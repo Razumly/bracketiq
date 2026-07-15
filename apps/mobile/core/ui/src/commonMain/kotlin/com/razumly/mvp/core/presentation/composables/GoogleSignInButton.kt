@@ -9,14 +9,30 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.util.Platform
-import com.razumly.mvp.icons.AndroidGoogleButtonDark
-import com.razumly.mvp.icons.AndroidGoogleButtonLight
-import com.razumly.mvp.icons.MVPIcons
-import com.razumly.mvp.icons.iOSGoogleButtonDark
-import com.razumly.mvp.icons.iOSGoogleButtonLight
+
+internal const val ANDROID_GOOGLE_SIGN_IN_ASPECT_RATIO = 189f / 40f
+internal const val IOS_GOOGLE_SIGN_IN_ASPECT_RATIO = 199f / 44f
+
+internal data class GoogleSignInButtonArtwork(
+    val imageVector: ImageVector,
+    val aspectRatio: Float,
+)
+
+internal expect fun googleSignInButtonArtwork(
+    isDarkTheme: Boolean,
+): GoogleSignInButtonArtwork
+
+internal fun googleSignInButtonWidth(
+    buttonHeight: Dp,
+    aspectRatio: Float,
+): Dp {
+    require(aspectRatio > 0f) { "Google sign-in artwork must have a positive aspect ratio." }
+    return buttonHeight * aspectRatio
+}
 
 @Composable
 fun GoogleSignInButton(
@@ -24,43 +40,18 @@ fun GoogleSignInButton(
     modifier: Modifier = Modifier
 ) {
     val isDarkTheme = isSystemInDarkTheme()
-    val isIOS = Platform.isIOS
-
-    val (buttonIcon, width, height) = when {
-        isIOS && isDarkTheme -> {
-            val aspectRatio = 199f / 44f
-            val buttonHeight = 50.dp
-            val buttonWidth = buttonHeight * aspectRatio
-            Triple(MVPIcons.iOSGoogleButtonDark, buttonWidth, buttonHeight)
-        }
-        isIOS && !isDarkTheme -> {
-            val aspectRatio = 199f / 44f
-            val buttonHeight = 50.dp
-            val buttonWidth = buttonHeight * aspectRatio
-            Triple(MVPIcons.iOSGoogleButtonLight, buttonWidth, buttonHeight)
-        }
-        !isIOS && isDarkTheme -> {
-            val aspectRatio = 189f / 40f
-            val buttonHeight = 50.dp
-            val buttonWidth = buttonHeight * aspectRatio
-            Triple(MVPIcons.AndroidGoogleButtonDark, buttonWidth, buttonHeight)
-        }
-        else -> {
-            val aspectRatio = 189f / 40f
-            val buttonHeight = 50.dp
-            val buttonWidth = buttonHeight * aspectRatio
-            Triple(MVPIcons.AndroidGoogleButtonLight, buttonWidth, buttonHeight)
-        }
-    }
+    val artwork = googleSignInButtonArtwork(isDarkTheme)
+    val height = 50.dp
+    val width = googleSignInButtonWidth(height, artwork.aspectRatio)
 
     Box(
         modifier = modifier
             .size(width, height)
-            .clip(RoundedCornerShape(height/2))
+            .clip(RoundedCornerShape(height / 2))
             .clickable { onClick() }
     ) {
         Image(
-            imageVector = buttonIcon,
+            imageVector = artwork.imageVector,
             contentDescription = "Sign in with Google",
             modifier = Modifier.size(width, height),
             contentScale = ContentScale.Fit

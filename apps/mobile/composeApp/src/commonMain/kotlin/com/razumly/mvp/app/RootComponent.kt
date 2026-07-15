@@ -9,33 +9,32 @@ import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.router.stack.replaceAll
 import com.arkivanov.decompose.value.Value
+import com.arkivanov.essenty.lifecycle.Lifecycle
+import com.arkivanov.essenty.lifecycle.LifecycleOwner
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
+import com.arkivanov.essenty.lifecycle.coroutines.repeatOnLifecycle
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.ChatGroupComponent
 import com.razumly.mvp.chat.ChatListComponent
-import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
-import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
-import com.razumly.mvp.core.data.dataTypes.normalizedRole
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.repositories.AppUpdatePrompt
 import com.razumly.mvp.core.data.repositories.IAppUpdateRepository
+import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.StartupAuthState
 import com.razumly.mvp.core.data.repositories.IEventRepository
-import com.razumly.mvp.core.data.repositories.UserScheduleSnapshot
 import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
 import com.razumly.mvp.core.presentation.AppConfig
 import com.razumly.mvp.core.presentation.CenterNavAction
 import com.razumly.mvp.core.presentation.EventDetailInitialTab
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
-import com.razumly.mvp.core.presentation.resolveCenterNavAction
+import com.razumly.mvp.core.presentation.RentalBookingItemManifest
+import com.razumly.mvp.core.presentation.toCenterNavAction
 import com.razumly.mvp.eventCreate.CreateEventComponent
 import com.razumly.mvp.eventDetail.EventDetailComponent
 import com.razumly.mvp.eventDetail.data.IMatchRepository
@@ -59,68 +58,85 @@ import dev.icerock.moko.permissions.PermissionsController
 import dev.icerock.moko.permissions.location.LOCATION
 import dev.icerock.moko.permissions.notifications.REMOTE_NOTIFICATION
 import io.github.aakira.napier.Napier
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
-import kotlin.time.Clock
-import kotlin.time.Duration.Companion.hours
-import kotlin.time.Duration.Companion.minutes
+import kotlin.coroutines.CoroutineContext
 
-data class ActiveEventTeamCheckInPrompt(
-    val eventId: String,
-    val eventName: String,
-    val eventTeamId: String,
-    val teamName: String,
+internal class CenterActionRefreshRequestTracker {
+    private var latestRequestId = 0L
+
+    fun begin(): Long {
+        latestRequestId += 1
+        return latestRequestId
+    }
+
+    fun invalidate() {
+        latestRequestId += 1
+    }
+
+    fun isCurrent(requestId: Long): Boolean = requestId == latestRequestId
+}
+
+internal data class AccountGuideCompletionState(
+    val accountId: String? = null,
+    val completedGuideIds: Set<String> = emptySet(),
+    val isLoaded: Boolean = false,
 )
 
-internal fun resolveActiveEventTeamCheckInCandidates(
-    snapshot: UserScheduleSnapshot,
-    user: UserData,
-    now: kotlin.time.Instant,
-): List<ActiveEventTeamCheckInPrompt> = snapshot.events
-    .asSequence()
-    .filter { event ->
-        val activeEnd = event.end.takeIf { end -> end > event.start } ?: event.start + 24.hours
-        event.teamSignup &&
-            event.teamCheckInMode.name == "EVENT" &&
-            now >= event.start - event.teamCheckInOpenMinutesBefore.coerceAtLeast(0).minutes &&
-            now <= activeEnd
-    }
-    .sortedBy { event -> event.start }
-    .flatMap { event ->
-        val eventTeamIds = event.teamIds.map(String::trim).filter(String::isNotBlank).toSet()
-        snapshot.teams.asSequence()
-            .filter { team -> team.id in eventTeamIds && team.isManagedBy(user.id) }
-            .map { team ->
-                ActiveEventTeamCheckInPrompt(
-                    eventId = event.id,
-                    eventName = event.name,
-                    eventTeamId = team.id,
-                    teamName = team.name,
-                )
+internal suspend fun LifecycleOwner.repeatCenterActionRefreshWhileStarted(
+    isActiveUser: () -> Boolean,
+    refresh: suspend () -> Unit,
+    onInactive: () -> Unit = {},
+    refreshIntervalMillis: Long,
+    context: CoroutineContext = Dispatchers.Main,
+) {
+    repeatOnLifecycle(
+        minActiveState = Lifecycle.State.STARTED,
+        context = context,
+    ) {
+        try {
+            while (isActive && isActiveUser()) {
+                refresh()
+                delay(refreshIntervalMillis)
             }
-    }
-    .toList()
-
-private fun Team.isManagedBy(userId: String): Boolean {
-    val normalizedUserId = userId.trim()
-    if (normalizedUserId.isBlank()) return false
-    return managerId?.trim() == normalizedUserId ||
-        headCoachId?.trim() == normalizedUserId ||
-        coachIds.any { coachId -> coachId.trim() == normalizedUserId } ||
-        activeStaffAssignments().any { assignment ->
-            assignment.userId.trim() == normalizedUserId &&
-                assignment.normalizedRole() in setOf("MANAGER", "HEAD_COACH", "ASSISTANT_COACH")
+        } finally {
+            onInactive()
         }
+    }
+}
+
+internal suspend fun LifecycleOwner.repeatChatRefreshOnForeground(
+    isActiveUser: () -> Boolean,
+    refresh: suspend () -> Unit,
+    context: CoroutineContext = Dispatchers.Main,
+) {
+    repeatOnLifecycle(
+        minActiveState = Lifecycle.State.STARTED,
+        context = context,
+    ) {
+        if (isActiveUser()) {
+            refresh()
+        }
+
+        // Keep this lifecycle session open without polling. Leaving STARTED cancels
+        // the block, and the next foreground session performs one fresh sync.
+        awaitCancellation()
+    }
 }
 
 class RootComponent(
@@ -142,9 +158,7 @@ class RootComponent(
             "We couldn't restore your session in time. Please log in."
         private const val PUSH_TARGET_REGISTRATION_ATTEMPTS = 3
         private const val PUSH_TARGET_REGISTRATION_RETRY_DELAY_MS = 2_000L
-        private const val CHAT_REFRESH_INTERVAL_MS = 30_000L
-        private const val CENTER_ACTION_SCHEDULE_REFRESH_INTERVAL_MS = 5 * 60_000L
-        private const val CENTER_ACTION_RECOMPUTE_INTERVAL_MS = 60_000L
+        private const val CENTER_ACTION_SCHEDULE_REFRESH_INTERVAL_MS = 60_000L
     }
 
     private val navigation = StackNavigation<AppConfig>()
@@ -172,21 +186,18 @@ class RootComponent(
 
     private val deepLinkNav = MutableStateFlow(deepLinkNavStart)
     private var registeredPushUserId: String? = null
-    private var syncedChatUserId: String? = null
     private var startupDecisionMade = false
     private var unreadCountJob: Job? = null
     private var pendingInviteCountJob: Job? = null
     private var pushRegistrationRetryJob: Job? = null
     private var deepLinkNavigationJob: Job? = null
-    private var chatStartupSyncJob: Job? = null
     private var chatRefreshJob: Job? = null
     private var registrationSyncJob: Job? = null
     private var centerActionRefreshJob: Job? = null
+    private val centerActionRefreshRequests = CenterActionRefreshRequestTracker()
     private var activeChatRefreshUserId: String? = null
     private var activeRegistrationSyncUserId: String? = null
     private var activeCenterActionUserId: String? = null
-    private var centerActionScheduleSnapshot = UserScheduleSnapshot()
-    private val suppressedEventTeamCheckInPromptKeys = mutableSetOf<String>()
 
     private val _selectedPage = MutableStateFlow<AppConfig>(AppConfig.Search())
     val selectedPage: StateFlow<AppConfig> = _selectedPage.asStateFlow()
@@ -204,17 +215,10 @@ class RootComponent(
     val appUpdatePrompt: StateFlow<AppUpdatePrompt?> = _appUpdatePrompt.asStateFlow()
     private val _centerNavAction = MutableStateFlow<CenterNavAction>(CenterNavAction.CreateEvent)
     val centerNavAction: StateFlow<CenterNavAction> = _centerNavAction.asStateFlow()
-    private val _completedGuideIds = MutableStateFlow<Set<String>>(emptySet())
-    val completedGuideIds: StateFlow<Set<String>> = _completedGuideIds.asStateFlow()
-    private val _completedGuideIdsLoaded = MutableStateFlow(false)
-    val completedGuideIdsLoaded: StateFlow<Boolean> = _completedGuideIdsLoaded.asStateFlow()
+    private val _accountGuideCompletionState = MutableStateFlow(AccountGuideCompletionState())
+    internal val accountGuideCompletionState: StateFlow<AccountGuideCompletionState> =
+        _accountGuideCompletionState.asStateFlow()
     val currentUser: StateFlow<Result<UserData>> = userRepository.currentUser
-    private val _activeEventTeamCheckInPrompt = MutableStateFlow<ActiveEventTeamCheckInPrompt?>(null)
-    val activeEventTeamCheckInPrompt = _activeEventTeamCheckInPrompt.asStateFlow()
-    private val _activeEventTeamCheckInSaving = MutableStateFlow(false)
-    val activeEventTeamCheckInSaving = _activeEventTeamCheckInSaving.asStateFlow()
-    private val _activeEventTeamCheckInError = MutableStateFlow<String?>(null)
-    val activeEventTeamCheckInError = _activeEventTeamCheckInError.asStateFlow()
 
     val childStack: Value<ChildStack<AppConfig, Child>> = childStack(
         source = navigation,
@@ -299,26 +303,27 @@ class RootComponent(
                         if (userData.id.isNotBlank()) {
                             refreshRegistrationCacheOnStartupIfNeeded(userData.id)
                             registerPushTargetIfNeeded(userData.id)
-                            refreshChatsOnStartupIfNeeded(userData.id)
-                            startChatRefreshLoopIfNeeded(userData.id)
+                            startChatForegroundRefreshIfNeeded(userData.id)
                             startCenterActionRefreshLoopIfNeeded(userData.id)
+                            scope.launch {
+                                _koin.get<IBillingRepository>().syncPendingRentalOrders()
+                                    .onFailure { error ->
+                                        Napier.w("Unable to retry pending paid rentals: ${error.message}")
+                                    }
+                            }
                         } else if (userRepository.startupAuthState.value == StartupAuthState.Unauthenticated) {
                             clearRegistrationCacheSyncState()
                             clearPushTargetIfNeeded()
-                            clearChatStartupSyncState()
-                            clearChatRefreshLoop()
+                            clearChatForegroundRefresh()
                             clearCenterActionRefreshLoop()
-                            clearActiveEventTeamCheckInState()
                         }
                     },
                     onFailure = {
                         if (userRepository.startupAuthState.value == StartupAuthState.Unauthenticated) {
                             clearRegistrationCacheSyncState()
                             clearPushTargetIfNeeded()
-                            clearChatStartupSyncState()
-                            clearChatRefreshLoop()
+                            clearChatForegroundRefresh()
                             clearCenterActionRefreshLoop()
-                            clearActiveEventTeamCheckInState()
                         }
                     }
                 )
@@ -358,10 +363,23 @@ class RootComponent(
         }
 
         scope.launch {
-            currentUserDataSource.getCompletedGuideIds().collect { guideIds ->
-                _completedGuideIds.value = guideIds
-                _completedGuideIdsLoaded.value = true
-            }
+            userRepository.currentUser
+                .map { result -> result.getOrNull()?.id?.trim().orEmpty() }
+                .distinctUntilChanged()
+                .collectLatest { userId ->
+                    _accountGuideCompletionState.value = AccountGuideCompletionState(
+                        accountId = userId.takeIf(String::isNotBlank),
+                    )
+                    if (userId.isBlank()) return@collectLatest
+
+                    currentUserDataSource.getCompletedGuideIds(userId).collect { guideIds ->
+                        _accountGuideCompletionState.value = AccountGuideCompletionState(
+                            accountId = userId,
+                            completedGuideIds = guideIds,
+                            isLoaded = true,
+                        )
+                    }
+                }
         }
     }
 
@@ -391,8 +409,14 @@ class RootComponent(
     }
 
     fun markGuideCompleted(guideId: String) {
+        val userId = userRepository.currentUser.value
+            .getOrNull()
+            ?.id
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: return
         scope.launch(Dispatchers.Default) {
-            currentUserDataSource.markGuideCompleted(guideId)
+            currentUserDataSource.markGuideCompleted(userId, guideId)
         }
     }
 
@@ -469,7 +493,7 @@ class RootComponent(
                 .onSuccess { event ->
                     setDefaultNavigationDirection()
                     // Keep Discover in the stack so back returns there from Event Detail.
-                    navigation.replaceAll(AppConfig.Search(), AppConfig.EventDetail(event))
+                    navigation.replaceAll(AppConfig.Search(), AppConfig.EventDetail(event.id))
                     _selectedPage.value = AppConfig.Search()
                 }
                 .onFailure { throwable ->
@@ -511,7 +535,7 @@ class RootComponent(
                         Napier.w("Deep-linked match $matchId was not found for event $eventId")
                         _startupNotice.value = "Couldn't open that match link."
                         setDefaultNavigationDirection()
-                        navigation.replaceAll(AppConfig.Search(), AppConfig.EventDetail(event))
+                        navigation.replaceAll(AppConfig.Search(), AppConfig.EventDetail(event.id))
                         _selectedPage.value = AppConfig.Search()
                         return@onSuccess
                     }
@@ -519,8 +543,8 @@ class RootComponent(
                     setDefaultNavigationDirection()
                     navigation.replaceAll(
                         AppConfig.Search(),
-                        AppConfig.EventDetail(event, initialTab = EventDetailInitialTab.SCHEDULE),
-                        AppConfig.MatchDetail(match.toRootMatchWithRelations(), event),
+                        AppConfig.EventDetail(event.id, initialTab = EventDetailInitialTab.SCHEDULE),
+                        AppConfig.MatchDetail(match.id, event.id),
                     )
                     _selectedPage.value = AppConfig.Search()
                 }
@@ -530,7 +554,7 @@ class RootComponent(
                     setDefaultNavigationDirection()
                     navigation.replaceAll(
                         AppConfig.Search(),
-                        AppConfig.EventDetail(event, initialTab = EventDetailInitialTab.SCHEDULE),
+                        AppConfig.EventDetail(event.id, initialTab = EventDetailInitialTab.SCHEDULE),
                     )
                     _selectedPage.value = AppConfig.Search()
                 }
@@ -588,7 +612,7 @@ class RootComponent(
             eventRepository.getEvent(eventId)
                 .onSuccess { event ->
                     setDefaultNavigationDirection()
-                    navigation.pushNew(AppConfig.EventDetail(event))
+                    navigation.pushNew(AppConfig.EventDetail(event.id))
                 }
                 .onFailure { throwable ->
                     Napier.w("Failed to open center event shortcut $eventId: ${throwable.message}")
@@ -622,18 +646,18 @@ class RootComponent(
                     if (match == null) {
                         Napier.w("Center match shortcut $normalizedMatchId was not found for event $normalizedEventId")
                         _startupNotice.value = "Couldn't open that match."
-                        recomputeCenterNavAction()
+                        requestCenterNavActionRefresh()
                         return@onSuccess
                     }
 
                     setDefaultNavigationDirection()
-                    navigation.pushNew(AppConfig.EventDetail(event, initialTab = EventDetailInitialTab.SCHEDULE))
-                    navigation.pushNew(AppConfig.MatchDetail(match.toRootMatchWithRelations(), event))
+                    navigation.pushNew(AppConfig.EventDetail(event.id, initialTab = EventDetailInitialTab.SCHEDULE))
+                    navigation.pushNew(AppConfig.MatchDetail(match.id, event.id))
                 }
                 .onFailure { throwable ->
                     Napier.w("Failed to open center match shortcut $normalizedEventId/$normalizedMatchId: ${throwable.message}")
                     _startupNotice.value = throwable.userMessage("Couldn't open that match.")
-                    recomputeCenterNavAction()
+                    requestCenterNavActionRefresh()
                 }
         }
     }
@@ -669,13 +693,7 @@ class RootComponent(
     private fun clearPushTargetIfNeeded() {
         pushRegistrationRetryJob?.cancel()
         pushRegistrationRetryJob = null
-        if (registeredPushUserId == null) return
         registeredPushUserId = null
-        scope.launch {
-            pushNotificationsRepository.removeDeviceAsTarget().onFailure {
-                Napier.w("Push target cleanup failed: ${it.message}")
-            }
-        }
     }
 
     private fun refreshRegistrationCacheOnStartupIfNeeded(userId: String) {
@@ -703,44 +721,31 @@ class RootComponent(
         }
     }
 
-    private fun refreshChatsOnStartupIfNeeded(userId: String) {
-        if (syncedChatUserId == userId || chatStartupSyncJob?.isActive == true) return
-        chatStartupSyncJob = scope.launch(Dispatchers.Default) {
-            chatGroupRepository.refreshChatGroupsAndMessages()
-                .onSuccess {
-                    syncedChatUserId = userId
-                }
-                .onFailure {
-                    if (syncedChatUserId == userId) {
-                        syncedChatUserId = null
-                    }
-                    Napier.w("Startup chat refresh failed: ${it.message}")
-                }
-        }
-    }
-
-    private fun clearChatStartupSyncState() {
-        chatStartupSyncJob?.cancel()
-        chatStartupSyncJob = null
-        syncedChatUserId = null
-    }
-
-    private fun startChatRefreshLoopIfNeeded(userId: String) {
+    private fun startChatForegroundRefreshIfNeeded(userId: String) {
         if (activeChatRefreshUserId == userId && chatRefreshJob?.isActive == true) return
 
         chatRefreshJob?.cancel()
         activeChatRefreshUserId = userId
-        chatRefreshJob = scope.launch(Dispatchers.Default) {
-            while (isActive && activeChatRefreshUserId == userId) {
-                chatGroupRepository.refreshChatGroupsAndMessages().onFailure { throwable ->
-                    Napier.w("Periodic chat refresh failed for user $userId: ${throwable.message}")
-                }
-                delay(CHAT_REFRESH_INTERVAL_MS)
-            }
+        chatRefreshJob = scope.launch {
+            repeatChatRefreshOnForeground(
+                isActiveUser = { activeChatRefreshUserId == userId },
+                refresh = {
+                    try {
+                        chatGroupRepository.refreshChatGroupsAndMessages().onFailure { throwable ->
+                            Napier.w("Foreground chat refresh failed for user $userId: ${throwable.message}")
+                        }
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (throwable: Throwable) {
+                        Napier.w("Foreground chat refresh failed for user $userId: ${throwable.message}")
+                    }
+                },
+                context = Dispatchers.Default,
+            )
         }
     }
 
-    private fun clearChatRefreshLoop() {
+    private fun clearChatForegroundRefresh() {
         activeChatRefreshUserId = null
         chatRefreshJob?.cancel()
         chatRefreshJob = null
@@ -750,117 +755,51 @@ class RootComponent(
         if (activeCenterActionUserId == userId && centerActionRefreshJob?.isActive == true) return
 
         centerActionRefreshJob?.cancel()
+        centerActionRefreshRequests.invalidate()
         activeCenterActionUserId = userId
-        centerActionRefreshJob = scope.launch(Dispatchers.Default) {
-            while (isActive && activeCenterActionUserId == userId) {
-                refreshCenterActionScheduleSnapshot()
+        centerActionRefreshJob = scope.launch {
+            repeatCenterActionRefreshWhileStarted(
+                isActiveUser = { activeCenterActionUserId == userId },
+                refresh = { refreshCenterNavAction(userId) },
+                onInactive = centerActionRefreshRequests::invalidate,
+                refreshIntervalMillis = CENTER_ACTION_SCHEDULE_REFRESH_INTERVAL_MS,
+            )
+        }
+    }
 
-                var elapsedMillis = 0L
-                while (
-                    isActive &&
-                    activeCenterActionUserId == userId &&
-                    elapsedMillis < CENTER_ACTION_SCHEDULE_REFRESH_INTERVAL_MS
+    private suspend fun refreshCenterNavAction(userId: String) {
+        val refreshRequestId = centerActionRefreshRequests.begin()
+        eventRepository.getMyScheduleNextAction()
+            .onSuccess { action ->
+                if (
+                    activeCenterActionUserId == userId
+                    && lifecycle.state >= Lifecycle.State.STARTED
+                    && centerActionRefreshRequests.isCurrent(refreshRequestId)
                 ) {
-                    delay(CENTER_ACTION_RECOMPUTE_INTERVAL_MS)
-                    elapsedMillis += CENTER_ACTION_RECOMPUTE_INTERVAL_MS
-                    recomputeCenterNavAction()
-                    refreshActiveEventTeamCheckInPrompt(centerActionScheduleSnapshot)
+                    _centerNavAction.value = action.toCenterNavAction()
                 }
             }
-        }
+            .onFailure { throwable ->
+                if (centerActionRefreshRequests.isCurrent(refreshRequestId)) {
+                    Napier.w("Failed to refresh center nav shortcut: ${throwable.message}")
+                }
+            }
     }
 
-    private suspend fun refreshCenterActionScheduleSnapshot() {
-        val snapshot = eventRepository.getMySchedule().getOrElse { throwable ->
-            Napier.w("Failed to refresh center nav schedule shortcut: ${throwable.message}")
-            recomputeCenterNavAction()
-            return
+    private fun requestCenterNavActionRefresh() {
+        val userId = activeCenterActionUserId ?: return
+        scope.launch {
+            refreshCenterNavAction(userId)
         }
-        centerActionScheduleSnapshot = snapshot
-        recomputeCenterNavAction()
-        refreshActiveEventTeamCheckInPrompt(snapshot)
-    }
-
-    private fun recomputeCenterNavAction() {
-        _centerNavAction.value = resolveCenterNavAction(
-            snapshot = centerActionScheduleSnapshot,
-            now = Clock.System.now(),
-        )
     }
 
     private fun clearCenterActionRefreshLoop() {
         activeCenterActionUserId = null
+        centerActionRefreshRequests.invalidate()
         centerActionRefreshJob?.cancel()
         centerActionRefreshJob = null
-        centerActionScheduleSnapshot = UserScheduleSnapshot()
         _centerNavAction.value = CenterNavAction.CreateEvent
     }
-
-    fun dismissActiveEventTeamCheckInPrompt() {
-        _activeEventTeamCheckInPrompt.value?.let { prompt ->
-            suppressedEventTeamCheckInPromptKeys += activeEventTeamCheckInPromptKey(prompt.eventId, prompt.eventTeamId)
-        }
-        _activeEventTeamCheckInPrompt.value = null
-        _activeEventTeamCheckInError.value = null
-    }
-
-    fun confirmActiveEventTeamCheckIn() {
-        val prompt = _activeEventTeamCheckInPrompt.value ?: return
-        if (_activeEventTeamCheckInSaving.value) return
-        _activeEventTeamCheckInSaving.value = true
-        _activeEventTeamCheckInError.value = null
-        scope.launch {
-            matchRepository.checkInEventTeam(prompt.eventId, prompt.eventTeamId)
-                .onSuccess {
-                    suppressedEventTeamCheckInPromptKeys += activeEventTeamCheckInPromptKey(
-                        prompt.eventId,
-                        prompt.eventTeamId,
-                    )
-                    _activeEventTeamCheckInPrompt.value = null
-                }
-                .onFailure { throwable ->
-                    _activeEventTeamCheckInError.value = throwable.userMessage("Failed to check in team.")
-                }
-            _activeEventTeamCheckInSaving.value = false
-        }
-    }
-
-    private suspend fun refreshActiveEventTeamCheckInPrompt(snapshot: UserScheduleSnapshot) {
-        val user = userRepository.currentUser.value.getOrNull() ?: return
-        val candidates = resolveActiveEventTeamCheckInCandidates(snapshot, user, Clock.System.now())
-
-        for (candidate in candidates) {
-            val promptKey = activeEventTeamCheckInPromptKey(candidate.eventId, candidate.eventTeamId)
-            if (promptKey in suppressedEventTeamCheckInPromptKeys) continue
-
-            val checkIns = matchRepository.getEventTeamCheckIns(candidate.eventId).getOrElse { throwable ->
-                Napier.w("Failed to load active event team check-in for ${candidate.eventId}: ${throwable.message}")
-                return
-            }.checkIns
-            val alreadyCheckedIn = checkIns.any { checkIn ->
-                checkIn.eventTeamId?.trim() == candidate.eventTeamId &&
-                    (checkIn.status.isNullOrBlank() || checkIn.status.equals("CHECKED_IN", ignoreCase = true))
-            }
-            if (!alreadyCheckedIn) {
-                _activeEventTeamCheckInPrompt.value = candidate
-                _activeEventTeamCheckInError.value = null
-                return
-            }
-        }
-        _activeEventTeamCheckInPrompt.value = null
-        _activeEventTeamCheckInError.value = null
-    }
-
-    private fun clearActiveEventTeamCheckInState() {
-        suppressedEventTeamCheckInPromptKeys.clear()
-        _activeEventTeamCheckInPrompt.value = null
-        _activeEventTeamCheckInSaving.value = false
-        _activeEventTeamCheckInError.value = null
-    }
-
-    private fun activeEventTeamCheckInPromptKey(eventId: String, eventTeamId: String): String =
-        "${eventId.trim()}:${eventTeamId.trim()}"
-
 
     private suspend fun refreshPendingInviteCount(userId: String) {
         userRepository.listInvites(userId)
@@ -907,29 +846,44 @@ class RootComponent(
         }
     }
 
-    override fun navigateToMatch(match: MatchWithRelations, event: Event) {
+    override fun navigateToMatch(matchId: String, eventId: String) {
+        val normalizedMatchId = matchId.trim()
+        val normalizedEventId = eventId.trim()
+        if (normalizedMatchId.isEmpty() || normalizedEventId.isEmpty()) return
         setDefaultNavigationDirection()
-        navigation.pushNew(AppConfig.MatchDetail(match, event))
+        navigation.pushNew(AppConfig.MatchDetail(normalizedMatchId, normalizedEventId))
     }
 
-    override fun navigateToMatchFromSchedule(match: MatchWithRelations, event: Event) {
+    override fun navigateToMatchFromSchedule(matchId: String, eventId: String) {
+        val normalizedMatchId = matchId.trim()
+        val normalizedEventId = eventId.trim()
+        if (normalizedMatchId.isEmpty() || normalizedEventId.isEmpty()) return
         setDefaultNavigationDirection()
-        navigation.pushNew(AppConfig.EventDetail(event, initialTab = EventDetailInitialTab.SCHEDULE))
-        navigation.pushNew(AppConfig.MatchDetail(match, event))
+        navigation.pushNew(AppConfig.EventDetail(normalizedEventId, initialTab = EventDetailInitialTab.SCHEDULE))
+        navigation.pushNew(AppConfig.MatchDetail(normalizedMatchId, normalizedEventId))
     }
 
     override fun navigateToTeams(
         freeAgents: List<String>,
-        event: Event?,
+        eventId: String?,
         selectedFreeAgentId: String?,
     ) {
         setDefaultNavigationDirection()
-        navigation.pushNew(AppConfig.Teams(freeAgents, event, selectedFreeAgentId))
+        navigation.pushNew(
+            AppConfig.Teams(
+                freeAgentIds = freeAgents.map(String::trim).filter(String::isNotBlank),
+                eventId = eventId?.trim()?.takeIf(String::isNotBlank),
+                selectedFreeAgentId = selectedFreeAgentId?.trim()?.takeIf(String::isNotBlank),
+            )
+        )
     }
 
-    override fun navigateToChat(user: UserData?, chat: ChatGroupWithRelations?) {
+    override fun navigateToChat(messageUserId: String?, chatId: String?) {
+        val normalizedMessageUserId = messageUserId?.trim()?.takeIf(String::isNotBlank)
+        val normalizedChatId = chatId?.trim()?.takeIf(String::isNotBlank)
+        if (normalizedMessageUserId == null && normalizedChatId == null) return
         setDefaultNavigationDirection()
-        navigation.pushNew(AppConfig.Chat(user, chat))
+        navigation.pushNew(AppConfig.Chat(normalizedMessageUserId, normalizedChatId))
     }
 
     override fun navigateToCreate() {
@@ -940,16 +894,39 @@ class RootComponent(
         openCreate(seed = seed)
     }
 
-    private fun openCreate(seed: SeededEventTemplateDraft?) {
-        setDefaultNavigationDirection()
-        pendingCreateSeed = seed
-        navigation.pushNew(AppConfig.Create())
-        _selectedPage.value = AppConfig.Create()
+    override fun navigateToCreateFromRental(
+        rentalBookingId: String,
+        rentalBookingItems: List<RentalBookingItemManifest>,
+    ) {
+        val normalizedBookingId = rentalBookingId.trim()
+        if (normalizedBookingId.isEmpty()) return
+        openCreate(
+            seed = null,
+            rentalBookingId = normalizedBookingId,
+            rentalBookingItems = rentalBookingItems,
+        )
     }
 
-    override fun navigateToEvent(event: Event) {
+    private fun openCreate(
+        seed: SeededEventTemplateDraft?,
+        rentalBookingId: String? = null,
+        rentalBookingItems: List<RentalBookingItemManifest> = emptyList(),
+    ) {
         setDefaultNavigationDirection()
-        navigation.pushNew(AppConfig.EventDetail(event))
+        pendingCreateSeed = seed
+        val config = AppConfig.Create(
+            rentalBookingId = rentalBookingId,
+            rentalBookingItems = rentalBookingItems,
+        )
+        navigation.pushNew(config)
+        _selectedPage.value = config
+    }
+
+    override fun navigateToEvent(eventId: String) {
+        val normalizedEventId = eventId.trim()
+        if (normalizedEventId.isEmpty()) return
+        setDefaultNavigationDirection()
+        navigation.pushNew(AppConfig.EventDetail(normalizedEventId))
     }
 
     override fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab) {
@@ -988,10 +965,12 @@ class RootComponent(
     }
 
     private fun onEventCreated(createdEvent: Event) {
+        val eventId = createdEvent.id.trim()
+        if (eventId.isEmpty()) return
         setDefaultNavigationDirection()
         navigation.replaceAll(AppConfig.Search())
         _selectedPage.value = AppConfig.Search()
-        navigation.pushNew(AppConfig.EventDetail(createdEvent))
+        navigation.pushNew(AppConfig.EventDetail(eventId))
     }
 
     private fun setDefaultNavigationDirection() {
@@ -1040,7 +1019,7 @@ class RootComponent(
         )
 
         is AppConfig.EventDetail -> Child.EventContent(
-            _koin.get { parametersOf(componentContext, config.event, this@RootComponent) },
+            _koin.get { parametersOf(componentContext, config.eventId, this@RootComponent) },
             _koin.get { parametersOf(componentContext) },
             config.initialTab,
         )
@@ -1050,7 +1029,7 @@ class RootComponent(
         )
 
         is AppConfig.MatchDetail -> Child.MatchContent(
-            component = _koin.get { parametersOf(componentContext, config.match, config.event) },
+            component = _koin.get { parametersOf(componentContext, config.matchId, config.eventId) },
             mapComponent = _koin.get { parametersOf(componentContext) },
         )
 
@@ -1059,14 +1038,22 @@ class RootComponent(
         )
 
         is AppConfig.Chat -> Child.Chat(
-            _koin.get { parametersOf(componentContext, config.user, config.chat, this@RootComponent) }
+            _koin.get { parametersOf(componentContext, config.messageUserId, config.chatId, this@RootComponent) }
         )
 
         is AppConfig.Create -> {
             val createSeed = config.seed ?: pendingCreateSeed
             pendingCreateSeed = null
             Child.Create(
-                _koin.get { parametersOf(componentContext, ::onEventCreated, createSeed) },
+                _koin.get {
+                    parametersOf(
+                        componentContext,
+                        ::onEventCreated,
+                        createSeed,
+                        config.rentalBookingId,
+                        config.rentalBookingItems,
+                    )
+                },
                 _koin.get { parametersOf(componentContext) }
             )
         }
@@ -1105,8 +1092,8 @@ class RootComponent(
             _koin.get {
                 parametersOf(
                     componentContext,
-                    config.freeAgents,
-                    config.event,
+                    config.freeAgentIds,
+                    config.eventId,
                     config.selectedFreeAgentId,
                     this@RootComponent,
                 )
@@ -1167,16 +1154,3 @@ private fun MatchMVP.matchesRouteId(routeMatchId: String): Boolean {
         matchId == routeNumber
     } == true
 }
-
-private fun MatchMVP.toRootMatchWithRelations(): MatchWithRelations =
-    MatchWithRelations(
-        match = this,
-        field = null,
-        team1 = null,
-        team2 = null,
-        teamOfficial = null,
-        winnerNextMatch = null,
-        loserNextMatch = null,
-        previousLeftMatch = null,
-        previousRightMatch = null,
-    )

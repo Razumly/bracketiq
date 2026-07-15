@@ -5,9 +5,58 @@ import kotlinx.serialization.encodeToString
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class WearDtosTest {
+    @Test
+    fun givenLegacyOnlyScheduleIdentities_whenDecoded_thenDoesNotResolveThem() {
+        val schedule = createWearJson().decodeFromString<WearScheduleResponseDto>(
+            """
+            {
+              "events": [{"${'$'}id": "event_legacy"}],
+              "matches": [{"${'$'}id": "match_legacy"}],
+              "teams": [{"${'$'}id": "team_legacy"}],
+              "fields": [{"${'$'}id": "field_legacy"}]
+            }
+            """.trimIndent(),
+        )
+
+        assertNull(schedule.events.single().resolvedId())
+        assertNull(schedule.matches.single().resolvedId())
+        assertNull(schedule.teams.single().resolvedId())
+        assertNull(schedule.fields.single().resolvedId())
+    }
+
+    @Test
+    fun givenPaginatedSchedule_whenDecoded_thenRetainsCompletenessMetadata() {
+        val schedule = createWearJson().decodeFromString<WearScheduleResponseDto>(
+            """
+            {
+              "events": [],
+              "matches": [],
+              "teams": [],
+              "fields": [],
+              "pagination": {
+                "limit": 200,
+                "hasMore": true,
+                "nextCursor": "cursor_2",
+                "isComplete": false,
+                "windowFrom": "2026-07-01T00:00:00Z",
+                "windowTo": "2026-07-31T00:00:00Z"
+              }
+            }
+            """.trimIndent(),
+        )
+
+        val pagination = assertNotNull(schedule.pagination)
+        assertEquals(200, pagination.limit)
+        assertTrue(pagination.hasMore)
+        assertEquals("cursor_2", pagination.nextCursor)
+        assertFalse(pagination.isComplete ?: true)
+    }
+
     @Test
     fun givenScheduleMatchWithNullOfficialIds_whenDecoded_thenUsesEmptyAssignments() {
         val schedule = createWearJson().decodeFromString<WearScheduleResponseDto>(

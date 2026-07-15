@@ -143,7 +143,6 @@ extension WatchOfficialViewModel {
         )
         let activeSegment = WatchMatchSegmentDTO(
             id: "segment_2",
-            legacyId: nil,
             eventId: "event_1",
             matchId: "match_showcase",
             sequence: 2,
@@ -158,7 +157,6 @@ extension WatchOfficialViewModel {
         let incidents = [
             WatchMatchIncidentDTO(
                 id: "incident_goal_1",
-                legacyId: nil,
                 eventId: "event_1",
                 matchId: "match_showcase",
                 segmentId: "segment_2",
@@ -176,7 +174,6 @@ extension WatchOfficialViewModel {
             ),
             WatchMatchIncidentDTO(
                 id: "incident_goal_2",
-                legacyId: nil,
                 eventId: "event_1",
                 matchId: "match_showcase",
                 segmentId: "segment_2",
@@ -194,7 +191,6 @@ extension WatchOfficialViewModel {
             ),
             WatchMatchIncidentDTO(
                 id: "incident_card_1",
-                legacyId: nil,
                 eventId: "event_1",
                 matchId: "match_showcase",
                 segmentId: "segment_2",
@@ -213,7 +209,6 @@ extension WatchOfficialViewModel {
         ]
         let raw = WatchMatchDTO(
             id: "match_showcase",
-            legacyId: nil,
             matchId: 12,
             team1Id: home.id,
             team2Id: away.id,

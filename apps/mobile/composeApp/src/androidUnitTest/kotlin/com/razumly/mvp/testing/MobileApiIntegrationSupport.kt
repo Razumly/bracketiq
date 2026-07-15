@@ -195,6 +195,7 @@ private object IntegrationNoopPushNotificationsRepository : IPushNotificationsRe
     override suspend fun createTournamentTopic(event: Event) = Result.success(Unit)
     override suspend fun createChatGroupTopic(chatGroup: ChatGroup) = Result.success(Unit)
     override fun setActiveChat(chatGroupId: String?) = Unit
+    override fun clearActiveChatIfMatches(chatGroupId: String?) = Unit
     override suspend fun addDeviceAsTarget() = Result.success(Unit)
     override suspend fun removeDeviceAsTarget() = Result.success(Unit)
     override suspend fun getDeviceTargetDebugStatus(syncBeforeCheck: Boolean) =

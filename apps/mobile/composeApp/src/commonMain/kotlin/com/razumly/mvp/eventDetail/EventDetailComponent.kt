@@ -37,6 +37,8 @@ import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckoutRequest
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
 import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.SignStep
@@ -76,7 +78,6 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val errorState: StateFlow<ErrorMessage?>
     val eventWithRelations: StateFlow<EventWithFullRelations>
     val currentUser: StateFlow<UserData>
-    val isPlatformAdmin: StateFlow<Boolean>
     val eventTeamCheckIns: StateFlow<Map<String, TeamCheckInDto>>
     val showEventTeamCheckInDialog: StateFlow<Boolean>
     val eventTeamCheckInSaving: StateFlow<Boolean>
@@ -139,7 +140,6 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun onNavigateToChat(user: UserData)
     fun dismissEventTeamCheckInDialog()
     fun confirmEventTeamCheckIn()
-    fun checkInEventTeam(eventTeamId: String)
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun updateEventRegistrationQuestionAnswer(questionId: String, answer: String)
     fun toggleEventRegistrationQuestionsExpanded()
@@ -206,6 +206,13 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
         teamId: String,
         request: EventTeamBillCreateRequest,
     ): Result<Unit>
+    suspend fun quoteInclusivePrice(
+        direction: InclusivePriceQuoteDirection,
+        amountCents: Int,
+        eventType: String? = null,
+    ): Result<InclusivePriceQuote> = Result.failure(
+        UnsupportedOperationException("Inclusive price quotes are unavailable."),
+    )
     suspend fun createParticipantPaymentCheckout(
         teamId: String,
         request: EventTeamPaymentCheckoutRequest,
@@ -265,8 +272,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun applyDiscountCodePrompt(code: String)
     fun clearDiscountCodePromptFeedback()
     fun dismissDiscountCodePrompt()
-    fun onUploadSelected(photo: GalleryPhotoResult)
-    fun deleteImage(imageId: String)
+    fun onUploadSelected(photo: GalleryPhotoResult, onRetry: () -> Unit = {})
+    fun deleteImage(imageId: String, onDeleted: () -> Unit = {})
     suspend fun sendNotification(title: String, message: String): Result<Unit>
     fun searchUsers(query: String)
     fun searchInviteTeams(query: String)

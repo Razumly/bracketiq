@@ -2,6 +2,9 @@ package com.razumly.mvp.teamManagement
 
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
+import com.arkivanov.essenty.backhandler.BackHandler
+import com.arkivanov.essenty.lifecycle.coroutines.withLifecycle
+import com.arkivanov.essenty.lifecycle.doOnDestroy
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Sport
@@ -12,14 +15,18 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.isActive
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
 import com.razumly.mvp.core.data.repositories.TeamInviteFreeAgentContext
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.presentation.INavigationHandler
+import com.razumly.mvp.core.presentation.LatestPlayerInviteSearch
 import com.razumly.mvp.core.util.LoadingHandler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -40,7 +47,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 interface TeamManagementComponent {
-    val selectedEvent: Event?
+    val selectedEvent: StateFlow<Event?>
     val currentUser: UserData
     val selectedFreeAgentId: String?
     val selectedFreeAgent: StateFlow<UserData?>
@@ -50,6 +57,7 @@ interface TeamManagementComponent {
     val currentTeams: StateFlow<List<TeamWithPlayers>>
     val isCurrentTeamsLoading: StateFlow<Boolean>
     val selectedTeam: StateFlow<TeamWithPlayers?>
+    val errorState: StateFlow<String?>
     val staffUsersById: StateFlow<Map<String, UserData>>
     val teamMemberCompliance: StateFlow<Map<String, EventTeamComplianceSummary>>
     val loadingTeamMemberComplianceId: StateFlow<String?>
@@ -60,6 +68,7 @@ interface TeamManagementComponent {
     val onBack: () -> Unit
 
     fun setLoadingHandler(handler: LoadingHandler)
+    fun clearError()
     fun selectTeam(team: TeamWithPlayers?)
     fun createTeam(team: Team, onResult: (Result<Unit>) -> Unit = {})
     fun joinTeam(team: Team)
@@ -77,25 +86,44 @@ interface TeamManagementComponent {
         roleInviteType: String,
         email: String? = null,
     )
+    suspend fun ensureUserByEmail(email: String): Result<UserData>
+    suspend fun quoteInclusivePrice(
+        direction: InclusivePriceQuoteDirection,
+        amountCents: Int,
+        eventType: String? = null,
+    ): Result<InclusivePriceQuote> = Result.failure(
+        UnsupportedOperationException("Inclusive price quotes are unavailable."),
+    )
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DefaultTeamManagementComponent(
     componentContext: ComponentContext,
     private val eventRepository: IEventRepository,
+    private val billingRepository: IBillingRepository,
     private val sportsRepository: ISportsRepository,
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
     @Suppress("UNUSED_PARAMETER")
     _legacyFreeAgents: List<String>,
-    override val selectedEvent: Event?,
+    eventId: String?,
     override val selectedFreeAgentId: String?,
     private val navigationHandler: INavigationHandler
 ) : ComponentContext by componentContext, TeamManagementComponent {
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val scope = teamManagementCoroutineScope()
     private var loadingHandler: LoadingHandler? = null
 
     override val onBack = navigationHandler::navigateBack
+
+    override suspend fun quoteInclusivePrice(
+        direction: InclusivePriceQuoteDirection,
+        amountCents: Int,
+        eventType: String?,
+    ): Result<InclusivePriceQuote> = billingRepository.quoteInclusivePrice(
+        direction = direction,
+        amountCents = amountCents,
+        eventType = eventType,
+    )
     private val teamEditorBackCallback = BackCallback(
         isEnabled = false,
         priority = BackCallback.PRIORITY_MAX,
@@ -103,8 +131,24 @@ class DefaultTeamManagementComponent(
         deselectTeam()
     }
     private val _errorState = MutableStateFlow<String?>(null)
+    override val errorState = _errorState.asStateFlow()
     private val _divisionTypeParameters = MutableStateFlow(DivisionTypeParameters())
     override val divisionTypeParameters = _divisionTypeParameters.asStateFlow()
+    private val normalizedEventId = eventId?.trim()?.takeIf(String::isNotBlank)
+    override val selectedEvent: StateFlow<Event?> = normalizedEventId
+        ?.let { selectedEventId ->
+            eventRepository.getEventWithRelationsFlow(selectedEventId)
+                .map { result ->
+                    result.getOrElse { error ->
+                        if (error !is NoSuchElementException) {
+                            _errorState.value = error.userMessage("Failed to load event context")
+                        }
+                        null
+                    }?.event
+                }
+                .stateIn(scope, SharingStarted.Eagerly, null)
+        }
+        ?: MutableStateFlow(null)
 
     private val currentUserState = userRepository.currentUser
         .map { result -> result.getOrNull() ?: UserData() }
@@ -124,19 +168,22 @@ class DefaultTeamManagementComponent(
     private val _sports = MutableStateFlow<List<Sport>>(emptyList())
     override val sports = _sports.asStateFlow()
 
-    override val currentTeams = currentUserIdFlow
+    private val currentTeamsResult: StateFlow<Result<List<TeamWithPlayers>>> = currentUserIdFlow
         .flatMapLatest { currentUserId ->
             if (currentUserId.isBlank()) {
                 flowOf(Result.success(emptyList()))
             } else {
                 teamRepository.getTeamsWithPlayersFlow(currentUserId)
             }
-        }.map { team ->
+        }
+        .stateIn(scope, SharingStarted.Eagerly, Result.success(emptyList()))
+    override val currentTeams = currentTeamsResult.map { team ->
             team.getOrElse {
                 _errorState.value = it.userMessage()
                 emptyList()
             }
-        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+        }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
     private val _isTeamsRefreshing = MutableStateFlow(false)
     private val repositoryCurrentTeamsLoading = currentUserIdFlow
         .flatMapLatest { currentUserId ->
@@ -156,6 +203,7 @@ class DefaultTeamManagementComponent(
 
     private val _selectedTeam = MutableStateFlow<TeamWithPlayers?>(null)
     override val selectedTeam = _selectedTeam.asStateFlow()
+    private var isSelectedTeamDraft = false
 
     private val _staffUsersById = MutableStateFlow<Map<String, UserData>>(emptyMap())
     override val staffUsersById = _staffUsersById.asStateFlow()
@@ -166,8 +214,13 @@ class DefaultTeamManagementComponent(
     private val _loadingTeamMemberComplianceId = MutableStateFlow<String?>(null)
     override val loadingTeamMemberComplianceId = _loadingTeamMemberComplianceId.asStateFlow()
 
-    private val _suggestedPlayers = MutableStateFlow<List<UserData>>(listOf())
-    override val suggestedPlayers = _suggestedPlayers.asStateFlow()
+    private val playerInviteSearch = LatestPlayerInviteSearch(
+        scope = scope,
+        searchPlayers = { query -> userRepository.searchPlayers(search = query) },
+        excludedUserId = { currentUser.id },
+        onFailure = { error -> _errorState.value = error.userMessage() },
+    )
+    override val suggestedPlayers = playerInviteSearch.suggestions
 
     override val inviteFreeAgentContext = selectedTeam
         .flatMapLatest { team ->
@@ -232,6 +285,13 @@ class DefaultTeamManagementComponent(
 
     init {
         backHandler.register(teamEditorBackCallback)
+        lifecycle.doOnDestroy(
+            TeamManagementLifecycleCleanup(
+                backHandler = backHandler,
+                backCallback = teamEditorBackCallback,
+            )::onDestroy,
+        )
+        lifecycle.doOnDestroy(playerInviteSearch::invalidate)
         scope.launch {
             currentUserState
                 .map { user -> user.friendIds }
@@ -261,15 +321,20 @@ class DefaultTeamManagementComponent(
                 }
         }
         scope.launch {
-            currentTeams.collect { teams ->
+            currentTeamsResult.collect { result ->
+                val teams = result.getOrNull() ?: return@collect
                 val selectedTeam = _selectedTeam.value
                 if (selectedTeam != null) {
-                    val updatedSelectedTeam = teams.find { team -> team.team.id == selectedTeam.team.id }
+                    val updatedSelectedTeam = resolveSelectedTeamAfterRefresh(
+                        selectedTeam = selectedTeam,
+                        refreshedTeams = teams,
+                        isDraft = isSelectedTeamDraft,
+                    )
                     if (updatedSelectedTeam != null) {
                         _selectedTeam.value = updatedSelectedTeam
                         refreshSelectedTeamStaffUsers(updatedSelectedTeam)
                     } else {
-                        refreshSelectedTeamStaffUsers(selectedTeam)
+                        deselectTeam()
                     }
                 }
             }
@@ -280,7 +345,13 @@ class DefaultTeamManagementComponent(
         loadingHandler = handler
     }
 
+    override fun clearError() {
+        _errorState.value = null
+    }
+
     override fun selectTeam(team: TeamWithPlayers?) {
+        playerInviteSearch.invalidate()
+        isSelectedTeamDraft = team == null
         val resolvedTeam = team ?: TeamWithPlayers(
             Team(currentUser.id), currentUser, listOf(currentUser), listOf()
         )
@@ -291,8 +362,9 @@ class DefaultTeamManagementComponent(
 
     override fun createTeam(team: Team, onResult: (Result<Unit>) -> Unit) {
         scope.launch {
+            val loadingOperation = loadingHandler?.newOperation()
             try {
-                loadingHandler?.showLoading("Creating team...")
+                loadingOperation?.showLoading("Creating team...")
                 val createResult = teamRepository.createTeam(
                     team.copy(
                         captainId = currentUser.id,
@@ -308,7 +380,7 @@ class DefaultTeamManagementComponent(
 
                 val createdTeam = createResult.getOrThrow()
 
-                loadingHandler?.showLoading("Fetching teams...")
+                loadingOperation?.showLoading("Fetching teams...")
                 val teamIdsToRefresh = (currentTeams.value.map { teamWithPlayers ->
                     teamWithPlayers.team.id
                 } + createdTeam.id)
@@ -326,7 +398,7 @@ class DefaultTeamManagementComponent(
                 _errorState.value = throwable.userMessage()
                 onResult(Result.failure(throwable))
             } finally {
-                loadingHandler?.hideLoading()
+                loadingOperation?.hideLoading()
             }
         }
     }
@@ -369,17 +441,21 @@ class DefaultTeamManagementComponent(
 
     override fun requestTeamRefund(team: Team, reason: String, onResult: (Result<Unit>) -> Unit) {
         scope.launch {
-            loadingHandler?.showLoading("Requesting refund...")
-            val result = teamRepository.requestTeamRegistrationRefund(team.id, reason)
-            result
-                .onSuccess {
-                    deselectTeam()
-                }
-                .onFailure {
-                    _errorState.value = it.userMessage("Refund request failed")
-                }
-            loadingHandler?.hideLoading()
-            onResult(result)
+            val loadingOperation = loadingHandler?.newOperation()
+            loadingOperation?.showLoading("Requesting refund...")
+            try {
+                val result = teamRepository.requestTeamRegistrationRefund(team.id, reason)
+                result
+                    .onSuccess {
+                        deselectTeam()
+                    }
+                    .onFailure {
+                        _errorState.value = it.userMessage("Refund request failed")
+                    }
+                onResult(result)
+            } finally {
+                loadingOperation?.hideLoading()
+            }
         }
     }
 
@@ -426,6 +502,8 @@ class DefaultTeamManagementComponent(
     }
 
     override fun deselectTeam() {
+        playerInviteSearch.invalidate()
+        isSelectedTeamDraft = false
         _selectedTeam.value = null
         teamEditorBackCallback.isEnabled = false
         _staffUsersById.value = emptyMap()
@@ -440,14 +518,7 @@ class DefaultTeamManagementComponent(
     }
 
     override fun searchPlayers(query: String) {
-        scope.launch {
-            _suggestedPlayers.value = userRepository.searchPlayers(search = query).getOrElse {
-                _errorState.value = it.userMessage()
-                emptyList()
-            }.filterNot { user ->
-                currentUser.id == user.id
-            }
-        }
+        playerInviteSearch.submit(query)
     }
 
     override fun inviteUserToRole(
@@ -467,6 +538,10 @@ class DefaultTeamManagementComponent(
                 return@launch
             }
         }
+    }
+
+    override suspend fun ensureUserByEmail(email: String): Result<UserData> {
+        return userRepository.ensureUserByEmail(email)
     }
 
     private fun refreshSelectedTeamStaffUsers(team: TeamWithPlayers?) {
@@ -510,4 +585,28 @@ class DefaultTeamManagementComponent(
         team.players.forEach { put(it.id, it) }
         team.pendingPlayers.forEach { put(it.id, it) }
     }
+}
+
+internal fun ComponentContext.teamManagementCoroutineScope() =
+    CoroutineScope(Dispatchers.Main + SupervisorJob()).withLifecycle(lifecycle)
+
+internal class TeamManagementLifecycleCleanup(
+    private val backHandler: BackHandler,
+    private val backCallback: BackCallback,
+) {
+    fun onDestroy() {
+        backCallback.isEnabled = false
+        if (backHandler.isRegistered(backCallback)) {
+            backHandler.unregister(backCallback)
+        }
+    }
+}
+
+internal fun resolveSelectedTeamAfterRefresh(
+    selectedTeam: TeamWithPlayers,
+    refreshedTeams: List<TeamWithPlayers>,
+    isDraft: Boolean,
+): TeamWithPlayers? {
+    if (isDraft) return selectedTeam
+    return refreshedTeams.firstOrNull { team -> team.team.id == selectedTeam.team.id }
 }

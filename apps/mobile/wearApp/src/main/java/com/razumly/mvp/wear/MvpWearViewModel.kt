@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MvpWearViewModel(application: Application) : AndroidViewModel(application) {
     private val tokenStore = WearAuthTokenStore(application.applicationContext)
@@ -44,6 +45,7 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
     private val _state = MutableStateFlow(MvpWearUiState())
     val state: StateFlow<MvpWearUiState> = _state.asStateFlow()
     private var demoMode = false
+    private val matchActionGate = WearMatchActionGate()
 
     init {
         bootstrap()
@@ -73,6 +75,10 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun signIn() {
+        tokenStore.unavailableMessage?.let { message ->
+            _state.update { it.copy(isLoading = false, error = message) }
+            return
+        }
         val email = state.value.email.trim()
         val password = state.value.password
         if (email.isBlank() || password.isBlank()) {
@@ -163,6 +169,11 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
                         },
                     )
                 }
+                WearRoute.INCIDENT_DELETE_CONFIRM -> current.copy(
+                    route = WearRoute.INCIDENT_EDITOR,
+                    error = null,
+                    message = null,
+                )
                 WearRoute.INCIDENT_TYPES -> current.copy(
                     route = if (current.incidentMode == WearIncidentMode.CREATE) {
                         WearRoute.TEAM_PICK
@@ -431,6 +442,42 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun requestDeleteIncident() {
+        val current = state.value
+        if (current.incidentMode != WearIncidentMode.EDIT || current.selectedIncident == null) return
+        _state.update {
+            it.copy(
+                route = WearRoute.INCIDENT_DELETE_CONFIRM,
+                error = null,
+                message = null,
+            )
+        }
+    }
+
+    fun deleteIncident() {
+        val current = state.value
+        if (current.route != WearRoute.INCIDENT_DELETE_CONFIRM) return
+        val match = current.selectedMatch ?: return
+        val incident = current.selectedIncident ?: run {
+            _state.update { it.copy(error = "Incident is no longer available.") }
+            return
+        }
+        launchBusy {
+            val updatedRaw = withContext(Dispatchers.IO) {
+                repository.deleteIncident(match = match, incident = incident)
+            }
+            val updatedMatch = match.withUpdatedRaw(updatedRaw, current.currentUserId)
+            _state.update {
+                it.withUpdatedMatch(updatedMatch).clearIncidentDraft().copy(
+                    route = WearRoute.INCIDENT_LIST,
+                    message = "Incident deleted.",
+                    error = null,
+                )
+            }
+            runCatching { reloadMatches(preserveSelection = true) }
+        }
+    }
+
     fun cancelIncident() {
         _state.update { current ->
             current.clearIncidentDraft().copy(
@@ -504,6 +551,17 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
     private fun bootstrap() {
         viewModelScope.launch {
             if (demoMode) return@launch
+            tokenStore.unavailableMessage?.let { message ->
+                _state.update {
+                    it.copy(
+                        route = WearRoute.LOGIN,
+                        isAuthenticated = false,
+                        isLoading = false,
+                        error = message,
+                    )
+                }
+                return@launch
+            }
             _state.update { it.copy(isLoading = true, error = null) }
             val session = try {
                 withContext(Dispatchers.IO) { repository.bootstrapSession() }
@@ -551,31 +609,17 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
         action: suspend (WearMatch) -> WearMatchDto,
     ) {
         val match = state.value.selectedMatch ?: return
-        viewModelScope.launch {
-            _state.update { it.copy(isLoading = false, error = null, message = null) }
-            val updatedRaw = try {
-                withContext(Dispatchers.IO) { action(match) }
-            } catch (throwable: Throwable) {
-                _state.update {
-                    it.copy(
-                        isLoading = false,
-                        error = throwable.toUserMessage(),
-                    )
-                }
-                return@launch
-            }
+        launchBusy {
+            val updatedRaw = withContext(Dispatchers.IO) { action(match) }
             val updatedMatch = match.withUpdatedRaw(updatedRaw, state.value.currentUserId)
             _state.update {
                 it.withUpdatedMatch(updatedMatch).copy(
                     route = successRoute,
                     message = successMessage,
                     error = null,
-                    isLoading = false,
                 )
             }
-            viewModelScope.launch {
-                runCatching { reloadMatches(preserveSelection = true) }
-            }
+            runCatching { reloadMatches(preserveSelection = true) }
         }
     }
 
@@ -608,20 +652,17 @@ class MvpWearViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun launchBusy(block: suspend () -> Unit) {
+        if (!matchActionGate.tryStart()) return
+        _state.update { it.copy(isLoading = true, error = null, message = null) }
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
-            runCatching { block() }
-                .onFailure { throwable ->
-                    _state.update {
-                        it.copy(
-                            isLoading = false,
-                            error = throwable.toUserMessage(),
-                        )
-                    }
-                }
-                .onSuccess {
-                    _state.update { it.copy(isLoading = false) }
-                }
+            try {
+                block()
+            } catch (throwable: Throwable) {
+                _state.update { it.copy(error = throwable.toUserMessage()) }
+            } finally {
+                matchActionGate.finish()
+                _state.update { it.copy(isLoading = false) }
+            }
         }
     }
 }
@@ -635,6 +676,7 @@ enum class WearRoute {
     ACTION_MENU,
     INCIDENT_LIST,
     INCIDENT_EDITOR,
+    INCIDENT_DELETE_CONFIRM,
     INCIDENT_TYPES,
     INCIDENT_TEAMS,
     PLAYERS,
@@ -651,6 +693,16 @@ enum class WearIncidentField {
     TEAM,
     PLAYER,
     TIME,
+}
+
+internal class WearMatchActionGate {
+    private val inFlight = AtomicBoolean(false)
+
+    fun tryStart(): Boolean = inFlight.compareAndSet(false, true)
+
+    fun finish() {
+        inFlight.set(false)
+    }
 }
 
 data class MvpWearUiState(

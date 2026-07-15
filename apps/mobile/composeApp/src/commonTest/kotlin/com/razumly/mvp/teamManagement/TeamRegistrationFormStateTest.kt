@@ -2,6 +2,8 @@ package com.razumly.mvp.teamManagement
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class TeamRegistrationFormStateTest {
     @Test
@@ -78,5 +80,41 @@ class TeamRegistrationFormStateTest {
         assertEquals(false, shouldShowTeamDivisionFields(TEAM_JOIN_POLICY_OPEN_REGISTRATION, ""))
         assertEquals(true, shouldShowTeamDivisionFields(TEAM_JOIN_POLICY_OPEN_REGISTRATION, "Volleyball"))
         assertEquals(true, shouldShowTeamDivisionFields(TEAM_JOIN_POLICY_REQUEST_TO_JOIN, "Soccer"))
+    }
+
+    @Test
+    fun paid_team_price_requires_a_confirmed_quote_before_submit() {
+        assertFalse(
+            isTeamRegistrationPriceReady(
+                joinPolicy = TEAM_JOIN_POLICY_OPEN_REGISTRATION,
+                isQuoteConfirmed = false,
+            ),
+        )
+        assertTrue(
+            isTeamRegistrationPriceReady(
+                joinPolicy = TEAM_JOIN_POLICY_OPEN_REGISTRATION,
+                isQuoteConfirmed = true,
+            ),
+        )
+        assertTrue(
+            isTeamRegistrationPriceReady(
+                joinPolicy = TEAM_JOIN_POLICY_CLOSED,
+                isQuoteConfirmed = false,
+            ),
+        )
+    }
+
+    @Test
+    fun confirmed_server_total_is_the_exact_team_registration_price() {
+        val sentinelServerTotalCents = 9_876
+
+        assertEquals(
+            sentinelServerTotalCents,
+            resolvedRegistrationPriceCents(
+                joinPolicy = TEAM_JOIN_POLICY_OPEN_REGISTRATION,
+                canChargeRegistration = true,
+                registrationPriceCentsInput = sentinelServerTotalCents,
+            ),
+        )
     }
 }

@@ -134,7 +134,7 @@ class EventSignatureExecutionCoordinatorTest {
             logError = { message, throwable -> events += "log:$message:${throwable.message}" },
         )
 
-        assertEquals("https://sign.example/doc", registrationFlow.webSignaturePrompt.value?.url)
+        assertEquals("https://app.boldsign.com/sign/doc-1", registrationFlow.webSignaturePrompt.value?.url)
         val poll = assertNotNull(pollBlock)
 
         poll.invoke()
@@ -155,6 +155,36 @@ class EventSignatureExecutionCoordinatorTest {
         )
     }
 
+    @Test
+    fun web_signature_step_rejects_an_untrusted_signing_url_before_polling() = runTest {
+        val registrationFlow = EventRegistrationFlowCoordinator()
+        val coordinator = EventSignatureExecutionCoordinator(registrationFlowCoordinator = registrationFlow)
+        val events = mutableListOf<String>()
+
+        coordinator.runActionAfterRequiredSigning(
+            eventId = "event-1",
+            signerContext = SignerContext.PARTICIPANT,
+            child = null,
+            currentAccountEmail = null,
+            teamId = null,
+            onReady = { events += "ready" },
+            getRequiredTeamSignLinks = { _, _, _, _ -> error("Team links should not be loaded") },
+            getRequiredSignLinks = { _, _, _, _ ->
+                Result.success(listOf(webStep(signingUrl = "intent://evil.example/#Intent;scheme=https;end")))
+            },
+            pollBoldSignOperation = { error("Untrusted URL must not start polling") },
+            startPolling = { error("Untrusted URL must not start polling") },
+            setError = { message -> events += "error:$message" },
+            logError = { message, throwable -> events += "log:$message:${throwable.message}" },
+        )
+
+        assertNull(registrationFlow.webSignaturePrompt.value)
+        assertEquals(
+            listOf("error:A required document has an unavailable or invalid signing URL."),
+            events,
+        )
+    }
+
     private fun textStep(): SignStep {
         return SignStep(
             templateId = "text-template",
@@ -163,11 +193,11 @@ class EventSignatureExecutionCoordinatorTest {
         )
     }
 
-    private fun webStep(): SignStep {
+    private fun webStep(signingUrl: String = "https://app.boldsign.com/sign/doc-1"): SignStep {
         return SignStep(
             templateId = "web-template",
             type = "PDF",
-            signingUrl = "https://sign.example/doc",
+            signingUrl = signingUrl,
             documentId = "doc-1",
             operationId = "operation-1",
         )

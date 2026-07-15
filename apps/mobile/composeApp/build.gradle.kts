@@ -17,22 +17,134 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.compose.vectorize)
     alias(libs.plugins.secrets)
+    alias(libs.plugins.google.services) apply false
+    alias(libs.plugins.skie)
     id("kotlin-parcelize")
-    id("com.google.gms.google-services") version "4.5.0"
-    id("co.touchlab.skie") version "0.10.13"
 }
+
+val googleServicesConfigFile = layout.projectDirectory.file("google-services.json").asFile
+val hasGoogleServicesConfig = googleServicesConfigFile.isFile
+
+if (hasGoogleServicesConfig) {
+    apply(plugin = "com.google.gms.google-services")
+} else {
+    logger.lifecycle(
+        "composeApp/google-services.json is not configured. " +
+            "Firebase, push notifications, analytics, and Android Google sign-in are disabled; " +
+            "debug builds and unit tests remain available.",
+    )
+}
+
+val requireGoogleServicesConfig by tasks.registering {
+    group = "verification"
+    description = "Fails release builds when the untracked Android Google Services config is missing."
+    doLast {
+        if (!googleServicesConfigFile.isFile) {
+            throw GradleException(
+                "Release builds require composeApp/google-services.json. " +
+                    "Run scripts/provision-google-services.sh; see README.md for local and CI setup.",
+            )
+        }
+    }
+}
+
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    dependsOn(requireGoogleServicesConfig)
+}
+
 composeCompiler {
-    includeSourceInformation = true
+    includeSourceInformation = providers.gradleProperty("compose.includeSourceInformation")
+        .map(String::toBoolean)
+        .orElse(false)
+        .get()
 }
 
 compose.resources {
     generateResClass = always
 }
 
+val canonicalLogoComment =
+    "<!-- Canonical BracketIQ logo geometry. Generate platform variants with :composeApp:generateLogoVectors. -->"
+val generatedLogoComment =
+    "<!-- Generated from mvp_logo.xml by :composeApp:generateLogoVectors. Do not edit manually. -->"
+val composeResourceSuppression = "<!--suppress XmlPathReference, XmlUnboundNsPrefix -->"
+val canonicalLogoFile = layout.projectDirectory.file(
+    "src/commonMain/composeResources/drawable/mvp_logo.xml",
+)
+val generatedLogoFiles = mapOf(
+    "launcher" to layout.projectDirectory.file("src/androidMain/res/drawable/ic_launcher_foreground.xml"),
+    "notification" to layout.projectDirectory.file("src/androidMain/res/drawable/ic_notification_logo.xml"),
+    "lightBackground" to layout.projectDirectory.file(
+        "src/commonMain/composeResources/drawable/mvp_logo_white_bg.xml",
+    ),
+)
+
+fun renderLogoVariant(canonicalXml: String, variant: String): String {
+    val geometryXml = canonicalXml
+        .removePrefix("$canonicalLogoComment\n")
+        .removePrefix("$composeResourceSuppression\n")
+    val transformed = when (variant) {
+        "launcher" -> geometryXml
+            .replace("android:scaleX=\"1\"", "android:scaleX=\"0.8\"")
+            .replace("android:scaleY=\"1\"", "android:scaleY=\"0.8\"")
+            .replace("android:translateX=\"0\"", "android:translateX=\"18.5\"")
+            .replace("android:translateY=\"0\"", "android:translateY=\"18.5\"")
+        "notification" -> Regex("android:fillColor=\"#[0-9A-Fa-f]+\"")
+            .replace(geometryXml, "android:fillColor=\"#FFFFFFFF\"")
+        "lightBackground" -> geometryXml.replaceFirst(
+            "android:fillColor=\"#fefefe\"",
+            "android:fillColor=\"#000000\"",
+        )
+        else -> error("Unknown logo variant: $variant")
+    }
+    val resourceSuppression = if (variant == "lightBackground") {
+        "$composeResourceSuppression\n"
+    } else {
+        ""
+    }
+    return "$generatedLogoComment\n$resourceSuppression$transformed"
+}
+
+val generateLogoVectors by tasks.registering {
+    group = "branding"
+    description = "Regenerates platform logo vectors from the canonical shared geometry."
+    inputs.file(canonicalLogoFile)
+    outputs.files(generatedLogoFiles.values)
+    doLast {
+        val canonicalXml = canonicalLogoFile.asFile.readText()
+        generatedLogoFiles.forEach { (variant, destination) ->
+            destination.asFile.writeText(renderLogoVariant(canonicalXml, variant))
+        }
+    }
+}
+
+val verifyLogoVectors by tasks.registering {
+    group = "verification"
+    description = "Rejects manually drifted logo geometry variants."
+    inputs.file(canonicalLogoFile)
+    inputs.files(generatedLogoFiles.values)
+    doLast {
+        val canonicalXml = canonicalLogoFile.asFile.readText()
+        val drifted = generatedLogoFiles.mapNotNull { (variant, destination) ->
+            variant.takeIf { destination.asFile.readText() != renderLogoVariant(canonicalXml, variant) }
+        }
+        if (drifted.isNotEmpty()) {
+            throw GradleException(
+                "Generated logo vectors are stale (${drifted.joinToString()}). " +
+                    "Run ./gradlew :composeApp:generateLogoVectors.",
+            )
+        }
+    }
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn(verifyLogoVectors)
+}
+
 val mvpVersion = "1.6.14"
 val mvpVersionCode = 67
 
-private fun loadProperties(path: String): Properties =
+fun loadProperties(path: String): Properties =
     Properties().apply {
         val propertiesFile = rootProject.file(path)
         if (propertiesFile.isFile) {
@@ -40,14 +152,13 @@ private fun loadProperties(path: String): Properties =
         }
     }
 
-private val secretProperties = loadProperties("secrets.properties")
-private val defaultProperties = loadProperties("local.defaults.properties")
+val secretProperties = loadProperties("secrets.properties")
+val defaultProperties = loadProperties("local.defaults.properties")
 
-private fun configProperty(name: String, fallback: String = ""): String =
+fun configProperty(name: String, fallback: String = ""): String =
     secretProperties.getProperty(name)
         ?: defaultProperties.getProperty(name)
         ?: fallback
-
 kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
@@ -145,7 +256,6 @@ kotlin {
                 implementation(libs.permissions.compose)
                 api(projects.core.network)
                 implementation(libs.coil.compose.core)
-                implementation(libs.coil.compose)
                 implementation(libs.coil.mp)
                 implementation(libs.coil.network.ktor)
                 implementation(libs.coil.svg)
@@ -200,21 +310,6 @@ kotlin {
                 implementation(libs.androidx.core.splashscreen)
                 implementation(libs.googleid)
                 implementation(libs.firebase.analytics)
-                implementation("com.google.auth:google-auth-library-oauth2-http:1.37.1") {
-                    exclude(group = "org.apache.httpcomponents", module = "httpclient")
-                    exclude(group = "org.apache.httpcomponents", module = "httpcore")
-                    exclude(module = "commons-logging")
-                }
-                implementation("com.google.http-client:google-http-client-gson:2.0.0") {
-                    exclude(group = "org.apache.httpcomponents", module = "httpclient")
-                    exclude(group = "org.apache.httpcomponents", module = "httpcore")
-                    exclude(module = "commons-logging")
-                }
-                implementation("com.google.apis:google-api-services-oauth2:v2-rev20200213-2.0.0") {
-                    exclude(group = "org.apache.httpcomponents", module = "httpclient")
-                    exclude(group = "org.apache.httpcomponents", module = "httpcore")
-                    exclude(module = "commons-logging")
-                }
                 implementation(libs.firebase.messaging)
                 implementation(libs.posthog.android)
                 implementation(libs.stripe.android)
@@ -247,7 +342,7 @@ kotlin {
             dependencies {
                 implementation(libs.mockk)
                 implementation(libs.robolectric)
-                implementation(libs.androidx.core)
+                implementation(libs.androidx.test.core)
                 implementation(libs.androidx.compose.ui.test.junit4)
             }
         }
@@ -259,20 +354,16 @@ android {
     namespace = "com.razumly.mvp"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
     buildFeatures.buildConfig = true
-    packaging {
-        resources.pickFirsts.add("META-INF/*")
-        resources.pickFirsts.add("mozilla/*")
-    }
     defaultConfig {
         applicationId = "com.razumly.mvp"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = mvpVersionCode
         versionName = mvpVersion
-        // The Secrets Gradle plugin supplies application variants, while the
-        // generated Android unit-test manifest is merged independently. Read
-        // the same secret/default chain here so test variants have a harmless
-        // placeholder without replacing a configured production key.
+        // The Secrets Gradle plugin supplies application variants, but Android's
+        // generated unit-test manifest is merged independently. Mirror the
+        // configured key into defaultConfig so every Android variant resolves
+        // the map placeholder without a test-only fake value.
         manifestPlaceholders["MAPS_API_KEY"] = configProperty("MAPS_API_KEY")
     }
     buildTypes {
@@ -291,11 +382,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-    bundle {
-        language {
-            enableSplit = false
-        }
     }
     testOptions {
         unitTests {
@@ -353,7 +439,7 @@ secrets {
 dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose.android)
     implementation(libs.androidx.animation.android)
-    debugImplementation("org.jetbrains.compose.ui:ui-tooling:${libs.versions.uiVersion.get()}")
+    debugImplementation(libs.jetbrains.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     implementation(libs.androidx.foundation.layout)
     implementation(libs.androidx.material)

@@ -6,7 +6,6 @@ import androidx.room.Entity
 import androidx.room.Ignore
 import androidx.room.PrimaryKey
 import androidx.room.TypeConverters
-import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.DivisionConverters
 import com.razumly.mvp.core.data.util.DivisionDetailConverters
@@ -327,108 +326,4 @@ fun Event.lifecycleStateLabel(): String {
         "TEMPLATE" -> "Template"
         else -> "Published"
     }
-}
-
-fun Event.toEventDTO(): EventDTO {
-    val effectiveDoTeamsOfficiate = if (officialSchedulingMode.requiresTeamOfficials()) true else doTeamsOfficiate
-    return EventDTO(
-        id = id,
-        name = name,
-        description = description,
-        doubleElimination = doubleElimination,
-        divisions = divisions.normalizeDivisionIdentifiers(),
-        divisionDetails = mergeDivisionDetailsForDivisions(
-            divisions = divisions,
-            existingDetails = divisionDetails,
-            eventId = id,
-        ),
-        winnerSetCount = winnerSetCount,
-        loserSetCount = loserSetCount,
-        winnerBracketPointsToVictory = winnerBracketPointsToVictory,
-        loserBracketPointsToVictory = loserBracketPointsToVictory,
-        prize = prize,
-        location = location,
-        address = address,
-        start = start.toString(),
-        end = end.toString(),
-        timeZone = timeZone,
-        priceCents = priceCents,
-        rating = rating,
-        imageId = imageId,
-        hostId = hostId,
-        assistantHostIds = assistantHostIds,
-        noFixedEndDateTime = noFixedEndDateTime,
-        coordinates = coordinates,
-        maxParticipants = maxParticipants,
-        teamSizeLimit = teamSizeLimit,
-        teamSignup = teamSignup,
-        singleDivision = singleDivision,
-        waitListIds = waitListIds,
-        freeAgentIds = freeAgentIds,
-        userIds = userIds,
-        teamIds = teamIds,
-        cancellationRefundHours = cancellationRefundHours,
-        registrationCutoffHours = registrationCutoffHours,
-        seedColor = seedColor,
-        sportId = sportId,
-        timeSlotIds = timeSlotIds,
-        fieldIds = fieldIds,
-        leagueScoringConfigId = leagueScoringConfigId,
-        organizationId = organizationId,
-        affiliateUrl = affiliateUrl,
-        scheduleText = scheduleText,
-        dateDisplayMode = dateDisplayMode,
-        dateDisplayText = dateDisplayText,
-        registrationPaymentMode = normalizedRegistrationPaymentMode(),
-        manualPaymentLinks = if (usesManualRegistrationPayments()) {
-            normalizeManualPaymentLinks(manualPaymentLinks)
-        } else {
-            emptyList()
-        },
-        manualPaymentInstructions = if (usesManualRegistrationPayments()) {
-            normalizeManualPaymentInstructions(manualPaymentInstructions)
-        } else {
-            null
-        },
-        autoCancellation = autoCancellation,
-        eventType = eventType.name,
-        minAge = minAge,
-        maxAge = maxAge,
-        registrationByDivisionType = registrationByDivisionType,
-        fieldCount = fieldIds
-            .count { fieldId -> fieldId.isNotBlank() }
-            .takeIf { count -> count > 0 },
-        gamesPerOpponent = gamesPerOpponent,
-        includePlayoffs = includePlayoffs,
-        splitLeaguePlayoffDivisions = splitLeaguePlayoffDivisions,
-        includePlayoffsOrPools = includePlayoffs,
-        playoffTeamCount = playoffTeamCount,
-        usesSets = usesSets,
-        matchDurationMinutes = matchDurationMinutes,
-        setDurationMinutes = setDurationMinutes,
-        setsPerMatch = setsPerMatch,
-        doTeamsOfficiate = effectiveDoTeamsOfficiate,
-        teamOfficialsMaySwap = if (effectiveDoTeamsOfficiate == true) teamOfficialsMaySwap else false,
-        teamCheckInMode = if (teamSignup) teamCheckInMode else TeamCheckInMode.OFF,
-        teamCheckInOpenMinutesBefore = teamCheckInOpenMinutesBefore.coerceAtLeast(0),
-        allowMatchRosterEdits = teamSignup && allowMatchRosterEdits,
-        allowTemporaryMatchPlayers = teamSignup && allowMatchRosterEdits && allowTemporaryMatchPlayers,
-        matchRulesOverride = matchRulesOverride,
-        autoCreatePointMatchIncidents = autoCreatePointMatchIncidents,
-        resolvedMatchRules = resolvedMatchRules,
-        restTimeMinutes = restTimeMinutes,
-        state = state,
-        pointsToVictory = pointsToVictory,
-        officialSchedulingMode = officialSchedulingMode,
-        officialPositions = officialPositions,
-        eventOfficials = eventOfficials,
-        officialIds = officialIds,
-        allowPaymentPlans = allowPaymentPlans,
-        installmentCount = installmentCount,
-        installmentDueDates = installmentDueDates,
-        installmentDueRelativeDays = installmentDueRelativeDays,
-        installmentAmounts = installmentAmounts,
-        allowTeamSplitDefault = allowTeamSplitDefault,
-        requiredTemplateIds = requiredTemplateIds,
-    )
 }

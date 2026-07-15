@@ -43,7 +43,7 @@ kotlin {
         androidMain {
             dependencies {
                 implementation(libs.androidx.browser)
-                implementation(libs.androidx.core)
+                implementation(libs.androidx.core.ktx)
                 implementation(libs.firebase.messaging)
                 implementation(libs.kotlinx.coroutines.android)
                 implementation(libs.posthog.android)
@@ -54,6 +54,10 @@ kotlin {
         commonTest {
             dependencies {
                 implementation(libs.kotlin.test)
+                implementation(libs.kotlinx.coroutines.test)
+                implementation(libs.ktor.client.mock)
+                implementation(libs.ktor.client.content.negotiation)
+                implementation(libs.ktor.serialization.kotlinx.json)
             }
         }
     }

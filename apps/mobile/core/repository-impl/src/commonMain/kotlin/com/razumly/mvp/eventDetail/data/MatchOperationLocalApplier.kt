@@ -12,7 +12,7 @@ import com.razumly.mvp.core.network.dto.MatchScoreSetDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.core.network.dto.MatchUpdateDto
 
-internal fun MatchMVP.applyLocalMatchUpdate(update: MatchUpdateDto): MatchMVP {
+fun MatchMVP.applyLocalMatchUpdate(update: MatchUpdateDto): MatchMVP {
     var next = applyLocalLifecycle(update.lifecycle)
     update.officialCheckIn?.let { checkIn ->
         next = next.applyLocalOfficialCheckIn(checkIn)
@@ -36,12 +36,10 @@ internal fun MatchMVP.applyLocalMatchUpdate(update: MatchUpdateDto): MatchMVP {
 internal fun MatchMVP.applyLocalScoreSet(scoreSet: MatchScoreSetDto): MatchMVP {
     val targetIndex = segments.indexOfFirst { segment ->
         segment.id == scoreSet.segmentId ||
-            segment.legacyId == scoreSet.segmentId ||
             segment.sequence == scoreSet.sequence
     }.takeIf { it >= 0 } ?: segments.size
     val target = segments.getOrNull(targetIndex) ?: MatchSegmentMVP(
         id = scoreSet.segmentId ?: "${id}_segment_${scoreSet.sequence}",
-        legacyId = scoreSet.segmentId ?: "${id}_segment_${scoreSet.sequence}",
         eventId = eventId,
         matchId = id,
         sequence = scoreSet.sequence,
@@ -111,12 +109,11 @@ private fun MatchMVP.applyLocalSegmentOperations(operations: List<MatchSegmentOp
     val updated = segments.toMutableList()
     operations.forEach { operation ->
         val index = updated.indexOfFirst { segment ->
-            operation.id?.let { id -> segment.id == id || segment.legacyId == id } == true ||
+            operation.id?.let { id -> segment.id == id } == true ||
                 segment.sequence == operation.sequence
         }
         val existing = updated.getOrNull(index) ?: MatchSegmentMVP(
             id = operation.id ?: "${id}_segment_${operation.sequence}",
-            legacyId = operation.id ?: "${id}_segment_${operation.sequence}",
             eventId = eventId,
             matchId = id,
             sequence = operation.sequence,
@@ -124,7 +121,6 @@ private fun MatchMVP.applyLocalSegmentOperations(operations: List<MatchSegmentOp
         )
         val next = existing.copy(
             id = operation.id ?: existing.id,
-            legacyId = operation.id ?: existing.legacyId,
             status = operation.status ?: existing.status,
             scores = operation.scores ?: existing.scores,
             winnerEventTeamId = when {
@@ -159,9 +155,11 @@ private fun MatchMVP.applyLocalSegmentOperations(operations: List<MatchSegmentOp
             updated += next
         }
     }
+    // Segment results are safe to show optimistically, but their aggregate does not establish a
+    // match winner. The server owns that evaluation because it depends on the scoring model,
+    // configured segment count, completion state, totals, and ties.
     return copy(
         segments = updated.sortedBy { it.sequence },
-        winnerEventTeamId = resolveWinnerFromLocalSegments(updated) ?: winnerEventTeamId,
     ).syncLegacyScoresFromLocalSegments()
 }
 
@@ -171,7 +169,7 @@ private fun MatchMVP.applyLocalIncidentOperations(operations: List<MatchIncident
     operations.forEach { operation ->
         when (operation.action.uppercase()) {
             "DELETE" -> {
-                val index = operation.id?.let { id -> incidents.indexOfFirst { it.id == id || it.legacyId == id } } ?: -1
+                val index = operation.id?.let { id -> incidents.indexOfFirst { it.id == id } } ?: -1
                 if (index >= 0) {
                     next = next.applyLocalIncidentScoreDelta(incidents[index], -1)
                     incidents.removeAt(index)
@@ -179,7 +177,7 @@ private fun MatchMVP.applyLocalIncidentOperations(operations: List<MatchIncident
             }
             "CREATE" -> {
                 val existingIndex = operation.id?.let { id ->
-                    incidents.indexOfFirst { it.id == id || it.legacyId == id }
+                    incidents.indexOfFirst { it.id == id }
                 } ?: -1
                 val incident = operation.toLocalIncident(
                     match = next,
@@ -196,7 +194,7 @@ private fun MatchMVP.applyLocalIncidentOperations(operations: List<MatchIncident
                 }
             }
             "UPDATE" -> {
-                val index = operation.id?.let { id -> incidents.indexOfFirst { it.id == id || it.legacyId == id } } ?: -1
+                val index = operation.id?.let { id -> incidents.indexOfFirst { it.id == id } } ?: -1
                 if (index >= 0) {
                     next = next.applyLocalIncidentScoreDelta(incidents[index], -1)
                     val previous = incidents[index]
@@ -256,13 +254,21 @@ private fun MatchMVP.applyLocalIncidentScoreDelta(
     if (delta == 0) return this
     val eventTeamId = incident.eventTeamId?.trim()?.takeIf(String::isNotBlank) ?: return this
     val segmentIndex = segments.indexOfFirst { segment ->
-        segment.id == incident.segmentId || segment.legacyId == incident.segmentId
+        segment.id == incident.segmentId
     }
     if (segmentIndex < 0) return this
     val updated = segments.toMutableList()
     val segment = updated[segmentIndex]
     val nextScore = ((segment.scores[eventTeamId] ?: 0) + delta * multiplier).coerceAtLeast(0)
-    updated[segmentIndex] = segment.copy(scores = segment.scores + (eventTeamId to nextScore))
+    val nextScores = segment.scores + (eventTeamId to nextScore)
+    updated[segmentIndex] = segment.copy(
+        status = when {
+            segment.status == "COMPLETE" -> segment.status
+            nextScores.values.any { score -> score > 0 } -> "IN_PROGRESS"
+            else -> "NOT_STARTED"
+        },
+        scores = nextScores,
+    )
     return copy(segments = updated)
 }
 
@@ -280,15 +286,4 @@ private fun MatchMVP.syncLegacyScoresFromLocalSegments(): MatchMVP {
             }
         },
     )
-}
-
-private fun resolveWinnerFromLocalSegments(segments: List<MatchSegmentMVP>): String? {
-    val completedWinners = segments
-        .filter { it.status == "COMPLETE" }
-        .mapNotNull { it.winnerEventTeamId?.trim()?.takeIf(String::isNotBlank) }
-    return completedWinners
-        .groupingBy { it }
-        .eachCount()
-        .maxByOrNull { it.value }
-        ?.key
 }

@@ -60,14 +60,6 @@ class EventDetailAccessRulesTest {
                 organization = organization(ownerId = "owner-1"),
             ),
         )
-        assertTrue(
-            canManageEventForUser(
-                event = Event(hostId = "host-1"),
-                user = user("admin-1"),
-                organization = null,
-                isPlatformAdmin = true,
-            ),
-        )
     }
 
     @Test

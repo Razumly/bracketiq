@@ -5,16 +5,20 @@ import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.util.LoadingHandler
-import com.razumly.mvp.core.util.LoadingState
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import com.razumly.mvp.core.util.LoadingHandlerImpl
+import com.razumly.mvp.core.util.LoadingOperation
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class EventInviteCoordinatorTest {
 
     @Test
@@ -58,6 +62,38 @@ class EventInviteCoordinatorTest {
         }
 
         assertEquals("Search unavailable", failure?.message)
+    }
+
+    @Test
+    fun search_users_ignores_an_older_success_after_a_newer_query_completes() = runTest {
+        val coordinator = EventInviteCoordinator()
+        val olderResponse = CompletableDeferred<Result<List<UserData>>>()
+        val newerResponse = CompletableDeferred<Result<List<UserData>>>()
+        val olderUser = user("user-old", fullName = "Older Result")
+        val newerUser = user("user-new", fullName = "Newer Result")
+
+        val olderSearch = async {
+            coordinator.searchUsers("ca") { query ->
+                assertEquals("ca", query)
+                olderResponse.await()
+            }
+        }
+        runCurrent()
+        val newerSearch = async {
+            coordinator.searchUsers("cam") { query ->
+                assertEquals("cam", query)
+                newerResponse.await()
+            }
+        }
+        runCurrent()
+
+        newerResponse.complete(Result.success(listOf(newerUser)))
+        assertNull(newerSearch.await())
+        assertEquals(listOf(newerUser), coordinator.suggestedUsers.value)
+
+        olderResponse.complete(Result.success(listOf(olderUser)))
+        assertNull(olderSearch.await())
+        assertEquals(listOf(newerUser), coordinator.suggestedUsers.value)
     }
 
     @Test
@@ -136,6 +172,82 @@ class EventInviteCoordinatorTest {
 
         assertEquals("Team search failed", failure?.message)
         assertFalse(coordinator.inviteTeamsLoading.value)
+    }
+
+    @Test
+    fun search_invite_teams_ignores_an_older_error_while_a_newer_query_is_loading() = runTest {
+        val coordinator = EventInviteCoordinator()
+        val event = Event(id = "event-1", teamSignup = true)
+        val olderResponse = CompletableDeferred<Result<List<Team>>>()
+        val newerResponse = CompletableDeferred<Result<List<Team>>>()
+        val newerTeam = team("team-new", name = "Newer Result")
+
+        val olderSearch = async {
+            coordinator.searchInviteTeams(
+                query = "ro",
+                event = event,
+                organizationId = null,
+                sportName = null,
+                excludeTeamIds = emptySet(),
+            ) { _, _, _, _, _ -> olderResponse.await() }
+        }
+        runCurrent()
+        val newerSearch = async {
+            coordinator.searchInviteTeams(
+                query = "rov",
+                event = event,
+                organizationId = null,
+                sportName = null,
+                excludeTeamIds = emptySet(),
+            ) { _, _, _, _, _ -> newerResponse.await() }
+        }
+        runCurrent()
+
+        olderResponse.complete(Result.failure(IllegalStateException("Stale failure")))
+        assertNull(olderSearch.await())
+        assertTrue(coordinator.inviteTeamsLoading.value)
+        assertEquals(emptyList(), coordinator.inviteTeamSuggestions.value)
+
+        newerResponse.complete(Result.success(listOf(newerTeam)))
+        assertNull(newerSearch.await())
+        assertFalse(coordinator.inviteTeamsLoading.value)
+        assertEquals(listOf(newerTeam), coordinator.inviteTeamSuggestions.value)
+    }
+
+    @Test
+    fun clearing_invite_searches_invalidates_pending_responses() = runTest {
+        val coordinator = EventInviteCoordinator()
+        val pendingUsers = CompletableDeferred<Result<List<UserData>>>()
+        val userSearch = async {
+            coordinator.searchUsers("cam") { pendingUsers.await() }
+        }
+        runCurrent()
+
+        coordinator.clearSuggestedUsers()
+        pendingUsers.complete(Result.success(listOf(user("user-stale"))))
+
+        assertNull(userSearch.await())
+        assertEquals(emptyList(), coordinator.suggestedUsers.value)
+
+        val pendingTeams = CompletableDeferred<Result<List<Team>>>()
+        val teamSearch = async {
+            coordinator.searchInviteTeams(
+                query = "ro",
+                event = Event(id = "event-1", teamSignup = true),
+                organizationId = null,
+                sportName = null,
+                excludeTeamIds = emptySet(),
+            ) { _, _, _, _, _ -> pendingTeams.await() }
+        }
+        runCurrent()
+        assertTrue(coordinator.inviteTeamsLoading.value)
+
+        coordinator.clearInviteTeamSearch()
+        pendingTeams.complete(Result.success(listOf(team("team-stale"))))
+
+        assertNull(teamSearch.await())
+        assertFalse(coordinator.inviteTeamsLoading.value)
+        assertEquals(emptyList(), coordinator.inviteTeamSuggestions.value)
     }
 
     @Test
@@ -355,22 +467,27 @@ class EventInviteCoordinatorTest {
         Team(captainId = "captain-1").copy(id = id, name = name)
 
     private class RecordingLoadingHandler : LoadingHandler {
-        private val _loadingState = MutableStateFlow(LoadingState())
-        override val loadingState: StateFlow<LoadingState> = _loadingState.asStateFlow()
+        private val delegate = LoadingHandlerImpl()
+        override val loadingState = delegate.loadingState
         val events = mutableListOf<String>()
 
-        override fun showLoading(message: String, progress: Float?) {
-            events += "show:$message"
-            _loadingState.value = LoadingState(isLoading = true, message = message, progress = progress)
-        }
+        override fun newOperation(): LoadingOperation {
+            val operation = delegate.newOperation()
+            return object : LoadingOperation {
+                override fun showLoading(message: String, progress: Float?) {
+                    events += "show:$message"
+                    operation.showLoading(message, progress)
+                }
 
-        override fun hideLoading() {
-            events += "hide"
-            _loadingState.value = LoadingState()
-        }
+                override fun hideLoading() {
+                    events += "hide"
+                    operation.hideLoading()
+                }
 
-        override fun updateProgress(progress: Float) {
-            _loadingState.value = _loadingState.value.copy(progress = progress)
+                override fun updateProgress(progress: Float) {
+                    operation.updateProgress(progress)
+                }
+            }
         }
     }
 }

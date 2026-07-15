@@ -43,10 +43,12 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 private class InMemoryAuthTokenStore(
@@ -62,7 +64,9 @@ private fun outgoingBodyText(content: OutgoingContent): String = when (content) 
     else -> error("Unsupported outgoing content ${content::class.simpleName}")
 }
 
-private class FakeTeamDao : TeamDao {
+private class FakeTeamDao(
+    private val relationsOrder: (List<String>) -> List<String> = { ids -> ids },
+) : RoomTeamDaoTestAdapter() {
     private val teams = MutableStateFlow<Map<String, Team>>(emptyMap())
 
     override suspend fun upsertTeam(team: Team) {
@@ -130,7 +134,7 @@ private class FakeTeamDao : TeamDao {
 
     override fun getTeamsWithPlayersFlowByIds(ids: List<String>): Flow<List<com.razumly.mvp.core.data.dataTypes.TeamWithPlayers>> =
         teams.map { cached ->
-            ids.mapNotNull(cached::get).map { team ->
+            relationsOrder(ids).mapNotNull(cached::get).map { team ->
                 com.razumly.mvp.core.data.dataTypes.TeamWithPlayers(
                     team = team,
                     captain = null,
@@ -196,12 +200,12 @@ private class FakeUserRepository : IUserRepository {
         visibilityContext: UserVisibilityContext,
     ): Flow<Result<List<UserData>>> = error("unused")
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = error("unused")
+    override suspend fun ensureUserByEmail(email: String): Result<UserData> = error("unused")
     override suspend fun createInvites(invites: List<com.razumly.mvp.core.network.dto.InviteCreateDto>): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
     override suspend fun deleteInvite(inviteId: String): Result<Unit> = error("unused")
     override suspend fun findEmailMembership(
         emails: List<String>,
         userIds: List<String>,
-        eventId: String?,
     ): Result<List<UserEmailMembershipMatch>> = error("unused")
     override suspend fun listInvites(userId: String, type: String?): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> {
         lastListInvitesInput = userId to type
@@ -256,8 +260,6 @@ private class FakeUserRepository : IUserRepository {
         firstName: String,
         lastName: String,
         email: String,
-        currentPassword: String,
-        newPassword: String,
         userName: String,
         profileImageId: String?,
     ): Result<Unit> = error("unused")
@@ -336,6 +338,8 @@ private object FakePushNotificationsRepository : IPushNotificationsRepository {
 
     override fun setActiveChat(chatGroupId: String?) {}
 
+    override fun clearActiveChatIfMatches(chatGroupId: String?) {}
+
     override suspend fun addDeviceAsTarget(): Result<Unit> = Result.success(Unit)
     override suspend fun removeDeviceAsTarget(): Result<Unit> = Result.success(Unit)
     override suspend fun getDeviceTargetDebugStatus(syncBeforeCheck: Boolean): Result<PushDeviceTargetDebugStatus> =
@@ -354,7 +358,7 @@ class TeamRepositoryTeamsFetchTest {
             assertEquals("/api/teams", request.url.encodedPath)
             assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
             assertEquals("t1,t2", request.url.parameters["ids"])
-            assertEquals("200", request.url.parameters["limit"])
+            assertEquals("2", request.url.parameters["limit"])
 
             respond(
                 content = """
@@ -412,7 +416,7 @@ class TeamRepositoryTeamsFetchTest {
         val userRepo = FakeUserRepository()
 
         val engine = MockEngine { request ->
-            assertEquals("ids=t1,t2&limit=200", request.url.encodedQuery)
+            assertEquals("ids=t1,t2&limit=2", request.url.encodedQuery)
             respond(
                 content = """
                     {
@@ -444,6 +448,38 @@ class TeamRepositoryTeamsFetchTest {
 
         assertEquals(listOf("t1", "t2"), teams.map(Team::id))
         assertEquals(listOf("t1", "t2"), teamDao.getTeams(listOf("t1", "t2")).map(Team::id))
+    }
+
+    @Test
+    fun getTeams_fetches_every_requested_id_in_safe_request_chunks() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+        val requestedIds = (1..201).map { index -> "team_$index" }
+        val requestChunks = mutableListOf<List<String>>()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams", request.url.encodedPath)
+            val chunk = request.url.parameters["ids"].orEmpty().split(',')
+            requestChunks += chunk
+            assertEquals(chunk.size.toString(), request.url.parameters["limit"])
+            respond(
+                content = """{"teams": []}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            tokenStore,
+        )
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        assertTrue(repo.getTeams(requestedIds).getOrThrow().isEmpty())
+        assertEquals(listOf(100, 100, 1), requestChunks.map(List<String>::size))
+        assertEquals(requestedIds, requestChunks.flatten())
     }
 
     @Test
@@ -1079,7 +1115,114 @@ class TeamRepositoryTeamsFetchTest {
     }
 
     @Test
-    fun updateTeam_retries_without_unknown_fields_when_backend_rejects_strict_patch() = runTest {
+    fun getOrganizationTeamsPage_includes_offset_maps_pagination_and_preserves_remote_order() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao(relationsOrder = List<String>::reversed)
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams", request.url.encodedPath)
+            assertEquals("org_1", request.url.parameters["organizationId"])
+            assertEquals("50", request.url.parameters["limit"])
+            assertEquals("20", request.url.parameters["offset"])
+            respond(
+                content = """
+                    {
+                      "teams": [
+                        {
+                          "id": "team_a",
+                          "name": "First Remote Team",
+                          "division": "Open",
+                          "playerIds": ["u1"],
+                          "captainId": "u1",
+                          "pending": [],
+                          "teamSize": 6,
+                          "organizationId": "org_1"
+                        },
+                        {
+                          "id": "team_b",
+                          "name": "Second Remote Team",
+                          "division": "Open",
+                          "playerIds": ["u2"],
+                          "captainId": "u2",
+                          "pending": [],
+                          "teamSize": 6,
+                          "organizationId": "org_1"
+                        }
+                      ],
+                      "pagination": {
+                        "limit": 50,
+                        "offset": 20,
+                        "nextOffset": 22,
+                        "hasMore": true
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            tokenStore,
+        )
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        val page = repo.getOrganizationTeamsPage("org_1", limit = 50, offset = 20).getOrThrow()
+
+        assertEquals(listOf("team_a", "team_b"), page.teams.map { team -> team.team.id })
+        assertEquals(22, page.nextOffset)
+        assertTrue(page.hasMore)
+    }
+
+    @Test
+    fun getOrganizationTeamsPage_sanitizes_values_and_treats_missing_pagination_as_terminal() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+        val engine = MockEngine { request ->
+            assertEquals("organization one", request.url.parameters["organizationId"])
+            assertEquals("1", request.url.parameters["limit"])
+            assertEquals("7", request.url.parameters["offset"])
+            respond(
+                content = """
+                    {
+                      "teams": [
+                        {
+                          "id": "team_1",
+                          "name": "Legacy Team",
+                          "division": "Open",
+                          "playerIds": ["u1"],
+                          "captainId": "u1",
+                          "pending": [],
+                          "teamSize": 6,
+                          "organizationId": "organization one"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            tokenStore,
+        )
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        val page = repo.getOrganizationTeamsPage(" organization one ", limit = -3, offset = 7).getOrThrow()
+
+        assertEquals(listOf("team_1"), page.teams.map { team -> team.team.id })
+        assertEquals(8, page.nextOffset)
+        assertFalse(page.hasMore)
+    }
+
+    @Test
+    fun updateTeam_fails_without_dropping_fields_when_backend_rejects_strict_patch() = runTest {
         val tokenStore = InMemoryAuthTokenStore("t123")
         val teamDao = FakeTeamDao()
         val db = FakeDatabaseService(teamDao)
@@ -1091,40 +1234,21 @@ class TeamRepositoryTeamsFetchTest {
             assertEquals(HttpMethod.Patch, request.method)
             requestCount += 1
 
-            if (requestCount == 1) {
-                respond(
-                    content = """
-                        {
-                          "error": "Invalid input",
-                          "details": {
-                            "formErrors": [
-                              "Unrecognized key(s) in object: 'assistantCoachIds', 'playerRegistrations', 'openRegistration', 'registrationPriceCents'"
-                            ],
-                            "fieldErrors": {}
-                          }
-                        }
-                    """.trimIndent(),
-                    status = HttpStatusCode.BadRequest,
-                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
-                )
-            } else {
-                respond(
-                    content = """
-                        {
-                          "id": "team_1",
-                          "name": "Compatibility Team",
-                          "division": "Open",
-                          "playerIds": ["u1"],
-                          "captainId": "u1",
-                          "pending": [],
-                          "teamSize": 6,
-                          "organizationId": "org_1"
-                        }
-                    """.trimIndent(),
-                    status = HttpStatusCode.OK,
-                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
-                )
-            }
+            respond(
+                content = """
+                    {
+                      "error": "Invalid input",
+                      "details": {
+                        "formErrors": [
+                          "Unrecognized key(s) in object: 'assistantCoachIds', 'playerRegistrations', 'openRegistration', 'registrationPriceCents'"
+                        ],
+                        "fieldErrors": {}
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.BadRequest,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
         }
 
         val http = HttpClient(engine) {
@@ -1154,10 +1278,11 @@ class TeamRepositoryTeamsFetchTest {
             id = "team_1",
         )
 
-        val updated = repo.updateTeam(team).getOrThrow()
+        val result = repo.updateTeam(team)
 
-        assertEquals("team_1", updated.id)
-        assertEquals(2, requestCount)
+        assertTrue(result.isFailure)
+        assertEquals(1, requestCount)
+        assertTrue(teamDao.getTeams(listOf("team_1")).isEmpty())
     }
 
     @Test
@@ -1173,6 +1298,7 @@ class TeamRepositoryTeamsFetchTest {
             name = "Existing Team",
             captainId = "u1",
             managerId = "u1",
+            profileImageId = "image_1",
             playerIds = listOf("u1", "u2"),
             pending = emptyList(),
             teamSize = 6,
@@ -1270,10 +1396,12 @@ class TeamRepositoryTeamsFetchTest {
         assertTrue("openRegistration" !in teamPayload)
         assertTrue("registrationPriceCents" !in teamPayload)
         assertTrue("assistantCoachIds" !in teamPayload)
+        assertTrue("managerId" !in teamPayload)
+        assertTrue("profileImageId" !in teamPayload)
     }
 
     @Test
-    fun updateTeam_sends_json_null_for_cached_nullable_fields_that_are_cleared() = runTest {
+    fun updateTeam_encodesExplicitProfileImageClearAsJsonNull() = runTest {
         val tokenStore = InMemoryAuthTokenStore("t123")
         val teamDao = FakeTeamDao()
         val db = FakeDatabaseService(teamDao)
@@ -1281,68 +1409,48 @@ class TeamRepositoryTeamsFetchTest {
         var capturedRequestBody = ""
         val existingTeam = Team(
             division = "Open",
-            name = "Clearable Team",
+            name = "Existing Team",
             captainId = "u1",
             managerId = "u1",
-            headCoachId = "coach_1",
+            profileImageId = "image_1",
             playerIds = listOf("u1"),
             pending = emptyList(),
             teamSize = 6,
-            affiliateUrl = "https://example.test/register",
             id = "team_1",
         ).withSynchronizedMembership()
         teamDao.upsertTeamWithRelations(existingTeam)
 
         val engine = MockEngine { request ->
-            assertEquals("/api/teams/team_1", request.url.encodedPath)
             assertEquals(HttpMethod.Patch, request.method)
+            assertEquals("/api/teams/team_1", request.url.encodedPath)
             capturedRequestBody = outgoingBodyText(request.body)
             respond(
                 content = """
                     {
                       "id": "team_1",
-                      "name": "Clearable Team",
+                      "name": "Existing Team",
                       "division": "Open",
-                      "captainId": "u1",
-                      "managerId": "u1",
                       "playerIds": ["u1"],
+                      "captainId": "u1",
                       "pending": [],
-                      "teamSize": 6,
-                      "headCoachId": null,
-                      "affiliateUrl": null
+                      "teamSize": 6
                     }
                 """.trimIndent(),
                 status = HttpStatusCode.OK,
                 headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
             )
         }
-
-        val http = HttpClient(engine) {
-            install(ContentNegotiation) { json(jsonMVP) }
-        }
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
         val api = MvpApiClient(http, "http://example.test", tokenStore)
         val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
 
-        // Staff assignments are canonical for coach roles. Clearing the legacy
-        // projection alone is normalized back to the active assignment, so a
-        // real coach removal must remove that assignment as well.
-        repo.updateTeam(
-            existingTeam.copy(
-                headCoachId = null,
-                affiliateUrl = null,
-                staffAssignments = existingTeam.staffAssignments.filterNot { assignment ->
-                    assignment.role == "HEAD_COACH"
-                },
-            ),
-        ).getOrThrow()
+        repo.updateTeam(existingTeam.copy(profileImageId = null).withSynchronizedMembership()).getOrThrow()
 
-        val teamPayload = jsonMVP.parseToJsonElement(capturedRequestBody)
+        val teamPatch = jsonMVP.parseToJsonElement(capturedRequestBody)
             .jsonObject
             .getValue("team")
             .jsonObject
-        assertEquals("null", teamPayload["headCoachId"]?.toString())
-        assertEquals("null", teamPayload["affiliateUrl"]?.toString())
-        assertTrue("profileImageId" !in teamPayload)
+        assertEquals(JsonNull, teamPatch["profileImageId"])
     }
 }
 

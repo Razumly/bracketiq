@@ -25,6 +25,7 @@ import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
+import com.razumly.mvp.core.data.dataTypes.RentalAvailabilitySnapshot
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.SportDTO
 import com.razumly.mvp.core.data.dataTypes.Subscription
@@ -62,6 +63,8 @@ import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckoutRequest
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.data.repositories.EventStaffInviteInput
+import com.razumly.mvp.core.data.repositories.EventStaffState
 import com.razumly.mvp.core.data.repositories.EventParticipantRefundMode
 import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
@@ -81,8 +84,10 @@ import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.core.network.dto.TeamCheckInDto
 import com.razumly.mvp.core.network.dto.TeamCheckInsResponseDto
 import com.razumly.mvp.core.network.MvpUploadFile
+import com.razumly.mvp.core.presentation.RentalBookingItemManifest
 import com.razumly.mvp.core.util.LoadingHandler
-import com.razumly.mvp.core.util.LoadingState
+import com.razumly.mvp.core.util.LoadingHandlerImpl
+import com.razumly.mvp.core.util.LoadingOperation
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.eventDetail.data.StagedMatchCreate
 import dev.icerock.moko.geo.LatLng
@@ -125,6 +130,8 @@ internal class CreateEventHarness(
     existingOrganizationEvents: List<Event> = emptyList(),
     rentalResourceOptions: List<RentalResourceOption> = emptyList(),
     initialSeed: SeededEventTemplateDraft? = null,
+    initialRentalBookingId: String? = null,
+    initialRentalBookingItems: List<RentalBookingItemManifest> = emptyList(),
 ) {
     val userRepository = CreateEvent_FakeUserRepository()
     val eventRepository = CreateEvent_FakeEventRepository(existingOrganizationEvents)
@@ -147,6 +154,8 @@ internal class CreateEventHarness(
         billingRepository = billingRepository,
         imageRepository = imageRepository,
         initialSeed = initialSeed,
+        initialRentalBookingId = initialRentalBookingId,
+        initialRentalBookingItems = initialRentalBookingItems,
         onEventCreated = { onEventCreatedCount += 1 }
     ).also { component ->
         component.setLoadingHandler(loadingHandler)
@@ -191,20 +200,10 @@ private fun createTestComponentContext(): DefaultComponentContext {
 }
 
 internal class CreateEvent_FakeLoadingHandler : LoadingHandler {
-    private val _loadingState = MutableStateFlow(LoadingState())
-    override val loadingState: StateFlow<LoadingState> = _loadingState
+    private val delegate = LoadingHandlerImpl()
+    override val loadingState = delegate.loadingState
 
-    override fun showLoading(message: String, progress: Float?) {
-        _loadingState.value = LoadingState(isLoading = true, message = message, progress = progress)
-    }
-
-    override fun hideLoading() {
-        _loadingState.value = LoadingState()
-    }
-
-    override fun updateProgress(progress: Float) {
-        _loadingState.update { it.copy(progress = progress) }
-    }
+    override fun newOperation(): LoadingOperation = delegate.newOperation()
 }
 
 internal class CreateEvent_FakeUserRepository : IUserRepository {
@@ -327,8 +326,6 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
         firstName: String,
         lastName: String,
         email: String,
-        currentPassword: String,
-        newPassword: String,
         userName: String,
         profileImageId: String?,
     ): Result<Unit> = Result.success(Unit)
@@ -364,11 +361,20 @@ internal data class CreateEventCall(
     val timeSlots: List<TimeSlot>?,
 )
 
+internal data class ReconcileEventStaffCall(
+    val event: Event,
+    val pendingInvites: List<EventStaffInviteInput>,
+    val expectedRevision: String,
+)
+
 internal class CreateEvent_FakeEventRepository(
     private val organizationEvents: List<Event> = emptyList(),
 ) : IEventRepository {
     val createEventCalls = mutableListOf<CreateEventCall>()
     val updateEventCalls = mutableListOf<Event>()
+    val getEventStaffStateCalls = mutableListOf<Event>()
+    val reconcileEventStaffCalls = mutableListOf<ReconcileEventStaffCall>()
+    var reconcileEventStaffFailure: Throwable? = null
 
     override fun getCachedEventsFlow(): Flow<Result<List<Event>>> =
         flowOf(Result.success(emptyList()))
@@ -380,6 +386,31 @@ internal class CreateEvent_FakeEventRepository(
     override suspend fun getEvent(eventId: String): Result<Event> = Result.failure(IllegalStateException("unused"))
     override suspend fun getEventStaffInvites(eventId: String): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> =
         Result.success(emptyList())
+    override suspend fun getEventStaffState(event: Event): Result<EventStaffState> {
+        getEventStaffStateCalls += event
+        return Result.success(
+            EventStaffState(
+                event = event,
+                staffInvites = emptyList(),
+                revision = "staff-revision-created",
+            ),
+        )
+    }
+    override suspend fun reconcileEventStaff(
+        event: Event,
+        pendingInvites: List<EventStaffInviteInput>,
+        expectedRevision: String,
+    ): Result<EventStaffState> {
+        reconcileEventStaffCalls += ReconcileEventStaffCall(event, pendingInvites, expectedRevision)
+        reconcileEventStaffFailure?.let { failure -> return Result.failure(failure) }
+        return Result.success(
+            EventStaffState(
+                event = event,
+                staffInvites = emptyList(),
+                revision = "staff-revision-reconciled",
+            ),
+        )
+    }
     override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> = Result.success(emptyList())
 
     override suspend fun getEventsByOrganization(
@@ -506,18 +537,6 @@ internal class CreateEvent_FakeFieldRepository : IFieldRepository {
     private var fieldCounter = 0
     private var slotCounter = 0
 
-    override suspend fun createFields(count: Int, organizationId: String?): Result<List<Field>> = runCatching {
-        List(count) { index ->
-            createField(
-                Field(
-                    fieldNumber = index + 1,
-                    organizationId = organizationId,
-                    id = "field-draft-${index + 1}",
-                )
-            ).getOrThrow()
-        }
-    }
-
     override suspend fun createField(field: Field): Result<Field> = runCatching {
         fieldCounter += 1
         val created = field.copy(id = "field-created-$fieldCounter")
@@ -535,6 +554,18 @@ internal class CreateEvent_FakeFieldRepository : IFieldRepository {
         fieldIds: List<String>,
         rentalOnly: Boolean,
     ): Result<List<TimeSlot>> = Result.success(emptyList())
+    override suspend fun getRentalAvailability(
+        organizationId: String,
+        rangeStart: Instant,
+        rangeEnd: Instant,
+    ): Result<RentalAvailabilitySnapshot> = Result.success(
+        RentalAvailabilitySnapshot(
+            rangeStart = rangeStart,
+            rangeEnd = rangeEnd,
+            fields = emptyList(),
+            busyBlocks = emptyList(),
+        )
+    )
 
     override suspend fun createTimeSlot(slot: TimeSlot): Result<TimeSlot> = runCatching {
         slotCounter += 1
@@ -559,18 +590,26 @@ internal class CreateEvent_FakeSportsRepository(
 internal class CreateEvent_FakeImagesRepository : IImagesRepository {
     private val imageIds = MutableStateFlow<List<String>>(emptyList())
     private var imageCounter = 0
+    var uploadFailure: Throwable? = null
+    var deleteFailure: Throwable? = null
 
-    override suspend fun uploadImage(inputFile: MvpUploadFile): Result<String> = runCatching {
-        imageCounter += 1
-        val imageId = "image-$imageCounter"
-        imageIds.value = imageIds.value + imageId
-        imageId
+    override suspend fun uploadImage(inputFile: MvpUploadFile): Result<String> {
+        uploadFailure?.let { return Result.failure(it) }
+        return runCatching {
+            imageCounter += 1
+            val imageId = "image-$imageCounter"
+            imageIds.value = imageIds.value + imageId
+            imageId
+        }
     }
 
     override fun getUserImageIdsFlow(): Flow<List<String>> = imageIds
     override suspend fun addImageToUser(imageId: String): Result<Unit> = Result.success(Unit)
-    override suspend fun deleteImage(imageId: String): Result<Unit> = runCatching {
-        imageIds.value = imageIds.value.filterNot { it == imageId }
+    override suspend fun deleteImage(imageId: String): Result<Unit> {
+        deleteFailure?.let { return Result.failure(it) }
+        return runCatching {
+            imageIds.value = imageIds.value.filterNot { it == imageId }
+        }
     }
 }
 

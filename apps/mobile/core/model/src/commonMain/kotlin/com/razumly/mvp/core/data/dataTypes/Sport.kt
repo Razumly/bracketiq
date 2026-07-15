@@ -63,7 +63,6 @@ data class DivisionTypeParameterOption(
 @Serializable
 data class SportSkillDivisionTypes(
     val sportId: String = "",
-    val sportName: String = "",
     val skills: List<DivisionTypeParameterOption> = emptyList(),
 )
 

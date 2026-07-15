@@ -15,26 +15,47 @@ interface IMVPRepository {
             }
         }
 
+        /**
+         * Refresh a collection-backed cache and return the resulting local snapshot.
+         *
+         * A collection response is not assumed to be exhaustive. Callers may provide
+         * [authoritativeIds] only when the request explicitly asked for those exact IDs and
+         * the server's response is authoritative for their existence. This keeps paged,
+         * filtered, and truncated responses from deleting unrelated cached records.
+         */
         suspend fun <T : MVPDocument> multiResponse(
             getRemoteData: suspend () -> List<T>,
             getLocalData: suspend () -> List<T>,
             saveData: suspend (List<T>) -> Unit,
             deleteData: suspend(List<String>) -> Unit,
+            authoritativeIds: List<String> = emptyList(),
         ): Result<List<T>> {
             return runCatching {
-                // Get remote data
                 val remoteData = getRemoteData()
-                val localData = getLocalData()
-                deleteData((localData.map { it.id }.toSet() - remoteData.map { it.id }
-                    .toSet()).toList())
+                val remoteIds = remoteData
+                    .asSequence()
+                    .map { document -> document.id.trim() }
+                    .filter(String::isNotBlank)
+                    .toSet()
+                val staleIds = authoritativeIds
+                    .asSequence()
+                    .map(String::trim)
+                    .filter(String::isNotBlank)
+                    .distinct()
+                    .filter { id -> id !in remoteIds }
+                    .toList()
 
-                // Save new/updated items
+                if (staleIds.isNotEmpty()) {
+                    deleteData(staleIds)
+                }
+
                 if (remoteData.isNotEmpty()) {
                     saveData(remoteData)
-                    remoteData
-                } else {
-                    localData
                 }
+
+                // Room is the cache authority. Re-read it only after all requested changes
+                // are applied so callers cannot render a stale, pre-delete object list.
+                getLocalData()
             }
         }
     }

@@ -83,6 +83,7 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
@@ -112,13 +113,15 @@ import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.isoDayNumber
+import kotlinx.datetime.offsetAt
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.datetime.toInstant
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.time.Clock
-import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.days
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 internal fun resolveRentalSelection(
@@ -164,13 +167,16 @@ internal fun resolveRentalRange(
     endMinutes: Int,
     timeZone: TimeZone,
 ): ResolvedRentalRange? {
-    if (endMinutes <= startMinutes) {
-        return null
-    }
-    if (startMinutes < RENTAL_TIMELINE_START_MINUTES || endMinutes > RENTAL_TIMELINE_END_MINUTES) {
+    if (!isSupportedRentalMinuteRange(startMinutes, endMinutes)) {
         return null
     }
 
+    val durationMinutes = rentalElapsedMinutesForWallClockRange(
+        date = date,
+        startMinutes = startMinutes,
+        endMinutes = endMinutes,
+        timeZone = timeZone,
+    ) ?: return null
     val rangeStart = date.toInstantAtMinutes(startMinutes, timeZone)
     val rangeEnd = date.toInstantAtMinutes(endMinutes, timeZone)
     val matchedSlot = selectBestSlotForInterval(
@@ -185,7 +191,7 @@ internal fun resolveRentalRange(
         slots = listOf(matchedSlot),
         totalPriceCents = proratedRentalPriceCents(
             priceCents = matchedSlot.price ?: 0,
-            durationMinutes = endMinutes - startMinutes,
+            durationMinutes = durationMinutes,
         ),
     )
 }
@@ -210,6 +216,7 @@ internal fun selectBestSlotForInterval(
         .sortedWith(
             compareBy<TimeSlot> { slot -> slot.slotDurationMinutes(timeZone) }
                 .thenBy { slot -> slot.price ?: Int.MAX_VALUE }
+                .thenBy { slot -> slot.id }
         )
         .firstOrNull()
 }
@@ -221,13 +228,20 @@ internal fun findMatchingSlot(
     endMinutes: Int,
     timeZone: TimeZone,
 ): TimeSlot? {
-    if (endMinutes <= startMinutes) {
-        return null
-    }
-    if (startMinutes < RENTAL_TIMELINE_START_MINUTES || endMinutes > RENTAL_TIMELINE_END_MINUTES) {
+    if (!isSupportedRentalMinuteRange(startMinutes, endMinutes)) {
         return null
     }
     val fieldTimeZone = option.resolvedRentalTimeZone(timeZone)
+    if (
+        rentalElapsedMinutesForWallClockRange(
+            date = date,
+            startMinutes = startMinutes,
+            endMinutes = endMinutes,
+            timeZone = fieldTimeZone,
+        ) == null
+    ) {
+        return null
+    }
     val startInstant = date.toInstantAtMinutes(startMinutes, fieldTimeZone)
     val endInstant = date.toInstantAtMinutes(endMinutes, fieldTimeZone)
     return selectBestSlotForInterval(
@@ -249,6 +263,126 @@ internal fun rangesOverlap(
         return false
     }
     return firstStart < secondEnd && secondStart < firstEnd
+}
+
+internal data class RentalResizeRange(
+    val startMinutes: Int,
+    val endMinutes: Int,
+)
+
+internal fun stepRentalResizeRange(
+    startMinutes: Int,
+    endMinutes: Int,
+    handle: RentalDragHandle,
+    steps: Int,
+    timelineStartMinutes: Int,
+    timelineEndMinutes: Int,
+    canApply: (startMinutes: Int, endMinutes: Int) -> Boolean,
+): RentalResizeRange {
+    var currentStart = startMinutes
+    var currentEnd = endMinutes
+    val deltaMinutes = when {
+        steps > 0 -> SLOT_INTERVAL_MINUTES
+        steps < 0 -> -SLOT_INTERVAL_MINUTES
+        else -> return RentalResizeRange(currentStart, currentEnd)
+    }
+
+    repeat(abs(steps)) {
+        val proposedStart = when (handle) {
+            RentalDragHandle.TOP -> (currentStart + deltaMinutes)
+                .coerceAtLeast(timelineStartMinutes)
+                .coerceAtMost(currentEnd - SLOT_INTERVAL_MINUTES)
+            RentalDragHandle.BOTTOM -> currentStart
+        }
+        val proposedEnd = when (handle) {
+            RentalDragHandle.TOP -> currentEnd
+            RentalDragHandle.BOTTOM -> (currentEnd + deltaMinutes)
+                .coerceAtLeast(currentStart + SLOT_INTERVAL_MINUTES)
+                .coerceAtMost(timelineEndMinutes)
+        }
+        if (
+            (proposedStart == currentStart && proposedEnd == currentEnd) ||
+            !canApply(proposedStart, proposedEnd)
+        ) {
+            return RentalResizeRange(currentStart, currentEnd)
+        }
+        currentStart = proposedStart
+        currentEnd = proposedEnd
+    }
+    return RentalResizeRange(currentStart, currentEnd)
+}
+
+internal data class RentalSelectionTimelineSlice(
+    val selection: RentalSelectionDraft,
+    val startMinutes: Int,
+    val endMinutes: Int,
+    val isContinuation: Boolean,
+)
+
+internal fun RentalSelectionDraft.timelineSliceForDate(
+    date: LocalDate,
+    timeZone: TimeZone,
+): RentalSelectionTimelineSlice? {
+    if (!isSupportedRentalMinuteRange(startMinutes, endMinutes)) {
+        return null
+    }
+    if (date == this.date) {
+        return RentalSelectionTimelineSlice(
+            selection = this,
+            startMinutes = startMinutes,
+            endMinutes = endMinutes,
+            isContinuation = false,
+        )
+    }
+
+    val selectionStart = this.date.toInstantAtMinutes(startMinutes, timeZone)
+    val selectionEnd = this.date.toInstantAtMinutes(endMinutes, timeZone)
+    val dayStart = date.toInstantAtMinutes(RENTAL_TIMELINE_START_MINUTES, timeZone)
+    val dayEnd = date.toInstantAtMinutes(RENTAL_TIMELINE_END_MINUTES, timeZone)
+    val clippedStart = if (selectionStart > dayStart) selectionStart else dayStart
+    val clippedEnd = if (selectionEnd < dayEnd) selectionEnd else dayEnd
+    if (clippedEnd <= clippedStart) {
+        return null
+    }
+
+    val sliceStartMinutes = clippedStart.toWallClockMinutesFromDate(
+        date = date,
+        timeZone = timeZone,
+        roundUp = false,
+    ).coerceIn(RENTAL_TIMELINE_START_MINUTES, RENTAL_TIMELINE_END_MINUTES)
+    val sliceEndMinutes = clippedEnd.toWallClockMinutesFromDate(
+        date = date,
+        timeZone = timeZone,
+        roundUp = true,
+    ).coerceIn(RENTAL_TIMELINE_START_MINUTES, RENTAL_TIMELINE_END_MINUTES)
+    if (sliceEndMinutes <= sliceStartMinutes) {
+        return null
+    }
+    return RentalSelectionTimelineSlice(
+        selection = this,
+        startMinutes = sliceStartMinutes,
+        endMinutes = sliceEndMinutes,
+        isContinuation = true,
+    )
+}
+
+internal fun rentalSelectionOverlapsRange(
+    selection: RentalSelectionDraft,
+    date: LocalDate,
+    startMinutes: Int,
+    endMinutes: Int,
+    timeZone: TimeZone,
+): Boolean {
+    if (!isSupportedRentalMinuteRange(startMinutes, endMinutes) ||
+        !isSupportedRentalMinuteRange(selection.startMinutes, selection.endMinutes)
+    ) {
+        return false
+    }
+    val rangeStart = date.toInstantAtMinutes(startMinutes, timeZone)
+    val rangeEnd = date.toInstantAtMinutes(endMinutes, timeZone)
+    val selectionStart = selection.date.toInstantAtMinutes(selection.startMinutes, timeZone)
+    val selectionEnd = selection.date.toInstantAtMinutes(selection.endMinutes, timeZone)
+    return selectionStart < rangeEnd && rangeStart < selectionEnd
 }
 
 internal fun proratedRentalPriceCents(
@@ -286,10 +420,7 @@ internal fun canApplyRentalSelectionRange(
     busyBlocks: List<RentalBusyBlock>,
     timeZone: TimeZone,
 ): Boolean {
-    if (endMinutes <= startMinutes) {
-        return false
-    }
-    if (startMinutes < RENTAL_TIMELINE_START_MINUTES || endMinutes > RENTAL_TIMELINE_END_MINUTES) {
+    if (!isSupportedRentalMinuteRange(startMinutes, endMinutes)) {
         return false
     }
 
@@ -304,12 +435,12 @@ internal fun canApplyRentalSelectionRange(
     val overlapsSelection = selections.any { selection ->
         selection.id != selectionId &&
             selection.fieldId == fieldId &&
-            selection.date == date &&
-            rangesOverlap(
-                selection.startMinutes,
-                selection.endMinutes,
-                startMinutes,
-                endMinutes,
+            rentalSelectionOverlapsRange(
+                selection = selection,
+                date = date,
+                startMinutes = startMinutes,
+                endMinutes = endMinutes,
+                timeZone = fieldTimeZone,
             )
     }
     if (overlapsSelection) {
@@ -337,6 +468,24 @@ internal fun canApplyRentalSelectionRange(
         endMinutes = endMinutes,
         timeZone = fieldTimeZone,
     )
+}
+
+internal fun isRentalSelectionValidForAvailabilitySnapshot(
+    fieldId: String,
+    start: Instant,
+    end: Instant,
+    availabilityWindow: RentalAvailabilityWindow?,
+    busyBlocks: List<RentalBusyBlock>,
+): Boolean {
+    if (availabilityWindow == null || end <= start) {
+        return false
+    }
+    if (start < availabilityWindow.start || end > availabilityWindow.end) {
+        return false
+    }
+    return busyBlocks.none { block ->
+        block.fieldId == fieldId && start < block.end && block.start < end
+    }
 }
 
 internal fun rangeOverlapsBusyBlockOnDate(
@@ -373,23 +522,32 @@ internal fun isRangeCoveredByRentalAvailability(
 internal fun RentalBusyBlock.toBusyRangeOnDate(
     date: LocalDate,
     timeZone: TimeZone,
+    timelineEndMinutes: Int = RENTAL_TIMELINE_END_MINUTES,
 ): RentalBusyRange? {
-    if (end <= start) {
+    if (end <= start || timelineEndMinutes <= RENTAL_TIMELINE_START_MINUTES) {
         return null
     }
 
-    val dayStart = date.toInstantAtMinutes(0, timeZone)
-    val dayEnd = date.toInstantAtMinutes(24 * 60, timeZone)
-    val clippedStart = if (start > dayStart) start else dayStart
-    val clippedEnd = if (end < dayEnd) end else dayEnd
+    val timelineStart = date.toInstantAtMinutes(RENTAL_TIMELINE_START_MINUTES, timeZone)
+    val timelineEnd = date.toInstantAtMinutes(timelineEndMinutes, timeZone)
+    val clippedStart = if (start > timelineStart) start else timelineStart
+    val clippedEnd = if (end < timelineEnd) end else timelineEnd
     if (clippedEnd <= clippedStart) {
         return null
     }
 
-    val startMinutes = (clippedStart - dayStart).inWholeMinutes.toInt()
-    val endMinutes = (clippedEnd - dayStart).inWholeMinutes.toInt()
-    val normalizedStart = startMinutes.coerceIn(RENTAL_TIMELINE_START_MINUTES, RENTAL_TIMELINE_END_MINUTES)
-    val normalizedEnd = endMinutes.coerceIn(RENTAL_TIMELINE_START_MINUTES, RENTAL_TIMELINE_END_MINUTES)
+    val startMinutes = clippedStart.toWallClockMinutesFromDate(
+        date = date,
+        timeZone = timeZone,
+        roundUp = false,
+    )
+    val endMinutes = clippedEnd.toWallClockMinutesFromDate(
+        date = date,
+        timeZone = timeZone,
+        roundUp = true,
+    )
+    val normalizedStart = startMinutes.coerceIn(RENTAL_TIMELINE_START_MINUTES, timelineEndMinutes)
+    val normalizedEnd = endMinutes.coerceIn(RENTAL_TIMELINE_START_MINUTES, timelineEndMinutes)
     if (normalizedEnd <= normalizedStart) {
         return null
     }
@@ -406,16 +564,170 @@ internal fun LocalDate.toInstantAtMinutes(
     minutesFromStartOfDay: Int,
     timeZone: TimeZone,
 ): Instant {
-    val startOfDay = LocalDateTime(
-        year = year,
-        monthNumber = monthNumber,
-        dayOfMonth = dayOfMonth,
-        hour = 0,
-        minute = 0,
+    require(minutesFromStartOfDay >= 0) {
+        "Minutes from start of day must not be negative."
+    }
+    return localDateTimeAtMinutes(minutesFromStartOfDay).toInstant(timeZone)
+}
+
+private fun LocalDate.localDateTimeAtMinutes(minutesFromStartOfDay: Int): LocalDateTime {
+    val dayOffset = minutesFromStartOfDay / MINUTES_PER_DAY
+    val targetDate = LocalDate.fromEpochDays(toEpochDays() + dayOffset)
+    val minuteOfDay = minutesFromStartOfDay % MINUTES_PER_DAY
+    return LocalDateTime(
+        year = targetDate.year,
+        monthNumber = targetDate.monthNumber,
+        dayOfMonth = targetDate.dayOfMonth,
+        hour = minuteOfDay / 60,
+        minute = minuteOfDay % 60,
         second = 0,
-        nanosecond = 0
-    ).toInstant(timeZone)
-    return startOfDay + minutesFromStartOfDay.minutes
+        nanosecond = 0,
+    )
+}
+
+internal fun rentalElapsedMinutesForWallClockRange(
+    date: LocalDate,
+    startMinutes: Int,
+    endMinutes: Int,
+    timeZone: TimeZone,
+): Int? {
+    if (!isSupportedRentalMinuteRange(startMinutes, endMinutes)) {
+        return null
+    }
+    val expectedStart = date.localDateTimeAtMinutes(startMinutes)
+    val expectedEnd = date.localDateTimeAtMinutes(endMinutes)
+    val rangeStart = expectedStart.toUniqueInstantOrNull(timeZone) ?: return null
+    val rangeEnd = expectedEnd.toUniqueInstantOrNull(timeZone) ?: return null
+    if (rangeEnd <= rangeStart) {
+        return null
+    }
+
+    return (rangeEnd - rangeStart).inWholeMinutes
+        .takeIf { minutes -> minutes in 1..Int.MAX_VALUE.toLong() }
+        ?.toInt()
+}
+
+private fun LocalDateTime.toUniqueInstantOrNull(timeZone: TimeZone): Instant? {
+    val resolved = toInstant(timeZone)
+    if (resolved.toLocalDateTime(timeZone) != this) {
+        return null
+    }
+
+    // The default conversion chooses the earlier instant during a fall-back
+    // overlap. Probe the offsets on both sides and retain every instant that
+    // round-trips to the requested wall time; a unique wall time has one.
+    val matchingInstants = listOf(
+        timeZone.offsetAt(resolved - 1.days),
+        timeZone.offsetAt(resolved),
+        timeZone.offsetAt(resolved + 1.days),
+    )
+        .distinct()
+        .map { offset -> toInstant(offset) }
+        .filter { candidate -> candidate.toLocalDateTime(timeZone) == this }
+        .distinct()
+    return matchingInstants.singleOrNull()
+}
+
+internal fun isUnambiguousRentalTimelineCell(
+    date: LocalDate,
+    startMinutes: Int,
+    timeZone: TimeZone,
+): Boolean {
+    val endMinutes = startMinutes + SLOT_INTERVAL_MINUTES
+    return rentalElapsedMinutesForWallClockRange(
+        date = date,
+        startMinutes = startMinutes,
+        endMinutes = endMinutes,
+        timeZone = timeZone,
+    ) == SLOT_INTERVAL_MINUTES
+}
+
+private fun Instant.toWallClockMinutesFromDate(
+    date: LocalDate,
+    timeZone: TimeZone,
+    roundUp: Boolean,
+): Int {
+    val local = toLocalDateTime(timeZone)
+    val dayOffset = (local.date.toEpochDays() - date.toEpochDays()).toInt()
+    val partialMinute = local.second > 0 || local.nanosecond > 0
+    return (dayOffset * MINUTES_PER_DAY) +
+        (local.hour * 60) +
+        local.minute +
+        if (roundUp && partialMinute) 1 else 0
+}
+
+internal fun rentalTimelineEndMinutesForDate(
+    date: LocalDate,
+    fieldOptions: List<RentalFieldOption>,
+    fallbackTimeZone: TimeZone,
+): Int {
+    val extendedTimelineEnd = fieldOptions
+        .asSequence()
+        .flatMap { option -> option.rentalSlots.asSequence() }
+        .mapNotNull { slot ->
+            val slotTimeZone = slot.timeZone.toTimeZoneOrUtc(fallbackTimeZone)
+            val slotStart = slot.startDate.toLocalDateTime(slotTimeZone)
+            if (slot.repeating) {
+                val slotStartMinutes = slot.startTimeMinutes
+                    ?: (slotStart.hour * 60 + slotStart.minute)
+                val slotEndMinutes = slot.endTimeMinutes
+                    ?: slot.endDate?.toLocalDateTime(slotTimeZone)?.let { endLocal ->
+                        endLocal.hour * 60 + endLocal.minute
+                    }
+                    ?: return@mapNotNull null
+                if (slotEndMinutes >= slotStartMinutes) {
+                    return@mapNotNull null
+                }
+                val selectedDayIndex = date.dayOfWeek.toRentalDayIndex()
+                val slotDayIndexes = slot.normalizedDaysOfWeek()
+                if (slotDayIndexes.isNotEmpty() && selectedDayIndex !in slotDayIndexes) {
+                    return@mapNotNull null
+                }
+                if (date < slotStart.date) {
+                    return@mapNotNull null
+                }
+                val slotEndDate = slot.endDate?.toLocalDateTime(slotTimeZone)?.date
+                if (slotEndDate != null && date > slotEndDate) {
+                    return@mapNotNull null
+                }
+                return@mapNotNull (MINUTES_PER_DAY + slotEndMinutes).roundUpToRentalInterval()
+            }
+
+            val slotEndInstant = slot.endDate ?: return@mapNotNull null
+            val slotEnd = slotEndInstant.toLocalDateTime(slotTimeZone)
+            val selectedDayStart = date.toInstantAtMinutes(0, slotTimeZone)
+            if (slotEndInstant <= selectedDayStart || slotStart.date > date) {
+                return@mapNotNull null
+            }
+
+            val endDayOffset = slotEnd.date.toEpochDays() - date.toEpochDays()
+            // Multi-day inventory is exposed again on each selected date. Only
+            // a slot ending on the following date extends this grid, which
+            // keeps long availability windows from materializing huge columns.
+            if (endDayOffset <= 0 || endDayOffset > 1) {
+                return@mapNotNull null
+            }
+            val endMinutes = (endDayOffset * MINUTES_PER_DAY.toLong()) +
+                (slotEnd.hour * 60) +
+                slotEnd.minute
+            endMinutes
+                .takeIf { minutes -> minutes <= Int.MAX_VALUE.toLong() - SLOT_INTERVAL_MINUTES }
+                ?.toInt()
+                ?.roundUpToRentalInterval()
+        }
+        .maxOrNull()
+    return extendedTimelineEnd?.coerceAtLeast(RENTAL_TIMELINE_END_MINUTES)
+        ?: RENTAL_TIMELINE_END_MINUTES
+}
+
+private fun Int.roundUpToRentalInterval(): Int {
+    val remainder = this % SLOT_INTERVAL_MINUTES
+    return if (remainder == 0) this else this + SLOT_INTERVAL_MINUTES - remainder
+}
+
+private fun isSupportedRentalMinuteRange(startMinutes: Int, endMinutes: Int): Boolean {
+    return startMinutes >= RENTAL_TIMELINE_START_MINUTES &&
+        endMinutes > startMinutes
 }
 
 internal fun DayOfWeek.toShortLabel(): String {
@@ -432,8 +744,9 @@ internal fun DayOfWeek.toShortLabel(): String {
 
 internal const val SLOT_INTERVAL_MINUTES = 30
 internal const val RENTAL_UNAVAILABLE_LABEL = "Unavailable"
-internal const val RENTAL_TIMELINE_START_MINUTES = 6 * 60
-internal const val RENTAL_TIMELINE_END_MINUTES = 24 * 60
+internal const val MINUTES_PER_DAY = 24 * 60
+internal const val RENTAL_TIMELINE_START_MINUTES = 0
+internal const val RENTAL_TIMELINE_END_MINUTES = MINUTES_PER_DAY
 internal val RENTAL_TIME_COLUMN_WIDTH = 72.dp
 internal val RENTAL_FIELD_COLUMN_WIDTH = 180.dp
 internal val RENTAL_FIELD_HEADER_HEIGHT = 48.dp
@@ -487,12 +800,19 @@ internal fun TimeSlot.matchesRentalSelection(
     val selectedStartLocal = rangeStart.toLocalDateTime(slotTimeZone)
     val selectedEndLocal = rangeEnd.toLocalDateTime(slotTimeZone)
 
-    if (selectedStartLocal.date != selectedEndLocal.date) {
-        return false
+    if (!repeating) {
+        val explicitSlotEnd = endDate ?: return false
+        return rangeStart >= startDate && rangeEnd <= explicitSlotEnd
     }
 
+    val selectedDaySpan = selectedEndLocal.date.toEpochDays() - selectedStartLocal.date.toEpochDays()
+    if (selectedDaySpan !in 0L..1L) {
+        return false
+    }
     val selectedStartMinutes = selectedStartLocal.hour * 60 + selectedStartLocal.minute
-    val selectedEndMinutes = selectedEndLocal.hour * 60 + selectedEndLocal.minute
+    val selectedEndMinutes = (selectedDaySpan.toInt() * MINUTES_PER_DAY) +
+        selectedEndLocal.hour * 60 +
+        selectedEndLocal.minute
 
     val slotStartMinutes = startTimeMinutes ?: (slotStartLocal.hour * 60 + slotStartLocal.minute)
     val slotEndMinutes = endTimeMinutes ?: endDate
@@ -500,37 +820,31 @@ internal fun TimeSlot.matchesRentalSelection(
         ?.let { endLocal -> endLocal.hour * 60 + endLocal.minute }
         ?: return false
 
-    if (slotEndMinutes <= slotStartMinutes) {
+    if (slotEndMinutes == slotStartMinutes) {
         return false
     }
-    if (selectedStartMinutes < slotStartMinutes || selectedEndMinutes > slotEndMinutes) {
-        return false
+    val normalizedSlotEndMinutes = if (slotEndMinutes < slotStartMinutes) {
+        MINUTES_PER_DAY + slotEndMinutes
+    } else {
+        slotEndMinutes
     }
-
-    if (repeating) {
-        val selectedDayIndex = selectedStartLocal.dayOfWeek.toRentalDayIndex()
-        val slotDayIndex = toMondayBasedDayIndex(slotTimeZone) ?: slotStartLocal.dayOfWeek.toRentalDayIndex()
-        if (selectedDayIndex != slotDayIndex) {
-            return false
-        }
-
-        if (selectedStartLocal.date < slotStartLocal.date) {
-            return false
-        }
-        if (endDate != null && selectedStartLocal.date > endDate!!.toLocalDateTime(slotTimeZone).date) {
-            return false
-        }
-        return true
-    }
-
-    val slotDurationMinutes = slotEndMinutes - slotStartMinutes
-    if (slotDurationMinutes <= 0) {
+    if (selectedStartMinutes < slotStartMinutes || selectedEndMinutes > normalizedSlotEndMinutes) {
         return false
     }
 
-    val slotEndInstant = endDate ?: (startDate + slotDurationMinutes.minutes)
+    val selectedDayIndex = selectedStartLocal.dayOfWeek.toRentalDayIndex()
+    val slotDayIndexes = normalizedDaysOfWeek()
+    if (slotDayIndexes.isNotEmpty() && selectedDayIndex !in slotDayIndexes) {
+        return false
+    }
 
-    return rangeStart >= startDate && rangeEnd <= slotEndInstant
+    if (selectedStartLocal.date < slotStartLocal.date) {
+        return false
+    }
+    if (endDate != null && selectedStartLocal.date > endDate!!.toLocalDateTime(slotTimeZone).date) {
+        return false
+    }
+    return true
 }
 
 internal fun TimeSlot.toRentalAvailabilityLabel(
@@ -548,18 +862,31 @@ internal fun TimeSlot.toRentalAvailabilityLabel(
 }
 
 internal fun TimeSlot.slotDurationMinutes(timeZone: TimeZone): Int {
-    val startMinutesValue = startTimeMinutes ?: startDate.toLocalDateTime(timeZone).let { local ->
+    if (!repeating) {
+        val explicitSlotEnd = endDate ?: return Int.MAX_VALUE
+        return (explicitSlotEnd - startDate).inWholeMinutes
+            .takeIf { duration -> duration > 0 }
+            ?.coerceAtMost(Int.MAX_VALUE.toLong())
+            ?.toInt()
+            ?: Int.MAX_VALUE
+    }
+    val slotTimeZone = this.timeZone.toTimeZoneOrUtc(timeZone)
+    val startMinutesValue = startTimeMinutes ?: startDate.toLocalDateTime(slotTimeZone).let { local ->
         local.hour * 60 + local.minute
     }
-    val endMinutesValue = endTimeMinutes ?: endDate?.toLocalDateTime(timeZone)?.let { local ->
+    val endMinutesValue = endTimeMinutes ?: endDate?.toLocalDateTime(slotTimeZone)?.let { local ->
         local.hour * 60 + local.minute
     } ?: return Int.MAX_VALUE
 
-    return if (endMinutesValue > startMinutesValue) {
-        endMinutesValue - startMinutesValue
-    } else {
-        Int.MAX_VALUE
+    if (endMinutesValue == startMinutesValue) {
+        return Int.MAX_VALUE
     }
+    val normalizedEndMinutes = if (endMinutesValue < startMinutesValue) {
+        MINUTES_PER_DAY + endMinutesValue
+    } else {
+        endMinutesValue
+    }
+    return normalizedEndMinutes - startMinutesValue
 }
 
 internal fun TimeSlot.toMondayBasedDayIndex(timeZone: TimeZone): Int? {
@@ -587,9 +914,10 @@ internal fun RentalFieldOption.resolvedRentalTimeZone(
 
 internal fun Int?.toClockLabel(): String? {
     val minutes = this ?: return null
-    if (minutes !in 0..(24 * 60)) {
+    if (minutes < 0) {
         return null
     }
+    val dayOffset = minutes / MINUTES_PER_DAY
     val hour24 = (minutes / 60) % 24
     val minute = minutes % 60
     val hour12 = when (val normalized = hour24 % 12) {
@@ -598,7 +926,60 @@ internal fun Int?.toClockLabel(): String? {
     }
     val suffix = if (hour24 < 12) "AM" else "PM"
     val minuteText = if (minute < 10) "0$minute" else minute.toString()
-    return "$hour12:$minuteText $suffix"
+    val daySuffix = when (dayOffset) {
+        0 -> ""
+        1 -> " next day"
+        else -> " +$dayOffset days"
+    }
+    return "$hour12:$minuteText $suffix$daySuffix"
+}
+
+internal enum class RentalSlotAccessibilityState(val spokenLabel: String) {
+    AVAILABLE("available"),
+    BOOKED("booked"),
+    PAST("in the past"),
+    SELECTED("selected"),
+    UNAVAILABLE("unavailable"),
+}
+
+internal fun rentalSlotAccessibilityLabel(
+    fieldLabel: String,
+    date: LocalDate,
+    startMinutes: Int,
+    endMinutes: Int,
+    state: RentalSlotAccessibilityState,
+    priceCents: Int? = null,
+): String {
+    val priceLabel = when {
+        priceCents == 0 -> ", free"
+        priceCents != null && priceCents > 0 -> ", ${priceCents.toCurrencyAccessibilityLabel()}"
+        else -> ""
+    }
+    return "$fieldLabel, ${date.timelineDateTimeLabel(startMinutes)} to " +
+        "${date.timelineDateTimeLabel(endMinutes)}, ${state.spokenLabel}$priceLabel"
+}
+
+internal fun rentalSelectionAccessibilityLabel(
+    fieldLabel: String,
+    date: LocalDate,
+    startMinutes: Int,
+    endMinutes: Int,
+): String {
+    return "$fieldLabel rental, ${date.timelineDateTimeLabel(startMinutes)} to " +
+        date.timelineDateTimeLabel(endMinutes)
+}
+
+private fun LocalDate.timelineDateTimeLabel(minutesFromStartOfDay: Int): String {
+    val dayOffset = minutesFromStartOfDay / MINUTES_PER_DAY
+    val date = LocalDate.fromEpochDays(toEpochDays() + dayOffset)
+    val minuteOfDay = minutesFromStartOfDay % MINUTES_PER_DAY
+    return "$date ${minuteOfDay.toClockLabel().orEmpty()}"
+}
+
+private fun Int.toCurrencyAccessibilityLabel(): String {
+    val dollars = this / 100
+    val cents = (this % 100).toString().padStart(2, '0')
+    return "\$$dollars.$cents"
 }
 
 internal fun Int?.toDayLabel(): String {

@@ -3,8 +3,6 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
-import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -15,40 +13,6 @@ import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 class EventMatchEditHelpersTest {
-    @Test
-    fun official_check_in_edit_updates_the_target_slot_and_primary_legacy_state() {
-        val match = MatchMVP(
-            id = "match-1",
-            matchId = 1,
-            eventId = "event-1",
-            officialId = "official-1",
-            officialCheckedIn = false,
-            officialIds = listOf(
-                MatchOfficialAssignment(
-                    positionId = "referee",
-                    slotIndex = 0,
-                    holderType = OfficialAssignmentHolderType.OFFICIAL,
-                    userId = "official-1",
-                    eventOfficialId = "event-official-1",
-                    checkedIn = false,
-                ),
-                MatchOfficialAssignment(
-                    positionId = "line-judge",
-                    slotIndex = 0,
-                    holderType = OfficialAssignmentHolderType.OFFICIAL,
-                    userId = "official-2",
-                    eventOfficialId = "event-official-2",
-                    checkedIn = false,
-                ),
-            ),
-        )
-
-        val updated = match.withOfficialAssignmentCheckIn(" referee ", 0, true)
-
-        assertTrue(updated.officialIds.first().checkedIn)
-        assertFalse(updated.officialIds.last().checkedIn)
-        assertEquals(true, updated.officialCheckedIn)
-    }
     @Test
     fun normalizeEditableBracketGraph_assigns_previous_slots_from_incoming_next_links() {
         val left = relation(match(id = "left", matchId = 1, winnerNextMatchId = "final"))

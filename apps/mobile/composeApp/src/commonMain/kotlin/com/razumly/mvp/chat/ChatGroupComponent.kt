@@ -2,9 +2,11 @@ package com.razumly.mvp.chat
 
 import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.lifecycle.doOnDestroy
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.data.IMessageRepository
+import com.razumly.mvp.chat.data.MessageHistoryPage
 import com.razumly.mvp.chat.data.isUnreadFor
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
@@ -13,6 +15,7 @@ import com.razumly.mvp.core.data.repositories.ChatTermsConsentState
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
+import com.razumly.mvp.core.presentation.LatestPlayerInviteSearch
 import com.razumly.mvp.core.util.newId
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.Dispatchers
@@ -30,11 +33,25 @@ import kotlinx.coroutines.launch
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
+enum class ChatFeedbackKind {
+    SUCCESS,
+    WARNING,
+}
+
+data class ChatFeedback(
+    val message: String,
+    val kind: ChatFeedbackKind,
+)
+
 interface ChatGroupComponent {
     val currentUser: UserData
     val messageInput: StateFlow<String>
     val chatGroup: StateFlow<ChatGroupWithRelations?>
+    val isChatLoading: StateFlow<Boolean>
+    val canLoadOlderMessages: StateFlow<Boolean>
+    val isLoadingOlderMessages: StateFlow<Boolean>
     val errorState: StateFlow<String?>
+    val feedback: StateFlow<ChatFeedback?>
     val suggestedPlayers: StateFlow<List<UserData>>
     val friends: StateFlow<List<UserData>>
     val isChatMuted: StateFlow<Boolean>
@@ -44,7 +61,9 @@ interface ChatGroupComponent {
 
     fun onBack()
     fun onMessageInputChange(newText: String)
+    fun loadOlderMessages()
     fun sendMessage()
+    fun dismissFeedback()
     fun deleteChat()
     fun leaveChat()
     fun searchPlayers(query: String)
@@ -62,19 +81,34 @@ class DefaultChatGroupComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
     private val chatGroupRepository: IChatGroupRepository,
-    messageUser: UserData?,
-    initialChatGroup: ChatGroupWithRelations?,
+    messageUserId: String?,
+    initialChatId: String?,
     private val messagesRepository: IMessageRepository,
     private val pushNotificationsRepository: IPushNotificationsRepository,
     private val navigationHandler: INavigationHandler,
 ) : ChatGroupComponent, ComponentContext by componentContext {
 
+    private val normalizedMessageUserId = messageUserId
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+    private val normalizedInitialChatId = initialChatId
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
+    private var ownedActiveChatId: String? = null
 
     private val _errorState = MutableStateFlow<String?>(null)
     override val errorState = _errorState.asStateFlow()
-    private val _suggestedPlayers = MutableStateFlow<List<UserData>>(listOf())
-    override val suggestedPlayers = _suggestedPlayers.asStateFlow()
+    private val _feedback = MutableStateFlow<ChatFeedback?>(null)
+    override val feedback = _feedback.asStateFlow()
+    private val playerInviteSearch = LatestPlayerInviteSearch(
+        scope = scope,
+        searchPlayers = userRepository::searchPlayers,
+        excludedUserId = { currentUser.id },
+        onFailure = { error -> _errorState.value = error.userMessage() },
+    )
+    override val suggestedPlayers = playerInviteSearch.suggestions
     private val _friends = MutableStateFlow<List<UserData>>(listOf())
     override val friends = _friends.asStateFlow()
     private val _isChatMuted = MutableStateFlow(false)
@@ -83,14 +117,31 @@ class DefaultChatGroupComponent(
     override val isCheckingChatTerms = userRepository.chatTermsConsentLoading
     private val _showChatTermsPrompt = MutableStateFlow(false)
     override val showChatTermsPrompt = _showChatTermsPrompt.asStateFlow()
+    private val _isChatLoading = MutableStateFlow(true)
+    override val isChatLoading = _isChatLoading.asStateFlow()
+    private val _canLoadOlderMessages = MutableStateFlow(false)
+    override val canLoadOlderMessages = _canLoadOlderMessages.asStateFlow()
+    private val _isLoadingOlderMessages = MutableStateFlow(false)
+    override val isLoadingOlderMessages = _isLoadingOlderMessages.asStateFlow()
+    private var messageHistoryChatId: String? = null
+    private var nextMessageHistoryIndex = 0
 
-    override val chatGroup = chatGroupRepository.getChatGroupFlow(messageUser, initialChatGroup)
+    override val chatGroup = chatGroupRepository.getChatGroupFlow(
+        messageUserId = normalizedMessageUserId,
+        chatId = normalizedInitialChatId,
+    )
         .map { result ->
+            _isChatLoading.value = false
             val chatGroup = result.getOrElse {
                 _errorState.value = it.userMessage()
                 null
             }
-            chatGroup?.copy(messages = chatGroup.messages.sortedBy { it.sentTime })
+            chatGroup?.copy(
+                messages = chatGroup.messages.sortedWith(
+                    compareBy<MessageMVP> { message -> message.sentTime }
+                        .thenBy { message -> message.id },
+                ),
+            )
         }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
@@ -103,6 +154,8 @@ class DefaultChatGroupComponent(
     override val currentUser: UserData
         get() = currentUserState.value
     init {
+        lifecycle.doOnDestroy(::clearOwnedActiveChat)
+        lifecycle.doOnDestroy(playerInviteSearch::invalidate)
         scope.launch {
             chatTermsState
                 .map { state -> state.accepted }
@@ -136,7 +189,7 @@ class DefaultChatGroupComponent(
                 .map { it?.chatGroup?.id?.trim().orEmpty() }
                 .distinctUntilChanged()
                 .collect { chatId ->
-                    pushNotificationsRepository.setActiveChat(chatId.ifBlank { null })
+                    setOwnedActiveChat(chatId.ifBlank { null })
                     if (chatId.isBlank()) {
                         _isChatMuted.value = false
                         return@collect
@@ -156,10 +209,15 @@ class DefaultChatGroupComponent(
                 }
                 .distinctUntilChanged()
                 .collect { chatId ->
-                    if (chatId.isBlank()) return@collect
-                    messagesRepository.getMessagesInChatGroup(chatId).onFailure { error ->
-                        Napier.w("Failed to load messages for opened chat $chatId: ${error.message}")
+                    messageHistoryChatId = chatId.takeIf(String::isNotBlank)
+                    nextMessageHistoryIndex = 0
+                    _canLoadOlderMessages.value = false
+                    if (chatId.isBlank()) {
+                        _isLoadingOlderMessages.value = false
+                        return@collect
                     }
+                    _isLoadingOlderMessages.value = true
+                    loadMessageHistoryPage(chatId = chatId, index = 0, reportFailure = false)
                 }
         }
         scope.launch {
@@ -194,12 +252,61 @@ class DefaultChatGroupComponent(
     }
 
     override fun onBack() {
-        pushNotificationsRepository.setActiveChat(null)
+        playerInviteSearch.invalidate()
+        clearOwnedActiveChat()
         navigationHandler.navigateBack()
     }
 
     override fun onMessageInputChange(newText: String) {
         _messageInput.value = newText
+    }
+
+    override fun loadOlderMessages() {
+        val chatId = chatGroup.value?.chatGroup?.id?.trim().orEmpty()
+        if (
+            chatId.isBlank() ||
+            chatId != messageHistoryChatId ||
+            !_canLoadOlderMessages.value ||
+            _isLoadingOlderMessages.value
+        ) {
+            return
+        }
+        val index = nextMessageHistoryIndex
+        _isLoadingOlderMessages.value = true
+        scope.launch {
+            loadMessageHistoryPage(chatId = chatId, index = index, reportFailure = true)
+        }
+    }
+
+    private suspend fun loadMessageHistoryPage(
+        chatId: String,
+        index: Int,
+        reportFailure: Boolean,
+    ) {
+        messagesRepository.getMessageHistoryPage(
+            chatGroupId = chatId,
+            index = index,
+        ).onSuccess { page ->
+            if (messageHistoryChatId != chatId) return@onSuccess
+            applyMessageHistoryPage(index = index, page = page)
+            if (reportFailure) {
+                _errorState.value = null
+            }
+        }.onFailure { error ->
+            if (messageHistoryChatId != chatId) return@onFailure
+            Napier.w("Failed to load messages for opened chat $chatId: ${error.message}")
+            if (reportFailure) {
+                _errorState.value = error.userMessage("Failed to load earlier messages.")
+            }
+        }
+        if (messageHistoryChatId == chatId) {
+            _isLoadingOlderMessages.value = false
+        }
+    }
+
+    private fun applyMessageHistoryPage(index: Int, page: MessageHistoryPage) {
+        nextMessageHistoryIndex = page.nextIndex
+        _canLoadOlderMessages.value = page.hasMore && page.nextIndex > index
     }
 
     override fun sendMessage() {
@@ -210,7 +317,6 @@ class DefaultChatGroupComponent(
             return
         }
         val currentChatGroup = chatGroup.value ?: return
-        _messageInput.value = ""
         val chatId = currentChatGroup.chatGroup.id
         val message = MessageMVP(
             id = newId(),
@@ -222,18 +328,30 @@ class DefaultChatGroupComponent(
             sentTime = Clock.System.now()
         )
 
+        _errorState.value = null
+        _feedback.value = null
         scope.launch {
             val createResult = messagesRepository.createMessage(message)
             if (createResult.isFailure) {
                 _errorState.value = createResult.exceptionOrNull()?.userMessage()
                 return@launch
             }
+            if (_messageInput.value.trim() == text) {
+                _messageInput.value = ""
+            }
             pushNotificationsRepository.sendChatGroupNotification(
                 chatId, "New message from ${currentUser.fullName}", text
             ).onFailure {
-                _errorState.value = it.userMessage()
+                _feedback.value = ChatFeedback(
+                    message = "Message sent, but recipients may not receive a notification.",
+                    kind = ChatFeedbackKind.WARNING,
+                )
             }
         }
+    }
+
+    override fun dismissFeedback() {
+        _feedback.value = null
     }
 
     override fun deleteChat() {
@@ -244,7 +362,7 @@ class DefaultChatGroupComponent(
         }
         scope.launch {
             chatGroupRepository.deleteChatGroup(currentChat.id).onSuccess {
-                pushNotificationsRepository.setActiveChat(null)
+                clearOwnedActiveChat()
                 navigationHandler.navigateBack()
             }.onFailure {
                 _errorState.value = it.userMessage("Failed to delete chat.")
@@ -260,7 +378,7 @@ class DefaultChatGroupComponent(
         }
         scope.launch {
             chatGroupRepository.deleteUserFromChatGroup(currentChat, currentUser.id).onSuccess {
-                pushNotificationsRepository.setActiveChat(null)
+                clearOwnedActiveChat()
                 navigationHandler.navigateBack()
             }.onFailure {
                 _errorState.value = it.userMessage("Failed to leave chat.")
@@ -269,12 +387,7 @@ class DefaultChatGroupComponent(
     }
 
     override fun searchPlayers(query: String) {
-        scope.launch {
-            _suggestedPlayers.value = userRepository.searchPlayers(query).getOrElse {
-                _errorState.value = it.userMessage()
-                emptyList()
-            }.filterNot { user -> user.id == currentUser.id }
-        }
+        playerInviteSearch.submit(query)
     }
 
     override fun addUserToChat(user: UserData) {
@@ -327,21 +440,36 @@ class DefaultChatGroupComponent(
         val currentChat = chatGroup.value?.chatGroup ?: return
         scope.launch {
             _errorState.value = null
+            _feedback.value = null
             chatGroupRepository.reportChat(
                 chatGroupId = currentChat.id,
                 notes = notes,
                 leaveChat = leaveChat,
             ).onSuccess { removedChatIds ->
                 if (leaveChat || removedChatIds.contains(currentChat.id)) {
-                    pushNotificationsRepository.setActiveChat(null)
+                    clearOwnedActiveChat()
                     navigationHandler.navigateBack()
                 } else {
-                    _errorState.value = "Chat reported."
+                    _feedback.value = ChatFeedback(
+                        message = "Chat reported.",
+                        kind = ChatFeedbackKind.SUCCESS,
+                    )
                 }
             }.onFailure {
                 _errorState.value = it.userMessage("Failed to report chat.")
             }
         }
+    }
+
+    private fun setOwnedActiveChat(chatGroupId: String?) {
+        ownedActiveChatId = chatGroupId
+        pushNotificationsRepository.setActiveChat(chatGroupId)
+    }
+
+    private fun clearOwnedActiveChat() {
+        val chatGroupId = ownedActiveChatId ?: return
+        pushNotificationsRepository.clearActiveChatIfMatches(chatGroupId)
+        ownedActiveChatId = null
     }
 
     override fun dismissChatTermsPrompt() {

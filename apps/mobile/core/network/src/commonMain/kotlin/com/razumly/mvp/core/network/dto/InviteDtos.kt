@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class InvitesResponseDto(
     val invites: List<Invite> = emptyList(),
+    val nextCursor: String? = null,
 )
 
 @Serializable
@@ -45,7 +46,6 @@ data class DeleteInvitesRequestDto(
 data class EmailMembershipLookupRequestDto(
     val emails: List<String> = emptyList(),
     val userIds: List<String> = emptyList(),
-    val eventId: String? = null,
 )
 
 @Serializable

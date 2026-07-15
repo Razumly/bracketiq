@@ -3,6 +3,7 @@ package com.razumly.mvp.core.presentation
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.repositories.UserScheduleSnapshot
+import com.razumly.mvp.core.data.repositories.UserScheduleNextAction
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -18,6 +19,26 @@ class CenterNavActionResolverTest {
         val action = resolveCenterNavAction(UserScheduleSnapshot(), now)
 
         assertEquals(CenterNavAction.CreateEvent, action)
+    }
+
+    @Test
+    fun narrow_server_match_action_maps_to_the_existing_navigation_contract() {
+        val action = UserScheduleNextAction.MatchShortcut(
+            eventId = "event_1",
+            matchId = "match_1",
+            eventName = "Event One",
+            eventImageId = "image_1",
+        ).toCenterNavAction()
+
+        assertEquals(
+            CenterNavAction.MatchShortcut(
+                eventId = "event_1",
+                matchId = "match_1",
+                eventName = "Event One",
+                eventImageId = "image_1",
+            ),
+            action,
+        )
     }
 
     @Test

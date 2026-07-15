@@ -17,7 +17,9 @@ class MainActivity : ComponentActivity() {
         applyDemoRoute(intent)
         setContent {
             val state = viewModel.state.collectAsStateWithLifecycle().value
-            BackHandler(enabled = state.route != WearRoute.LOGIN && state.route != WearRoute.MATCHES) {
+            BackHandler(
+                enabled = !state.isLoading && state.route != WearRoute.LOGIN && state.route != WearRoute.MATCHES,
+            ) {
                 viewModel.back()
             }
             MvpWearApp(
@@ -48,6 +50,8 @@ class MainActivity : ComponentActivity() {
                     onMinuteAdjusted = viewModel::adjustMinute,
                     onTimeDone = viewModel::returnToIncidentEditor,
                     onFinishIncident = viewModel::finishIncident,
+                    onRequestDeleteIncident = viewModel::requestDeleteIncident,
+                    onDeleteIncident = viewModel::deleteIncident,
                     onCancelIncident = viewModel::cancelIncident,
                 ),
             )
@@ -101,5 +105,7 @@ data class MvpWearActions(
     val onMinuteAdjusted: (Int) -> Unit,
     val onTimeDone: () -> Unit,
     val onFinishIncident: () -> Unit,
+    val onRequestDeleteIncident: () -> Unit,
+    val onDeleteIncident: () -> Unit,
     val onCancelIncident: () -> Unit,
 )

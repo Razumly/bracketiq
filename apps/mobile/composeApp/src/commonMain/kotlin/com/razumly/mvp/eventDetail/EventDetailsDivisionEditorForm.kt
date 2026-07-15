@@ -26,6 +26,8 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.InclusivePriceInput
 import com.razumly.mvp.core.presentation.composables.MoneyInputField
@@ -55,7 +57,9 @@ internal data class EventDetailsDivisionEditorFormState(
     val divisionInputsExpanded: Boolean,
     val hostHasAccount: Boolean,
     val isNewEvent: Boolean,
+    val showValidationErrors: Boolean,
     val addSelfToEvent: Boolean,
+    val inclusivePriceEditorKey: String = "event-price",
 )
 
 internal data class EventDetailsDivisionEditorFormActions(
@@ -77,6 +81,14 @@ internal data class EventDetailsDivisionEditorFormActions(
     val onAddSelfToEventChange: (Boolean) -> Unit,
     val onAddCurrentUser: (Boolean) -> Unit,
     val onDivisionInputsExpandedChange: (Boolean) -> Unit,
+    val quoteInclusivePrice: suspend (
+        InclusivePriceQuoteDirection,
+        Int,
+        String?,
+    ) -> Result<InclusivePriceQuote> = { _, _, _ ->
+        Result.failure(UnsupportedOperationException("Inclusive price quotes are unavailable."))
+    },
+    val onPriceQuoteConfirmationChange: (Boolean) -> Unit = {},
 )
 
 @Composable
@@ -410,6 +422,10 @@ private fun DivisionSingleDivisionDefaults(
                 manualPaymentsEnabled = manualPaymentsEnabled,
                 hostHasAccount = state.hostHasAccount,
                 enabled = true,
+                inclusivePriceEditorKey = state.inclusivePriceEditorKey,
+                eventType = editEvent.eventType.name,
+                quoteInclusivePrice = actions.quoteInclusivePrice,
+                onPriceQuoteConfirmationChange = actions.onPriceQuoteConfirmationChange,
                 onPriceChange = { parsedPrice ->
                     actions.onDivisionEditorDefaultsChange(
                         divisionEditorDefaults.copy(priceCents = parsedPrice),
@@ -525,7 +541,8 @@ private fun DivisionSingleDivisionDefaults(
                                 )
                             }
                         },
-                        isError = (editEvent.playoffTeamCount ?: 0) < 2,
+                        isError = state.showValidationErrors &&
+                            (editEvent.playoffTeamCount ?: 0) < 2,
                         errorMessage = "Required and must be at least 2.",
                     )
                 }
@@ -566,7 +583,7 @@ private fun DivisionSingleDivisionDefaults(
                                 )
                             }
                         },
-                        isError = run {
+                        isError = state.showValidationErrors && run {
                             val playoffTeamCount = editEvent.playoffTeamCount
                             (playoffTeamCount ?: 0) < 2 ||
                                 (
@@ -610,11 +627,13 @@ private fun DivisionSingleDivisionDefaults(
                                 copy(divisionDetails = nextDetails)
                             }
                         },
-                        isError = (singleDivisionPoolCount ?: 0) < 1 ||
+                        isError = state.showValidationErrors && (
+                            (singleDivisionPoolCount ?: 0) < 1 ||
                             (
                                 singleDivisionPoolCount != null &&
                                     editEvent.maxParticipants % singleDivisionPoolCount != 0
-                                ),
+                            )
+                        ),
                         errorMessage = "Max teams must divide evenly by pools.",
                     )
                     NumberInputField(
@@ -623,7 +642,7 @@ private fun DivisionSingleDivisionDefaults(
                         label = "Pool Team Count",
                         enabled = false,
                         onValueChange = {},
-                        isError = singleDivisionPoolTeamCount == null,
+                        isError = state.showValidationErrors && singleDivisionPoolTeamCount == null,
                         errorMessage = "Derived from Pool Count and Max Teams",
                         supportingText = "Derived from Pool Count and Max Teams",
                     )
@@ -666,8 +685,8 @@ private fun DivisionInfoFields(
             modifier = Modifier.weight(1f),
             label = "Gender",
             placeholder = "Select gender",
-            isError = divisionEditor.gender.isBlank(),
-            supportingText = if (divisionEditor.gender.isBlank()) {
+            isError = state.showValidationErrors && divisionEditor.gender.isBlank(),
+            supportingText = if (state.showValidationErrors && divisionEditor.gender.isBlank()) {
                 "Select a gender."
             } else {
                 ""
@@ -682,8 +701,8 @@ private fun DivisionInfoFields(
             modifier = Modifier.weight(1f),
             label = "Skill Division",
             placeholder = "Select skill division",
-            isError = divisionEditor.skillDivisionTypeId.isBlank(),
-            supportingText = if (divisionEditor.skillDivisionTypeId.isBlank()) {
+            isError = state.showValidationErrors && divisionEditor.skillDivisionTypeId.isBlank(),
+            supportingText = if (state.showValidationErrors && divisionEditor.skillDivisionTypeId.isBlank()) {
                 "Select a skill division."
             } else {
                 ""
@@ -705,8 +724,8 @@ private fun DivisionInfoFields(
             modifier = Modifier.weight(1f),
             label = "Age Division",
             placeholder = "Select age division",
-            isError = divisionEditor.ageDivisionTypeId.isBlank(),
-            supportingText = if (divisionEditor.ageDivisionTypeId.isBlank()) {
+            isError = state.showValidationErrors && divisionEditor.ageDivisionTypeId.isBlank(),
+            supportingText = if (state.showValidationErrors && divisionEditor.ageDivisionTypeId.isBlank()) {
                 "Select an age division."
             } else {
                 ""
@@ -745,6 +764,10 @@ private fun DivisionInfoFields(
                 manualPaymentsEnabled = manualPaymentsEnabled,
                 hostHasAccount = state.hostHasAccount,
                 enabled = state.divisionEditorReady,
+                inclusivePriceEditorKey = state.inclusivePriceEditorKey,
+                eventType = editEvent.eventType.name,
+                quoteInclusivePrice = actions.quoteInclusivePrice,
+                onPriceQuoteConfirmationChange = actions.onPriceQuoteConfirmationChange,
                 onPriceChange = { priceCents ->
                     actions.onDivisionEditorChange(
                         divisionEditor.copy(
@@ -764,7 +787,7 @@ private fun DivisionInfoFields(
                     }
                 },
                 isMaxParticipantsError = divisionEditor.maxParticipants.let { maxParticipants ->
-                    maxParticipants == null || maxParticipants < 2
+                    state.showValidationErrors && (maxParticipants == null || maxParticipants < 2)
                 },
             )
         }
@@ -780,6 +803,14 @@ private fun DivisionPriceAndMaxTeamsFields(
     manualPaymentsEnabled: Boolean,
     hostHasAccount: Boolean,
     enabled: Boolean,
+    inclusivePriceEditorKey: String,
+    eventType: String,
+    quoteInclusivePrice: suspend (
+        InclusivePriceQuoteDirection,
+        Int,
+        String?,
+    ) -> Result<InclusivePriceQuote>,
+    onPriceQuoteConfirmationChange: (Boolean) -> Unit,
     onPriceChange: (Int) -> Unit,
     onMaxParticipantsChange: (String) -> Unit,
     isMaxParticipantsError: Boolean,
@@ -813,10 +844,14 @@ private fun DivisionPriceAndMaxTeamsFields(
         } else {
             InclusivePriceInput(
                 totalPriceCents = priceCents.coerceAtLeast(0),
-                onTotalPriceChange = onPriceChange,
+                onConfirmedTotalPriceChange = onPriceChange,
+                quoteInclusivePrice = quoteInclusivePrice,
+                onQuoteConfirmationChange = onPriceQuoteConfirmationChange,
                 modifier = Modifier.weight(2f),
                 totalLabel = priceLabel,
                 enabled = hostHasAccount && enabled,
+                editorKey = inclusivePriceEditorKey,
+                eventType = eventType,
             )
         }
     }
@@ -872,7 +907,7 @@ private fun DivisionTournamentPoolFields(
                         )
                     }
                 },
-                isError = tournamentPoolPlayEnabled &&
+                isError = state.showValidationErrors && tournamentPoolPlayEnabled &&
                     ((divisionBracketTeamCount ?: 0) < 2 ||
                         (
                             divisionPoolCount != null &&
@@ -900,7 +935,7 @@ private fun DivisionTournamentPoolFields(
                     )
                 }
             },
-            isError = tournamentPoolPlayEnabled &&
+            isError = state.showValidationErrors && tournamentPoolPlayEnabled &&
                 ((divisionPoolCount ?: 0) < 1 ||
                     (
                         divisionPoolCount != null &&
@@ -915,7 +950,7 @@ private fun DivisionTournamentPoolFields(
         label = "Pool Team Count",
         enabled = false,
         onValueChange = {},
-        isError = divisionPoolTeamCount == null,
+        isError = state.showValidationErrors && divisionPoolTeamCount == null,
         errorMessage = "Derived from Pool Count and Max Teams",
         supportingText = "Derived from Pool Count and Max Teams",
     )
@@ -970,7 +1005,7 @@ private fun DivisionPaymentPlanFields(
                 val parsed = newValue.toIntOrNull() ?: 1
                 actions.onSyncDivisionInstallmentCount(parsed.coerceAtLeast(1))
             },
-            isError = installmentCount <= 0,
+            isError = state.showValidationErrors && installmentCount <= 0,
             errorMessage = "Installment count must be at least 1.",
         )
         repeat(installmentCount) { index ->

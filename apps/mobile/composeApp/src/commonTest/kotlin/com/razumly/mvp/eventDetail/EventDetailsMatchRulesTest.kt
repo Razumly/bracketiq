@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MatchIncidentTypeDefinitionMVP
 import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.Sport
@@ -13,6 +14,29 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class EventDetailsMatchRulesTest {
+    @Test
+    fun given_custom_incident_definition_when_copying_override_then_definition_is_preserved() {
+        val customDefinition = MatchIncidentTypeDefinitionMVP(
+            code = "blue_card",
+            label = "Blue card",
+            kind = "DISCIPLINE",
+            cardColor = "blue",
+            requiresTeam = true,
+            metadata = mapOf("severity" to "major"),
+        )
+
+        val override = copyMatchRulesOverride(
+            current = null,
+            supportedIncidentTypes = listOf(customDefinition.code),
+            incidentTypeDefinitions = listOf(customDefinition),
+        )
+
+        assertEquals(
+            listOf(customDefinition.copy(code = "BLUE_CARD")),
+            override?.incidentTypeDefinitions,
+        )
+    }
+
     @Test
     fun given_event_or_weekly_event_when_checking_visibility_then_match_rules_section_is_hidden() {
         assertFalse(shouldShowMatchRulesSection(EventType.EVENT))

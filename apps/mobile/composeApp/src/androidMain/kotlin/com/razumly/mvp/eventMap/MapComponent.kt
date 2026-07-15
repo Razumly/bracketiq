@@ -31,6 +31,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -132,7 +133,15 @@ actual class MapComponent(
         logMapsDiagnostics(context)
         backHandler.register(_backCallback)
         _backCallback.priority = BackCallback.PRIORITY_MAX
-        instanceKeeper.put(cleanupKey, Cleanup(locationTracker))
+        instanceKeeper.put(
+            cleanupKey,
+            MapComponentCleanup(
+                scope = scope,
+                backHandler = backHandler,
+                backCallback = _backCallback,
+                stopLocationTracking = locationTracker::stopTracking,
+            ),
+        )
         scope.launch {
             _showMap.collect {
                 _backCallback.isEnabled = it
@@ -215,10 +224,6 @@ actual class MapComponent(
         return place.toMVPPlace(placesClient)
     }
 
-    fun setRadius(radius: Double) {
-        _currentRadiusMeters.value = radius
-    }
-
     actual fun setEvents(events: List<Event>) {
         _events.value = events
     }
@@ -237,12 +242,6 @@ actual class MapComponent(
 
     actual fun toggleMap() {
         _showMap.value = !_showMap.value
-    }
-
-    private class Cleanup(private val locationTracker: LocationTracker) : InstanceKeeper.Instance {
-        override fun onDestroy() {
-            runCatching { locationTracker.stopTracking() }
-        }
     }
 
     suspend fun getPlace(placeId: String): MVPPlace =
@@ -448,5 +447,20 @@ actual class MapComponent(
 
     private companion object {
         const val MIN_MAP_VIEW_RADIUS_MILES = 0.25
+    }
+}
+
+internal class MapComponentCleanup(
+    private val scope: CoroutineScope,
+    private val backHandler: com.arkivanov.essenty.backhandler.BackHandler,
+    private val backCallback: BackCallback,
+    private val stopLocationTracking: () -> Unit,
+) : InstanceKeeper.Instance {
+    override fun onDestroy() {
+        scope.cancel()
+        runCatching(stopLocationTracking)
+        if (backHandler.isRegistered(backCallback)) {
+            backHandler.unregister(backCallback)
+        }
     }
 }

@@ -7,7 +7,6 @@ import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
 import com.razumly.mvp.core.data.util.normalizeDivisionLabel
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -40,7 +39,6 @@ data class TeamStaffAssignmentApiDto(
 @Serializable
 data class TeamApiDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val name: String = "",
     val kind: String? = null,
     val division: String? = null,
@@ -74,7 +72,7 @@ data class TeamApiDto(
     val staffAssignments: List<TeamStaffAssignmentApiDto>? = null,
 ) {
     fun toTeamOrNull(): Team? {
-        val resolvedId = id ?: legacyId
+        val resolvedId = id
         if (resolvedId.isNullOrBlank()) return null
 
         val resolvedTeamSize = (teamSize ?: 0).takeIf { it > 0 } ?: 2
@@ -257,7 +255,6 @@ data class TeamUpdateDto(
     val joinPolicy: String? = null,
     val openRegistration: Boolean? = null,
     val registrationPriceCents: Int? = null,
-    val affiliateUrl: String? = null,
     val requiredTemplateIds: List<String>? = null,
     val playerRegistrations: List<TeamPlayerRegistrationApiDto>? = null,
 )
@@ -329,11 +326,6 @@ fun Team.toUpdateDto(
         },
         registrationPriceCents = if (shouldIncludeTeamUpdateField("registrationPriceCents", omitFields, includeFields)) {
             synced.registrationPriceCents.coerceAtLeast(0)
-        } else {
-            null
-        },
-        affiliateUrl = if (shouldIncludeTeamUpdateField("affiliateUrl", omitFields, includeFields)) {
-            synced.affiliateUrl?.trim()?.takeIf(String::isNotBlank)
         } else {
             null
         },

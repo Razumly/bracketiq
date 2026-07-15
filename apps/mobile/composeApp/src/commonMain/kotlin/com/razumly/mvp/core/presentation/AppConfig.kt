@@ -1,9 +1,5 @@
 package com.razumly.mvp.core.presentation
 
-import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
-import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
 import kotlinx.serialization.Serializable
 
@@ -36,14 +32,14 @@ sealed class AppConfig {
 
     @Serializable
     data class EventDetail(
-        val event: Event,
+        val eventId: String,
         val initialTab: EventDetailInitialTab = EventDetailInitialTab.DEFAULT,
     ) : AppConfig()
 
     @Serializable
     data class MatchDetail(
-        val match: MatchWithRelations,
-        val event: Event,
+        val matchId: String,
+        val eventId: String,
     ) : AppConfig()
 
     @Serializable
@@ -51,13 +47,15 @@ sealed class AppConfig {
 
     @Serializable
     data class Chat(
-        val user: UserData?,
-        val chat: ChatGroupWithRelations?
+        val messageUserId: String? = null,
+        val chatId: String? = null,
     ) : AppConfig()
 
     @Serializable
     data class Create(
         val seed: SeededEventTemplateDraft? = null,
+        val rentalBookingId: String? = null,
+        val rentalBookingItems: List<RentalBookingItemManifest> = emptyList(),
     ) : AppConfig()
 
     @Serializable
@@ -83,8 +81,8 @@ sealed class AppConfig {
 
     @Serializable
     data class Teams(
-        val freeAgents: List<String>,
-        val event: Event?,
+        val freeAgentIds: List<String>,
+        val eventId: String?,
         val selectedFreeAgentId: String? = null,
     ) : AppConfig()
 

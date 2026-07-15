@@ -7,7 +7,6 @@ import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.util.normalizeDivisionLabel
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlinx.serialization.json.JsonArray
@@ -22,7 +21,6 @@ import kotlin.time.Instant
 @Serializable
 data class MatchEmbeddedFieldDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val fieldNumber: Int? = null,
     val divisions: List<String>? = null,
     val lat: Double? = null,
@@ -34,7 +32,7 @@ data class MatchEmbeddedFieldDto(
     val location: String? = null,
     val organizationId: String? = null,
 ) {
-    fun resolvedId(): String? = id ?: legacyId
+    fun resolvedId(): String? = id
 
     fun toFieldOrNull(): Field? {
         val resolvedId = resolvedId()?.trim()?.takeIf(String::isNotBlank) ?: return null
@@ -58,7 +56,6 @@ data class MatchEmbeddedFieldDto(
 @Serializable
 data class MatchApiDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
 
     val matchId: Int? = null,
     val team1Id: String? = null,
@@ -99,7 +96,7 @@ data class MatchApiDto(
 ) {
     @OptIn(ExperimentalTime::class)
     fun toMatchOrNull(): MatchMVP? {
-        val resolvedId = id ?: legacyId
+        val resolvedId = id
         val resolvedMatchId = matchId
         val resolvedEventId = eventId
         val resolvedFieldId = fieldId?.trim()?.takeIf(String::isNotBlank)
@@ -151,7 +148,6 @@ data class MatchApiDto(
 @Serializable
 data class MatchSegmentApiDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val eventId: String? = null,
     val matchId: String? = null,
     val sequence: Int? = null,
@@ -165,14 +161,13 @@ data class MatchSegmentApiDto(
     val metadata: Map<String, JsonElement>? = null,
 ) {
     fun toMatchSegmentOrNull(): MatchSegmentMVP? {
-        val resolvedId = id ?: legacyId
+        val resolvedId = id
         val resolvedMatchId = matchId
         val resolvedSequence = sequence
         if (resolvedId.isNullOrBlank() || resolvedMatchId.isNullOrBlank() || resolvedSequence == null) return null
 
         return MatchSegmentMVP(
             id = resolvedId,
-            legacyId = legacyId,
             eventId = eventId,
             matchId = resolvedMatchId,
             sequence = resolvedSequence,

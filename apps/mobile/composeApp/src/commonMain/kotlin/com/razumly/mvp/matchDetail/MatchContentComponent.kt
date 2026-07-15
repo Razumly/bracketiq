@@ -36,7 +36,6 @@ import com.razumly.mvp.core.network.dto.MatchActionOperationDto
 import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.eventDetail.resolveEventMatchRules
-import io.github.aakira.napier.Napier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -69,6 +68,7 @@ private const val MATCH_INCIDENT_DELETE_FAILED = "DELETE_FAILED"
 private val INCIDENT_RETRY_DELAYS_MS = longArrayOf(3_000L, 15_000L, 30_000L)
 private const val INCIDENT_CONFIRM_NO_PROGRESS_TIMEOUT_MS = 10_000L
 private const val DIRECT_SCORE_DEBOUNCE_MS = 500L
+private const val MATCH_CHECK_IN_RETRY_DELAY_MS = 3_000L
 private const val MATCH_DETAIL_CLEANUP_KEY = "Cleanup_MatchDetail"
 private const val MATCH_DETAIL_REALTIME_PAUSE_PREFIX = "match-detail-open:"
 private const val OFFICIAL_MATCH_OPEN_MINUTES_BEFORE = 60
@@ -86,15 +86,6 @@ internal fun isTeamCheckInWindowOpen(match: MatchMVP, event: Event, now: Instant
     val openMinutes = event.teamCheckInOpenMinutesBefore.coerceAtLeast(0)
     return now >= start - openMinutes.minutes
 }
-
-internal fun resolveMatchCompletionTime(
-    actualEnd: String?,
-    completionInstant: Instant,
-): Instant = actualEnd
-    ?.trim()
-    ?.takeIf(String::isNotBlank)
-    ?.let { value -> runCatching { Instant.parse(value) }.getOrNull() }
-    ?: completionInstant
 
 interface MatchContentComponent {
     val matchWithTeams: StateFlow<MatchWithTeams>
@@ -121,10 +112,8 @@ interface MatchContentComponent {
     val matchRosterLoading: StateFlow<Boolean>
     val matchRosterSaving: StateFlow<Boolean>
     val showMatchRosterDialog: StateFlow<Boolean>
-    val showSetConfirmDialog: StateFlow<Boolean>
     val errorState: StateFlow<String?>
 
-    fun dismissSetDialog()
     fun dismissOfficialDialog()
     fun dismissTeamCheckInDialog()
     fun confirmTeamCheckIn()
@@ -170,8 +159,7 @@ interface MatchContentComponent {
         note: String?,
     )
     fun removeMatchIncident(incidentId: String)
-    fun requestSetConfirmation()
-    fun confirmSet()
+    fun completeCurrentSet()
 }
 
 
@@ -229,13 +217,32 @@ private fun TeamWithRelations.isCurrentUserManagerOrCoach(userId: String): Boole
 @OptIn(ExperimentalCoroutinesApi::class)
 class DefaultMatchContentComponent(
     componentContext: ComponentContext,
-    selectedMatch: MatchWithRelations,
-    selectedEvent: Event?,
+    selectedMatchId: String,
+    selectedEventId: String,
     eventRepository: IEventRepository,
     private val matchRepository: IMatchRepository,
     userRepository: IUserRepository,
     private val teamRepository: ITeamRepository,
 ) : MatchContentComponent, ComponentContext by componentContext {
+
+    private val selectedMatch = MatchWithRelations(
+        match = MatchMVP(
+            matchId = 0,
+            eventId = selectedEventId.trim(),
+            id = selectedMatchId.trim(),
+        ),
+        field = null,
+        team1 = null,
+        team2 = null,
+        teamOfficial = null,
+        winnerNextMatch = null,
+        loserNextMatch = null,
+        previousLeftMatch = null,
+        previousRightMatch = null,
+    )
+    private val selectedEvent = selectedEventId.trim()
+        .takeIf(String::isNotBlank)
+        ?.let { eventId -> Event(id = eventId) }
 
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -247,7 +254,9 @@ class DefaultMatchContentComponent(
             .distinctUntilChanged()
             .map { eventResult ->
                 eventResult.map { it.event }.getOrElse {
-                    _errorState.value = it.userMessage()
+                    if (it !is NoSuchElementException) {
+                        _errorState.value = it.userMessage()
+                    }
                     selectedEvent
                 }
             }.stateIn(scope, SharingStarted.Eagerly, selectedEvent)
@@ -264,6 +273,7 @@ class DefaultMatchContentComponent(
     private var pendingDirectScoreSync: PendingDirectScoreSync? = null
     private var incidentQueueRetryJob: Job? = null
     private var incidentRetryAttempt = 0
+    private var incidentQueueStartupDrainMatchId: String? = null
 
     override val matchWithTeams = _optimisticMatch.flatMapLatest { optimisticMatch ->
         if (optimisticMatch != null) {
@@ -272,7 +282,9 @@ class DefaultMatchContentComponent(
             matchRepository.getMatchFlow(selectedMatch.match.id).distinctUntilChanged()
                 .flatMapLatest { dbResult ->
                     val baseMatch = dbResult.getOrElse {
-                        _errorState.value = it.userMessage()
+                        if (it !is NoSuchElementException) {
+                            _errorState.value = it.userMessage()
+                        }
                         selectedMatch
                     }
 
@@ -378,9 +390,7 @@ class DefaultMatchContentComponent(
     private val shownTeamCheckInPromptKeys = mutableSetOf<String>()
     private val confirmedTeamCheckInPromptKeys = mutableSetOf<String>()
     private var lastLoadedMatchCheckInKey: String? = null
-
-    private val _showSetConfirmDialog = MutableStateFlow(false)
-    override val showSetConfirmDialog = _showSetConfirmDialog.asStateFlow()
+    private var scheduledMatchCheckInRetryKey: String? = null
 
     private val currentUserState = userRepository.currentUser
         .map { result -> result.getOrNull() ?: UserData() }
@@ -453,17 +463,6 @@ class DefaultMatchContentComponent(
             }
         }
         scope.launch {
-            combine(_isOfficial, _officialCheckedIn) { ownsMatchEditing, checkedIn ->
-                ownsMatchEditing && checkedIn
-            }
-                .distinctUntilChanged()
-                .collect { scoringOpen ->
-                    if (scoringOpen) {
-                        resumePersistedIncidentWork()
-                    }
-                }
-        }
-        scope.launch {
             event.collect {
                 val normalizedMatch = updateMatchStructureForCurrentContext(matchWithTeams.value.match)
                 _matchFinished.value = isMatchOver(normalizedMatch)
@@ -499,10 +498,6 @@ class DefaultMatchContentComponent(
                 evaluateTeamCheckInPrompt()
             }
         }
-    }
-
-    override fun dismissSetDialog() {
-        _showSetConfirmDialog.value = false
     }
 
     override fun dismissOfficialDialog() {
@@ -667,11 +662,10 @@ class DefaultMatchContentComponent(
         val officialWindowOpen = isOfficialMatchWindowOpen(currentMatch)
         val canCheckIn = canCheckIntoMatch(currentMatch) && officialWindowOpen
         val rawCheckedIn = when {
-            isAssignedTeamOfficial -> true
             isAssignedUserOfficial -> currentMatch.isUserCheckedInForOfficialSlot(currentUser.id)
             else -> currentMatch.officialCheckedIn == true
         }
-        val assignedPromptKey = if (isAssignedUserOfficial) {
+        val assignedPromptKey = if (isAssignedTeamOfficial || isAssignedUserOfficial) {
             officialCheckInPromptKey(
                 match = currentMatch,
                 teamOfficialId = teamOfficialId,
@@ -685,11 +679,12 @@ class DefaultMatchContentComponent(
         val checkedIn = rawCheckedIn || (assignedPromptKey != null && assignedPromptKey in confirmedOfficialCheckInPromptKeys)
         val canSwapIntoOfficial = !checkedIn && canCurrentUserSwapIntoOfficial(currentMatch)
         val isOfficial = isAssignedTeamOfficial || isAssignedUserOfficial
-        val shouldShowPrompt = canCheckIn && !checkedIn && (isAssignedUserOfficial || canSwapIntoOfficial)
+        val shouldShowPrompt = canCheckIn && !checkedIn && (isOfficial || canSwapIntoOfficial)
 
         _isOfficial.value = isOfficial
         _officialCheckedIn.value = checkedIn
-        _assignedTeamOfficialPendingCheckIn.value = false
+        _assignedTeamOfficialPendingCheckIn.value = canCheckIn && !checkedIn && isAssignedTeamOfficial
+        resumePersistedIncidentQueueIfNeeded()
         if (!shouldShowPrompt) {
             _showOfficialCheckInDialog.value = false
             return
@@ -782,13 +777,6 @@ class DefaultMatchContentComponent(
                     )
                 val isAssignedUserOfficial = currentMatch.isUserAssignedToOfficialSlot(currentUser.id)
                 val canSwap = canCurrentUserSwapIntoOfficial(currentMatch)
-                if (isAssignedTeamOfficial) {
-                    dismissOfficialDialog()
-                    _isOfficial.value = true
-                    _officialCheckedIn.value = true
-                    _assignedTeamOfficialPendingCheckIn.value = false
-                    return@launch
-                }
                 if (!canCheckIntoMatch(currentMatch)) {
                     dismissOfficialDialog()
                     _errorState.value = "Officials can only check in after both teams are assigned."
@@ -817,12 +805,16 @@ class DefaultMatchContentComponent(
                     return@launch
                 }
 
-                if (isAssignedUserOfficial) {
+                if (isAssignedTeamOfficial || isAssignedUserOfficial) {
                     val updatedMatch = matchWithTeams.value.copy(
-                        match = currentMatch.updateOfficialAssignmentCheckIn(
-                            userId = currentUser.id,
-                            checkedIn = true,
-                        ),
+                        match = if (isAssignedUserOfficial) {
+                            currentMatch.updateOfficialAssignmentCheckIn(
+                                userId = currentUser.id,
+                                checkedIn = true,
+                            )
+                        } else {
+                            currentMatch.copy(officialCheckedIn = true)
+                        },
                     )
                     matchRepository.updateMatch(updatedMatch.match).onSuccess {
                         markOfficialCheckInConfirmed(currentMatch)
@@ -850,9 +842,9 @@ class DefaultMatchContentComponent(
                 )
                 matchRepository.updateMatch(updatedMatch.match).onSuccess {
                     _isOfficial.value = true
-                    _officialCheckedIn.value = true
-                    _assignedTeamOfficialPendingCheckIn.value = false
-                    _showOfficialCheckInDialog.value = false
+                    _officialCheckedIn.value = false
+                    _assignedTeamOfficialPendingCheckIn.value = true
+                    _showOfficialCheckInDialog.value = true
                 }.onFailure {
                     _errorState.value = it.userMessage()
                 }
@@ -1251,6 +1243,7 @@ class DefaultMatchContentComponent(
         val currentMatch = matchWithTeams.value.match
         if (!isMatchTeamCheckInEnabled(currentEvent)) {
             lastLoadedMatchCheckInKey = null
+            scheduledMatchCheckInRetryKey = null
             _matchTeamCheckIns.value = emptyMap()
             return
         }
@@ -1273,9 +1266,29 @@ class DefaultMatchContentComponent(
                         eventTeamId?.let { it to checkIn }
                     }
                     .toMap()
+                if (scheduledMatchCheckInRetryKey == loadKey) {
+                    scheduledMatchCheckInRetryKey = null
+                }
             }.onFailure {
-                // Managers/coaches are allowed to POST check-ins but the read route is host/official-only.
+                // A read can fail transiently even though the official remains authorized. Keep the
+                // in-flight key until the bounded retry begins so concurrent collectors do not send
+                // duplicate reads; later event/match refreshes can retry after that attempt too.
+                scheduleMatchCheckInRetry(loadKey)
             }
+        }
+    }
+
+    private fun scheduleMatchCheckInRetry(loadKey: String) {
+        if (scheduledMatchCheckInRetryKey == loadKey) return
+        scheduledMatchCheckInRetryKey = loadKey
+        scope.launch {
+            delay(MATCH_CHECK_IN_RETRY_DELAY_MS)
+            val currentEvent = event.value ?: return@launch
+            val currentMatch = matchWithTeams.value.match
+            val currentLoadKey = "${currentEvent.id}:${currentMatch.id}"
+            if (scheduledMatchCheckInRetryKey != loadKey || currentLoadKey != loadKey) return@launch
+            lastLoadedMatchCheckInKey = null
+            refreshMatchCheckInsIfAllowed()
         }
     }
 
@@ -1550,8 +1563,15 @@ class DefaultMatchContentComponent(
         checkSetCompletion(updatedScoringMatchWithIncident)
 
         scope.launch {
-            matchRepository.saveMatchLocally(updatedScoringMatchWithIncident)
-            processIncidentQueueUntilBlocked(updatedScoringMatchWithIncident)
+            matchRepository.addMatchIncident(
+                match = scoringMatch,
+                operation = localIncident.toCreateIncidentOperation(),
+            ).onSuccess {
+                _optimisticMatch.value = null
+            }.onFailure { error ->
+                _optimisticMatch.value = null
+                _errorState.value = "Failed to save incident locally: ${error.userMessage()}"
+            }
         }
     }
 
@@ -1582,33 +1602,24 @@ class DefaultMatchContentComponent(
         _optimisticMatch.value = currentMatch.copy(match = updatedMatch)
 
         scope.launch {
-            matchRepository.saveMatchLocally(updatedMatch)
             if (incident.isPendingCreateUpload()) {
-                _optimisticMatch.value = null
+                persistMatchLocally(updatedMatch, clearOptimisticOnSuccess = true)
             } else {
-                processIncidentQueueUntilBlocked(updatedMatch)
+                matchRepository.updateMatchOperations(
+                    match = scoringMatch,
+                    incidentOperations = listOf(incident.toDeleteIncidentOperation()),
+                ).onSuccess {
+                    _optimisticMatch.value = null
+                }.onFailure { error ->
+                    _optimisticMatch.value = null
+                    _errorState.value = "Failed to save incident locally: ${error.userMessage()}"
+                }
             }
         }
     }
 
 
-    override fun requestSetConfirmation() {
-        if (matchFinished.value || !isOfficial.value || officialCheckedIn.value != true) return
-
-        val scoringMatch = currentScoringMatch()
-        val rules = resolveActiveRules(scoringMatch, event.value)
-        val setIndex = currentSet.value.coerceIn(0, maxSets - 1)
-        setConfirmationValidationError(
-            match = scoringMatch,
-            rules = rules,
-            setIndex = setIndex,
-        )?.let { error ->
-            _errorState.value = error
-        }
-    }
-
-
-    override fun confirmSet() {
+    override fun completeCurrentSet() {
         if (_segmentConfirmSaving.value) return
         if (matchFinished.value || !isOfficial.value || officialCheckedIn.value != true) {
             return
@@ -1653,12 +1664,8 @@ class DefaultMatchContentComponent(
                 val updatedScoringMatch = scoringMatch.copy(segments = updatedSegments)
                     .syncLegacyScoresFromSegments(maxSets)
 
-                val finalizing = isMatchOver(updatedScoringMatch)
-                val syncedMatch = if (finalizing) {
-                    val endTime = resolveMatchCompletionTime(
-                        actualEnd = updatedScoringMatch.actualEnd,
-                        completionInstant = Clock.System.now(),
-                    )
+                val persistedMatch = if (isMatchOver(updatedScoringMatch)) {
+                    val endTime = Clock.System.now()
                     syncMatchImmediatelyBlocking(
                         match = updatedScoringMatch,
                         finalize = true,
@@ -1671,9 +1678,11 @@ class DefaultMatchContentComponent(
                         saveLocallyBeforeRemote = false,
                     )
                 }
-                if (syncedMatch == null) return@launch
-                applyConfirmedMatchState(syncedMatch)
-                persistMatchLocally(syncedMatch, clearOptimisticOnSuccess = true)
+                if (persistedMatch == null) return@launch
+                applyConfirmedMatchState(persistedMatch)
+                if (!isMatchOver(updatedScoringMatch)) {
+                    persistMatchLocally(persistedMatch, clearOptimisticOnSuccess = true)
+                }
             } finally {
                 _segmentConfirmSaving.value = false
             }
@@ -1795,13 +1804,16 @@ class DefaultMatchContentComponent(
                     if (!saveLocallyBeforeRemote) {
                         _optimisticMatch.value = null
                     }
-                }.map { match }.getOrNull()
+                }.fold(
+                    onSuccess = { match },
+                    onFailure = { null },
+                )
             }
     }
 
     private suspend fun processIncidentQueueUntilBlocked(
         initialMatch: MatchMVP? = null,
-        scheduleRetryOnFailure: Boolean = true,
+        rescheduleOnFailure: Boolean = true,
     ) {
         incidentQueueMutex.withLock {
             var queuedMatch = initialMatch
@@ -1815,7 +1827,7 @@ class DefaultMatchContentComponent(
                 val updatedMatch = executeIncidentAction(currentMatch, action)
                 queuedMatch = updatedMatch
                 if (updatedMatch == null) {
-                    if (scheduleRetryOnFailure) {
+                    if (rescheduleOnFailure) {
                         scheduleIncidentQueueRetry()
                     }
                     return@withLock
@@ -1824,20 +1836,21 @@ class DefaultMatchContentComponent(
         }
     }
 
-    /**
-     * Current incident changes are persisted in the match-operation outbox. Older installs can
-     * still have a MatchMVP incident marked PENDING/FAILED without a corresponding outbox row;
-     * the component queue converts those rows once, then the serialized outbox drain owns all
-     * retry classification. In particular, TERMINAL rows remain excluded from this path.
-     */
-    private suspend fun resumePersistedIncidentWork() {
-        processIncidentQueueUntilBlocked(scheduleRetryOnFailure = false)
-        matchRepository.syncPendingMatchOperations(selectedMatchForRealtime.id)
-            .onFailure { error ->
-                Napier.w(
-                    "Unable to resume pending match operations for ${selectedMatchForRealtime.id}: ${error.message}",
-                )
-            }
+    private fun resumePersistedIncidentQueueIfNeeded() {
+        if (!_isOfficial.value || _officialCheckedIn.value != true) return
+        val currentMatch = matchWithTeams.value.match
+        val matchId = currentMatch.id.trim()
+        if (matchId.isBlank() || incidentQueueStartupDrainMatchId == matchId) return
+        incidentQueueStartupDrainMatchId = matchId
+        scope.launch {
+            // A reopened screen gets one immediate recovery attempt.  Do not create an
+            // unbounded background retry chain here: failures remain persisted and the
+            // normal queue triggers resume them on the next user action or screen open.
+            processIncidentQueueUntilBlocked(
+                initialMatch = currentMatch,
+                rescheduleOnFailure = false,
+            )
+        }
     }
 
     private suspend fun drainIncidentQueueForConfirmation(): Boolean {
@@ -1905,30 +1918,14 @@ class DefaultMatchContentComponent(
         }
 
         return result.fold(
-            onSuccess = { remoteMatch ->
-                val updatedMatch = when (action.operation.action) {
-                    "DELETE" -> remoteMatch.copy(
-                        incidents = remoteMatch.incidents.filterNot { incident -> incident.id == action.incident.id },
-                    )
-                    else -> markLocalIncidentUploadStatus(
-                        match = remoteMatch,
-                        incidentId = action.incident.id,
-                        uploadStatus = null,
-                    )
-                }
+            onSuccess = { locallyQueuedMatch ->
                 incidentRetryAttempt = 0
-                matchRepository.saveMatchLocally(updatedMatch)
                 _optimisticMatch.value = null
-                updatedMatch
+                locallyQueuedMatch
             },
-            onFailure = {
-                val failedMatch = markLocalIncidentUploadStatus(
-                    match = match,
-                    incidentId = action.incident.id,
-                    uploadStatus = action.failureStatus,
-                )
-                matchRepository.saveMatchLocally(failedMatch)
-                _optimisticMatch.value = matchWithTeams.value.copy(match = failedMatch)
+            onFailure = { error ->
+                _optimisticMatch.value = null
+                _errorState.value = "Failed to save incident locally: ${error.userMessage()}"
                 null
             },
         )
@@ -2422,30 +2419,14 @@ class DefaultMatchContentComponent(
                     incident.isPendingCreateUpload() -> PendingIncidentAction(
                         incident = incident,
                         operation = incident.toCreateIncidentOperation(),
-                        failureStatus = MATCH_INCIDENT_UPLOAD_FAILED,
                     )
                     incident.isPendingDeleteUpload() -> PendingIncidentAction(
                         incident = incident,
                         operation = incident.toDeleteIncidentOperation(),
-                        failureStatus = MATCH_INCIDENT_DELETE_FAILED,
                     )
                     else -> null
                 }
             }
-
-    private fun markLocalIncidentUploadStatus(
-        match: MatchMVP,
-        incidentId: String,
-        uploadStatus: String?,
-    ): MatchMVP = match.copy(
-        incidents = match.incidents.map { incident ->
-            if (incident.id == incidentId) {
-                incident.copy(uploadStatus = uploadStatus)
-            } else {
-                incident
-            }
-        },
-    )
 
     private fun MatchMVP.removeIncidentScore(incident: MatchIncidentMVP): MatchMVP {
         val linkedDelta = incident.linkedPointDelta ?: return this
@@ -2454,7 +2435,7 @@ class DefaultMatchContentComponent(
         }
         val eventTeamId = incident.eventTeamId?.trim()?.takeIf(String::isNotBlank) ?: return this
         val segmentIndex = segments.indexOfFirst { segment ->
-            segment.id == incident.segmentId || segment.legacyId == incident.segmentId
+            segment.id == incident.segmentId
         }
         if (segmentIndex < 0) {
             return this
@@ -2692,7 +2673,6 @@ private data class OfficialUserLookup(
 private data class PendingIncidentAction(
     val incident: MatchIncidentMVP,
     val operation: MatchIncidentOperationDto,
-    val failureStatus: String,
 )
 
 private data class PendingDirectScoreSync(

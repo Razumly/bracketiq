@@ -3,6 +3,7 @@ package com.razumly.mvp.organizationDetail
 import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
+import com.arkivanov.essenty.lifecycle.doOnDestroy
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.Event
@@ -22,7 +23,9 @@ import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.PurchaseIntentTimeSlotContext
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.RentalOrderItem
+import com.razumly.mvp.core.data.repositories.RentalOrderPayerMismatchException
 import com.razumly.mvp.core.data.repositories.RentalOrderSelectionRequest
+import com.razumly.mvp.core.data.repositories.RentalOrderTerminalFailureException
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import com.razumly.mvp.core.data.repositories.isActive
@@ -32,22 +35,28 @@ import com.razumly.mvp.core.data.repositories.userMessage
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
-import com.razumly.mvp.core.presentation.PaymentSheetOperation
-import com.razumly.mvp.core.presentation.PaymentSheetOperationHost
 import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentResult
+import com.razumly.mvp.core.presentation.RentalBookingItemManifest
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
+import com.razumly.mvp.core.util.LoadingOperation
+import com.razumly.mvp.core.util.finishAllLoadingOperations
 import com.razumly.mvp.core.util.newId
+import com.razumly.mvp.core.util.trustedBoldSignSigningUrlOrNull
 import com.razumly.mvp.eventDetail.TextSignaturePromptState
 import com.razumly.mvp.eventDetail.WebSignaturePromptState
 import com.razumly.mvp.eventDetail.DiscountCodePromptState
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.eventSearch.RentalAvailabilityLoader
+import com.razumly.mvp.eventSearch.RentalAvailabilityWindow
 import com.razumly.mvp.eventSearch.RentalBusyBlock
 import com.razumly.mvp.eventSearch.RentalFieldOption
+import com.razumly.mvp.eventSearch.rentalAvailabilityFetchWindowForDate
 import io.github.aakira.napier.Napier
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
@@ -67,24 +76,90 @@ import kotlin.time.Instant
 private fun Product.isSinglePurchase(): Boolean =
     period.trim().equals("SINGLE", ignoreCase = true)
 
+private const val ORGANIZATION_CATALOG_PAGE_SIZE = 50
+private const val ORGANIZATION_REVIEWS_PAGE_SIZE = 20
+
+private fun <T> mergeOrganizationCatalogItems(
+    existing: List<T>,
+    incoming: List<T>,
+    id: (T) -> String,
+): List<T> {
+    val merged = existing.toMutableList()
+    val indexById = buildMap {
+        existing.forEachIndexed { index, item ->
+            id(item).trim().takeIf(String::isNotBlank)?.let { stableId ->
+                put(stableId, index)
+            }
+        }
+    }.toMutableMap()
+
+    incoming.forEach { item ->
+        val stableId = id(item).trim()
+        if (stableId.isBlank()) {
+            merged += item
+            return@forEach
+        }
+        val existingIndex = indexById[stableId]
+        if (existingIndex == null) {
+            indexById[stableId] = merged.size
+            merged += item
+        } else {
+            merged[existingIndex] = item
+        }
+    }
+    return merged
+}
+
+internal suspend fun resolveTeamPaymentCompletionMessage(
+    teamRepository: ITeamRepository,
+    pendingTeam: TeamWithPlayers,
+    currentUserId: String,
+): String {
+    val refreshedTeam = teamRepository.getTeamWithPlayers(pendingTeam.team.id).getOrNull()
+    val paymentPending = refreshedTeam
+        ?.team
+        ?.playerRegistrations
+        ?.any { registration ->
+            registration.userId == currentUserId && registration.isPaymentPending()
+        } == true
+
+    return when {
+        paymentPending ->
+            "Payment submitted for ${pendingTeam.team.name}. Registration is pending until the bank payment clears."
+        refreshedTeam == null ->
+            "Payment submitted for ${pendingTeam.team.name}. We are confirming the registration status."
+        else -> "Registration completed for ${pendingTeam.team.name}."
+    }
+}
+
 data class RentalReservationComplete(
     val bookingId: String,
     val billId: String? = null,
     val totalCents: Int,
+    val items: List<RentalBookingItemManifest>,
 )
 
-private data class PendingRentalReservation(
+data class TeamSignatureSyncProgress(
+    val currentStep: Int,
+    val totalSteps: Int,
+    val message: String = "Waiting for signature sync...",
+)
+
+enum class OrganizationReviewSaveStatus {
+    IDLE,
+    SAVING,
+    SUCCEEDED,
+    FAILED,
+}
+
+internal data class PendingRentalReservation(
     val publicSlug: String,
     val context: RentalCreateContext,
     val selections: List<RentalOrderSelectionRequest>,
+    val payerUserId: String,
     val paymentIntentId: String?,
+    val pendingOrderId: String? = null,
 )
-
-private enum class OrganizationCheckoutOwner {
-    PRODUCT,
-    TEAM,
-    RENTAL,
-}
 
 internal fun resolveOrganizationDetailTabs(
     initialTab: OrganizationDetailTab,
@@ -120,12 +195,20 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     val startingProductCheckoutId: StateFlow<String?>
     val rentalFieldOptions: StateFlow<List<RentalFieldOption>>
     val rentalBusyBlocks: StateFlow<List<RentalBusyBlock>>
+    val loadedRentalAvailabilityWindow: StateFlow<RentalAvailabilityWindow?>
     val isLoadingOrganization: StateFlow<Boolean>
     val isLoadingEvents: StateFlow<Boolean>
     val isLoadingTeams: StateFlow<Boolean>
+    val canLoadMoreEvents: StateFlow<Boolean>
+    val canLoadMoreTeams: StateFlow<Boolean>
+    val isLoadingMoreEvents: StateFlow<Boolean>
+    val isLoadingMoreTeams: StateFlow<Boolean>
     val isLoadingProducts: StateFlow<Boolean>
     val isLoadingReviews: StateFlow<Boolean>
+    val canLoadMoreReviews: StateFlow<Boolean>
+    val isLoadingMoreReviews: StateFlow<Boolean>
     val isMutatingReview: StateFlow<Boolean>
+    val reviewSaveStatus: StateFlow<OrganizationReviewSaveStatus>
     val isLoadingRentals: StateFlow<Boolean>
     val errorState: StateFlow<ErrorMessage?>
     val message: StateFlow<String?>
@@ -136,6 +219,7 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     val loadingTeamMemberComplianceId: StateFlow<String?>
     val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
     val webSignaturePrompt: StateFlow<WebSignaturePromptState?>
+    val teamSignatureSyncProgress: StateFlow<TeamSignatureSyncProgress?>
     val discountCodePrompt: StateFlow<DiscountCodePromptState?>
     val isReservingRental: StateFlow<Boolean>
     val completedRentalReservation: StateFlow<RentalReservationComplete?>
@@ -144,13 +228,16 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     fun refreshOrganization(force: Boolean = false)
     fun refreshEvents(force: Boolean = false)
     fun refreshTeams(force: Boolean = false)
+    fun loadMoreEvents()
+    fun loadMoreTeams()
     fun refreshProducts(force: Boolean = false)
     fun refreshReviews(force: Boolean = false)
+    fun loadMoreReviews()
     fun saveReview(rating: Int, body: String?)
     fun deleteReview(reviewId: String)
     fun reportReview(reviewId: String)
     fun signInToReview()
-    fun refreshRentals(force: Boolean = false)
+    fun refreshRentals(rangeStart: Instant, rangeEnd: Instant, force: Boolean = false)
     fun startProductPurchase(product: Product)
     fun startTeamRegistration(team: TeamWithPlayers)
     fun leaveTeam(team: TeamWithPlayers)
@@ -200,11 +287,7 @@ class DefaultOrganizationDetailComponent(
     override val visibleTabs: StateFlow<List<OrganizationDetailTab>> = _visibleTabs.asStateFlow()
 
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
-    private val rentalAvailabilityLoader = RentalAvailabilityLoader(
-        eventRepository = eventRepository,
-        matchRepository = matchRepository,
-        fieldRepository = fieldRepository,
-    )
+    private val rentalAvailabilityLoader = RentalAvailabilityLoader(fieldRepository)
 
     private val _organization = MutableStateFlow<Organization?>(null)
     override val organization: StateFlow<Organization?> = _organization.asStateFlow()
@@ -230,6 +313,10 @@ class DefaultOrganizationDetailComponent(
     private val _rentalBusyBlocks = MutableStateFlow<List<RentalBusyBlock>>(emptyList())
     override val rentalBusyBlocks: StateFlow<List<RentalBusyBlock>> = _rentalBusyBlocks.asStateFlow()
 
+    private val _loadedRentalAvailabilityWindow = MutableStateFlow<RentalAvailabilityWindow?>(null)
+    override val loadedRentalAvailabilityWindow: StateFlow<RentalAvailabilityWindow?> =
+        _loadedRentalAvailabilityWindow.asStateFlow()
+
     private val _isLoadingOrganization = MutableStateFlow(false)
     override val isLoadingOrganization: StateFlow<Boolean> = _isLoadingOrganization.asStateFlow()
 
@@ -239,14 +326,32 @@ class DefaultOrganizationDetailComponent(
     private val _isLoadingTeams = MutableStateFlow(false)
     override val isLoadingTeams: StateFlow<Boolean> = _isLoadingTeams.asStateFlow()
 
+    private val _canLoadMoreEvents = MutableStateFlow(false)
+    override val canLoadMoreEvents: StateFlow<Boolean> = _canLoadMoreEvents.asStateFlow()
+    private val _canLoadMoreTeams = MutableStateFlow(false)
+    override val canLoadMoreTeams: StateFlow<Boolean> = _canLoadMoreTeams.asStateFlow()
+    private val _isLoadingMoreEvents = MutableStateFlow(false)
+    override val isLoadingMoreEvents: StateFlow<Boolean> = _isLoadingMoreEvents.asStateFlow()
+    private val _isLoadingMoreTeams = MutableStateFlow(false)
+    override val isLoadingMoreTeams: StateFlow<Boolean> = _isLoadingMoreTeams.asStateFlow()
+
     private val _isLoadingProducts = MutableStateFlow(false)
     override val isLoadingProducts: StateFlow<Boolean> = _isLoadingProducts.asStateFlow()
 
     private val _isLoadingReviews = MutableStateFlow(false)
     override val isLoadingReviews: StateFlow<Boolean> = _isLoadingReviews.asStateFlow()
 
+    private val _canLoadMoreReviews = MutableStateFlow(false)
+    override val canLoadMoreReviews: StateFlow<Boolean> = _canLoadMoreReviews.asStateFlow()
+
+    private val _isLoadingMoreReviews = MutableStateFlow(false)
+    override val isLoadingMoreReviews: StateFlow<Boolean> = _isLoadingMoreReviews.asStateFlow()
+
     private val _isMutatingReview = MutableStateFlow(false)
     override val isMutatingReview: StateFlow<Boolean> = _isMutatingReview.asStateFlow()
+
+    private val _reviewSaveStatus = MutableStateFlow(OrganizationReviewSaveStatus.IDLE)
+    override val reviewSaveStatus: StateFlow<OrganizationReviewSaveStatus> = _reviewSaveStatus.asStateFlow()
 
     private val _isLoadingRentals = MutableStateFlow(false)
     override val isLoadingRentals: StateFlow<Boolean> = _isLoadingRentals.asStateFlow()
@@ -262,6 +367,9 @@ class DefaultOrganizationDetailComponent(
     override val textSignaturePrompt: StateFlow<TextSignaturePromptState?> = _textSignaturePrompt.asStateFlow()
     private val _webSignaturePrompt = MutableStateFlow<WebSignaturePromptState?>(null)
     override val webSignaturePrompt: StateFlow<WebSignaturePromptState?> = _webSignaturePrompt.asStateFlow()
+    private val _teamSignatureSyncProgress = MutableStateFlow<TeamSignatureSyncProgress?>(null)
+    override val teamSignatureSyncProgress: StateFlow<TeamSignatureSyncProgress?> =
+        _teamSignatureSyncProgress.asStateFlow()
     private val _discountCodePrompt = MutableStateFlow<DiscountCodePromptState?>(null)
     override val discountCodePrompt: StateFlow<DiscountCodePromptState?> = _discountCodePrompt.asStateFlow()
     private val _isReservingRental = MutableStateFlow(false)
@@ -282,9 +390,17 @@ class DefaultOrganizationDetailComponent(
     private var organizationLoaded = false
     private var eventsLoaded = false
     private var teamsLoaded = false
+    private var nextEventsOffset = 0
+    private var nextTeamsOffset = 0
+    private var eventsCatalogGeneration = 0L
+    private var teamsCatalogGeneration = 0L
     private var productsLoaded = false
     private var reviewsLoaded = false
+    private var reviewsGeneration = 0L
     private var rentalsLoaded = false
+    private var rentalAvailabilityGeneration = 0L
+    private var rentalAvailabilityJob: Job? = null
+    private var activeRentalAvailabilityWindow: RentalAvailabilityWindow? = null
     private var pendingProductPurchase: Product? = null
     private var pendingTeamRegistration: TeamWithPlayers? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
@@ -295,7 +411,8 @@ class DefaultOrganizationDetailComponent(
     private var pendingTeamSignaturePollJob: Job? = null
     private var pendingPostSignatureAction: (suspend () -> Unit)? = null
     private var pendingRentalReservation: PendingRentalReservation? = null
-    private val checkoutOperationHost = PaymentSheetOperationHost<OrganizationCheckoutOwner>()
+    private val checkoutSessionCoordinator = OrganizationCheckoutSessionCoordinator()
+    private val checkoutLoadingOperations = mutableMapOf<String, LoadingOperation>()
     private var pendingProductCheckoutOperationId: String? = null
     private var pendingTeamCheckoutOperationId: String? = null
     private var pendingRentalCheckoutOperationId: String? = null
@@ -311,31 +428,41 @@ class DefaultOrganizationDetailComponent(
 
     init {
         backHandler.register(sectionBackCallback)
+        lifecycle.doOnDestroy {
+            checkoutLoadingOperations.finishAllLoadingOperations()
+        }
         refreshOrganization()
+
+        scope.launch {
+            billingRepository.syncPendingRentalOrders()
+                .onFailure { error ->
+                    Napier.w("Unable to retry pending paid rental reservations: ${error.message}")
+                }
+        }
 
         scope.launch {
             paymentResult.collect { result ->
                 if (result == null) return@collect
-                val checkout = checkoutOperationHost.claimResult()
+                val checkout = checkoutSessionCoordinator.claimResult()
                 if (checkout == null) {
                     Napier.w("Ignoring organization payment result without an active presented checkout.")
                     clearPaymentResult()
                     return@collect
                 }
                 if (!matchesOrganizationCheckout(checkout)) {
-                    Napier.w(
-                        "Ignoring organization payment result for unmatched checkout ${checkout.operationId}.",
-                    )
-                    checkoutOperationHost.releaseResultClaim(checkout)
+                    Napier.w("Ignoring organization payment result for unmatched checkout ${checkout.operationId}.")
+                    checkoutSessionCoordinator.releaseClaim(checkout)
                     clearPaymentResult()
                     return@collect
                 }
                 when (result) {
                     PaymentResult.Canceled -> {
+                        discardPendingRentalReservation(pendingRentalReservation)
                         _errorState.value = ErrorMessage("Payment canceled.")
                     }
 
                     is PaymentResult.Failed -> {
+                        discardPendingRentalReservation(pendingRentalReservation)
                         _errorState.value = ErrorMessage(result.error)
                     }
 
@@ -344,73 +471,82 @@ class DefaultOrganizationDetailComponent(
                         val pendingProduct = pendingProductPurchase
                         val pendingTeam = pendingTeamRegistration
                         when (checkout.owner) {
-                            OrganizationCheckoutOwner.RENTAL -> if (pendingRental != null) {
-                                completePendingRentalReservation(pendingRental)
+                        OrganizationCheckoutOwner.RENTAL -> if (pendingRental != null) {
+                            completePendingRentalReservation(pendingRental)
+                        }
+                        OrganizationCheckoutOwner.PRODUCT -> if (pendingProduct != null) {
+                            _message.value = if (pendingProduct.isSinglePurchase()) {
+                                "Purchase completed for ${pendingProduct.name}."
+                            } else {
+                                "Subscription started for ${pendingProduct.name}."
                             }
-                            OrganizationCheckoutOwner.PRODUCT -> if (pendingProduct != null) {
-                                _message.value = if (pendingProduct.isSinglePurchase()) {
-                                    "Purchase completed for ${pendingProduct.name}."
-                                } else {
-                                    "Subscription started for ${pendingProduct.name}."
-                                }
-                                refreshProducts(force = true)
+                            refreshProducts(force = true)
+                        }
+                        OrganizationCheckoutOwner.TEAM -> if (pendingTeam != null) {
+                            val generation = ++teamsCatalogGeneration
+                            _isLoadingTeams.value = true
+                            _isLoadingMoreTeams.value = false
+                            val refreshedPage = runCatching {
+                                teamRepository.getOrganizationTeamsPage(
+                                    organizationId = organizationId,
+                                    limit = ORGANIZATION_CATALOG_PAGE_SIZE,
+                                    offset = 0,
+                                ).getOrThrow()
+                            }.getOrNull()
+                            if (generation == teamsCatalogGeneration && refreshedPage != null) {
+                                _teams.value = mergeOrganizationCatalogItems(
+                                    existing = emptyList(),
+                                    incoming = refreshedPage.teams,
+                                    id = { team -> team.team.id },
+                                )
+                                nextTeamsOffset = refreshedPage.nextOffset.coerceAtLeast(0)
+                                _canLoadMoreTeams.value = refreshedPage.hasMore
+                                teamsLoaded = true
+                                updateVisibleTabs()
                             }
-                            OrganizationCheckoutOwner.TEAM -> if (pendingTeam != null) {
-                                val refreshedTeams = teamRepository.getTeamsByOrganization(organizationId).getOrNull()
-                                if (refreshedTeams != null) {
-                                    _teams.value = refreshedTeams
-                                    teamsLoaded = true
-                                }
-                                val paymentPending = refreshedTeams
-                                    ?.firstOrNull { team -> team.team.id == pendingTeam.team.id }
-                                    ?.team
-                                    ?.playerRegistrations
-                                    ?.any { registration ->
-                                        registration.userId == currentUser.value.id && registration.isPaymentPending()
-                                    } == true
-                                _message.value = if (paymentPending) {
-                                    "Payment submitted for ${pendingTeam.team.name}. Registration is pending until the bank payment clears."
-                                } else {
-                                    "Registration completed for ${pendingTeam.team.name}."
-                                }
+                            if (generation == teamsCatalogGeneration) {
+                                _isLoadingTeams.value = false
                             }
+                            _message.value = resolveTeamPaymentCompletionMessage(
+                                teamRepository = teamRepository,
+                                pendingTeam = pendingTeam,
+                                currentUserId = currentUser.value.id,
+                            )
+                        }
                         }
                     }
                 }
                 finishOrganizationCheckout(checkout)
                 clearPaymentResult()
-                if (::loadingHandler.isInitialized) {
-                    loadingHandler.hideLoading()
-                }
             }
         }
     }
 
-    private fun matchesOrganizationCheckout(checkout: PaymentSheetOperation<OrganizationCheckoutOwner>): Boolean =
-        when (checkout.owner) {
-            OrganizationCheckoutOwner.PRODUCT ->
-                pendingProductPurchase != null && pendingProductCheckoutOperationId == checkout.operationId
-            OrganizationCheckoutOwner.TEAM ->
-                pendingTeamRegistration != null && pendingTeamCheckoutOperationId == checkout.operationId
-            OrganizationCheckoutOwner.RENTAL ->
-                pendingRentalReservation != null && pendingRentalCheckoutOperationId == checkout.operationId
-        }
-
-    private fun beginOrganizationCheckout(
-        owner: OrganizationCheckoutOwner,
-    ): PaymentSheetOperation<OrganizationCheckoutOwner>? {
-        val checkout = checkoutOperationHost.start(owner)
-        if (checkout == null) {
-            _errorState.value = ErrorMessage("Another checkout is already in progress.")
-        }
-        return checkout
+    private fun matchesOrganizationCheckout(checkout: OrganizationCheckoutSession): Boolean = when (checkout.owner) {
+        OrganizationCheckoutOwner.PRODUCT ->
+            pendingProductPurchase != null && pendingProductCheckoutOperationId == checkout.operationId
+        OrganizationCheckoutOwner.TEAM ->
+            pendingTeamRegistration != null && pendingTeamCheckoutOperationId == checkout.operationId
+        OrganizationCheckoutOwner.RENTAL ->
+            pendingRentalReservation != null && pendingRentalCheckoutOperationId == checkout.operationId
     }
 
-    private fun finishOrganizationCheckout(
-        checkout: PaymentSheetOperation<OrganizationCheckoutOwner>,
-    ): Boolean {
-        if (!checkoutOperationHost.finish(checkout)) return false
+    private fun beginOrganizationCheckout(owner: OrganizationCheckoutOwner): OrganizationCheckoutSession? {
+        if (checkoutSessionCoordinator.activeSession != null) {
+            _errorState.value = ErrorMessage("Another checkout is already in progress.")
+            return null
+        }
 
+        return checkoutSessionCoordinator.start(owner)
+            ?: run {
+                _errorState.value = ErrorMessage("Another checkout is already in progress.")
+                null
+            }
+    }
+
+    private fun finishOrganizationCheckout(checkout: OrganizationCheckoutSession): Boolean {
+        if (!checkoutSessionCoordinator.finish(checkout)) return false
+        checkoutLoadingOperations.remove(checkout.operationId)?.hideLoading()
         when (checkout.owner) {
             OrganizationCheckoutOwner.PRODUCT -> {
                 _startingProductCheckoutId.value = null
@@ -428,8 +564,31 @@ class DefaultOrganizationDetailComponent(
                 _isReservingRental.value = false
             }
         }
-
         return true
+    }
+
+    private fun showOrganizationCheckoutLoading(
+        checkout: OrganizationCheckoutSession,
+        message: String,
+    ) {
+        val operation = checkoutLoadingOperations[checkout.operationId]
+            ?: if (::loadingHandler.isInitialized) loadingHandler.newOperation() else null
+            ?: return
+        checkoutLoadingOperations[checkout.operationId] = operation
+        operation.showLoading(message)
+    }
+
+    private suspend fun <T> withOrganizationLoading(
+        message: String,
+        action: suspend () -> T,
+    ): T {
+        val operation = if (::loadingHandler.isInitialized) loadingHandler.newOperation() else null
+        operation?.showLoading(message)
+        return try {
+            action()
+        } finally {
+            operation?.hideLoading()
+        }
     }
 
     override fun setLoadingHandler(handler: LoadingHandler) {
@@ -462,7 +621,7 @@ class DefaultOrganizationDetailComponent(
                 refreshTeams(force = true)
                 refreshProducts(force = true)
                 refreshReviews(force = true)
-                refreshRentals(force = true)
+                refreshCurrentRentalWeek(force = true)
             } else {
                 eventsLoaded = true
                 teamsLoaded = true
@@ -474,42 +633,150 @@ class DefaultOrganizationDetailComponent(
     }
 
     override fun refreshEvents(force: Boolean) {
-        scope.launch {
-            if (_isLoadingEvents.value) return@launch
-            if (eventsLoaded && !force) return@launch
+        if (_isLoadingEvents.value && !force) return
+        if (eventsLoaded && !force) return
 
-            _isLoadingEvents.value = true
-            eventRepository.getEventsByOrganization(organizationId, limit = 300)
-                .onSuccess { loadedEvents ->
-                    _events.value = loadedEvents
+        val generation = ++eventsCatalogGeneration
+        _isLoadingEvents.value = true
+        _isLoadingMoreEvents.value = false
+        scope.launch {
+            runCatching {
+                eventRepository.getOrganizationEventsPage(
+                    organizationId = organizationId,
+                    limit = ORGANIZATION_CATALOG_PAGE_SIZE,
+                    offset = 0,
+                ).getOrThrow()
+            }.onSuccess { page ->
+                if (generation == eventsCatalogGeneration) {
+                    _events.value = mergeOrganizationCatalogItems(
+                        existing = emptyList(),
+                        incoming = page.events,
+                        id = Event::id,
+                    )
+                    nextEventsOffset = page.nextOffset.coerceAtLeast(0)
+                    _canLoadMoreEvents.value = page.hasMore
+                    eventsLoaded = true
                 }
-                .onFailure { error ->
+            }.onFailure { error ->
+                if (generation == eventsCatalogGeneration) {
                     _errorState.value = ErrorMessage("Failed to load organization events: ${error.userMessage()}")
-                    _events.value = emptyList()
+                    eventsLoaded = true
                 }
-            _isLoadingEvents.value = false
-            eventsLoaded = true
-            updateVisibleTabs()
+            }
+            if (generation == eventsCatalogGeneration) {
+                _isLoadingEvents.value = false
+                updateVisibleTabs()
+            }
+        }
+    }
+
+    override fun loadMoreEvents() {
+        if (!_canLoadMoreEvents.value || _isLoadingMoreEvents.value || _isLoadingEvents.value) return
+
+        val generation = eventsCatalogGeneration
+        val offset = nextEventsOffset
+        _isLoadingMoreEvents.value = true
+        scope.launch {
+            runCatching {
+                eventRepository.getOrganizationEventsPage(
+                    organizationId = organizationId,
+                    limit = ORGANIZATION_CATALOG_PAGE_SIZE,
+                    offset = offset,
+                ).getOrThrow()
+            }.onSuccess { page ->
+                if (generation == eventsCatalogGeneration) {
+                    _events.value = mergeOrganizationCatalogItems(
+                        existing = _events.value,
+                        incoming = page.events,
+                        id = Event::id,
+                    )
+                    nextEventsOffset = page.nextOffset.coerceAtLeast(offset)
+                    _canLoadMoreEvents.value = page.hasMore
+                    eventsLoaded = true
+                    updateVisibleTabs()
+                }
+            }.onFailure {
+                if (generation == eventsCatalogGeneration) {
+                    _errorState.value = ErrorMessage("Failed to load more events. Try again.")
+                }
+            }
+            if (generation == eventsCatalogGeneration) {
+                _isLoadingMoreEvents.value = false
+            }
         }
     }
 
     override fun refreshTeams(force: Boolean) {
-        scope.launch {
-            if (_isLoadingTeams.value) return@launch
-            if (teamsLoaded && !force) return@launch
+        if (_isLoadingTeams.value && !force) return
+        if (teamsLoaded && !force) return
 
-            _isLoadingTeams.value = true
-            teamRepository.getTeamsByOrganization(organizationId)
-                .onSuccess { teamsWithPlayers ->
-                    _teams.value = teamsWithPlayers
+        val generation = ++teamsCatalogGeneration
+        _isLoadingTeams.value = true
+        _isLoadingMoreTeams.value = false
+        scope.launch {
+            runCatching {
+                teamRepository.getOrganizationTeamsPage(
+                    organizationId = organizationId,
+                    limit = ORGANIZATION_CATALOG_PAGE_SIZE,
+                    offset = 0,
+                ).getOrThrow()
+            }.onSuccess { page ->
+                if (generation == teamsCatalogGeneration) {
+                    _teams.value = mergeOrganizationCatalogItems(
+                        existing = emptyList(),
+                        incoming = page.teams,
+                        id = { team -> team.team.id },
+                    )
+                    nextTeamsOffset = page.nextOffset.coerceAtLeast(0)
+                    _canLoadMoreTeams.value = page.hasMore
+                    teamsLoaded = true
                 }
-                .onFailure { error ->
+            }.onFailure { error ->
+                if (generation == teamsCatalogGeneration) {
                     _errorState.value = ErrorMessage("Failed to load organization teams: ${error.userMessage()}")
-                    _teams.value = emptyList()
+                    teamsLoaded = true
                 }
-            _isLoadingTeams.value = false
-            teamsLoaded = true
-            updateVisibleTabs()
+            }
+            if (generation == teamsCatalogGeneration) {
+                _isLoadingTeams.value = false
+                updateVisibleTabs()
+            }
+        }
+    }
+
+    override fun loadMoreTeams() {
+        if (!_canLoadMoreTeams.value || _isLoadingMoreTeams.value || _isLoadingTeams.value) return
+
+        val generation = teamsCatalogGeneration
+        val offset = nextTeamsOffset
+        _isLoadingMoreTeams.value = true
+        scope.launch {
+            runCatching {
+                teamRepository.getOrganizationTeamsPage(
+                    organizationId = organizationId,
+                    limit = ORGANIZATION_CATALOG_PAGE_SIZE,
+                    offset = offset,
+                ).getOrThrow()
+            }.onSuccess { page ->
+                if (generation == teamsCatalogGeneration) {
+                    _teams.value = mergeOrganizationCatalogItems(
+                        existing = _teams.value,
+                        incoming = page.teams,
+                        id = { team -> team.team.id },
+                    )
+                    nextTeamsOffset = page.nextOffset.coerceAtLeast(offset)
+                    _canLoadMoreTeams.value = page.hasMore
+                    teamsLoaded = true
+                    updateVisibleTabs()
+                }
+            }.onFailure {
+                if (generation == teamsCatalogGeneration) {
+                    _errorState.value = ErrorMessage("Failed to load more teams. Try again.")
+                }
+            }
+            if (generation == teamsCatalogGeneration) {
+                _isLoadingMoreTeams.value = false
+            }
         }
     }
 
@@ -554,35 +821,88 @@ class DefaultOrganizationDetailComponent(
     }
 
     override fun refreshReviews(force: Boolean) {
-        scope.launch {
-            if (_isLoadingReviews.value) return@launch
-            if (reviewsLoaded && !force) return@launch
+        if (_isLoadingReviews.value && !force) return
+        if (reviewsLoaded && !force) return
 
-            _isLoadingReviews.value = true
-            billingRepository.getOrganizationReviews(organizationId)
+        val generation = ++reviewsGeneration
+        _isLoadingReviews.value = true
+        _isLoadingMoreReviews.value = false
+        scope.launch {
+            billingRepository.getOrganizationReviews(
+                organizationId = organizationId,
+                limit = ORGANIZATION_REVIEWS_PAGE_SIZE,
+            )
                 .onSuccess { payload ->
+                    if (generation != reviewsGeneration) return@onSuccess
                     _reviews.value = payload
+                    _canLoadMoreReviews.value = !payload.nextCursor.isNullOrBlank()
                 }
                 .onFailure { error ->
+                    if (generation != reviewsGeneration) return@onFailure
                     _errorState.value = ErrorMessage(error.userMessage("Failed to load organization reviews."))
                 }
+            if (generation != reviewsGeneration) return@launch
             _isLoadingReviews.value = false
             reviewsLoaded = true
         }
     }
 
+    override fun loadMoreReviews() {
+        if (!_canLoadMoreReviews.value || _isLoadingReviews.value || _isLoadingMoreReviews.value) return
+        val cursor = _reviews.value?.nextCursor?.takeIf(String::isNotBlank) ?: return
+        val generation = reviewsGeneration
+        _isLoadingMoreReviews.value = true
+        scope.launch {
+            billingRepository.getOrganizationReviews(
+                organizationId = organizationId,
+                cursor = cursor,
+                limit = ORGANIZATION_REVIEWS_PAGE_SIZE,
+            )
+                .onSuccess { page ->
+                    if (generation != reviewsGeneration) return@onSuccess
+                    val current = _reviews.value ?: return@onSuccess
+                    val mergedReviews = mergeOrganizationCatalogItems(
+                        existing = current.reviews,
+                        incoming = page.reviews,
+                        id = { review -> review.id },
+                    )
+                    val nextCursor = page.nextCursor?.takeIf { next ->
+                        next.isNotBlank() && next != cursor
+                    }
+                    _reviews.value = page.copy(
+                        reviews = mergedReviews,
+                        nextCursor = nextCursor,
+                    )
+                    _canLoadMoreReviews.value = nextCursor != null
+                }
+                .onFailure {
+                    if (generation != reviewsGeneration) return@onFailure
+                    _errorState.value = ErrorMessage("Failed to load more organization reviews. Try again.")
+                }
+            if (generation != reviewsGeneration) return@launch
+            _isLoadingMoreReviews.value = false
+        }
+    }
+
     override fun saveReview(rating: Int, body: String?) {
         if (_isMutatingReview.value) return
+        reviewsGeneration += 1
+        _isLoadingReviews.value = false
+        _isLoadingMoreReviews.value = false
+        _isMutatingReview.value = true
+        _reviewSaveStatus.value = OrganizationReviewSaveStatus.SAVING
         scope.launch {
-            _isMutatingReview.value = true
             billingRepository.saveOrganizationReview(organizationId, rating, body)
                 .onSuccess { payload ->
                     _reviews.value = payload
+                    _canLoadMoreReviews.value = !payload.nextCursor.isNullOrBlank()
                     reviewsLoaded = true
                     _message.value = "Your review has been published."
+                    _reviewSaveStatus.value = OrganizationReviewSaveStatus.SUCCEEDED
                 }
                 .onFailure { error ->
                     _errorState.value = ErrorMessage(error.userMessage("Failed to save your review."))
+                    _reviewSaveStatus.value = OrganizationReviewSaveStatus.FAILED
                 }
             _isMutatingReview.value = false
         }
@@ -590,11 +910,15 @@ class DefaultOrganizationDetailComponent(
 
     override fun deleteReview(reviewId: String) {
         if (_isMutatingReview.value) return
+        reviewsGeneration += 1
+        _isLoadingReviews.value = false
+        _isLoadingMoreReviews.value = false
         scope.launch {
             _isMutatingReview.value = true
             billingRepository.deleteOrganizationReview(organizationId, reviewId)
                 .onSuccess { payload ->
                     _reviews.value = payload
+                    _canLoadMoreReviews.value = !payload.nextCursor.isNullOrBlank()
                     reviewsLoaded = true
                     _message.value = "Your review has been deleted."
                 }
@@ -619,38 +943,61 @@ class DefaultOrganizationDetailComponent(
         navigationHandler.navigateToLogin()
     }
 
-    override fun refreshRentals(force: Boolean) {
-        scope.launch {
-            if (_isLoadingRentals.value) return@launch
-            if (rentalsLoaded && !force) return@launch
-
-            val org = _organization.value
-            if (org == null) {
-                _rentalFieldOptions.value = emptyList()
-                _rentalBusyBlocks.value = emptyList()
-                rentalsLoaded = true
-                updateVisibleTabs()
-                return@launch
-            }
-
-            _isLoadingRentals.value = true
-            val fieldIds = resolveOrganizationFieldIds(org)
-            if (fieldIds.isEmpty()) {
-                _rentalFieldOptions.value = emptyList()
-                _rentalBusyBlocks.value = emptyList()
-                _isLoadingRentals.value = false
-                rentalsLoaded = true
-                updateVisibleTabs()
-                return@launch
-            }
-
-            loadRentalFieldOptions(fieldIds)
-            loadRentalBusyBlocks(org.id, fieldIds)
-
-            _isLoadingRentals.value = false
-            rentalsLoaded = true
-            updateVisibleTabs()
+    override fun refreshRentals(
+        rangeStart: Instant,
+        rangeEnd: Instant,
+        force: Boolean,
+    ) {
+        if (rangeEnd <= rangeStart) {
+            _errorState.value = ErrorMessage("Rental availability range end must be after its start.")
+            return
         }
+
+        val organization = _organization.value ?: return
+        val requestedWindow = RentalAvailabilityWindow(start = rangeStart, end = rangeEnd)
+        if (_isLoadingRentals.value && activeRentalAvailabilityWindow == requestedWindow) return
+        if (!force && rentalsLoaded && _loadedRentalAvailabilityWindow.value == requestedWindow) return
+
+        activeRentalAvailabilityWindow = requestedWindow
+        val generation = ++rentalAvailabilityGeneration
+        rentalAvailabilityJob?.cancel()
+        _loadedRentalAvailabilityWindow.value = null
+        _isLoadingRentals.value = true
+        rentalAvailabilityJob = scope.launch {
+            rentalAvailabilityLoader.loadAvailability(
+                organizationId = organization.id,
+                rangeStart = requestedWindow.start,
+                rangeEnd = requestedWindow.end,
+            ).onSuccess { snapshot ->
+                if (generation != rentalAvailabilityGeneration) return@onSuccess
+                _rentalFieldOptions.value = snapshot.fieldOptions
+                _rentalBusyBlocks.value = snapshot.busyBlocks
+                _loadedRentalAvailabilityWindow.value = requestedWindow
+                rentalsLoaded = true
+                updateVisibleTabs()
+            }.onFailure { error ->
+                if (generation != rentalAvailabilityGeneration) return@onFailure
+                _errorState.value = ErrorMessage(
+                    "Failed to load rental availability: ${error.userMessage()}",
+                )
+            }
+
+            if (generation == rentalAvailabilityGeneration) {
+                _isLoadingRentals.value = false
+                updateVisibleTabs()
+            }
+        }
+    }
+
+    private fun refreshCurrentRentalWeek(force: Boolean) {
+        val timeZone = TimeZone.currentSystemDefault()
+        val today = Clock.System.now().toLocalDateTime(timeZone).date
+        val window = rentalAvailabilityFetchWindowForDate(today, timeZone)
+        refreshRentals(
+            rangeStart = window.start,
+            rangeEnd = window.end,
+            force = force,
+        )
     }
 
     private fun updateVisibleTabs() {
@@ -673,13 +1020,9 @@ class DefaultOrganizationDetailComponent(
     override fun startProductPurchase(product: Product) {
         scope.launch {
             if (_startingProductCheckoutId.value != null) return@launch
-            if (checkoutOperationHost.activeOperation != null) {
-                _errorState.value = ErrorMessage("Another checkout is already in progress.")
-                return@launch
-            }
 
             _startingProductCheckoutId.value = product.id
-            var checkout: PaymentSheetOperation<OrganizationCheckoutOwner>? = null
+            var checkout: OrganizationCheckoutSession? = null
             try {
                 val user = userRepository.currentUser.value.getOrNull()
                 val account = userRepository.currentAccount.value.getOrNull()
@@ -694,10 +1037,7 @@ class DefaultOrganizationDetailComponent(
                     description = "Enter a discount code for ${product.name}, or continue without one.",
                 )
                 checkout = beginOrganizationCheckout(OrganizationCheckoutOwner.PRODUCT) ?: return@launch
-
-                if (::loadingHandler.isInitialized) {
-                    loadingHandler.showLoading("Preparing checkout...")
-                }
+                showOrganizationCheckoutLoading(checkout, "Preparing checkout...")
                 val purchaseIntentResult = if (product.isSinglePurchase()) {
                     billingRepository.createProductPurchaseIntent(product.id, discountCode)
                 } else {
@@ -706,7 +1046,7 @@ class DefaultOrganizationDetailComponent(
                 purchaseIntentResult
                     .onSuccess { intent ->
                         val activeCheckout = checkout ?: return@onSuccess
-                        if (!checkoutOperationHost.isCurrent(activeCheckout)) {
+                        if (!checkoutSessionCoordinator.isCurrent(activeCheckout)) {
                             Napier.w("Ignoring a product intent for inactive checkout ${activeCheckout.operationId}.")
                             return@onSuccess
                         }
@@ -721,31 +1061,24 @@ class DefaultOrganizationDetailComponent(
                             )
                         }.onFailure { error ->
                             if (finishOrganizationCheckout(activeCheckout)) {
-                                _errorState.value = ErrorMessage(
-                                    error.userMessage("Unable to start payment sheet."),
-                                )
-                                if (::loadingHandler.isInitialized) {
-                                    loadingHandler.hideLoading()
-                                }
+                                _errorState.value = ErrorMessage(error.userMessage("Unable to start payment sheet."))
                             }
                         }
                     }
                     .onFailure { error ->
-                        checkout?.let(::finishOrganizationCheckout)
-                        _errorState.value = ErrorMessage("Unable to start checkout: ${error.userMessage()}")
-                        if (::loadingHandler.isInitialized) {
-                            loadingHandler.hideLoading()
+                        checkout?.let { activeCheckout ->
+                            if (finishOrganizationCheckout(activeCheckout)) {
+                                _errorState.value = ErrorMessage("Unable to start checkout: ${error.userMessage()}")
+                            }
                         }
                     }
             } catch (error: Throwable) {
-                checkout?.let(::finishOrganizationCheckout)
-                _errorState.value = ErrorMessage("Unable to start checkout: ${error.userMessage()}")
-                if (::loadingHandler.isInitialized) {
-                    loadingHandler.hideLoading()
+                val activeCheckout = checkout
+                if (activeCheckout == null || finishOrganizationCheckout(activeCheckout)) {
+                    _errorState.value = ErrorMessage("Unable to start checkout: ${error.userMessage()}")
                 }
             } finally {
-                if (pendingProductPurchase == null) {
-                    checkout?.let(::finishOrganizationCheckout)
+                if (pendingProductPurchase == null && checkoutSessionCoordinator.activeSession == null) {
                     _startingProductCheckoutId.value = null
                 }
             }
@@ -758,13 +1091,8 @@ class DefaultOrganizationDetailComponent(
     ) {
         scope.launch {
             if (_isReservingRental.value) return@launch
-            if (checkoutOperationHost.activeOperation != null) {
-                _errorState.value = ErrorMessage("Another checkout is already in progress.")
-                return@launch
-            }
             _completedRentalReservation.value = null
             _isReservingRental.value = true
-            var checkout: PaymentSheetOperation<OrganizationCheckoutOwner>? = null
             try {
                 val organization = _organization.value
                 if (organization == null) {
@@ -805,6 +1133,7 @@ class DefaultOrganizationDetailComponent(
                     publicSlug = publicSlug,
                     context = rentalContext,
                     selections = orderSelections,
+                    payerUserId = user.id,
                     paymentIntentId = null,
                 )
 
@@ -813,63 +1142,73 @@ class DefaultOrganizationDetailComponent(
                     return@launch
                 }
 
-                checkout = beginOrganizationCheckout(OrganizationCheckoutOwner.RENTAL) ?: return@launch
-
-                if (::loadingHandler.isInitialized) {
-                    loadingHandler.showLoading("Preparing rental checkout...")
-                }
+                val checkout = beginOrganizationCheckout(OrganizationCheckoutOwner.RENTAL) ?: return@launch
+                showOrganizationCheckoutLoading(checkout, "Preparing rental checkout...")
                 billingRepository.createPurchaseIntent(
                     event = buildRentalPaymentEvent(
                         organization = organization,
                         context = rentalContext,
                         userId = user.id,
                     ),
-                    timeSlotContext = buildRentalPaymentTimeSlotContext(rentalContext),
+                    timeSlotContext = buildRentalPaymentTimeSlotContext(
+                        context = rentalContext,
+                        selections = orderSelections,
+                    ),
                 ).onSuccess { intent ->
-                    val activeCheckout = checkout ?: return@onSuccess
-                    if (!checkoutOperationHost.isCurrent(activeCheckout)) {
-                        Napier.w("Ignoring a rental intent for inactive checkout ${activeCheckout.operationId}.")
+                    if (!checkoutSessionCoordinator.isCurrent(checkout)) {
+                        Napier.w("Ignoring a rental intent for inactive checkout ${checkout.operationId}.")
                         return@onSuccess
                     }
                     runCatching {
-                        pendingRentalReservation = pendingReservation.copy(
-                            paymentIntentId = intent.paymentIntent.toPaymentIntentId(),
-                        )
-                        pendingRentalCheckoutOperationId = activeCheckout.operationId
+                        val paymentIntentId = intent.paymentIntent.toPaymentIntentId()
+                            ?.trim()
+                            ?.takeIf(String::isNotBlank)
+                            ?: error("Rental checkout did not return a payment intent.")
+                        billingRepository.prepareRentalOrder(
+                            publicSlug = pendingReservation.publicSlug,
+                            eventId = rentalContext.rentalBookingId ?: error("Rental booking id is required."),
+                            selections = pendingReservation.selections,
+                            paymentIntentId = paymentIntentId,
+                            payerUserId = pendingReservation.payerUserId,
+                        ).getOrThrow().also { pendingOrderId ->
+                            pendingRentalReservation = pendingReservation.copy(
+                                paymentIntentId = paymentIntentId,
+                                pendingOrderId = pendingOrderId,
+                            )
+                            pendingRentalCheckoutOperationId = checkout.operationId
+                        }
                         showPaymentSheet(
                             intent = intent,
                             email = account?.email.orEmpty(),
                             name = user.fullName,
-                            checkout = activeCheckout,
+                            checkout = checkout,
                         )
                     }.onFailure { error ->
-                        if (finishOrganizationCheckout(activeCheckout)) {
+                        discardPendingRentalReservation(pendingRentalReservation)
+                        if (finishOrganizationCheckout(checkout)) {
                             _errorState.value = ErrorMessage(error.userMessage("Unable to start rental payment."))
                         }
                     }
                 }.onFailure { error ->
-                    checkout?.let { activeCheckout ->
-                        if (finishOrganizationCheckout(activeCheckout)) {
-                            _errorState.value = ErrorMessage(error.userMessage("Unable to start rental checkout."))
-                        }
+                    if (finishOrganizationCheckout(checkout)) {
+                        _errorState.value = ErrorMessage(error.userMessage("Unable to start rental checkout."))
                     }
                 }
             } finally {
                 if (pendingRentalReservation == null) {
-                    checkout?.let(::finishOrganizationCheckout)
                     _isReservingRental.value = false
-                    if (::loadingHandler.isInitialized) {
-                        loadingHandler.hideLoading()
-                    }
                 }
             }
         }
     }
 
     override fun createEventFromCompletedRentalReservation() {
-        _completedRentalReservation.value ?: return
+        val completedReservation = _completedRentalReservation.value ?: return
         _completedRentalReservation.value = null
-        navigationHandler.navigateToCreate()
+        navigationHandler.navigateToCreateFromRental(
+            rentalBookingId = completedReservation.bookingId,
+            rentalBookingItems = completedReservation.items,
+        )
     }
 
     override fun dismissCompletedRentalReservation() {
@@ -880,10 +1219,6 @@ class DefaultOrganizationDetailComponent(
         scope.launch {
             val teamId = team.team.id.trim()
             if (teamId.isBlank() || _startingTeamRegistrationId.value != null) return@launch
-            if (checkoutOperationHost.activeOperation != null) {
-                _errorState.value = ErrorMessage("Another checkout is already in progress.")
-                return@launch
-            }
 
             _startingTeamRegistrationId.value = teamId
             try {
@@ -894,23 +1229,19 @@ class DefaultOrganizationDetailComponent(
                     return@launch
                 }
 
-                if (::loadingHandler.isInitialized) {
-                    loadingHandler.showLoading("Preparing team registration...")
-                }
-                teamRepository.requestTeamRegistration(teamId)
-                    .onSuccess { result ->
-                        handleTeamRegistrationResult(
-                            team = team,
-                            accountEmail = account?.email.orEmpty(),
-                            payerName = user.fullName,
-                            result = result,
-                        )
-                    }
-                    .onFailure { error ->
-                        _errorState.value = ErrorMessage("Unable to start registration: ${error.userMessage()}")
-                    }
-                if (::loadingHandler.isInitialized) {
-                    loadingHandler.hideLoading()
+                withOrganizationLoading("Preparing team registration...") {
+                    teamRepository.requestTeamRegistration(teamId)
+                        .onSuccess { result ->
+                            handleTeamRegistrationResult(
+                                team = team,
+                                accountEmail = account?.email.orEmpty(),
+                                payerName = user.fullName,
+                                result = result,
+                            )
+                        }
+                        .onFailure { error ->
+                            _errorState.value = ErrorMessage("Unable to start registration: ${error.userMessage()}")
+                        }
                 }
             } finally {
                 if (pendingTeamRegistration == null) {
@@ -945,22 +1276,21 @@ class DefaultOrganizationDetailComponent(
             startTeamSigning(team.team.id) {
                 scope.launch {
                     _startingTeamRegistrationId.value = team.team.id
-                    if (::loadingHandler.isInitialized) {
-                        loadingHandler.showLoading("Refreshing team registration...")
-                    }
-                    teamRepository.requestTeamRegistration(team.team.id)
-                        .onSuccess { refreshed ->
-                            continueTeamRegistration(team, accountEmail, payerName, refreshed)
-                        }.onFailure { error ->
-                            _errorState.value = ErrorMessage(
-                                "Unable to refresh team registration: ${error.userMessage()}",
-                            )
+                    try {
+                        withOrganizationLoading("Refreshing team registration...") {
+                            teamRepository.requestTeamRegistration(team.team.id)
+                                .onSuccess { refreshed ->
+                                    continueTeamRegistration(team, accountEmail, payerName, refreshed)
+                                }.onFailure { error ->
+                                    _errorState.value = ErrorMessage(
+                                        "Unable to refresh team registration: ${error.userMessage()}",
+                                    )
+                                }
                         }
-                    if (::loadingHandler.isInitialized) {
-                        loadingHandler.hideLoading()
-                    }
-                    if (pendingTeamRegistration == null) {
-                        _startingTeamRegistrationId.value = null
+                    } finally {
+                        if (pendingTeamRegistration == null) {
+                            _startingTeamRegistrationId.value = null
+                        }
                     }
                 }
             }
@@ -983,64 +1313,48 @@ class DefaultOrganizationDetailComponent(
         }
 
         _startingTeamRegistrationId.value = teamId
-        var checkout: PaymentSheetOperation<OrganizationCheckoutOwner>? = null
         try {
             if (team.team.registrationPriceCents > 0) {
-                if (checkoutOperationHost.activeOperation != null) {
-                    _errorState.value = ErrorMessage("Another checkout is already in progress.")
-                    return
-                }
                 if (!ensureBillingAddressOrPrompt {
                         scope.launch { continueTeamRegistration(team, accountEmail, payerName, result) }
                     }) {
                     return
                 }
-                if (::loadingHandler.isInitialized) {
-                    loadingHandler.showLoading("Preparing checkout...")
-                }
                 val discountCode = requestDiscountCode(
                     description = "Enter a discount code for this team registration, or continue without one.",
                 )
-                checkout = beginOrganizationCheckout(OrganizationCheckoutOwner.TEAM) ?: return
+                val checkout = beginOrganizationCheckout(OrganizationCheckoutOwner.TEAM) ?: return
+                showOrganizationCheckoutLoading(checkout, "Preparing checkout...")
                 billingRepository.createTeamRegistrationPurchaseIntent(
                     team = team.team,
                     teamRegistration = result.registration,
                     discountCode = discountCode,
                 ).onSuccess { intent ->
-                    val activeCheckout = checkout ?: return@onSuccess
-                    if (!checkoutOperationHost.isCurrent(activeCheckout)) {
-                        Napier.w("Ignoring a team intent for inactive checkout ${activeCheckout.operationId}.")
+                    if (!checkoutSessionCoordinator.isCurrent(checkout)) {
+                        Napier.w("Ignoring a team intent for inactive checkout ${checkout.operationId}.")
                         return@onSuccess
                     }
                     runCatching {
                         pendingTeamRegistration = team
-                        pendingTeamCheckoutOperationId = activeCheckout.operationId
+                        pendingTeamCheckoutOperationId = checkout.operationId
                         showPaymentSheet(
                             intent = intent,
                             email = accountEmail,
                             name = payerName,
-                            checkout = activeCheckout,
+                            checkout = checkout,
                         )
                     }.onFailure { error ->
-                        if (finishOrganizationCheckout(activeCheckout)) {
+                        if (finishOrganizationCheckout(checkout)) {
                             _errorState.value = ErrorMessage(
                                 error.userMessage("Unable to start payment sheet."),
                             )
-                            if (::loadingHandler.isInitialized) {
-                                loadingHandler.hideLoading()
-                            }
                         }
                     }
                 }.onFailure { error ->
-                    checkout?.let { activeCheckout ->
-                        if (finishOrganizationCheckout(activeCheckout)) {
-                            _errorState.value = ErrorMessage(
-                                "Unable to start registration: ${error.userMessage(result.userMessage("Unable to start registration."))}",
-                            )
-                            if (::loadingHandler.isInitialized) {
-                                loadingHandler.hideLoading()
-                            }
-                        }
+                    if (finishOrganizationCheckout(checkout)) {
+                        _errorState.value = ErrorMessage(
+                            "Unable to start registration: ${error.userMessage(result.userMessage("Unable to start registration."))}",
+                        )
                     }
                 }
                 return
@@ -1055,7 +1369,6 @@ class DefaultOrganizationDetailComponent(
             refreshTeams(force = true)
         } finally {
             if (pendingTeamRegistration == null) {
-                checkout?.let(::finishOrganizationCheckout)
                 _startingTeamRegistrationId.value = null
             }
         }
@@ -1065,40 +1378,32 @@ class DefaultOrganizationDetailComponent(
         scope.launch {
             val teamId = team.team.id.trim()
             if (teamId.isBlank()) return@launch
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.showLoading("Leaving team...")
-            }
-            teamRepository.leaveTeam(teamId)
-                .onSuccess {
-                    _message.value = "You left ${team.team.name}."
-                    refreshTeams(force = true)
-                }
-                .onFailure { error ->
-                    _errorState.value = ErrorMessage("Unable to leave team: ${error.userMessage()}")
-                }
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.hideLoading()
+            withOrganizationLoading("Leaving team...") {
+                teamRepository.leaveTeam(teamId)
+                    .onSuccess {
+                        _message.value = "You left ${team.team.name}."
+                        refreshTeams(force = true)
+                    }
+                    .onFailure { error ->
+                        _errorState.value = ErrorMessage("Unable to leave team: ${error.userMessage()}")
+                    }
             }
         }
     }
 
     override fun submitBillingAddress(address: BillingAddressDraft) {
         scope.launch {
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.showLoading("Saving billing address...")
-            }
-            billingRepository.updateBillingAddress(address)
-                .onSuccess {
-                    _billingAddressPrompt.value = null
-                    val action = pendingBillingAddressAction
-                    pendingBillingAddressAction = null
-                    action?.invoke()
-                }
-                .onFailure { error ->
-                    _errorState.value = ErrorMessage(error.userMessage("Unable to save billing address."))
-                }
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.hideLoading()
+            withOrganizationLoading("Saving billing address...") {
+                billingRepository.updateBillingAddress(address)
+                    .onSuccess {
+                        _billingAddressPrompt.value = null
+                        val action = pendingBillingAddressAction
+                        pendingBillingAddressAction = null
+                        action?.invoke()
+                    }
+                    .onFailure { error ->
+                        _errorState.value = ErrorMessage(error.userMessage("Unable to save billing address."))
+                    }
             }
         }
     }
@@ -1128,27 +1433,23 @@ class DefaultOrganizationDetailComponent(
         }
 
         scope.launch {
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.showLoading("Recording signature ...")
-            }
-            val documentId = prompt.step.resolvedDocumentId()
-                ?: "mobile-team-text-${prompt.step.templateId}-${Clock.System.now().toEpochMilliseconds()}"
+            withOrganizationLoading("Recording signature ...") {
+                val documentId = prompt.step.resolvedDocumentId()
+                    ?: "mobile-team-text-${prompt.step.templateId}-${Clock.System.now().toEpochMilliseconds()}"
 
-            billingRepository.recordTeamSignature(
-                teamId = teamId,
-                templateId = prompt.step.templateId,
-                documentId = documentId,
-                type = prompt.step.type,
-            ).onFailure { error ->
-                _errorState.value = ErrorMessage(error.userMessage("Failed to record signature."))
-            }.onSuccess {
-                _textSignaturePrompt.value = null
-                if (awaitTeamSignatureStepClearance(prompt.step)) {
-                    processNextTeamSignatureStep()
+                billingRepository.recordTeamSignature(
+                    teamId = teamId,
+                    templateId = prompt.step.templateId,
+                    documentId = documentId,
+                    type = prompt.step.type,
+                ).onFailure { error ->
+                    _errorState.value = ErrorMessage(error.userMessage("Failed to record signature."))
+                }.onSuccess {
+                    if (awaitTeamSignatureStepClearance(prompt.step)) {
+                        _textSignaturePrompt.value = null
+                        processNextTeamSignatureStep()
+                    }
                 }
-            }
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.hideLoading()
             }
         }
     }
@@ -1164,7 +1465,7 @@ class DefaultOrganizationDetailComponent(
     }
 
     override fun viewEvent(event: Event) {
-        navigationHandler.navigateToEvent(event)
+        navigationHandler.navigateToEvent(event.id)
     }
 
     override fun selectTab(tab: OrganizationDetailTab) {
@@ -1184,48 +1485,93 @@ class DefaultOrganizationDetailComponent(
         intent: PurchaseIntent,
         email: String,
         name: String,
-        checkout: PaymentSheetOperation<OrganizationCheckoutOwner>,
+        checkout: OrganizationCheckoutSession,
     ) {
-        check(checkoutOperationHost.isCurrent(checkout)) {
+        check(checkoutSessionCoordinator.isCurrent(checkout)) {
             "Checkout is no longer active."
         }
         clearPaymentResult()
         setPaymentIntent(intent)
         val billingAddress = loadSavedBillingAddress()
-        if (::loadingHandler.isInitialized) {
-            loadingHandler.showLoading("Waiting for payment completion...")
-        }
-        check(checkoutOperationHost.awaitResult(checkout)) {
+        showOrganizationCheckoutLoading(checkout, "Waiting for payment completion...")
+        check(checkoutSessionCoordinator.awaitResult(checkout)) {
             "Checkout is no longer active."
         }
         presentPaymentSheet(email, name, billingAddress)
     }
 
-    private suspend fun completePendingRentalReservation(pending: PendingRentalReservation) {
-        if (::loadingHandler.isInitialized) {
-            loadingHandler.showLoading("Reserving resources...")
+    internal suspend fun completePendingRentalReservation(pending: PendingRentalReservation) {
+        val checkout = checkoutSessionCoordinator.activeSession?.takeIf { active ->
+            active.owner == OrganizationCheckoutOwner.RENTAL &&
+                active.operationId == pendingRentalCheckoutOperationId
         }
-        billingRepository.createRentalOrder(
-            publicSlug = pending.publicSlug,
-            eventId = pending.context.rentalBookingId?.trim()?.takeIf(String::isNotBlank) ?: newId(),
-            selections = pending.selections,
-            paymentIntentId = pending.paymentIntentId,
-        ).onSuccess { result ->
-            _completedRentalReservation.value = RentalReservationComplete(
-                bookingId = result.bookingId,
-                billId = result.billId,
-                totalCents = result.totalCents,
-            )
-            _message.value = "Resources reserved."
-            refreshRentals(force = true)
-        }.onFailure { error ->
-            _errorState.value = ErrorMessage(error.userMessage("Unable to reserve resources."))
+        if (checkout != null) {
+            showOrganizationCheckoutLoading(checkout, "Reserving resources...")
         }
-        pendingRentalReservation = null
-        _isReservingRental.value = false
-        if (::loadingHandler.isInitialized) {
-            loadingHandler.hideLoading()
+        val standaloneOperation = if (checkout == null && ::loadingHandler.isInitialized) {
+            loadingHandler.newOperation().also { operation ->
+                operation.showLoading("Reserving resources...")
+            }
+        } else {
+            null
         }
+        try {
+            billingRepository.createRentalOrder(
+                publicSlug = pending.publicSlug,
+                eventId = pending.context.rentalBookingId?.trim()?.takeIf(String::isNotBlank) ?: newId(),
+                selections = pending.selections,
+                paymentIntentId = pending.paymentIntentId,
+                payerUserId = pending.payerUserId,
+            ).onSuccess { result ->
+                val itemManifest = result.items.toRentalBookingItemManifestOrNull()
+                if (itemManifest == null) {
+                    _errorState.value = ErrorMessage(
+                        "Payment was recorded, but the reserved-resource details were incomplete. " +
+                            "Do not submit another payment; contact the organization for assistance.",
+                    )
+                    return@onSuccess
+                }
+                _completedRentalReservation.value = RentalReservationComplete(
+                    bookingId = result.bookingId,
+                    billId = result.billId,
+                    totalCents = result.totalCents,
+                    items = itemManifest,
+                )
+                _message.value = "Resources reserved."
+                activeRentalAvailabilityWindow?.let { window ->
+                    refreshRentals(
+                        rangeStart = window.start,
+                        rangeEnd = window.end,
+                        force = true,
+                    )
+                }
+            }.onFailure { error ->
+                _errorState.value = ErrorMessage(
+                    if (error is RentalOrderTerminalFailureException) {
+                        "Payment was recorded, but this reservation needs staff assistance. " +
+                            "Do not submit another payment. " + error.userMessage()
+                    } else if (error is RentalOrderPayerMismatchException) {
+                        "Payment is linked to the original renter account. Sign back in as that renter to finish the reservation."
+                    } else {
+                        "Payment was recorded, but the reservation is still being finalized. " +
+                            "It will retry automatically; do not submit another payment. " +
+                            error.userMessage("Unable to reserve resources right now.")
+                    },
+                )
+            }
+        } finally {
+            pendingRentalReservation = null
+            _isReservingRental.value = false
+            standaloneOperation?.hideLoading()
+        }
+    }
+
+    private suspend fun discardPendingRentalReservation(pending: PendingRentalReservation?) {
+        val pendingOrderId = pending?.pendingOrderId?.trim()?.takeIf(String::isNotBlank) ?: return
+        billingRepository.discardPreparedRentalOrder(pendingOrderId)
+            .onFailure { error ->
+                Napier.w("Unable to discard canceled rental checkout $pendingOrderId: ${error.message}")
+            }
     }
 
     private fun buildRentalPaymentEvent(
@@ -1258,6 +1604,7 @@ class DefaultOrganizationDetailComponent(
 
     private fun buildRentalPaymentTimeSlotContext(
         context: RentalCreateContext,
+        selections: List<RentalOrderSelectionRequest>,
     ): PurchaseIntentTimeSlotContext {
         val bookingId = context.rentalBookingId?.trim()?.takeIf(String::isNotBlank) ?: newId()
         return PurchaseIntentTimeSlotContext(
@@ -1268,29 +1615,27 @@ class DefaultOrganizationDetailComponent(
             scheduledFieldId = context.selectedFieldIds.firstOrNull(),
             scheduledFieldIds = context.selectedFieldIds,
             hostRequiredTemplateIds = context.hostRequiredTemplateIds,
+            rentalSelections = selections,
         )
     }
 
-    private fun RentalCreateContext.withRentalOrderResult(
-        bookingId: String,
-        items: List<RentalOrderItem>,
-    ): RentalCreateContext {
-        return copy(
-            rentalBookingId = bookingId,
-            lockedSelections = lockedSelections.map { selection ->
-                val item = items.firstOrNull { candidate -> candidate.matchesLockedSelection(selection) }
-                selection.copy(rentalBookingItemId = item?.id)
-            },
-        )
-    }
-
-    private fun RentalOrderItem.matchesLockedSelection(selection: com.razumly.mvp.core.presentation.LockedRentalSelection): Boolean {
-        if (fieldId.trim() != selection.fieldId.trim()) {
-            return false
+    private fun List<RentalOrderItem>.toRentalBookingItemManifestOrNull(): List<RentalBookingItemManifest>? {
+        if (isEmpty()) return null
+        val manifest = map { item ->
+            val id = item.id.trim().takeIf(String::isNotBlank) ?: return null
+            val fieldId = item.fieldId.trim().takeIf(String::isNotBlank) ?: return null
+            val start = runCatching { Instant.parse(item.start.trim()) }.getOrNull() ?: return null
+            val end = runCatching { Instant.parse(item.end.trim()) }.getOrNull() ?: return null
+            if (end <= start) return null
+            RentalBookingItemManifest(
+                id = id,
+                fieldId = fieldId,
+                start = start.toString(),
+                end = end.toString(),
+            )
         }
-        val itemStart = runCatching { Instant.parse(start).toEpochMilliseconds() }.getOrNull()
-        val itemEnd = runCatching { Instant.parse(end).toEpochMilliseconds() }.getOrNull()
-        return itemStart == selection.startEpochMillis && itemEnd == selection.endEpochMillis
+        if (manifest.map(RentalBookingItemManifest::id).distinct().size != manifest.size) return null
+        return manifest
     }
 
     private fun String?.toPaymentIntentId(): String? {
@@ -1360,52 +1705,61 @@ class DefaultOrganizationDetailComponent(
         }
 
         val normalizedOperationId = operationId?.trim()?.takeIf(String::isNotBlank)
-        if (normalizedOperationId != null) {
-            _errorState.value = ErrorMessage("Waiting for signature sync...")
-            billingRepository.pollBoldSignOperation(normalizedOperationId).getOrElse { error ->
-                Napier.e("Failed to poll team BoldSign operation.", error)
-                _errorState.value = ErrorMessage(error.userMessage("Failed to confirm signature status."))
-                clearPendingTeamSignatureFlow()
-                return false
+        _teamSignatureSyncProgress.value = TeamSignatureSyncProgress(
+            currentStep = pendingTeamSignatureStepIndex + 1,
+            totalSteps = pendingTeamSignatureSteps.size.coerceAtLeast(1),
+        )
+        return try {
+            if (normalizedOperationId != null) {
+                billingRepository.pollBoldSignOperation(normalizedOperationId).getOrElse { error ->
+                    Napier.e("Failed to poll team BoldSign operation.", error)
+                    _errorState.value = ErrorMessage(error.userMessage("Failed to confirm signature status."))
+                    clearPendingTeamSignatureFlow()
+                    return false
+                }
             }
+
+            val intervalMillis = 2_000L
+            val timeoutMillis = 60_000L
+            var elapsedMillis = 0L
+
+            while (elapsedMillis <= timeoutMillis) {
+                val refreshedSteps = fetchRequiredTeamSignatureSteps(teamId).getOrElse { error ->
+                    _errorState.value = ErrorMessage(error.userMessage("Failed to confirm signature status."))
+                    clearPendingTeamSignatureFlow()
+                    return false
+                }
+
+                if (refreshedSteps.none { refreshedStep -> refreshedStep.matchesPendingTeamSignatureStep(step) }) {
+                    pendingTeamSignatureSteps = refreshedSteps
+                    pendingTeamSignatureStepIndex = 0
+                    return true
+                }
+
+                if (elapsedMillis >= timeoutMillis) {
+                    break
+                }
+
+                delay(intervalMillis)
+                elapsedMillis += intervalMillis
+            }
+
+            clearPendingTeamSignatureFlow()
+            _errorState.value = ErrorMessage("Document synchronization is delayed. Please try again shortly.")
+            false
+        } finally {
+            _teamSignatureSyncProgress.value = null
         }
-
-        val intervalMillis = 2_000L
-        val timeoutMillis = 60_000L
-        var elapsedMillis = 0L
-
-        while (elapsedMillis <= timeoutMillis) {
-            _errorState.value = ErrorMessage("Waiting for signature sync...")
-            val refreshedSteps = fetchRequiredTeamSignatureSteps(teamId).getOrElse { error ->
-                _errorState.value = ErrorMessage(error.userMessage("Failed to confirm signature status."))
-                clearPendingTeamSignatureFlow()
-                return false
-            }
-
-            if (refreshedSteps.none { refreshedStep -> refreshedStep.matchesPendingTeamSignatureStep(step) }) {
-                pendingTeamSignatureSteps = refreshedSteps
-                pendingTeamSignatureStepIndex = 0
-                return true
-            }
-
-            if (elapsedMillis >= timeoutMillis) {
-                break
-            }
-
-            delay(intervalMillis)
-            elapsedMillis += intervalMillis
-        }
-
-        clearPendingTeamSignatureFlow()
-        _errorState.value = ErrorMessage("Document synchronization is delayed. Please try again shortly.")
-        return false
     }
 
     private suspend fun startTeamSigning(teamId: String, onReady: suspend () -> Unit) {
+        _errorState.value = null
+        _teamSignatureSyncProgress.value = null
         pendingTeamSignatureTeamId = teamId.trim().takeIf(String::isNotBlank)
         pendingPostSignatureAction = onReady
         fetchRequiredTeamSignatureSteps(teamId)
             .onFailure { error ->
+                clearPendingTeamSignatureFlow()
                 _errorState.value = ErrorMessage(
                     "Unable to load required documents: ${error.userMessage("Unknown error")}",
                 )
@@ -1444,10 +1798,10 @@ class DefaultOrganizationDetailComponent(
             return
         }
 
-        val signingUrl = currentStep.resolvedSigningUrl()
-        if (signingUrl.isNullOrBlank()) {
+        val signingUrl = trustedBoldSignSigningUrlOrNull(currentStep.resolvedSigningUrl())
+        if (signingUrl == null) {
             clearPendingTeamSignatureFlow()
-            _errorState.value = ErrorMessage("A required document is missing a signing URL.")
+            _errorState.value = ErrorMessage("A required document has an unavailable or invalid signing URL.")
             return
         }
 
@@ -1458,7 +1812,6 @@ class DefaultOrganizationDetailComponent(
             totalSteps = pendingTeamSignatureSteps.size,
         )
 
-        _errorState.value = ErrorMessage("Waiting for signature sync...")
         pendingTeamSignaturePollJob = scope.launch {
             if (awaitTeamSignatureStepClearance(currentStep)) {
                 _webSignaturePrompt.value = null
@@ -1476,6 +1829,7 @@ class DefaultOrganizationDetailComponent(
         pendingPostSignatureAction = null
         _textSignaturePrompt.value = null
         _webSignaturePrompt.value = null
+        _teamSignatureSyncProgress.value = null
     }
 
     private suspend fun loadSavedBillingAddress(): BillingAddressDraft? {
@@ -1485,36 +1839,4 @@ class DefaultOrganizationDetailComponent(
             ?.normalized()
     }
 
-    private suspend fun resolveOrganizationFieldIds(organization: Organization): List<String> {
-        return fieldRepository.listFields()
-            .getOrElse { error ->
-                Napier.w("Failed to load fields for organization rentals: ${error.message}")
-                emptyList()
-            }
-            .filter { field -> field.organizationId == organization.id }
-            .map { field -> field.id }
-            .distinct()
-    }
-
-    private suspend fun loadRentalFieldOptions(fieldIds: List<String>) {
-        _rentalFieldOptions.value = emptyList()
-        rentalAvailabilityLoader.loadFieldOptions(fieldIds)
-            .onSuccess { options ->
-                _rentalFieldOptions.value = options.filter { option -> option.rentalSlots.isNotEmpty() }
-            }
-            .onFailure { error ->
-                _errorState.value = ErrorMessage("Failed to load rental field options: ${error.userMessage()}")
-            }
-    }
-
-    private suspend fun loadRentalBusyBlocks(organizationId: String, fieldIds: List<String>) {
-        rentalAvailabilityLoader.loadBusyBlocks(organizationId = organizationId, fieldIds = fieldIds)
-            .onSuccess { busyBlocks ->
-                _rentalBusyBlocks.value = busyBlocks
-            }
-            .onFailure { error ->
-                _rentalBusyBlocks.value = emptyList()
-                _errorState.value = ErrorMessage("Failed to load existing field events: ${error.userMessage()}")
-            }
-    }
 }

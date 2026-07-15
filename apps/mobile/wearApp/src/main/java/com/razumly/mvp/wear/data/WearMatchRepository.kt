@@ -22,6 +22,107 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
+private const val WEAR_SCHEDULE_PAGE_SIZE = 200
+private const val WEAR_SCHEDULE_MAX_PAGES = 100
+private const val WEAR_SCHEDULE_PAST_DAYS = 90L
+private const val WEAR_SCHEDULE_FUTURE_DAYS = 366L
+
+internal suspend fun loadCompleteWearSchedule(
+    windowFrom: Instant,
+    windowTo: Instant,
+    loadPage: suspend (String) -> WearScheduleResponseDto,
+    pageSize: Int = WEAR_SCHEDULE_PAGE_SIZE,
+    maxPages: Int = WEAR_SCHEDULE_MAX_PAGES,
+): WearScheduleResponseDto {
+    require(pageSize > 0) { "Wear schedule page size must be positive." }
+    require(maxPages > 0) { "Wear schedule page limit must be positive." }
+
+    val encodedWindowFrom = URLEncoder.encode(windowFrom.toString(), "UTF-8")
+    val encodedWindowTo = URLEncoder.encode(windowTo.toString(), "UTF-8")
+    val basePath = "api/profile/schedule?from=$encodedWindowFrom&to=$encodedWindowTo&limit=$pageSize"
+    val eventsById = linkedMapOf<String, WearEventDto>()
+    val matchesById = linkedMapOf<String, WearMatchDto>()
+    val teamsById = linkedMapOf<String, WearTeamDto>()
+    val fieldsById = linkedMapOf<String, WearFieldDto>()
+    val seenCursors = mutableSetOf<String>()
+    var cursor: String? = null
+
+    fun mergedSchedule(pagination: WearSchedulePaginationDto?): WearScheduleResponseDto =
+        WearScheduleResponseDto(
+            events = eventsById.values.toList(),
+            matches = matchesById.values.toList(),
+            teams = teamsById.values.toList(),
+            fields = fieldsById.values.toList(),
+            pagination = pagination,
+        )
+
+    fun validateWindow(pagination: WearSchedulePaginationDto) {
+        pagination.windowFrom?.let { returnedFrom ->
+            check(Instant.parse(returnedFrom) == windowFrom) {
+                "Wear schedule response window changed while paging."
+            }
+        }
+        pagination.windowTo?.let { returnedTo ->
+            check(Instant.parse(returnedTo) == windowTo) {
+                "Wear schedule response window changed while paging."
+            }
+        }
+    }
+
+    repeat(maxPages) { pageIndex ->
+        val pagePath = cursor?.let { value ->
+            "$basePath&cursor=${URLEncoder.encode(value, "UTF-8")}"
+        } ?: basePath
+        val page = loadPage(pagePath)
+
+        page.events.forEachIndexed { index, event ->
+            eventsById[event.resolvedId() ?: "$pageIndex:event:$index"] = event
+        }
+        page.matches.forEachIndexed { index, match ->
+            matchesById[match.resolvedId() ?: "$pageIndex:match:$index"] = match
+        }
+        page.teams.forEachIndexed { index, team ->
+            teamsById[team.resolvedId() ?: "$pageIndex:team:$index"] = team
+        }
+        page.fields.forEachIndexed { index, field ->
+            fieldsById[field.resolvedId() ?: "$pageIndex:field:$index"] = field
+        }
+
+        val pagination = page.pagination
+        if (pagination == null) {
+            check(pageIndex == 0) {
+                "Wear schedule response dropped pagination metadata during continuation."
+            }
+            check(page.events.size < pageSize) {
+                "Wear schedule response reached the legacy server cap without completeness metadata."
+            }
+            return mergedSchedule(pagination = null)
+        }
+
+        validateWindow(pagination)
+        if (!pagination.hasMore) {
+            check(pagination.isComplete != false) {
+                "Wear schedule response declared an incomplete final page."
+            }
+            return mergedSchedule(pagination)
+        }
+
+        check(pagination.isComplete != true) {
+            "Wear schedule response marked a page complete while returning a continuation."
+        }
+        val nextCursor = pagination.nextCursor
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: error("Wear schedule page is incomplete but did not provide a continuation cursor.")
+        check(seenCursors.add(nextCursor)) {
+            "Wear schedule pagination repeated a continuation cursor."
+        }
+        cursor = nextCursor
+    }
+
+    error("Wear schedule endpoint exceeded the safe pagination limit.")
+}
+
 class WearMatchRepository(
     private val api: WearApiClient,
     private val tokenStore: WearAuthTokenStore,
@@ -105,10 +206,7 @@ class WearMatchRepository(
             .plus(cachedMatches.filterKeys { matchId -> matchId !in remoteMatchesById })
             .values
             .toList()
-        val usersById = emptyMap<String, WearUserProfileDto>()
-        val teamsById = schedule.teams
-            .mapNotNull { team -> team.resolvedId()?.let { it to team.toWearTeam(usersById) } }
-            .toMap()
+        val teamsById = hydrateWearTeams(schedule.teams, ::fetchUsers)
         val eventsById = schedule.events.mapNotNull { event -> event.resolvedId()?.let { it to event } }.toMap()
         val fieldsById = schedule.fields.mapNotNull { field -> field.resolvedId()?.let { it to field } }.toMap()
 
@@ -461,6 +559,18 @@ class WearMatchRepository(
         )
     }
 
+    suspend fun deleteIncident(
+        match: WearMatch,
+        incident: WearMatchIncidentDto,
+    ): WearMatchDto {
+        val incidentId = incident.resolvedId().normalizedId()
+            ?: throw WearApiException("Incident is no longer available.")
+        if (match.raw.incidents.none { it.resolvedId() == incidentId }) {
+            throw WearApiException("Incident is no longer available.")
+        }
+        return patchMatch(match, incidentDeletePatch(incidentId))
+    }
+
     fun defaultIncidentClockSeconds(match: WearMatch): Int {
         val segment = match.raw.activeSegment() ?: return 0
         val startedAt = runCatching { Instant.parse(segment.startedAt) }.getOrNull() ?: return 0
@@ -552,13 +662,20 @@ class WearMatchRepository(
     }
 
     private suspend fun refreshRemoteSchedule(sessionUserId: String): WearScheduleResponseDto {
-        val schedule = api.get<WearScheduleResponseDto>("api/profile/schedule")
-        val detailMatches = fetchOfficialEventDetailMatches(schedule.events, sessionUserId)
-        val remoteSchedule = schedule
-            .copy(matches = (detailMatches + schedule.matches).distinctBy { it.resolvedId() })
-            .trimForOfficial(sessionUserId)
-            .withLocalOverlays()
+        val requestedAt = Instant.ofEpochMilli(Instant.now().toEpochMilli())
+        val schedule = loadCompleteWearSchedule(
+            windowFrom = requestedAt.minus(Duration.ofDays(WEAR_SCHEDULE_PAST_DAYS)),
+            windowTo = requestedAt.plus(Duration.ofDays(WEAR_SCHEDULE_FUTURE_DAYS)),
+            loadPage = { path -> api.get<WearScheduleResponseDto>(path) },
+        )
+        val mergedAndTrimmedSchedule = schedule.trimForOfficial(sessionUserId)
+        val remoteSchedule = reconcileAuthoritativeWearSchedule(
+            remoteSchedule = mergedAndTrimmedSchedule,
+            operationStore = operationStore,
+            applyOperation = { match, operation -> match.applyLocalOperation(operation) },
+        )
         operationStore.cacheSchedule(remoteSchedule)
+        remoteSchedule.matches.forEach(operationStore::cacheMatch)
         return remoteSchedule
     }
 
@@ -585,10 +702,10 @@ class WearMatchRepository(
             lastError = null,
             lastAttemptAt = null,
         )
-        val cachedMatch = operationStore.cachedMatches()[matchId]
-            ?: operationStore.cachedSchedule()
-                ?.matches
-                ?.firstOrNull { it.resolvedId() == matchId }
+        val cachedMatch = operationStore.cachedSchedule()
+            ?.matches
+            ?.firstOrNull { it.resolvedId() == matchId }
+            ?: operationStore.cachedMatches()[matchId]
             ?: return false
         operationStore.upsertOperation(importedOperation)
         val updatedMatch = cachedMatch.applyLocalOperation(importedOperation)
@@ -618,14 +735,11 @@ class WearMatchRepository(
                 break
             }
             operationStore.markAcked(operation.id)
-            val remaining = operationStore.localOverlayOperations(operation.matchId)
-            val cachedMatch = if (remaining.isEmpty()) {
-                remoteMatch
-            } else {
-                remaining.fold(remoteMatch) { current, pending ->
-                    current.applyLocalOperation(pending)
-                }
-            }
+            val cachedMatch = reconcileAuthoritativeWearMatch(
+                remoteMatch = remoteMatch,
+                operationStore = operationStore,
+                applyOperation = { current, pending -> current.applyLocalOperation(pending) },
+            )
             operationStore.cacheMatch(cachedMatch)
             syncedCount += 1
         }
@@ -650,21 +764,6 @@ class WearMatchRepository(
             }
         }
         return response.match ?: throw WearApiException("Match response did not include the updated match.")
-    }
-
-    private fun WearScheduleResponseDto.withLocalOverlays(): WearScheduleResponseDto {
-        val operationsByMatchId = operationStore.localOverlayOperations()
-            .mapNotNull { operation -> operation.matchId.normalizedId()?.let { it to operation } }
-            .groupBy({ it.first }, { it.second })
-        if (operationsByMatchId.isEmpty()) return this
-        return copy(
-            matches = matches.map { match ->
-                val matchId = match.resolvedId() ?: return@map match
-                operationsByMatchId[matchId]
-                    .orEmpty()
-                    .fold(match) { current, operation -> current.applyLocalOperation(operation) }
-            },
-        )
     }
 
     private fun WearScoreSetDto.withClientOperation(operation: WearPendingMatchOperation): WearScoreSetDto =
@@ -988,27 +1087,61 @@ class WearMatchRepository(
         }.getOrDefault(emptyMap())
     }
 
-    private suspend fun fetchOfficialEventDetailMatches(
-        events: List<WearEventDto>,
-        sessionUserId: String,
-    ): List<WearMatchDto> {
-        val eventIds = events
-            .filter { event -> event.isOfficialOrHostEventFor(sessionUserId) }
-            .mapNotNull(WearEventDto::resolvedId)
-            .distinct()
-        if (eventIds.isEmpty()) return emptyList()
-        return eventIds.flatMap { eventId ->
-            runCatching {
-                api.get<WearEventDetailResponseDto>("api/events/$eventId/detail").matches
-            }.getOrDefault(emptyList())
-        }
-    }
 }
 
 data class WearSession(
     val userId: String,
     val label: String,
 )
+
+internal fun incidentDeletePatch(incidentId: String): JsonObject {
+    val normalizedIncidentId = incidentId.normalizedId()
+        ?: throw WearApiException("Incident is no longer available.")
+    return buildJsonObject {
+        put(
+            "incidentOperations",
+            JsonArray(
+                listOf(
+                    buildJsonObject {
+                        put("action", JsonPrimitive("DELETE"))
+                        put("id", JsonPrimitive(normalizedIncidentId))
+                    },
+                ),
+            ),
+        )
+    }
+}
+
+internal fun reconcileAuthoritativeWearSchedule(
+    remoteSchedule: WearScheduleResponseDto,
+    operationStore: WearMatchOperationStore,
+    applyOperation: (WearMatchDto, WearPendingMatchOperation) -> WearMatchDto,
+): WearScheduleResponseDto {
+    operationStore.removeImportedOperations()
+    val operationsByMatchId = operationStore.localOverlayOperations()
+        .mapNotNull { operation -> operation.matchId.normalizedId()?.let { it to operation } }
+        .groupBy({ it.first }, { it.second })
+    if (operationsByMatchId.isEmpty()) return remoteSchedule
+    return remoteSchedule.copy(
+        matches = remoteSchedule.matches.map { match ->
+            val matchId = match.resolvedId() ?: return@map match
+            operationsByMatchId[matchId]
+                .orEmpty()
+                .fold(match) { current, operation -> applyOperation(current, operation) }
+        },
+    )
+}
+
+internal fun reconcileAuthoritativeWearMatch(
+    remoteMatch: WearMatchDto,
+    operationStore: WearMatchOperationStore,
+    applyOperation: (WearMatchDto, WearPendingMatchOperation) -> WearMatchDto,
+): WearMatchDto {
+    val matchId = remoteMatch.resolvedId() ?: return remoteMatch
+    operationStore.removeImportedOperations(matchId)
+    return operationStore.localOverlayOperations(matchId)
+        .fold(remoteMatch) { current, operation -> applyOperation(current, operation) }
+}
 
 fun WearIncidentTypeDefinitionDto.isScoring(): Boolean =
     (linkedPointDelta ?: 0) != 0 ||
@@ -1019,6 +1152,28 @@ fun WearIncidentTypeDefinitionDto.isScoring(): Boolean =
 
 fun WearIncidentTypeDefinitionDto.requiresPlayer(rules: WearResolvedMatchRulesDto): Boolean =
     requiresParticipant == true || (isScoring() && rules.pointIncidentRequiresParticipant)
+
+internal suspend fun hydrateWearTeams(
+    teams: List<WearTeamDto>,
+    fetchUsers: suspend (List<String>) -> Map<String, WearUserProfileDto>,
+): Map<String, WearTeam> {
+    val usersById = fetchUsers(
+        teams
+            .flatMap(WearTeamDto::participantUserIds)
+            .distinct(),
+    )
+    return teams
+        .mapNotNull { team -> team.resolvedId()?.let { it to team.toWearTeam(usersById) } }
+        .toMap()
+}
+
+private fun WearTeamDto.participantUserIds(): List<String> {
+    val registrationUserIds = playerRegistrations.orEmpty()
+        .mapNotNull(WearTeamRegistrationDto::participantUserId)
+    return registrationUserIds.ifEmpty {
+        playerIds.orEmpty().mapNotNull { userId -> userId.normalizedId() }
+    }
+}
 
 private fun WearTeamDto.toWearTeam(usersById: Map<String, WearUserProfileDto>): WearTeam {
     val registrations = playerRegistrations.orEmpty()
@@ -1081,13 +1236,6 @@ private fun WearScheduleResponseDto.trimForOfficial(userId: String): WearSchedul
         teams = teams.filter { team -> team.resolvedId() in teamIds },
         fields = fields.filter { field -> field.resolvedId() in fieldIds },
     )
-}
-
-private fun WearEventDto.isOfficialOrHostEventFor(userId: String): Boolean {
-    val normalizedUserId = userId.normalizedId() ?: return false
-    return hostId.normalizedId() == normalizedUserId ||
-        assistantHostIds.orEmpty().any { it.normalizedId() == normalizedUserId } ||
-        officialIds.orEmpty().any { it.normalizedId() == normalizedUserId }
 }
 
 fun WearMatchDto.orderedSegments(): List<WearMatchSegmentDto> =
@@ -1185,6 +1333,18 @@ fun WearMatch.canUseTieBreaker(): Boolean =
         rules.canUseOvertime ||
         rules.supportsShootout ||
         rules.canUseShootout
+
+fun WearMatch.displayScoreFor(teamId: String?): Int {
+    val normalizedTeamId = teamId.normalizedId() ?: return 0
+    return if (rules.scoringModel.equals("SETS", ignoreCase = true)) {
+        (raw.activeSegment() ?: raw.nextPlayableSegment(rules))
+            ?.scores
+            ?.get(normalizedTeamId)
+            ?: 0
+    } else {
+        raw.orderedSegments().sumOf { segment -> segment.scores[normalizedTeamId] ?: 0 }
+    }
+}
 
 fun WearMatch.regulationComplete(): Boolean {
     val regulationCount = rules.segmentCount.coerceAtLeast(1)

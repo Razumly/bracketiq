@@ -39,6 +39,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.password
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -64,6 +67,7 @@ import com.razumly.mvp.wear.data.WearPlayer
 import com.razumly.mvp.wear.data.WearTeam
 import com.razumly.mvp.wear.data.activeSegment
 import com.razumly.mvp.wear.data.canStartSegmentFromDetail
+import com.razumly.mvp.wear.data.displayScoreFor
 import com.razumly.mvp.wear.data.isScoring
 import com.razumly.mvp.wear.data.nextPlayableSegment
 import com.razumly.mvp.wear.data.orderedSegments
@@ -110,17 +114,14 @@ fun MvpWearApp(
                 WearRoute.ACTION_MENU -> ActionMenuScreen(state, actions)
                 WearRoute.INCIDENT_LIST -> IncidentListScreen(state, actions)
                 WearRoute.INCIDENT_EDITOR -> IncidentEditorScreen(state, actions)
+                WearRoute.INCIDENT_DELETE_CONFIRM -> IncidentDeleteConfirmationScreen(state, actions)
                 WearRoute.INCIDENT_TYPES -> IncidentTypeScreen(state, actions)
                 WearRoute.INCIDENT_TEAMS -> IncidentTeamScreen(state, actions)
                 WearRoute.PLAYERS -> PlayerScreen(state, actions)
                 WearRoute.TIME_PICK -> TimePickScreen(state, actions)
             }
             if (state.isLoading) {
-                LoadingPill(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 10.dp),
-                )
+                LoadingScrim()
             }
         }
     }
@@ -179,7 +180,6 @@ private fun MatchListScreen(
         MiniHeader(title = "Upcoming", subtitle = state.currentUserLabel ?: "Officials")
         if (state.matches.isEmpty()) {
             EmptyText("No matches")
-            SecondaryChip(label = "Refresh", onClick = actions.onRefresh)
         } else {
             state.matches.forEach { match ->
                 MatchRow(match = match, onClick = { actions.onMatchSelected(match.id) })
@@ -249,10 +249,10 @@ private fun MatchDetailScreen(
             val active = match.raw.activeSegment() != null
             when {
                 !match.officialCheckedIn -> {
-                    PrimaryChip(label = "Check in", onClick = actions.onCheckIn)
+                    PrimaryChip(label = "Check in", enabled = !state.isLoading, onClick = actions.onCheckIn)
                 }
                 active -> {
-                    PrimaryChip(label = "Timer", onClick = actions.onOpenTimer)
+                    PrimaryChip(label = "Timer", enabled = !state.isLoading, onClick = actions.onOpenTimer)
                 }
                 match.isFinished() -> {
                     SecondaryChip(label = "Finished", enabled = false, onClick = {})
@@ -265,19 +265,30 @@ private fun MatchDetailScreen(
                     ) {
                         PrimaryChip(
                             label = match.startSegmentActionLabel(),
+                            enabled = !state.isLoading,
                             onClick = actions.onStartTimer,
                         )
                         SecondaryChip(
                             label = "Finish Match",
+                            enabled = !state.isLoading,
                             onClick = actions.onEndMatch,
                         )
                     }
                 }
                 match.canStartSegmentFromDetail() -> {
-                    PrimaryChip(label = match.startSegmentActionLabel(), onClick = actions.onStartTimer)
+                    PrimaryChip(
+                        label = match.startSegmentActionLabel(),
+                        enabled = !state.isLoading,
+                        onClick = actions.onStartTimer,
+                    )
                 }
                 else -> {
-                    PrimaryChip(label = "Finish Match", color = Danger, onClick = actions.onEndMatch)
+                    PrimaryChip(
+                        label = "Finish Match",
+                        enabled = !state.isLoading,
+                        color = Danger,
+                        onClick = actions.onEndMatch,
+                    )
                 }
             }
             StatusText(message = state.error, danger = true)
@@ -309,7 +320,7 @@ private fun TimerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Background)
-            .clickable(onClick = actions.onTimerTapped),
+            .clickable(enabled = !state.isLoading, onClick = actions.onTimerTapped),
         contentAlignment = Alignment.Center,
     ) {
         BasicText(
@@ -362,7 +373,7 @@ private fun TeamScorePickerScreen(
                     .fillMaxWidth()
                     .background(HomeBlue)
                     .clickable(
-                        enabled = match.team1 != null,
+                        enabled = !state.isLoading && match.team1 != null,
                         onClick = { match.team1?.id?.let(actions.onTeamSelected) },
                     ),
             )
@@ -372,7 +383,7 @@ private fun TeamScorePickerScreen(
                     .fillMaxWidth()
                     .background(AwayRed)
                     .clickable(
-                        enabled = match.team2 != null,
+                        enabled = !state.isLoading && match.team2 != null,
                         onClick = { match.team2?.id?.let(actions.onTeamSelected) },
                     ),
             )
@@ -389,14 +400,14 @@ private fun TeamScorePickerScreen(
                 .offset(y = -nameOffset),
         )
         ScoreValue(
-            score = match.scoreFor(match.team1?.id),
+            score = match.displayScoreFor(match.team1?.id),
             fontSize = scoreTextSize,
             modifier = Modifier
                 .align(Alignment.Center)
                 .offset(y = -scoreOffset),
         )
         ScoreValue(
-            score = match.scoreFor(match.team2?.id),
+            score = match.displayScoreFor(match.team2?.id),
             fontSize = scoreTextSize,
             modifier = Modifier
                 .align(Alignment.Center)
@@ -419,6 +430,7 @@ private fun TeamScorePickerScreen(
             iconSize = actionIconSize,
             plusFontSize = actionPlusSize,
             textFontSize = actionTextSize,
+            enabled = !state.isLoading,
             onClick = actions.onShowActionMenu,
         )
     }
@@ -441,15 +453,18 @@ private fun ActionMenuScreen(
     ) {
         ActionOptionChip(
             label = "Incidents",
+            enabled = !state.isLoading,
             onClick = actions.onShowIncidentList,
         )
         ActionOptionChip(
             label = "Reset Time",
+            enabled = !state.isLoading,
             onClick = actions.onResetTimer,
         )
         ActionOptionChip(
             label = match.endSegmentActionLabel(),
             color = Danger,
+            enabled = !state.isLoading,
             onClick = actions.onEndSegment,
         )
         StatusText(message = state.error, danger = true)
@@ -554,6 +569,14 @@ private fun IncidentEditorScreen(
                 value = state.incidentClockDisplay().plainLabel,
                 onClick = { actions.onEditIncidentField(WearIncidentField.TIME) },
             )
+            if (state.incidentMode == WearIncidentMode.EDIT) {
+                PrimaryChip(
+                    label = "Delete incident",
+                    color = Danger,
+                    enabled = !state.isLoading,
+                    onClick = actions.onRequestDeleteIncident,
+                )
+            }
             StatusText(message = state.error, danger = true)
             StatusText(message = state.message, danger = false)
         }
@@ -565,6 +588,7 @@ private fun IncidentEditorScreen(
                 label = "Cancel",
                 modifier = Modifier.weight(1f),
                 color = Danger,
+                enabled = !state.isLoading,
                 contentAlignment = Alignment.CenterEnd,
                 onClick = actions.onCancelIncident,
             )
@@ -572,10 +596,65 @@ private fun IncidentEditorScreen(
                 label = if (state.isLoading) "Finished" else "Finish",
                 modifier = Modifier.weight(1f),
                 color = Accent,
+                enabled = !state.isLoading,
                 contentAlignment = Alignment.CenterStart,
                 onClick = actions.onFinishIncident,
             )
         }
+    }
+}
+
+@Composable
+private fun IncidentDeleteConfirmationScreen(
+    state: MvpWearUiState,
+    actions: MvpWearActions,
+) {
+    val match = state.selectedMatch
+    val incident = state.selectedIncident
+    if (match == null || incident == null) {
+        EmptySelection(actions.onBack)
+        return
+    }
+    FixedFooterScreen(
+        title = "Delete incident",
+        onBack = actions.onBack,
+        footer = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                BottomActionButton(
+                    label = "Keep",
+                    modifier = Modifier.weight(1f),
+                    enabled = !state.isLoading,
+                    contentAlignment = Alignment.CenterEnd,
+                    onClick = actions.onBack,
+                )
+                BottomActionButton(
+                    label = "Delete",
+                    modifier = Modifier.weight(1f),
+                    color = Danger,
+                    enabled = !state.isLoading,
+                    contentAlignment = Alignment.CenterStart,
+                    onClick = actions.onDeleteIncident,
+                )
+            }
+        },
+    ) {
+        BasicText(
+            text = "Remove this ${incident.typeLabel(match)}?",
+            style = TextStyle(
+                color = OnSurface,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            ),
+        )
+        BasicText(
+            text = "This cannot be undone after it syncs.",
+            style = TextStyle(color = Muted, fontSize = 10.sp, textAlign = TextAlign.Center),
+        )
+        StatusText(message = state.error, danger = true)
     }
 }
 
@@ -633,10 +712,10 @@ private fun IncidentTeamScreen(
         footer = { BottomActionButton(label = "Cancel", color = Danger, onClick = actions.onCancelIncident) },
     ) {
         match.team1?.let { team ->
-            TeamChip(team = team, score = match.scoreFor(team.id), onClick = { actions.onTeamSelected(team.id) })
+            TeamChip(team = team, score = match.displayScoreFor(team.id), onClick = { actions.onTeamSelected(team.id) })
         }
         match.team2?.let { team ->
-            TeamChip(team = team, score = match.scoreFor(team.id), onClick = { actions.onTeamSelected(team.id) })
+            TeamChip(team = team, score = match.displayScoreFor(team.id), onClick = { actions.onTeamSelected(team.id) })
         }
         StatusText(message = state.error, danger = true)
     }
@@ -853,12 +932,13 @@ private fun BackCircleButton(
 private fun ActionOptionChip(
     label: String,
     color: Color = SurfaceAlt,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     if (color == Danger) {
-        PrimaryChip(label = label, color = color, onClick = onClick)
+        PrimaryChip(label = label, color = color, enabled = enabled, onClick = onClick)
     } else {
-        SecondaryChip(label = label, onClick = onClick)
+        SecondaryChip(label = label, enabled = enabled, onClick = onClick)
     }
 }
 
@@ -903,7 +983,7 @@ private fun BottomActionButton(
 }
 
 @Composable
-private fun WearTextField(
+internal fun WearTextField(
     value: String,
     label: String,
     onValueChange: (String) -> Unit,
@@ -913,10 +993,16 @@ private fun WearTextField(
     imeAction: ImeAction = ImeAction.Next,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
 ) {
+    val isPasswordField = visualTransformation is PasswordVisualTransformation
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics {
+                contentDescription = label
+                if (isPasswordField) password()
+            },
         singleLine = true,
         visualTransformation = visualTransformation,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
@@ -1064,6 +1150,7 @@ private fun CenterActionPill(
     iconSize: androidx.compose.ui.unit.Dp,
     plusFontSize: TextUnit,
     textFontSize: TextUnit,
+    enabled: Boolean,
     onClick: () -> Unit,
 ) {
     Row(
@@ -1072,7 +1159,7 @@ private fun CenterActionPill(
             .height(height)
             .clip(RoundedCornerShape(14.dp))
             .background(Color(0xFFF3F5F8))
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
@@ -1397,6 +1484,19 @@ private fun LoadingPill(modifier: Modifier = Modifier) {
 }
 
 @Composable
+private fun LoadingScrim() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Background.copy(alpha = 0.78f))
+            .clickable(onClick = {}),
+        contentAlignment = Alignment.Center,
+    ) {
+        LoadingPill()
+    }
+}
+
+@Composable
 private fun EmptySelection(onBack: () -> Unit) {
     CenteredWatchScreen {
         EmptyText("Nothing selected")
@@ -1467,11 +1567,6 @@ private fun WearMatch.endSegmentActionLabel(): String {
 private fun WearMatch.startTimeLabel(): String? =
     startIso?.let(::formatStartTime)
 
-private fun WearMatch.scoreFor(teamId: String?): Int {
-    if (teamId == null) return 0
-    return raw.orderedSegments().sumOf { segment -> segment.scores[teamId] ?: 0 }
-}
-
 private fun WearMatch.teamFor(teamId: String?): WearTeam? =
     listOfNotNull(team1, team2).firstOrNull { it.id == teamId }
 
@@ -1488,11 +1583,11 @@ private fun formatStartTime(raw: String): String? =
             .format(Instant.parse(raw))
     }.getOrNull()
 
-private fun formatDuration(seconds: Long): String {
+internal fun formatMatchClockDuration(seconds: Long): String {
     val safeSeconds = seconds.coerceAtLeast(0)
     val minutes = safeSeconds / 60
     val remainder = safeSeconds % 60
-    return "${minutes.toString().padStart(3, '0')}:${remainder.toString().padStart(2, '0')}"
+    return "$minutes:${remainder.toString().padStart(2, '0')}"
 }
 
 private data class MatchClockDisplay(
@@ -1521,15 +1616,15 @@ private fun WearMatch.clockDisplay(elapsedSeconds: Long): MatchClockDisplay {
     val activeSegment = raw.activeSegment()
     val safeSeconds = elapsedSeconds.coerceAtLeast(0).toInt()
     if (!rules.timekeeping.addedTimeEnabled || activeSegment == null) {
-        return MatchClockDisplay(formatDuration(safeSeconds.toLong()), isAddedTime = false)
+        return MatchClockDisplay(formatMatchClockDuration(safeSeconds.toLong()), isAddedTime = false)
     }
     val durationSeconds = durationSecondsForSequence(activeSegment.sequence)
-        ?: return MatchClockDisplay(formatDuration(safeSeconds.toLong()), isAddedTime = false)
+        ?: return MatchClockDisplay(formatMatchClockDuration(safeSeconds.toLong()), isAddedTime = false)
     val offsetSeconds = regulationOffsetSeconds(activeSegment)
     return if (safeSeconds >= durationSeconds) {
-        MatchClockDisplay("+${formatDuration((safeSeconds - durationSeconds).toLong())}", isAddedTime = true)
+        MatchClockDisplay("+${formatMatchClockDuration((safeSeconds - durationSeconds).toLong())}", isAddedTime = true)
     } else {
-        MatchClockDisplay(formatDuration((offsetSeconds + safeSeconds).toLong()), isAddedTime = false)
+        MatchClockDisplay(formatMatchClockDuration((offsetSeconds + safeSeconds).toLong()), isAddedTime = false)
     }
 }
 

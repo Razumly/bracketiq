@@ -32,7 +32,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,16 +46,14 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.repositories.AccountDeletionRequest
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
-import com.razumly.mvp.core.util.emailAddressRegex
 import com.razumly.mvp.eventDetail.composables.SelectEventImage
 import io.github.ismoy.imagepickerkmp.domain.models.MimeType
-import io.github.ismoy.imagepickerkmp.presentation.ui.components.GalleryPickerLauncher
+import io.github.ismoy.imagepickerkmp.features.imagepicker.ui.rememberImagePickerKMP
 
 private const val DELETE_ACCOUNT_CONFIRMATION_TEXT = "delete my account"
 
@@ -71,28 +68,21 @@ fun ProfileDetailsScreen(
     val currentUser by component.currentUser.collectAsState()
     val currentAccount by component.currentAccount.collectAsState()
     val lastUploadedImageId by component.lastUploadedImageId.collectAsState()
-    val accountDeletionMfaChallenge by component.accountDeletionMfaChallenge.collectAsState()
-    val accountDeletionError by component.accountDeletionError.collectAsState()
+    val passwordChangeCompleted by component.passwordChangeCompleted.collectAsState()
 
     // Form state
-    var email by remember { mutableStateOf("") }
-    var firstName by remember { mutableStateOf("") }
-    var lastName by remember { mutableStateOf("") }
-    var profileImageId by remember { mutableStateOf<String?>(null) }
+    var draftState by remember { mutableStateOf(ProfileDetailsDraftState()) }
+    val draft = draftState.draft
     var currentPassword by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
-    var userName by remember { mutableStateOf("") }
     var confirmNewPassword by remember { mutableStateOf("") }
     var currentPasswordVisible by remember { mutableStateOf(false) }
     var newPasswordVisible by remember { mutableStateOf(false) }
     var confirmNewPasswordVisible by remember { mutableStateOf(false) }
-    var showUploadImagePicker by remember { mutableStateOf(false) }
     var showImageSelector by rememberSaveable { mutableStateOf(false) }
     var pendingProfileImageId by remember { mutableStateOf<String?>(null) }
     var showDeleteAccountDialog by rememberSaveable { mutableStateOf(false) }
     var deleteAccountConfirmationText by rememberSaveable { mutableStateOf("") }
-    var deleteAccountCurrentPassword by remember { mutableStateOf("") }
-    var deleteAccountMfaCode by remember { mutableStateOf("") }
 
     val uploadedImageIds = remember(currentUser.uploadedImages) {
         currentUser.uploadedImages
@@ -100,58 +90,35 @@ fun ProfileDetailsScreen(
             .filter(String::isNotBlank)
             .distinct()
     }
-    val selectableImageIds = remember(uploadedImageIds, profileImageId) {
-        (uploadedImageIds + listOfNotNull(profileImageId?.trim()?.takeIf(String::isNotBlank))).distinct()
+    val selectableImageIds = remember(uploadedImageIds, draft.profileImageId) {
+        (uploadedImageIds + listOfNotNull(draft.profileImageId?.trim()?.takeIf(String::isNotBlank))).distinct()
     }
-    val avatarDisplayName = remember(firstName, lastName, userName) {
-        listOf(firstName.trim(), lastName.trim())
+    val avatarDisplayName = remember(draft.firstName, draft.lastName, draft.userName) {
+        listOf(draft.firstName.trim(), draft.lastName.trim())
             .filter(String::isNotBlank)
             .joinToString(" ")
-            .ifBlank { userName.trim().ifBlank { "User" } }
+            .ifBlank { draft.userName.trim().ifBlank { "User" } }
     }
-
-    val isEmailValid by remember {
-        derivedStateOf {
-            email.isNotBlank() && email.matches(emailAddressRegex)
-        }
-    }
-    val isFirstNameValid by remember { derivedStateOf { firstName.isNotBlank() } }
-    val isLastNameValid by remember { derivedStateOf { lastName.isNotBlank() } }
-    val isPasswordValid by remember {
-        derivedStateOf {
-            if (newPassword.isBlank() && confirmNewPassword.isBlank()) return@derivedStateOf true
-            // Server requires currentPassword + newPassword >= 8
-            currentPassword.isNotBlank() && newPassword.length >= 8 && newPassword == confirmNewPassword
-        }
-    }
-    val passwordsMatch by remember {
-        derivedStateOf { newPassword.isBlank() || newPassword == confirmNewPassword }
-    }
-
-    val isFormValid by remember {
-        derivedStateOf {
-            isEmailValid && isFirstNameValid && isLastNameValid && isPasswordValid
-        }
-    }
-    val hasDeleteAccountConfirmation by remember {
-        derivedStateOf {
-            deleteAccountConfirmationText.trim()
-                .equals(DELETE_ACCOUNT_CONFIRMATION_TEXT, ignoreCase = true)
-        }
-    }
-    val deleteAccountMfaCodeIsComplete by remember {
-        derivedStateOf {
-            val code = deleteAccountMfaCode.trim()
-            code.length == 6 && code.all(Char::isDigit)
-        }
-    }
-    val canConfirmDeleteAccount by remember {
-        derivedStateOf {
-            hasDeleteAccountConfirmation && (
-                accountDeletionMfaChallenge == null || deleteAccountMfaCodeIsComplete
+    val profilePhotoPicker = rememberImagePickerKMP()
+    val launchProfilePhotoPicker = remember(profilePhotoPicker) {
+        {
+            profilePhotoPicker.launchGallery(
+                allowMultiple = false,
+                mimeTypes = listOf(MimeType.IMAGE_ALL),
             )
         }
     }
+
+    val formValidation = validateProfileDetailsForm(
+        draft = draft,
+    )
+    val passwordChangeValidation = validatePasswordChangeForm(
+        currentPassword = currentPassword,
+        newPassword = newPassword,
+        confirmNewPassword = confirmNewPassword,
+    )
+    val canConfirmDeleteAccount = deleteAccountConfirmationText.trim()
+        .equals(DELETE_ACCOUNT_CONFIRMATION_TEXT, ignoreCase = true)
     val passwordKeyboardOptions = remember {
         KeyboardOptions(
             keyboardType = KeyboardType.Password,
@@ -159,33 +126,14 @@ fun ProfileDetailsScreen(
         )
     }
 
-    fun resetAccountDeletionDialogState() {
-        showDeleteAccountDialog = false
-        deleteAccountConfirmationText = ""
-        deleteAccountCurrentPassword = ""
-        deleteAccountMfaCode = ""
-        component.clearAccountDeletionState()
-    }
-
-    fun submitAccountDeletion() {
-        if (!canConfirmDeleteAccount) return
-        component.deleteAccount(
-            AccountDeletionRequest(
-                confirmationText = deleteAccountConfirmationText,
-                currentPassword = deleteAccountCurrentPassword.takeIf(String::isNotBlank),
-                mfaChallengeId = accountDeletionMfaChallenge?.challengeId,
-                mfaCode = deleteAccountMfaCode.takeIf(String::isNotBlank),
-            ),
-        )
-    }
-
-    // Initialize form with current data
+    // Only hydrate a clean draft. Repository refreshes can change either full object while the
+    // user is editing this form (for example after deleting an uploaded image).
     LaunchedEffect(currentUser, currentAccount) {
-        userName = currentUser.userName
-        firstName = currentUser.firstName
-        lastName = currentUser.lastName
-        email = currentAccount.email
-        profileImageId = currentUser.profileImageId
+        draftState = reconcileProfileDetailsDraft(
+            state = draftState,
+            currentUser = currentUser,
+            currentAccount = currentAccount,
+        )
     }
 
     LaunchedEffect(lastUploadedImageId) {
@@ -194,9 +142,23 @@ fun ProfileDetailsScreen(
             if (showImageSelector) {
                 pendingProfileImageId = uploadedId
             } else {
-                profileImageId = uploadedId
+                draftState = draftState.copy(
+                    draft = draftState.draft.copy(profileImageId = uploadedId),
+                )
             }
             component.consumeUploadedImageSelection()
+        }
+    }
+
+    LaunchedEffect(passwordChangeCompleted) {
+        if (passwordChangeCompleted) {
+            currentPassword = ""
+            newPassword = ""
+            confirmNewPassword = ""
+            currentPasswordVisible = false
+            newPasswordVisible = false
+            confirmNewPasswordVisible = false
+            component.consumePasswordChangeCompletion()
         }
     }
 
@@ -217,21 +179,26 @@ fun ProfileDetailsScreen(
         }
     }
 
-    if (showUploadImagePicker) {
-        GalleryPickerLauncher(
-            onPhotosSelected = { photos ->
-                showUploadImagePicker = false
-                photos.firstOrNull()?.let(component::onUploadSelected)
-            },
-            onError = {
-                showUploadImagePicker = false
-            },
-            onDismiss = {
-                showUploadImagePicker = false
-            },
-            allowMultiple = false,
-            mimeTypes = listOf(MimeType.IMAGE_ALL),
-        )
+    LaunchedEffect(profilePhotoPicker.result) {
+        when (val outcome = resolveProfilePhotoPickerOutcome(profilePhotoPicker.result)) {
+            ProfilePhotoPickerOutcome.Ignore -> Unit
+            is ProfilePhotoPickerOutcome.Upload -> {
+                profilePhotoPicker.reset()
+                component.onUploadSelected(
+                    photo = outcome.photo,
+                    onRetry = launchProfilePhotoPicker,
+                )
+            }
+            is ProfilePhotoPickerOutcome.Failure -> {
+                profilePhotoPicker.reset()
+                popupHandler.showPopup(
+                    profilePhotoRetryError(
+                        message = outcome.message,
+                        onRetry = launchProfilePhotoPicker,
+                    ),
+                )
+            }
+        }
     }
 
     if (showImageSelector) {
@@ -244,22 +211,26 @@ fun ProfileDetailsScreen(
                     },
                     imageIds = selectableImageIds,
                     initialSelectedImageId = pendingProfileImageId,
-                    onUploadSelected = { showUploadImagePicker = true },
+                    onUploadSelected = launchProfilePhotoPicker,
                     onDeleteImage = { imageId ->
                         component.deleteImage(imageId)
                         if (pendingProfileImageId == imageId) {
                             pendingProfileImageId = null
                         }
-                        if (profileImageId == imageId) {
-                            profileImageId = null
+                        if (draft.profileImageId == imageId) {
+                            draftState = draftState.copy(
+                                draft = draftState.draft.copy(profileImageId = null),
+                            )
                         }
                     },
                     onConfirm = {
-                        profileImageId = pendingProfileImageId
+                        draftState = draftState.copy(
+                            draft = draftState.draft.copy(profileImageId = pendingProfileImageId),
+                        )
                         showImageSelector = false
                     },
                     onCancel = {
-                        pendingProfileImageId = profileImageId
+                        pendingProfileImageId = draft.profileImageId
                         showImageSelector = false
                     },
                 )
@@ -269,7 +240,10 @@ fun ProfileDetailsScreen(
 
     if (showDeleteAccountDialog) {
         AlertDialog(
-            onDismissRequest = ::resetAccountDeletionDialogState,
+            onDismissRequest = {
+                showDeleteAccountDialog = false
+                deleteAccountConfirmationText = ""
+            },
             title = { Text("Delete Account") },
             text = {
                 Column(
@@ -283,22 +257,15 @@ fun ProfileDetailsScreen(
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     StandardTextField(
-                        value = deleteAccountCurrentPassword,
-                        onValueChange = { deleteAccountCurrentPassword = it },
-                        label = "Current password",
-                        isPassword = true,
-                        keyboardType = "password",
-                        imeAction = ImeAction.Next,
-                        supportingText = "Required for password sign-ins. Google or Apple accounts must sign in again first.",
-                    )
-                    StandardTextField(
                         value = deleteAccountConfirmationText,
                         onValueChange = { deleteAccountConfirmationText = it },
                         label = "Confirmation",
                         imeAction = ImeAction.Done,
                         onImeAction = {
                             if (canConfirmDeleteAccount) {
-                                submitAccountDeletion()
+                                showDeleteAccountDialog = false
+                                component.deleteAccount(deleteAccountConfirmationText)
+                                deleteAccountConfirmationText = ""
                             }
                         },
                         supportingText = if (deleteAccountConfirmationText.isNotBlank() && !canConfirmDeleteAccount) {
@@ -306,46 +273,17 @@ fun ProfileDetailsScreen(
                         } else {
                             ""
                         },
-                        isError = deleteAccountConfirmationText.isNotBlank() && !hasDeleteAccountConfirmation,
+                        isError = deleteAccountConfirmationText.isNotBlank() && !canConfirmDeleteAccount,
                     )
-                    if (accountDeletionMfaChallenge != null) {
-                        Text(
-                            "Authenticator verification is required. Enter the six-digit code from your authenticator app to continue.",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        StandardTextField(
-                            value = deleteAccountMfaCode,
-                            onValueChange = { value ->
-                                deleteAccountMfaCode = value.filter(Char::isDigit).take(6)
-                            },
-                            label = "Authenticator code",
-                            keyboardType = "number",
-                            imeAction = ImeAction.Done,
-                            onImeAction = ::submitAccountDeletion,
-                            supportingText = "The challenge expires soon. Request a new one if the code expires.",
-                            isError = deleteAccountMfaCode.isNotBlank() && !deleteAccountMfaCodeIsComplete,
-                        )
-                        TextButton(
-                            onClick = {
-                                deleteAccountMfaCode = ""
-                                component.clearAccountDeletionState()
-                            },
-                        ) {
-                            Text("Request a new code")
-                        }
-                    }
-                    accountDeletionError?.let { error ->
-                        Text(
-                            error,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
                 }
             },
             confirmButton = {
                 Button(
-                    onClick = ::submitAccountDeletion,
+                    onClick = {
+                        showDeleteAccountDialog = false
+                        component.deleteAccount(deleteAccountConfirmationText)
+                        deleteAccountConfirmationText = ""
+                    },
                     enabled = canConfirmDeleteAccount,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.error,
@@ -357,7 +295,10 @@ fun ProfileDetailsScreen(
             },
             dismissButton = {
                 TextButton(
-                    onClick = ::resetAccountDeletionDialogState,
+                    onClick = {
+                        showDeleteAccountDialog = false
+                        deleteAccountConfirmationText = ""
+                    },
                 ) {
                     Text("Cancel")
                 }
@@ -391,19 +332,27 @@ fun ProfileDetailsScreen(
             )
 
             StandardTextField(
-                value = userName,
-                onValueChange = { userName = it },
+                value = draft.userName,
+                onValueChange = { userName ->
+                    draftState = draftState.copy(
+                        draft = draftState.draft.copy(userName = userName),
+                    )
+                },
                 label = "Username",
-                isError = userName.isBlank(),
-                supportingText = if (userName.isBlank()) "Required" else ""
+                isError = !formValidation.isUserNameValid,
+                supportingText = if (!formValidation.isUserNameValid) "Username is required" else ""
             )
 
             StandardTextField(
-                value = email,
-                onValueChange = { email = it },
+                value = draft.email,
+                onValueChange = { email ->
+                    draftState = draftState.copy(
+                        draft = draftState.draft.copy(email = email),
+                    )
+                },
                 label = "Email",
                 keyboardType = "email",
-                isError = !isEmailValid && email.isNotBlank(),
+                isError = !formValidation.isEmailValid && draft.email.isNotBlank(),
                 supportingText = "Email changes are not supported yet",
                 enabled = false,
                 readOnly = true,
@@ -414,21 +363,29 @@ fun ProfileDetailsScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 StandardTextField(
-                    value = firstName,
-                    onValueChange = { firstName = it },
+                    value = draft.firstName,
+                    onValueChange = { firstName ->
+                        draftState = draftState.copy(
+                            draft = draftState.draft.copy(firstName = firstName),
+                        )
+                    },
                     label = "First Name",
                     modifier = Modifier.weight(1f),
-                    isError = !isFirstNameValid && firstName.isNotBlank(),
-                    supportingText = if (!isFirstNameValid && firstName.isNotBlank()) "Required" else ""
+                    isError = !formValidation.isFirstNameValid && draft.firstName.isNotBlank(),
+                    supportingText = if (!formValidation.isFirstNameValid && draft.firstName.isNotBlank()) "Required" else ""
                 )
 
                 StandardTextField(
-                    value = lastName,
-                    onValueChange = { lastName = it },
+                    value = draft.lastName,
+                    onValueChange = { lastName ->
+                        draftState = draftState.copy(
+                            draft = draftState.draft.copy(lastName = lastName),
+                        )
+                    },
                     label = "Last Name",
                     modifier = Modifier.weight(1f),
-                    isError = !isLastNameValid && lastName.isNotBlank(),
-                    supportingText = if (!isLastNameValid && lastName.isNotBlank()) "Required" else ""
+                    isError = !formValidation.isLastNameValid && draft.lastName.isNotBlank(),
+                    supportingText = if (!formValidation.isLastNameValid && draft.lastName.isNotBlank()) "Required" else ""
                 )
             }
 
@@ -445,7 +402,7 @@ fun ProfileDetailsScreen(
             ) {
                 NetworkAvatar(
                     displayName = avatarDisplayName,
-                    imageRef = profileImageId,
+                    imageRef = draft.profileImageId,
                     size = 80.dp,
                     contentDescription = "Profile picture",
                 )
@@ -454,7 +411,7 @@ fun ProfileDetailsScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Button(onClick = {
-                        pendingProfileImageId = profileImageId
+                        pendingProfileImageId = draft.profileImageId
                         showImageSelector = true
                     }) {
                         Text("Change Profile Photo")
@@ -462,9 +419,10 @@ fun ProfileDetailsScreen(
                 }
             }
 
-            // Password Section
+            // Password changes are intentionally a separate mutation from Profile Save so a
+            // later profile-validation or network failure cannot hide a successful password change.
             Text(
-                "Change Password (Optional)",
+                "Change Password",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(top = 8.dp)
             )
@@ -485,11 +443,11 @@ fun ProfileDetailsScreen(
                     }
                 },
                 supportingText = {
-                    if (newPassword.isNotBlank() && currentPassword.isBlank()) {
+                    if (newPassword.isNotBlank() && !passwordChangeValidation.hasCurrentPassword) {
                         Text("Required to change password", color = MaterialTheme.colorScheme.error)
                     }
                 },
-                isError = newPassword.isNotBlank() && currentPassword.isBlank()
+                isError = newPassword.isNotBlank() && !passwordChangeValidation.hasCurrentPassword
             )
 
             OutlinedTextField(
@@ -508,14 +466,14 @@ fun ProfileDetailsScreen(
                     }
                 },
                 supportingText = {
-                    if (newPassword.isNotBlank() && newPassword.length < 8) {
+                    if (newPassword.isNotBlank() && !passwordChangeValidation.isNewPasswordLongEnough) {
                         Text(
                             "Password must be at least 8 characters",
                             color = MaterialTheme.colorScheme.error
                         )
                     }
                 },
-                isError = newPassword.isNotBlank() && newPassword.length < 8
+                isError = newPassword.isNotBlank() && !passwordChangeValidation.isNewPasswordLongEnough
             )
 
             if (newPassword.isNotBlank()) {
@@ -535,29 +493,44 @@ fun ProfileDetailsScreen(
                         }
                     },
                     supportingText = {
-                        if (confirmNewPassword.isNotBlank() && !passwordsMatch) {
+                        if (confirmNewPassword.isNotBlank() && !passwordChangeValidation.passwordsMatch) {
                             Text("Passwords do not match", color = MaterialTheme.colorScheme.error)
                         }
                     },
-                    isError = confirmNewPassword.isNotBlank() && !passwordsMatch
+                    isError = confirmNewPassword.isNotBlank() && !passwordChangeValidation.passwordsMatch
                 )
+            }
+
+            Button(
+                onClick = {
+                    component.changePassword(
+                        currentPassword = currentPassword,
+                        newPassword = newPassword,
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = passwordChangeValidation.canSubmit,
+            ) {
+                Text("Change Password")
             }
 
             // Save Button
             Button(
                 onClick = {
-                    component.updateProfile(
-                        firstName = firstName,
-                        lastName = lastName,
-                        email = email,
-                        currentPassword = currentPassword,
-                        newPassword = newPassword,
-                        userName = userName,
-                        profileImageId = profileImageId,
-                    )
+                    formValidation.normalizedUserName?.let { normalizedUserName ->
+                        val submittedDraft = draft.copy(userName = normalizedUserName)
+                        draftState = draftState.copy(draft = submittedDraft)
+                        component.updateProfile(
+                            firstName = submittedDraft.firstName,
+                            lastName = submittedDraft.lastName,
+                            email = submittedDraft.email,
+                            userName = submittedDraft.userName,
+                            profileImageId = submittedDraft.profileImageId,
+                        )
+                    }
                 },
                 modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                enabled = isFormValid
+                enabled = formValidation.canSave,
             ) {
                 Text("Save Profile Changes")
             }
@@ -591,9 +564,6 @@ fun ProfileDetailsScreen(
                     Button(
                         onClick = {
                             deleteAccountConfirmationText = ""
-                            deleteAccountCurrentPassword = ""
-                            deleteAccountMfaCode = ""
-                            component.clearAccountDeletionState()
                             showDeleteAccountDialog = true
                         },
                         colors = ButtonDefaults.buttonColors(

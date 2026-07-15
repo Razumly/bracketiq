@@ -9,6 +9,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -28,6 +29,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,7 +47,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -53,7 +58,6 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
@@ -63,11 +67,16 @@ import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.TermsConsentDialog
 import com.razumly.mvp.core.presentation.util.timeFormat
+import com.razumly.mvp.chat.composables.isChatListNearBottom
+import com.razumly.mvp.chat.composables.isOlderHistoryPrepend
+import com.razumly.mvp.chat.composables.resolveChatScrollUpdate
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.Month
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import androidx.compose.ui.window.Dialog
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -77,17 +86,38 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     val verticalShift = 4.dp
     val input by component.messageInput.collectAsState()
     val chatGroupWithRelations by component.chatGroup.collectAsState()
+    val isChatLoading by component.isChatLoading.collectAsState()
+    val canLoadOlderMessages by component.canLoadOlderMessages.collectAsState()
+    val isLoadingOlderMessages by component.isLoadingOlderMessages.collectAsState()
     val errorMessage by component.errorState.collectAsState()
+    val feedback by component.feedback.collectAsState()
     val friends by component.friends.collectAsState()
     val suggestedPlayers by component.suggestedPlayers.collectAsState()
     val isChatMuted by component.isChatMuted.collectAsState()
     val chatTermsState by component.chatTermsState.collectAsState()
     val isCheckingChatTerms by component.isCheckingChatTerms.collectAsState()
     val showChatTermsPrompt by component.showChatTermsPrompt.collectAsState()
+    if (isChatLoading) {
+        ChatAvailabilityScreen(
+            isLoading = true,
+            errorMessage = errorMessage,
+            onBack = component::onBack,
+        )
+        return
+    }
+    val resolvedChatGroup = chatGroupWithRelations ?: run {
+        ChatAvailabilityScreen(
+            isLoading = false,
+            errorMessage = errorMessage,
+            onBack = component::onBack,
+        )
+        return
+    }
     val currentUserId = component.currentUser.id
-    val chatGroup = chatGroupWithRelations?.chatGroup ?: ChatGroup.empty()
-    val messages = chatGroupWithRelations?.messages ?: listOf()
-    val users = chatGroupWithRelations?.users ?: listOf()
+    val chatGroup = resolvedChatGroup.chatGroup
+    val chatId = chatGroup.id
+    val messages = resolvedChatGroup.messages
+    val users = resolvedChatGroup.users
     val isHost = chatGroup.hostId == currentUserId
     val participantNames = users
         .mapNotNull { user -> user.fullName.asMeaningfulText() }
@@ -99,6 +129,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
         ?: participantNames
         ?: "Chat"
     val listState = rememberLazyListState()
+    val scrollScope = rememberCoroutineScope()
     val density = LocalDensity.current
     val imeBottom = WindowInsets.ime.getBottom(density)
     val focusManager = LocalFocusManager.current
@@ -119,16 +150,64 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     var showReportChatDialog by remember { mutableStateOf(false) }
     var showReportLeaveDialog by remember { mutableStateOf(false) }
     var reportNotes by remember { mutableStateOf("") }
+    var previousMessageCount by remember(chatId) { mutableStateOf(0) }
+    var previousLatestMessageKey by remember(chatId) { mutableStateOf("") }
+    var unseenMessageCount by remember(chatId) { mutableStateOf(0) }
+    var wasNearBottom by remember(chatId) { mutableStateOf(true) }
+    val currentMessageCount by rememberUpdatedState(messages.size)
+    val historyHeaderCount = if (canLoadOlderMessages || isLoadingOlderMessages) 1 else 0
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
-        }
+    LaunchedEffect(listState, chatId, historyHeaderCount) {
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect {
+                val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                val isNearBottom = isChatListNearBottom(
+                    lastVisibleItemIndex = lastVisibleIndex - historyHeaderCount,
+                    messageCount = currentMessageCount,
+                )
+                wasNearBottom = isNearBottom
+                if (isNearBottom) {
+                    unseenMessageCount = 0
+                }
+            }
     }
 
-    LaunchedEffect(imeBottom) {
+    LaunchedEffect(latestMessageKey, messages.size, currentUserId, historyHeaderCount) {
+        if (messages.isEmpty()) {
+            previousMessageCount = 0
+            previousLatestMessageKey = ""
+            unseenMessageCount = 0
+            return@LaunchedEffect
+        }
+        if (isOlderHistoryPrepend(
+                previousMessageCount = previousMessageCount,
+                currentMessageCount = messages.size,
+                previousLatestMessageKey = previousLatestMessageKey,
+                currentLatestMessageKey = latestMessageKey,
+            )
+        ) {
+            previousMessageCount = messages.size
+            return@LaunchedEffect
+        }
+        val update = resolveChatScrollUpdate(
+            previousMessageCount = previousMessageCount,
+            currentMessageCount = messages.size,
+            isNearBottom = wasNearBottom,
+            latestMessageUserId = messages.last().userId,
+            currentUserId = currentUserId,
+            currentUnseenMessageCount = unseenMessageCount,
+        )
+        if (update.shouldAutoScroll) {
+            listState.animateScrollToItem(messages.lastIndex + historyHeaderCount)
+        }
+        unseenMessageCount = update.unseenMessageCount
+        previousMessageCount = messages.size
+        previousLatestMessageKey = latestMessageKey
+    }
+
+    LaunchedEffect(imeBottom, historyHeaderCount) {
         if (imeBottom > 0 && messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
+            listState.animateScrollToItem(messages.lastIndex + historyHeaderCount)
         }
     }
 
@@ -214,6 +293,10 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
+            ChatFeedbackBanner(
+                feedback = feedback,
+                onDismiss = component::dismissFeedback,
+            )
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -225,6 +308,23 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                 ),
                 verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Bottom)
             ) {
+                if (canLoadOlderMessages || isLoadingOlderMessages) {
+                    item(key = "load-earlier-messages") {
+                        TextButton(
+                            onClick = component::loadOlderMessages,
+                            enabled = !isLoadingOlderMessages,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                if (isLoadingOlderMessages) {
+                                    "Loading earlier messages…"
+                                } else {
+                                    "Load earlier messages"
+                                },
+                            )
+                        }
+                    }
+                }
                 itemsIndexed(
                     items = messages,
                     key = { index, message -> messageKey(message, index) }
@@ -244,6 +344,27 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                             }
                         }
                     )
+                }
+            }
+
+            if (unseenMessageCount > 0 && messages.isNotEmpty()) {
+                TextButton(
+                    onClick = {
+                        scrollScope.launch {
+                            listState.animateScrollToItem(messages.lastIndex + historyHeaderCount)
+                            unseenMessageCount = 0
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                ) {
+                    val label = if (unseenMessageCount == 1) {
+                        "1 new message"
+                    } else {
+                        "$unseenMessageCount new messages"
+                    }
+                    Text(label)
                 }
             }
 
@@ -419,6 +540,89 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
         )
     }
 
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun ChatAvailabilityScreen(
+    isLoading: Boolean,
+    errorMessage: String?,
+    onBack: () -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Chat") },
+                navigationIcon = {
+                    PlatformBackButton(onBack = onBack, arrow = true)
+                },
+            )
+        },
+    ) { paddingValues ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(horizontal = 24.dp),
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator()
+                    Text("Loading chat…")
+                } else {
+                    Text("This chat is unavailable.")
+                    errorMessage
+                        ?.trim()
+                        ?.takeIf(String::isNotBlank)
+                        ?.let { message ->
+                            Text(
+                                text = message,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    TextButton(onClick = onBack) {
+                        Text("Go back")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ChatFeedbackBanner(
+    feedback: ChatFeedback?,
+    onDismiss: () -> Unit,
+) {
+    val item = feedback ?: return
+    val (containerColor, contentColor) = when (item.kind) {
+        ChatFeedbackKind.SUCCESS ->
+            MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+        ChatFeedbackKind.WARNING ->
+            MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+    }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = item.message,
+                style = MaterialTheme.typography.bodySmall,
+                color = contentColor,
+            )
+            TextButton(onClick = onDismiss) {
+                Text("Dismiss")
+            }
+        }
+    }
 }
 
 private fun String?.asMeaningfulText(): String? =

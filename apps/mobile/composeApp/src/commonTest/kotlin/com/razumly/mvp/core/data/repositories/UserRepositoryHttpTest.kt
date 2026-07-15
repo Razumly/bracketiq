@@ -5,6 +5,8 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.RegistrationProgressDraft
+import com.razumly.mvp.core.data.dataTypes.CatalogQueryCacheEntry
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -18,6 +20,7 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
+import com.razumly.mvp.core.data.dataTypes.daos.CatalogCacheDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
@@ -42,9 +45,11 @@ import io.ktor.http.headersOf
 import io.ktor.http.content.OutgoingContent
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -52,11 +57,11 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.launch
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Clock
 
 private class UserRepositoryHttp_InMemoryAuthTokenStore(
     private var token: String = "",
@@ -83,9 +88,16 @@ private class UserRepositoryHttp_InMemoryPreferencesDataStore(
     }
 }
 
-private class UserRepositoryHttp_FakeUserDataDao : UserDataDao {
-    override suspend fun upsertUserData(userData: UserData) {}
-    override suspend fun upsertUsersData(usersData: List<UserData>) {}
+private class UserRepositoryHttp_FakeUserDataDao : RoomUserDataDaoTestAdapter() {
+    var lastUpsertedUser: UserData? = null
+
+    override suspend fun upsertUserData(userData: UserData) {
+        lastUpsertedUser = userData
+    }
+
+    override suspend fun upsertUsersData(usersData: List<UserData>) {
+        lastUpsertedUser = usersData.lastOrNull()
+    }
     override suspend fun deleteUsersById(ids: List<String>) {}
     override suspend fun upsertUserEventCrossRef(crossRef: EventUserCrossRef) {}
     override suspend fun upsertUserEventCrossRefs(crossRefs: List<EventUserCrossRef>) {}
@@ -99,7 +111,7 @@ private class UserRepositoryHttp_FakeUserDataDao : UserDataDao {
     override suspend fun searchUsers(search: String): List<UserData> = emptyList()
 }
 
-private class UserRepositoryHttp_FakeChatGroupDao : ChatGroupDao {
+private class UserRepositoryHttp_FakeChatGroupDao : RoomChatGroupDaoTestAdapter() {
     val deletedChatIds = mutableListOf<String>()
 
     override suspend fun upsertChatGroup(chatGroup: ChatGroup) {}
@@ -136,7 +148,6 @@ private class UserRepositoryHttp_UnusedEventDao : EventDao {
     override suspend fun getEventsByIds(ids: List<String>): List<Event> = emptyList()
     override suspend fun getEventWithRelationsById(id: String) = error("unused")
     override fun getEventWithRelationsFlow(id: String) = error("unused")
-    override suspend fun upsertEventWithRelations(event: Event) {}
     override suspend fun deleteEventWithCrossRefs(eventId: String) {}
     override suspend fun deleteEventCrossRefs(eventId: String) {}
     override suspend fun deleteEventUserCrossRefsByEventId(eventId: String) {}
@@ -144,7 +155,7 @@ private class UserRepositoryHttp_UnusedEventDao : EventDao {
     override suspend fun clearAllEventsWithCrossRefs() {}
 }
 
-private class UserRepositoryHttp_UnusedTeamDao : TeamDao {
+private class UserRepositoryHttp_UnusedTeamDao : RoomTeamDaoTestAdapter() {
     override suspend fun upsertTeam(team: Team) {}
     override suspend fun upsertTeams(teams: List<Team>) {}
     override suspend fun getTeam(teamId: String): Team = error("unused")
@@ -173,7 +184,9 @@ private class UserRepositoryHttp_UnusedTeamDao : TeamDao {
     override suspend fun upsertTeamsWithRelations(teams: List<Team>) {}
 }
 
-private class UserRepositoryHttp_FakeDatabaseService : DatabaseService {
+private class UserRepositoryHttp_FakeDatabaseService(
+    override val getCatalogCacheDao: CatalogCacheDao = InMemoryCatalogCacheDao(),
+) : DatabaseService {
     override val getMatchDao: MatchDao get() = error("unused")
     override val getTeamDao: TeamDao = UserRepositoryHttp_UnusedTeamDao()
     override val getFieldDao: FieldDao get() = error("unused")
@@ -190,60 +203,288 @@ private fun outgoingBodyText(content: OutgoingContent): String = when (content) 
     else -> error("Unsupported outgoing content ${content::class.simpleName}")
 }
 
+private val logoutTestAuthMeResponse =
+    """
+    {
+      "user": {
+        "id": "user_1",
+        "email": "user@example.test",
+        "name": "Sam Player"
+      },
+      "profile": {
+        "id": "user_1",
+        "firstName": "Sam",
+        "lastName": "Player",
+        "teamIds": [],
+        "friendIds": [],
+        "friendRequestIds": [],
+        "friendRequestSentIds": [],
+        "followingIds": [],
+        "blockedUserIds": [],
+        "hiddenEventIds": [],
+        "userName": "sam_player",
+        "hasStripeAccount": false,
+        "uploadedImages": [],
+        "profileImageId": null,
+        "chatTermsAcceptedAt": null,
+        "chatTermsVersion": null
+      }
+    }
+    """.trimIndent()
+
+private val logoutTestChatTermsResponse =
+    """
+    {
+      "accepted": false,
+      "acceptedAt": null,
+      "version": "2026-04-14",
+      "url": "/terms",
+      "summary": []
+    }
+    """.trimIndent()
+
+private const val logoutRegistrationDraftKey = "event:shared:event-1:none:none"
+
+private fun logoutRegistrationDraft(userId: String, answer: String): RegistrationProgressDraft =
+    RegistrationProgressDraft(
+        scope = "event",
+        userId = userId,
+        eventId = "event-1",
+        answers = mapOf("answer" to answer),
+        updatedAt = Clock.System.now().toString(),
+    )
+
 class UserRepositoryHttpTest {
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun logout_publishes_unauthenticated_before_empty_current_user() = runTest {
-        val tokenStore = UserRepositoryHttp_InMemoryAuthTokenStore()
+    fun logout_removes_device_target_while_authenticated_before_clearing_local_state() = runTest {
+        var logoutAuthorization: String? = null
+        var logoutBody = ""
+        val tokenStore = UserRepositoryHttp_InMemoryAuthTokenStore("session-token")
         val engine = MockEngine { request ->
-            assertEquals("/api/auth/logout", request.url.encodedPath)
-            assertEquals(HttpMethod.Post, request.method)
-            respond(content = "", status = HttpStatusCode.OK)
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = logoutTestAuthMeResponse,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/chat/terms-consent" -> respond(
+                    content = logoutTestChatTermsResponse,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/logout" -> {
+                    assertEquals(HttpMethod.Post, request.method)
+                    logoutAuthorization = request.headers[HttpHeaders.Authorization]
+                    logoutBody = outgoingBodyText(request.body)
+                    respond(
+                        content = "{\"ok\":true,\"deviceTargetRemoved\":true}",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected request ${request.method.value} ${request.url}")
+            }
         }
         val client = HttpClient(engine) {
             install(ContentNegotiation) { json(jsonMVP) }
         }
+        val currentUserDataSource = CurrentUserDataSource(UserRepositoryHttp_InMemoryPreferencesDataStore())
+        val catalogDao = InMemoryCatalogCacheDao()
+        catalogDao.activateViewer("authenticated:old")
+        catalogDao.upsertCatalogQuery(
+            CatalogQueryCacheEntry(
+                cacheKey = "old-query",
+                viewerKey = "authenticated:old",
+                resourceType = "organizations",
+                projectionKey = "detail",
+                orderedIdsJson = "[]",
+                payloadJson = "[]",
+                isComplete = true,
+            ),
+        )
         val repository = UserRepository(
-            databaseService = UserRepositoryHttp_FakeDatabaseService(),
+            databaseService = UserRepositoryHttp_FakeDatabaseService(catalogDao),
             api = MvpApiClient(client, "http://localhost", tokenStore),
             tokenStore = tokenStore,
-            currentUserDataSource = CurrentUserDataSource(UserRepositoryHttp_InMemoryPreferencesDataStore()),
+            currentUserDataSource = currentUserDataSource,
             startupDispatcher = StandardTestDispatcher(testScheduler),
         )
         advanceUntilIdle()
-        repository.setCachedCurrentUserProfile(
-            UserData(
-                firstName = "Sam",
-                lastName = "Player",
-                teamIds = emptyList(),
-                friendIds = emptyList(),
-                friendRequestIds = emptyList(),
-                friendRequestSentIds = emptyList(),
-                followingIds = emptyList(),
-                userName = "sam_player",
-                hasStripeAccount = false,
-                uploadedImages = emptyList(),
-                profileImageId = null,
-                id = "user_1",
-            ),
-        ).getOrThrow()
-
-        val startupStatesWhenCurrentUserWasEmptied = mutableListOf<StartupAuthState>()
-        val collection = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            repository.currentUser.collect { user ->
-                if (user.isFailure) {
-                    startupStatesWhenCurrentUserWasEmptied += repository.startupAuthState.value
+        currentUserDataSource.savePushToken("device-token")
+        currentUserDataSource.savePushTarget("user_user_1")
+        currentUserDataSource.saveUserId("user_1")
+        currentUserDataSource.saveRegistrationProgress(
+            key = logoutRegistrationDraftKey,
+            draft = logoutRegistrationDraft("user_1", "current-account-answer"),
+        )
+        assertEquals(
+            "current-account-answer",
+            currentUserDataSource.loadRegistrationProgress(logoutRegistrationDraftKey)?.answers?.get("answer"),
+        )
+        currentUserDataSource.saveUserId("user_2")
+        currentUserDataSource.saveRegistrationProgress(
+            key = logoutRegistrationDraftKey,
+            draft = logoutRegistrationDraft("user_2", "other-account-answer"),
+        )
+        currentUserDataSource.saveUserId("user_1")
+        var authStateWhenCurrentUserCleared: StartupAuthState? = null
+        val observeCurrentUser = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            repository.currentUser.collect { currentUser ->
+                if (currentUser.isFailure) {
+                    authStateWhenCurrentUserCleared = repository.startupAuthState.value
                 }
             }
         }
 
-        repository.logout().getOrThrow()
+        val result = repository.logout()
 
-        assertEquals(
-            listOf<StartupAuthState>(StartupAuthState.Unauthenticated),
-            startupStatesWhenCurrentUserWasEmptied,
+        observeCurrentUser.cancel()
+        assertTrue(result.isSuccess)
+        assertEquals("Bearer session-token", logoutAuthorization)
+        assertTrue(
+            logoutBody.contains("\"deviceTarget\":{\"pushToken\":\"device-token\",\"pushTarget\":\"user_user_1\"}"),
+            "Expected authenticated logout to include the stored device target, body=$logoutBody",
         )
-        collection.cancel()
+        assertEquals("", tokenStore.get())
+        assertEquals("", currentUserDataSource.getPushToken().first())
+        assertEquals("", currentUserDataSource.getPushTarget().first())
+        assertEquals("anonymous", catalogDao.getActiveViewer()?.viewerKey)
+        assertNull(catalogDao.getCatalogQuery("old-query", "authenticated:old"))
+        currentUserDataSource.saveUserId("user_1")
+        assertNull(currentUserDataSource.loadRegistrationProgress(logoutRegistrationDraftKey))
+        currentUserDataSource.saveUserId("user_2")
+        assertEquals(
+            "other-account-answer",
+            currentUserDataSource.loadRegistrationProgress(logoutRegistrationDraftKey)?.answers?.get("answer"),
+        )
+        assertTrue(repository.currentUser.value.isFailure)
+        assertTrue(repository.startupAuthState.value is StartupAuthState.Unauthenticated)
+        assertTrue(authStateWhenCurrentUserCleared is StartupAuthState.Unauthenticated)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun logout_retains_authenticated_and_push_state_when_device_cleanup_fails() = runTest {
+        var logoutAuthorization: String? = null
+        val tokenStore = UserRepositoryHttp_InMemoryAuthTokenStore("session-token")
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = logoutTestAuthMeResponse,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/chat/terms-consent" -> respond(
+                    content = logoutTestChatTermsResponse,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/logout" -> {
+                    logoutAuthorization = request.headers[HttpHeaders.Authorization]
+                    respond(
+                        content = "{\"error\":\"Push target cleanup failed\",\"code\":\"PUSH_TARGET_CLEANUP_FAILED\"}",
+                        status = HttpStatusCode.ServiceUnavailable,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected request ${request.method.value} ${request.url}")
+            }
+        }
+        val client = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+            expectSuccess = true
+        }
+        val currentUserDataSource = CurrentUserDataSource(UserRepositoryHttp_InMemoryPreferencesDataStore())
+        val repository = UserRepository(
+            databaseService = UserRepositoryHttp_FakeDatabaseService(),
+            api = MvpApiClient(client, "http://localhost", tokenStore),
+            tokenStore = tokenStore,
+            currentUserDataSource = currentUserDataSource,
+            startupDispatcher = StandardTestDispatcher(testScheduler),
+        )
+        advanceUntilIdle()
+        currentUserDataSource.savePushToken("device-token")
+        currentUserDataSource.savePushTarget("user_user_1")
+        currentUserDataSource.saveUserId("user_1")
+        currentUserDataSource.saveRegistrationProgress(
+            key = logoutRegistrationDraftKey,
+            draft = logoutRegistrationDraft("user_1", "preserved-answer"),
+        )
+        assertEquals(
+            "preserved-answer",
+            currentUserDataSource.loadRegistrationProgress(logoutRegistrationDraftKey)?.answers?.get("answer"),
+        )
+
+        val result = repository.logout()
+
+        assertTrue(result.isFailure)
+        assertEquals("Bearer session-token", logoutAuthorization)
+        assertEquals("session-token", tokenStore.get())
+        assertEquals("device-token", currentUserDataSource.getPushToken().first())
+        assertEquals("user_user_1", currentUserDataSource.getPushTarget().first())
+        assertEquals(
+            "preserved-answer",
+            currentUserDataSource.loadRegistrationProgress(logoutRegistrationDraftKey)?.answers?.get("answer"),
+        )
+        assertEquals("user_1", repository.currentUser.value.getOrNull()?.id)
+        assertTrue(repository.startupAuthState.value is StartupAuthState.Authenticated)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun logout_does_not_revoke_session_when_a_saved_push_target_has_no_token() = runTest {
+        var logoutRequested = false
+        val tokenStore = UserRepositoryHttp_InMemoryAuthTokenStore("session-token")
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = logoutTestAuthMeResponse,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/chat/terms-consent" -> respond(
+                    content = logoutTestChatTermsResponse,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/logout" -> {
+                    logoutRequested = true
+                    error("Logout must not be requested without the saved push token.")
+                }
+
+                else -> error("Unexpected request ${request.method.value} ${request.url}")
+            }
+        }
+        val client = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val currentUserDataSource = CurrentUserDataSource(UserRepositoryHttp_InMemoryPreferencesDataStore())
+        val repository = UserRepository(
+            databaseService = UserRepositoryHttp_FakeDatabaseService(),
+            api = MvpApiClient(client, "http://localhost", tokenStore),
+            tokenStore = tokenStore,
+            currentUserDataSource = currentUserDataSource,
+            startupDispatcher = StandardTestDispatcher(testScheduler),
+        )
+        advanceUntilIdle()
+        currentUserDataSource.savePushTarget("user_user_1")
+
+        val result = repository.logout()
+
+        assertTrue(result.isFailure)
+        assertTrue(!logoutRequested)
+        assertEquals("session-token", tokenStore.get())
+        assertEquals("", currentUserDataSource.getPushToken().first())
+        assertEquals("user_user_1", currentUserDataSource.getPushTarget().first())
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -374,6 +615,39 @@ class UserRepositoryHttpTest {
         assertEquals("/terms", state.url)
     }
 
+    @Test
+    fun getChatTermsConsentState_doesNotSubstituteMissingRequiredAgreementUrl() = runTest {
+        val engine = MockEngine { request ->
+            assertEquals("http://localhost/api/chat/terms-consent", request.url.toString())
+            respond(
+                content = """
+                    {
+                      "code": "CHAT_TERMS_REQUIRED",
+                      "accepted": false,
+                      "version": "2026-04-14",
+                      "summary": ["No tolerance for objectionable content."]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val client = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val repository = UserRepository(
+            databaseService = UserRepositoryHttp_FakeDatabaseService(),
+            api = MvpApiClient(client, "http://localhost", UserRepositoryHttp_InMemoryAuthTokenStore()),
+            tokenStore = UserRepositoryHttp_InMemoryAuthTokenStore(),
+            currentUserDataSource = CurrentUserDataSource(UserRepositoryHttp_InMemoryPreferencesDataStore()),
+        )
+
+        val state = repository.getChatTermsConsentState().getOrThrow()
+
+        assertEquals(false, state.accepted)
+        assertNull(state.url)
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun acceptChatTermsConsent_updates_cached_current_user_profile() = runTest {
@@ -429,7 +703,7 @@ class UserRepositoryHttpTest {
                         "id": "user_1",
                         "firstName": "Sam",
                         "lastName": "Player",
-                        "teamIds": [],
+                        "teamIds": ["team_server"],
                         "friendIds": [],
                         "friendRequestIds": [],
                         "friendRequestSentIds": [],
@@ -465,7 +739,7 @@ class UserRepositoryHttpTest {
             UserData(
                 firstName = "Sam",
                 lastName = "Player",
-                teamIds = emptyList(),
+                teamIds = listOf("team_cached"),
                 friendIds = listOf("user_2"),
                 friendRequestIds = emptyList(),
                 friendRequestSentIds = emptyList(),
@@ -484,6 +758,11 @@ class UserRepositoryHttpTest {
         assertEquals(listOf("chat_1", "chat_2"), removedChatIds)
         assertEquals(listOf("chat_1", "chat_2"), fakeChatGroupDao.deletedChatIds)
         assertEquals(listOf("user_2"), cachedUser?.blockedUserIds)
+        assertEquals(listOf("team_server"), cachedUser?.teamIds)
+        assertEquals(
+            listOf("team_server"),
+            (fakeDatabase.getUserDataDao as UserRepositoryHttp_FakeUserDataDao).lastUpsertedUser?.teamIds,
+        )
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -534,7 +813,7 @@ class UserRepositoryHttpTest {
             UserData(
                 firstName = "Sam",
                 lastName = "Player",
-                teamIds = emptyList(),
+                teamIds = listOf("team_cached"),
                 friendIds = emptyList(),
                 friendRequestIds = emptyList(),
                 friendRequestSentIds = emptyList(),
@@ -552,11 +831,83 @@ class UserRepositoryHttpTest {
         val cachedUser = repository.currentUser.value.getOrNull()
 
         assertEquals(emptyList(), cachedUser?.blockedUserIds)
+        assertEquals(emptyList(), cachedUser?.teamIds)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun updateUser_omits_server_managed_fields_from_patch_and_uses_server_values() = runTest {
+    fun followUser_preserves_cached_team_ids_when_social_response_omits_them() = runTest {
+        val fakeDatabase = UserRepositoryHttp_FakeDatabaseService()
+        val engine = MockEngine { request ->
+            assertEquals("/api/users/social/following", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            respond(
+                content = """
+                    {
+                      "user": {
+                        "id": "user_1",
+                        "firstName": "Sam",
+                        "lastName": "Player",
+                        "friendIds": [],
+                        "friendRequestIds": [],
+                        "friendRequestSentIds": [],
+                        "followingIds": ["user_2"],
+                        "blockedUserIds": [],
+                        "hiddenEventIds": [],
+                        "userName": "sam_player",
+                        "hasStripeAccount": false,
+                        "uploadedImages": [],
+                        "profileImageId": null,
+                        "chatTermsAcceptedAt": null,
+                        "chatTermsVersion": null
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val client = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val repository = UserRepository(
+            databaseService = fakeDatabase,
+            api = MvpApiClient(client, "http://localhost", UserRepositoryHttp_InMemoryAuthTokenStore()),
+            tokenStore = UserRepositoryHttp_InMemoryAuthTokenStore(),
+            currentUserDataSource = CurrentUserDataSource(UserRepositoryHttp_InMemoryPreferencesDataStore()),
+        )
+        advanceUntilIdle()
+        repository.setCachedCurrentUserProfile(
+            UserData(
+                firstName = "Sam",
+                lastName = "Player",
+                teamIds = listOf("team_cached"),
+                friendIds = emptyList(),
+                friendRequestIds = emptyList(),
+                friendRequestSentIds = emptyList(),
+                followingIds = emptyList(),
+                userName = "sam_player",
+                hasStripeAccount = false,
+                uploadedImages = emptyList(),
+                profileImageId = null,
+                id = "user_1",
+            )
+        ).getOrThrow()
+
+        repository.followUser("user_2").getOrThrow()
+        val cachedUser = repository.currentUser.value.getOrThrow()
+
+        assertEquals(listOf("user_2"), cachedUser.followingIds)
+        assertEquals(listOf("team_cached"), cachedUser.teamIds)
+        assertEquals(
+            listOf("team_cached"),
+            (fakeDatabase.getUserDataDao as UserRepositoryHttp_FakeUserDataDao).lastUpsertedUser?.teamIds,
+        )
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun updateUser_omits_server_managed_relationships_and_uses_server_memberships() = runTest {
         var requestBody = ""
         val engine = MockEngine { request ->
             assertEquals("/api/users/user_1", request.url.encodedPath)
@@ -570,15 +921,15 @@ class UserRepositoryHttpTest {
                         "firstName": "Sam",
                         "lastName": "Player",
                         "teamIds": ["team_server"],
-                        "friendIds": [],
-                        "friendRequestIds": [],
-                        "friendRequestSentIds": [],
-                        "followingIds": [],
+                        "friendIds": ["friend_server"],
+                        "friendRequestIds": ["incoming_server"],
+                        "friendRequestSentIds": ["outgoing_server"],
+                        "followingIds": ["following_server"],
                         "blockedUserIds": [],
                         "hiddenEventIds": [],
                         "userName": "sam_player",
-                        "hasStripeAccount": false,
-                        "uploadedImages": [],
+                        "hasStripeAccount": true,
+                        "uploadedImages": ["image_server"],
                         "profileImageId": null,
                         "chatTermsAcceptedAt": null,
                         "chatTermsVersion": null
@@ -605,13 +956,13 @@ class UserRepositoryHttpTest {
                 firstName = "Sam",
                 lastName = "Player",
                 teamIds = listOf("team_client"),
-                friendIds = emptyList(),
-                friendRequestIds = emptyList(),
-                friendRequestSentIds = emptyList(),
-                followingIds = emptyList(),
+                friendIds = listOf("friend_client"),
+                friendRequestIds = listOf("incoming_client"),
+                friendRequestSentIds = listOf("outgoing_client"),
+                followingIds = listOf("following_client"),
                 userName = "sam_player",
                 hasStripeAccount = true,
-                uploadedImages = emptyList(),
+                uploadedImages = listOf("image_client"),
                 profileImageId = null,
                 id = "user_1",
             )
@@ -622,27 +973,37 @@ class UserRepositoryHttpTest {
                 firstName = "Sam",
                 lastName = "Player",
                 teamIds = listOf("team_client"),
-                friendIds = emptyList(),
-                friendRequestIds = emptyList(),
-                friendRequestSentIds = emptyList(),
-                followingIds = emptyList(),
+                friendIds = listOf("friend_client"),
+                friendRequestIds = listOf("incoming_client"),
+                friendRequestSentIds = listOf("outgoing_client"),
+                followingIds = listOf("following_client"),
                 userName = "sam_player",
                 hasStripeAccount = true,
-                uploadedImages = emptyList(),
+                uploadedImages = listOf("image_client"),
                 profileImageId = null,
                 id = "user_1",
             )
         ).getOrThrow()
 
-        assertFalse(requestBody.contains("\"teamIds\""), "Expected teamIds to be omitted from user PATCH payloads.")
-        assertFalse(
-            requestBody.contains("\"hasStripeAccount\""),
-            "Expected server-managed Stripe state to be omitted from user PATCH payloads.",
-        )
+        listOf(
+            "teamIds",
+            "friendIds",
+            "friendRequestIds",
+            "friendRequestSentIds",
+            "followingIds",
+            "hasStripeAccount",
+            "uploadedImages",
+            "notificationSettings",
+        ).forEach { field ->
+            assertTrue(!requestBody.contains("\"$field\""), "Expected $field to be omitted from user PATCH payloads.")
+        }
         assertEquals(listOf("team_server"), updated.teamIds)
-        assertEquals(false, updated.hasStripeAccount)
+        assertEquals(listOf("friend_server"), updated.friendIds)
+        assertEquals(listOf("incoming_server"), updated.friendRequestIds)
+        assertEquals(listOf("outgoing_server"), updated.friendRequestSentIds)
+        assertEquals(listOf("following_server"), updated.followingIds)
+        assertEquals(listOf("image_server"), updated.uploadedImages)
         assertEquals(listOf("team_server"), repository.currentUser.value.getOrThrow().teamIds)
-        assertEquals(false, repository.currentUser.value.getOrThrow().hasStripeAccount)
     }
 
     @Test
@@ -734,12 +1095,10 @@ class UserRepositoryHttpTest {
         val matches = repository.findEmailMembership(
             emails = listOf(" Ref@example.com ", "ref@example.com"),
             userIds = listOf(" user_1 ", "user_1", "user_2"),
-            eventId = " event_1 ",
         ).getOrThrow()
 
         assertEquals(listOf(UserEmailMembershipMatch(email = "ref@example.com", userId = "user_1")), matches)
         assertTrue(requestBody.contains("\"emails\":[\"ref@example.com\"]"))
         assertTrue(requestBody.contains("\"userIds\":[\"user_1\",\"user_2\"]"))
-        assertTrue(requestBody.contains("\"eventId\":\"event_1\""))
     }
 }

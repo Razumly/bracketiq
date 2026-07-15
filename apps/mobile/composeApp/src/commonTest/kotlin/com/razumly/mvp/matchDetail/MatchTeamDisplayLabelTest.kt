@@ -7,59 +7,50 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class MatchTeamDisplayLabelTest {
+
     @Test
-    fun unnamedTeam_withBlankLegacyPlayerNames_usesSafeFallbacks() {
-        val team = TeamWithRelations(
-            team = Team(
+    fun uses_player_first_name_when_unnamed_team_has_empty_last_name() {
+        val player = user(id = "player_1", firstName = "Avery", lastName = "")
+        val team = unnamedTeam(players = listOf(player))
+
+        assertEquals("Avery", matchTeamDisplayLabel(team, fallbackLabel = "Team 1"))
+    }
+
+    @Test
+    fun trims_whitespace_names_and_uses_the_team_fallback_when_no_player_name_remains() {
+        val namedPlayer = user(id = "player_1", firstName = "  Jordan  ", lastName = "   ")
+        val blankPlayer = user(id = "player_2", firstName = "   ", lastName = "  ")
+        val team = unnamedTeam(players = listOf(namedPlayer, blankPlayer))
+
+        assertEquals("Jordan", matchTeamDisplayLabel(team, fallbackLabel = "Team 2"))
+        assertEquals("Team 2", matchTeamDisplayLabel(unnamedTeam(players = listOf(blankPlayer)), fallbackLabel = "Team 2"))
+    }
+
+    private fun unnamedTeam(players: List<UserData>): TeamWithRelations =
+        TeamWithRelations(
+            team = Team(captainId = players.firstOrNull()?.id.orEmpty()).copy(
                 id = "team_1",
                 name = "   ",
-                division = "OPEN",
-                captainId = "player_1",
-                playerIds = listOf("player_1", "player_2", "player_3"),
-                teamSize = 3,
+                playerIds = players.map(UserData::id),
             ),
-            players = listOf(
-                user(id = "player_1", firstName = "Avery", lastName = ""),
-                user(id = "player_2", firstName = "", lastName = "Ng"),
-                user(id = "player_3", firstName = "", lastName = " "),
-            ),
+            players = players,
             matchAsTeam1 = emptyList(),
             matchAsTeam2 = emptyList(),
         )
 
-        assertEquals("Avery & N", matchTeamDisplayLabel(team, fallback = "Team 1"))
-        assertEquals("Team 2", matchTeamDisplayLabel(null, fallback = "Team 2"))
-    }
-
-    @Test
-    fun namedTeam_takesPrecedenceOverPlayerFallbacks() {
-        val team = TeamWithRelations(
-            team = Team(
-                id = "team_1",
-                name = "Cascade Crew",
-                division = "OPEN",
-                captainId = "player_1",
-                teamSize = 1,
-            ),
-            players = listOf(user(id = "player_1", firstName = "Avery", lastName = "")),
-            matchAsTeam1 = emptyList(),
-            matchAsTeam2 = emptyList(),
+    private fun user(id: String, firstName: String, lastName: String): UserData =
+        UserData(
+            firstName = firstName,
+            lastName = lastName,
+            teamIds = emptyList(),
+            friendIds = emptyList(),
+            friendRequestIds = emptyList(),
+            friendRequestSentIds = emptyList(),
+            followingIds = emptyList(),
+            userName = "",
+            hasStripeAccount = false,
+            uploadedImages = emptyList(),
+            profileImageId = null,
+            id = id,
         )
-
-        assertEquals("Cascade Crew", matchTeamDisplayLabel(team, fallback = "Team 1"))
-    }
-
-    private fun user(id: String, firstName: String, lastName: String) = UserData(
-        id = id,
-        firstName = firstName,
-        lastName = lastName,
-        teamIds = emptyList(),
-        friendIds = emptyList(),
-        friendRequestIds = emptyList(),
-        friendRequestSentIds = emptyList(),
-        followingIds = emptyList(),
-        userName = id,
-        hasStripeAccount = false,
-        uploadedImages = emptyList(),
-    )
 }

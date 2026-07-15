@@ -1135,14 +1135,94 @@ internal val MVP_DATABASE_MIGRATIONS_7_TO_35: Array<Migration> = arrayOf(
 val MIGRATION_35_90_LEGACY_VERSION_CONTINUITY = migration(35, 90, emptyList())
 
 /**
- * Facility membership is canonical server data and is needed to group cached fields when the
- * client falls back to Room. Facility details remain hydrated separately, but the ID itself must
- * survive every Room round trip.
+ * Facility membership is canonical server data and is needed to group cached
+ * fields when the client falls back to Room. Facility details remain hydrated
+ * separately, but the ID itself must survive every Room round trip.
  */
 val MIGRATION_90_91_FIELD_FACILITY_ID = migration(
     90,
     91,
     listOf("ALTER TABLE `Field` ADD COLUMN `facilityId` TEXT"),
+)
+
+/**
+ * Catalog responses that previously lived only in memory now have a durable local source of
+ * truth. Payloads stay serialized so API/domain evolution does not duplicate those contracts in
+ * Room columns. Exact request snapshots preserve ordering and projections without inferred joins.
+ */
+val MIGRATION_91_92_ROOM_FIRST_CATALOG_CACHE = migration(
+    91,
+    92,
+    listOf(
+        "CREATE TABLE IF NOT EXISTS `catalog_cache_viewer` (`id` TEXT NOT NULL, `viewerKey` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "CREATE TABLE IF NOT EXISTS `catalog_query_cache` (`cacheKey` TEXT NOT NULL, `viewerKey` TEXT NOT NULL, `resourceType` TEXT NOT NULL, `projectionKey` TEXT NOT NULL, `orderedIdsJson` TEXT NOT NULL, `payloadJson` TEXT NOT NULL, `paginationJson` TEXT, `isComplete` INTEGER NOT NULL, PRIMARY KEY(`cacheKey`))",
+        "CREATE INDEX IF NOT EXISTS `index_catalog_query_cache_viewerKey` ON `catalog_query_cache` (`viewerKey`)",
+        "CREATE INDEX IF NOT EXISTS `index_catalog_query_cache_viewerKey_resourceType_projectionKey` ON `catalog_query_cache` (`viewerKey`, `resourceType`, `projectionKey`)",
+        "CREATE TABLE IF NOT EXISTS `organization_cache` (`viewerKey` TEXT NOT NULL, `projectionKey` TEXT NOT NULL, `organizationId` TEXT NOT NULL, `payloadJson` TEXT NOT NULL, PRIMARY KEY(`viewerKey`, `projectionKey`, `organizationId`))",
+        "CREATE INDEX IF NOT EXISTS `index_organization_cache_viewerKey` ON `organization_cache` (`viewerKey`)",
+        "CREATE TABLE IF NOT EXISTS `product_cache` (`viewerKey` TEXT NOT NULL, `projectionKey` TEXT NOT NULL, `id` TEXT NOT NULL, `organizationId` TEXT NOT NULL, `payloadJson` TEXT NOT NULL, PRIMARY KEY(`viewerKey`, `projectionKey`, `id`))",
+        "CREATE INDEX IF NOT EXISTS `index_product_cache_viewerKey` ON `product_cache` (`viewerKey`)",
+        "CREATE INDEX IF NOT EXISTS `index_product_cache_viewerKey_projectionKey_organizationId` ON `product_cache` (`viewerKey`, `projectionKey`, `organizationId`)",
+        "CREATE TABLE IF NOT EXISTS `organization_reviews_cache` (`cacheKey` TEXT NOT NULL, `viewerKey` TEXT NOT NULL, `organizationId` TEXT NOT NULL, `cursorKey` TEXT NOT NULL, `pageLimit` INTEGER NOT NULL, `payloadJson` TEXT NOT NULL, PRIMARY KEY(`cacheKey`))",
+        "CREATE INDEX IF NOT EXISTS `index_organization_reviews_cache_viewerKey` ON `organization_reviews_cache` (`viewerKey`)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS `index_organization_reviews_cache_viewerKey_organizationId_cursorKey_pageLimit` ON `organization_reviews_cache` (`viewerKey`, `organizationId`, `cursorKey`, `pageLimit`)",
+        "CREATE TABLE IF NOT EXISTS `time_slot_cache` (`viewerKey` TEXT NOT NULL, `projectionKey` TEXT NOT NULL, `id` TEXT NOT NULL, `payloadJson` TEXT NOT NULL, PRIMARY KEY(`viewerKey`, `projectionKey`, `id`))",
+        "CREATE INDEX IF NOT EXISTS `index_time_slot_cache_viewerKey` ON `time_slot_cache` (`viewerKey`)",
+    ),
+)
+
+/**
+ * Membership IDs have one persisted source after v93. Legacy JSON arrays and existing junction
+ * rows are merged before the junctions lose their user-side foreign keys. The parent-side cascade
+ * remains so deleting a team or chat still removes its memberships, while membership can arrive
+ * before the corresponding user profile.
+ */
+val MIGRATION_92_93_CANONICAL_MEMBERSHIP = migration(
+    92,
+    93,
+    listOf(
+        "DROP TABLE IF EXISTS `app009_team_user_backup`",
+        "CREATE TABLE `app009_team_user_backup` (`teamId` TEXT NOT NULL, `userId` TEXT NOT NULL, PRIMARY KEY(`teamId`, `userId`))",
+        "INSERT OR IGNORE INTO `app009_team_user_backup` (`teamId`, `userId`) SELECT relation.`teamId`, relation.`userId` FROM `team_user_cross_ref` relation INNER JOIN `Team` parent ON parent.`id` = relation.`teamId`",
+        "INSERT OR IGNORE INTO `app009_team_user_backup` (`teamId`, `userId`) SELECT team.`id`, CAST(member.`value` AS TEXT) FROM `Team` team, json_each(CASE WHEN json_valid(team.`playerIds`) THEN team.`playerIds` ELSE '[]' END) member WHERE json_type(CASE WHEN json_valid(team.`playerIds`) THEN team.`playerIds` ELSE '[]' END) = 'array' AND member.`type` = 'text'",
+        "INSERT OR IGNORE INTO `app009_team_user_backup` (`teamId`, `userId`) SELECT team.`id`, user.`id` FROM `UserData` user, json_each(CASE WHEN json_valid(user.`teamIds`) THEN user.`teamIds` ELSE '[]' END) membership, `Team` team WHERE json_type(CASE WHEN json_valid(user.`teamIds`) THEN user.`teamIds` ELSE '[]' END) = 'array' AND membership.`type` = 'text' AND team.`id` = CAST(membership.`value` AS TEXT)",
+        "DROP TABLE IF EXISTS `app009_team_pending_backup`",
+        "CREATE TABLE `app009_team_pending_backup` (`teamId` TEXT NOT NULL, `userId` TEXT NOT NULL, PRIMARY KEY(`teamId`, `userId`))",
+        "INSERT OR IGNORE INTO `app009_team_pending_backup` (`teamId`, `userId`) SELECT relation.`teamId`, relation.`userId` FROM `team_pending_player_cross_ref` relation INNER JOIN `Team` parent ON parent.`id` = relation.`teamId`",
+        "INSERT OR IGNORE INTO `app009_team_pending_backup` (`teamId`, `userId`) SELECT team.`id`, CAST(member.`value` AS TEXT) FROM `Team` team, json_each(CASE WHEN json_valid(team.`pending`) THEN team.`pending` ELSE '[]' END) member WHERE json_type(CASE WHEN json_valid(team.`pending`) THEN team.`pending` ELSE '[]' END) = 'array' AND member.`type` = 'text'",
+        "DROP TABLE IF EXISTS `app009_chat_user_backup`",
+        "CREATE TABLE `app009_chat_user_backup` (`chatId` TEXT NOT NULL, `userId` TEXT NOT NULL, PRIMARY KEY(`chatId`, `userId`))",
+        "INSERT OR IGNORE INTO `app009_chat_user_backup` (`chatId`, `userId`) SELECT relation.`chatId`, relation.`userId` FROM `chat_user_cross_ref` relation INNER JOIN `ChatGroup` parent ON parent.`id` = relation.`chatId`",
+        "INSERT OR IGNORE INTO `app009_chat_user_backup` (`chatId`, `userId`) SELECT chat.`id`, CAST(member.`value` AS TEXT) FROM `ChatGroup` chat, json_each(CASE WHEN json_valid(chat.`userIds`) THEN chat.`userIds` ELSE '[]' END) member WHERE json_type(CASE WHEN json_valid(chat.`userIds`) THEN chat.`userIds` ELSE '[]' END) = 'array' AND member.`type` = 'text'",
+        "DROP TABLE IF EXISTS `team_user_cross_ref_migration_new`",
+        "CREATE TABLE `team_user_cross_ref_migration_new` (`teamId` TEXT NOT NULL, `userId` TEXT NOT NULL, PRIMARY KEY(`teamId`, `userId`), FOREIGN KEY(`teamId`) REFERENCES `Team`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)",
+        "INSERT OR IGNORE INTO `team_user_cross_ref_migration_new` (`teamId`, `userId`) SELECT backup.`teamId`, backup.`userId` FROM `app009_team_user_backup` backup INNER JOIN `Team` parent ON parent.`id` = backup.`teamId`",
+        "DROP TABLE `team_user_cross_ref`",
+        "ALTER TABLE `team_user_cross_ref_migration_new` RENAME TO `team_user_cross_ref`",
+        "CREATE INDEX `index_team_user_cross_ref_teamId` ON `team_user_cross_ref` (`teamId`)",
+        "CREATE INDEX `index_team_user_cross_ref_userId` ON `team_user_cross_ref` (`userId`)",
+        "DROP TABLE IF EXISTS `team_pending_player_cross_ref_migration_new`",
+        "CREATE TABLE `team_pending_player_cross_ref_migration_new` (`teamId` TEXT NOT NULL, `userId` TEXT NOT NULL, PRIMARY KEY(`teamId`, `userId`), FOREIGN KEY(`teamId`) REFERENCES `Team`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)",
+        "INSERT OR IGNORE INTO `team_pending_player_cross_ref_migration_new` (`teamId`, `userId`) SELECT backup.`teamId`, backup.`userId` FROM `app009_team_pending_backup` backup INNER JOIN `Team` parent ON parent.`id` = backup.`teamId`",
+        "DROP TABLE `team_pending_player_cross_ref`",
+        "ALTER TABLE `team_pending_player_cross_ref_migration_new` RENAME TO `team_pending_player_cross_ref`",
+        "CREATE INDEX `index_team_pending_player_cross_ref_teamId` ON `team_pending_player_cross_ref` (`teamId`)",
+        "CREATE INDEX `index_team_pending_player_cross_ref_userId` ON `team_pending_player_cross_ref` (`userId`)",
+        "DROP TABLE IF EXISTS `chat_user_cross_ref_migration_new`",
+        "CREATE TABLE `chat_user_cross_ref_migration_new` (`chatId` TEXT NOT NULL, `userId` TEXT NOT NULL, PRIMARY KEY(`chatId`, `userId`), FOREIGN KEY(`chatId`) REFERENCES `ChatGroup`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)",
+        "INSERT OR IGNORE INTO `chat_user_cross_ref_migration_new` (`chatId`, `userId`) SELECT backup.`chatId`, backup.`userId` FROM `app009_chat_user_backup` backup INNER JOIN `ChatGroup` parent ON parent.`id` = backup.`chatId`",
+        "DROP TABLE `chat_user_cross_ref`",
+        "ALTER TABLE `chat_user_cross_ref_migration_new` RENAME TO `chat_user_cross_ref`",
+        "CREATE INDEX `index_chat_user_cross_ref_chatId` ON `chat_user_cross_ref` (`chatId`)",
+        "CREATE INDEX `index_chat_user_cross_ref_userId` ON `chat_user_cross_ref` (`userId`)",
+        "ALTER TABLE `Team` DROP COLUMN `playerIds`",
+        "ALTER TABLE `Team` DROP COLUMN `pending`",
+        "ALTER TABLE `ChatGroup` DROP COLUMN `userIds`",
+        "ALTER TABLE `UserData` DROP COLUMN `teamIds`",
+        "DROP TABLE `app009_team_user_backup`",
+        "DROP TABLE `app009_team_pending_backup`",
+        "DROP TABLE `app009_chat_user_backup`",
+    ),
 )
 
 val MVP_DATABASE_MIGRATIONS: Array<Migration> = arrayOf(
@@ -1154,4 +1234,6 @@ val MVP_DATABASE_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_35_90_LEGACY_VERSION_CONTINUITY,
     *LEGACY_DATABASE_MIGRATIONS,
     MIGRATION_90_91_FIELD_FACILITY_ID,
+    MIGRATION_91_92_ROOM_FIRST_CATALOG_CACHE,
+    MIGRATION_92_93_CANONICAL_MEMBERSHIP,
 )

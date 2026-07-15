@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -15,6 +16,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import kotlin.test.assertEquals
@@ -108,5 +110,83 @@ class WeeklyScheduleViewUiTest {
         composeRule.onNodeWithText("schedule-weekly-occurrence-2").performClick()
 
         assertEquals("weekly-occurrence-2", clickedId)
+    }
+
+    @Test
+    fun unrelated_recomposition_does_not_republish_unchanged_fab_visibility() {
+        val occurrence = Event(
+            id = "weekly-occurrence-fab",
+            name = "Thu 4/18/30, 9:00 AM-1:00 PM",
+            hostId = "host-1",
+            location = "CoEd Open",
+            coordinates = listOf(-80.0, 25.0),
+            start = Instant.parse("2030-04-18T16:00:00Z"),
+            end = Instant.parse("2030-04-18T20:00:00Z"),
+        )
+        val unrelatedRecomposition = mutableIntStateOf(0)
+        var visibilityUpdates = 0
+
+        composeRule.setContent {
+            CompositionLocalProvider(LocalNavBarPadding provides PaddingValues()) {
+                MaterialTheme {
+                    val recompositionMarker = unrelatedRecomposition.intValue
+                    ScheduleView(
+                        items = listOf(ScheduleItem.EventEntry(occurrence)),
+                        fields = emptyList(),
+                        showFab = {
+                            check(recompositionMarker >= 0)
+                            visibilityUpdates += 1
+                        },
+                        topContentPadding = 0.dp,
+                        onMatchClick = {},
+                        eventCardContent = { event, _, _, _ ->
+                            Text(text = "schedule-${event.id}")
+                        },
+                    )
+                }
+            }
+        }
+
+        composeRule.waitForIdle()
+        assertEquals(1, visibilityUpdates)
+
+        composeRule.runOnIdle {
+            unrelatedRecomposition.intValue += 1
+        }
+        composeRule.waitForIdle()
+
+        assertEquals(1, visibilityUpdates)
+    }
+
+    @Test
+    fun empty_schedule_restores_fab_once_and_ignores_unrelated_recomposition() {
+        val unrelatedRecomposition = mutableIntStateOf(0)
+        val visibilityUpdates = mutableListOf<Boolean>()
+
+        composeRule.setContent {
+            CompositionLocalProvider(LocalNavBarPadding provides PaddingValues()) {
+                MaterialTheme {
+                    ScheduleView(
+                        items = emptyList(),
+                        fields = emptyList(),
+                        showFab = { isVisible -> visibilityUpdates += isVisible },
+                        topContentPadding = unrelatedRecomposition.intValue.dp,
+                        onMatchClick = {},
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("No scheduled entries yet.").assertIsDisplayed()
+        composeRule.waitForIdle()
+        assertEquals(listOf(true), visibilityUpdates)
+
+        composeRule.runOnIdle {
+            unrelatedRecomposition.intValue += 1
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("No scheduled entries yet.").assertIsDisplayed()
+        assertEquals(listOf(true), visibilityUpdates)
     }
 }

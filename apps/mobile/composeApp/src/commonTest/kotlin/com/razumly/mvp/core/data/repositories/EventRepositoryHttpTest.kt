@@ -5,6 +5,8 @@ import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventOfficial
+import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventParticipantManagementCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventTeamComplianceCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventUserComplianceCacheEntry
@@ -17,12 +19,14 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
+import com.razumly.mvp.core.data.dataTypes.daos.CatalogCacheDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventComplianceDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventParticipantManagementDao
@@ -59,11 +63,15 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.JsonNull
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.ExperimentalTime
+import kotlin.time.Duration.Companion.days
 import kotlin.time.Instant
 
 private class EventRepositoryHttp_InMemoryAuthTokenStore(
@@ -119,7 +127,6 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
     override suspend fun getEventsByIds(ids: List<String>): List<Event> = ids.mapNotNull(events.value::get)
     override suspend fun getEventWithRelationsById(id: String): EventWithRelations = error("unused")
     override fun getEventWithRelationsFlow(id: String): Flow<EventWithRelations> = error("unused")
-    override suspend fun upsertEventWithRelations(event: Event) { upsertEvent(event) }
     override suspend fun deleteEventWithCrossRefs(eventId: String) {
         deleteEventWithCrossRefsCalls += eventId
         deleteEventById(eventId)
@@ -139,7 +146,7 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
     }
 }
 
-private class EventRepositoryHttp_FakeUserDataDao : UserDataDao {
+private class EventRepositoryHttp_FakeUserDataDao : RoomUserDataDaoTestAdapter() {
     override suspend fun upsertUserData(userData: UserData) {}
     override suspend fun upsertUsersData(usersData: List<UserData>) {}
     override suspend fun deleteUsersById(ids: List<String>) {}
@@ -155,7 +162,7 @@ private class EventRepositoryHttp_FakeUserDataDao : UserDataDao {
     override suspend fun searchUsers(search: String): List<UserData> = emptyList()
 }
 
-private class EventRepositoryHttp_FakeTeamDao : TeamDao {
+private class EventRepositoryHttp_FakeTeamDao : RoomTeamDaoTestAdapter() {
     override suspend fun upsertTeam(team: Team) {}
     override suspend fun upsertTeams(teams: List<Team>) {}
     override suspend fun getTeam(teamId: String): Team = error("unused")
@@ -383,6 +390,7 @@ private class EventRepositoryHttp_FakeDatabaseService(
     override val getEventParticipantManagementDao: EventParticipantManagementDao =
         EventRepositoryHttp_FakeParticipantManagementDao(),
     override val getEventComplianceDao: EventComplianceDao = EventRepositoryHttp_FakeComplianceDao(),
+    override val getCatalogCacheDao: CatalogCacheDao = InMemoryCatalogCacheDao(),
 ) : DatabaseService {
     override val getEventRegistrationDao: EventRegistrationDao get() = error("unused")
     override val getChatGroupDao: ChatGroupDao get() = error("unused")
@@ -455,12 +463,12 @@ private class EventRepositoryHttp_FakeUserRepository(
     override suspend fun logout(): Result<Unit> = error("unused")
     override suspend fun deleteAccount(confirmationText: String): Result<Unit> = error("unused")
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = error("unused")
+    override suspend fun ensureUserByEmail(email: String): Result<UserData> = error("unused")
     override suspend fun createInvites(invites: List<com.razumly.mvp.core.network.dto.InviteCreateDto>): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
     override suspend fun deleteInvite(inviteId: String): Result<Unit> = error("unused")
     override suspend fun findEmailMembership(
         emails: List<String>,
         userIds: List<String>,
-        eventId: String?,
     ): Result<List<UserEmailMembershipMatch>> = error("unused")
     override suspend fun listInvites(userId: String, type: String?): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
     override suspend fun acceptInvite(inviteId: String): Result<Unit> = error("unused")
@@ -511,8 +519,6 @@ private class EventRepositoryHttp_FakeUserRepository(
         firstName: String,
         lastName: String,
         email: String,
-        currentPassword: String,
-        newPassword: String,
         userName: String,
         profileImageId: String?,
     ): Result<Unit> = error("unused")
@@ -564,6 +570,607 @@ private object EventRepositoryHttp_UnusedTeamRepository : ITeamRepository {
 }
 
 class EventRepositoryHttpTest {
+    @Test
+    fun getMySchedule_follows_server_cursor_and_merges_all_pages_without_duplicates() = runTest {
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        var requestCount = 0
+        var requestedWindowFrom: String? = null
+        var requestedWindowTo: String? = null
+        val engine = MockEngine { request ->
+            requestCount += 1
+            assertEquals("/api/profile/schedule", request.url.encodedPath)
+            assertEquals("200", request.url.parameters["limit"])
+            val windowFrom = request.url.parameters["from"] ?: error("Missing bounded schedule from")
+            val windowTo = request.url.parameters["to"] ?: error("Missing bounded schedule to")
+            assertEquals(456.days, Instant.parse(windowTo) - Instant.parse(windowFrom))
+            requestedWindowFrom?.let { assertEquals(it, windowFrom) }
+            requestedWindowTo?.let { assertEquals(it, windowTo) }
+            requestedWindowFrom = windowFrom
+            requestedWindowTo = windowTo
+
+            when (requestCount) {
+                1 -> {
+                    assertEquals(null, request.url.parameters["cursor"])
+                    respond(
+                        content = """
+                            {
+                              "events": [
+                                {
+                                  "id": "event_1",
+                                  "name": "First Event",
+                                  "hostId": "host_1",
+                                  "coordinates": [-80.0, 25.0],
+                                  "start": "2026-07-13T12:00:00Z",
+                                  "end": "2026-07-13T13:00:00Z"
+                                }
+                              ],
+                              "pagination": {
+                                "limit": 200,
+                                "hasMore": true,
+                                "nextCursor": "cursor two/+",
+                                "isComplete": false,
+                                "windowFrom": "$windowFrom",
+                                "windowTo": "$windowTo"
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                2 -> {
+                    assertEquals("cursor two/+", request.url.parameters["cursor"])
+                    respond(
+                        content = """
+                            {
+                              "events": [
+                                {
+                                  "id": "event_1",
+                                  "name": "First Event",
+                                  "hostId": "host_1",
+                                  "coordinates": [-80.0, 25.0],
+                                  "start": "2026-07-13T12:00:00Z",
+                                  "end": "2026-07-13T13:00:00Z"
+                                },
+                                {
+                                  "id": "event_2",
+                                  "name": "Second Event",
+                                  "hostId": "host_1",
+                                  "coordinates": [-80.0, 25.0],
+                                  "start": "2026-07-14T12:00:00Z",
+                                  "end": "2026-07-14T13:00:00Z"
+                                }
+                              ],
+                              "pagination": {
+                                "limit": 200,
+                                "hasMore": false,
+                                "nextCursor": null,
+                                "isComplete": true,
+                                "windowFrom": "$windowFrom",
+                                "windowTo": "$windowTo"
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected schedule page request $requestCount")
+            }
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val snapshot = repo.getMySchedule().getOrThrow()
+
+        assertEquals(2, requestCount)
+        assertEquals(listOf("event_1", "event_2"), snapshot.events.map(Event::id))
+        assertEquals("event_1", eventDao.getEventById("event_1")?.id)
+        assertEquals("event_2", eventDao.getEventById("event_2")?.id)
+    }
+
+    @Test
+    fun getMySchedule_fails_closed_when_an_incomplete_page_has_no_cursor() = runTest {
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            EventRepositoryHttp_FakeEventDao(),
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        val engine = MockEngine {
+            respond(
+                content = """
+                    {
+                      "events": [],
+                      "pagination": {
+                        "limit": 200,
+                        "hasMore": true,
+                        "nextCursor": null
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val failure = repo.getMySchedule().exceptionOrNull()
+
+        assertEquals(
+            "Schedule page is incomplete but did not provide a continuation cursor",
+            failure?.message,
+        )
+    }
+
+    @Test
+    fun getMySchedule_fails_closed_when_pagination_metadata_disappears_on_continuation() = runTest {
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            EventRepositoryHttp_FakeEventDao(),
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        var requestCount = 0
+        val engine = MockEngine {
+            requestCount += 1
+            respond(
+                content = if (requestCount == 1) {
+                    """
+                        {
+                          "events": [],
+                          "pagination": {
+                            "limit": 200,
+                            "hasMore": true,
+                            "nextCursor": "cursor_2",
+                            "isComplete": false
+                          }
+                        }
+                    """.trimIndent()
+                } else {
+                    """
+                        {
+                          "events": [{
+                            "id": "event_2",
+                            "name": "Second Event",
+                            "hostId": "host_1",
+                            "coordinates": [-80.0, 25.0],
+                            "start": "2026-07-14T12:00:00Z",
+                            "end": "2026-07-14T13:00:00Z"
+                          }]
+                        }
+                    """.trimIndent()
+                },
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repo = EventRepository(
+            db,
+            MvpApiClient(
+                HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+                "http://example.test",
+                EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+            ),
+            EventRepositoryHttp_UnusedTeamRepository,
+            userRepo,
+        )
+
+        val failure = repo.getMySchedule().exceptionOrNull()
+
+        assertEquals(
+            "Schedule response dropped pagination metadata during continuation",
+            failure?.message,
+        )
+        assertEquals(2, requestCount)
+    }
+
+    @Test
+    fun getMySchedule_fails_closed_when_server_never_terminates_pagination() = runTest {
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            EventRepositoryHttp_FakeEventDao(),
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        var requestCount = 0
+        val engine = MockEngine {
+            requestCount += 1
+            respond(
+                content = """
+                    {
+                      "events": [],
+                      "pagination": {
+                        "limit": 200,
+                        "hasMore": true,
+                        "nextCursor": "cursor_$requestCount",
+                        "isComplete": false
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repo = EventRepository(
+            db,
+            MvpApiClient(
+                HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+                "http://example.test",
+                EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+            ),
+            EventRepositoryHttp_UnusedTeamRepository,
+            userRepo,
+        )
+
+        val failure = repo.getMySchedule().exceptionOrNull()
+
+        assertEquals("Schedule endpoint exceeded the safe pagination limit", failure?.message)
+        assertEquals(100, requestCount)
+    }
+
+    @Test
+    fun getMySchedule_accepts_a_small_legacy_response_without_pagination_metadata() = runTest {
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            EventRepositoryHttp_FakeEventDao(),
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        val engine = MockEngine {
+            respond(
+                content = """
+                    {
+                      "events": [
+                        {
+                          "id": "event_legacy",
+                          "name": "Legacy Event",
+                          "hostId": "host_1",
+                          "coordinates": [-80.0, 25.0],
+                          "start": "2026-07-13T12:00:00Z",
+                          "end": "2026-07-13T13:00:00Z"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val snapshot = repo.getMySchedule().getOrThrow()
+
+        assertEquals(listOf("event_legacy"), snapshot.events.map(Event::id))
+    }
+
+    @Test
+    fun getMyScheduleNextAction_maps_the_narrow_match_contract() = runTest {
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            EventRepositoryHttp_FakeEventDao(),
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        val engine = MockEngine { request ->
+            assertEquals("/api/profile/schedule/next-action", request.url.encodedPath)
+            respond(
+                content = """
+                    {
+                      "contractVersion": 1,
+                      "generatedAt": "2026-07-13T12:00:00.000Z",
+                      "action": {
+                        "type": "MATCH",
+                        "eventId": "event_1",
+                        "matchId": "match_1",
+                        "eventName": "Summer League",
+                        "eventImageId": "image_1"
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val action = repo.getMyScheduleNextAction().getOrThrow()
+
+        assertEquals(
+            UserScheduleNextAction.MatchShortcut(
+                eventId = "event_1",
+                matchId = "match_1",
+                eventName = "Summer League",
+                eventImageId = "image_1",
+            ),
+            action,
+        )
+    }
+
+    @Test
+    fun getHostEventsPage_includes_offset_and_maps_server_pagination() = runTest {
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        val engine = MockEngine { request ->
+            assertEquals("/api/events", request.url.encodedPath)
+            assertEquals("host_1", request.url.parameters["hostId"])
+            assertEquals("50", request.url.parameters["limit"])
+            assertEquals("200", request.url.parameters["offset"])
+            respond(
+                content = """
+                    {
+                      "events": [
+                        {
+                          "id": "event_201",
+                          "name": "Hosted Event",
+                          "hostId": "host_1",
+                          "coordinates": [-80.0, 25.0],
+                          "start": "2026-07-13T12:00:00Z",
+                          "end": "2026-07-13T13:00:00Z"
+                        }
+                      ],
+                      "pagination": {
+                        "limit": 50,
+                        "offset": 200,
+                        "nextOffset": 201,
+                        "hasMore": true
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val page = repo.getHostEventsPage(" host_1 ", limit = 50, offset = 200).getOrThrow()
+
+        assertEquals(listOf("event_201"), page.events.map(Event::id))
+        assertEquals(201, page.nextOffset)
+        assertTrue(page.hasMore)
+    }
+
+    @Test
+    fun getHostEventsPage_fails_the_retryable_page_when_any_event_row_is_malformed() = runTest {
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        val engine = MockEngine {
+            respond(
+                content = """
+                    {
+                      "events": [
+                        {
+                          "id": "event_201",
+                          "name": "Valid Event",
+                          "hostId": "host_1",
+                          "start": "2026-07-13T12:00:00Z",
+                          "end": "2026-07-13T13:00:00Z"
+                        },
+                        {
+                          "id": "event_202",
+                          "name": "Malformed Event",
+                          "hostId": "host_1",
+                          "start": "not-a-date",
+                          "end": "2026-07-13T13:00:00Z"
+                        }
+                      ],
+                      "pagination": {
+                        "limit": 2,
+                        "offset": 200,
+                        "nextOffset": 202,
+                        "hasMore": true
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val result = repo.getHostEventsPage("host_1", limit = 2, offset = 200)
+
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("Hosted events page row 2"))
+        assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("id=event_202"))
+        assertTrue(eventDao.getAllCachedEvents().first().isEmpty())
+    }
+
+    @Test
+    fun getHostEventsPage_fails_when_server_claims_more_rows_without_a_continuation() = runTest {
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        val engine = MockEngine {
+            respond(
+                content = """
+                    {
+                      "events": [
+                        {
+                          "id": "event_201",
+                          "name": "Hosted Event",
+                          "hostId": "host_1",
+                          "start": "2026-07-13T12:00:00Z",
+                          "end": "2026-07-13T13:00:00Z"
+                        }
+                      ],
+                      "pagination": {
+                        "limit": 50,
+                        "offset": 200,
+                        "hasMore": true
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val result = repo.getHostEventsPage("host_1", limit = 50, offset = 200)
+
+        assertTrue(result.isFailure)
+        assertEquals(
+            "Hosted events page is missing a valid continuation offset",
+            result.exceptionOrNull()?.message,
+        )
+    }
+
+    @Test
+    fun getOrganizationEventsPage_includes_offset_and_maps_server_pagination() = runTest {
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        val engine = MockEngine { request ->
+            assertEquals("/api/events", request.url.encodedPath)
+            assertEquals("org_1", request.url.parameters["organizationId"])
+            assertEquals("50", request.url.parameters["limit"])
+            assertEquals("25", request.url.parameters["offset"])
+            respond(
+                content = """
+                    {
+                      "events": [
+                        {
+                          "id": "event_26",
+                          "name": "Organization Event",
+                          "hostId": "host_1",
+                          "coordinates": [-80.0, 25.0],
+                          "start": "2026-07-13T12:00:00Z",
+                          "end": "2026-07-13T13:00:00Z"
+                        }
+                      ],
+                      "pagination": {
+                        "limit": 50,
+                        "offset": 25,
+                        "nextOffset": 26,
+                        "hasMore": true
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val page = repo.getOrganizationEventsPage("org_1", limit = 50, offset = 25).getOrThrow()
+
+        assertEquals(listOf("event_26"), page.events.map(Event::id))
+        assertEquals(26, page.nextOffset)
+        assertTrue(page.hasMore)
+    }
+
+    @Test
+    fun getOrganizationEventsPage_sanitizes_values_and_treats_missing_pagination_as_terminal() = runTest {
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        val engine = MockEngine { request ->
+            assertEquals("organization one", request.url.parameters["organizationId"])
+            assertEquals("1", request.url.parameters["limit"])
+            assertEquals("7", request.url.parameters["offset"])
+            respond(
+                content = """
+                    {
+                      "events": [
+                        {
+                          "id": "event_1",
+                          "name": "Legacy Organization Event",
+                          "hostId": "host_1",
+                          "coordinates": [-80.0, 25.0],
+                          "start": "2026-07-13T12:00:00Z",
+                          "end": "2026-07-13T13:00:00Z"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val page = repo.getOrganizationEventsPage(" organization one ", limit = -3, offset = 7).getOrThrow()
+
+        assertEquals(listOf("event_1"), page.events.map(Event::id))
+        assertEquals(8, page.nextOffset)
+        assertFalse(page.hasMore)
+    }
+
     @Test
     fun getCachedEventsFlow_filters_hidden_events_from_cached_results() = runTest {
         val eventDao = EventRepositoryHttp_FakeEventDao()
@@ -642,6 +1249,39 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun close_stops_session_cache_invalidation() = runTest {
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val api = MvpApiClient(
+            HttpClient(MockEngine { error("HTTP should not be used in session-cache test") }) {
+                install(ContentNegotiation) { json(jsonMVP) }
+            },
+            "http://localhost",
+            EventRepositoryHttp_InMemoryAuthTokenStore(),
+        )
+        val repo = EventRepository(
+            db,
+            api,
+            EventRepositoryHttp_UnusedTeamRepository,
+            userRepo,
+            coroutineDispatcher = StandardTestDispatcher(testScheduler),
+        )
+
+        advanceUntilIdle()
+        repo.close()
+        userRepo.emitCurrentUser(makeUser("u2"))
+        advanceUntilIdle()
+
+        assertEquals(0, eventDao.clearAllEventsWithCrossRefsCalls)
+    }
+
+    @Test
     fun reportEvent_removes_hidden_events_from_cache_and_updates_current_user() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()
@@ -688,6 +1328,370 @@ class EventRepositoryHttpTest {
         assertEquals(listOf("event_1"), cachedUser?.hiddenEventIds)
         assertEquals(listOf(listOf("event_1")), eventDao.deleteEventsWithCrossRefsCalls)
         assertTrue(eventDao.deleteEventsByIdCalls.isEmpty())
+    }
+
+    @Test
+    fun updateEvent_doesNotClearLegacyFieldCountWhenUnrelatedFieldsChange() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val cachedEvent = makeEvent(id = "event_1", hostId = "host_1").copy(fieldCount = 4)
+        eventDao.upsertEvent(cachedEvent)
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        var capturedRequestBody = ""
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Patch, request.method)
+            assertEquals("/api/events/event_1", request.url.encodedPath)
+            capturedRequestBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+            respond(
+                content = """
+                    {
+                      "id": "event_1",
+                      "name": "Renamed Event",
+                      "hostId": "host_1",
+                      "coordinates": [-80.0, 25.0],
+                      "start": "2026-02-10T00:00:00Z",
+                      "end": "2026-02-10T01:00:00Z"
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        repo.updateEvent(cachedEvent.copy(name = "Renamed Event", fieldCount = null)).getOrThrow()
+
+        val eventPatch = jsonMVP.parseToJsonElement(capturedRequestBody)
+            .jsonObject
+            .getValue("event")
+            .jsonObject
+        assertEquals("Renamed Event", eventPatch["name"]?.jsonPrimitive?.content)
+        assertFalse("fieldCount" in eventPatch)
+    }
+
+    @Test
+    fun updateEventPreservingStaff_omits_staff_assignments_and_ignores_relation_cache_failure() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val cachedEvent = makeEvent(id = "event_1", hostId = "host_1")
+        eventDao.upsertEvent(cachedEvent)
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        var capturedRequestBody = ""
+        val engine = MockEngine { request ->
+            capturedRequestBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+            respond(
+                content = """
+                    {
+                      "id": "event_1",
+                      "name": "Updated Event",
+                      "hostId": "host_1",
+                      "teamIds": ["team_missing"],
+                      "coordinates": [-80.0, 25.0],
+                      "start": "2026-02-10T00:00:00Z",
+                      "end": "2026-02-10T01:00:00Z"
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val repo = EventRepository(
+            db,
+            MvpApiClient(http, "http://example.test", tokenStore),
+            EventRepositoryHttp_UnusedTeamRepository,
+            userRepo,
+        )
+
+        repo.updateEventPreservingStaff(
+            newEvent = cachedEvent.copy(
+                name = "Updated Event",
+                assistantHostIds = listOf("assistant_1"),
+                officialPositions = listOf(EventOfficialPosition("position_1", "Referee")),
+                eventOfficials = listOf(
+                    EventOfficial(
+                        id = "event_official_1",
+                        userId = "official_1",
+                        positionIds = listOf("position_1"),
+                    ),
+                ),
+                officialIds = listOf("official_1"),
+            ),
+            expectedStaffRevision = "revision_loaded",
+        ).getOrThrow()
+
+        val requestBody = jsonMVP.parseToJsonElement(capturedRequestBody).jsonObject
+        val eventPatch = requestBody
+            .getValue("event")
+            .jsonObject
+        assertEquals("true", requestBody["preserveStaffAssignments"]?.jsonPrimitive?.content)
+        assertEquals("revision_loaded", requestBody["expectedStaffRevision"]?.jsonPrimitive?.content)
+        assertFalse("assistantHostIds" in eventPatch)
+        assertFalse("eventOfficials" in eventPatch)
+        assertFalse("officialIds" in eventPatch)
+        assertTrue("officialPositions" in eventPatch)
+    }
+
+    @Test
+    fun eventStaffState_uses_the_atomic_get_and_put_contract() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val baseEvent = makeEvent(id = "event_1", hostId = "host_1")
+        eventDao.upsertEvent(baseEvent)
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        var requestCount = 0
+        val engine = MockEngine { request ->
+            requestCount += 1
+            assertEquals("/api/events/event_1/staff", request.url.encodedPath)
+            if (requestCount == 1) {
+                assertEquals(HttpMethod.Get, request.method)
+            } else {
+                assertEquals(HttpMethod.Put, request.method)
+                val body = jsonMVP.parseToJsonElement(
+                    (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString(),
+                ).jsonObject
+                assertEquals("revision_1", body["expectedRevision"]?.jsonPrimitive?.content)
+                assertEquals(
+                    "assistant_1",
+                    body.getValue("assistantHostIds").toString().trim('[', ']', '"'),
+                )
+                assertTrue(body.getValue("pendingInvites").toString().contains("ASSISTANT_HOST"))
+            }
+            respond(
+                content = """
+                    {
+                      "contractVersion": 1,
+                      "eventId": "event_1",
+                      "revision": "${if (requestCount == 1) "revision_1" else "revision_2"}",
+                      "assistantHostIds": ["assistant_1"],
+                      "officialPositions": [
+                        { "id": "position_1", "name": "Referee", "count": 1, "order": 0 }
+                      ],
+                      "eventOfficials": [],
+                      "officialIds": [],
+                      "staffInvites": []
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { configureMvpHttpClient() }
+        val repo = EventRepository(
+            db,
+            MvpApiClient(http, "http://example.test", tokenStore),
+            EventRepositoryHttp_UnusedTeamRepository,
+            userRepo,
+        )
+
+        val loaded = repo.getEventStaffState(baseEvent).getOrThrow()
+        val reconciled = repo.reconcileEventStaff(
+            event = loaded.event,
+            pendingInvites = listOf(
+                EventStaffInviteInput(
+                    email = "Staff@Example.Test ",
+                    firstName = " Avery ",
+                    lastName = " Assistant ",
+                    roles = setOf(EventStaffAssignmentRole.ASSISTANT_HOST),
+                ),
+            ),
+            expectedRevision = loaded.revision,
+        ).getOrThrow()
+
+        assertEquals("revision_2", reconciled.revision)
+        assertEquals(listOf("assistant_1"), reconciled.event.assistantHostIds)
+        assertEquals(2, requestCount)
+    }
+
+    @Test
+    fun eventStaffState_keeps_server_success_when_relation_cache_fails_and_accepts_empty_positions() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val baseEvent = makeEvent(id = "event_1", hostId = "host_1").copy(
+            teamIds = listOf("team_missing"),
+            officialPositions = listOf(EventOfficialPosition("position_stale", "Stale position")),
+        )
+        eventDao.upsertEvent(baseEvent)
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/events/event_1/staff", request.url.encodedPath)
+            respond(
+                content = """
+                    {
+                      "contractVersion": 1,
+                      "eventId": "event_1",
+                      "revision": "revision_1",
+                      "assistantHostIds": [],
+                      "officialPositions": [],
+                      "eventOfficials": [],
+                      "officialIds": [],
+                      "staffInvites": []
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repo = EventRepository(
+            db,
+            MvpApiClient(
+                HttpClient(engine) { configureMvpHttpClient() },
+                "http://example.test",
+                tokenStore,
+            ),
+            EventRepositoryHttp_UnusedTeamRepository,
+            EventRepositoryHttp_FakeUserRepository(makeUser("user_1")),
+        )
+
+        val result = repo.getEventStaffState(baseEvent)
+
+        assertTrue(result.isSuccess)
+        assertTrue(result.getOrThrow().event.officialPositions.isEmpty())
+    }
+
+    @Test
+    fun eventStaffState_surfaces_revision_conflicts_without_mutating_the_cache() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val baseEvent = makeEvent(id = "event_1", hostId = "host_1")
+        eventDao.upsertEvent(baseEvent)
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Put, request.method)
+            assertEquals("/api/events/event_1/staff", request.url.encodedPath)
+            respond(
+                content = """
+                    {
+                      "error": "Event staff changed. Reload and try again.",
+                      "code": "EVENT_STAFF_REVISION_CONFLICT",
+                      "currentRevision": "revision_current"
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.Conflict,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repo = EventRepository(
+            db,
+            MvpApiClient(
+                HttpClient(engine) { configureMvpHttpClient() },
+                "http://example.test",
+                tokenStore,
+            ),
+            EventRepositoryHttp_UnusedTeamRepository,
+            EventRepositoryHttp_FakeUserRepository(makeUser("user_1")),
+        )
+
+        val result = repo.reconcileEventStaff(
+            event = baseEvent.copy(assistantHostIds = listOf("assistant_1")),
+            pendingInvites = emptyList(),
+            expectedRevision = "revision_stale",
+        )
+
+        assertTrue(result.isFailure)
+        assertEquals(baseEvent, eventDao.getEventById("event_1"))
+    }
+
+    @Test
+    fun updateEvent_encodes_intentionally_cleared_nullable_fields_as_json_null() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val cachedEvent = makeEvent(id = "event_1", hostId = "host_1").copy(
+            address = "100 Court Way",
+            minAge = 12,
+            maxAge = 18,
+            cancellationRefundHours = 24,
+            sportId = "sport_1",
+            matchDurationMinutes = 45,
+            setDurationMinutes = 20,
+        )
+        eventDao.upsertEvent(cachedEvent)
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        var capturedRequestBody = ""
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Patch, request.method)
+            capturedRequestBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+            respond(
+                content = """
+                    {
+                      "id": "event_1",
+                      "name": "Updated Event",
+                      "hostId": "host_1",
+                      "coordinates": [-80.0, 25.0],
+                      "start": "2026-02-10T00:00:00Z",
+                      "end": "2026-02-10T01:00:00Z"
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        repo.updateEvent(cachedEvent.copy(
+            name = "Updated Event",
+            address = null,
+            minAge = null,
+            maxAge = null,
+            cancellationRefundHours = null,
+            sportId = null,
+            matchDurationMinutes = null,
+            setDurationMinutes = null,
+        )).getOrThrow()
+
+        val eventPatch = jsonMVP.parseToJsonElement(capturedRequestBody)
+            .jsonObject
+            .getValue("event")
+            .jsonObject
+        assertEquals(JsonNull, eventPatch["address"])
+        assertEquals(JsonNull, eventPatch["minAge"])
+        assertEquals(JsonNull, eventPatch["maxAge"])
+        assertEquals(JsonNull, eventPatch["cancellationRefundHours"])
+        assertEquals(JsonNull, eventPatch["sportId"])
+        assertEquals(JsonNull, eventPatch["matchDurationMinutes"])
+        assertEquals(JsonNull, eventPatch["setDurationMinutes"])
     }
 
     @Test
@@ -756,6 +1760,413 @@ class EventRepositoryHttpTest {
 
         assertEquals(listOf("e1"), events.map { it.id })
         assertEquals("e1", eventDao.getEventById("e1")?.id)
+    }
+
+    @Test
+    fun getEventsByIds_fetches_every_requested_id_in_safe_request_chunks() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val requestedIds = (1..201).map { index -> "event_$index" }
+        val requestChunks = mutableListOf<List<String>>()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events", request.url.encodedPath)
+            val chunk = request.url.parameters["ids"].orEmpty().split(',')
+            requestChunks += chunk
+            assertEquals(chunk.size.toString(), request.url.parameters["limit"])
+            respond(
+                content = """{"events": []}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            tokenStore,
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        assertTrue(repo.getEventsByIds(requestedIds).getOrThrow().isEmpty())
+        assertEquals(listOf(100, 100, 1), requestChunks.map(List<String>::size))
+        assertEquals(requestedIds, requestChunks.flatten())
+    }
+
+    @Test
+    fun field_and_time_slot_id_queries_fetch_every_requested_id_in_safe_request_chunks() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val fieldDao = EventRepositoryHttp_FakeFieldDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            EventRepositoryHttp_FakeEventDao(),
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+            getFieldDao = fieldDao,
+        )
+        val requestedIds = (1..201).map { index -> "item_$index" }
+        val fieldChunks = mutableListOf<List<String>>()
+        val slotChunks = mutableListOf<List<String>>()
+        val fieldSlotChunks = mutableListOf<List<String>>()
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/fields" -> {
+                    fieldChunks += request.url.parameters["ids"].orEmpty().split(',')
+                    respond(
+                        content = """{"fields": []}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                "/api/time-slots" -> {
+                    val ids = request.url.parameters["ids"]
+                    if (ids != null) {
+                        slotChunks += ids.split(',')
+                    } else {
+                        fieldSlotChunks += request.url.parameters["fieldIds"].orEmpty().split(',')
+                        assertEquals("true", request.url.parameters["rentalOnly"])
+                    }
+                    respond(
+                        content = """{"timeSlots": []}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected request: ${request.url}")
+            }
+        }
+        val repo = FieldRepository(
+            MvpApiClient(
+                HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+                "http://example.test",
+                tokenStore,
+            ),
+            db,
+        )
+
+        assertTrue(repo.getFields(requestedIds).getOrThrow().isEmpty())
+        assertTrue(repo.getTimeSlots(requestedIds).getOrThrow().isEmpty())
+        assertTrue(repo.getTimeSlotsForFields(requestedIds, rentalOnly = true).getOrThrow().isEmpty())
+        listOf(fieldChunks, slotChunks, fieldSlotChunks).forEach { chunks ->
+            assertEquals(listOf(100, 100, 1), chunks.map(List<String>::size))
+            assertEquals(requestedIds, chunks.flatten())
+        }
+    }
+
+    @Test
+    fun timeSlotRead_returns_room_snapshot_when_refresh_is_offline() = runTest {
+        var requestCount = 0
+        val engine = MockEngine { request ->
+            assertEquals("/api/time-slots", request.url.encodedPath)
+            assertEquals("slot_1", request.url.parameters["ids"])
+            requestCount += 1
+            if (requestCount == 2) {
+                respond(
+                    content = "{}",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            } else if (requestCount > 2) {
+                respond(
+                    content = """{"error":"offline"}""",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            } else {
+                respond(
+                    content = """
+                        {
+                          "timeSlots": [{
+                            "id": "slot_1",
+                            "dayOfWeek": 2,
+                            "daysOfWeek": [2],
+                            "divisions": ["open"],
+                            "startTimeMinutes": 600,
+                            "endTimeMinutes": 660,
+                            "startDate": "2026-07-14T17:00:00Z",
+                            "timeZone": "UTC",
+                            "repeating": false,
+                            "endDate": null,
+                            "scheduledFieldId": "field_1",
+                            "scheduledFieldIds": ["field_1"],
+                            "price": 2500
+                          }]
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+        }
+        val database = EventRepositoryHttp_FakeDatabaseService(
+            EventRepositoryHttp_FakeEventDao(),
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val repository = FieldRepository(
+            MvpApiClient(
+                HttpClient(engine) { configureMvpHttpClient() },
+                "http://example.test",
+                EventRepositoryHttp_InMemoryAuthTokenStore("token"),
+            ),
+            database,
+        )
+
+        val onlineSlot = repository.getTimeSlots(listOf("slot_1")).getOrThrow().single()
+        assertEquals("slot_1", onlineSlot.id)
+        assertEquals(listOf("field_1"), onlineSlot.scheduledFieldIds)
+        assertEquals(2500, onlineSlot.price)
+
+        assertTrue(repository.getTimeSlots(listOf("slot_1")).isFailure)
+
+        val offlineSlot = repository.getTimeSlots(listOf("slot_1")).getOrThrow().single()
+        assertEquals(onlineSlot, offlineSlot)
+    }
+
+    @Test
+    fun timeSlotFieldRead_fetchesEveryPage_and_preservesAll201RowsInServerOrder() = runTest {
+        val requestedOffsets = mutableListOf<Int>()
+        val engine = MockEngine { request ->
+            val offset = request.url.parameters["offset"]?.toIntOrNull() ?: 0
+            requestedOffsets += offset
+            val range = if (offset == 0) 0 until 200 else 200 until 201
+            val rows = range.joinToString(",") { index ->
+                """{"id":"slot_${index.toString().padStart(3, '0')}","dayOfWeek":2,"daysOfWeek":[2],"startTimeMinutes":600,"endTimeMinutes":660,"startDate":"2026-07-14T17:00:00Z","timeZone":"UTC","repeating":false,"endDate":null,"scheduledFieldId":"field_1","scheduledFieldIds":["field_1"],"price":2500}"""
+            }
+            val hasMore = offset == 0
+            val nextOffset = if (hasMore) 200 else 201
+            respond(
+                content = """{"timeSlots":[$rows],"pagination":{"limit":200,"offset":$offset,"nextOffset":$nextOffset,"hasMore":$hasMore}}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repository = FieldRepository(
+            MvpApiClient(
+                HttpClient(engine) { configureMvpHttpClient() },
+                "http://example.test",
+                EventRepositoryHttp_InMemoryAuthTokenStore("token"),
+            ),
+            EventRepositoryHttp_FakeDatabaseService(
+                EventRepositoryHttp_FakeEventDao(),
+                EventRepositoryHttp_FakeUserDataDao(),
+                EventRepositoryHttp_FakeTeamDao(),
+            ),
+        )
+
+        val slots = repository.getTimeSlotsForField("field_1").getOrThrow()
+
+        assertEquals(listOf(0, 200), requestedOffsets)
+        assertEquals(201, slots.size)
+        assertEquals("slot_000", slots.first().id)
+        assertEquals("slot_200", slots.last().id)
+    }
+
+    @Test
+    fun publicRentalFieldRead_keepsExactRequestAssociation_whenPayloadOmitsFieldIds() = runTest {
+        var offline = false
+        val engine = MockEngine {
+            if (offline) {
+                return@MockEngine respond(
+                    content = """{"error":"offline"}""",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+            respond(
+                content = """{"timeSlots":[{"id":"public_slot","dayOfWeek":2,"daysOfWeek":[2],"startTimeMinutes":600,"endTimeMinutes":660,"startDate":"2026-07-14T17:00:00Z","timeZone":"UTC","repeating":false,"endDate":null,"price":2500}],"pagination":{"limit":200,"offset":0,"nextOffset":1,"hasMore":false}}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repository = FieldRepository(
+            MvpApiClient(
+                HttpClient(engine) { configureMvpHttpClient() },
+                "http://example.test",
+                EventRepositoryHttp_InMemoryAuthTokenStore(),
+            ),
+            EventRepositoryHttp_FakeDatabaseService(
+                EventRepositoryHttp_FakeEventDao(),
+                EventRepositoryHttp_FakeUserDataDao(),
+                EventRepositoryHttp_FakeTeamDao(),
+            ),
+        )
+
+        val onlineSlots = repository.getTimeSlotsForFields(
+            listOf("field_1", "field_2"),
+            rentalOnly = true,
+        ).getOrThrow()
+        assertEquals(listOf("public_slot"), onlineSlots.map { slot -> slot.id })
+        assertEquals(listOf("field_1", "field_2"), onlineSlots.single().scheduledFieldIds)
+        offline = true
+        val offlineSlots = repository.getTimeSlotsForFields(
+            listOf("field_1", "field_2"),
+            rentalOnly = true,
+        ).getOrThrow()
+        assertEquals(listOf("public_slot"), offlineSlots.map { slot -> slot.id })
+        assertEquals(listOf("field_1", "field_2"), offlineSlots.single().scheduledFieldIds)
+        assertTrue(
+            repository.getTimeSlotsForFields(listOf("field_3"), rentalOnly = true).isFailure,
+        )
+    }
+
+    @Test
+    fun successfulEmptyTimeSlotRefresh_replacesStaleSnapshot_authoritatively() = runTest {
+        var requestCount = 0
+        val engine = MockEngine {
+            requestCount += 1
+            when (requestCount) {
+                1 -> respond(
+                    content = """{"timeSlots":[{"id":"stale_slot","dayOfWeek":2,"daysOfWeek":[2],"startTimeMinutes":600,"endTimeMinutes":660,"startDate":"2026-07-14T17:00:00Z","timeZone":"UTC","repeating":false,"endDate":null,"scheduledFieldId":"field_1","scheduledFieldIds":["field_1"],"price":2500}],"pagination":{"limit":200,"offset":0,"nextOffset":1,"hasMore":false}}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                2 -> respond(
+                    content = """{"timeSlots":[],"pagination":{"limit":200,"offset":0,"nextOffset":0,"hasMore":false}}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                else -> respond(
+                    content = """{"error":"offline"}""",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+        }
+        val repository = FieldRepository(
+            MvpApiClient(
+                HttpClient(engine) { configureMvpHttpClient() },
+                "http://example.test",
+                EventRepositoryHttp_InMemoryAuthTokenStore("token"),
+            ),
+            EventRepositoryHttp_FakeDatabaseService(
+                EventRepositoryHttp_FakeEventDao(),
+                EventRepositoryHttp_FakeUserDataDao(),
+                EventRepositoryHttp_FakeTeamDao(),
+            ),
+        )
+
+        assertEquals(listOf("stale_slot"), repository.getTimeSlotsForField("field_1").getOrThrow().map { it.id })
+        assertTrue(repository.getTimeSlotsForField("field_1").getOrThrow().isEmpty())
+        assertTrue(repository.getTimeSlotsForField("field_1").getOrThrow().isEmpty())
+    }
+
+    @Test
+    fun timeSlotCrud_persistsRoomBeforeReturning_and_deleteRemovesTheScopedRecord() = runTest {
+        val engine = MockEngine { request ->
+            val price = if (request.method == HttpMethod.Patch) 3500 else 2500
+            when (request.method) {
+                HttpMethod.Post, HttpMethod.Patch -> respond(
+                    // Mutation responses are allowed to omit the association; the request owns it.
+                    content = """{"id":"slot_crud","dayOfWeek":2,"daysOfWeek":[2],"startTimeMinutes":600,"endTimeMinutes":660,"startDate":"2026-07-14T17:00:00Z","timeZone":"UTC","repeating":false,"endDate":null,"price":$price}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                HttpMethod.Delete -> respond(
+                    content = "",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Text.Plain.toString()),
+                )
+                HttpMethod.Get -> respond(
+                    content = """{"error":"offline"}""",
+                    status = HttpStatusCode.ServiceUnavailable,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+                else -> error("Unexpected request: ${request.method} ${request.url}")
+            }
+        }
+        val database = EventRepositoryHttp_FakeDatabaseService(
+            EventRepositoryHttp_FakeEventDao(),
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val repository = FieldRepository(
+            MvpApiClient(
+                HttpClient(engine) { configureMvpHttpClient() },
+                "http://example.test",
+                EventRepositoryHttp_InMemoryAuthTokenStore("token"),
+            ),
+            database,
+        )
+        val request = TimeSlot(
+            id = "slot_crud",
+            dayOfWeek = 2,
+            daysOfWeek = listOf(2),
+            startTimeMinutes = 600,
+            endTimeMinutes = 660,
+            startDate = Instant.parse("2026-07-14T17:00:00Z"),
+            repeating = false,
+            endDate = null,
+            scheduledFieldId = "field_1",
+            scheduledFieldIds = listOf("field_1"),
+            price = 2500,
+        )
+
+        val created = repository.createTimeSlot(request).getOrThrow()
+        assertEquals(listOf("field_1"), created.scheduledFieldIds)
+        val updated = repository.updateTimeSlot(request.copy(price = 3500)).getOrThrow()
+        assertEquals(3500, updated.price)
+        assertEquals(listOf("field_1"), updated.scheduledFieldIds)
+        assertEquals(
+            3500,
+            repository.getTimeSlots(listOf("slot_crud")).getOrThrow().single().price,
+        )
+
+        repository.deleteTimeSlot("slot_crud").getOrThrow()
+        val viewer = database.getCatalogCacheDao.getActiveViewer()?.viewerKey ?: error("Missing cache viewer")
+        assertTrue(
+            database.getCatalogCacheDao
+                .getTimeSlots(listOf("slot_crud"), viewer, "authenticated")
+                .isEmpty(),
+        )
+    }
+
+    @Test
+    fun listFields_returns_an_authoritative_empty_response_instead_of_cached_fields() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val fieldDao = EventRepositoryHttp_FakeFieldDao()
+        val staleCachedField = Field(
+            id = "field_stale",
+            fieldNumber = 1,
+            name = "Removed facility field",
+            organizationId = "organization_1",
+        )
+        fieldDao.upsertField(staleCachedField)
+        assertEquals(listOf(staleCachedField), fieldDao.getAllFields())
+        val database = EventRepositoryHttp_FakeDatabaseService(
+            EventRepositoryHttp_FakeEventDao(),
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+            getFieldDao = fieldDao,
+        )
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/fields", request.url.encodedPath)
+            respond(
+                content = """{"fields": []}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repository = FieldRepository(
+            MvpApiClient(
+                HttpClient(engine) { configureMvpHttpClient() },
+                "http://example.test",
+                tokenStore,
+            ),
+            database,
+        )
+
+        val fields = repository.listFields().getOrThrow()
+
+        assertTrue(fields.isEmpty())
     }
 
     @Test
@@ -914,11 +2325,19 @@ class EventRepositoryHttpTest {
     }
 
     @Test
-    fun getEvent_preserves_cached_participant_roster_until_participant_snapshot_refresh() = runTest {
+    fun getEvent_replaces_cached_divisions_and_participant_roster_with_authoritative_response() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()
+        val removedDivisionId = "e1__division__removed"
+        val currentDivisionId = "e1__division__current"
         val cachedEvent = makeEvent(id = "e1", hostId = "h1").copy(
             teamSignup = true,
+            singleDivision = false,
+            divisions = listOf(removedDivisionId, currentDivisionId),
+            divisionDetails = listOf(
+                DivisionDetail(id = removedDivisionId, key = "removed", name = "Removed Division"),
+                DivisionDetail(id = currentDivisionId, key = "current", name = "Current Division"),
+            ),
             teamIds = (1..9).map { index -> "team_$index" },
             userIds = listOf("user_cached"),
             waitListIds = listOf("wait_cached"),
@@ -944,6 +2363,15 @@ class EventRepositoryHttpTest {
                       "start": "2026-02-10T00:00:00Z",
                       "end": "2026-02-10T01:00:00Z",
                       "teamSignup": true,
+                      "singleDivision": false,
+                      "divisions": ["$currentDivisionId"],
+                      "divisionDetails": [
+                        {
+                          "id": "$currentDivisionId",
+                          "key": "current",
+                          "name": "Current Division"
+                        }
+                      ],
                       "teamIds": ["team_1", "team_2", "team_3", "team_4", "team_5", "team_6"],
                       "userIds": [],
                       "waitListIds": [],
@@ -962,10 +2390,12 @@ class EventRepositoryHttpTest {
         val cachedAfterRefresh = eventDao.getEventById("e1")
 
         assertEquals("Event One Updated", refreshed.name)
-        assertEquals(cachedEvent.teamIds, cachedAfterRefresh?.teamIds)
-        assertEquals(cachedEvent.userIds, cachedAfterRefresh?.userIds)
-        assertEquals(cachedEvent.waitListIds, cachedAfterRefresh?.waitListIds)
-        assertEquals(cachedEvent.freeAgentIds, cachedAfterRefresh?.freeAgentIds)
+        assertEquals(listOf(currentDivisionId), refreshed.divisions)
+        assertEquals(listOf(currentDivisionId), cachedAfterRefresh?.divisions)
+        assertEquals(listOf("team_1", "team_2", "team_3", "team_4", "team_5", "team_6"), cachedAfterRefresh?.teamIds)
+        assertEquals(emptyList(), cachedAfterRefresh?.userIds)
+        assertEquals(emptyList(), cachedAfterRefresh?.waitListIds)
+        assertEquals(emptyList(), cachedAfterRefresh?.freeAgentIds)
         assertEquals(emptyList(), eventDao.deleteEventCrossRefsCalls)
     }
 
@@ -1104,6 +2534,7 @@ class EventRepositoryHttpTest {
                           "eventId": "e1"
                         }
                       ],
+                      "staffRevision": "staff_revision_1",
                       "teamCompliance": {
                         "teams": [
                           {
@@ -1154,6 +2585,7 @@ class EventRepositoryHttpTest {
         assertEquals("config_1", detail.leagueScoringConfig?.id)
         assertEquals(3, detail.leagueScoringConfig?.pointsForWin)
         assertEquals(listOf("invite_1"), detail.staffInvites.map(Invite::id))
+        assertEquals("staff_revision_1", detail.staffRevision)
         assertEquals(1, managementDao.entries.size)
         assertEquals(1, complianceDao.teamSummaries.size)
     }
@@ -3560,64 +4992,5 @@ class EventRepositoryHttpTest {
         assertTrue(capturedBody.contains("\"applyReassignment\":false"))
         assertFalse(result.applyReassignment)
         assertEquals("e1__division__advanced", result.division.divisionId)
-    }
-
-    @Test
-    fun updateEvent_sends_json_null_for_cached_nullable_values_that_are_cleared() = runTest {
-        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
-        val eventDao = EventRepositoryHttp_FakeEventDao()
-        val db = EventRepositoryHttp_FakeDatabaseService(
-            eventDao,
-            EventRepositoryHttp_FakeUserDataDao(),
-            EventRepositoryHttp_FakeTeamDao(),
-        )
-        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("host_1"))
-        val existing = makeEvent(id = "e1", hostId = "host_1").copy(
-            address = "123 Main St",
-            minAge = 12,
-            sportId = "volleyball",
-        )
-        eventDao.upsertEvent(existing)
-        var capturedBody = ""
-
-        val engine = MockEngine { request ->
-            assertEquals("/api/events/e1", request.url.encodedPath)
-            assertEquals(HttpMethod.Patch, request.method)
-            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
-                ?.bytes()
-                ?.decodeToString()
-                .orEmpty()
-            respond(
-                content = """
-                    {
-                      "id": "e1",
-                      "name": "Ee1",
-                      "hostId": "host_1",
-                      "start": "2026-02-10T00:00:00Z",
-                      "end": "2026-02-10T01:00:00Z",
-                      "coordinates": [-80.0, 25.0],
-                      "address": null,
-                      "minAge": null,
-                      "sportId": null,
-                      "eventType": "EVENT",
-                      "userIds": [],
-                      "teamIds": []
-                    }
-                """.trimIndent(),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
-            )
-        }
-
-        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
-        val api = MvpApiClient(http, "http://example.test", tokenStore)
-        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
-
-        repo.updateEvent(existing.copy(address = null, minAge = null, sportId = null)).getOrThrow()
-
-        assertTrue(capturedBody.contains("\"address\":null"))
-        assertTrue(capturedBody.contains("\"minAge\":null"))
-        assertTrue(capturedBody.contains("\"sportId\":null"))
-        assertFalse(capturedBody.contains("\"organizationId\":null"))
     }
 }

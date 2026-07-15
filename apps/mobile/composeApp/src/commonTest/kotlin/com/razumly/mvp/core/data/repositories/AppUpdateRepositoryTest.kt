@@ -52,6 +52,16 @@ private class AppUpdate_InMemoryPreferencesDataStore(
 }
 
 class AppUpdateRepositoryTest {
+    private val expectedPlatform: String
+        get() = if (Platform.isIOS) "IOS" else "ANDROID"
+
+    private val trustedUpdateUrl: String
+        get() = if (Platform.isIOS) {
+            "https://apps.apple.com/us/app/bracketiq/id6746649739"
+        } else {
+            "https://play.google.com/store/apps/details?id=com.razumly.mvp"
+        }
+
     @Test
     fun checkForUpdate_returns_prompt_for_available_nonbreaking_release() = runTest {
         val repository = repositoryWithResponse(
@@ -60,12 +70,12 @@ class AppUpdateRepositoryTest {
                   "updateAvailable": true,
                   "updateRequired": false,
                   "latestVersion": {
-                    "platform": "ANDROID",
+                    "platform": "$expectedPlatform",
                     "versionName": "1.5.7",
                     "buildNumber": 41,
                     "changes": ["Adds update prompts.", "Improves mobile scheduling."],
                     "hasBreakingChanges": false,
-                    "updateUrl": "https://play.google.com/store/apps/details?id=com.razumly.mvp"
+                    "updateUrl": "$trustedUpdateUrl"
                   }
                 }
             """.trimIndent(),
@@ -85,6 +95,88 @@ class AppUpdateRepositoryTest {
     }
 
     @Test
+    fun checkForUpdate_accepts_the_shipped_1_6_14_boundary_release() = runTest {
+        val currentBuild = if (Platform.isIOS) 78 else 67
+        val previousBuild = if (Platform.isIOS) 77 else 66
+        val repository = repositoryWithResponse(
+            response = """
+                {
+                  "updateAvailable": true,
+                  "updateRequired": false,
+                  "latestVersion": {
+                    "platform": "$expectedPlatform",
+                    "versionName": "1.6.14",
+                    "buildNumber": $currentBuild,
+                    "changes": [
+                      "Adds organization reviews on organization profiles.",
+                      "Improves Discover map searches and database-backed event tag filters.",
+                      "Makes registration, discount-code, and bill pricing details clearer and more reliable.",
+                      "Tags push tokens by platform for more reliable notifications."
+                    ],
+                    "hasBreakingChanges": false,
+                    "updateUrl": "$trustedUpdateUrl"
+                  },
+                  "releases": [
+                    {
+                      "platform": "$expectedPlatform",
+                      "versionName": "1.6.14",
+                      "buildNumber": $currentBuild,
+                      "changes": [
+                        "Adds organization reviews on organization profiles.",
+                        "Improves Discover map searches and database-backed event tag filters.",
+                        "Makes registration, discount-code, and bill pricing details clearer and more reliable.",
+                        "Tags push tokens by platform for more reliable notifications."
+                      ],
+                      "hasBreakingChanges": false,
+                      "updateUrl": "$trustedUpdateUrl"
+                    }
+                  ]
+                }
+            """.trimIndent(),
+        )
+
+        val prompt = repository.checkForUpdate().getOrThrow()
+
+        assertNotNull(prompt)
+        assertEquals("1.6.14", prompt.versionName)
+        assertEquals(currentBuild, prompt.buildNumber)
+        assertEquals("$expectedPlatform:1.6.14:$currentBuild", prompt.releaseKey)
+        assertTrue(previousBuild < currentBuild)
+        assertEquals(
+            listOf(
+                "Adds organization reviews on organization profiles.",
+                "Improves Discover map searches and database-backed event tag filters.",
+                "Makes registration, discount-code, and bill pricing details clearer and more reliable.",
+                "Tags push tokens by platform for more reliable notifications.",
+            ),
+            prompt.changes,
+        )
+        assertFalse(prompt.updateRequired)
+    }
+
+    @Test
+    fun checkForUpdate_rejects_untrusted_remote_update_url() = runTest {
+        val repository = repositoryWithResponse(
+            response = """
+                {
+                  "updateAvailable": true,
+                  "updateRequired": true,
+                  "latestVersion": {
+                    "platform": "$expectedPlatform",
+                    "versionName": "1.6.15",
+                    "buildNumber": 68,
+                    "changes": ["Security update."],
+                    "hasBreakingChanges": true,
+                    "updateUrl": "intent://malicious.example/#Intent;scheme=https;end"
+                  }
+                }
+            """.trimIndent(),
+        )
+
+        assertNull(repository.checkForUpdate().getOrThrow())
+    }
+
+    @Test
     fun checkForUpdate_returns_release_sections_for_every_newer_release() = runTest {
         val repository = repositoryWithResponse(
             response = """
@@ -92,37 +184,37 @@ class AppUpdateRepositoryTest {
                   "updateAvailable": true,
                   "updateRequired": false,
                   "latestVersion": {
-                    "platform": "ANDROID",
+                    "platform": "$expectedPlatform",
                     "versionName": "1.5.8",
                     "buildNumber": 42,
                     "changes": ["Adds richer update history."],
                     "hasBreakingChanges": false,
-                    "updateUrl": "https://play.google.com/store/apps/details?id=com.razumly.mvp"
+                    "updateUrl": "$trustedUpdateUrl"
                   },
                   "releases": [
                     {
-                      "platform": "ANDROID",
+                      "platform": "$expectedPlatform",
                       "versionName": "1.5.6",
                       "buildNumber": 40,
                       "changes": ["Improves event detail division controls."],
                       "hasBreakingChanges": false,
-                      "updateUrl": "https://play.google.com/store/apps/details?id=com.razumly.mvp"
+                      "updateUrl": "$trustedUpdateUrl"
                     },
                     {
-                      "platform": "ANDROID",
+                      "platform": "$expectedPlatform",
                       "versionName": "1.5.7",
                       "buildNumber": 41,
                       "changes": ["Improves update prompts."],
                       "hasBreakingChanges": false,
-                      "updateUrl": "https://play.google.com/store/apps/details?id=com.razumly.mvp"
+                      "updateUrl": "$trustedUpdateUrl"
                     },
                     {
-                      "platform": "ANDROID",
+                      "platform": "$expectedPlatform",
                       "versionName": "1.5.8",
                       "buildNumber": 42,
                       "changes": ["Adds richer update history."],
                       "hasBreakingChanges": false,
-                      "updateUrl": "https://play.google.com/store/apps/details?id=com.razumly.mvp"
+                      "updateUrl": "$trustedUpdateUrl"
                     }
                   ]
                 }
@@ -146,7 +238,7 @@ class AppUpdateRepositoryTest {
             ),
             prompt.changes,
         )
-        assertEquals("ANDROID:1.5.8:42", prompt.releaseKey)
+        assertEquals("$expectedPlatform:1.5.8:42", prompt.releaseKey)
     }
 
     @Test
@@ -158,12 +250,12 @@ class AppUpdateRepositoryTest {
                   "updateAvailable": true,
                   "updateRequired": false,
                   "latestVersion": {
-                    "platform": "ANDROID",
+                    "platform": "$expectedPlatform",
                     "versionName": "1.5.7",
                     "buildNumber": 41,
                     "changes": ["Adds update prompts."],
                     "hasBreakingChanges": false,
-                    "updateUrl": "https://play.google.com/store/apps/details?id=com.razumly.mvp"
+                    "updateUrl": "$trustedUpdateUrl"
                   }
                 }
             """.trimIndent(),
@@ -186,12 +278,12 @@ class AppUpdateRepositoryTest {
                   "updateAvailable": true,
                   "updateRequired": false,
                   "latestVersion": {
-                    "platform": "ANDROID",
+                    "platform": "$expectedPlatform",
                     "versionName": "1.5.7",
                     "buildNumber": 41,
                     "changes": ["Adds update prompts."],
                     "hasBreakingChanges": false,
-                    "updateUrl": "https://play.google.com/store/apps/details?id=com.razumly.mvp"
+                    "updateUrl": "$trustedUpdateUrl"
                   }
                 }
             """.trimIndent(),
@@ -207,12 +299,12 @@ class AppUpdateRepositoryTest {
                   "updateAvailable": true,
                   "updateRequired": true,
                   "latestVersion": {
-                    "platform": "ANDROID",
+                    "platform": "$expectedPlatform",
                     "versionName": "1.5.7",
                     "buildNumber": 41,
                     "changes": ["Updates the mobile data contract."],
                     "hasBreakingChanges": true,
-                    "updateUrl": "https://play.google.com/store/apps/details?id=com.razumly.mvp"
+                    "updateUrl": "$trustedUpdateUrl"
                   }
                 }
             """.trimIndent(),
@@ -223,7 +315,7 @@ class AppUpdateRepositoryTest {
 
         assertNotNull(prompt)
         assertTrue(prompt.updateRequired)
-        assertEquals("ANDROID:1.5.7:41", prompt.releaseKey)
+        assertEquals("$expectedPlatform:1.5.7:41", prompt.releaseKey)
     }
 
     private fun repositoryWithResponse(

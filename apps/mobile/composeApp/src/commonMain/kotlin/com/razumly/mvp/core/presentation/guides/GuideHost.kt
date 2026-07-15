@@ -11,13 +11,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -47,6 +50,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,7 +63,7 @@ private val GUIDE_TARGET_CORNER_RADIUS = 12.dp
 private val GUIDE_TARGET_PADDING = 8.dp
 private val GUIDE_CARD_MARGIN = 16.dp
 private val GUIDE_CARD_MAX_WIDTH = 340.dp
-private val GUIDE_CARD_ESTIMATED_HEIGHT = 188.dp
+private val GUIDE_CARD_TARGET_GAP = 12.dp
 
 @Composable
 fun GuideHost(
@@ -196,38 +200,53 @@ private fun GuideCard(
 ) {
     val density = LocalDensity.current
     val statusBarTopPx = WindowInsets.statusBars.getTop(density).toFloat()
-    val cardOffset = remember(step.id, targetBounds, rootSize, density, statusBarTopPx) {
+    var cardSize by remember(step.id) { mutableStateOf(IntSize.Zero) }
+    val bodyScrollState = rememberScrollState()
+    LaunchedEffect(step.id) {
+        bodyScrollState.scrollTo(0)
+    }
+    val cardMaxWidth = with(density) {
+        minOf(
+            GUIDE_CARD_MAX_WIDTH.toPx(),
+            (rootSize.width - (GUIDE_CARD_MARGIN.toPx() * 2)).coerceAtLeast(0f),
+        ).toDp()
+    }
+    val cardMaxHeight = with(density) {
+        val marginPx = GUIDE_CARD_MARGIN.toPx()
+        (rootSize.height - statusBarTopPx - (marginPx * 2))
+            .coerceAtLeast(0f)
+            .toDp()
+    }
+    val cardOffset = remember(step.id, targetBounds, rootSize, cardSize, density, statusBarTopPx) {
         with(density) {
             val marginPx = GUIDE_CARD_MARGIN.toPx()
             val minCardTopPx = statusBarTopPx + marginPx
             val maxCardWidthPx = GUIDE_CARD_MAX_WIDTH.toPx()
-            val cardWidthPx = minOf(maxCardWidthPx, rootSize.width - (marginPx * 2)).coerceAtLeast(0f)
-            val estimatedCardHeightPx = GUIDE_CARD_ESTIMATED_HEIGHT.toPx()
-            val preferredYBelow = targetBounds.bottom + 12.dp.toPx()
-            val preferredYAbove = targetBounds.top - estimatedCardHeightPx - 12.dp.toPx()
-            val y = if (preferredYBelow + estimatedCardHeightPx <= rootSize.height - marginPx) {
-                preferredYBelow
-            } else {
-                preferredYAbove
-            }.coerceIn(
-                minCardTopPx,
-                (rootSize.height - estimatedCardHeightPx - marginPx).coerceAtLeast(minCardTopPx),
+            val fallbackCardWidthPx = minOf(
+                maxCardWidthPx,
+                rootSize.width - (marginPx * 2),
+            ).coerceAtLeast(0f)
+            calculateGuideCardOffset(
+                targetBounds = targetBounds,
+                rootSize = rootSize,
+                cardSize = cardSize,
+                marginPx = marginPx,
+                minCardTopPx = minCardTopPx,
+                targetGapPx = GUIDE_CARD_TARGET_GAP.toPx(),
+                fallbackCardWidthPx = fallbackCardWidthPx,
             )
-
-            val x = targetBounds.left.coerceIn(
-                marginPx,
-                (rootSize.width - cardWidthPx - marginPx).coerceAtLeast(marginPx),
-            )
-
-            IntOffset(x.roundToInt(), y.roundToInt())
         }
     }
 
     Card(
         modifier = Modifier
             .offset { cardOffset }
-            .padding(horizontal = GUIDE_CARD_MARGIN)
-            .widthIn(max = GUIDE_CARD_MAX_WIDTH),
+            .widthIn(max = cardMaxWidth)
+            .heightIn(max = cardMaxHeight)
+            .onSizeChanged { measuredSize -> cardSize = measuredSize }
+            .graphicsLayer {
+                alpha = if (cardSize == IntSize.Zero) 0f else 1f
+            },
         shape = RoundedCornerShape(16.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 12.dp),
         colors = CardDefaults.cardColors(
@@ -262,6 +281,9 @@ private fun GuideCard(
                 text = step.body,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .verticalScroll(bodyScrollState),
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -302,6 +324,36 @@ private fun GuideCard(
             }
         }
     }
+}
+
+internal fun calculateGuideCardOffset(
+    targetBounds: Rect,
+    rootSize: IntSize,
+    cardSize: IntSize,
+    marginPx: Float,
+    minCardTopPx: Float,
+    targetGapPx: Float,
+    fallbackCardWidthPx: Float,
+): IntOffset {
+    val cardWidthPx = cardSize.width
+        .takeIf { it > 0 }
+        ?.toFloat()
+        ?: fallbackCardWidthPx
+    val cardHeightPx = cardSize.height.coerceAtLeast(0).toFloat()
+    val maxCardTopPx = (rootSize.height - cardHeightPx - marginPx)
+        .coerceAtLeast(minCardTopPx)
+    val preferredYBelow = targetBounds.bottom + targetGapPx
+    val preferredYAbove = targetBounds.top - cardHeightPx - targetGapPx
+    val y = if (preferredYBelow + cardHeightPx <= rootSize.height - marginPx) {
+        preferredYBelow
+    } else {
+        preferredYAbove
+    }.coerceIn(minCardTopPx, maxCardTopPx)
+    val maxCardLeftPx = (rootSize.width - cardWidthPx - marginPx)
+        .coerceAtLeast(marginPx)
+    val x = targetBounds.left.coerceIn(marginPx, maxCardLeftPx)
+
+    return IntOffset(x.roundToInt(), y.roundToInt())
 }
 
 private fun Rect.inflate(amount: Float): Rect =

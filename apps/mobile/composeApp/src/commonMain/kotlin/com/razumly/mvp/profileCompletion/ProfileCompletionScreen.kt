@@ -292,6 +292,7 @@ fun ProfileCompletionScreen(component: ProfileCompletionComponent) {
         getTime = false,
         showDate = true,
         canSelectPast = true,
+        canSelectFuture = false,
     )
 
     if (showUploadImagePicker) {

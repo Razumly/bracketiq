@@ -12,12 +12,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -183,11 +185,13 @@ fun TextSignatureDialog(
     prompt: TextSignaturePromptState,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    progressMessage: String? = null,
 ) {
     var accepted by remember(prompt.step.templateId) { mutableStateOf(false) }
+    val isSyncing = !progressMessage.isNullOrBlank()
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSyncing) onDismiss() },
         title = { Text(prompt.step.title ?: "Required Document Signature") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -215,21 +219,41 @@ fun TextSignatureDialog(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Checkbox(checked = accepted, onCheckedChange = { accepted = it })
+                    Checkbox(
+                        checked = accepted,
+                        onCheckedChange = { accepted = it },
+                        enabled = !isSyncing,
+                    )
                     Text("I have read and agree to this document.")
                 }
+                progressMessage
+                    ?.trim()
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { message ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            Text(
+                                text = message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
             }
         },
         confirmButton = {
             Button(
                 onClick = onConfirm,
-                enabled = accepted
+                enabled = accepted && !isSyncing,
             ) {
                 Text("Accept and Continue")
             }
         },
         dismissButton = {
-            Button(onClick = onDismiss) {
+            Button(onClick = onDismiss, enabled = !isSyncing) {
                 Text("Cancel")
             }
         }

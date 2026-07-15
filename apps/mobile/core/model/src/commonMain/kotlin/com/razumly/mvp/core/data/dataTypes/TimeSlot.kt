@@ -44,7 +44,9 @@ data class TimeSlot(
     val timeZone: String = "UTC",
     val repeating: Boolean,
     @Contextual val endDate: Instant?,
-    val scheduledFieldId: String?,
+    // Public rental projections intentionally omit field associations. The exact request-to-result
+    // association is retained by the Room query snapshot rather than fabricated in this record.
+    val scheduledFieldId: String? = null,
     val scheduledFieldIds: List<String>? = null,
     val price: Int?,
     val requiredTemplateIds: List<String> = emptyList(),

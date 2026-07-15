@@ -98,6 +98,7 @@ internal data class EventDetailsRegistrationState(
     val registrationSummary: String,
     val refundSummary: String,
     val isTeamSizeValid: Boolean,
+    val showValidationErrors: Boolean,
     val isOrganizationEvent: Boolean,
     val organizationTemplatesLoading: Boolean,
     val organizationTemplatesError: String?,
@@ -204,8 +205,8 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
                             }
                         }
                     },
-                    isError = !state.isTeamSizeValid,
-                    supportingText = if (!state.isTeamSizeValid) {
+                    isError = state.showValidationErrors && !state.isTeamSizeValid,
+                    supportingText = if (state.showValidationErrors && !state.isTeamSizeValid) {
                         "Team size must be at least 1."
                     } else {
                         ""

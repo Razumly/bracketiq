@@ -1146,7 +1146,7 @@ fun EventSearchScreen(
                 val dropdownTopPx = searchBoxPosition.y + searchBoxSize.height
                 val navBottomPx = offsetNavPadding.calculateBottomPadding().toPx()
                 val availablePx = screenHeightPx - dropdownTopPx - navBottomPx - 32.dp.toPx()
-                availablePx.coerceAtLeast(640.dp.toPx()).toDp()
+                resolveDiscoverFilterMaxHeight(availablePx.toDp())
             }
         } else {
             null
@@ -1602,6 +1602,7 @@ fun EventSearchScreen(
                 SearchBox(
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = selectedTab.searchPlaceholder,
+                    query = searchQuery,
                     filter = selectedTab == DiscoverTab.EVENTS || selectedTab == DiscoverTab.ORGANIZATIONS,
                     currentFilter = when (selectedTab) {
                         DiscoverTab.EVENTS -> currentFilter
@@ -1826,6 +1827,11 @@ fun EventSearchScreen(
     }
 
 }
+
+internal val DISCOVER_FILTER_MAX_HEIGHT = 640.dp
+
+internal fun resolveDiscoverFilterMaxHeight(availableHeight: Dp): Dp =
+    availableHeight.coerceIn(0.dp, DISCOVER_FILTER_MAX_HEIGHT)
 
 private fun distanceMilesBetween(start: LatLng, end: LatLng): Double {
     val earthRadiusMiles = 3958.8

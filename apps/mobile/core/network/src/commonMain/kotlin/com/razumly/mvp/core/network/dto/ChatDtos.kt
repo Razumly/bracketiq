@@ -3,7 +3,6 @@ package com.razumly.mvp.core.network.dto
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupSummary
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -11,7 +10,6 @@ import kotlin.time.Instant
 @Serializable
 data class ChatGroupApiDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val name: String? = null,
     val teamId: String? = null,
     val userIds: List<String>? = null,
@@ -20,7 +18,7 @@ data class ChatGroupApiDto(
     val lastMessage: MessageApiDto? = null,
 ) {
     fun toChatGroupOrNull(): ChatGroup? {
-        val resolvedId = id ?: legacyId
+        val resolvedId = id
         val resolvedHostId = hostId?.trim()
         val normalizedUserIds = (userIds ?: emptyList()).map { userId -> userId.trim() }
         if (resolvedId.isNullOrBlank() || resolvedHostId.isNullOrBlank()) return null
@@ -38,7 +36,7 @@ data class ChatGroupApiDto(
 
     @OptIn(ExperimentalTime::class)
     fun toSummaryOrNull(): ChatGroupSummary? {
-        val resolvedId = id ?: legacyId
+        val resolvedId = id
         if (resolvedId.isNullOrBlank()) return null
         val lastPreview = lastMessage?.toMessageOrNull()
         return ChatGroupSummary(
@@ -81,7 +79,6 @@ data class ChatMuteResponseDto(
 @Serializable
 data class MessageApiDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val body: String? = null,
     val userId: String? = null,
     val chatId: String? = null,
@@ -91,7 +88,7 @@ data class MessageApiDto(
 ) {
     @OptIn(ExperimentalTime::class)
     fun toMessageOrNull(): MessageMVP? {
-        val resolvedId = id ?: legacyId
+        val resolvedId = id
         val resolvedUserId = userId
         val resolvedBody = body
         val resolvedChatId = chatId
@@ -115,6 +112,18 @@ data class MessageApiDto(
 @Serializable
 data class MessagesResponseDto(
     val messages: List<MessageApiDto> = emptyList(),
+    val pagination: MessagesPaginationDto = MessagesPaginationDto(),
+)
+
+@Serializable
+data class MessagesPaginationDto(
+    val index: Int = 0,
+    val limit: Int = 100,
+    val totalCount: Int = 0,
+    val nextIndex: Int = 0,
+    val remainingCount: Int = 0,
+    val hasMore: Boolean = false,
+    val order: String = "desc",
 )
 
 @Serializable

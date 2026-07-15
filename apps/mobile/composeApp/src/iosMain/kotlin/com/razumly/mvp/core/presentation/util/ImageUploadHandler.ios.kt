@@ -12,12 +12,17 @@ import platform.Foundation.dataWithContentsOfURL
 import platform.Foundation.getBytes
 import kotlin.time.Clock
 
-actual fun convertPhotoResultToUploadFile(photoResult: GalleryPhotoResult): MvpUploadFile {
-    val fallbackExtension = extensionForImageUploadMimeType(photoResult.mimeType) ?: ".jpg"
-    val fileName = photoResult.fileName ?: "image_${Clock.System.now().toEpochMilliseconds()}$fallbackExtension"
-    val mimeType = requireSupportedImageUploadMimeType(fileName, photoResult.mimeType)
+actual suspend fun convertPhotoResultToUploadFile(photoResult: GalleryPhotoResult): MvpUploadFile {
+    val fileName = photoResult.fileName
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: "image_${Clock.System.now().toEpochMilliseconds()}"
+    val mimeType = normalizeSelectedImageContentType(photoResult.mimeType)
 
     val byteArray = convertUriToByteArray(photoResult.uri)
+    if (byteArray.size > MAX_IMAGE_UPLOAD_BYTES) {
+        throw ImageUploadTooLargeException()
+    }
 
     return MvpUploadFile(bytes = byteArray, filename = fileName, mimeType = mimeType)
 }

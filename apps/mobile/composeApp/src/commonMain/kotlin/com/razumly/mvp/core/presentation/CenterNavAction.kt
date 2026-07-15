@@ -3,6 +3,7 @@ package com.razumly.mvp.core.presentation
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.repositories.UserScheduleSnapshot
+import com.razumly.mvp.core.data.repositories.UserScheduleNextAction
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Instant
@@ -22,6 +23,21 @@ sealed class CenterNavAction {
         val eventName: String,
         val eventImageId: String,
     ) : CenterNavAction()
+}
+
+internal fun UserScheduleNextAction.toCenterNavAction(): CenterNavAction = when (this) {
+    UserScheduleNextAction.CreateEvent -> CenterNavAction.CreateEvent
+    is UserScheduleNextAction.EventShortcut -> CenterNavAction.EventShortcut(
+        eventId = eventId,
+        eventName = eventName,
+        eventImageId = eventImageId,
+    )
+    is UserScheduleNextAction.MatchShortcut -> CenterNavAction.MatchShortcut(
+        eventId = eventId,
+        matchId = matchId,
+        eventName = eventName,
+        eventImageId = eventImageId,
+    )
 }
 
 internal fun resolveCenterNavAction(

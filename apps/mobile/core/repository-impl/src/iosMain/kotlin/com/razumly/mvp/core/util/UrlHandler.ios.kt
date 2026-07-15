@@ -17,19 +17,30 @@ private fun sanitizeUrlForIosOpen(url: String): String {
 
 actual class UrlHandler {
     actual suspend fun openUrlInWebView(url: String): Result<String> {
+        val trustedUrl = trustedExternalHttpsUrlOrNull(url)
+            ?: return Result.failure(IllegalArgumentException("Only secure HTTPS links can be opened."))
+        return openTrustedUrl(trustedUrl, "external")
+    }
+
+    actual suspend fun openDirectionsUrl(url: String): Result<String> {
+        val trustedUrl = trustedDirectionsUrlOrNull(url)
+            ?: return Result.failure(IllegalArgumentException("Invalid directions URL."))
+        return openTrustedUrl(trustedUrl, "directions")
+    }
+
+    private suspend fun openTrustedUrl(url: String, kind: String): Result<String> {
         return suspendCoroutine { continuation ->
             try {
-                Napier.i("Opening URL on iOS: $url", tag = "Stripe")
+                Napier.i("Opening trusted $kind URL on iOS.", tag = "ExternalLink")
                 val sanitizedUrl = sanitizeUrlForIosOpen(url)
                 if (sanitizedUrl != url) {
-                    Napier.i("Sanitized URL for iOS open: $sanitizedUrl", tag = "Stripe")
+                    Napier.i("Sanitized URL for iOS open.", tag = "ExternalLink")
                 }
                 val nsUrl = NSURL.URLWithString(sanitizedUrl)
                 if (nsUrl == null) {
                     continuation.resume(Result.failure(Exception("Invalid URL")))
                     return@suspendCoroutine
                 }
-                Napier.i("NSURL absoluteString on iOS: ${nsUrl.absoluteString ?: "<null>"}", tag = "Stripe")
 
                 UIApplication.sharedApplication.openURL(
                     url = nsUrl,

@@ -69,6 +69,7 @@ android {
     sourceSets {
         getByName("androidTest").assets.srcDir("src/test/assets")
     }
+
 }
 
 room {

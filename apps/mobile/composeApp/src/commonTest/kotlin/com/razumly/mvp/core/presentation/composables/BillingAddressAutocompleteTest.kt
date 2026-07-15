@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.presentation.composables
 
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.util.jsonMVP
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -10,13 +11,79 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class BillingAddressAutocompleteTest {
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun givenManualEdit_whenOldResolutionCompletes_thenStaleAddressIsIgnored() = runTest {
+        val pending = mutableMapOf<String, Continuation<Result<BillingAddressDraft>>>()
+        val resolved = mutableListOf<BillingAddressDraft>()
+        var finishedCount = 0
+        val coordinator = BillingAddressResolutionCoordinator(
+            scope = this,
+            resolveAddress = { placeId ->
+                suspendCoroutine { continuation -> pending[placeId] = continuation }
+            },
+        )
+
+        coordinator.resolve(
+            placeId = "old-place",
+            onResolved = resolved::add,
+            onFailure = { error -> throw error },
+            onFinished = { finishedCount += 1 },
+        )
+        runCurrent()
+
+        coordinator.invalidate()
+        pending.getValue("old-place").resume(Result.success(address(line1 = "Old address")))
+        runCurrent()
+
+        assertTrue(resolved.isEmpty())
+        assertEquals(0, finishedCount)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun givenNewerSelection_whenResponsesCompleteOutOfOrder_thenOnlyLatestAddressIsApplied() = runTest {
+        val pending = mutableMapOf<String, Continuation<Result<BillingAddressDraft>>>()
+        val resolved = mutableListOf<BillingAddressDraft>()
+        var finishedCount = 0
+        val coordinator = BillingAddressResolutionCoordinator(
+            scope = this,
+            resolveAddress = { placeId ->
+                suspendCoroutine { continuation -> pending[placeId] = continuation }
+            },
+        )
+
+        listOf("old-place", "new-place").forEach { placeId ->
+            coordinator.resolve(
+                placeId = placeId,
+                onResolved = resolved::add,
+                onFailure = { error -> throw error },
+                onFinished = { finishedCount += 1 },
+            )
+            runCurrent()
+        }
+
+        pending.getValue("new-place").resume(Result.success(address(line1 = "New address")))
+        runCurrent()
+        pending.getValue("old-place").resume(Result.success(address(line1 = "Old address")))
+        runCurrent()
+
+        assertEquals(listOf("New address"), resolved.map(BillingAddressDraft::line1))
+        assertEquals(1, finishedCount)
+    }
+
     @Test
     fun givenRestrictedKeyHeaders_whenFindingSuggestions_thenSendsGooglePlacesIdentityHeaders() = runTest {
         var packageHeader: String? = null
@@ -144,5 +211,13 @@ class BillingAddressAutocompleteTest {
         longText = longText,
         shortText = shortText,
         types = types.toList(),
+    )
+
+    private fun address(line1: String): BillingAddressDraft = BillingAddressDraft(
+        line1 = line1,
+        city = "Portland",
+        state = "OR",
+        postalCode = "97205",
+        countryCode = "US",
     )
 }

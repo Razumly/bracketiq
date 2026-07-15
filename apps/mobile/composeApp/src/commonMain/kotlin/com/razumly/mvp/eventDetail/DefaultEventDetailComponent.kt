@@ -5,6 +5,7 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
+import com.arkivanov.essenty.lifecycle.doOnDestroy
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.analytics.AnalyticsEvent
 import com.razumly.mvp.core.analytics.AnalyticsTracker
@@ -17,8 +18,6 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
-import com.razumly.mvp.core.data.dataTypes.EventWithRelations
-import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
@@ -35,20 +34,17 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
-import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
-import com.razumly.mvp.core.data.dataTypes.isPaymentPending
-import com.razumly.mvp.core.data.dataTypes.normalizedRole
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.IBillingRepository
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.ISportsRepository
-import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.ITeamRepository
@@ -56,46 +52,31 @@ import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
-import com.razumly.mvp.core.data.repositories.PurchaseIntent
-import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckoutRequest
-import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
-import com.razumly.mvp.core.data.repositories.EventDetailSyncResult
-import com.razumly.mvp.core.data.repositories.EventParticipantManagementSnapshot
-import com.razumly.mvp.core.data.repositories.EventParticipantDivisionWarning
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
-import com.razumly.mvp.core.data.repositories.EventParticipantsSummary
-import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
-import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
-import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.data.repositories.userMessage
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.network.MvpApiClient
-import com.razumly.mvp.core.network.dto.TeamCheckInDto
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
-import com.razumly.mvp.core.presentation.PaymentResult
-import com.razumly.mvp.core.presentation.util.ShareServiceProvider
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
-import com.razumly.mvp.core.util.newId
+import com.razumly.mvp.core.util.LoadingOperation
 import com.razumly.mvp.eventDetail.data.BracketNode
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
@@ -107,52 +88,15 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
-import kotlin.time.Clock
-import kotlin.time.Duration.Companion.minutes
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
-
-private data class WithdrawTargetsRefreshKey(
-    val eventId: String,
-    val occurrenceKey: String?,
-    val teamSignup: Boolean,
-    val eventType: EventType,
-    val playerIds: List<String>,
-    val waitListIds: List<String>,
-    val freeAgentIds: List<String>,
-    val teamIds: List<String>,
-)
-
-private fun FamilyChild.toJoinChildOption(): JoinChildOption {
-    val normalizedFirstName = firstName.trim()
-    val normalizedLastName = lastName.trim()
-    val fullName = listOf(normalizedFirstName, normalizedLastName)
-        .filter { it.isNotBlank() }
-        .joinToString(" ")
-        .ifBlank { "Child" }
-    val normalizedEmail = email?.trim()?.takeIf(String::isNotBlank)
-    return JoinChildOption(
-        userId = userId,
-        fullName = fullName,
-        email = normalizedEmail,
-        hasEmail = hasEmail ?: (normalizedEmail != null),
-    )
-}
-
-private fun EventWithRelations.withInitialEventImageFallback(initialEvent: Event): EventWithRelations {
-    val initialImageId = initialEvent.imageId.trim()
-    if (initialImageId.isBlank() || event.id != initialEvent.id || event.imageId.isNotBlank()) {
-        return this
-    }
-    return copy(event = event.copy(imageId = initialImageId))
-}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DefaultEventDetailComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
     fieldRepository: IFieldRepository,
-    event: Event,
+    eventId: String,
     notificationsRepository: IPushNotificationsRepository,
     private val billingRepository: IBillingRepository,
     private val eventRepository: IEventRepository,
@@ -165,6 +109,18 @@ class DefaultEventDetailComponent(
     private val apiClient: MvpApiClient? = null,
 
 ) : EventDetailComponent, PaymentProcessor(), ComponentContext by componentContext {
+    private val event = Event(id = eventId.trim())
+
+    override suspend fun quoteInclusivePrice(
+        direction: InclusivePriceQuoteDirection,
+        amountCents: Int,
+        eventType: String?,
+    ): Result<InclusivePriceQuote> = billingRepository.quoteInclusivePrice(
+        direction = direction,
+        amountCents = amountCents,
+        eventType = eventType,
+    )
+
     private companion object {
         const val MATCH_REALTIME_EDIT_PAUSE_REASON = "event-detail-editing"
     }
@@ -174,7 +130,6 @@ class DefaultEventDetailComponent(
             event = selectedEvent.value,
             user = currentUser.value,
             organization = eventWithRelations.value.organization,
-            isPlatformAdmin = _currentAccount.value.isAdmin,
         )
 
     private fun canManageParticipantData(
@@ -185,7 +140,6 @@ class DefaultEventDetailComponent(
         event = event,
         user = user,
         organization = organization,
-        isPlatformAdmin = _currentAccount.value.isAdmin,
     )
 
     private fun canEditMatchesNow(): Boolean = matchEditingCoordinator.canEditNow(canManageMatchEditing())
@@ -200,10 +154,8 @@ class DefaultEventDetailComponent(
             AuthAccount.empty()
         }
     }.stateIn(scope, SharingStarted.Eagerly, AuthAccount.empty())
-    override val isPlatformAdmin = _currentAccount
-        .map { account -> account.isAdmin }
-        .stateIn(scope, SharingStarted.Eagerly, false)
     private val _eventStaffInvites = MutableStateFlow<List<Invite>>(emptyList())
+    private val _eventStaffRevision = MutableStateFlow<String?>(null)
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
@@ -213,9 +165,13 @@ class DefaultEventDetailComponent(
     private val paymentPlanBillingCoordinator = EventPaymentPlanBillingCoordinator()
     private val purchaseIntentCoordinator = EventPurchaseIntentCoordinator(registrationFlowCoordinator)
     private val signatureExecutionCoordinator = EventSignatureExecutionCoordinator(registrationFlowCoordinator)
-    private val detailHydrationCoordinator = EventDetailHydrationCoordinator()
     private val joinConfirmationCoordinator = EventJoinConfirmationCoordinator()
     private val eventInviteCoordinator = EventInviteCoordinator()
+    private val eventTeamCheckInCoordinator = EventTeamCheckInCoordinator(
+        getEventTeamCheckInsRequest = matchRepository::getEventTeamCheckIns,
+        checkInEventTeamRequest = matchRepository::checkInEventTeam,
+        scope = scope,
+    )
     override val suggestedUsers = eventInviteCoordinator.suggestedUsers
     override val inviteTeamSuggestions = eventInviteCoordinator.inviteTeamSuggestions
     override val inviteTeamsLoading = eventInviteCoordinator.inviteTeamsLoading
@@ -225,9 +181,23 @@ class DefaultEventDetailComponent(
     override val startingTeamRegistrationId = registrationFlowCoordinator.startingTeamRegistrationId
 
     private lateinit var loadingHandler: LoadingHandler
+    private var registrationPaymentLoadingOperation: LoadingOperation? = null
 
     override fun setLoadingHandler(loadingHandler: LoadingHandler) {
         this.loadingHandler = loadingHandler
+    }
+
+    private fun showRegistrationPaymentLoading(message: String) {
+        val operation = registrationPaymentLoadingOperation
+            ?: loadingHandler.newOperation().also { created ->
+                registrationPaymentLoadingOperation = created
+            }
+        operation.showLoading(message)
+    }
+
+    private fun finishRegistrationPaymentLoading() {
+        registrationPaymentLoadingOperation?.hideLoading()
+        registrationPaymentLoadingOperation = null
     }
 
     override fun clearError() {
@@ -235,149 +205,42 @@ class DefaultEventDetailComponent(
     }
 
     override fun dismissEventTeamCheckInDialog() {
-        _showEventTeamCheckInDialog.value = false
+        eventTeamCheckInCoordinator.dismissDialog()
     }
 
     override fun confirmEventTeamCheckIn() {
-        val eventTeamId = _currentUserManagedEventTeamId.value ?: resolveCurrentUserManagedEventTeamId()
-        if (eventTeamId.isNullOrBlank()) {
-            _showEventTeamCheckInDialog.value = false
-            return
-        }
-        submitEventTeamCheckIn(eventTeamId = eventTeamId, dismissPromptOnSuccess = true)
-    }
-
-    override fun checkInEventTeam(eventTeamId: String) {
-        submitEventTeamCheckIn(eventTeamId = eventTeamId, dismissPromptOnSuccess = false)
-    }
-
-    private fun submitEventTeamCheckIn(eventTeamId: String, dismissPromptOnSuccess: Boolean) {
-        if (_eventTeamCheckInSaving.value) return
         val currentEvent = selectedEvent.value
-        val normalizedEventTeamId = eventTeamId.trim()
-        if (!eventTeamCheckInEnabled(currentEvent) || normalizedEventTeamId.isBlank()) {
-            _showEventTeamCheckInDialog.value = false
-            return
-        }
-        _eventTeamCheckInSaving.value = true
-        scope.launch {
-            try {
-                matchRepository.checkInEventTeam(
-                    eventId = currentEvent.id,
-                    eventTeamId = normalizedEventTeamId,
-                ).onSuccess { checkIn ->
-                    confirmedEventTeamCheckInPromptKeys += eventTeamCheckInPromptKey(currentEvent.id, normalizedEventTeamId)
-                    _eventTeamCheckIns.value = _eventTeamCheckIns.value + (normalizedEventTeamId to checkIn)
-                    if (dismissPromptOnSuccess) {
-                        _showEventTeamCheckInDialog.value = false
-                    }
-                }.onFailure { error ->
-                    _errorState.value = ErrorMessage("Failed to check in team: ${error.userMessage()}")
-                }
-            } finally {
-                _eventTeamCheckInSaving.value = false
-            }
-        }
-    }
-
-    private fun updateCurrentUserManagedEventTeam() {
-        _currentUserManagedEventTeamId.value = resolveCurrentUserManagedEventTeamId()
-    }
-
-    private fun resolveCurrentUserManagedEventTeamId(): String? {
-        val currentUserId = currentUser.value.id.trim()
-        if (currentUserId.isBlank()) return null
-        val eventTeamIds = selectedEvent.value.teamIds
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .toSet()
-        val relationTeams = eventWithRelations.value.teams
-        val candidateTeams = if (eventTeamIds.isEmpty()) {
-            relationTeams
-        } else {
-            relationTeams.filter { team -> team.team.id in eventTeamIds }
-        }
-        return candidateTeams.firstOrNull { team ->
-            team.team.managerId?.trim() == currentUserId ||
-                team.team.headCoachId?.trim() == currentUserId ||
-                team.team.coachIds.any { coachId -> coachId.trim() == currentUserId } ||
-                team.team.activeStaffAssignments().any { assignment ->
-                    assignment.userId.trim() == currentUserId &&
-                        assignment.normalizedRole() in setOf("MANAGER", "HEAD_COACH", "ASSISTANT_COACH")
-                }
-        }?.team?.id
-    }
-
-    private fun eventTeamCheckInEnabled(event: Event): Boolean =
-        event.teamSignup && event.teamCheckInMode.name == "EVENT"
-
-    private fun eventTeamCheckInPromptKey(eventId: String, eventTeamId: String): String =
-        "${eventId.trim()}:${eventTeamId.trim()}"
-
-    private fun eventTeamHasCheckedIn(eventId: String, eventTeamId: String): Boolean {
-        if (eventTeamCheckInPromptKey(eventId, eventTeamId) in confirmedEventTeamCheckInPromptKeys) return true
-        val checkIn = _eventTeamCheckIns.value[eventTeamId] ?: return false
-        return checkIn.status?.trim()?.uppercase().orEmpty() in setOf("", "CHECKED_IN")
-    }
-
-    private fun isEventTeamCheckInWindowOpen(event: Event): Boolean {
-        val start = event.start
-        val openAt = start - event.teamCheckInOpenMinutesBefore.coerceAtLeast(0).minutes
-        return Clock.System.now() >= openAt
+        eventTeamCheckInCoordinator.confirm(
+            event = currentEvent,
+            eventTeamId = currentUserManagedEventTeamId.value,
+            onFailure = { error ->
+                _errorState.value = ErrorMessage("Failed to check in team: ${error.userMessage()}")
+            },
+        )
     }
 
     private fun refreshEventTeamCheckInsIfAllowed() {
         val event = selectedEvent.value
-        if (!eventTeamCheckInEnabled(event)) {
-            lastLoadedEventCheckInKey = null
-            _eventTeamCheckIns.value = emptyMap()
-            return
-        }
         val canViewCheckIns = canManageParticipantData(event = event) ||
             isCurrentUserEventOfficial(currentUser.value.id, event)
-        if (!canViewCheckIns) {
-            return
-        }
-        val loadKey = event.id.trim()
-        if (loadKey.isBlank() || lastLoadedEventCheckInKey == loadKey) {
-            return
-        }
-        lastLoadedEventCheckInKey = loadKey
-        scope.launch {
-            matchRepository.getEventTeamCheckIns(event.id).onSuccess { response ->
-                _eventTeamCheckIns.value = response.checkIns
-                    .mapNotNull { checkIn ->
-                        val eventTeamId = checkIn.eventTeamId?.trim()?.takeIf(String::isNotBlank)
-                        eventTeamId?.let { it to checkIn }
-                    }
-                    .toMap()
-            }.onFailure {
-                // Keep the prompt available and retry on the next refresh after transient read failures.
-            }
-        }
+        eventTeamCheckInCoordinator.refreshIfAllowed(
+            event = event,
+            canViewCheckIns = canViewCheckIns,
+        )
     }
 
     private fun evaluateEventTeamCheckInPrompt() {
         val event = selectedEvent.value
-        if (!eventTeamCheckInEnabled(event) || !isEventTeamCheckInWindowOpen(event)) {
-            _showEventTeamCheckInDialog.value = false
-            return
-        }
-        val eventTeamId = _currentUserManagedEventTeamId.value ?: resolveCurrentUserManagedEventTeamId()
-        if (eventTeamId.isNullOrBlank() || eventTeamHasCheckedIn(event.id, eventTeamId)) {
-            _showEventTeamCheckInDialog.value = false
-            return
-        }
-        val promptKey = eventTeamCheckInPromptKey(event.id, eventTeamId)
-        if (shownEventTeamCheckInPromptKeys.add(promptKey)) {
-            _showEventTeamCheckInDialog.value = true
-        }
+        eventTeamCheckInCoordinator.evaluatePrompt(
+            event = event,
+            eventTeamId = currentUserManagedEventTeamId.value,
+        )
     }
 
     override fun updateEventRegistrationQuestionAnswer(questionId: String, answer: String) {
         if (!registrationFlowCoordinator.updateQuestionAnswer(questionId, answer)) return
         scope.launch {
-            saveCurrentRegistrationProgress(step = "questions")
+            registrationLifecycleHandler.saveCurrentRegistrationProgress(step = "questions")
         }
     }
 
@@ -397,14 +260,14 @@ class DefaultEventDetailComponent(
         }
 
         scope.launch {
-            saveCurrentRegistrationProgress(step = "questions")
+            registrationLifecycleHandler.saveCurrentRegistrationProgress(step = "questions")
             result.continuation?.invoke()
         }
     }
 
     override fun registrationHoldExpired() {
         scope.launch {
-            clearCurrentRegistrationProgress()
+            registrationLifecycleHandler.clearCurrentRegistrationProgress()
             registrationFlowCoordinator.clearPendingJoinConfirmationTarget()
             registrationFlowCoordinator.clearTeamRegistrationState()
             registrationFlowCoordinator.clearAfterRegistrationHoldExpired()
@@ -450,28 +313,36 @@ class DefaultEventDetailComponent(
     override val leagueDivisionStandings = leagueStandingsCoordinator.divisionStandings
     override val leagueDivisionStandingsLoading = leagueStandingsCoordinator.divisionStandingsLoading
     override val leagueStandingsConfirming = leagueStandingsCoordinator.standingsConfirming
-    private var sportsLoadJob: Job? = null
     private val sportsCatalogCoordinator = EventSportsCatalogCoordinator()
     private val _eventTags = MutableStateFlow<List<EventTag>>(emptyList())
 
-    private val eventRelations: StateFlow<EventWithRelations> =
-        eventRepository.getCachedEventWithRelationsFlow(event.id).map { result ->
-            result.getOrElse {
-                _errorState.value = ErrorMessage(it.userMessage())
-                EventWithRelations(event, null)
-            }.withInitialEventImageFallback(event)
-        }.stateIn(
-            scope,
-            SharingStarted.Eagerly,
-            EventWithRelations(event, null)
-        )
+    private val relationStateCoordinator = EventRelationStateCoordinator(
+        initialEvent = event,
+        currentUser = currentUser,
+        observeEventRelations = eventRepository::getEventWithRelationsFlow,
+        observeEventMatches = matchRepository::getCachedMatchesOfTournamentFlow,
+        observeEventTeams = teamRepository::getTeamsFlow,
+        observeUsers = userRepository::getUsersFlow,
+        observeCurrentUserTeams = teamRepository::getTeamsWithPlayersFlow,
+        scope = scope,
+        onEventRelationsError = { error ->
+            _errorState.value = ErrorMessage(error.userMessage())
+        },
+        onEventMatchesError = { error ->
+            _errorState.value = ErrorMessage("Error loading matches: ${error.userMessage()}")
+        },
+        onEventTeamsError = { error ->
+            _errorState.value = ErrorMessage("Failed to load teams: ${error.userMessage()}")
+        },
+    )
+
+    private val eventRelations = relationStateCoordinator.eventRelations
 
     override val sports = sportsCatalogCoordinator.sports
     override val eventTags = _eventTags.asStateFlow()
     override val divisionTypeParameters = sportsCatalogCoordinator.divisionTypeParameters
 
-    override val selectedEvent: StateFlow<Event> =
-        eventRelations.map { it.event }.stateIn(scope, SharingStarted.Eagerly, event)
+    override val selectedEvent = relationStateCoordinator.selectedEvent
 
     private val bootstrapResourcesCoordinator = EventBootstrapResourcesCoordinator(
         selectedEvent = selectedEvent,
@@ -486,84 +357,11 @@ class DefaultEventDetailComponent(
     override val isHost = selectedEvent.map { it.hostId == currentUser.value.id }
         .stateIn(scope, SharingStarted.Eagerly, false)
 
-    private val selectedEventId: StateFlow<String> = selectedEvent
-        .map { selected -> selected.id.trim() }
-        .distinctUntilChanged()
-        .stateIn(scope, SharingStarted.Eagerly, event.id.trim())
-
-    private val eventRelationPlayers: StateFlow<List<UserData>> = eventRelations
-        .map { relations -> relations.players }
-        .distinctUntilChanged()
-        .stateIn(scope, SharingStarted.Eagerly, emptyList())
-
-    private val eventRelationHost: StateFlow<UserData?> = eventRelations
-        .map { relations -> relations.host }
-        .distinctUntilChanged()
-        .stateIn(scope, SharingStarted.Eagerly, eventRelations.value.host)
-
-    private val eventRelationTeamIds: StateFlow<List<String>> = combine(
-        selectedEvent,
-        eventRelations,
-    ) { selected, relations ->
-        val registeredTeamIds = selected.teamIds.normalizedTeamIds()
-        if (selected.teamSignup) {
-            registeredTeamIds
-        } else {
-            (registeredTeamIds + relations.teams.map { team -> team.id }).normalizedTeamIds()
-        }
-    }
-        .distinctUntilChanged()
-        .stateIn(scope, SharingStarted.Eagerly, event.teamIds.normalizedTeamIds())
-
-    private val eventMatches: StateFlow<List<MatchWithRelations>> = selectedEventId
-        .flatMapLatest { eventId ->
-            if (eventId.isBlank()) {
-                flowOf(emptyList())
-            } else {
-                matchRepository.getCachedMatchesOfTournamentFlow(eventId).map { result ->
-                    result.getOrElse {
-                        _errorState.value = ErrorMessage("Error loading matches: ${it.userMessage()}")
-                        emptyList()
-                    }
-                }
-            }
-        }
-        .stateIn(scope, SharingStarted.Eagerly, emptyList())
-
-    private val eventTeams: StateFlow<List<TeamWithPlayers>> = eventRelationTeamIds
-        .flatMapLatest { relationTeamIds ->
-            if (relationTeamIds.isEmpty()) {
-                flowOf(emptyList())
-            } else {
-                teamRepository.getTeamsFlow(relationTeamIds).map { result ->
-                    result.getOrElse {
-                        _errorState.value = ErrorMessage("Failed to load teams: ${it.userMessage()}")
-                        emptyList()
-                    }
-                }
-            }
-        }
-        .stateIn(scope, SharingStarted.Eagerly, emptyList())
-
-    private val eventHost: StateFlow<UserData?> = combine(
-        selectedEvent
-            .map { selected -> selected.id to selected.hostId.trim() }
-            .distinctUntilChanged(),
-        eventRelationHost,
-    ) { (eventId, hostId), host ->
-        Triple(eventId, hostId, host)
-    }.flatMapLatest { (eventId, hostId, host) ->
-        if (host != null || hostId.isBlank()) {
-            flowOf(host)
-        } else {
-            userRepository.getUsersFlow(
-                userIds = listOf(hostId),
-                visibilityContext = UserVisibilityContext(eventId = eventId),
-            ).map { result ->
-                result.getOrElse { emptyList() }.firstOrNull()
-            }
-        }
-    }.stateIn(scope, SharingStarted.Eagerly, eventRelations.value.host)
+    private val selectedEventId = relationStateCoordinator.selectedEventId
+    private val eventRelationPlayers = relationStateCoordinator.eventPlayers
+    private val eventMatches = relationStateCoordinator.eventMatches
+    private val eventTeams = relationStateCoordinator.eventTeams
+    private val eventHost = relationStateCoordinator.eventHost
 
     private val eventOrganization: StateFlow<Organization?> = selectedEvent
         .map { selected -> selected.organizationId?.trim().orEmpty() }
@@ -649,13 +447,21 @@ class DefaultEventDetailComponent(
     override val eventFields: StateFlow<List<FieldWithMatches>> = combine(
         selectedEventId,
         eventFieldIds,
-    ) { eventId, fieldIds ->
-        eventId to fieldIds
-    }.flatMapLatest { (_, fieldIds) ->
+        bootstrapResourcesCoordinator.bootstrappedEventIds,
+    ) { eventId, fieldIds, bootstrappedEventIds ->
+        Triple(eventId, fieldIds, bootstrappedEventIds.contains(eventId))
+    }.flatMapLatest { (eventId, fieldIds, bootstrapped) ->
         if (fieldIds.isEmpty()) {
             flowOf(emptyList())
-        } else {
+        } else if (bootstrapped) {
             fieldRepository.getFieldsWithMatchesFlow(fieldIds)
+        } else {
+            flow {
+                fieldRepository.getFields(fieldIds).onFailure { error ->
+                    Napier.w("Failed to refresh fields for event $eventId: ${error.message}")
+                }
+                emitAll(fieldRepository.getFieldsWithMatchesFlow(fieldIds))
+            }
         }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
@@ -708,32 +514,125 @@ class DefaultEventDetailComponent(
     private val _eventMatchesLoading = MutableStateFlow(false)
     override val eventMatchesLoading = _eventMatchesLoading.asStateFlow()
 
-    private var eventDetailHydrationJob: Job? = null
-    private var weeklyOccurrenceSummaryPrefetchJob: Job? = null
+    private val participantBootstrapCoordinator: EventParticipantBootstrapCoordinator = EventParticipantBootstrapCoordinator(
+        selectedEvent = selectedEvent,
+        participantManagementCoordinator = participantManagementCoordinator,
+        weeklyOccurrenceCoordinator = weeklyOccurrenceCoordinator,
+        operations = EventParticipantBootstrapOperations(
+            getEvent = eventRepository::getEvent,
+            syncCurrentUserRegistrationCacheForEvent = eventRepository::syncCurrentUserRegistrationCacheForEvent,
+            syncEventParticipants = eventRepository::syncEventParticipants,
+            syncEventDetail = eventRepository::syncEventDetail,
+            refreshMatches = matchRepository::getMatchesOfTournament,
+            observeParticipantManagementSnapshot = eventRepository::observeEventParticipantManagementSnapshot,
+            observeTeamCompliance = eventRepository::observeEventTeamCompliance,
+            observeUserCompliance = eventRepository::observeEventUserCompliance,
+            loadParticipantManagementSnapshot = eventRepository::getEventParticipantManagementSnapshot,
+            loadTeamCompliance = eventRepository::getEventTeamCompliance,
+            loadUserCompliance = eventRepository::getEventUserCompliance,
+            getEventParticipantsSummary = eventRepository::getEventParticipantsSummary,
+        ),
+        effects = EventParticipantBootstrapEffects(
+            canManageParticipantData = { targetEvent -> canManageParticipantData(targetEvent) },
+            refreshCurrentUserMembershipState = ::refreshCurrentUserMembershipState,
+            applyBootstrapSyncResult = bootstrapResourcesCoordinator::applyEventDetailSyncResult,
+            replaceStaffInvites = { staffInvites, staffRevision ->
+                _eventStaffInvites.value = staffInvites
+                staffRevision
+                    ?.trim()
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { revision -> _eventStaffRevision.value = revision }
+            },
+            setMatchesLoading = { loading -> _eventMatchesLoading.value = loading },
+            showDetails = { _showDetails.value = true },
+            setError = { error -> _errorState.value = error },
+        ),
+        scope = scope,
+    )
+    private val participantActionHandler = EventParticipantActionHandler(
+        scope = scope,
+        participantManagementCoordinator = participantManagementCoordinator,
+        participantBootstrapCoordinator = participantBootstrapCoordinator,
+        eventRepository = eventRepository,
+        billingRepository = billingRepository,
+        navigationHandler = navigationHandler,
+        loadingHandler = { loadingHandler },
+        selectedEvent = { selectedEvent.value },
+        selectedDivision = ::selectDivision,
+        requireSelectedWeeklyOccurrence = { event, errorMessage ->
+            requireSelectedWeeklyOccurrence(event, errorMessage)
+        },
+        setMessage = { message -> _errorState.value = ErrorMessage(message) },
+    )
+    private val inviteActionHandler = EventInviteActionHandler(
+        scope = scope,
+        inviteCoordinator = eventInviteCoordinator,
+        participantBootstrapCoordinator = participantBootstrapCoordinator,
+        userRepository = userRepository,
+        teamRepository = teamRepository,
+        eventRepository = eventRepository,
+        loadingHandler = { loadingHandler },
+        selectedEvent = { selectedEvent.value },
+        eventWithRelations = { eventWithRelations.value },
+        selectedDivisionId = { selectedDivision.value },
+        currentUserId = { currentUser.value.id },
+        requireSelectedWeeklyOccurrence = { event, errorMessage ->
+            requireSelectedWeeklyOccurrence(event, errorMessage)
+        },
+        setError = { error -> _errorState.value = error },
+    )
+    private val resourceLifecycleHandler = EventResourceLifecycleHandler(
+        scope = scope,
+        sportsRepository = sportsRepository,
+        eventRepository = eventRepository,
+        billingRepository = billingRepository,
+        matchRepository = matchRepository,
+        editDraftCoordinator = editDraftCoordinator,
+        divisionContentCoordinator = divisionContentCoordinator,
+        sportsCatalogCoordinator = sportsCatalogCoordinator,
+        organizationTemplatesCoordinator = organizationTemplatesCoordinator,
+        leagueStandingsCoordinator = leagueStandingsCoordinator,
+        loadingHandler = { loadingHandler },
+        selectedEvent = { selectedEvent.value },
+        selectedDivisionId = { selectedDivision.value },
+        selectDivision = ::selectDivision,
+        refreshSelectedDivisionContent = ::refreshSelectedDivisionContent,
+        setEventTags = { tags -> _eventTags.value = tags },
+        setError = { error -> _errorState.value = error },
+    )
+    private val eventEditActionHandler = EventEditActionHandler(
+        scope = scope,
+        editActionCoordinator = editActionCoordinator,
+        editDraftCoordinator = editDraftCoordinator,
+        rentalResourcesCoordinator = rentalResourcesCoordinator,
+        sportsCatalogCoordinator = sportsCatalogCoordinator,
+        inviteCoordinator = eventInviteCoordinator,
+        eventRepository = eventRepository,
+        billingRepository = billingRepository,
+        matchRepository = matchRepository,
+        loadingHandler = { loadingHandler },
+        selectedEvent = { selectedEvent.value },
+        eventWithRelations = { eventWithRelations.value },
+        eventFields = { eventFields.value },
+        expectedStaffRevision = { _eventStaffRevision.value },
+        setStaffState = { invites, revision ->
+            _eventStaffInvites.value = invites
+            _eventStaffRevision.value = revision
+        },
+        loadSports = resourceLifecycleHandler::loadSports,
+        refreshLeagueStandingsAfterSchedule = resourceLifecycleHandler::refreshLeagueStandingsAfterSchedule,
+        setError = { message -> _errorState.value = ErrorMessage(message) },
+    )
 
-    private val _userTeams = currentUser.flatMapLatest {
-        teamRepository.getTeamsWithPlayersFlow(it.id).map { result ->
-            result.getOrElse {
-                emptyList()
-            }
-        }
-    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    private val userTeams = relationStateCoordinator.currentUserTeams
 
-    private val _eventTeamCheckIns = MutableStateFlow<Map<String, TeamCheckInDto>>(emptyMap())
-    override val eventTeamCheckIns = _eventTeamCheckIns.asStateFlow()
+    override val eventTeamCheckIns = eventTeamCheckInCoordinator.eventTeamCheckIns
 
-    private val _showEventTeamCheckInDialog = MutableStateFlow(false)
-    override val showEventTeamCheckInDialog = _showEventTeamCheckInDialog.asStateFlow()
+    override val showEventTeamCheckInDialog = eventTeamCheckInCoordinator.showEventTeamCheckInDialog
 
-    private val _eventTeamCheckInSaving = MutableStateFlow(false)
-    override val eventTeamCheckInSaving = _eventTeamCheckInSaving.asStateFlow()
+    override val eventTeamCheckInSaving = eventTeamCheckInCoordinator.eventTeamCheckInSaving
 
-    private val _currentUserManagedEventTeamId = MutableStateFlow<String?>(null)
-    override val currentUserManagedEventTeamId = _currentUserManagedEventTeamId.asStateFlow()
-
-    private val shownEventTeamCheckInPromptKeys = mutableSetOf<String>()
-    private val confirmedEventTeamCheckInPromptKeys = mutableSetOf<String>()
-    private var lastLoadedEventCheckInKey: String? = null
+    override val currentUserManagedEventTeamId = relationStateCoordinator.currentUserManagedEventTeamId
 
     private val cachedCurrentUserRegistrations = selectedEvent
         .map { selected -> selected.id.trim() }
@@ -753,15 +652,12 @@ class DefaultEventDetailComponent(
     private val membershipCoordinator = EventMembershipCoordinator(
         initialEvent = event,
         initialCurrentUserId = currentUser.value.id,
-        initialCurrentUserTeamIds = currentUser.value.teamIds
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .toSet(),
+        initialCurrentUserTeamIds = relationStateCoordinator.currentUserTeamIds.value,
         initialWeeklyParentWithoutSelection = isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null,
     )
 
     override val validTeams = combine(
-        _userTeams,
+        userTeams,
         eventWithRelations,
         currentUser,
     ) { teams, relations, user ->
@@ -815,6 +711,21 @@ class DefaultEventDetailComponent(
     override val editableRounds = matchEditingCoordinator.editableRounds
     override val showTeamSelectionDialog = matchEditingCoordinator.showTeamSelectionDialog
     override val showMatchEditDialog = matchEditingCoordinator.showMatchEditDialog
+    private val matchEditActionHandler = EventMatchEditActionHandler(
+        scope = scope,
+        matchEditingCoordinator = matchEditingCoordinator,
+        bracketRoundsCoordinator = bracketRoundsCoordinator,
+        notificationCoordinator = notificationCoordinator,
+        matchRepository = matchRepository,
+        loadingHandler = { loadingHandler },
+        selectedEvent = { selectedEvent.value },
+        selectedDivisionId = { selectedDivision.value },
+        eventWithRelations = { eventWithRelations.value },
+        divisionFields = { divisionFields.value },
+        canManageMatchEditing = ::canManageMatchEditing,
+        canEditMatchesNow = ::canEditMatchesNow,
+        setError = { message -> _errorState.value = ErrorMessage(message) },
+    )
 
     override val joinChoiceDialog = registrationFlowCoordinator.joinChoiceDialog
     override val childJoinSelectionDialog = registrationFlowCoordinator.childJoinSelectionDialog
@@ -831,7 +742,42 @@ class DefaultEventDetailComponent(
     override val textSignaturePrompt = registrationFlowCoordinator.textSignaturePrompt
     override val webSignaturePrompt = registrationFlowCoordinator.webSignaturePrompt
 
-    private val shareServiceProvider = ShareServiceProvider()
+    private val externalActionHandler = EventExternalActionHandler(
+        scope = scope,
+        eventRepository = eventRepository,
+        billingRepository = billingRepository,
+        apiClient = apiClient,
+        loadingHandler = { loadingHandler },
+        urlHandler = { urlHandler },
+        selectedEvent = { selectedEvent.value },
+        navigateBack = backCallback::onBack,
+        setMessage = { message -> _errorState.value = ErrorMessage(message) },
+    )
+    private val registrationLifecycleHandler = EventRegistrationLifecycleHandler(
+        userRepository = userRepository,
+        teamRepository = teamRepository,
+        eventRepository = eventRepository,
+        billingRepository = billingRepository,
+        currentUserDataSource = currentUserDataSource,
+        registrationFlowCoordinator = registrationFlowCoordinator,
+        divisionContentCoordinator = divisionContentCoordinator,
+        membershipCoordinator = membershipCoordinator,
+        joinConfirmationCoordinator = joinConfirmationCoordinator,
+        participantBootstrapCoordinator = participantBootstrapCoordinator,
+        weeklyOccurrenceCoordinator = weeklyOccurrenceCoordinator,
+        selectedEvent = { selectedEvent.value },
+        selectedDivisionId = { selectedDivision.value },
+        currentUser = { currentUser.value },
+        cachedCurrentUserRegistrations = { cachedCurrentUserRegistrations.value },
+        profileTeamIds = { relationStateCoordinator.currentUserTeamIds.value.toList() },
+        currentWeeklyOccurrenceSelection = ::currentWeeklyOccurrenceSelection,
+        showPaymentLoading = ::showRegistrationPaymentLoading,
+        finishPaymentLoading = ::finishRegistrationPaymentLoading,
+        refreshEventDetails = ::refreshEventDetails,
+        clearPaymentResult = ::clearPaymentResult,
+        setScheduleTrackedUserIds = { ids -> _scheduleTrackedUserIds.value = ids },
+        setMessage = { message -> _errorState.value = ErrorMessage(message) },
+    )
     private val registrationActionHandler = EventRegistrationActionHandler(
         scope = scope,
         userRepository = userRepository,
@@ -847,6 +793,8 @@ class DefaultEventDetailComponent(
         membershipCoordinator = membershipCoordinator,
         weeklyOccurrenceCoordinator = weeklyOccurrenceCoordinator,
         loadingHandler = { loadingHandler },
+        showPaymentLoading = ::showRegistrationPaymentLoading,
+        finishPaymentLoading = ::finishRegistrationPaymentLoading,
         selectedEvent = { selectedEvent.value },
         selectedDivision = { selectedDivision.value },
         currentUser = { currentUser.value },
@@ -861,146 +809,30 @@ class DefaultEventDetailComponent(
         isEventFull = { isEventFull.value },
         currentWeeklyOccurrenceSelection = ::currentWeeklyOccurrenceSelection,
         requireSelectedWeeklyOccurrence = ::requireSelectedWeeklyOccurrence,
-        loadJoinableChildren = ::loadJoinableChildren,
-        saveCurrentRegistrationProgress = { step, registrationId, holdExpiresAt ->
-            saveCurrentRegistrationProgress(
-                step = step,
-                registrationId = registrationId,
-                holdExpiresAt = holdExpiresAt,
-            )
-        },
-        clearCurrentRegistrationProgress = ::clearCurrentRegistrationProgress,
-        addCurrentUserToEventWithRegistrationAnswers = ::addCurrentUserToEventWithRegistrationAnswers,
-        addTeamToEventWithRegistrationAnswers = ::addTeamToEventWithRegistrationAnswers,
-        createPurchaseIntentWithRegistrationAnswers = ::createPurchaseIntentWithRegistrationAnswers,
-        refreshEventAfterParticipantMutation = ::refreshEventAfterParticipantMutation,
+        loadJoinableChildren = registrationLifecycleHandler::loadJoinableChildren,
+        saveCurrentRegistrationProgress = registrationLifecycleHandler::saveCurrentRegistrationProgress,
+        clearCurrentRegistrationProgress = registrationLifecycleHandler::clearCurrentRegistrationProgress,
+        addCurrentUserToEventWithRegistrationAnswers =
+            registrationLifecycleHandler::addCurrentUserToEventWithRegistrationAnswers,
+        addTeamToEventWithRegistrationAnswers =
+            registrationLifecycleHandler::addTeamToEventWithRegistrationAnswers,
+        createPurchaseIntentWithRegistrationAnswers =
+            registrationLifecycleHandler::createPurchaseIntentWithRegistrationAnswers,
+        refreshEventAfterParticipantMutation = participantBootstrapCoordinator::refreshEventAfterParticipantMutation,
         refreshCurrentUserMembershipState = ::refreshCurrentUserMembershipState,
         refreshEventDetails = ::refreshEventDetails,
-        checkIsUserFreeAgent = ::checkIsUserFreeAgent,
-        resolveWithdrawTargetMembership = ::resolveWithdrawTargetMembership,
+        checkIsUserFreeAgent = registrationLifecycleHandler::checkIsUserFreeAgent,
+        resolveWithdrawTargetMembership = registrationLifecycleHandler::resolveWithdrawTargetMembership,
         setPaymentIntent = { intent -> setPaymentIntent(intent) },
         clearPaymentResult = ::clearPaymentResult,
         presentPaymentSheet = ::presentPaymentSheet,
         setError = { message -> _errorState.value = ErrorMessage(message) },
     )
 
-    private fun currentRegistrationProgressScope(): EventRegistrationProgressScope =
-        EventRegistrationProgressScope(
-            userId = currentUser.value.id,
-            eventId = selectedEvent.value.id,
-            occurrence = currentWeeklyOccurrenceSelection(),
-        )
-
-    private suspend fun saveCurrentRegistrationProgress(
-        step: String? = null,
-        registrationId: String? = null,
-        holdExpiresAt: String? = registrationFlowCoordinator.holdExpiresAt.value,
-    ) {
-        registrationFlowCoordinator.saveRegistrationProgress(
-            scope = currentRegistrationProgressScope(),
-            selectedDivisionId = selectedDivision.value,
-            step = step,
-            registrationId = registrationId,
-            holdExpiresAt = holdExpiresAt,
-        ) { key, draft ->
-            currentUserDataSource?.saveRegistrationProgress(
-                key = key,
-                draft = draft,
-            )
-        }
-    }
-
-    private suspend fun loadCurrentRegistrationProgress() {
-        registrationFlowCoordinator.loadRegistrationProgress(
-            scope = currentRegistrationProgressScope(),
-        ) { key ->
-            currentUserDataSource?.loadRegistrationProgress(key)
-        }
-            ?.let { restoredDivisionId ->
-                divisionContentCoordinator.restoreSelectedDivision(restoredDivisionId)
-            }
-    }
-
-    private suspend fun clearCurrentRegistrationProgress() {
-        registrationFlowCoordinator.clearRegistrationProgress(
-            scope = currentRegistrationProgressScope(),
-        ) { key ->
-            currentUserDataSource?.clearRegistrationProgress(key)
-        }
-    }
-
     private fun ensureEventRegistrationQuestionsAnswered(onReady: () -> Unit): Boolean {
         return registrationFlowCoordinator.ensureQuestionsAnswered(
             eventName = selectedEvent.value.name,
             onReady = onReady,
-        )
-    }
-
-    private suspend fun addCurrentUserToEventWithRegistrationAnswers(
-        event: Event,
-        preferredDivisionId: String?,
-        occurrence: EventOccurrenceSelection?,
-    ): Result<SelfRegistrationResult> {
-        return registrationFlowCoordinator.addCurrentUserToEventWithRegistrationAnswers(
-            event = event,
-            preferredDivisionId = preferredDivisionId,
-            occurrence = occurrence,
-            addWithoutAnswers = eventRepository::addCurrentUserToEvent,
-            addWithAnswers = eventRepository::addCurrentUserToEvent,
-        )
-    }
-
-    private suspend fun addTeamToEventWithRegistrationAnswers(
-        event: Event,
-        team: Team,
-        preferredDivisionId: String?,
-        occurrence: EventOccurrenceSelection?,
-    ): Result<Unit> {
-        return registrationFlowCoordinator.addTeamToEventWithRegistrationAnswers(
-            event = event,
-            team = team,
-            preferredDivisionId = preferredDivisionId,
-            occurrence = occurrence,
-            addWithoutAnswers = eventRepository::addTeamToEvent,
-            addWithAnswers = eventRepository::addTeamToEvent,
-        )
-    }
-
-    private suspend fun createPurchaseIntentWithRegistrationAnswers(
-        event: Event,
-        teamId: String? = null,
-        priceCents: Int,
-        occurrence: EventOccurrenceSelection?,
-        divisionId: String?,
-        discountCode: String? = null,
-    ): Result<PurchaseIntent> {
-        return registrationFlowCoordinator.createPurchaseIntentWithRegistrationAnswers(
-            event = event,
-            teamId = teamId,
-            priceCents = priceCents,
-            occurrence = occurrence,
-            divisionId = divisionId,
-            createWithoutAnswers = { targetEvent, targetTeamId, targetPriceCents, selectedOccurrence, targetDivisionId ->
-                billingRepository.createPurchaseIntent(
-                    event = targetEvent,
-                    teamId = targetTeamId,
-                    priceCents = targetPriceCents,
-                    occurrence = selectedOccurrence,
-                    divisionId = targetDivisionId,
-                    discountCode = discountCode,
-                )
-            },
-            createWithAnswers = { targetEvent, targetTeamId, targetPriceCents, selectedOccurrence, targetDivisionId, answers ->
-                billingRepository.createPurchaseIntent(
-                    event = targetEvent,
-                    teamId = targetTeamId,
-                    priceCents = targetPriceCents,
-                    occurrence = selectedOccurrence,
-                    divisionId = targetDivisionId,
-                    answers = answers,
-                    discountCode = discountCode,
-                )
-            },
         )
     }
 
@@ -1020,604 +852,143 @@ class DefaultEventDetailComponent(
         registrationFlowCoordinator.dismissDiscountCodePrompt()
     }
 
+    private val lifecycleBindings = EventDetailLifecycleBindings(scope)
+
     init {
         backHandler.register(backCallback)
+        lifecycle.doOnDestroy(::finishRegistrationPaymentLoading)
         if (editDraftCoordinator.isEditing.value) {
-            loadSports(reportErrors = true)
+            resourceLifecycleHandler.loadSports(reportErrors = true)
         }
-        loadEventTags()
-        scope.launch {
-            selectedEvent
-                .map { selected -> selected.organizationId?.trim().orEmpty() }
-                .distinctUntilChanged()
-                .collect { organizationId ->
-                    loadOrganizationTemplates(organizationId)
-                }
+        resourceLifecycleHandler.loadEventTags()
+        lifecycleBindings.bindOrganizationTemplates(
+            selectedEvent,
+            resourceLifecycleHandler::loadOrganizationTemplates,
+        )
+        lifecycleBindings.bindSelectedEventResources(selectedEvent) { eventId ->
+            participantBootstrapCoordinator.hydrateMobileEventDetail(
+                showDetailsOnSuccess = false,
+                showLoading = false,
+                reportErrors = false,
+            )
+            eventEditActionHandler.loadAvailableRentalResources(eventId)
         }
-        scope.launch {
-            selectedEvent
-                .map { selected -> selected.id.trim() }
-                .distinctUntilChanged()
-                .collectLatest { eventId ->
-                    hydrateEventDetailForMobile(
-                        showDetailsOnSuccess = false,
-                        showLoading = false,
-                        reportErrors = false,
-                    )
-                    loadAvailableRentalResources(eventId)
-                }
+        lifecycleBindings.bindScheduleTrackedUser(
+            currentUser,
+            registrationLifecycleHandler::refreshScheduleTrackedUserIds,
+        )
+        lifecycleBindings.bindRegistrationScope(
+            selectedEvent = selectedEvent,
+            currentUser = currentUser,
+            selectedWeeklyOccurrence = weeklyOccurrenceCoordinator.selectedWeeklyOccurrence,
+            onMissingScope = registrationFlowCoordinator::clearForMissingRegistrationScope,
+            onScopeChanged = registrationLifecycleHandler::loadRegistrationLifecycleScope,
+        )
+        lifecycleBindings.bindSelectedEventMode(
+            selectedEvent,
+            participantBootstrapCoordinator::onSelectedEventChanged,
+        )
+        lifecycleBindings.bindEventTeamCheckIns(
+            selectedEvent = selectedEvent,
+            eventWithRelations = eventWithRelations,
+            currentUser = currentUser,
+            currentUserManagedEventTeamId = currentUserManagedEventTeamId,
+        ) {
+            refreshEventTeamCheckInsIfAllowed()
+            evaluateEventTeamCheckInPrompt()
         }
-        scope.launch {
-            currentUser
-                .map { user -> user.id }
-                .distinctUntilChanged()
-                .collect {
-                    refreshScheduleTrackedUserIds()
-                }
-        }
-        scope.launch {
-            combine(
-                selectedEvent.map { selected -> selected.id.trim() },
-                currentUser.map { user -> user.id.trim() },
-                weeklyOccurrenceCoordinator.selectedWeeklyOccurrence,
-            ) { eventId, userId, occurrence ->
-                Triple(eventId, userId, occurrence)
-            }
-                .distinctUntilChanged()
-                .collectLatest { (eventId, userId, _) ->
-                    if (eventId.isBlank() || userId.isBlank()) {
-                        registrationFlowCoordinator.clearForMissingRegistrationScope()
-                        return@collectLatest
-                    }
-                    eventRepository.getRegistrationQuestions("EVENT", eventId)
-                        .onSuccess { questions ->
-                            registrationFlowCoordinator.replaceRegistrationQuestions(questions)
-                        }
-                        .onFailure { throwable ->
-                            Napier.w("Failed to load event registration questions.", throwable)
-                            registrationFlowCoordinator.clearRegistrationQuestionsAfterLoadFailure()
-                        }
-                    loadCurrentRegistrationProgress()
-                }
-        }
-        scope.launch {
-            selectedEvent
-                .map { selected -> selected.id to isWeeklyParentEvent(selected) }
-                .distinctUntilChanged()
-                .collect { (_, weeklyParent) ->
-                    weeklyOccurrenceSummaryPrefetchJob?.cancel()
-                    weeklyOccurrenceCoordinator.handleSelectedEventChanged(weeklyParent)
-                }
-        }
-        scope.launch {
-            combine(selectedEvent, eventWithRelations, currentUser) { eventValue, relations, user ->
-                Triple(eventValue.id, relations.teams.map { team -> team.team.id }, user.id)
-            }
-                .distinctUntilChanged()
-                .collect {
-                    updateCurrentUserManagedEventTeam()
-                    refreshEventTeamCheckInsIfAllowed()
-                    evaluateEventTeamCheckInPrompt()
-                }
-        }
-        scope.launch {
-            weeklyOccurrenceCoordinator.selectedWeeklyOccurrence
-                .collectLatest { selectedOccurrence ->
-                    val targetEvent = selectedEvent.value
-                    weeklyOccurrenceCoordinator.updateSelectedSummaryFromCache(
-                        isWeeklyParent = isWeeklyParentEvent(targetEvent),
-                        selection = selectedOccurrence,
-                    )
-                    if (!isWeeklyParentEvent(targetEvent)) return@collectLatest
-                    refreshCurrentUserMembershipState(targetEvent)
-                    syncSelectedWeeklyOccurrenceParticipants(
-                        event = targetEvent,
-                        reportErrors = false,
-                    )
-                }
-        }
-        scope.launch {
-            combine(selectedEvent, weeklyOccurrenceCoordinator.selectedWeeklyOccurrence) { eventValue, occurrenceState ->
-                participantManagementRoomTarget(
-                    event = eventValue,
-                    occurrence = occurrenceState?.let { selectedOccurrence ->
-                        EventOccurrenceSelection(
-                            slotId = selectedOccurrence.slotId,
-                            occurrenceDate = selectedOccurrence.occurrenceDate,
-                            label = selectedOccurrence.label,
-                        )
-                    },
-                )
-            }
-                .distinctUntilChanged()
-                .flatMapLatest { target ->
-                    if (target == null) {
-                        flowOf(ParticipantManagementLocalState())
-                    } else {
-                        val occurrence = target.toOccurrence()
-                        val snapshotFlow = eventRepository.observeEventParticipantManagementSnapshot(
-                            eventId = target.eventId,
-                            occurrence = occurrence,
-                        )
-                        val complianceFlow = if (target.teamSignup) {
-                            eventRepository.observeEventTeamCompliance(
-                                eventId = target.eventId,
-                                occurrence = occurrence,
-                            ).map { summaries ->
-                                ParticipantManagementLocalState(
-                                    teamSummaries = summaries.associateBy(EventTeamComplianceSummary::teamId),
-                                )
-                            }
-                        } else {
-                            eventRepository.observeEventUserCompliance(
-                                eventId = target.eventId,
-                                occurrence = occurrence,
-                            ).map { summaries ->
-                                ParticipantManagementLocalState(
-                                    userSummaries = summaries.associateBy(EventComplianceUserSummary::userId),
-                                )
-                            }
-                        }
-                        combine(snapshotFlow, complianceFlow) { snapshot, compliance ->
-                            compliance.copy(snapshot = snapshot)
-                        }
-                    }
-                }
-                .collect { localState ->
-                    participantManagementCoordinator.applyLocalState(localState)
-                }
-        }
-        scope.launch {
-            combine(
-                selectedEvent,
+        lifecycleBindings.bindWeeklyOccurrence(
+            weeklyOccurrenceCoordinator.selectedWeeklyOccurrence,
+            participantBootstrapCoordinator::onWeeklyOccurrenceChanged,
+        )
+        lifecycleBindings.bindParticipantLocalState(
+            participantBootstrapCoordinator.participantLocalStateFlow(),
+            participantBootstrapCoordinator::applyLocalState,
+        )
+        lifecycleBindings.bindManagedParticipantBootstrap(
+            participantBootstrapCoordinator.managedBootstrapTargetFlow(
                 currentUser,
-                eventWithRelations.map { relations -> relations.organization }.distinctUntilChanged(),
-                weeklyOccurrenceCoordinator.selectedWeeklyOccurrence,
-            ) { eventValue, user, organization, occurrenceState ->
-                val occurrence = occurrenceState?.let { selectedOccurrence ->
-                    EventOccurrenceSelection(
-                        slotId = selectedOccurrence.slotId,
-                        occurrenceDate = selectedOccurrence.occurrenceDate,
-                        label = selectedOccurrence.label,
-                    )
-                }
-                participantManagementRoomTarget(eventValue, occurrence)
-                    ?.takeIf {
-                        canManageParticipantData(
-                            event = eventValue,
-                            user = user,
-                            organization = organization,
-                        )
-                    }
-            }
-                .distinctUntilChanged()
-                .collectLatest { target ->
-                    if (!participantManagementCoordinator.beginManagedDetailBootstrap(target)) return@collectLatest
-                    val bootstrapTarget = target ?: return@collectLatest
-                    try {
-                        eventRepository.syncEventDetail(
-                            event = selectedEvent.value,
-                            occurrence = bootstrapTarget.toOccurrence(),
-                            manage = true,
-                        ).onSuccess { result ->
-                            applyEventDetailSyncResult(result)
-                        }.onFailure { throwable ->
-                            participantManagementCoordinator.clearManagedBootstrapRequestIfCurrent(bootstrapTarget)
-                            Napier.w("Failed to refresh event detail management bootstrap.", throwable)
-                        }
-                    } finally {
-                        participantManagementCoordinator.finishManagedDetailBootstrap()
-                    }
-                }
-        }
-        scope.launch {
-            cachedCurrentUserRegistrations.collect {
-                refreshCurrentUserMembershipState(selectedEvent.value)
-            }
-        }
-        scope.launch {
-            editDraftCoordinator.isEditing.collect { isEditing ->
-                backCallback.isEnabled = isEditing
-            }
-        }
-        scope.launch {
-            _showDetails.collect { showDetails ->
-                backCallback.isEnabled = showDetails
-            }
-        }
-        scope.launch {
-            paymentResult.collect {
-                if (it != null) {
-                    val pendingTeam = registrationFlowCoordinator.currentPendingTeamRegistration()
-                    val confirmationTarget = registrationFlowCoordinator.currentJoinConfirmationTarget()
-                    when (it) {
-                        PaymentResult.Canceled -> {
-                            _errorState.value = ErrorMessage("Payment canceled.")
-                            registrationFlowCoordinator.clearTeamRegistrationState()
-                        }
-
-                        is PaymentResult.Failed -> {
-                            _errorState.value = ErrorMessage(it.error)
-                            registrationFlowCoordinator.clearTeamRegistrationState()
-                        }
-
-                        PaymentResult.Completed -> {
-                            if (pendingTeam != null) {
-                                loadingHandler.showLoading("Refreshing Team")
-                                registrationFlowCoordinator.clearStartingTeamRegistrationId()
-                                val teamRegisteredSuccessfully = joinConfirmationCoordinator.waitForTeamRegistrationWithTimeout(
-                                    teamId = pendingTeam.team.id,
-                                    currentUserId = currentUser.value.id,
-                                    getTeamWithPlayers = teamRepository::getTeamWithPlayers,
-                                )
-                                registrationFlowCoordinator.clearPendingTeamRegistration()
-                                if (teamRegisteredSuccessfully) {
-                                    val refreshedTeam = teamRepository.getTeamWithPlayers(pendingTeam.team.id)
-                                        .getOrNull()
-                                    val paymentPending = refreshedTeam
-                                        ?.team
-                                        ?.playerRegistrations
-                                        ?.any { registration ->
-                                            registration.userId == currentUser.value.id && registration.isPaymentPending()
-                                        } == true
-                                    membershipCoordinator.setUsersTeam(
-                                        refreshedTeam ?: pendingTeam,
-                                        currentUser.value.id,
-                                    )
-                                    refreshCurrentUserMembershipState(selectedEvent.value)
-                                    _errorState.value = ErrorMessage(
-                                        if (paymentPending) {
-                                            "Payment submitted for ${pendingTeam.team.name}. Registration is pending until the bank payment clears."
-                                        } else {
-                                            "Registration completed for ${pendingTeam.team.name}."
-                                        }
-                                    )
-                                    refreshEventDetails()
-                                } else {
-                                    _errorState.value = ErrorMessage(
-                                        "Payment submitted, but team registration confirmation is still pending. Please reload the event."
-                                    )
-                                }
-                            } else {
-                                loadingHandler.showLoading("Reloading Event")
-                                val userJoinedSuccessfully = joinConfirmationCoordinator.waitForUserInEventWithTimeout(
-                                    confirmationTarget = confirmationTarget,
-                                    isUserInEvent = { membershipCoordinator.isUserInEvent.value },
-                                    refreshAfterParticipantMutation = {
-                                        refreshEventAfterParticipantMutation(
-                                            eventId = selectedEvent.value.id,
-                                            warningMessage = "Failed to refresh event while waiting for join confirmation.",
-                                        )
-                                    },
-                                    isJoinConfirmationSatisfied = { target ->
-                                        joinConfirmationCoordinator.isJoinConfirmationSatisfied(
-                                            confirmationTarget = target,
-                                            cachedCurrentUserRegistrations = { cachedCurrentUserRegistrations.value },
-                                            selectedEvent = { selectedEvent.value },
-                                            currentWeeklyOccurrenceSelection = ::currentWeeklyOccurrenceSelection,
-                                            syncCurrentUserRegistrationCache = eventRepository::syncCurrentUserRegistrationCache,
-                                            getEvent = eventRepository::getEvent,
-                                            syncEventParticipants = { event, occurrence ->
-                                                eventRepository.syncEventParticipants(
-                                                    event = event,
-                                                    occurrence = occurrence,
-                                                )
-                                            },
-                                            getTeams = teamRepository::getTeams,
-                                            applyParticipantSyncResult = ::applyParticipantSyncResult,
-                                            refreshCurrentUserMembershipState = ::refreshCurrentUserMembershipState,
-                                            rememberWeeklyOccurrenceSummary = ::rememberWeeklyOccurrenceSummary,
-                                        )
-                                    },
-                                )
-                                if (!userJoinedSuccessfully) {
-                                    _errorState.value =
-                                        ErrorMessage("Payment submitted, but event registration confirmation is still pending. Please reload event.")
-                                } else if (membershipCoordinator.isRegistrationPaymentPending.value) {
-                                    _errorState.value = ErrorMessage(
-                                        "Payment submitted. Registration is pending until the bank payment clears."
-                                    )
-                                }
-                            }
-                            clearCurrentRegistrationProgress()
-                        }
-                    }
-                    loadingHandler.hideLoading()
-                    registrationFlowCoordinator.clearPendingJoinConfirmationTarget()
-                    clearPaymentResult()
-                }
-            }
-        }
-        scope.launch {
-            matchRepository.setIgnoreMatch(null)
-            try {
-                combine(selectedEventId, editDraftCoordinator.isEditing, matchEditingCoordinator.isEditingMatches) { eventId, isEditing, isEditingMatches ->
-                    Triple(eventId, isEditing, isEditingMatches)
-                }.collectLatest { (eventId, isEditing, isEditingMatches) ->
-                    if (eventId.isBlank()) {
-                        matchRepository.setRealtimePaused(MATCH_REALTIME_EDIT_PAUSE_REASON, false)
-                        matchRepository.unsubscribeFromRealtime()
-                    } else {
-                        matchRepository.subscribeToMatches(eventId)
-                        matchRepository.setRealtimePaused(
-                            MATCH_REALTIME_EDIT_PAUSE_REASON,
-                            isEditing || isEditingMatches,
-                        )
-                    }
-                }
-            } finally {
-                matchRepository.setRealtimePaused(MATCH_REALTIME_EDIT_PAUSE_REASON, false)
-                matchRepository.unsubscribeFromRealtime()
-            }
-        }
-        scope.launch {
-            eventWithRelations.collect { relations ->
-                if (!canEditEventDetails(relations.event) && editDraftCoordinator.isEditing.value) {
-                    editDraftCoordinator.forceExitEditing(relations.event)
-                }
-                editDraftCoordinator.replaceReadOnlyTimeSlots(
-                    event = relations.event,
-                    timeSlots = relations.timeSlots,
-                )
-                val activeDivision = divisionContentCoordinator.currentSelectedDivision()
-                    ?: relations.event.resolveDefaultSelectedDivisionId()
-                if (!activeDivision.isNullOrBlank()) {
-                    selectDivision(activeDivision)
-                } else {
-                    refreshSelectedDivisionContent()
-                }
-            }
-        }
-        scope.launch {
-            selectedEvent.collect { selected ->
-                refreshCurrentUserMembershipState(selected)
-            }
-        }
-        scope.launch {
-            selectedEvent
-                .map { selected -> selected.resolveDefaultSelectedDivisionId() }
-                .distinctUntilChanged()
-                .collect { divisionId ->
-                    val resolvedDivisionId = divisionId?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)
-                        ?: return@collect
-                    val availableDivisionIds = selectedEvent.value.divisions
-                        .map { it.normalizeDivisionIdentifier() }
-                        .filter(String::isNotBlank)
-                        .toSet()
-                    val currentDivisionId = divisionContentCoordinator.currentSelectedDivision()
-                        ?.normalizeDivisionIdentifier()
-                        ?.takeIf(String::isNotBlank)
-                    if (currentDivisionId == null || (availableDivisionIds.isNotEmpty() && currentDivisionId !in availableDivisionIds)) {
-                        selectDivision(resolvedDivisionId)
-                    }
-                }
-        }
-        scope.launch {
-            combine(selectedEvent, selectedWeeklyOccurrence) { selected, occurrence ->
-                WithdrawTargetsRefreshKey(
-                    eventId = selected.id.trim(),
-                    occurrenceKey = weeklyOccurrenceSummaryKey(
-                        slotId = occurrence?.slotId,
-                        occurrenceDate = occurrence?.occurrenceDate,
-                    ),
-                    teamSignup = selected.teamSignup,
-                    eventType = selected.eventType,
-                    playerIds = selected.playerIds
-                        .map(String::trim)
-                        .filter(String::isNotBlank)
-                        .distinct(),
-                    waitListIds = selected.waitList
-                        .map(String::trim)
-                        .filter(String::isNotBlank)
-                        .distinct(),
-                    freeAgentIds = selected.freeAgents
-                        .map(String::trim)
-                        .filter(String::isNotBlank)
-                        .distinct(),
-                    teamIds = selected.teamIds
-                        .map(String::trim)
-                        .filter(String::isNotBlank)
-                        .distinct(),
-                ) to selected
-            }
-                .distinctUntilChanged { old, new -> old.first == new.first }
-                .collect { (_, selected) ->
-                    refreshWithdrawTargets(selected)
-                }
-        }
-        scope.launch {
-            combine(eventWithRelations, eventFields, editDraftCoordinator.isEditing) { relations, fieldsWithMatches, editing ->
-                Triple(relations, fieldsWithMatches.map { relation -> relation.field }, editing)
-            }.collect { (relations, fields, editing) ->
-                if (!editing) {
-                    editDraftCoordinator.refreshReadOnlyDraft(
-                        event = relations.event,
-                        sourceFields = fields,
-                        leagueScoringConfig = relations.leagueScoringConfig?.toDto()
-                            ?: LeagueScoringConfigDTO(),
-                    )
-                }
-            }
-        }
-        scope.launch {
-            selectedDivision.collect { _ ->
-                divisionContentCoordinator.currentSelectedDivision()?.let { selectDivision(it) }
-            }
-        }
-        scope.launch {
-            combine(selectedEvent, selectedDivision) { eventValue, divisionValue ->
-                leagueStandingsCoordinator.resolveLoadTarget(
+                eventOrganization,
+            ) { eventValue, user, organization ->
+                canManageParticipantData(
                     event = eventValue,
-                    selectedDivisionId = divisionValue,
-                    isPlayoffPlacementDivision = { divisionId ->
-                        eventValue.isPlayoffPlacementDivision(divisionId)
-                    },
-                )
-            }
-                .distinctUntilChanged()
-                .collect { selection ->
-                    leagueStandingsCoordinator.loadStandingsForSelection(
-                        target = selection,
-                        showLoading = true,
-                        reportErrors = false,
-                        getStandings = eventRepository::getLeagueDivisionStandings,
-                    )?.let { errorMessage -> _errorState.value = errorMessage }
-                }
-        }
-        scope.launch {
-            divisionContentCoordinator.divisionMatches.collect { generateRounds() }
-        }
-    }
-
-    private suspend fun prefetchNonWeeklyParticipants(
-        event: Event = selectedEvent.value,
-    ) {
-        detailHydrationCoordinator.prefetchNonWeeklyParticipants(
-            event = event,
-            isWeeklyParentEvent = ::isWeeklyParentEvent,
-            manage = canManageParticipantData(event),
-            markManagedBootstrapRequested = ::markManagedBootstrapRequested,
-            syncEventDetail = { targetEvent, occurrence, manage ->
-                eventRepository.syncEventDetail(
-                    event = targetEvent,
-                    occurrence = occurrence,
-                    manage = manage,
+                    user = user,
+                    organization = organization,
                 )
             },
-            applyEventDetailSyncResult = ::applyEventDetailSyncResult,
-            clearManagedBootstrapRequestIfCurrent = ::clearManagedBootstrapRequestIfCurrent,
-            setError = { error -> _errorState.value = error },
+            participantBootstrapCoordinator::refreshManagedBootstrap,
         )
-    }
-
-    private fun applyParticipantSyncResult(result: EventParticipantsSyncResult) {
-        detailHydrationCoordinator.applyParticipantSyncResult(
-            result = result,
-            isWeeklyParentEvent = ::isWeeklyParentEvent,
-            replaceParticipantDivisionWarnings = participantManagementCoordinator::replaceParticipantDivisionWarnings,
-            applyOverviewParticipantSummary = weeklyOccurrenceCoordinator::applyOverviewParticipantSummary,
+        lifecycleBindings.bindMembershipSources(
+            registrations = cachedCurrentUserRegistrations,
+            currentUserTeams = relationStateCoordinator.currentUserTeamIds,
+            selectedEvent = selectedEvent,
+            refreshMembership = ::refreshCurrentUserMembershipState,
         )
-    }
-
-    private fun markManagedBootstrapRequested(
-        event: Event,
-        occurrence: EventOccurrenceSelection?,
-        manage: Boolean,
-    ) {
-        participantManagementCoordinator.markManagedBootstrapRequested(
-            target = participantManagementRoomTarget(
-                event = event,
-                occurrence = occurrence,
-            ),
-            manage = manage,
+        lifecycleBindings.bindEditingBackCallback(editDraftCoordinator.isEditing) { isEditing ->
+            backCallback.isEnabled = isEditing
+        }
+        lifecycleBindings.bindDetailsBackCallback(_showDetails) { showDetails ->
+            backCallback.isEnabled = showDetails
+        }
+        lifecycleBindings.bindPaymentResults(
+            paymentResult,
+            registrationLifecycleHandler::handleRegistrationPaymentResult,
         )
-    }
-
-    private fun clearManagedBootstrapRequestIfCurrent(
-        event: Event,
-        occurrence: EventOccurrenceSelection?,
-    ) {
-        participantManagementCoordinator.clearManagedBootstrapRequestIfCurrent(
-            participantManagementRoomTarget(
-                event = event,
-                occurrence = occurrence,
-            ),
-        )
-    }
-
-    private fun applyEventDetailSyncResult(result: EventDetailSyncResult) {
-        detailHydrationCoordinator.applyEventDetailSyncResult(
-            result = result,
-            applyParticipantSyncResult = ::applyParticipantSyncResult,
-            applyBootstrapSyncResult = bootstrapResourcesCoordinator::applyEventDetailSyncResult,
-            replaceStaffInvites = { syncResult ->
-                _eventStaffInvites.value = syncResult.staffInvites
+        lifecycleBindings.bindMatchRealtime(
+            selectedEventId = selectedEventId,
+            isEditing = editDraftCoordinator.isEditing,
+            isEditingMatches = matchEditingCoordinator.isEditingMatches,
+            resetIgnoredMatch = { matchRepository.setIgnoreMatch(null) },
+            subscribe = { eventId -> matchRepository.subscribeToMatches(eventId) },
+            setEditingPaused = { paused ->
+                matchRepository.setRealtimePaused(MATCH_REALTIME_EDIT_PAUSE_REASON, paused)
             },
+            unsubscribe = { matchRepository.unsubscribeFromRealtime() },
         )
-    }
-
-    private fun loadSports(reportErrors: Boolean) {
-        val loadInProgress = sportsLoadJob?.isActive == true
-        if (!sportsCatalogCoordinator.prepareLoad(reportErrors, loadInProgress)) {
-            return
-        }
-        sportsLoadJob = scope.launch {
-            var loadedSports = false
-            var loadedDivisionTypes = false
-            sportsRepository.getSports()
-                .onSuccess { sports ->
-                    loadedSports = true
-                    sportsCatalogCoordinator.applySportsSuccess(sports)
-                    if (editDraftCoordinator.isEditing.value) {
-                        editDraftCoordinator.updateEditedEvent { previous ->
-                            sportsCatalogCoordinator.syncOfficialStaffingForSportTransition(
-                                previous = previous,
-                                updated = previous,
-                            )
-                        }
-                    }
-                }
-                .onFailure {
-                    Napier.w("Failed to load sports.", it)
-                    if (sportsCatalogCoordinator.shouldReportLoadErrors(editDraftCoordinator.isEditing.value)) {
-                        _errorState.value = ErrorMessage("Failed to load sports: ${it.userMessage()}")
-                    }
-                }
-            sportsRepository.getDivisionTypeParameters()
-                .onSuccess { parameters ->
-                    loadedDivisionTypes = true
-                    sportsCatalogCoordinator.applyDivisionTypeParametersSuccess(parameters)
-                }
-                .onFailure {
-                    Napier.w("Failed to load division options.", it)
-                    if (sportsCatalogCoordinator.shouldReportLoadErrors(editDraftCoordinator.isEditing.value)) {
-                        _errorState.value = ErrorMessage("Failed to load division options: ${it.userMessage()}")
-                    }
-                }
-            sportsCatalogCoordinator.finishLoad(loadedSports, loadedDivisionTypes)
-        }
-    }
-
-    private fun loadEventTags() {
-        scope.launch {
-            eventRepository.getEventTags()
-                .onSuccess { tags ->
-                    _eventTags.value = tags
-                }
-                .onFailure { error ->
-                    _errorState.value = ErrorMessage("Failed to load event tags: ${error.userMessage()}")
-                }
-        }
-    }
-
-    private suspend fun loadOrganizationTemplates(organizationId: String) {
-        if (organizationId.isBlank()) {
-            organizationTemplatesCoordinator.clear()
-            return
-        }
-
-        organizationTemplatesCoordinator.beginLoad()
-        billingRepository.listOrganizationTemplates(organizationId)
-            .onSuccess { templates ->
-                organizationTemplatesCoordinator.applyLoadSuccess(templates)
-            }
-            .onFailure { throwable ->
-                Napier.w("Failed to load templates for organization $organizationId.", throwable)
-                organizationTemplatesCoordinator.applyLoadFailure(
-                    throwable.userMessage("Failed to load templates."),
-                )
-            }
-        organizationTemplatesCoordinator.finishLoad()
+        lifecycleBindings.bindEventRelations(
+            eventWithRelations,
+            resourceLifecycleHandler::handleEventRelationsChanged,
+        )
+        lifecycleBindings.bindSelectedEventMembership(selectedEvent, ::refreshCurrentUserMembershipState)
+        lifecycleBindings.bindDefaultDivision(
+            selectedEvent,
+            resourceLifecycleHandler::handleDefaultDivisionChanged,
+        )
+        lifecycleBindings.bindWithdrawTargets(
+            selectedEvent,
+            selectedWeeklyOccurrence,
+            registrationLifecycleHandler::refreshWithdrawTargets,
+        )
+        lifecycleBindings.bindReadOnlyDraft(
+            eventWithRelations,
+            eventFields,
+            editDraftCoordinator.isEditing,
+            resourceLifecycleHandler::handleReadOnlyDraftStateChanged,
+        )
+        lifecycleBindings.bindSelectedDivision(
+            selectedDivision,
+            resourceLifecycleHandler::handleSelectedDivisionChanged,
+        )
+        lifecycleBindings.bindLeagueStandings(
+            selectedEvent,
+            selectedDivision,
+            resourceLifecycleHandler::resolveLeagueStandingsLifecycleTarget,
+            resourceLifecycleHandler::loadLeagueStandingsLifecycleTarget,
+        )
+        lifecycleBindings.bindDivisionMatches(
+            divisionContentCoordinator.divisionMatches,
+            ::generateRounds,
+        )
     }
 
     override fun onNavigateToChat(user: UserData) {
-        navigationHandler.navigateToChat(user = user)
+        navigationHandler.navigateToChat(messageUserId = user.id)
     }
 
     override fun matchSelected(selectedMatch: MatchWithRelations) {
         navigationHandler.navigateToMatch(
-            selectedMatch,
-            selectedEvent.value
+            matchId = selectedMatch.match.id,
+            eventId = selectedEvent.value.id,
         )
     }
 
@@ -1628,7 +999,7 @@ class DefaultEventDetailComponent(
             relations = eventWithRelations.value,
         )
         if (matchEditingCoordinator.isEditingMatches.value) {
-            refreshEditableRounds()
+            matchEditActionHandler.refreshEditableRounds()
         }
     }
 
@@ -1638,81 +1009,30 @@ class DefaultEventDetailComponent(
             relations = eventWithRelations.value,
         )
         if (matchEditingCoordinator.isEditingMatches.value) {
-            refreshEditableRounds()
+            matchEditActionHandler.refreshEditableRounds()
         }
     }
 
-    private suspend fun refreshLeagueStandingsAfterSchedule(event: Event) {
-        val target = leagueStandingsCoordinator.resolveScheduleRefreshTarget(
-            event = event,
-            divisionId = resolveLeagueStandingsDivisionId(),
-        ) ?: return
-        leagueStandingsCoordinator.loadDivisionStandings(
-            target = target,
-            showLoading = false,
-            reportErrors = false,
-            getStandings = eventRepository::getLeagueDivisionStandings,
-        )
-    }
+    override fun refreshLeagueStandings() = resourceLifecycleHandler.refreshLeagueStandings()
 
-    private fun resolveLeagueStandingsDivisionId(): String? =
-        leagueStandingsCoordinator.resolveCurrentDivisionId(
-            selectedDivisionId = selectedDivision.value,
-            isSelectedDivisionEligible = { divisionId ->
-                !selectedEvent.value.isPlayoffPlacementDivision(divisionId)
-            },
-        )
-
-    override fun refreshLeagueStandings() {
-        val target = leagueStandingsCoordinator.resolveCurrentLoadTarget(
-            eventId = selectedEvent.value.id,
-            divisionId = resolveLeagueStandingsDivisionId(),
-        ) ?: return
-        scope.launch {
-            leagueStandingsCoordinator.loadDivisionStandings(
-                target = target,
-                showLoading = true,
-                reportErrors = true,
-                getStandings = eventRepository::getLeagueDivisionStandings,
-            )?.let { errorMessage -> _errorState.value = errorMessage }
-        }
-    }
-
-    override fun confirmLeagueStandings(applyReassignment: Boolean) {
-        val event = selectedEvent.value
-        val target = leagueStandingsCoordinator.resolveScheduleRefreshTarget(
-            event = event,
-            divisionId = resolveLeagueStandingsDivisionId(),
-        )
-
-        if (target == null) {
-            _errorState.value = ErrorMessage("Select a standings division before confirming standings.")
-            return
-        }
-
-        scope.launch {
-            _errorState.value = leagueStandingsCoordinator.confirmStandings(
-                target = target,
-                applyReassignment = applyReassignment,
-                loadingHandler = loadingHandler,
-                confirmStandings = eventRepository::confirmLeagueDivisionStandings,
-                refreshMatches = { eventId -> matchRepository.getMatchesOfTournament(eventId) },
-                refreshEvent = { eventId -> eventRepository.getEvent(eventId) },
-            )
-        }
-    }
+    override fun confirmLeagueStandings(applyReassignment: Boolean) =
+        resourceLifecycleHandler.confirmLeagueStandings(applyReassignment)
 
     override fun onHostCreateAccount() {
         scope.launch {
-            loadingHandler.showLoading("Redirecting to Stripe On Boarding ...")
-            billingRepository.createAccount().onSuccess { onBoardingUrl ->
-                urlHandler?.openUrlInWebView(
-                    url = onBoardingUrl,
-                )
-            }.onFailure {
-                _errorState.value = ErrorMessage(it.userMessage())
+            val loadingOperation = loadingHandler.newOperation()
+            loadingOperation.showLoading("Redirecting to Stripe On Boarding ...")
+            try {
+                billingRepository.createAccount().onSuccess { onBoardingUrl ->
+                    urlHandler?.openUrlInWebView(
+                        url = onBoardingUrl,
+                    )
+                }.onFailure {
+                    _errorState.value = ErrorMessage(it.userMessage())
+                }
+            } finally {
+                loadingOperation.hideLoading()
             }
-            loadingHandler.hideLoading()
         }
     }
 
@@ -1723,97 +1043,39 @@ class DefaultEventDetailComponent(
     override fun toggleLosersBracket() {
         bracketRoundsCoordinator.toggleLosersBracket(divisionContentCoordinator.divisionMatches.value)
         if (matchEditingCoordinator.isEditingMatches.value) {
-            refreshEditableRounds()
+            matchEditActionHandler.refreshEditableRounds()
         }
     }
 
-    override fun onUploadSelected(photo: GalleryPhotoResult) {
+    override fun onUploadSelected(photo: GalleryPhotoResult, onRetry: () -> Unit) {
         scope.launch {
-            imageCoordinator.uploadSelected(photo)
+            when (val outcome = imageCoordinator.uploadSelected(photo, loadingHandler)) {
+                is EventImageUploadOutcome.Success -> Unit
+                is EventImageUploadOutcome.Failure -> {
+                    _errorState.value = eventImageRetryError(
+                        message = eventImageFailureMessage(outcome.reason),
+                        onRetry = onRetry,
+                    )
+                }
+            }
         }
     }
 
-    override fun deleteImage(imageId: String) {
+    override fun deleteImage(imageId: String, onDeleted: () -> Unit) {
         scope.launch {
             imageCoordinator.deleteImage(imageId, loadingHandler)
+                .onSuccess { onDeleted() }
+                .onFailure {
+                    _errorState.value = eventImageRetryError(
+                        message = eventImageFailureMessage(EventImageFailure.DELETE),
+                        onRetry = { deleteImage(imageId, onDeleted) },
+                    )
+                }
         }
     }
 
     private fun currentWeeklyOccurrenceSelection(): EventOccurrenceSelection? {
         return weeklyOccurrenceCoordinator.currentSelection()
-    }
-
-    private suspend fun refreshParticipantManagementSnapshot(
-        eventId: String,
-        occurrence: EventOccurrenceSelection?,
-        reportErrors: Boolean = true,
-    ) {
-        participantManagementCoordinator.refreshParticipantManagementSnapshot(
-            eventId = eventId,
-            occurrence = occurrence,
-            reportErrors = reportErrors,
-            loadSnapshot = eventRepository::getEventParticipantManagementSnapshot,
-        )?.let { error -> _errorState.value = error }
-    }
-
-    private suspend fun refreshParticipantComplianceSummaries(
-        eventId: String,
-        occurrence: EventOccurrenceSelection?,
-        teamSignup: Boolean,
-        reportErrors: Boolean = true,
-    ) {
-        participantManagementCoordinator.refreshParticipantComplianceSummaries(
-            eventId = eventId,
-            occurrence = occurrence,
-            teamSignup = teamSignup,
-            reportErrors = reportErrors,
-            loadTeamCompliance = eventRepository::getEventTeamCompliance,
-            loadUserCompliance = eventRepository::getEventUserCompliance,
-        )?.let { error -> _errorState.value = error }
-    }
-
-    private suspend fun refreshParticipantManagementData(
-        target: ParticipantManagementRoomTarget,
-        reportErrors: Boolean = true,
-    ) {
-        participantManagementCoordinator.refreshParticipantManagementData(
-            target = target,
-            reportErrors = reportErrors,
-            loadSnapshot = eventRepository::getEventParticipantManagementSnapshot,
-            loadTeamCompliance = eventRepository::getEventTeamCompliance,
-            loadUserCompliance = eventRepository::getEventUserCompliance,
-        )?.let { error -> _errorState.value = error }
-    }
-
-    private suspend fun refreshParticipantManagementSnapshotIfNeeded(
-        event: Event = selectedEvent.value,
-    ) {
-        val target = participantManagementRoomTarget(
-            event = event,
-            occurrence = currentWeeklyOccurrenceSelection(),
-        ) ?: return
-        if (!canManageParticipantData(event)) return
-        refreshParticipantManagementSnapshot(
-            eventId = target.eventId,
-            occurrence = target.toOccurrence(),
-            reportErrors = false,
-        )
-    }
-
-    private suspend fun refreshParticipantComplianceIfNeeded(
-        event: Event = selectedEvent.value,
-    ) {
-        val target = participantManagementRoomTarget(
-            event = event,
-            occurrence = currentWeeklyOccurrenceSelection(),
-        ) ?: return
-        if (!canManageParticipantData(event)) return
-        refreshParticipantComplianceSummaries(
-            eventId = target.eventId,
-            occurrence = target.toOccurrence(),
-            teamSignup = target.teamSignup,
-            reportErrors = false,
-        )
     }
 
     private fun requireSelectedWeeklyOccurrence(
@@ -1827,91 +1089,6 @@ class DefaultEventDetailComponent(
             _errorState.value = ErrorMessage(errorMessage)
             null
         }
-    }
-
-    private fun rememberWeeklyOccurrenceSummary(
-        occurrence: EventOccurrenceSelection,
-        summary: WeeklyOccurrenceSummary,
-    ) {
-        weeklyOccurrenceCoordinator.rememberWeeklyOccurrenceSummary(occurrence, summary)
-    }
-
-    private suspend fun fetchWeeklyOccurrenceSummary(
-        event: Event,
-        occurrence: EventOccurrenceSelection,
-    ): WeeklyOccurrenceSummary? {
-        return eventRepository.getEventParticipantsSummary(
-            eventId = event.id,
-            occurrence = occurrence,
-        ).onFailure { throwable ->
-            Napier.w(
-                "Failed to load weekly occurrence summary for ${occurrence.slotId} on ${occurrence.occurrenceDate}.",
-                throwable,
-            )
-        }.getOrNull()?.takeUnless { summary ->
-            summary.weeklySelectionRequired
-        }?.let { summary ->
-            WeeklyOccurrenceSummary(
-                participantCount = summary.participantCount,
-                participantCapacity = summary.participantCapacity,
-            )
-        }
-    }
-
-    private suspend fun syncSelectedWeeklyOccurrenceParticipants(
-        event: Event = selectedEvent.value,
-        reportErrors: Boolean = true,
-    ) {
-        detailHydrationCoordinator.syncSelectedWeeklyOccurrenceParticipants(
-            event = event,
-            occurrence = currentWeeklyOccurrenceSelection(),
-            isWeeklyParentEvent = ::isWeeklyParentEvent,
-            manage = canManageParticipantData(event),
-            reportErrors = reportErrors,
-            clearSelectedWeeklyOccurrenceSummary = weeklyOccurrenceCoordinator::clearSelectedWeeklyOccurrenceSummary,
-            markManagedBootstrapRequested = ::markManagedBootstrapRequested,
-            syncEventDetail = { targetEvent, occurrence, manage ->
-                eventRepository.syncEventDetail(
-                    event = targetEvent,
-                    occurrence = occurrence,
-                    manage = manage,
-                )
-            },
-            applyEventDetailSyncResult = ::applyEventDetailSyncResult,
-            applySelectedOccurrenceParticipantSummary = weeklyOccurrenceCoordinator::applySelectedOccurrenceParticipantSummary,
-            clearManagedBootstrapRequestIfCurrent = ::clearManagedBootstrapRequestIfCurrent,
-            setError = { error -> _errorState.value = error },
-            logWarning = Napier::w,
-        )
-    }
-
-    private suspend fun refreshSelectedWeeklyOccurrenceSummaryIfNeeded(
-        event: Event = selectedEvent.value,
-    ) {
-        if (isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() != null) {
-            syncSelectedWeeklyOccurrenceParticipants(
-                event = event,
-                reportErrors = false,
-            )
-        }
-    }
-
-    private suspend fun refreshEventAfterParticipantMutation(
-        eventId: String = selectedEvent.value.id,
-        warningMessage: String = "Failed to refresh event after participant update.",
-    ) {
-        detailHydrationCoordinator.refreshEventAfterParticipantMutation(
-            eventId = eventId,
-            occurrence = currentWeeklyOccurrenceSelection(),
-            warningMessage = warningMessage,
-            getEvent = eventRepository::getEvent,
-            syncEventParticipants = eventRepository::syncEventParticipants,
-            applyParticipantSyncResult = ::applyParticipantSyncResult,
-            refreshSelectedWeeklyOccurrenceSummaryIfNeeded = ::refreshSelectedWeeklyOccurrenceSummaryIfNeeded,
-            refreshParticipantManagementSnapshotIfNeeded = ::refreshParticipantManagementSnapshotIfNeeded,
-            refreshParticipantComplianceIfNeeded = ::refreshParticipantComplianceIfNeeded,
-            logWarning = Napier::w,
-        )
     }
 
     override fun joinEvent() {
@@ -1992,24 +1169,11 @@ class DefaultEventDetailComponent(
     }
 
     override fun prefetchWeeklyOccurrenceSummaries(occurrences: List<EventOccurrenceSelection>) {
-        val event = selectedEvent.value
-        if (!isWeeklyParentEvent(event)) return
-
-        val pending = weeklyOccurrenceCoordinator.pendingOccurrenceSummaries(occurrences)
-        if (pending.isEmpty()) return
-
-        weeklyOccurrenceSummaryPrefetchJob?.cancel()
-        weeklyOccurrenceSummaryPrefetchJob = scope.launch {
-            pending.forEach { occurrence ->
-                val summary = fetchWeeklyOccurrenceSummary(event, occurrence) ?: return@forEach
-                rememberWeeklyOccurrenceSummary(occurrence, summary)
-            }
-        }
+        participantBootstrapCoordinator.prefetchWeeklyOccurrenceSummaries(occurrences)
     }
 
     override fun clearSelectedWeeklySession() {
-        weeklyOccurrenceCoordinator.clearSelectedWeeklySession()
-        participantManagementCoordinator.clearParticipantManagementState()
+        participantBootstrapCoordinator.clearSelectedWeeklySession()
     }
 
     override fun joinEventAsTeam(team: TeamWithPlayers) {
@@ -2037,36 +1201,6 @@ class DefaultEventDetailComponent(
 
     override fun dismissChildJoinSelectionDialog() {
         registrationActionHandler.dismissChildJoinSelectionDialog()
-    }
-
-    private suspend fun loadJoinableChildren(
-        warningMessage: String = "Failed to load linked children before join flow.",
-    ): List<JoinChildOption> {
-        return userRepository.listChildren()
-            .onFailure { throwable ->
-                Napier.w(warningMessage, throwable)
-            }
-            .getOrElse { emptyList() }
-            .asSequence()
-            .filter { child ->
-                child.userId.isNotBlank() &&
-                    (child.linkStatus?.equals("active", ignoreCase = true) != false)
-            }
-            .map { child -> child.toJoinChildOption() }
-            .toList()
-    }
-
-    private suspend fun refreshScheduleTrackedUserIds() {
-        val ids = linkedSetOf<String>()
-        val currentUserId = currentUser.value.id.trim()
-        if (currentUserId.isNotEmpty()) {
-            ids += currentUserId
-        }
-        loadJoinableChildren()
-            .map { child -> child.userId.trim() }
-            .filter { childId -> childId.isNotEmpty() }
-            .forEach { childId -> ids += childId }
-        _scheduleTrackedUserIds.value = ids
     }
 
     override fun requestRefund(reason: String, targetUserId: String?) {
@@ -2097,702 +1231,105 @@ class DefaultEventDetailComponent(
     }
 
     override fun refreshEventDetails() {
-        hydrateEventDetailForMobile(
+        participantBootstrapCoordinator.hydrateMobileEventDetail(
             showDetailsOnSuccess = false,
             showLoading = true,
             reportErrors = true,
         )
     }
 
-    private fun hydrateEventDetailForMobile(
-        showDetailsOnSuccess: Boolean,
-        showLoading: Boolean,
-        reportErrors: Boolean,
-    ) {
-        val event = selectedEvent.value
-        val request = detailHydrationCoordinator.beginMobileHydration(
-            event = event,
-            showDetailsOnSuccess = showDetailsOnSuccess,
-            showLoading = showLoading,
-            reportErrors = reportErrors,
-            setParticipantLoading = participantManagementCoordinator::setEventTeamsAndParticipantsLoading,
-            setMatchesLoading = { loading -> _eventMatchesLoading.value = loading },
-            showDetails = { _showDetails.value = true },
-        ) ?: return
+    override fun toggleEdit() = eventEditActionHandler.toggleEdit()
 
-        // Mobile hydration refreshes the management data directly. Mark that work before
-        // launching it so the managed-detail observer does not start a second identical
-        // bootstrap for the same event and occurrence.
-        markManagedBootstrapRequested(
-            event = event,
-            occurrence = currentWeeklyOccurrenceSelection(),
-            manage = canManageParticipantData(event),
-        )
-        eventDetailHydrationJob?.cancel()
-        eventDetailHydrationJob = scope.launch {
-            detailHydrationCoordinator.hydrateMobileEventDetail(
-                request = request,
-                fallbackEvent = event,
-                occurrence = currentWeeklyOccurrenceSelection(),
-                isWeeklyParentEvent = ::isWeeklyParentEvent,
-                getEvent = eventRepository::getEvent,
-                syncCurrentUserRegistrationCacheForEvent = eventRepository::syncCurrentUserRegistrationCacheForEvent,
-                syncEventParticipants = eventRepository::syncEventParticipants,
-                refreshMatches = matchRepository::getMatchesOfTournament,
-                applyParticipantSyncResult = ::applyParticipantSyncResult,
-                applySelectedOccurrenceParticipantSummary = weeklyOccurrenceCoordinator::applySelectedOccurrenceParticipantSummary,
-                refreshParticipantManagementSnapshotIfNeeded = ::refreshParticipantManagementSnapshotIfNeeded,
-                refreshParticipantComplianceIfNeeded = ::refreshParticipantComplianceIfNeeded,
-                setParticipantLoading = participantManagementCoordinator::setEventTeamsAndParticipantsLoading,
-                setMatchesLoading = { loading -> _eventMatchesLoading.value = loading },
-                showDetails = { _showDetails.value = true },
-                setError = { error -> _errorState.value = error },
-            )
-        }
-    }
+    override fun startEditingEvent() = eventEditActionHandler.startEditingEvent()
 
-    override fun toggleEdit() {
-        setEventEditMode(enabled = !editDraftCoordinator.isEditing.value)
-    }
+    override fun cancelEditingEvent() = eventEditActionHandler.cancelEditingEvent()
 
-    override fun startEditingEvent() {
-        setEventEditMode(enabled = true)
-    }
+    override fun editEventField(update: Event.() -> Event) =
+        eventEditActionHandler.editEventField(update)
 
-    override fun cancelEditingEvent() {
-        setEventEditMode(enabled = false)
-    }
+    override fun editTournamentField(update: Event.() -> Event) =
+        eventEditActionHandler.editEventField(update)
 
-    private fun setEventEditMode(enabled: Boolean) {
-        val unsupportedFeatures = mobileEventEditUnsupportedFeatures(selectedEvent.value)
-        if (enabled && unsupportedFeatures.isNotEmpty()) {
-            _errorState.value = ErrorMessage(
-                mobileEventEditUnsupportedMessage(unsupportedFeatures)
-            )
-            return
-        }
-        if (editDraftCoordinator.isEditing.value == enabled) {
-            return
-        }
-        if (enabled && !sportsCatalogCoordinator.isCatalogLoaded()) {
-            loadSports(reportErrors = true)
-        }
-        // Initialize or reset the draft from the latest selected event when mode changes.
-        val selected = selectedEvent.value
-        val seededEvent = if (enabled && sportsCatalogCoordinator.currentSports().isNotEmpty()) {
-            sportsCatalogCoordinator.syncOfficialStaffingForSportTransition(
-                previous = selected,
-                updated = selected,
-            )
-        } else {
-            selected
-        }
-        editDraftCoordinator.seedDraftForEditing(
-            event = seededEvent,
-            sourceFields = eventFields.value.map { relation -> relation.field },
-            timeSlots = eventWithRelations.value.timeSlots,
-            leagueScoringConfig = eventWithRelations.value.leagueScoringConfig?.toDto()
-                ?: LeagueScoringConfigDTO(),
-        )
-        if (enabled) {
-            val changedRentalSelection = rentalResourcesCoordinator.setAttachedResourceSelection(
-                slots = editDraftCoordinator.editableLeagueTimeSlots.value,
-                eventId = seededEvent.id,
-            )
-            if (changedRentalSelection && rentalResourcesCoordinator.selectedResourceIds.value.isNotEmpty()) {
-                syncSelectedRentalResourcesIntoEditDraft()
-            }
-        }
-        if (!enabled) {
-            eventInviteCoordinator.clearPendingStaffInvites()
-            eventInviteCoordinator.clearSuggestedUsers()
-        }
-        editDraftCoordinator.setEditing(enabled)
-    }
+    override fun searchUsers(query: String) = inviteActionHandler.searchUsers(query)
 
-    override fun editEventField(update: Event.() -> Event) {
-        editDraftCoordinator.updateEditedEvent { previous ->
-            sportsCatalogCoordinator.syncOfficialStaffingForSportTransition(
-                previous = previous,
-                updated = previous.update(),
-            )
-        }
-    }
+    override fun searchInviteTeams(query: String) = inviteActionHandler.searchInviteTeams(query)
 
-    override fun editTournamentField(update: Event.() -> Event) {
-        editDraftCoordinator.updateEditedEvent { previous ->
-            sportsCatalogCoordinator.syncOfficialStaffingForSportTransition(
-                previous = previous,
-                updated = previous.update(),
-            )
-        }
-    }
+    override fun inviteTeamToEvent(team: Team) = inviteActionHandler.inviteTeamToEvent(team)
 
-    override fun searchUsers(query: String) {
-        scope.launch {
-            eventInviteCoordinator.searchUsers(
-                query = query,
-                searchPlayers = userRepository::searchPlayers,
-            )?.let { errorMessage -> _errorState.value = errorMessage }
-        }
-    }
+    override fun invitePlayerToEvent(user: UserData) = inviteActionHandler.invitePlayerToEvent(user)
 
-    override fun searchInviteTeams(query: String) {
-        val event = selectedEvent.value
-        scope.launch {
-            eventInviteCoordinator.searchInviteTeams(
-                query = query,
-                event = event,
-                organizationId = currentInviteOrganizationId(event),
-                sportName = currentInviteSportName(event),
-                excludeTeamIds = eventParticipantTeamIdsForInviteSearch(event),
-                searchTeams = { searchQuery, eventId, organizationId, sportName, excludeTeamIds ->
-                    teamRepository.searchTeamsForEventInvite(
-                        query = searchQuery,
-                        eventId = eventId,
-                        organizationId = organizationId,
-                        sportName = sportName,
-                        excludeTeamIds = excludeTeamIds,
-                    )
-                },
-            )?.let { errorMessage -> _errorState.value = errorMessage }
-        }
-    }
-
-    override fun inviteTeamToEvent(team: Team) {
-        scope.launch {
-            val event = selectedEvent.value
-            val occurrence = if (isWeeklyParentEvent(event)) {
-                requireSelectedWeeklyOccurrence(
-                    event = event,
-                    errorMessage = "Select an occurrence before inviting a team.",
-                ) ?: return@launch
-            } else {
-                null
-            }
-
-            _errorState.value = eventInviteCoordinator.inviteTeamToEvent(
-                team = team,
-                event = event,
-                existingTeamIds = eventParticipantTeamIdsForInviteSearch(event),
-                selectedDivisionId = selectedDivision.value,
-                occurrence = occurrence,
-                loadingHandler = loadingHandler,
-                addTeam = eventRepository::addTeamToEvent,
-                refreshAfterMutation = ::refreshEventAfterParticipantMutation,
-            )
-        }
-    }
-
-    override fun invitePlayerToEvent(user: UserData) {
-        scope.launch {
-            val event = selectedEvent.value
-            val occurrence = if (isWeeklyParentEvent(event)) {
-                requireSelectedWeeklyOccurrence(
-                    event = event,
-                    errorMessage = "Select an occurrence before inviting a player.",
-                ) ?: return@launch
-            } else {
-                null
-            }
-
-            _errorState.value = eventInviteCoordinator.invitePlayerToEvent(
-                user = user,
-                event = event,
-                existingUserIds = eventParticipantUserIdsForInviteSearch(event),
-                selectedDivisionId = selectedDivision.value,
-                occurrence = occurrence,
-                loadingHandler = loadingHandler,
-                addPlayer = eventRepository::addPlayerToEvent,
-                refreshAfterMutation = ::refreshEventAfterParticipantMutation,
-            )
-        }
-    }
-
-    override fun invitePlayerToEventByEmail(firstName: String, lastName: String, email: String) {
-        scope.launch {
-            val event = selectedEvent.value
-            _errorState.value = eventInviteCoordinator.invitePlayerToEventByEmail(
-                firstName = firstName,
-                lastName = lastName,
-                email = email,
-                event = event,
-                loadingHandler = loadingHandler,
-                createInvite = { targetEvent, normalizedEmail, normalizedFirstName, normalizedLastName ->
-                    createEventPlayerInvite(
-                        event = targetEvent,
-                        userId = null,
-                        email = normalizedEmail,
-                        firstName = normalizedFirstName,
-                        lastName = normalizedLastName,
-                    )
-                },
-            )
-        }
-    }
-
-    private fun currentInviteOrganizationId(event: Event = selectedEvent.value): String? {
-        return resolveEventInviteOrganizationId(
-            event = event,
-            relationOrganizationId = eventWithRelations.value.organization?.id,
-        )
-    }
-
-    private fun currentInviteSportName(event: Event = selectedEvent.value): String? {
-        return resolveEventInviteSportName(
-            event = event,
-            relationSportName = eventWithRelations.value.sport?.name,
-        )
-    }
-
-    private fun eventParticipantTeamIdsForInviteSearch(event: Event = selectedEvent.value): Set<String> =
-        eventParticipantTeamIdsForInviteSearch(
-            event = event,
-            teams = eventWithRelations.value.teams,
-        )
-
-    private fun eventParticipantUserIdsForInviteSearch(event: Event = selectedEvent.value): Set<String> =
-        eventParticipantUserIdsForInviteSearch(
-            event = event,
-            players = eventWithRelations.value.players,
-        )
-
-    private suspend fun createEventPlayerInvite(
-        event: Event,
-        userId: String?,
-        email: String?,
-        firstName: String?,
-        lastName: String?,
-    ): Result<List<Invite>> {
-        val invite = buildEventPlayerInviteRequest(
-            event = event,
-            organizationId = currentInviteOrganizationId(event),
-            userId = userId,
-            email = email,
-            firstName = firstName,
-            lastName = lastName,
-            createdBy = currentUser.value.id,
-        ).getOrElse { throwable ->
-            return Result.failure(throwable)
-        }
-        return userRepository.createInvites(
-            invites = listOf(invite),
-        )
-    }
+    override fun invitePlayerToEventByEmail(firstName: String, lastName: String, email: String) =
+        inviteActionHandler.invitePlayerToEventByEmail(firstName, lastName, email)
 
     override suspend fun addPendingStaffInvite(
         firstName: String,
         lastName: String,
         email: String,
         roles: Set<EventStaffRole>,
-    ): Result<Unit> = runCatching {
-        val normalizedDraft = eventInviteCoordinator.pendingStaffInviteDraft(
-            firstName = firstName,
-            lastName = lastName,
-            email = email,
-            roles = roles,
-        ).getOrThrow()
-
-        val event = editDraftCoordinator.editedEvent.value
-        val assignedUserIds = normalizedDraft.roles
-            .flatMap { role -> event.assignedUserIdsForRole(role) }
-            .distinct()
-        if (assignedUserIds.isNotEmpty()) {
-            val matches = userRepository.findEmailMembership(
-                emails = listOf(normalizedDraft.email),
-                userIds = assignedUserIds,
-                eventId = event.id,
-            ).getOrThrow()
-            normalizedDraft.roles.forEach { role ->
-                val roleUserIds = event.assignedUserIdsForRole(role)
-                if (matches.any { match -> roleUserIds.contains(match.userId) }) {
-                    error("${normalizedDraft.email} is already added in the ${role.conflictListLabel()}.")
-                }
-            }
-        }
-
-        eventInviteCoordinator.addPendingStaffInviteDraft(normalizedDraft)
-    }.onFailure { error ->
-        _errorState.value = ErrorMessage(error.userMessage("Unable to add staff invite."))
-    }
+    ): Result<Unit> = inviteActionHandler.addPendingStaffInvite(
+        firstName = firstName,
+        lastName = lastName,
+        email = email,
+        roles = roles,
+        editedEvent = editDraftCoordinator.editedEvent.value,
+    )
 
     override fun removePendingStaffInvite(email: String, role: EventStaffRole?) {
-        eventInviteCoordinator.removePendingStaffInvite(email, role)
+        inviteActionHandler.removePendingStaffInvite(email, role)
     }
 
-    override fun updateEvent() {
-        scope.launch {
-            when (val result = editActionCoordinator.runSaveEventAction(
-                selectedEvent = selectedEvent.value,
-                pendingStaffInvites = eventInviteCoordinator.pendingStaffInvites.value,
-                existingStaffInvites = _eventStaffInvites.value,
-                currentUserId = currentUser.value.id,
-                prepareEventForUpdate = ::prepareEventForUpdate,
-                updatePreparedEvent = { prepared ->
-                    eventRepository.updateEvent(
-                        newEvent = prepared.event,
-                        fields = prepared.fields,
-                        timeSlots = prepared.timeSlots,
-                        leagueScoringConfig = prepared.leagueScoringConfig,
-                    ).getOrThrow()
-                },
-                reconcileStaffInvites = { event, pendingStaffInvites, existingStaffInvites, previouslyAssignedUserIds, createdByUserId ->
-                    reconcileEventStaffInvites(
-                        userRepository = userRepository,
-                        event = event,
-                        pendingStaffInvites = pendingStaffInvites,
-                        existingStaffInvites = existingStaffInvites,
-                        previouslyAssignedUserIds = previouslyAssignedUserIds,
-                        createdByUserId = createdByUserId,
-                    ).getOrThrow()
-                },
-                updateFinalEvent = { event ->
-                    eventRepository.updateEvent(event).getOrThrow()
-                },
-                refetchMatchesOfTournament = { eventId ->
-                    matchRepository.getMatchesOfTournament(eventId)
-                },
-                showLoading = { message -> loadingHandler.showLoading(message) },
-                hideLoading = loadingHandler::hideLoading,
-            )) {
-                is EventSaveActionResult.Success -> {
-                    _eventStaffInvites.value = result.staffInvites
-                    eventInviteCoordinator.clearPendingStaffInvites()
-                    eventInviteCoordinator.clearSuggestedUsers()
-                    cancelEditingEvent()
-                }
-                is EventSaveActionResult.Failure -> {
-                    _errorState.value = ErrorMessage(result.throwable.userMessage(result.fallbackMessage))
-                }
-            }
-        }
-    }
+    override fun updateEvent() = eventEditActionHandler.updateEvent()
 
-    override fun rescheduleEvent() {
-        runScheduleEditAction(EventScheduleEditAction.RESCHEDULE)
-    }
+    override fun rescheduleEvent() = eventEditActionHandler.rescheduleEvent()
 
-    override fun buildBrackets() {
-        runScheduleEditAction(EventScheduleEditAction.BUILD_BRACKETS)
-    }
+    override fun buildBrackets() = eventEditActionHandler.buildBrackets()
 
-    override fun rebuildWithoutPlaceholderTeams() {
-        runScheduleEditAction(EventScheduleEditAction.REBUILD_WITHOUT_PLACEHOLDER_TEAMS)
-    }
+    override fun rebuildWithoutPlaceholderTeams() =
+        eventEditActionHandler.rebuildWithoutPlaceholderTeams()
 
-    private fun runScheduleEditAction(action: EventScheduleEditAction) {
-        scope.launch {
-            when (val result = editActionCoordinator.runScheduleEditAction(
-                action = action,
-                prepareEventForUpdate = ::prepareEventForUpdate,
-                logPreparedFieldOwnership = ::logPreparedFieldOwnership,
-                updateEvent = { prepared ->
-                    eventRepository.updateEvent(
-                        newEvent = prepared.event,
-                        fields = prepared.fields,
-                        timeSlots = prepared.timeSlots,
-                        leagueScoringConfig = prepared.leagueScoringConfig,
-                    ).getOrThrow()
-                },
-                deleteMatchesOfTournament = { eventId ->
-                    matchRepository.deleteMatchesOfTournament(eventId).getOrThrow()
-                },
-                scheduleEvent = { scheduleAction, updated ->
-                    when (scheduleAction) {
-                        EventScheduleEditAction.RESCHEDULE -> {
-                            eventRepository.scheduleEvent(updated.id).getOrThrow()
-                        }
-                        EventScheduleEditAction.BUILD_BRACKETS -> {
-                            val participantCount = updated.maxParticipants.takeIf { maxParticipants ->
-                                maxParticipants > 0
-                            }
-                            eventRepository.scheduleEvent(updated.id, participantCount).getOrThrow()
-                        }
-                        EventScheduleEditAction.REBUILD_WITHOUT_PLACEHOLDER_TEAMS -> {
-                            eventRepository.scheduleEvent(
-                                eventId = updated.id,
-                                includePlaceholderTeams = false,
-                            ).getOrThrow()
-                        }
-                    }
-                },
-                refetchMatchesOfTournament = { eventId ->
-                    matchRepository.getMatchesOfTournament(eventId).getOrThrow()
-                },
-                resetBracketMatchesAfterSchedule = { updated ->
-                    resetBracketMatchesAfterSchedule(
-                        event = updated,
-                        getMatchesOfTournament = { eventId ->
-                            matchRepository.getMatchesOfTournament(eventId).getOrThrow()
-                        },
-                        updateMatchesBulk = { matches ->
-                            matchRepository.updateMatchesBulk(matches).getOrThrow()
-                        },
-                    )
-                },
-                refreshLeagueStandingsAfterSchedule = ::refreshLeagueStandingsAfterSchedule,
-                showLoading = { message -> loadingHandler.showLoading(message) },
-                hideLoading = loadingHandler::hideLoading,
-            )) {
-                is EventScheduleEditResult.Success -> {
-                    cancelEditingEvent()
-                    _errorState.value = ErrorMessage(result.message)
-                }
-                is EventScheduleEditResult.Failure -> {
-                    _errorState.value = ErrorMessage(result.throwable.userMessage(result.fallbackMessage))
-                }
-            }
-        }
-    }
+    override fun createTemplateFromCurrentEvent() =
+        eventEditActionHandler.createTemplateFromCurrentEvent()
 
-    override fun createTemplateFromCurrentEvent() {
-        scope.launch {
-            val sourceEvent = if (editDraftCoordinator.isEditing.value) editDraftCoordinator.editedEvent.value else selectedEvent.value
-            when (val result = editActionCoordinator.runCreateTemplateAction(
-                sourceEvent = sourceEvent,
-                createTemplate = { sourceEventId ->
-                    eventRepository.createEventTemplateFromEvent(sourceEventId).getOrThrow()
-                },
-                showLoading = { message -> loadingHandler.showLoading(message) },
-                hideLoading = loadingHandler::hideLoading,
-            )) {
-                is EventTemplateCreateResult.AlreadyTemplate -> {
-                    _errorState.value = ErrorMessage(result.message)
-                }
-                is EventTemplateCreateResult.OrganizationManaged -> {
-                    _errorState.value = ErrorMessage(result.message)
-                }
-                is EventTemplateCreateResult.Success -> {
-                    _errorState.value = ErrorMessage(result.message)
-                }
-                is EventTemplateCreateResult.Failure -> {
-                    _errorState.value = ErrorMessage(result.throwable.userMessage(result.fallbackMessage))
-                }
-            }
-        }
-    }
+    override fun publishEvent() = eventEditActionHandler.publishEvent()
 
-    override fun publishEvent() {
-        scope.launch {
-            when (val result = editActionCoordinator.runPublishEventAction(
-                currentEvent = selectedEvent.value,
-                updateEvent = eventRepository::updateEvent,
-                refreshEvent = { eventId ->
-                    eventRepository.getEvent(eventId)
-                },
-                showLoading = { message -> loadingHandler.showLoading(message) },
-                hideLoading = loadingHandler::hideLoading,
-            )) {
-                EventPublishResult.AlreadyPublished,
-                EventPublishResult.Success -> Unit
-                is EventPublishResult.Failure -> {
-                    _errorState.value = ErrorMessage(result.throwable.userMessage(result.fallbackMessage))
-                }
-            }
-        }
-    }
+    override fun createNewTeam() = participantActionHandler.createNewTeam()
 
-    override fun createNewTeam() {
-        navigationHandler.navigateToTeams(
-            selectedEvent.value.freeAgents,
-            selectedEvent.value,
-            selectedFreeAgentId = null,
-        )
-    }
+    override fun inviteFreeAgentToTeam(userId: String) =
+        participantActionHandler.inviteFreeAgentToTeam(userId)
 
-    override fun inviteFreeAgentToTeam(userId: String) {
-        val normalizedUserId = userId.trim().takeIf(String::isNotBlank) ?: return
-        navigationHandler.navigateToTeams(
-            selectedEvent.value.freeAgents,
-            selectedEvent.value,
-            selectedFreeAgentId = normalizedUserId,
-        )
-    }
-
-    override fun startManagingParticipants() {
-        val event = selectedEvent.value
-        if (isWeeklyParentEvent(event)) {
-            requireSelectedWeeklyOccurrence(
-                event = event,
-                errorMessage = "Select an occurrence before managing participants.",
-            )
-        }
-    }
+    override fun startManagingParticipants() = participantActionHandler.startManagingParticipants()
 
     override fun stopManagingParticipants() = Unit
 
-    override fun moveTeamParticipantDivision(team: TeamWithPlayers, divisionId: String) {
-        scope.launch {
-            val event = selectedEvent.value
-            val weeklyOccurrence = if (isWeeklyParentEvent(event)) {
-                requireSelectedWeeklyOccurrence(
-                    event = event,
-                    errorMessage = "Select an occurrence before moving teams.",
-                ) ?: return@launch
-            } else {
-                null
-            }
-            applyParticipantMutationResult(
-                participantManagementCoordinator.moveTeamParticipantDivision(
-                    event = event,
-                    team = team,
-                    divisionId = divisionId,
-                    occurrence = weeklyOccurrence,
-                    moveTeamDivision = { targetEvent, targetTeam, targetDivisionId, occurrence ->
-                        eventRepository.moveTeamParticipantDivision(
-                            event = targetEvent,
-                            team = targetTeam,
-                            preferredDivisionId = targetDivisionId,
-                            occurrence = occurrence,
-                        )
-                    },
-                    applySuccessfulMove = { result, normalizedDivisionId ->
-                        applyParticipantSyncResult(result)
-                        selectDivision(normalizedDivisionId)
-                        refreshSelectedWeeklyOccurrenceSummaryIfNeeded(result.event)
-                        refreshParticipantManagementSnapshotIfNeeded(result.event)
-                        refreshParticipantComplianceIfNeeded(result.event)
-                    },
-                    showLoading = loadingHandler::showLoading,
-                    hideLoading = loadingHandler::hideLoading,
-                ),
-            )
-        }
-    }
+    override fun moveTeamParticipantDivision(team: TeamWithPlayers, divisionId: String) =
+        participantActionHandler.moveTeamParticipantDivision(team, divisionId)
 
-    override fun removeTeamParticipant(team: TeamWithPlayers) {
-        scope.launch {
-            val event = selectedEvent.value
-            val weeklyOccurrence = if (isWeeklyParentEvent(event)) {
-                requireSelectedWeeklyOccurrence(
-                    event = event,
-                    errorMessage = "Select an occurrence before removing participants.",
-                ) ?: return@launch
-            } else {
-                null
-            }
-            applyParticipantMutationResult(
-                participantManagementCoordinator.removeTeamParticipant(
-                    event = event,
-                    team = team,
-                    occurrence = weeklyOccurrence,
-                    removeTeam = { targetEvent, targetTeam, occurrence ->
-                        eventRepository.removeTeamFromEvent(
-                            targetEvent,
-                            targetTeam,
-                            occurrence = occurrence,
-                        )
-                    },
-                    refreshAfterSuccess = { eventId, warningMessage ->
-                        refreshEventAfterParticipantMutation(
-                            eventId = eventId,
-                            warningMessage = warningMessage,
-                        )
-                    },
-                    showLoading = loadingHandler::showLoading,
-                    hideLoading = loadingHandler::hideLoading,
-                ),
-            )
-        }
-    }
+    override fun removeTeamParticipant(team: TeamWithPlayers) =
+        participantActionHandler.removeTeamParticipant(team)
 
-    override fun removeUserParticipant(userId: String) {
-        scope.launch {
-            val event = selectedEvent.value
-            val weeklyOccurrence = if (isWeeklyParentEvent(event)) {
-                requireSelectedWeeklyOccurrence(
-                    event = event,
-                    errorMessage = "Select an occurrence before removing participants.",
-                ) ?: return@launch
-            } else {
-                null
-            }
-            applyParticipantMutationResult(
-                participantManagementCoordinator.removeUserParticipant(
-                    event = event,
-                    userId = userId,
-                    occurrence = weeklyOccurrence,
-                    removeUser = { targetEvent, targetUserId, occurrence ->
-                        eventRepository.removeCurrentUserFromEvent(
-                            targetEvent,
-                            targetUserId = targetUserId,
-                            occurrence = occurrence,
-                        )
-                    },
-                    refreshAfterSuccess = { eventId, warningMessage ->
-                        refreshEventAfterParticipantMutation(
-                            eventId = eventId,
-                            warningMessage = warningMessage,
-                        )
-                    },
-                    showLoading = loadingHandler::showLoading,
-                    hideLoading = loadingHandler::hideLoading,
-                ),
-            )
-        }
-    }
+    override fun removeUserParticipant(userId: String) =
+        participantActionHandler.removeUserParticipant(userId)
 
-    private fun applyParticipantMutationResult(result: ParticipantMutationResult) {
-        val message = when (result) {
-            ParticipantMutationResult.NoOp -> null
-            is ParticipantMutationResult.Success -> result.message
-            is ParticipantMutationResult.Rejected -> result.message
-            is ParticipantMutationResult.Failed -> result.message
-        } ?: return
-        _errorState.value = ErrorMessage(message)
-    }
-
-    override suspend fun getParticipantBillingSnapshot(teamId: String): Result<EventTeamBillingSnapshot> {
-        return participantManagementCoordinator.getParticipantBillingSnapshot(
-            eventId = selectedEvent.value.id,
-            teamId = teamId,
-            loadSnapshot = billingRepository::getEventTeamBillingSnapshot,
-        )
-    }
+    override suspend fun getParticipantBillingSnapshot(teamId: String): Result<EventTeamBillingSnapshot> =
+        participantActionHandler.getParticipantBillingSnapshot(teamId)
 
     override suspend fun createParticipantBill(
         teamId: String,
         request: EventTeamBillCreateRequest,
-    ): Result<Unit> {
-        return participantManagementCoordinator.createParticipantBill(
-            eventId = selectedEvent.value.id,
-            teamId = teamId,
-            request = request,
-            createBill = billingRepository::createEventTeamBill,
-            refreshAfterSuccess = {
-                refreshParticipantComplianceIfNeeded(selectedEvent.value)
-            },
-        )
-    }
+    ): Result<Unit> = participantActionHandler.createParticipantBill(teamId, request)
 
     override suspend fun createParticipantPaymentCheckout(
         teamId: String,
         request: EventTeamPaymentCheckoutRequest,
-    ): Result<EventTeamPaymentCheckout> {
-        return participantManagementCoordinator.createParticipantPaymentCheckout(
-            eventId = selectedEvent.value.id,
-            teamId = teamId,
-            request = request,
-            createCheckout = billingRepository::createEventTeamPaymentCheckout,
-        )
-    }
+    ): Result<EventTeamPaymentCheckout> =
+        participantActionHandler.createParticipantPaymentCheckout(teamId, request)
 
     override suspend fun refundParticipantPayment(
         teamId: String,
         billPaymentId: String,
         amountCents: Int,
-    ): Result<Unit> {
-        return participantManagementCoordinator.refundParticipantPayment(
-            eventId = selectedEvent.value.id,
-            teamId = teamId,
-            billPaymentId = billPaymentId,
-            amountCents = amountCents,
-            refundPayment = billingRepository::refundEventTeamBillPayment,
-            refreshAfterSuccess = {
-                refreshParticipantComplianceIfNeeded(selectedEvent.value)
-            },
-        )
-    }
+    ): Result<Unit> =
+        participantActionHandler.refundParticipantPayment(teamId, billPaymentId, amountCents)
 
     override suspend fun reviewParticipantManualPaymentProof(
         billId: String,
@@ -2801,344 +1338,59 @@ class DefaultEventDetailComponent(
         decision: String,
         amountAcceptedCents: Int?,
         reviewNote: String?,
-    ): Result<Unit> {
-        return billingRepository.reviewManualPaymentProof(
-            billId = billId,
-            billPaymentId = billPaymentId,
-            proofId = proofId,
-            decision = decision,
-            amountAcceptedCents = amountAcceptedCents,
-            reviewNote = reviewNote,
-        ).mapCatching {
-            refreshParticipantComplianceIfNeeded(selectedEvent.value)
-        }
-    }
+    ): Result<Unit> = participantActionHandler.reviewParticipantManualPaymentProof(
+        billId = billId,
+        billPaymentId = billPaymentId,
+        proofId = proofId,
+        decision = decision,
+        amountAcceptedCents = amountAcceptedCents,
+        reviewNote = reviewNote,
+    )
 
-    override fun selectPlace(place: MVPPlace?) {
-        editEventField {
-            copy(
-                coordinates = place?.coordinates ?: listOf(0.0, 0.0),
-                location = place?.name ?: "",
-                address = place?.address,
-            )
-        }
-    }
+    override fun selectPlace(place: MVPPlace?) = eventEditActionHandler.selectPlace(place)
 
-    override fun onTypeSelected(type: EventType) {
-        editEventField { copy(eventType = type) }
-    }
+    override fun onTypeSelected(type: EventType) = eventEditActionHandler.onTypeSelected(type)
 
     private fun generateRounds() {
         bracketRoundsCoordinator.refreshRounds(divisionContentCoordinator.divisionMatches.value)
     }
 
-    override fun selectFieldCount(count: Int) {
-        editDraftCoordinator.selectFieldCount(count)
-    }
+    override fun selectFieldCount(count: Int) = eventEditActionHandler.selectFieldCount(count)
 
-    override fun updateLocalFieldName(index: Int, name: String) {
-        editDraftCoordinator.updateLocalFieldName(index, name)
-    }
+    override fun updateLocalFieldName(index: Int, name: String) =
+        eventEditActionHandler.updateLocalFieldName(index, name)
 
-    override fun setRentalResourceSelected(optionId: String, selected: Boolean) {
-        if (rentalResourcesCoordinator.setSelected(optionId, selected)) {
-            syncSelectedRentalResourcesIntoEditDraft()
-        }
-    }
+    override fun setRentalResourceSelected(optionId: String, selected: Boolean) =
+        eventEditActionHandler.setRentalResourceSelected(optionId, selected)
 
-    override fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO) {
-        editDraftCoordinator.updateLeagueScoringConfig(update)
-    }
+    override fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO) =
+        eventEditActionHandler.updateLeagueScoringConfig(update)
 
-    override fun addLeagueTimeSlot() {
-        editDraftCoordinator.addLeagueTimeSlot()
-    }
+    override fun addLeagueTimeSlot() = eventEditActionHandler.addLeagueTimeSlot()
 
-    override fun updateLeagueTimeSlot(index: Int, update: TimeSlot.() -> TimeSlot) {
-        editDraftCoordinator.updateLeagueTimeSlot(
-            index = index,
-            update = update,
-            normalizeSlotResourceSelection = ::normalizeRentalSlotResourceSelection,
-        )
-    }
+    override fun updateLeagueTimeSlot(index: Int, update: TimeSlot.() -> TimeSlot) =
+        eventEditActionHandler.updateLeagueTimeSlot(index, update)
 
-    override fun removeLeagueTimeSlot(index: Int) {
-        editDraftCoordinator.removeLeagueTimeSlot(index)
-    }
+    override fun removeLeagueTimeSlot(index: Int) = eventEditActionHandler.removeLeagueTimeSlot(index)
 
-    private fun loadAvailableRentalResources(eventId: String) {
-        scope.launch {
-            billingRepository.listRentalResourceOptions(eventId = eventId.takeIf(String::isNotBlank))
-                .onSuccess { options ->
-                    val changedSelection = rentalResourcesCoordinator.applyLoadedResources(
-                        options = options,
-                        slots = editDraftCoordinator.editableLeagueTimeSlots.value,
-                        eventId = eventId,
-                    )
-                    if (changedSelection) {
-                        if (editDraftCoordinator.isEditing.value) {
-                            syncSelectedRentalResourcesIntoEditDraft()
-                        }
-                    }
-                }
-                .onFailure { error ->
-                    Napier.w("Unable to load event rental resources: ${error.message}")
-                }
-        }
-    }
+    override fun checkIsUserWaitListed(event: Event): Boolean =
+        registrationLifecycleHandler.checkIsUserWaitListed(event)
 
-    private fun normalizeRentalSlotResourceSelection(
-        slot: TimeSlot,
-        validFieldIds: Set<String> = editDraftCoordinator.editableFieldIds(),
-    ): TimeSlot = rentalResourcesCoordinator.normalizeSlotResourceSelection(slot, validFieldIds)
+    override fun deleteEvent() = externalActionHandler.deleteEvent()
 
-    private fun syncSelectedRentalResourcesIntoEditDraft() {
-        val draft = rentalResourcesCoordinator.buildEditDraft(
-            event = editDraftCoordinator.editedEvent.value,
-            currentFields = editDraftCoordinator.editableFields.value,
-            currentSlots = editDraftCoordinator.editableLeagueTimeSlots.value,
-            defaultDivisionIds = defaultFieldDivisions(editDraftCoordinator.editedEvent.value),
-        )
-        editDraftCoordinator.applyRentalDraft(draft)
-    }
+    override fun reportEvent(notes: String?) = externalActionHandler.reportEvent(notes)
 
-    private fun selectedRentalResourceFields(
-        options: List<RentalResourceOption> = rentalResourcesCoordinator.selectedOptions(),
-    ): List<Field> = rentalResourcesCoordinator.selectedFields(options)
+    override fun shareEvent() = externalActionHandler.shareEvent()
 
-    private fun prepareEventForUpdate(): PreparedEventForUpdate {
-        val result = EventEditPayloadBuilder.prepareForUpdate(
-            EventEditPayloadInput(
-                editedEvent = editDraftCoordinator.editedEvent.value.copy(
-                    matchRulesOverride = matchRulesOverrideWithoutSegmentCount(
-                        editDraftCoordinator.editedEvent.value.matchRulesOverride,
-                    ),
-                ),
-                editableFields = editDraftCoordinator.editableFields.value,
-                editableLeagueTimeSlots = editDraftCoordinator.editableLeagueTimeSlots.value,
-                selectedRentalFields = selectedRentalResourceFields(),
-                leagueScoringConfig = editDraftCoordinator.editableLeagueScoringConfig.value,
-                originalEventStart = eventWithRelations.value.event.start,
-                normalizeSlotResourceSelection = { slot, validFieldIds ->
-                    normalizeRentalSlotResourceSelection(slot, validFieldIds)
-                },
-            )
-        )
-        result.editableFields?.let { fields ->
-            editDraftCoordinator.applyPreparedEditableFields(fields)
-        }
-        return result.prepared
-    }
+    override fun shareEventQrCode() = externalActionHandler.shareEventQrCode()
 
-    private fun logPreparedFieldOwnership(action: String, prepared: PreparedEventForUpdate) {
-        val eventOrgId = prepared.event.organizationId?.trim()?.takeIf(String::isNotBlank)
-        val fieldOwnership = prepared.fields
-            .orEmpty()
-            .joinToString(separator = ", ") { field ->
-                val fieldOrg = field.organizationId?.trim()?.takeIf(String::isNotBlank) ?: "null"
-                "${field.id}:$fieldOrg"
-            }
-        Napier.i(
-            "Event ownership payload [$action] eventId=${prepared.event.id} " +
-                "eventOrg=${eventOrgId ?: "null"} fieldOwnership=[$fieldOwnership]",
-        )
-    }
+    override fun openEventDirections() = externalActionHandler.openEventDirections()
 
-    override fun checkIsUserWaitListed(event: Event): Boolean {
-        return membershipCoordinator.checkIsUserWaitListed(
-            event = event,
-            currentUserId = currentUser.value.id,
-            currentUserTeamIds = currentUserTeamIds(),
-            cachedMembership = resolveCachedCurrentUserRegistrationMembership(event),
-            weeklyParentWithoutSelection = isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null,
-        )
-    }
+    override fun checkIsUserFreeAgent(event: Event): Boolean =
+        registrationLifecycleHandler.checkIsUserFreeAgent(event)
 
-    override fun deleteEvent() {
-        scope.launch {
-            val currentEvent = selectedEvent.value
-            val deletePlan = eventDeletePlan(currentEvent)
-            var deleted = false
-            if (!deletePlan.shouldRefund) {
-                loadingHandler.showLoading(deletePlan.loadingMessage)
-                eventRepository.deleteEvent(selectedEvent.value.id)
-                    .onSuccess {
-                        deleted = true
-                    }.onFailure {
-                        _errorState.value = ErrorMessage(it.userMessage())
-                    }
-            } else {
-                loadingHandler.showLoading(deletePlan.loadingMessage)
-                billingRepository.deleteAndRefundEvent(selectedEvent.value)
-                    .onSuccess {
-                        deleted = true
-                    }.onFailure {
-                        _errorState.value = ErrorMessage(it.userMessage())
-                    }
-            }
-            if (deleted) {
-                backCallback.onBack()
-            }
-            loadingHandler.hideLoading()
-        }
-    }
-
-    override fun reportEvent(notes: String?) {
-        val currentEvent = selectedEvent.value
-        scope.launch {
-            eventRepository.reportEvent(currentEvent.id, notes)
-                .onSuccess {
-                    _errorState.value = ErrorMessage("Event reported. It will be hidden from your searches.")
-                    backCallback.onBack()
-                }
-                .onFailure {
-                    _errorState.value = ErrorMessage(it.userMessage("Failed to report event."))
-                }
-        }
-    }
-
-    override fun shareEvent() {
-        val payload = eventSharePayload(selectedEvent.value)
-        shareServiceProvider.getShareService().share(payload.title, payload.url)
-    }
-
-    override fun shareEventQrCode() {
-        val targetEvent = selectedEvent.value
-        val payload = eventQrCodeSharePayload(targetEvent)
-        val client = apiClient ?: run {
-            _errorState.value = ErrorMessage("Failed to share QR code.")
-            return
-        }
-        scope.launch {
-            runCatching {
-                client.getBytes(payload.path)
-            }.onSuccess { imageBytes ->
-                shareServiceProvider.getShareService().shareImage(
-                    title = payload.title,
-                    imageBytes = imageBytes,
-                    fileName = payload.fileName,
-                    mimeType = payload.mimeType,
-                )
-            }.onFailure { throwable ->
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Failed to share QR code.")
-                )
-            }
-        }
-    }
-
-    override fun openEventDirections() {
-        val directionsPlan = eventDirectionsPlan(selectedEvent.value)
-        if (directionsPlan is EventDirectionsPlan.Unavailable) {
-            _errorState.value = ErrorMessage(directionsPlan.message)
-            return
-        }
-        val directionsUrls = (directionsPlan as EventDirectionsPlan.OpenUrl).let { plan ->
-            listOf(plan.url) + plan.fallbackUrls
-        }
-
-        scope.launch {
-            val handler = urlHandler
-            if (handler == null) {
-                _errorState.value = ErrorMessage("Unable to open directions.")
-                return@launch
-            }
-
-            var lastFailure: Throwable? = null
-            for (directionsUrl in directionsUrls) {
-                val result = handler.openUrlInWebView(directionsUrl)
-                if (result.isSuccess) {
-                    return@launch
-                }
-                lastFailure = result.exceptionOrNull()
-            }
-
-            _errorState.value = ErrorMessage(
-                lastFailure?.userMessage("Unable to open directions.")
-                    ?: "Unable to open directions.",
-            )
-        }
-    }
-
-    override fun checkIsUserFreeAgent(event: Event): Boolean {
-        return membershipCoordinator.checkIsUserFreeAgent(
-            event = event,
-            currentUserId = currentUser.value.id,
-            currentUserTeamIds = currentUserTeamIds(),
-            cachedMembership = resolveCachedCurrentUserRegistrationMembership(event),
-            weeklyParentWithoutSelection = isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null,
-        )
-    }
-
-    private suspend fun refreshCurrentUserMembershipState(event: Event) {
-        val current = currentUser.value
-        val selectedOccurrence = currentWeeklyOccurrenceSelection()
-        val eventIsWeeklyParent = isWeeklyParentEvent(event)
-        val missingWeeklySelection = membershipCoordinator.refreshCurrentUserMembershipState(
-            event = event,
-            currentUserId = current.id,
-            profileTeamIds = current.teamIds,
-            registrations = cachedCurrentUserRegistrations.value,
-            selectedOccurrence = selectedOccurrence,
-            isWeeklyParentEvent = eventIsWeeklyParent,
-            weeklyParentWithoutSelection = eventIsWeeklyParent && selectedOccurrence == null,
-            getTeamWithPlayers = { teamId ->
-                teamRepository.getTeamWithPlayers(teamId).getOrNull()
-            },
-        )
-        if (missingWeeklySelection) {
-            registrationFlowCoordinator.clearWithdrawTargets()
-        }
-    }
-
-    private fun resolveCachedCurrentUserRegistrationMembership(
-        event: Event,
-    ): CurrentUserRegistrationMembershipState? {
-        return membershipCoordinator.resolveCachedMembership(
-            registrations = cachedCurrentUserRegistrations.value,
-            selectedOccurrence = currentWeeklyOccurrenceSelection(),
-            currentUserId = currentUser.value.id,
-            profileTeamIds = currentUser.value.teamIds,
-            isWeeklyParentEvent = isWeeklyParentEvent(event),
-        )
-    }
-
-    private suspend fun refreshWithdrawTargets(event: Event) {
-        val current = currentUser.value
-        registrationFlowCoordinator.replaceWithdrawTargets(
-            registrationFlowCoordinator.buildWithdrawTargets(
-                currentUserId = current.id,
-                currentUserFullName = current.fullName,
-                children = loadJoinableChildren(
-                    warningMessage = "Failed to load linked children for withdraw targets.",
-                ),
-            ) { userId ->
-                resolveWithdrawTargetMembership(event, userId)
-            },
-        )
-    }
-
-    private fun resolveWithdrawTargetMembership(
-        event: Event,
-        userId: String,
-    ): WithdrawTargetMembership? {
-        return membershipCoordinator.resolveWithdrawTargetMembership(
-            event = event,
-            userId = userId,
-            currentUserId = currentUser.value.id,
-            profileTeamIds = currentUser.value.teamIds,
-            cachedCurrentUserMembership = if (userId == currentUser.value.id) {
-                resolveCachedCurrentUserRegistrationMembership(event)
-            } else {
-                null
-            },
-            weeklyParentWithoutSelection = isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null,
-        )
-    }
-
-    private fun currentUserTeamIds(): Set<String> {
-        return membershipCoordinator.currentUserTeamIds(currentUser.value.teamIds)
-    }
+    private suspend fun refreshCurrentUserMembershipState(event: Event) =
+        registrationLifecycleHandler.refreshCurrentUserMembershipState(event)
 
     override fun dismissPaymentPlanPreviewDialog() {
         registrationActionHandler.dismissPaymentPlanPreviewDialog()
@@ -3168,199 +1420,48 @@ class DefaultEventDetailComponent(
         registrationActionHandler.dismissBillingAddressPrompt()
     }
 
-    private fun refreshEditableRounds() {
-        matchEditingCoordinator.refreshEditableRounds(
-            event = selectedEvent.value,
-            selectedDivisionId = selectedDivision.value,
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-        )
-    }
+    override fun startEditingMatches() = matchEditActionHandler.startEditingMatches()
 
-    private fun createStagedMatch(
-        creationContext: MatchCreateContext,
-        seed: MatchMVP? = null,
-        openEditor: Boolean = false,
-    ): MatchWithRelations? {
-        return matchEditingCoordinator.createStagedMatchIfEditable(
-            canEditMatchesNow = canEditMatchesNow(),
-            input = StagedMatchInput(
-                event = selectedEvent.value,
-                selectedDivisionId = selectedDivision.value,
-                creationContext = creationContext,
-                seed = seed,
-                clientId = newId(),
-                now = Clock.System.now(),
-            ),
-            openEditor = openEditor,
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-        ) { relation, context, isCreateMode ->
-            showMatchEditDialog(
-                match = relation,
-                creationContext = context,
-                isCreateMode = isCreateMode,
-            )
-        }
-    }
+    override fun cancelEditingMatches() = matchEditActionHandler.cancelEditingMatches()
 
-    override fun startEditingMatches() {
-        scope.launch {
-            matchEditingCoordinator.beginEditingIfAllowed(
-                canManageMatchEditing = canManageMatchEditing(),
-                matches = eventWithRelations.value.matches,
-                event = selectedEvent.value,
-                selectedDivisionId = selectedDivision.value,
-                buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-            )
-        }
-    }
+    override fun commitMatchChanges() = matchEditActionHandler.commitMatchChanges()
 
-    override fun cancelEditingMatches() {
-        matchEditingCoordinator.cancelEditing()
-    }
+    override fun updateEditableMatch(matchId: String, updater: (MatchMVP) -> MatchMVP) =
+        matchEditActionHandler.updateEditableMatch(matchId, updater)
 
-    override fun commitMatchChanges() {
-        if (!canEditMatchesNow()) {
-            return
-        }
-        scope.launch {
-            when (val result = matchEditingCoordinator.commitChanges(
-                isTournament = selectedEvent.value.eventType == EventType.TOURNAMENT,
-                updateMatchesBulk = { payload ->
-                    matchRepository.updateMatchesBulk(payload.updates, payload.creates, payload.deletes)
-                },
-                onCommitStarted = { loadingHandler.showLoading("Updating matches...") },
-                onCommitFinished = { loadingHandler.hideLoading() },
-            )) {
-                MatchEditCommitResult.Success -> Unit
-                is MatchEditCommitResult.Invalid -> {
-                    _errorState.value = ErrorMessage(result.errorMessage)
-                }
-                is MatchEditCommitResult.Failure -> {
-                    _errorState.value = ErrorMessage(result.throwable.userMessage("Failed to update matches"))
-                }
-            }
-        }
-    }
+    override fun setLockForEditableMatches(matchIds: List<String>, locked: Boolean) =
+        matchEditActionHandler.setLockForEditableMatches(matchIds, locked)
 
-    override fun updateEditableMatch(matchId: String, updater: (MatchMVP) -> MatchMVP) {
-        matchEditingCoordinator.updateEditableMatch(
-            matchId = matchId,
-            event = selectedEvent.value,
-            selectedDivisionId = selectedDivision.value,
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-            updater = updater,
-        )
-    }
+    override fun addScheduleMatch() = matchEditActionHandler.addScheduleMatch()
 
-    override fun setLockForEditableMatches(matchIds: List<String>, locked: Boolean) {
-        matchEditingCoordinator.setLockForEditableMatchesIfEditable(
-            canEditMatchesNow = canEditMatchesNow(),
-            matchIds = matchIds,
-            locked = locked,
-            event = selectedEvent.value,
-            selectedDivisionId = selectedDivision.value,
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-        )
-    }
+    override fun addBracketMatch() = matchEditActionHandler.addBracketMatch()
 
-    override fun addScheduleMatch() {
-        createStagedMatch(
-            creationContext = MatchCreateContext.SCHEDULE,
-            openEditor = true,
-        )
-    }
+    override fun addBracketMatchFromAnchor(anchorMatchId: String, slot: BracketAddSlot) =
+        matchEditActionHandler.addBracketMatchFromAnchor(anchorMatchId, slot)
 
-    override fun addBracketMatch() {
-        createStagedMatch(
-            creationContext = MatchCreateContext.BRACKET,
-            openEditor = true,
-        )
-    }
+    override fun showTeamSelection(matchId: String, position: TeamPosition) =
+        matchEditActionHandler.showTeamSelection(matchId, position)
 
-    override fun addBracketMatchFromAnchor(anchorMatchId: String, slot: BracketAddSlot) {
-        matchEditingCoordinator.addBracketMatchFromAnchorIfEditable(
-            canEditMatchesNow = canEditMatchesNow(),
-            anchorMatchId = anchorMatchId,
-            slot = slot,
-            event = selectedEvent.value,
-            selectedDivisionId = selectedDivision.value,
-            clientId = newId(),
-            now = Clock.System.now(),
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-        )
-    }
+    override fun selectTeamForMatch(matchId: String, position: TeamPosition, teamId: String?) =
+        matchEditActionHandler.selectTeamForMatch(matchId, position, teamId)
 
-    override fun showTeamSelection(matchId: String, position: TeamPosition) {
-        matchEditingCoordinator.showTeamSelection(matchId, position, eventWithRelations.value.teams)
-    }
-
-    override fun selectTeamForMatch(matchId: String, position: TeamPosition, teamId: String?) {
-        matchEditingCoordinator.selectTeamForMatch(
-            matchId = matchId,
-            position = position,
-            teamId = teamId,
-            event = selectedEvent.value,
-            selectedDivisionId = selectedDivision.value,
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-        )
-    }
-
-    override fun dismissTeamSelection() {
-        matchEditingCoordinator.dismissTeamSelection()
-    }
+    override fun dismissTeamSelection() = matchEditActionHandler.dismissTeamSelection()
 
     override fun showMatchEditDialog(
         match: MatchWithRelations,
         creationContext: MatchCreateContext,
         isCreateMode: Boolean,
-    ) {
-        matchEditingCoordinator.showMatchEditDialogIfEditable(
-            canEditMatchesNow = canEditMatchesNow(),
-            match = match,
-            teams = eventWithRelations.value.teams,
-            fields = divisionFields.value,
-            fallbackMatches = eventWithRelations.value.matches,
-            event = selectedEvent.value,
-            players = eventWithRelations.value.players,
-            isCreateMode = isCreateMode,
-            creationContext = creationContext,
-        )
-    }
+    ) = matchEditActionHandler.showMatchEditDialog(match, creationContext, isCreateMode)
 
     override suspend fun sendNotification(title: String, message: String): Result<Unit> =
-        notificationCoordinator.sendEventNotification(
-            eventWithRelations.value.event.id,
-            eventWithRelations.value.event.eventType,
-            title,
-            message,
-        )
+        matchEditActionHandler.sendNotification(title, message)
 
-    override fun dismissMatchEditDialog() {
-        matchEditingCoordinator.dismissMatchEditDialog(
-            event = selectedEvent.value,
-            selectedDivisionId = selectedDivision.value,
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-        )
-    }
+    override fun dismissMatchEditDialog() = matchEditActionHandler.dismissMatchEditDialog()
 
-    override fun deleteMatchFromDialog(matchId: String) {
-        matchEditingCoordinator.deleteMatchFromDialogIfEditable(
-            canEditMatchesNow = canEditMatchesNow(),
-            matchId = matchId,
-            event = selectedEvent.value,
-            selectedDivisionId = selectedDivision.value,
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-        )
-    }
+    override fun deleteMatchFromDialog(matchId: String) =
+        matchEditActionHandler.deleteMatchFromDialog(matchId)
 
-    override fun updateMatchFromDialog(updatedMatch: MatchWithRelations) {
-        matchEditingCoordinator.updateMatchFromDialogIfEditable(
-            canEditMatchesNow = canEditMatchesNow(),
-            updatedMatch = updatedMatch,
-            event = selectedEvent.value,
-            selectedDivisionId = selectedDivision.value,
-            buildRounds = bracketRoundsCoordinator::buildBracketRounds,
-        )
-    }
+    override fun updateMatchFromDialog(updatedMatch: MatchWithRelations) =
+        matchEditActionHandler.updateMatchFromDialog(updatedMatch)
 
 }

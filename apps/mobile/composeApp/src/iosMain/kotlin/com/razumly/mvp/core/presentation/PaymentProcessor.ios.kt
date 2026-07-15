@@ -27,23 +27,36 @@ actual open class PaymentProcessor : IPaymentProcessor {
     }
 
     actual override fun presentPaymentSheet(email: String, name: String, billingAddress: BillingAddressDraft?) {
-        val intent = purchaseIntent ?: return
+        val intent = purchaseIntent
+        val launchError = paymentSheetLaunchError(intent)
+        if (launchError != null) {
+            failPaymentSheetPresentation(launchError)
+            return
+        }
 
-        _nativeViewFactory?.presentStripePaymentSheet(
-            publishableKey = intent.publishableKey ?: return,
-            customerId = intent.customer,
-            ephemeralKey = intent.ephemeralKey,
-            paymentIntent = intent.paymentIntent ?: return,
-            billingName = name,
-            billingEmail = email,
-            billingAddress = billingAddress?.normalized(),
-            onPaymentResult = { result ->
-                emitPaymentResult(result)
-            }
-        )
+        val launchIntent = requireNotNull(intent)
+        val nativeViewFactory = _nativeViewFactory
+            ?: return failPaymentSheetPresentation("Payment setup is unavailable. Please try again.")
+
+        runCatching {
+            nativeViewFactory.presentStripePaymentSheet(
+                publishableKey = requireNotNull(launchIntent.publishableKey).trim(),
+                customerId = launchIntent.customer,
+                ephemeralKey = launchIntent.ephemeralKey,
+                paymentIntent = requireNotNull(launchIntent.paymentIntent).trim(),
+                billingName = name,
+                billingEmail = email,
+                billingAddress = billingAddress?.normalized(),
+                onPaymentResult = { result ->
+                    handlePaymentResult(result)
+                }
+            )
+        }.onFailure {
+            failPaymentSheetPresentation("Unable to open the payment sheet. Please try again.")
+        }
     }
 
-    internal actual fun emitPaymentResult(result: PaymentResult) {
+    private fun handlePaymentResult(result: PaymentResult) {
         when (result) {
             is PaymentResult.Completed -> {
                 Napier.d("Completed Purchase", tag = "Stripe")
@@ -70,5 +83,9 @@ actual open class PaymentProcessor : IPaymentProcessor {
     fun setNativeViewFactory(factory: NativeViewFactory) {
         _nativeViewFactory = factory
         urlHandler = UrlHandler()
+    }
+
+    private fun failPaymentSheetPresentation(message: String) {
+        handlePaymentResult(PaymentResult.Failed(message))
     }
 }

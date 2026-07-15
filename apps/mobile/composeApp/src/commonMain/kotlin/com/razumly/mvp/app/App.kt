@@ -19,7 +19,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -49,6 +48,8 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -99,12 +100,13 @@ fun App(root: RootComponent) {
     val pendingInviteCount by root.pendingInviteCount.collectAsState()
     val appUpdatePrompt by root.appUpdatePrompt.collectAsState()
     val centerNavAction by root.centerNavAction.collectAsState()
-    val completedGuideIds by root.completedGuideIds.collectAsState()
-    val completedGuideIdsLoaded by root.completedGuideIdsLoaded.collectAsState()
+    val accountGuideCompletionState by root.accountGuideCompletionState.collectAsState()
     val currentUserResult by root.currentUser.collectAsState()
-    val activeEventTeamCheckInPrompt by root.activeEventTeamCheckInPrompt.collectAsState()
-    val activeEventTeamCheckInSaving by root.activeEventTeamCheckInSaving.collectAsState()
-    val activeEventTeamCheckInError by root.activeEventTeamCheckInError.collectAsState()
+    val currentGuideAccountId = currentUserResult
+        .getOrNull()
+        ?.id
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
 
     val popupHandler = remember { PopupHandlerImpl() }
     val loadingHandler = remember { LoadingHandlerImpl() }
@@ -171,10 +173,12 @@ fun App(root: RootComponent) {
         }
     }
 
-    LaunchedEffect(completedGuideIds, completedGuideIdsLoaded) {
+    LaunchedEffect(currentGuideAccountId, accountGuideCompletionState) {
+        guideController.updateAccount(currentGuideAccountId)
         guideController.updateCompletedGuideIds(
-            ids = completedGuideIds,
-            loaded = completedGuideIdsLoaded,
+            accountId = accountGuideCompletionState.accountId,
+            ids = accountGuideCompletionState.completedGuideIds,
+            loaded = accountGuideCompletionState.isLoaded,
         )
     }
 
@@ -237,41 +241,6 @@ fun App(root: RootComponent) {
                         prompt = prompt,
                         onUpdateNow = root::openAppUpdate,
                         onDismiss = root::dismissAppUpdatePrompt,
-                    )
-                }
-
-                activeEventTeamCheckInPrompt?.takeIf { appUpdatePrompt == null }?.let { prompt ->
-                    AlertDialog(
-                        onDismissRequest = {
-                            if (!activeEventTeamCheckInSaving) {
-                                root.dismissActiveEventTeamCheckInPrompt()
-                            }
-                        },
-                        title = { Text("Team event check-in") },
-                        text = {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Check in ${prompt.teamName} for ${prompt.eventName}.")
-                                activeEventTeamCheckInError?.let { error ->
-                                    Text(error, color = MaterialTheme.colorScheme.error)
-                                }
-                            }
-                        },
-                        confirmButton = {
-                            Button(
-                                onClick = root::confirmActiveEventTeamCheckIn,
-                                enabled = !activeEventTeamCheckInSaving,
-                            ) {
-                                Text(if (activeEventTeamCheckInSaving) "Saving..." else "Check in")
-                            }
-                        },
-                        dismissButton = {
-                            Button(
-                                onClick = root::dismissActiveEventTeamCheckInPrompt,
-                                enabled = !activeEventTeamCheckInSaving,
-                            ) {
-                                Text("Later")
-                            }
-                        },
                     )
                 }
 
@@ -522,57 +491,52 @@ private fun StartupSplashScreen() {
 fun LoadingOverlay(
     message: String, progress: Float? = null, modifier: Modifier = Modifier
 ) {
-    Box(
-        modifier = modifier
-            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.42f))
-            .consumePointerInput(),
-        contentAlignment = Alignment.Center
+    // A platform Dialog gives assistive technologies a true modal boundary and
+    // prevents keyboard focus from escaping to controls behind the overlay.
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false,
+        ),
     ) {
-        Card(
-            modifier = Modifier.padding(32.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.42f))
+                .semantics { contentDescription = "Loading. $message" },
+            contentAlignment = Alignment.Center,
         ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+            Card(
+                modifier = Modifier.padding(32.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
             ) {
-                if (progress != null) {
-                    // Determinate progress indicator
-                    CircularProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier.size(48.dp),
-                        trackColor = ProgressIndicatorDefaults.circularIndeterminateTrackColor,
-                    )
-                    Text("${(progress * 100).toInt()}%")
-                } else {
-                    // Indeterminate progress indicator
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(48.dp)
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    if (progress != null) {
+                        CircularProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier.size(48.dp),
+                            trackColor = ProgressIndicatorDefaults.circularIndeterminateTrackColor,
+                        )
+                        Text("${(progress * 100).toInt()}%")
+                    } else {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(48.dp)
+                        )
+                    }
+
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center
                     )
                 }
-
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center
-                )
             }
-        }
-    }
-}
-
-/**
- * Makes the full-screen loading scrim modal for pointer input. A disabled clickable does not
- * install a gesture handler, so it cannot stop taps, drags, or scrolls from reaching the
- * content behind the overlay.
- */
-private fun Modifier.consumePointerInput(): Modifier = pointerInput(Unit) {
-    awaitPointerEventScope {
-        while (true) {
-            awaitPointerEvent(PointerEventPass.Initial)
-                .changes
-                .forEach { change -> change.consume() }
         }
     }
 }

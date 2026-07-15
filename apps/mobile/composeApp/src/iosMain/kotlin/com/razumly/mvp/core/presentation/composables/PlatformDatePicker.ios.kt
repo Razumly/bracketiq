@@ -19,12 +19,16 @@ actual fun PlatformDateTimePicker(
     getTime: Boolean,
     showDate: Boolean,
     canSelectPast: Boolean,
+    canSelectFuture: Boolean,
     initialDate: Instant?,
 ) {
     // Get the current time and calculate min/max dates
     val now = Clock.System.now()
     val minDate = if (canSelectPast) now - (120 * 365).days else now
-    val maxDate = now + (2 * 365).days
+    val maxDate = platformDatePickerMaximumDate(
+        now = now,
+        canSelectFuture = canSelectFuture,
+    )
     val requestedInitialDate = initialDate ?: now
     val clampedInitialDate = when {
         requestedInitialDate < minDate -> minDate
@@ -37,7 +41,7 @@ actual fun PlatformDateTimePicker(
     val latestOnDateSelected by rememberUpdatedState(onDateSelected)
     val latestOnDismissRequest by rememberUpdatedState(onDismissRequest)
 
-    LaunchedEffect(showPicker, getTime, showDate, canSelectPast, clampedInitialDate) {
+    LaunchedEffect(showPicker, getTime, showDate, canSelectPast, canSelectFuture, clampedInitialDate) {
         if (!showPicker) return@LaunchedEffect
         factory.createNativePlatformDatePicker(
             initialDate = clampedInitialDate,

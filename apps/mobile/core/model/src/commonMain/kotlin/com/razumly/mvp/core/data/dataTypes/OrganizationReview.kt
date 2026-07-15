@@ -35,6 +35,7 @@ data class OrganizationReviewSummary(
 data class OrganizationReviewsPayload(
     val summary: OrganizationReviewSummary = OrganizationReviewSummary(),
     val reviews: List<OrganizationReview> = emptyList(),
+    val nextCursor: String? = null,
     val viewerReview: OrganizationReview? = null,
     val viewerIsAuthenticated: Boolean = false,
     val canReview: Boolean = false,

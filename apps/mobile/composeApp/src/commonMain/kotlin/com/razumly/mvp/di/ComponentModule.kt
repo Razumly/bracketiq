@@ -7,10 +7,7 @@ import com.razumly.mvp.chat.DefaultChatGroupComponent
 import com.razumly.mvp.chat.DefaultChatListComponent
 import com.razumly.mvp.app.RootComponent
 import com.razumly.mvp.app.RootComponent.DeepLinkNav
-import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.DefaultPlayerInteractionComponent
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
@@ -66,11 +63,11 @@ val componentModule = module {
         )
     }
 
-    factory<MatchContentComponent> { (componentContext: ComponentContext, selectedMatch: MatchWithRelations, selectedEvent: Event) ->
+    factory<MatchContentComponent> { (componentContext: ComponentContext, selectedMatchId: String, selectedEventId: String) ->
         DefaultMatchContentComponent(
             componentContext = componentContext,
-            selectedMatch = selectedMatch,
-            selectedEvent = selectedEvent,
+            selectedMatchId = selectedMatchId,
+            selectedEventId = selectedEventId,
             eventRepository = get(),
             matchRepository = get(),
             userRepository = get(),
@@ -78,10 +75,10 @@ val componentModule = module {
         )
     }
 
-    factory<EventDetailComponent> { (componentContext: ComponentContext, event: Event, navHandler: INavigationHandler) ->
+    factory<EventDetailComponent> { (componentContext: ComponentContext, eventId: String, navHandler: INavigationHandler) ->
         DefaultEventDetailComponent(
             componentContext = componentContext,
-            event = event,
+            eventId = eventId,
             eventRepository = get(),
             userRepository = get(),
             matchRepository = get(),
@@ -97,11 +94,19 @@ val componentModule = module {
         )
     }
 
-    factory<CreateEventComponent> { (componentContext: ComponentContext, onCreatedEvent: (Event) -> Unit, seed: com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft?) ->
+    factory<CreateEventComponent> { (
+        componentContext: ComponentContext,
+        onCreatedEvent: (Event) -> Unit,
+        seed: com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft?,
+        rentalBookingId: String?,
+        rentalBookingItems: List<com.razumly.mvp.core.presentation.RentalBookingItemManifest>,
+    ) ->
         DefaultCreateEventComponent(
             componentContext = componentContext,
             onEventCreated = onCreatedEvent,
             initialSeed = seed,
+            initialRentalBookingId = rentalBookingId,
+            initialRentalBookingItems = rentalBookingItems,
             userRepository = get(),
             eventRepository = get(),
             fieldRepository = get(),
@@ -137,14 +142,14 @@ val componentModule = module {
 
     factory<ChatGroupComponent> { (
         componentContext: ComponentContext,
-        user: UserData?,
-        chat: ChatGroupWithRelations?,
+        messageUserId: String?,
+        chatId: String?,
         navHandler: INavigationHandler,
     ) ->
         DefaultChatGroupComponent(
             componentContext = componentContext,
-            messageUser = user,
-            initialChatGroup = chat,
+            messageUserId = messageUserId,
+            initialChatId = chatId,
             userRepository = get(),
             messagesRepository = get(),
             pushNotificationsRepository = get(),
@@ -204,17 +209,18 @@ val componentModule = module {
     factory<TeamManagementComponent> { (
         componentContext: ComponentContext,
         freeAgents: List<String>,
-        selectedEvent: Event?,
+        eventId: String?,
         selectedFreeAgentId: String?,
         navHandler: INavigationHandler,
     ) ->
         DefaultTeamManagementComponent(
             componentContext = componentContext,
+            billingRepository = get(),
             teamRepository = get(),
             userRepository = get(),
             sportsRepository = get(),
             _legacyFreeAgents = freeAgents,
-            selectedEvent = selectedEvent,
+            eventId = eventId,
             selectedFreeAgentId = selectedFreeAgentId,
             eventRepository = get(),
             navigationHandler = navHandler,
@@ -253,7 +259,6 @@ val componentModule = module {
         DefaultPlayerInteractionComponent(
             componentContext = params.get(),
             userRepository = get(),
-            chatRepository = get()
         )
     }
 }

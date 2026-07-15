@@ -44,8 +44,7 @@ class Converters {
 
     @TypeConverter
     fun toNotificationSettings(value: String): NotificationSettings {
-        return runCatching { Json.decodeFromString<NotificationSettings>(value) }
-            .getOrDefault(emptyMap())
+        return Json.decodeFromString(value)
     }
 
     // List<Int> converter
@@ -111,8 +110,7 @@ class Converters {
 
     @TypeConverter
     fun toEventOfficialPositions(value: String): List<EventOfficialPosition> =
-        runCatching { Json.decodeFromString<List<EventOfficialPosition>>(value) }
-            .getOrDefault(emptyList())
+        Json.decodeFromString(value)
 
     @TypeConverter
     fun fromEventOfficials(value: List<EventOfficial>): String =
@@ -120,8 +118,7 @@ class Converters {
 
     @TypeConverter
     fun toEventOfficials(value: String): List<EventOfficial> =
-        runCatching { Json.decodeFromString<List<EventOfficial>>(value) }
-            .getOrDefault(emptyList())
+        Json.decodeFromString(value)
 
     @TypeConverter
     fun fromEventTags(value: List<EventTag>): String =
@@ -129,8 +126,7 @@ class Converters {
 
     @TypeConverter
     fun toEventTags(value: String): List<EventTag> =
-        runCatching { Json.decodeFromString<List<EventTag>>(value) }
-            .getOrDefault(emptyList())
+        Json.decodeFromString(value)
 
     @TypeConverter
     fun fromMatchOfficialAssignments(value: List<MatchOfficialAssignment>): String =
@@ -138,8 +134,7 @@ class Converters {
 
     @TypeConverter
     fun toMatchOfficialAssignments(value: String): List<MatchOfficialAssignment> =
-        runCatching { Json.decodeFromString<List<MatchOfficialAssignment>>(value) }
-            .getOrDefault(emptyList())
+        Json.decodeFromString(value)
 
     @TypeConverter
     fun fromMatchSegments(value: List<MatchSegmentMVP>): String =
@@ -147,8 +142,7 @@ class Converters {
 
     @TypeConverter
     fun toMatchSegments(value: String): List<MatchSegmentMVP> =
-        runCatching { Json.decodeFromString<List<MatchSegmentMVP>>(value) }
-            .getOrDefault(emptyList())
+        Json.decodeFromString(value)
 
     @TypeConverter
     fun fromMatchIncidents(value: List<MatchIncidentMVP>): String =
@@ -156,8 +150,7 @@ class Converters {
 
     @TypeConverter
     fun toMatchIncidents(value: String): List<MatchIncidentMVP> =
-        runCatching { Json.decodeFromString<List<MatchIncidentMVP>>(value) }
-            .getOrDefault(emptyList())
+        Json.decodeFromString(value)
 
     @TypeConverter
     fun fromResolvedMatchRules(value: ResolvedMatchRulesMVP?): String? =
@@ -166,7 +159,7 @@ class Converters {
     @TypeConverter
     fun toResolvedMatchRules(value: String?): ResolvedMatchRulesMVP? =
         value?.takeIf { it.isNotBlank() }?.let {
-            runCatching { Json.decodeFromString<ResolvedMatchRulesMVP>(it) }.getOrNull()
+            Json.decodeFromString(it)
         }
 
     @TypeConverter
@@ -176,7 +169,7 @@ class Converters {
     @TypeConverter
     fun toMatchRulesConfig(value: String?): MatchRulesConfigMVP? =
         value?.takeIf { it.isNotBlank() }?.let {
-            runCatching { Json.decodeFromString<MatchRulesConfigMVP>(it) }.getOrNull()
+            Json.decodeFromString(it)
         }
 
     @TypeConverter
@@ -185,8 +178,7 @@ class Converters {
 
     @TypeConverter
     fun toTeamPlayerRegistrations(value: String): List<TeamPlayerRegistration> =
-        runCatching { Json.decodeFromString<List<TeamPlayerRegistration>>(value) }
-            .getOrDefault(emptyList())
+        Json.decodeFromString(value)
 
     @TypeConverter
     fun fromTeamStaffAssignments(value: List<TeamStaffAssignment>): String =
@@ -194,8 +186,7 @@ class Converters {
 
     @TypeConverter
     fun toTeamStaffAssignments(value: String): List<TeamStaffAssignment> =
-        runCatching { Json.decodeFromString<List<TeamStaffAssignment>>(value) }
-            .getOrDefault(emptyList())
+        Json.decodeFromString(value)
 
     @TypeConverter
     fun fromManualPaymentLinks(value: List<ManualPaymentLink>): String =
@@ -203,8 +194,7 @@ class Converters {
 
     @TypeConverter
     fun toManualPaymentLinks(value: String): List<ManualPaymentLink> =
-        runCatching { Json.decodeFromString<List<ManualPaymentLink>>(value) }
-            .getOrDefault(emptyList())
+        Json.decodeFromString(value)
 }
 
 class DivisionConverters {
@@ -218,8 +208,7 @@ class DivisionConverters {
         if (data.isNullOrEmpty()) return emptyList()
         val trimmed = data.trim()
         val rawValues = if (trimmed.startsWith("[")) {
-            runCatching { Json.decodeFromString<List<String>>(trimmed) }
-                .getOrDefault(emptyList())
+            Json.decodeFromString<List<String>>(trimmed)
         } else {
             trimmed.split(",")
         }
@@ -237,8 +226,6 @@ class DivisionDetailConverters {
     @TypeConverter
     fun toDivisionDetails(data: String?): List<DivisionDetail> {
         if (data.isNullOrBlank()) return emptyList()
-        return runCatching {
-            Json.decodeFromString<List<DivisionDetail>>(data)
-        }.getOrDefault(emptyList()).normalizeDivisionDetails()
+        return Json.decodeFromString<List<DivisionDetail>>(data).normalizeDivisionDetails()
     }
 }

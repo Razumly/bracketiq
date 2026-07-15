@@ -3,8 +3,6 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
-import com.razumly.mvp.core.data.dataTypes.normalizedMatchOfficialAssignments
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.eventDetail.data.BracketNode
 import com.razumly.mvp.eventDetail.data.validateAndNormalizeBracketGraph
@@ -13,35 +11,6 @@ internal data class MatchEditValidationResult(
     val isValid: Boolean,
     val errorMessage: String,
 )
-
-internal fun MatchMVP.withOfficialAssignmentCheckIn(
-    positionId: String,
-    slotIndex: Int,
-    checkedIn: Boolean,
-): MatchMVP {
-    val normalizedPositionId = positionId.trim()
-    if (normalizedPositionId.isBlank() || slotIndex < 0) return this
-    val updatedAssignments = officialIds
-        .normalizedMatchOfficialAssignments()
-        .map { assignment ->
-            if (assignment.holderType == OfficialAssignmentHolderType.OFFICIAL &&
-                assignment.positionId == normalizedPositionId &&
-                assignment.slotIndex == slotIndex
-            ) {
-                assignment.copy(checkedIn = checkedIn)
-            } else {
-                assignment
-            }
-        }
-    val primaryOfficial = updatedAssignments.firstOrNull { assignment ->
-        assignment.holderType == OfficialAssignmentHolderType.OFFICIAL
-    }
-    return copy(
-        officialIds = updatedAssignments,
-        officialId = primaryOfficial?.userId,
-        officialCheckedIn = primaryOfficial?.checkedIn ?: officialCheckedIn,
-    )
-}
 
 internal fun buildEditableBracketNodes(matches: List<MatchWithRelations>): List<BracketNode> {
     return matches.map { relation ->

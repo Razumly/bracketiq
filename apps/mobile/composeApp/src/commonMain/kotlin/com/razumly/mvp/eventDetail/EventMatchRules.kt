@@ -444,6 +444,21 @@ private fun normalizedMatchRuleStringList(values: List<String>?): List<String> =
         .filter(String::isNotBlank)
         .distinct()
 
+private fun normalizedIncidentDefinitions(
+    values: List<MatchIncidentTypeDefinitionMVP>?,
+): List<MatchIncidentTypeDefinitionMVP>? {
+    val definitionsByCode = linkedMapOf<String, MatchIncidentTypeDefinitionMVP>()
+    values.orEmpty().forEach { definition ->
+        val code = definition.code.trim().uppercase()
+        if (code.isBlank()) return@forEach
+        definitionsByCode[code] = definition.copy(
+            code = code,
+            label = definition.label.trim().ifBlank { incidentDefinitionForCode(code).label },
+        )
+    }
+    return definitionsByCode.values.toList().takeIf { it.isNotEmpty() }
+}
+
 private fun sameStringSet(left: List<String>, right: List<String>): Boolean {
     if (left.size != right.size) {
         return false
@@ -459,6 +474,7 @@ private fun normalizeMatchRulesOverride(value: MatchRulesConfigMVP?): MatchRules
 
     val supportedIncidentTypes = normalizedMatchRuleStringList(value.supportedIncidentTypes)
         .takeIf { it.isNotEmpty() }
+    val incidentTypeDefinitions = normalizedIncidentDefinitions(value.incidentTypeDefinitions)
     val timekeeping = value.timekeeping?.takeIf { config ->
         config.timerMode != null ||
             config.segmentDurationMinutes != null ||
@@ -475,6 +491,7 @@ private fun normalizeMatchRulesOverride(value: MatchRulesConfigMVP?): MatchRules
         canUseOvertime = value.canUseOvertime,
         canUseShootout = value.canUseShootout,
         supportedIncidentTypes = supportedIncidentTypes,
+        incidentTypeDefinitions = incidentTypeDefinitions,
         timekeeping = timekeeping,
     )
 

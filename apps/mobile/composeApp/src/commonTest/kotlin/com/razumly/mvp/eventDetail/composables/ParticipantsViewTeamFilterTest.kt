@@ -15,6 +15,41 @@ import kotlin.test.assertTrue
 
 class ParticipantsViewTeamFilterTest {
     @Test
+    fun givenBillingActionInFlight_whenCheckingActionAvailability_thenAllActionsRemainDisabled() {
+        assertTrue(canStartParticipantBillingAction(inFlightActionId = null))
+        assertFalse(canStartParticipantBillingAction(inFlightActionId = "proof-1"))
+        assertFalse(canStartParticipantBillingAction(inFlightActionId = "payment-1"))
+    }
+
+    @Test
+    fun givenStaleParticipantBillingRequest_whenCheckingApplicability_thenResultIsIgnored() {
+        assertTrue(
+            isCurrentParticipantBillingRequest(
+                activeRequestGeneration = 4,
+                requestGeneration = 4,
+                activeBillingTeamId = "team-b",
+                requestBillingTeamId = "team-b",
+            )
+        )
+        assertFalse(
+            isCurrentParticipantBillingRequest(
+                activeRequestGeneration = 5,
+                requestGeneration = 4,
+                activeBillingTeamId = "team-b",
+                requestBillingTeamId = "team-b",
+            )
+        )
+        assertFalse(
+            isCurrentParticipantBillingRequest(
+                activeRequestGeneration = 4,
+                requestGeneration = 4,
+                activeBillingTeamId = "team-b",
+                requestBillingTeamId = "team-a",
+            )
+        )
+    }
+
+    @Test
     fun givenTeamSignupLeague_whenBuildingParticipantTeams_thenPlaceholderSlotsAreExcluded() {
         val event = Event(
             eventType = EventType.LEAGUE,

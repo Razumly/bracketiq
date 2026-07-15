@@ -64,6 +64,7 @@ internal data class EventDetailsScheduleState(
     val leagueTimeSlots: List<TimeSlot>,
     val availableRentalResources: List<RentalResourceOption>,
     val selectedRentalResourceIds: Set<String>,
+    val rentalResourceSelectionLocked: Boolean,
     val eventTimeZone: TimeZone,
     val slotErrors: Map<Int, String>,
     val slotEditorEnabled: Boolean,
@@ -75,6 +76,7 @@ internal data class EventDetailsScheduleState(
     val allowLocalResourceCreationWithRentalResources: Boolean,
     val isFieldCountValid: Boolean,
     val isLeagueSlotsValid: Boolean,
+    val showValidationErrors: Boolean,
     val scheduleTimeLocked: Boolean,
 )
 
@@ -182,6 +184,7 @@ internal fun LazyListScope.eventDetailsScheduleSection(
                 slots = state.leagueTimeSlots,
                 availableRentalResources = state.availableRentalResources,
                 selectedRentalResourceIds = state.selectedRentalResourceIds,
+                rentalResourceSelectionLocked = state.rentalResourceSelectionLocked,
                 onRentalResourceSelectionChange = actions.onRentalResourceSelectionChange,
                 eventStart = state.editEvent.start,
                 eventEnd = if (state.editEvent.noFixedEndDateTime) {
@@ -206,7 +209,7 @@ internal fun LazyListScope.eventDetailsScheduleSection(
                 lockedDivisionIds = state.editEvent.divisions.normalizeDivisionIdentifiers(),
                 allowDivisionEditsWhenReadOnly = state.allowDivisionEditsWhenReadOnly,
                 allowLocalResourceCreationWithRentalResources = state.allowLocalResourceCreationWithRentalResources,
-                fieldCountError = if (!state.isFieldCountValid) {
+                fieldCountError = if (state.showValidationErrors && !state.isFieldCountValid) {
                     "Resource count must be at least 1."
                 } else {
                     null
@@ -214,7 +217,8 @@ internal fun LazyListScope.eventDetailsScheduleSection(
                 readOnly = state.scheduleTimeLocked,
             )
             if (
-                !state.isLeagueSlotsValid &&
+                state.showValidationErrors &&
+                    !state.isLeagueSlotsValid &&
                 (
                     state.editEvent.eventType == EventType.LEAGUE ||
                         state.editEvent.eventType == EventType.TOURNAMENT ||

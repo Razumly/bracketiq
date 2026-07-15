@@ -142,6 +142,36 @@ class TeamInviteDialogUiTest {
     }
 
     @Test
+    fun dismissing_invite_dialog_invalidates_the_active_player_search() {
+        val searchQueries = mutableListOf<String>()
+
+        composeRule.setContent {
+            MaterialTheme {
+                TeamInviteDialog(
+                    teamName = "Test team",
+                    inviteTarget = TeamInviteTarget.PLAYER,
+                    freeAgents = emptyList(),
+                    friends = emptyList(),
+                    suggestions = emptyList(),
+                    inviteFreeAgentContext = inviteContext(),
+                    onSearch = searchQueries::add,
+                    onDismiss = {},
+                    onInvite = { _, _ -> },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Invite User").performClick()
+        composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("sam")
+        composeRule.waitUntil(timeoutMillis = 5_000) { searchQueries.lastOrNull() == "sam" }
+        composeRule.onNodeWithText("Cancel").performClick()
+
+        composeRule.runOnIdle {
+            assertEquals("", searchQueries.last())
+        }
+    }
+
+    @Test
     fun existing_team_read_only_view_uses_team_name_title_inline_jersey_and_expandable_details() {
         val rosterPlayer = user("player_1", "Alex", "Setter")
         val currentUser = user("viewer_1", "Casey", "Viewer")

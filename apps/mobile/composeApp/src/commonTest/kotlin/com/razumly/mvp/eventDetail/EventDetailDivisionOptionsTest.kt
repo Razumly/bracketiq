@@ -355,4 +355,124 @@ class EventDetailDivisionOptionsTest {
         assertNull(options.findEventDivisionOption("skill_open_age_18plus"))
         assertNull(options.findEventDivisionOption("m_skill_open_age_18plus"))
     }
+
+    @Test
+    fun playoffDivisionIdsForSelection_collectsExplicitAndPlacementDivisions() {
+        val event = Event(
+            id = "event-playoff-selection",
+            eventType = EventType.LEAGUE,
+            includePlayoffs = true,
+            splitLeaguePlayoffDivisions = true,
+            divisions = listOf("league_open", "playoff_gold"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "league_open",
+                    key = "league_open",
+                    name = "Open League",
+                    playoffPlacementDivisionIds = listOf(" playoff_gold "),
+                ),
+                DivisionDetail(
+                    id = "PLAYOFF_GOLD",
+                    kind = "playoff",
+                    key = "playoff_gold",
+                    name = "Gold Playoff",
+                ),
+            ),
+        )
+
+        assertEquals(setOf("playoff_gold"), event.playoffDivisionIdsForSelection())
+    }
+
+    @Test
+    fun buildEventDetailDivisionPresentation_keepsBracketAndPoolSelectionsSingular() {
+        val bracketId = "event-pools__division__c_skill_open_age_18plus"
+        val poolAId = "${bracketId}_pool_a"
+        val poolBId = "${bracketId}_pool_b"
+        val event = poolPlayEvent(
+            bracketId = bracketId,
+            poolAId = poolAId,
+            poolBId = poolBId,
+        )
+
+        val presentation = buildEventDetailDivisionPresentation(
+            selectedEvent = EventWithFullRelations(
+                event = event,
+                players = emptyList(),
+                matches = emptyList(),
+                teams = emptyList(),
+            ),
+            selectedDivision = poolBId,
+            selectedStandingsPoolDivisionId = poolBId,
+            tournamentPoolPlayEnabled = true,
+            showStandingsDrawColumn = false,
+            leagueDivisionStandings = null,
+        )
+
+        assertEquals(listOf(bracketId), presentation.tournamentBracketDivisionOptions.map { it.id })
+        assertEquals(bracketId, presentation.selectedScheduleDivisionId)
+        assertEquals(listOf(poolAId, poolBId), presentation.schedulePoolDivisionOptions.map { it.id })
+        assertEquals(bracketId, presentation.selectedStandingsDivisionId)
+        assertEquals(poolBId, presentation.selectedStandingsDataDivisionId)
+        assertEquals(listOf(bracketId), presentation.registrationDivisionOptions.map { it.id })
+    }
+
+    @Test
+    fun buildEventDetailDivisionPresentation_invalidPoolFallsBackToFirstPool() {
+        val bracketId = "event-pools__division__c_skill_open_age_18plus"
+        val poolAId = "${bracketId}_pool_a"
+        val poolBId = "${bracketId}_pool_b"
+
+        val presentation = buildEventDetailDivisionPresentation(
+            selectedEvent = EventWithFullRelations(
+                event = poolPlayEvent(
+                    bracketId = bracketId,
+                    poolAId = poolAId,
+                    poolBId = poolBId,
+                ),
+                players = emptyList(),
+                matches = emptyList(),
+                teams = emptyList(),
+            ),
+            selectedDivision = bracketId,
+            selectedStandingsPoolDivisionId = "missing_pool",
+            tournamentPoolPlayEnabled = true,
+            showStandingsDrawColumn = false,
+            leagueDivisionStandings = null,
+        )
+
+        assertEquals(poolAId, presentation.selectedStandingsDataDivisionId)
+    }
+
+    private fun poolPlayEvent(
+        bracketId: String,
+        poolAId: String,
+        poolBId: String,
+    ): Event = Event(
+        id = "event-pools",
+        eventType = EventType.TOURNAMENT,
+        includePlayoffs = true,
+        teamSignup = true,
+        singleDivision = false,
+        divisions = listOf(poolAId, poolBId),
+        divisionDetails = listOf(
+            DivisionDetail(
+                id = bracketId,
+                kind = "PLAYOFF",
+                key = "c_skill_open_age_18plus",
+                name = "CoEd Open 18+",
+            ),
+            DivisionDetail(
+                id = poolAId,
+                key = "c_skill_open_age_18plus_pool_a",
+                name = "CoEd Open 18+ Pool A",
+                playoffPlacementDivisionIds = listOf(bracketId),
+            ),
+            DivisionDetail(
+                id = poolBId,
+                key = "c_skill_open_age_18plus_pool_b",
+                name = "CoEd Open 18+ Pool B",
+                playoffPlacementDivisionIds = listOf(bracketId),
+            ),
+        ),
+    )
 }

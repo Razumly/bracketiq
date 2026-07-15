@@ -25,10 +25,14 @@ import io.ktor.http.encodeURLQueryComponent
 import kotlinx.serialization.Serializable
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 interface IChatGroupRepository : IMVPRepository {
     val chatGroupsFlow: Flow<Result<List<ChatGroupWithRelations>>>
@@ -36,10 +40,12 @@ interface IChatGroupRepository : IMVPRepository {
     fun getUnreadMessageCountFlow(userId: String): Flow<Int>
 
     fun getChatGroupFlow(
-        user: UserData?, chatGroup: ChatGroupWithRelations?
+        messageUserId: String?,
+        chatId: String?,
     ): Flow<Result<ChatGroupWithRelations>>
 
     suspend fun refreshChatGroupsAndMessages(): Result<Unit>
+    suspend fun refreshChatGroupSummary(chatGroupId: String): Result<Unit>
     suspend fun createChatGroup(newChatGroup: ChatGroupWithRelations): Result<Unit>
     suspend fun updateChatGroup(newChatGroup: ChatGroup): Result<ChatGroup>
     suspend fun deleteChatGroup(chatGroupId: String): Result<Unit>
@@ -51,6 +57,71 @@ interface IChatGroupRepository : IMVPRepository {
         Result.failure(NotImplementedError("Chat reporting is not implemented"))
 }
 
+internal data class OwnedChatSummaries(
+    val userId: String? = null,
+    val summaries: Map<String, ChatGroupSummary> = emptyMap(),
+    val isComplete: Boolean = false,
+)
+
+internal fun visibleChatSummaries(
+    snapshot: OwnedChatSummaries,
+    currentUserId: String?,
+): Map<String, ChatGroupSummary> = if (snapshot.userId == currentUserId) {
+    snapshot.summaries
+} else {
+    emptyMap()
+}
+
+internal fun replaceChatSummariesIfCurrent(
+    snapshot: OwnedChatSummaries,
+    requestUserId: String,
+    currentUserId: String?,
+    summaries: Map<String, ChatGroupSummary>,
+): OwnedChatSummaries = if (requestUserId == currentUserId) {
+    OwnedChatSummaries(
+        userId = requestUserId,
+        summaries = summaries,
+        isComplete = true,
+    )
+} else {
+    snapshot
+}
+
+internal fun mergeChatSummaryIfCurrent(
+    snapshot: OwnedChatSummaries,
+    requestUserId: String,
+    currentUserId: String?,
+    chatGroupId: String,
+    summary: ChatGroupSummary,
+): OwnedChatSummaries {
+    if (requestUserId != currentUserId) return snapshot
+    val currentSummaries = visibleChatSummaries(snapshot, requestUserId)
+    return OwnedChatSummaries(
+        userId = requestUserId,
+        summaries = currentSummaries + (chatGroupId to summary),
+        isComplete = snapshot.userId == requestUserId && snapshot.isComplete,
+    )
+}
+
+internal fun resolveTotalUnreadCount(
+    snapshot: OwnedChatSummaries,
+    currentUserId: String,
+    localUnreadByChatId: Map<String, Int>,
+): Int {
+    val visibleSummaries = visibleChatSummaries(snapshot, currentUserId)
+    if (snapshot.userId == currentUserId && snapshot.isComplete) {
+        return visibleSummaries.values.sumOf(ChatGroupSummary::unreadCount)
+    }
+
+    val localOrTargetedTotal = localUnreadByChatId.entries.sumOf { (chatGroupId, localUnread) ->
+        visibleSummaries[chatGroupId]?.unreadCount ?: localUnread
+    }
+    val targetedChatsNotYetInRoom = visibleSummaries.entries
+        .filterNot { (chatGroupId) -> localUnreadByChatId.containsKey(chatGroupId) }
+        .sumOf { (_, summary) -> summary.unreadCount }
+    return localOrTargetedTotal + targetedChatsNotYetInRoom
+}
+
 class ChatGroupRepository(
     private val api: MvpApiClient,
     private val databaseService: DatabaseService,
@@ -58,34 +129,103 @@ class ChatGroupRepository(
     private val messageRepository: IMessageRepository,
     private val teamRepository: ITeamRepository,
 ) : IChatGroupRepository {
-    private val _chatSummaries = kotlinx.coroutines.flow.MutableStateFlow<Map<String, ChatGroupSummary>>(emptyMap())
+    private val summaryRefreshMutex = Mutex()
+    private val chatSummarySnapshot = MutableStateFlow(OwnedChatSummaries())
     override val chatGroupsFlow = groupsFlow()
-    override val chatSummariesFlow: Flow<Map<String, ChatGroupSummary>> = _chatSummaries
+    override val chatSummariesFlow: Flow<Map<String, ChatGroupSummary>> = combine(
+        chatSummarySnapshot,
+        userRepository.currentUser,
+    ) { snapshot, currentUser ->
+        visibleChatSummaries(
+            snapshot = snapshot,
+            currentUserId = currentUser.getOrNull()?.id?.trim()?.takeIf(String::isNotBlank),
+        )
+    }
     override fun getUnreadMessageCountFlow(userId: String): Flow<Int> =
         kotlinx.coroutines.flow.combine(
             databaseService.getChatGroupDao.getChatGroupsFlowByUserId(userId),
-            chatSummariesFlow,
-        ) { chatGroups, summaries ->
-            if (summaries.isNotEmpty()) {
-                summaries.values.sumOf { summary -> summary.unreadCount }
-            } else {
-                countUnreadMessages(chatGroups, userId)
-            }
+            chatSummarySnapshot,
+        ) { chatGroups, snapshot ->
+            resolveTotalUnreadCount(
+                snapshot = snapshot,
+                currentUserId = userId,
+                localUnreadByChatId = chatGroups.associate { chatGroup ->
+                    chatGroup.chatGroup.id to countUnreadMessages(chatGroup.messages, userId)
+                },
+            )
         }
 
     override fun getChatGroupFlow(
-        user: UserData?, chatGroup: ChatGroupWithRelations?
+        messageUserId: String?,
+        chatId: String?,
     ): Flow<Result<ChatGroupWithRelations>> {
+        val normalizedMessageUserId = messageUserId?.trim()?.takeIf(String::isNotBlank)
+        val normalizedChatId = chatId?.trim()?.takeIf(String::isNotBlank)
+        if (normalizedMessageUserId != null) {
+            return directMessageFlow(normalizedMessageUserId)
+        }
+
         return chatGroupsFlow.map { result ->
-            result.fold(onSuccess = { list ->
-                user?.let { findOrCreateDirectMessage(it.id) }
-                    ?: list.find { it.chatGroup.id == chatGroup?.chatGroup?.id }
-                        ?.let { foundChatGroup ->
-                            Result.success(foundChatGroup)
-                        } ?: Result.failure(Exception("Chat group not found"))
-            }, onFailure = { error ->
-                Result.failure(error)
-            })
+            result.mapCatching { list ->
+                list.find { it.chatGroup.id == normalizedChatId }
+                    ?: throw Exception("Chat group not found")
+            }
+        }
+    }
+
+    /**
+     * Resolves the server-owned direct-message ID once for each collector, then
+     * keeps observing Room without feeding every database invalidation back
+     * into another create request. A cached pair is emitted immediately and is
+     * retained as an offline fallback if canonical resolution fails.
+     */
+    private fun directMessageFlow(otherUserId: String): Flow<Result<ChatGroupWithRelations>> = flow {
+        val currentUserId = userRepository.currentUser.value.getOrThrow().id
+        var didAttemptCanonicalResolution = false
+        var canonicalChatId: String? = null
+        var lastResolvedChat: ChatGroupWithRelations? = null
+
+        chatGroupsFlow.collect { result ->
+            val upstreamError = result.exceptionOrNull()
+            if (upstreamError != null) {
+                val cachedChat = lastResolvedChat
+                emit(
+                    if (cachedChat != null) Result.success(cachedChat)
+                    else Result.failure(upstreamError)
+                )
+                return@collect
+            }
+            val chatGroups = result.getOrThrow()
+            val observedChat = canonicalChatId
+                ?.let { id -> chatGroups.find { group -> group.chatGroup.id == id } }
+                ?: chatGroups.find { group ->
+                    val participantIds = group.chatGroup.userIds.distinct()
+                    participantIds.size == 2 &&
+                        currentUserId in participantIds &&
+                        otherUserId in participantIds
+                }
+                ?: lastResolvedChat
+
+            if (observedChat != null) {
+                lastResolvedChat = observedChat
+                emit(Result.success(observedChat))
+            }
+
+            if (!didAttemptCanonicalResolution) {
+                didAttemptCanonicalResolution = true
+                val canonicalResult = findOrCreateDirectMessage(otherUserId)
+                val canonicalError = canonicalResult.exceptionOrNull()
+                if (canonicalError != null) {
+                    if (observedChat == null) {
+                        emit(Result.failure(canonicalError))
+                    }
+                    return@collect
+                }
+                val canonicalChat = canonicalResult.getOrThrow()
+                canonicalChatId = canonicalChat.chatGroup.id
+                lastResolvedChat = canonicalChat
+                emit(Result.success(canonicalChat))
+            }
         }
     }
 
@@ -110,22 +250,58 @@ class ChatGroupRepository(
         return refreshChatGroupsAndMessagesForUser(userId).map {}
     }
 
+    override suspend fun refreshChatGroupSummary(chatGroupId: String): Result<Unit> = runCatching {
+        val normalizedChatGroupId = chatGroupId.trim().takeIf(String::isNotBlank)
+            ?: error("Chat group id cannot be blank.")
+        val requestUserId = currentUserIdOrNull()
+            ?: error("An authenticated user is required to refresh chat summaries.")
+
+        summaryRefreshMutex.withLock {
+            val response = api.get<ChatGroupApiDto>(
+                "api/chat/groups/${normalizedChatGroupId.encodeURLPathPart()}",
+            )
+            val responseId = response.id?.trim()?.takeIf(String::isNotBlank)
+                ?: error("Chat summary response for $normalizedChatGroupId is missing canonical id.")
+            if (responseId != normalizedChatGroupId) {
+                error("Chat summary response did not match the requested chat group.")
+            }
+            val summary = response.toSummaryOrNull()
+                ?: error("Chat summary response was incomplete.")
+            chatSummarySnapshot.value = mergeChatSummaryIfCurrent(
+                snapshot = chatSummarySnapshot.value,
+                requestUserId = requestUserId,
+                currentUserId = currentUserIdOrNull(),
+                chatGroupId = normalizedChatGroupId,
+                summary = summary,
+            )
+        }
+    }
+
     private suspend fun refreshChatGroupsAndMessagesForUser(userId: String): Result<List<ChatGroup>> =
         multiResponse(
             getRemoteData = {
-                val encoded = userId.encodeURLQueryComponent()
-                val res = api.get<ChatGroupsResponseDto>("api/chat/groups?userId=$encoded")
-                val summaries = res.groups.mapNotNull { groupDto ->
-                    val groupId = groupDto.id ?: groupDto.legacyId
-                    val summary = groupDto.toSummaryOrNull()
-                    if (groupId.isNullOrBlank() || summary == null) {
-                        null
-                    } else {
+                summaryRefreshMutex.withLock {
+                    val encoded = userId.encodeURLQueryComponent()
+                    val res = api.get<ChatGroupsResponseDto>("api/chat/groups?userId=$encoded")
+                    val summaries = res.groups.mapIndexed { index, groupDto ->
+                        val rowContext = "Chat groups response row ${index + 1}"
+                        val groupId = groupDto.id?.trim()?.takeIf(String::isNotBlank)
+                            ?: error("$rowContext is missing canonical id.")
+                        val summary = groupDto.toSummaryOrNull()
+                            ?: error("$rowContext is incomplete.")
                         groupId to summary
+                    }.toMap()
+                    chatSummarySnapshot.value = replaceChatSummariesIfCurrent(
+                        snapshot = chatSummarySnapshot.value,
+                        requestUserId = userId,
+                        currentUserId = currentUserIdOrNull(),
+                        summaries = summaries,
+                    )
+                    res.groups.mapIndexed { index, groupDto ->
+                        groupDto.toChatGroupOrNull()
+                            ?: error("Chat groups response row ${index + 1} is malformed.")
                     }
-                }.toMap()
-                _chatSummaries.value = summaries
-                res.groups.mapNotNull { it.toChatGroupOrNull() }
+                }
             },
             getLocalData = {
                 databaseService.getChatGroupDao.getChatGroupsByUserId(userId)
@@ -154,7 +330,18 @@ class ChatGroupRepository(
             },
         )
 
+    private fun currentUserIdOrNull(): String? = userRepository.currentUser.value
+        .getOrNull()
+        ?.id
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+
     override suspend fun createChatGroup(newChatGroup: ChatGroupWithRelations): Result<Unit> =
+        createChatGroupCanonical(newChatGroup).map { }
+
+    private suspend fun createChatGroupCanonical(
+        newChatGroup: ChatGroupWithRelations,
+    ): Result<ChatGroup> =
         singleResponse(networkCall = {
             api.post<CreateChatGroupRequestDto, ChatGroupApiDto>(
                 path = "api/chat/groups",
@@ -172,7 +359,7 @@ class ChatGroupRepository(
             chatGroup.setDisplayName(resolveDisplayName(chatGroup, otherUsers, team))
                 .setImageUrl(resolveImageUrl(chatGroup, otherUsers, team))
             databaseService.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
-        }, onReturn = { })
+        }, onReturn = { chatGroup -> chatGroup })
 
     override suspend fun updateChatGroup(newChatGroup: ChatGroup): Result<ChatGroup> =
         singleResponse(networkCall = {
@@ -332,21 +519,6 @@ class ChatGroupRepository(
         runCatching {
             val currentUserId = userRepository.currentUser.value.getOrThrow().id
 
-            val existingChats = chatGroupsFlow.first().getOrThrow()
-            val existingDM = existingChats.find { chatGroup ->
-                chatGroup.chatGroup.userIds.size == 2 && chatGroup.chatGroup.userIds.contains(
-                    otherUserId
-                ) && chatGroup.chatGroup.userIds.contains(
-                    currentUserId
-                )
-            }
-
-            if (existingDM != null) {
-                return@runCatching existingChats.find { it.chatGroup.id == existingDM.chatGroup.id }
-                    ?: throw Exception("Chat group not found")
-            }
-
-            // Create new DM chat
             val otherUser = userRepository.getUsers(listOf(otherUserId)).getOrThrow().first()
             val currentUser = userRepository.currentUser.value.getOrThrow()
 
@@ -359,9 +531,11 @@ class ChatGroupRepository(
                 ), users = listOf(currentUser, otherUser), messages = listOf()
             )
 
-            createChatGroup(newChatGroup).getOrThrow()
-
-            newChatGroup
+            // The server atomically creates or returns the one canonical row
+            // for this participant pair. Its ID may differ from our proposed
+            // ID when another client won the race, so return that row.
+            val canonicalChatGroup = createChatGroupCanonical(newChatGroup).getOrThrow()
+            newChatGroup.copy(chatGroup = canonicalChatGroup)
         }
 }
 

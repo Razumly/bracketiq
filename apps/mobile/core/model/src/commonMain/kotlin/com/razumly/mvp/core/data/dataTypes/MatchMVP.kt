@@ -4,7 +4,6 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.MatchDTO
 import kotlinx.serialization.Contextual
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -167,7 +166,6 @@ data class ResolvedMatchRulesMVP(
 @Serializable
 data class MatchSegmentMVP(
     val id: String,
-    @SerialName("\$id") val legacyId: String? = null,
     val eventId: String? = null,
     val matchId: String,
     val sequence: Int,
@@ -184,7 +182,6 @@ data class MatchSegmentMVP(
 @Serializable
 data class MatchIncidentMVP(
     val id: String,
-    @SerialName("\$id") val legacyId: String? = null,
     val eventId: String? = null,
     val matchId: String,
     val segmentId: String? = null,

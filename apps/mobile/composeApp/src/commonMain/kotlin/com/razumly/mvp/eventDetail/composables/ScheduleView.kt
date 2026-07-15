@@ -41,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -65,8 +66,11 @@ import com.kizitonwose.calendar.core.DayPosition
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
+import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
 import com.razumly.mvp.core.data.dataTypes.assignedOfficialUserIds
 import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.util.getScreenHeight
 import com.razumly.mvp.core.presentation.util.getImageUrl
@@ -168,14 +172,17 @@ fun ScheduleView(
         ScheduleEventCard(event = event, start = start, end = end, onClick = onClick)
     },
 ) {
+    val currentShowFab by rememberUpdatedState(showFab)
     if (items.isEmpty()) {
+        LaunchedEffect(Unit) {
+            currentShowFab(true)
+        }
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
             Text("No scheduled entries yet.", style = MaterialTheme.typography.bodyMedium)
         }
-        showFab(true)
         return
     }
 
@@ -274,7 +281,9 @@ fun ScheduleView(
     val coroutineScope = rememberCoroutineScope()
     val lazyListState = rememberLazyListState()
     val isScrollingUp by lazyListState.isScrollingUp()
-    showFab(isScrollingUp)
+    LaunchedEffect(isScrollingUp) {
+        currentShowFab(isScrollingUp)
+    }
     val agendaViewportHeight = (
         getScreenHeight() *
             if (isMobileLayout) {
@@ -959,7 +968,7 @@ private fun formatScheduleDateTimeWindow(
     }
 }
 
-private fun matchIncludesTrackedUsers(
+internal fun matchIncludesTrackedUsers(
     match: MatchWithRelations,
     trackedUserIds: Set<String>,
 ): Boolean {
@@ -971,11 +980,14 @@ private fun matchIncludesTrackedUsers(
 
     val teams = listOfNotNull(match.team1, match.team2, match.teamOfficial)
     return teams.any { team ->
-        trackedUserIds.contains(team.captainId) ||
-            (!team.managerId.isNullOrBlank() && trackedUserIds.contains(team.managerId)) ||
-            (!team.headCoachId.isNullOrBlank() && trackedUserIds.contains(team.headCoachId)) ||
-            team.playerIds.any { playerId -> trackedUserIds.contains(playerId) } ||
-            team.coachIds.any { coachId -> trackedUserIds.contains(coachId) }
+        val syncedTeam = team.withSynchronizedMembership()
+        trackedUserIds.contains(syncedTeam.captainId) ||
+            syncedTeam.activePlayerRegistrations().any { registration ->
+                trackedUserIds.contains(registration.userId)
+            } ||
+            syncedTeam.activeStaffAssignments().any { assignment ->
+                trackedUserIds.contains(assignment.userId)
+            }
     }
 }
 

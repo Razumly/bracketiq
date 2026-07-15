@@ -1,19 +1,26 @@
 package com.razumly.mvp.eventMap
 
 import android.location.Geocoder
-import android.os.Build
 import android.location.Location
-import androidx.compose.ui.platform.LocalContext
+import android.os.Build
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SearchBar
 import androidx.compose.material3.SearchBarDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -33,7 +40,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
@@ -86,6 +98,49 @@ private val MAP_EVENT_CLUSTER_TOUCH_DISTANCE = 54.dp
 private const val MAP_MARKER_IMAGE_SIZE_PX = 96
 private const val MAP_EVENT_CARD_IMAGE_WIDTH_PX = 560
 private const val MAP_EVENT_CARD_IMAGE_HEIGHT_PX = 220
+
+internal data class MapPinConfirmationOption(
+    val index: Int,
+    val key: String,
+    val name: String,
+    val address: String?,
+)
+
+internal fun mapPinConfirmationAccessibilityLabel(
+    name: String,
+    address: String?,
+): String = buildString {
+    append("Choose map pin for ")
+    append(name)
+    address
+        ?.trim()
+        ?.takeIf { it.isNotBlank() && !it.equals(name, ignoreCase = true) }
+        ?.let { normalizedAddress ->
+            append(", ")
+            append(normalizedAddress)
+        }
+}
+
+private fun Place.toMapPinConfirmationOption(index: Int): MapPinConfirmationOption {
+    val normalizedAddress = formattedAddress?.trim()?.takeIf(String::isNotBlank)
+    val normalizedName = displayName
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: normalizedAddress
+        ?: "Unknown location"
+    val stableKey = id
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: location?.let { location -> "${location.latitude},${location.longitude}" }
+        ?: "$normalizedName:$index"
+
+    return MapPinConfirmationOption(
+        index = index,
+        key = stableKey,
+        name = normalizedName,
+        address = normalizedAddress?.takeUnless { it.equals(normalizedName, ignoreCase = true) },
+    )
+}
 
 private data class EventMarkerGroup(
     val key: String,
@@ -160,6 +215,70 @@ private fun rememberMarkerImage(imageUrl: String?): MarkerImage {
 }
 
 @Composable
+internal fun MapPinConfirmationPanel(
+    options: List<MapPinConfirmationOption>,
+    onConfirm: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (options.isEmpty()) return
+
+    Surface(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 4.dp,
+        shadowElevation = 6.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Choose a map pin",
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                text = "Select the correct result below, then press Select Location.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(
+                    items = options,
+                    key = { option -> "${option.key}:${option.index}" },
+                ) { option ->
+                    OutlinedButton(
+                        onClick = { onConfirm(option.index) },
+                        modifier = Modifier
+                            .widthIn(max = 280.dp)
+                            .semantics {
+                                contentDescription = mapPinConfirmationAccessibilityLabel(
+                                    name = option.name,
+                                    address = option.address,
+                                )
+                                role = Role.Button
+                            },
+                    ) {
+                        Column {
+                            Text(
+                                text = "Choose ${option.name}",
+                                style = MaterialTheme.typography.labelLarge,
+                            )
+                            option.address?.let { address ->
+                                Text(
+                                    text = address,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 actual fun EventMap(
     component: MapComponent,
     onEventSelected: (event: Event) -> Unit,
@@ -190,6 +309,7 @@ actual fun EventMap(
     val closeButtonBottomPadding =
         LocalNavBarPadding.current.calculateBottomPadding() + MAP_CLOSE_BUTTON_EXTRA_BOTTOM_PADDING
     var searchedPlaces by remember { mutableStateOf<List<Place>>(emptyList()) }
+    var searchResultsAwaitingPinChoice by remember { mutableStateOf<List<Place>>(emptyList()) }
     val defaultZoom = 12f
     val defaultDurationMs = 1000
     val trackedLatLng = trackedLocation?.toGoogle()
@@ -411,6 +531,7 @@ actual fun EventMap(
     val clearPendingSelection: () -> Unit = {
         selectedPOI = null
         searchedPlaces = emptyList()
+        searchResultsAwaitingPinChoice = emptyList()
         armedPlaceId = null
         armedSearchedPlaceId = null
         armedPoiPlaceId = null
@@ -468,6 +589,17 @@ actual fun EventMap(
         onPlaceSelected(selectedPlace)
     }
 
+    fun chooseSearchedPlacePin(searchResult: Place) {
+        searchResultsAwaitingPinChoice = emptyList()
+        selectedPOI = null
+        armedPlaceId = null
+        armedSearchedPlaceId = null
+        armedPoiPlaceId = null
+        scope.launch {
+            selectSearchedPlace(searchResult)
+        }
+    }
+
     suspend fun selectPoiPlace(poi: PointOfInterest) {
         val selectedPlace = runCatching {
             component.getPlace(poi.placeId)
@@ -502,6 +634,12 @@ actual fun EventMap(
 
     LaunchedEffect(searchedPlaces) {
         armedSearchedPlaceId = null
+    }
+
+    LaunchedEffect(selectionRequiresConfirmation) {
+        if (!selectionRequiresConfirmation) {
+            searchResultsAwaitingPinChoice = emptyList()
+        }
     }
 
     LaunchedEffect(cameraPositionState) {
@@ -648,6 +786,7 @@ actual fun EventMap(
                     armedPoiPlaceId = null
                     isAnimating = true
                     if (selectionRequiresConfirmation) {
+                        searchResultsAwaitingPinChoice = emptyList()
                         scope.launch {
                             animateToSelectedLocation(poi.latLng)
                             selectPoiPlace(poi)
@@ -799,6 +938,7 @@ actual fun EventMap(
                             if (!canClickPOI) {
                                 false
                             } else if (selectionRequiresConfirmation) {
+                                searchResultsAwaitingPinChoice = emptyList()
                                 selectedPOI = null
                                 armedPlaceId = null
                                 armedSearchedPlaceId = null
@@ -875,13 +1015,7 @@ actual fun EventMap(
                             if (!canClickPOI) {
                                 false
                             } else if (selectionRequiresConfirmation) {
-                                selectedPOI = null
-                                armedPlaceId = null
-                                armedPoiPlaceId = null
-                                armedSearchedPlaceId = null
-                                scope.launch {
-                                    selectSearchedPlace(place)
-                                }
+                                chooseSearchedPlacePin(place)
                                 true
                             } else {
                                 val isSecondTap = armedSearchedPlaceId == placeMarkerKey
@@ -889,9 +1023,7 @@ actual fun EventMap(
                                 armedPoiPlaceId = null
                                 armedSearchedPlaceId = if (isSecondTap) null else placeMarkerKey
                                 if (isSecondTap) {
-                                    scope.launch {
-                                        selectSearchedPlace(place)
-                                    }
+                                    chooseSearchedPlacePin(place)
                                     true
                                 } else {
                                     false
@@ -899,13 +1031,7 @@ actual fun EventMap(
                             }
                         },
                         onInfoWindowClick = {
-                            selectedPOI = null
-                            armedPlaceId = null
-                            armedSearchedPlaceId = null
-                            armedPoiPlaceId = null
-                            scope.launch {
-                                selectSearchedPlace(place)
-                            }
+                            chooseSearchedPlacePin(place)
                         },
                         infoContent = {
                             MapPOICard(
@@ -939,6 +1065,7 @@ actual fun EventMap(
                         if (!canClickPOI) {
                             false
                         } else if (selectionRequiresConfirmation) {
+                            searchResultsAwaitingPinChoice = emptyList()
                             armedPlaceId = null
                             armedSearchedPlaceId = null
                             armedPoiPlaceId = null
@@ -962,6 +1089,7 @@ actual fun EventMap(
                         }
                     },
                     onInfoWindowClick = {
+                        searchResultsAwaitingPinChoice = emptyList()
                         armedPlaceId = null
                         armedSearchedPlaceId = null
                         armedPoiPlaceId = null
@@ -1012,6 +1140,7 @@ actual fun EventMap(
                                 if (!canClickPOI) {
                                     false
                                 } else if (selectionRequiresConfirmation) {
+                                    searchResultsAwaitingPinChoice = emptyList()
                                     scope.launch {
                                         animateToSelectedLocation(originalPlaceMarkerState.position)
                                         updateRevealCenterFor(originalPlaceMarkerState.position)
@@ -1024,6 +1153,7 @@ actual fun EventMap(
                             },
                             onInfoWindowClick = {
                                 if (canClickPOI && selectionRequiresConfirmation) {
+                                    searchResultsAwaitingPinChoice = emptyList()
                                     scope.launch {
                                         animateToSelectedLocation(originalPlaceMarkerState.position)
                                         updateRevealCenterFor(originalPlaceMarkerState.position)
@@ -1106,32 +1236,57 @@ actual fun EventMap(
         }
 
         if (canClickPOI) {
-            MapSearchBar(
-                modifier = Modifier.fillMaxWidth(),
-                component = component,
-            ) { newPlaces ->
-                selectedPOI = null
-                searchedPlaces = newPlaces
-                if (newPlaces.size > 1) {
-                    val bounds = LatLngBounds.builder()
-                    newPlaces.forEach { place ->
-                        bounds.include(place.location!!)
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth(),
+            ) {
+                MapSearchBar(
+                    modifier = Modifier.fillMaxWidth(),
+                    component = component,
+                ) { newPlaces ->
+                    selectedPOI = null
+                    searchedPlaces = newPlaces
+                    searchResultsAwaitingPinChoice = if (selectionRequiresConfirmation) {
+                        newPlaces
+                    } else {
+                        emptyList()
                     }
-                    scope.launch {
-                        cameraPositionState.animate(
-                            CameraUpdateFactory.newLatLngBounds(bounds.build(), 100),
-                            defaultDurationMs,
-                        )
-                    }
-                } else if (newPlaces.isNotEmpty()) {
-                    scope.launch {
-                        val location = newPlaces.first().location
-                        cameraPositionState.animate(
-                            CameraUpdateFactory.newLatLng(location!!),
-                            defaultDurationMs,
-                        )
+                    if (newPlaces.size > 1) {
+                        val bounds = LatLngBounds.builder()
+                        newPlaces.forEach { place ->
+                            bounds.include(place.location!!)
+                        }
+                        scope.launch {
+                            cameraPositionState.animate(
+                                CameraUpdateFactory.newLatLngBounds(bounds.build(), 100),
+                                defaultDurationMs,
+                            )
+                        }
+                    } else if (newPlaces.isNotEmpty()) {
+                        scope.launch {
+                            val location = newPlaces.first().location
+                            cameraPositionState.animate(
+                                CameraUpdateFactory.newLatLng(location!!),
+                                defaultDurationMs,
+                            )
+                        }
                     }
                 }
+
+                MapPinConfirmationPanel(
+                    options = searchResultsAwaitingPinChoice.mapIndexed { index, place ->
+                        place.toMapPinConfirmationOption(index)
+                    },
+                    onConfirm = { index ->
+                        searchResultsAwaitingPinChoice
+                            .getOrNull(index)
+                            ?.let(::chooseSearchedPlacePin)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                )
             }
         }
 

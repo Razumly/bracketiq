@@ -34,35 +34,6 @@ private data class OkResponse(val ok: Boolean)
 
 class MvpApiClientTest {
     @Test
-    fun http_client_factory_is_deferred_until_the_first_request() = runTest {
-        var factoryCalls = 0
-        val engine = MockEngine {
-            respond(
-                content = """{"ok":true}""",
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
-            )
-        }
-        val api = MvpApiClient(
-            httpFactory = {
-                factoryCalls += 1
-                HttpClient(engine) {
-                    install(ContentNegotiation) { json(jsonMVP) }
-                }
-            },
-            baseUrl = "http://example.test",
-            tokenStore = InMemoryAuthTokenStore(),
-        )
-
-        assertEquals("http://example.test/api/ping", api.urlFor("/api/ping"))
-        assertEquals(0, factoryCalls)
-
-        assertEquals(true, api.get<OkResponse>("/api/ping").ok)
-        assertEquals(1, factoryCalls)
-        api.http.close()
-    }
-
-    @Test
     fun get_attaches_bearer_token_when_present() = runTest {
         val tokenStore = InMemoryAuthTokenStore("abc")
 

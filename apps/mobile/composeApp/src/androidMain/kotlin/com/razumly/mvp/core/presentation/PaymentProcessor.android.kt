@@ -29,10 +29,25 @@ actual open class PaymentProcessor : IPaymentProcessor {
 
     @OptIn(AddressAutocompletePreview::class)
     actual override fun presentPaymentSheet(email: String, name: String, billingAddress: BillingAddressDraft?) {
-        purchaseIntent.value?.let {
-            val clientSecret = it.paymentIntent ?: return
-            val normalizedBillingAddress = billingAddress?.normalized()
-            _paymentSheet.value?.presentWithPaymentIntent(
+        val intent = purchaseIntent.value
+        val launchError = paymentSheetLaunchError(intent)
+        if (launchError != null) {
+            failPaymentSheetPresentation(launchError)
+            return
+        }
+
+        val context = _context
+            ?: return failPaymentSheetPresentation("Payment setup is unavailable. Please try again.")
+        val paymentSheet = _paymentSheet.value
+            ?: return failPaymentSheetPresentation("Payment setup is unavailable. Please try again.")
+        val launchIntent = requireNotNull(intent)
+        val clientSecret = requireNotNull(launchIntent.paymentIntent).trim()
+        val publishableKey = requireNotNull(launchIntent.publishableKey).trim()
+        val normalizedBillingAddress = billingAddress?.normalized()
+
+        runCatching {
+            PaymentConfiguration.init(context, publishableKey)
+            paymentSheet.presentWithPaymentIntent(
                 paymentIntentClientSecret = clientSecret,
                 configuration = PaymentSheet.Configuration.Builder("BracketIQ").apply {
                     _customerConfig?.let(::customer)
@@ -53,20 +68,13 @@ actual open class PaymentProcessor : IPaymentProcessor {
                     )
                 ).googlePlacesApiKey(BuildConfig.MAPS_API_KEY).build()
             )
+        }.onFailure { throwable ->
+            failPaymentSheetPresentation(throwable.toUserFacingPaymentMessage())
         }
     }
 
     actual override suspend fun setPaymentIntent(intent: PurchaseIntent) {
         purchaseIntent.value = intent
-        val context = _context ?: return
-
-        val publishableKey = intent.publishableKey
-        if (publishableKey.isNullOrBlank()) {
-            Napier.e("Missing Stripe publishableKey", tag = "Stripe")
-            return
-        }
-        PaymentConfiguration.init(context, publishableKey)
-
         val customer = intent.customer
         val ephemeralKey = intent.ephemeralKey
         _customerConfig = if (!customer.isNullOrBlank() && !ephemeralKey.isNullOrBlank()) {
@@ -116,6 +124,11 @@ actual open class PaymentProcessor : IPaymentProcessor {
     fun setContext(context: Context) {
         _context = context
         urlHandler = UrlHandler(context)
+    }
+
+    private fun failPaymentSheetPresentation(message: String) {
+        Napier.w(message, tag = "Stripe")
+        _paymentResult.value = PaymentResult.Failed(message)
     }
 
     private fun Throwable.toUserFacingPaymentMessage(): String {

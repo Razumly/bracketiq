@@ -67,7 +67,12 @@ private class MessageRepositoryHttp_FakeMessageDao : MessageDao {
     override suspend fun getMessageById(id: String): MessageMVP? = messages[id]
 
     override suspend fun getMessagesInChatGroup(chatGroupId: String): List<MessageMVP> =
-        messages.values.filter { it.chatId == chatGroupId }
+        messages.values
+            .filter { it.chatId == chatGroupId }
+            .sortedWith(
+                compareBy<MessageMVP> { message -> message.sentTime }
+                    .thenBy { message -> message.id },
+            )
 }
 
 private class MessageRepositoryHttp_FakeDatabaseService(
@@ -84,6 +89,112 @@ private class MessageRepositoryHttp_FakeDatabaseService(
 }
 
 class MessageRepositoryHttpTest {
+    @OptIn(ExperimentalTime::class)
+    @Test
+    fun messageHistory_pages_from_newest_and_accumulates_older_messages_in_cache() = runTest {
+        val requestedIndexes = mutableListOf<String>()
+        val messageDao = MessageRepositoryHttp_FakeMessageDao()
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/chat/groups/chat-1/messages", request.url.encodedPath)
+            assertEquals("2", request.url.parameters["limit"])
+            assertEquals("desc", request.url.parameters["order"])
+            val index = request.url.parameters["index"]
+                ?: error("Message history request omitted its index")
+            requestedIndexes += index
+            val content = when (index) {
+                "0" -> """
+                    {
+                      "messages": [
+                        {
+                          "id": "message-3",
+                          "body": "Newest",
+                          "userId": "sender-1",
+                          "chatId": "chat-1",
+                          "sentTime": "2026-02-10T00:03:00Z"
+                        },
+                        {
+                          "id": "message-2",
+                          "body": "Middle",
+                          "userId": "sender-1",
+                          "chatId": "chat-1",
+                          "sentTime": "2026-02-10T00:02:00Z"
+                        }
+                      ],
+                      "pagination": {
+                        "index": 0,
+                        "limit": 2,
+                        "totalCount": 3,
+                        "nextIndex": 2,
+                        "remainingCount": 1,
+                        "hasMore": true,
+                        "order": "desc"
+                      }
+                    }
+                """.trimIndent()
+                "2" -> """
+                    {
+                      "messages": [
+                        {
+                          "id": "message-1",
+                          "body": "Oldest",
+                          "userId": "sender-1",
+                          "chatId": "chat-1",
+                          "sentTime": "2026-02-10T00:01:00Z"
+                        }
+                      ],
+                      "pagination": {
+                        "index": 2,
+                        "limit": 2,
+                        "totalCount": 3,
+                        "nextIndex": 3,
+                        "remainingCount": 0,
+                        "hasMore": false,
+                        "order": "desc"
+                      }
+                    }
+                """.trimIndent()
+                else -> error("Unexpected message history index: $index")
+            }
+            respond(
+                content = content,
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repository = MessageRepository(
+            api = MvpApiClient(
+                http = HttpClient(engine) { configureMvpHttpClient() },
+                baseUrl = "http://example.test",
+                tokenStore = MessageRepositoryHttp_InMemoryAuthTokenStore(),
+            ),
+            databaseService = MessageRepositoryHttp_FakeDatabaseService(messageDao),
+        )
+
+        val newestPage = repository.getMessageHistoryPage(
+            chatGroupId = "chat-1",
+            index = 0,
+            limit = 2,
+        ).getOrThrow()
+        val olderPage = repository.getMessageHistoryPage(
+            chatGroupId = "chat-1",
+            index = newestPage.nextIndex,
+            limit = 2,
+        ).getOrThrow()
+
+        assertEquals(listOf("0", "2"), requestedIndexes)
+        assertEquals(listOf("message-2", "message-3"), newestPage.messages.map { it.id })
+        assertEquals(2, newestPage.nextIndex)
+        assertTrue(newestPage.hasMore)
+        assertEquals(listOf("message-1"), olderPage.messages.map { it.id })
+        assertEquals(3, olderPage.nextIndex)
+        assertTrue(!olderPage.hasMore)
+        assertEquals(
+            listOf("message-1", "message-2", "message-3"),
+            messageDao.getMessagesInChatGroup("chat-1").map { message -> message.id },
+        )
+    }
+
     @OptIn(ExperimentalTime::class)
     @Test
     fun createMessage_posts_to_api_and_persists_to_cache() = runTest {
@@ -138,72 +249,69 @@ class MessageRepositoryHttpTest {
 
     @OptIn(ExperimentalTime::class)
     @Test
-    fun markMessagesRead_when_serverAcknowledges_then_marks_cached_messages_read() = runTest {
-        val tokenStore = MessageRepositoryHttp_InMemoryAuthTokenStore("t123")
-        val messageDao = MessageRepositoryHttp_FakeMessageDao()
-        messageDao.upsertMessage(
-            MessageMVP(
-                id = "m1",
-                userId = "u2",
-                body = "Hello",
-                attachmentUrls = emptyList(),
-                chatId = "c1",
-                readByIds = emptyList(),
-                sentTime = Instant.parse("2026-02-10T00:00:00Z"),
-            ),
-        )
-        val db = MessageRepositoryHttp_FakeDatabaseService(messageDao)
+    fun markMessagesRead_after_server_acknowledgement_updates_cached_read_state() = runTest {
+        val messageDao = MessageRepositoryHttp_FakeMessageDao().apply {
+            upsertMessage(unreadMessage())
+        }
         val engine = MockEngine { request ->
             assertEquals(HttpMethod.Post, request.method)
-            assertEquals("/api/chat/groups/c1/messages/read", request.url.encodedPath)
-            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
-            respond(
-                content = "{\"ok\":true}",
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
-            )
+            assertEquals("/api/chat/groups/chat-1/messages/read", request.url.encodedPath)
+            respond(content = "", status = HttpStatusCode.NoContent)
         }
-        val http = HttpClient(engine) { configureMvpHttpClient() }
-        val repo = MessageRepository(MvpApiClient(http, "http://example.test", tokenStore), db)
+        val repository = MessageRepository(
+            api = MvpApiClient(
+                http = HttpClient(engine) { configureMvpHttpClient() },
+                baseUrl = "http://example.test",
+                tokenStore = MessageRepositoryHttp_InMemoryAuthTokenStore(),
+            ),
+            databaseService = MessageRepositoryHttp_FakeDatabaseService(messageDao),
+        )
 
-        val result = repo.markMessagesRead(chatGroupId = "c1", userId = "u1")
+        val result = repository.markMessagesRead(chatGroupId = "chat-1", userId = "user-1")
 
         assertTrue(result.isSuccess)
-        assertEquals(listOf("u1"), messageDao.getMessageById("m1")?.readByIds)
+        assertEquals(
+            listOf("user-1"),
+            messageDao.getMessageById("message-1")?.readByIds,
+        )
     }
 
     @OptIn(ExperimentalTime::class)
     @Test
-    fun markMessagesRead_when_serverRejects_then_keeps_cached_messages_unread() = runTest {
-        val tokenStore = MessageRepositoryHttp_InMemoryAuthTokenStore("t123")
-        val messageDao = MessageRepositoryHttp_FakeMessageDao()
-        messageDao.upsertMessage(
-            MessageMVP(
-                id = "m1",
-                userId = "u2",
-                body = "Hello",
-                attachmentUrls = emptyList(),
-                chatId = "c1",
-                readByIds = emptyList(),
-                sentTime = Instant.parse("2026-02-10T00:00:00Z"),
-            ),
-        )
-        val db = MessageRepositoryHttp_FakeDatabaseService(messageDao)
-        val engine = MockEngine { request ->
-            assertEquals(HttpMethod.Post, request.method)
-            assertEquals("/api/chat/groups/c1/messages/read", request.url.encodedPath)
+    fun markMessagesRead_when_server_rejects_keeps_cached_message_unread() = runTest {
+        val messageDao = MessageRepositoryHttp_FakeMessageDao().apply {
+            upsertMessage(unreadMessage())
+        }
+        val engine = MockEngine {
             respond(
-                content = "{\"error\":\"Read receipt failed\"}",
+                content = """{"error":"read receipt rejected"}""",
                 status = HttpStatusCode.InternalServerError,
                 headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
             )
         }
-        val http = HttpClient(engine) { configureMvpHttpClient() }
-        val repo = MessageRepository(MvpApiClient(http, "http://example.test", tokenStore), db)
+        val repository = MessageRepository(
+            api = MvpApiClient(
+                http = HttpClient(engine) { configureMvpHttpClient() },
+                baseUrl = "http://example.test",
+                tokenStore = MessageRepositoryHttp_InMemoryAuthTokenStore(),
+            ),
+            databaseService = MessageRepositoryHttp_FakeDatabaseService(messageDao),
+        )
 
-        val result = repo.markMessagesRead(chatGroupId = "c1", userId = "u1")
+        val result = repository.markMessagesRead(chatGroupId = "chat-1", userId = "user-1")
 
         assertTrue(result.isFailure)
-        assertEquals(emptyList(), messageDao.getMessageById("m1")?.readByIds)
+        assertEquals(emptyList(), messageDao.getMessageById("message-1")?.readByIds)
     }
+
+    @OptIn(ExperimentalTime::class)
+    private fun unreadMessage() = MessageMVP(
+        id = "message-1",
+        userId = "sender-1",
+        body = "Unread message",
+        attachmentUrls = emptyList(),
+        chatId = "chat-1",
+        readByIds = emptyList(),
+        sentTime = Instant.parse("2026-02-10T00:00:00Z"),
+    )
 }

@@ -127,6 +127,42 @@ class EventDetailWeeklyBehaviorTest {
     }
 
     @Test
+    fun weekly_session_options_buildThreeWeeksFromTheSlotStart() {
+        val event = Event(
+            id = "weekly-session-event",
+            name = "Weekly Sessions",
+            eventType = EventType.WEEKLY_EVENT,
+            start = Instant.parse("2099-04-13T00:00:00Z"),
+            end = Instant.parse("2099-05-31T23:59:59Z"),
+            timeZone = "UTC",
+            divisions = listOf("open"),
+            timeSlotIds = listOf("slot-weekly"),
+        )
+        val slot = TimeSlot(
+            id = "slot-weekly",
+            dayOfWeek = 0,
+            daysOfWeek = (0..6).toList(),
+            divisions = listOf("open"),
+            startTimeMinutes = 9 * 60,
+            endTimeMinutes = 10 * 60 + 30,
+            startDate = Instant.parse("2099-04-13T00:00:00Z"),
+            repeating = true,
+            endDate = Instant.parse("2099-05-31T23:59:59Z"),
+            scheduledFieldId = "field-1",
+            scheduledFieldIds = listOf("field-1"),
+            price = null,
+        )
+
+        val options = buildWeeklySessionOptions(event, listOf(slot))
+
+        assertEquals("2099-04-13", options.first().occurrenceDate)
+        assertEquals("CoEd Open 18+", options.first().divisionLabel)
+        assertEquals(9, options.first().start.toString().substring(11, 13).toInt())
+        assertEquals(21, options.size)
+        assertEquals(options.map { option -> option.id }.distinct().size, options.size)
+    }
+
+    @Test
     fun teams_needing_players_summary_uses_singular_copy_for_single_team_and_player() {
         assertEquals(
             "1 team needs 1 player",
@@ -300,6 +336,102 @@ class EventDetailWeeklyBehaviorTest {
                 event.copy(teamIds = emptyList()),
                 teamTarget,
             ),
+        )
+    }
+
+    @Test
+    fun buildEventDetailWeeklyRoutePresentation_nonWeeklyEventUsesEventStartPolicy() {
+        val event = Event(
+            id = "one-off-event",
+            eventType = EventType.EVENT,
+            address = "123 Main St",
+        )
+
+        val presentation = buildEventDetailWeeklyRoutePresentation(
+            selectedEvent = EventWithFullRelations(
+                event = event,
+                players = emptyList(),
+                matches = emptyList(),
+                teams = emptyList(),
+            ),
+            selectedWeeklyOccurrence = null,
+            sports = emptyList(),
+            now = Instant.parse("2026-04-12T12:00:00Z"),
+            eventHasStarted = true,
+            isUserInEvent = false,
+            isHost = false,
+            isAssistantHost = false,
+            isEventOfficial = false,
+        )
+
+        assertFalse(presentation.isWeeklyEvent)
+        assertFalse(presentation.isWeeklyParentEvent)
+        assertTrue(presentation.joinBlockedByStart)
+        assertTrue(presentation.hasDirectionsTarget)
+        assertTrue(presentation.weeklySessionOptions.isEmpty())
+        assertTrue(presentation.weeklyScheduleOptions.isEmpty())
+    }
+
+    @Test
+    fun buildEventDetailWeeklyRoutePresentation_weeklyParentBuildsSessionsAndTracksJoin() {
+        val event = Event(
+            id = "weekly-route-event",
+            eventType = EventType.WEEKLY_EVENT,
+            start = Instant.parse("2099-04-13T00:00:00Z"),
+            end = Instant.parse("2099-05-31T23:59:59Z"),
+            timeZone = "UTC",
+            divisions = listOf("open"),
+            timeSlotIds = listOf("slot-weekly"),
+        )
+        val slot = TimeSlot(
+            id = "slot-weekly",
+            dayOfWeek = 0,
+            daysOfWeek = (0..6).toList(),
+            divisions = listOf("open"),
+            startTimeMinutes = 9 * 60,
+            endTimeMinutes = 10 * 60,
+            startDate = Instant.parse("2099-04-13T00:00:00Z"),
+            repeating = true,
+            endDate = Instant.parse("2099-05-31T23:59:59Z"),
+            scheduledFieldId = "field-1",
+            scheduledFieldIds = listOf("field-1"),
+            price = null,
+        )
+        val occurrence = SelectedWeeklyOccurrenceState(
+            slotId = "slot-weekly",
+            occurrenceDate = "2099-04-13",
+            label = "Weekly session",
+            sessionStart = Instant.parse("2099-04-13T09:00:00Z"),
+            sessionEnd = Instant.parse("2099-04-13T10:00:00Z"),
+        )
+
+        val presentation = buildEventDetailWeeklyRoutePresentation(
+            selectedEvent = EventWithFullRelations(
+                event = event,
+                players = emptyList(),
+                matches = emptyList(),
+                teams = emptyList(),
+                timeSlots = listOf(slot),
+            ),
+            selectedWeeklyOccurrence = occurrence,
+            sports = emptyList(),
+            now = Instant.parse("2099-04-12T12:00:00Z"),
+            eventHasStarted = false,
+            isUserInEvent = true,
+            isHost = false,
+            isAssistantHost = false,
+            isEventOfficial = false,
+        )
+
+        assertTrue(presentation.isWeeklyParentEvent)
+        assertFalse(presentation.selectedWeeklyOccurrenceStarted)
+        assertFalse(presentation.joinBlockedByStart)
+        assertTrue(presentation.selectedWeeklyOccurrenceJoined)
+        assertTrue(presentation.weeklySessionOptions.isNotEmpty())
+        assertTrue(presentation.weeklyScheduleOptions.isNotEmpty())
+        assertEquals(
+            presentation.weeklyScheduleOptions.size,
+            presentation.weeklyScheduleItems.size,
         )
     }
 }

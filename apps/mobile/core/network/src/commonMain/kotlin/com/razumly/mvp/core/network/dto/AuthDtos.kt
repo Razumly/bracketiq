@@ -9,7 +9,6 @@ import com.razumly.mvp.core.data.util.toNameCase
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlin.time.Clock
 
@@ -17,6 +16,23 @@ import kotlin.time.Clock
 data class LoginRequestDto(
     val email: String,
     val password: String,
+)
+
+@Serializable
+data class LogoutDeviceTargetDto(
+    val pushToken: String,
+    val pushTarget: String? = null,
+)
+
+@Serializable
+data class LogoutRequestDto(
+    val deviceTarget: LogoutDeviceTargetDto? = null,
+)
+
+@Serializable
+data class LogoutResponseDto(
+    val ok: Boolean,
+    val deviceTargetRemoved: Boolean? = null,
 )
 
 @Serializable
@@ -104,23 +120,6 @@ data class PasswordRequestDto(
 @Serializable
 data class DeleteAccountRequestDto(
     val confirmationText: String,
-    val currentPassword: String? = null,
-    val mfaChallengeId: String? = null,
-    val mfaCode: String? = null,
-)
-
-@Serializable
-data class DeleteAccountMfaChallengeDto(
-    val challengeId: String? = null,
-    val expiresAt: String? = null,
-    val method: String? = null,
-)
-
-@Serializable
-data class DeleteAccountErrorResponseDto(
-    val error: String? = null,
-    val code: String? = null,
-    val mfa: DeleteAccountMfaChallengeDto? = null,
 )
 
 @Serializable
@@ -142,7 +141,6 @@ data class AuthSessionDto(
 @Serializable
 data class UserProfileDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val firstName: String? = null,
     val lastName: String? = null,
     val teamIds: List<String>? = null,
@@ -166,8 +164,6 @@ data class UserProfileDto(
     val dateOfBirth: String? = null,
     val createdAt: String? = null,
     val updatedAt: String? = null,
-    @SerialName("\$createdAt") val legacyCreatedAt: String? = null,
-    @SerialName("\$updatedAt") val legacyUpdatedAt: String? = null,
 )
 
 @Serializable
@@ -201,6 +197,11 @@ data class UserResponseDto(
 )
 
 @Serializable
+data class EnsureUserByEmailRequestDto(
+    val email: String,
+)
+
+@Serializable
 data class UpdateUserRequestDto(
     val data: UserUpdateDto,
 )
@@ -215,19 +216,20 @@ data class UserUpdateDto(
     val friendRequestIds: List<String>? = null,
     val friendRequestSentIds: List<String>? = null,
     val followingIds: List<String>? = null,
+    val hasStripeAccount: Boolean? = null,
     val uploadedImages: List<String>? = null,
     val profileImageId: String? = null,
     val notificationSettings: NotificationSettings? = null,
 )
 
-fun AuthUserDto.toAuthAccountOrNull(isAdmin: Boolean = false): AuthAccount? {
+fun AuthUserDto.toAuthAccountOrNull(): AuthAccount? {
     val userId = id?.takeIf(String::isNotBlank) ?: return null
     val emailAddr = email?.takeIf(String::isNotBlank) ?: return null
-    return AuthAccount(id = userId, email = emailAddr, name = name, isAdmin = isAdmin)
+    return AuthAccount(id = userId, email = emailAddr, name = name)
 }
 
 fun UserProfileDto.toUserDataOrNull(): UserData? {
-    val resolvedId = (id ?: legacyId)?.takeIf(String::isNotBlank) ?: return null
+    val resolvedId = id?.takeIf(String::isNotBlank) ?: return null
     return UserData(
         firstName = firstName.orEmpty().toNameCase(),
         lastName = lastName.orEmpty().toNameCase(),

@@ -24,25 +24,30 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.util.EmbeddedWebUrlPolicy
 import com.razumly.mvp.core.util.Platform
+import com.razumly.mvp.core.util.trustedBoldSignSigningUrlOrNull
+import com.razumly.mvp.core.util.trustedEmbeddedWebUrlOrNull
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EmbeddedWebModal(
     title: String,
     url: String,
+    urlPolicy: EmbeddedWebUrlPolicy = EmbeddedWebUrlPolicy.SIGNING,
     onDismiss: () -> Unit,
     description: String? = null,
     primaryActionLabel: String? = null,
     onPrimaryAction: (() -> Unit)? = null,
 ) {
     val uriHandler = LocalUriHandler.current
-    val normalizedUrl = remember(url) { url.trim() }
-    val preferExternalBrowser = remember(normalizedUrl) {
-        shouldOpenBoldSignExternally(normalizedUrl)
+    val trustedUrl = remember(url, urlPolicy) {
+        trustedEmbeddedWebUrlOrNull(url, urlPolicy)
     }
-    val fallbackOpenInBrowserAction = normalizedUrl
-        .takeIf(String::isNotBlank)
+    val preferExternalBrowser = remember(trustedUrl) {
+        trustedUrl != null && shouldOpenBoldSignExternally(trustedUrl)
+    }
+    val fallbackOpenInBrowserAction = trustedUrl
         ?.let { targetUrl ->
             {
                 runCatching { uriHandler.openUri(targetUrl) }
@@ -60,9 +65,9 @@ fun EmbeddedWebModal(
         }
     }
 
-    LaunchedEffect(preferExternalBrowser, normalizedUrl) {
-        if (preferExternalBrowser && normalizedUrl.isNotBlank()) {
-            runCatching { uriHandler.openUri(normalizedUrl) }
+    LaunchedEffect(preferExternalBrowser, trustedUrl) {
+        if (preferExternalBrowser && trustedUrl != null) {
+            runCatching { uriHandler.openUri(trustedUrl) }
         }
     }
 
@@ -105,7 +110,19 @@ fun EmbeddedWebModal(
                         shape = RoundedCornerShape(12.dp),
                     ),
             ) {
-                if (preferExternalBrowser) {
+                if (trustedUrl == null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp),
+                    ) {
+                        Text(
+                            text = "The document link is unavailable or invalid. Refresh and try again.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                } else if (preferExternalBrowser) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -119,7 +136,8 @@ fun EmbeddedWebModal(
                     }
                 } else {
                     PlatformWebView(
-                        url = normalizedUrl,
+                        url = trustedUrl,
+                        urlPolicy = urlPolicy,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -154,15 +172,7 @@ fun EmbeddedWebModal(
 }
 
 private fun shouldOpenBoldSignExternally(url: String): Boolean {
-    if (url.isBlank()) return false
-    val normalizedUrl = url.lowercase()
     val isMobilePlatform = Platform.isIOS || Platform.name.equals("android", ignoreCase = true)
     if (!isMobilePlatform) return false
-
-    val isBoldSignHost = normalizedUrl.contains("://app.boldsign.com/")
-        || normalizedUrl.contains("://boldsign.com/")
-    if (!isBoldSignHost) return false
-
-    return normalizedUrl.contains("/document/sign")
-        || normalizedUrl.contains("/sign/")
+    return trustedBoldSignSigningUrlOrNull(url) != null
 }

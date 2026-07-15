@@ -4,7 +4,6 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
-import com.razumly.mvp.core.data.dataTypes.UserData
 
 @Entity(
     tableName = "chat_user_cross_ref",
@@ -14,12 +13,6 @@ import com.razumly.mvp.core.data.dataTypes.UserData
             entity = ChatGroup::class,
             parentColumns = ["id"],
             childColumns = ["chatId"],
-            onDelete = ForeignKey.CASCADE
-        ),
-        ForeignKey(
-            entity = UserData::class,
-            parentColumns = ["id"],
-            childColumns = ["userId"],
             onDelete = ForeignKey.CASCADE
         )
     ],

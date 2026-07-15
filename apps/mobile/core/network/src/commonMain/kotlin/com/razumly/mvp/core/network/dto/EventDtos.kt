@@ -34,7 +34,6 @@ import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlin.native.ObjCName
@@ -71,7 +70,6 @@ private fun parseApiInstant(value: String, timeZone: String): Instant? {
 @Serializable
 data class EventApiDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
 
     val name: String? = null,
     @property:ObjCName(swiftName = "eventDescription")
@@ -181,7 +179,7 @@ data class EventApiDto(
 ) {
     @OptIn(ExperimentalTime::class)
     fun toEventOrNull(): Event? {
-        val resolvedId = id ?: legacyId
+        val resolvedId = id
         val resolvedName = name
         val resolvedHostId = hostId
         val resolvedStart = start
@@ -453,9 +451,81 @@ data class EventApiDto(
     }
 }
 
+/**
+ * Convert an API event at a repository boundary where dropping a row would make the server page
+ * look complete. Nullable conversion remains available for explicitly optional embedded records,
+ * but collection responses must fail as a unit so callers can surface and retry the same page.
+ */
+fun EventApiDto.toEventOrThrow(context: String = "event response"): Event =
+    toEventOrNull() ?: throw IllegalArgumentException(
+        "$context contains a malformed event (${eventPayloadIdentity()}): ${eventPayloadValidationFailure()}",
+    )
+
+fun List<EventApiDto>.toEventsOrThrow(context: String): List<Event> =
+    mapIndexed { index, event ->
+        event.toEventOrThrow("$context row ${index + 1}")
+    }
+
+private fun EventApiDto.eventPayloadIdentity(): String {
+    val resolvedId = id?.trim()?.takeIf(String::isNotBlank)
+    return resolvedId?.let { "id=$it" } ?: "missing id"
+}
+
+private fun EventApiDto.eventPayloadValidationFailure(): String {
+    val resolvedId = id?.trim()?.takeIf(String::isNotBlank)
+    if (resolvedId == null) return "id is required"
+    if (name.isNullOrBlank()) return "name is required"
+    if (hostId.isNullOrBlank() && affiliateUrl.isNullOrBlank()) {
+        return "hostId or affiliateUrl is required"
+    }
+    val resolvedStart = start?.trim()?.takeIf(String::isNotBlank)
+        ?: return "start is required"
+    val resolvedTimeZone = timeZone?.trim()?.takeIf(String::isNotBlank) ?: "UTC"
+    if (parseApiInstant(resolvedStart, resolvedTimeZone) == null) return "start is invalid"
+    val resolvedEnd = end?.trim()?.takeIf(String::isNotBlank)
+    if (resolvedEnd == null && noFixedEndDateTime != true) return "end is required"
+    if (resolvedEnd != null && parseApiInstant(resolvedEnd, resolvedTimeZone) == null) {
+        return "end is invalid"
+    }
+    return "required fields are invalid"
+}
+
+data class EventsPageContinuation(
+    val nextOffset: Int,
+    val hasMore: Boolean,
+)
+
+fun EventsResponseDto.pageContinuationOrThrow(
+    context: String,
+    requestedOffset: Int,
+): EventsPageContinuation {
+    val safeOffset = requestedOffset.coerceAtLeast(0)
+    val serverNextOffset = pagination?.nextOffset?.takeIf { candidate -> candidate > safeOffset }
+    val hasMore = pagination?.hasMore == true
+    check(!hasMore || serverNextOffset != null) {
+        "$context is missing a valid continuation offset"
+    }
+    return EventsPageContinuation(
+        nextOffset = serverNextOffset ?: safeOffset + events.size,
+        hasMore = hasMore,
+    )
+}
+
+fun EventsResponseDto.hasMoreEventRows(requestedLimit: Int): Boolean =
+    pagination?.hasMore ?: (events.size >= requestedLimit.coerceAtLeast(1))
+
 @Serializable
 data class EventsResponseDto(
     val events: List<EventApiDto> = emptyList(),
+    val pagination: EventsPaginationDto? = null,
+)
+
+@Serializable
+data class EventsPaginationDto(
+    val limit: Int? = null,
+    val offset: Int? = null,
+    val nextOffset: Int? = null,
+    val hasMore: Boolean? = null,
 )
 
 @Serializable
@@ -798,11 +868,38 @@ data class CurrentUserEventRegistrationsResponseDto(
 )
 
 @Serializable
+data class ProfileSchedulePaginationDto(
+    val limit: Int,
+    val hasMore: Boolean,
+    val nextCursor: String? = null,
+    val isComplete: Boolean? = null,
+    val windowFrom: String? = null,
+    val windowTo: String? = null,
+)
+
+@Serializable
 data class ProfileScheduleResponseDto(
     val events: List<EventApiDto> = emptyList(),
     val matches: List<MatchApiDto> = emptyList(),
     val teams: List<TeamApiDto> = emptyList(),
     val fields: List<Field> = emptyList(),
+    val pagination: ProfileSchedulePaginationDto? = null,
+)
+
+@Serializable
+data class ProfileScheduleNextActionDto(
+    val type: String,
+    val eventId: String? = null,
+    val matchId: String? = null,
+    val eventName: String? = null,
+    val eventImageId: String? = null,
+)
+
+@Serializable
+data class ProfileScheduleNextActionResponseDto(
+    val contractVersion: Int,
+    val generatedAt: String,
+    val action: ProfileScheduleNextActionDto,
 )
 
 @Serializable
@@ -814,6 +911,7 @@ data class EventDetailBootstrapResponseDto(
     val timeSlots: List<TimeSlot> = emptyList(),
     val leagueScoringConfig: LeagueScoringConfigDTO? = null,
     val staffInvites: List<Invite> = emptyList(),
+    val staffRevision: String? = null,
     val teamCompliance: EventTeamComplianceResponseDto? = null,
     val userCompliance: EventUserComplianceResponseDto? = null,
 )

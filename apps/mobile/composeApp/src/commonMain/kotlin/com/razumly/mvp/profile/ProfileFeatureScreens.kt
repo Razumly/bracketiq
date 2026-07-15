@@ -75,6 +75,7 @@ import com.razumly.mvp.core.data.repositories.ProfileDocumentType
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
+import com.razumly.mvp.core.util.EmbeddedWebUrlPolicy
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
@@ -422,7 +423,7 @@ private fun CreateDiscountDialog(
                             },
                             modifier = Modifier.weight(1f),
                             label = "Discount %",
-                            keyboardType = "number",
+                            keyboardType = "decimal",
                             enabled = selectedTarget != null,
                             inputFilter = ::discountPercentInputFilter,
                             containerColor = dialogContainerColor,
@@ -883,6 +884,22 @@ fun ProfilePaymentPlansScreen(component: ProfileComponent) {
             )
         }
 
+        plansState.warning?.let { message ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                ),
+            ) {
+                Text(
+                    modifier = Modifier.padding(16.dp),
+                    text = message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            }
+        }
+
         when {
             plansState.isLoading -> {
                 Text(
@@ -1005,11 +1022,7 @@ fun ProfileEventTemplatesScreen(component: ProfileComponent) {
             }
 
             templatesState.templates.isEmpty() -> {
-                Text(
-                    text = "No event templates yet.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                EventTemplatesEmptyState(onCreateEvent = component::createEvent)
             }
 
             else -> {
@@ -1020,6 +1033,27 @@ fun ProfileEventTemplatesScreen(component: ProfileComponent) {
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+internal fun EventTemplatesEmptyState(onCreateEvent: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = "No event templates yet",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            text = "Templates are made from an existing personal event. Create or open an event, then choose Create Template from its actions.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Button(onClick = onCreateEvent) {
+            Text("Create an event")
         }
     }
 }
@@ -1637,6 +1671,7 @@ fun ProfileChildrenScreen(component: ProfileComponent) {
         showPicker = showChildBirthdayPicker,
         getTime = false,
         canSelectPast = true,
+        canSelectFuture = false,
     )
 }
 
@@ -2201,6 +2236,10 @@ fun ProfileDocumentsScreen(component: ProfileComponent) {
         EmbeddedWebModal(
             title = prompt.title,
             url = prompt.url,
+            urlPolicy = when (prompt.mode) {
+                ProfileWebDocumentPromptMode.SIGN -> EmbeddedWebUrlPolicy.SIGNING
+                ProfileWebDocumentPromptMode.VIEW -> EmbeddedWebUrlPolicy.DOCUMENT_VIEW
+            },
             description = prompt.description,
             onDismiss = component::dismissWebDocumentPrompt,
         )

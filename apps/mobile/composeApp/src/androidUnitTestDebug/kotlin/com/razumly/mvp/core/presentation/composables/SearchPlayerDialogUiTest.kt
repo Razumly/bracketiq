@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import com.razumly.mvp.core.data.dataTypes.UserData
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -64,6 +65,7 @@ class SearchPlayerDialogUiTest {
 
     @Test
     fun close_button_dismisses_dialog() {
+        val searchQueries = mutableListOf<String>()
         composeRule.setContent {
             var isDialogVisible by mutableStateOf(true)
 
@@ -72,7 +74,7 @@ class SearchPlayerDialogUiTest {
                     SearchPlayerDialog(
                         freeAgents = emptyList(),
                         friends = emptyList(),
-                        onSearch = {},
+                        onSearch = searchQueries::add,
                         onPlayerSelected = {},
                         onDismiss = { isDialogVisible = false },
                         suggestions = emptyList(),
@@ -82,6 +84,8 @@ class SearchPlayerDialogUiTest {
             }
         }
 
+        composeRule.onNode(hasSetTextAction()).performTextInput("sam")
+        composeRule.waitUntil(timeoutMillis = 5_000) { searchQueries.lastOrNull() == "sam" }
         composeRule.onNodeWithContentDescription("Close search dialog").performClick()
 
         composeRule.waitUntil(timeoutMillis = 5_000) {
@@ -91,6 +95,7 @@ class SearchPlayerDialogUiTest {
         assertTrue(
             composeRule.onAllNodesWithText("Add User").fetchSemanticsNodes().isEmpty()
         )
+        assertEquals("", searchQueries.last())
     }
 
     private fun user(

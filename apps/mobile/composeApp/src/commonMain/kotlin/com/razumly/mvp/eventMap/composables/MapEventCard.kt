@@ -1,12 +1,5 @@
 package com.razumly.mvp.eventMap.composables
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.Image
@@ -34,14 +27,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -395,75 +386,6 @@ fun MapPlaceMarker(
                 .size(40.dp)
                 .clip(CircleShape),
             contentScale = ContentScale.Crop,
-        )
-    }
-}
-
-@Composable
-fun AnimatedMarkerContent(
-    isExpanded: Boolean,
-    markerContent: @Composable () -> Unit,
-    expandedContent: @Composable () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val animatedScale by animateFloatAsState(
-        targetValue = if (isExpanded) 1.1f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
-        )
-    )
-
-    AnimatedContent(
-        targetState = isExpanded,
-        transitionSpec = {
-            scaleIn(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                    stiffness = Spring.StiffnessLow
-                )
-            ) togetherWith scaleOut(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                    stiffness = Spring.StiffnessLow
-                )
-            )
-        }
-    ) { expanded ->
-        Box(
-            modifier = modifier.graphicsLayer {
-                scaleX = animatedScale
-                scaleY = animatedScale
-            }
-        ) {
-            if (expanded) {
-                expandedContent()
-            } else {
-                markerContent()
-            }
-        }
-    }
-}
-
-@Composable
-fun MaterialMarker(
-    text: String,
-    backgroundColor: Color = MaterialTheme.colorScheme.surface,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .size(40.dp)
-            .shadow(4.dp, CircleShape)
-            .clip(CircleShape)
-            .background(backgroundColor),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = text,
-            color = MaterialTheme.colorScheme.onSurface,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold
         )
     }
 }

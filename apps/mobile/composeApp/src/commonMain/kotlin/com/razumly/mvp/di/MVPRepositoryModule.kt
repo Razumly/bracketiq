@@ -41,10 +41,18 @@ val MVPRepositoryModule = module {
         UserRepository(get(), get(), get(), get(), get())
     } bind IUserRepository::class
     single {
-        MatchRepository(get(), get(), get())
+        MatchRepository(get(), get(), get(), currentUserDataSource = get())
     } bind IMatchRepository::class
     single {
-        PushNotificationsRepository(get(), get(), get(), get())
+        PushNotificationsRepository(
+            get(),
+            get(),
+            get(),
+            get(),
+            // Resolve lazily: ChatGroupRepository uses TeamRepository, which
+            // already depends on this push repository.
+            chatGroupRepositoryProvider = { get() },
+        )
     } bind IPushNotificationsRepository::class
     single {
         MessageRepository(get(), get())

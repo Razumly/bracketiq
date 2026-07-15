@@ -19,25 +19,19 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 
 class MvpApiClient(
-    private val httpFactory: () -> HttpClient,
+    val http: HttpClient,
     @PublishedApi
     internal val baseUrl: String,
     val tokenStore: AuthTokenStore,
 ) {
     /**
-     * Creating a Ktor client loads its plugins and platform dependencies. Keep that work out of
-     * dependency-injection startup, where Android is still on the application main thread.
+     * Captures the bearer token once for a logical request/cache transaction. Callers that persist
+     * a response can therefore bind the HTTP identity and cache viewer to the same credential.
      */
-    val http: HttpClient by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { httpFactory() }
-
-    constructor(
-        http: HttpClient,
-        baseUrl: String,
-        tokenStore: AuthTokenStore,
-    ) : this(
-        httpFactory = { http },
+    suspend fun openSession(): MvpApiSession = MvpApiSession(
+        http = http,
         baseUrl = baseUrl,
-        tokenStore = tokenStore,
+        token = tokenStore.get(),
     )
 
     fun urlFor(path: String): String {
@@ -146,6 +140,58 @@ class MvpApiClient(
             contentType(ContentType.Application.Json)
             if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
             setBody(body)
+        }.bodyAsText()
+    }
+}
+
+class MvpApiSession @PublishedApi internal constructor(
+    @PublishedApi internal val http: HttpClient,
+    @PublishedApi internal val baseUrl: String,
+    val token: String,
+) {
+    @PublishedApi
+    internal fun urlFor(path: String): String {
+        val base = baseUrl.trimEnd('/')
+        val normalizedPath = path.trimStart('/')
+        return "$base/$normalizedPath"
+    }
+
+    suspend inline fun <reified Res> get(path: String): Res = http.get(urlFor(path)) {
+        if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+    }.body()
+
+    suspend inline fun <reified Req : Any, reified Res> post(path: String, body: Req): Res =
+        http.post(urlFor(path)) {
+            contentType(ContentType.Application.Json)
+            if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+            setBody(body)
+        }.body()
+
+    suspend inline fun <reified Req : Any> postNoResponse(path: String, body: Req) {
+        http.post(urlFor(path)) {
+            contentType(ContentType.Application.Json)
+            if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+            setBody(body)
+        }.bodyAsText()
+    }
+
+    suspend inline fun <reified Req : Any, reified Res> patch(path: String, body: Req): Res =
+        http.patch(urlFor(path)) {
+            contentType(ContentType.Application.Json)
+            if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+            setBody(body)
+        }.body()
+
+    suspend inline fun <reified Req : Any, reified Res> delete(path: String, body: Req): Res =
+        http.delete(urlFor(path)) {
+            contentType(ContentType.Application.Json)
+            if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+            setBody(body)
+        }.body()
+
+    suspend fun deleteNoResponse(path: String) {
+        http.delete(urlFor(path)) {
+            if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
         }.bodyAsText()
     }
 }

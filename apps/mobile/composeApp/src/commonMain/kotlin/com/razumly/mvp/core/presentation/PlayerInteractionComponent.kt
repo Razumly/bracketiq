@@ -3,11 +3,11 @@ package com.razumly.mvp.core.presentation
 import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
-import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,67 +27,67 @@ interface PlayerInteractionComponent {
 class DefaultPlayerInteractionComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
-    @Suppress("unused")
-    private val chatRepository: IChatGroupRepository
 ) : PlayerInteractionComponent, ComponentContext by componentContext {
 
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState
 
-    private lateinit var _loadingHandler: LoadingHandler
+    private var loadingHandler: LoadingHandler? = null
 
     override fun setLoadingHandler(handler: LoadingHandler) {
-        _loadingHandler = handler
+        loadingHandler = handler
     }
 
     override fun sendFriendRequest(user: UserData) {
-        scope.launch {
-            _loadingHandler.showLoading("Sending Friend Request ...")
-            userRepository.sendFriendRequest(user).onFailure {
-               _errorState.value = ErrorMessage(it.userMessage())
-            }
-            _loadingHandler.hideLoading()
+        launchPlayerAction("Sending Friend Request ...") {
+            userRepository.sendFriendRequest(user)
         }
     }
 
     override fun followUser(user: UserData) {
-        scope.launch {
-            _loadingHandler.showLoading("Following User ...")
-            userRepository.followUser(user.id).onFailure {
-                _errorState.value = ErrorMessage(it.userMessage())
-            }
-            _loadingHandler.hideLoading()
+        launchPlayerAction("Following User ...") {
+            userRepository.followUser(user.id)
         }
     }
 
     override fun unfollowUser(user: UserData) {
-        scope.launch {
-            _loadingHandler.showLoading("Unfollowing User ...")
-            userRepository.unfollowUser(user.id).onFailure {
-                _errorState.value = ErrorMessage(it.userMessage())
-            }
-            _loadingHandler.hideLoading()
+        launchPlayerAction("Unfollowing User ...") {
+            userRepository.unfollowUser(user.id)
         }
     }
 
     override fun blockUser(user: UserData, leaveSharedChats: Boolean) {
-        scope.launch {
-            _loadingHandler.showLoading("Blocking User ...")
-            userRepository.blockUser(user.id, leaveSharedChats).onFailure {
-                _errorState.value = ErrorMessage(it.userMessage())
-            }
-            _loadingHandler.hideLoading()
+        launchPlayerAction("Blocking User ...") {
+            userRepository.blockUser(user.id, leaveSharedChats)
         }
     }
 
     override fun unblockUser(user: UserData) {
+        launchPlayerAction("Unblocking User ...") {
+            userRepository.unblockUser(user.id)
+        }
+    }
+
+    private fun launchPlayerAction(
+        loadingMessage: String,
+        action: suspend () -> Result<*>,
+    ) {
         scope.launch {
-            _loadingHandler.showLoading("Unblocking User ...")
-            userRepository.unblockUser(user.id).onFailure {
-                _errorState.value = ErrorMessage(it.userMessage())
+            val loadingOperation = loadingHandler?.newOperation()
+            try {
+                loadingOperation?.showLoading(loadingMessage)
+                action().onFailure { error ->
+                    if (error is CancellationException) throw error
+                    _errorState.value = ErrorMessage(error.userMessage())
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                _errorState.value = ErrorMessage(error.userMessage())
+            } finally {
+                loadingOperation?.hideLoading()
             }
-            _loadingHandler.hideLoading()
         }
     }
 }

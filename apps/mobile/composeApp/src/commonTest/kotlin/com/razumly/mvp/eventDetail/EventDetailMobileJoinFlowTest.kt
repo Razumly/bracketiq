@@ -59,12 +59,12 @@ import com.razumly.mvp.eventCreate.CreateEvent_FakeImagesRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeSportsRepository
 import com.razumly.mvp.eventCreate.MainDispatcherTest
 import com.razumly.mvp.core.util.LoadingHandler
-import com.razumly.mvp.core.util.LoadingState
+import com.razumly.mvp.core.util.LoadingHandlerImpl
+import com.razumly.mvp.core.util.LoadingOperation
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -75,6 +75,47 @@ import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
+    @Test
+    fun id_only_event_detail_hydrates_current_event_relations_by_id() = runTest(testDispatcher) {
+        val host = mobileUser(id = "id_only_host", firstName = "ID", lastName = "Host")
+        val event = Event(
+            id = "id_only_event",
+            name = "Current event from repository",
+            hostId = host.id,
+            state = "PUBLISHED",
+            eventType = EventType.EVENT,
+        )
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = event,
+            host = host,
+            currentUser = host,
+            players = emptyList(),
+            teams = emptyList(),
+            staffInvites = emptyList(),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(host),
+            fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
+            eventId = event.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(emptyList(), emptyMap(), emptyMap()),
+            teamRepository = EventDetailFakeTeamRepository(emptyList(), listOf(host)),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        advance()
+
+        assertEquals(listOf(event.id), eventRepository.eventWithRelationsFlowRequests)
+        assertTrue(eventRepository.cachedEventWithRelationsFlowRequests.isEmpty())
+        assertEquals(event.name, component.selectedEvent.value.name)
+    }
+
     @Test
     fun published_event_defers_sports_catalog_load_until_editing() =
         runTest(testDispatcher) {
@@ -98,7 +139,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
                     timeSlots = emptyList(),
                     fieldMatches = emptyList(),
                 ),
-                event = initialEvent,
+                eventId = initialEvent.id,
                 notificationsRepository = NoopPushNotificationsRepository,
                 billingRepository = CreateEvent_FakeBillingRepository(),
                 eventRepository = EventDetailFakeEventRepository(
@@ -269,7 +310,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
                 componentContext = createTestComponentContext(),
                 userRepository = EventDetailFakeUserRepository(currentUser),
                 fieldRepository = fieldRepository,
-                event = initialEvent,
+                eventId = initialEvent.id,
                 notificationsRepository = NoopPushNotificationsRepository,
                 billingRepository = CreateEvent_FakeBillingRepository(),
                 eventRepository = eventRepository,
@@ -376,7 +417,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
                 timeSlots = listOf(slot),
                 fieldMatches = listOf(FieldWithMatches(field = field, matches = emptyList())),
             ),
-            event = initialEvent,
+                eventId = initialEvent.id,
             notificationsRepository = NoopPushNotificationsRepository,
             billingRepository = CreateEvent_FakeBillingRepository(),
             eventRepository = eventRepository,
@@ -467,7 +508,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             componentContext = createTestComponentContext(),
             userRepository = userRepository,
             fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
-            event = initialEvent,
+                eventId = initialEvent.id,
             notificationsRepository = NoopPushNotificationsRepository,
             billingRepository = CreateEvent_FakeBillingRepository(),
             eventRepository = eventRepository,
@@ -603,7 +644,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
                 timeSlots = listOf(slot),
                 fieldMatches = listOf(FieldWithMatches(field = field, matches = emptyList())),
             ),
-            event = initialEvent,
+                eventId = initialEvent.id,
             notificationsRepository = NoopPushNotificationsRepository,
             billingRepository = CreateEvent_FakeBillingRepository(),
             eventRepository = eventRepository,
@@ -705,7 +746,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
                 timeSlots = listOf(slot),
                 fieldMatches = listOf(FieldWithMatches(field = field, matches = emptyList())),
             ),
-            event = initialEvent,
+                eventId = initialEvent.id,
             notificationsRepository = NoopPushNotificationsRepository,
             billingRepository = CreateEvent_FakeBillingRepository(),
             eventRepository = eventRepository,
@@ -814,7 +855,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
                 timeSlots = listOf(slot),
                 fieldMatches = listOf(FieldWithMatches(field = field, matches = emptyList())),
             ),
-            event = initialEvent,
+                eventId = initialEvent.id,
             notificationsRepository = NoopPushNotificationsRepository,
             billingRepository = CreateEvent_FakeBillingRepository(),
             eventRepository = eventRepository,
@@ -927,7 +968,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
                 timeSlots = listOf(slot),
                 fieldMatches = listOf(FieldWithMatches(field = field, matches = emptyList())),
             ),
-            event = initialEvent,
+                eventId = initialEvent.id,
             notificationsRepository = NoopPushNotificationsRepository,
             billingRepository = CreateEvent_FakeBillingRepository(),
             eventRepository = eventRepository,
@@ -1062,7 +1103,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
                 timeSlots = listOf(slot),
                 fieldMatches = listOf(FieldWithMatches(field = field, matches = emptyList())),
             ),
-            event = initialEvent,
+                eventId = initialEvent.id,
             notificationsRepository = NoopPushNotificationsRepository,
             billingRepository = CreateEvent_FakeBillingRepository(),
             eventRepository = eventRepository,
@@ -1177,7 +1218,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
                 timeSlots = listOf(slot),
                 fieldMatches = listOf(FieldWithMatches(field = field, matches = emptyList())),
             ),
-            event = initialEvent,
+                eventId = initialEvent.id,
             notificationsRepository = NoopPushNotificationsRepository,
             billingRepository = CreateEvent_FakeBillingRepository(),
             eventRepository = eventRepository,
@@ -1287,7 +1328,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
                 timeSlots = listOf(slot),
                 fieldMatches = listOf(FieldWithMatches(field = field, matches = emptyList())),
             ),
-            event = initialEvent,
+                eventId = initialEvent.id,
             notificationsRepository = NoopPushNotificationsRepository,
             billingRepository = CreateEvent_FakeBillingRepository(),
             eventRepository = eventRepository,
@@ -1377,7 +1418,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             componentContext = createTestComponentContext(),
             userRepository = EventDetailFakeUserRepository(currentUser),
             fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
-            event = initialEvent,
+                eventId = initialEvent.id,
             notificationsRepository = NoopPushNotificationsRepository,
             billingRepository = billingRepository,
             eventRepository = eventRepository,
@@ -1406,7 +1447,8 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
     }
 
     @Test
-    fun startTeamRegistration_forPaidOpenTeam_createsTeamRegistrationPurchaseIntent() = runTest(testDispatcher) {
+    fun startTeamRegistration_forPaidOpenTeam_clearsPendingState_whenPaymentPresentationIsUnavailable() =
+        runTest(testDispatcher) {
         val host = mobileUser(id = "host_paid_team", firstName = "Host", lastName = "User")
         val currentUser = mobileUser(id = "paid_team_joiner", firstName = "Paid", lastName = "Joiner")
         val team = Team(
@@ -1460,7 +1502,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             componentContext = createTestComponentContext(),
             userRepository = EventDetailFakeUserRepository(currentUser),
             fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
-            event = initialEvent,
+                eventId = initialEvent.id,
             notificationsRepository = NoopPushNotificationsRepository,
             billingRepository = billingRepository,
             eventRepository = eventRepository,
@@ -1483,8 +1525,9 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
 
         assertEquals(listOf(team.id), teamRepository.registeredTeamIds)
         assertEquals(listOf(team.id), billingRepository.teamRegistrationPurchaseIntentCalls)
-        assertEquals(team.id, component.startingTeamRegistrationId.value)
+        assertNull(component.startingTeamRegistrationId.value)
         assertFalse(component.isUserInEvent.value)
+        assertEquals("Payment setup is unavailable. Please try again.", component.errorState.value?.message)
     }
 
     @Test
@@ -1592,7 +1635,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             componentContext = createTestComponentContext(),
             userRepository = EventDetailFakeUserRepository(currentUser),
             fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
-            event = initialEvent,
+                eventId = initialEvent.id,
             notificationsRepository = NoopPushNotificationsRepository,
             billingRepository = billingRepository,
             eventRepository = eventRepository,
@@ -1728,7 +1771,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             componentContext = createTestComponentContext(),
             userRepository = EventDetailFakeUserRepository(currentUser),
             fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
-            event = initialEvent,
+                eventId = initialEvent.id,
             notificationsRepository = NoopPushNotificationsRepository,
             billingRepository = billingRepository,
             eventRepository = eventRepository,
@@ -1868,7 +1911,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             componentContext = createTestComponentContext(),
             userRepository = EventDetailFakeUserRepository(currentUser),
             fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
-            event = initialEvent,
+                eventId = initialEvent.id,
             notificationsRepository = NoopPushNotificationsRepository,
             billingRepository = billingRepository,
             eventRepository = eventRepository,
@@ -1944,7 +1987,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             componentContext = createTestComponentContext(),
             userRepository = userRepository,
             fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
-            event = event,
+            eventId = event.id,
             notificationsRepository = NoopPushNotificationsRepository,
             billingRepository = CreateEvent_FakeBillingRepository(),
             eventRepository = eventRepository,
@@ -1966,7 +2009,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
     }
 
     @Test
-    fun eventEntryLoadsRegistrationDetailsSilentlyAndReusesThemUntilRefresh() = runTest(testDispatcher) {
+    fun eventEntryLoadsRegistrationDetailsOnceAndReusesThemUntilRefresh() = runTest(testDispatcher) {
         val host = mobileUser(id = "host_1", firstName = "Host", lastName = "User")
         val event = Event(
             id = "event_1",
@@ -1986,7 +2029,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             componentContext = createTestComponentContext(),
             userRepository = EventDetailFakeUserRepository(host),
             fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
-            event = event,
+            eventId = event.id,
             notificationsRepository = NoopPushNotificationsRepository,
             billingRepository = CreateEvent_FakeBillingRepository(),
             eventRepository = eventRepository,
@@ -2037,7 +2080,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             componentContext = createTestComponentContext(),
             userRepository = userRepository,
             fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
-            event = event,
+            eventId = event.id,
             notificationsRepository = NoopPushNotificationsRepository,
             billingRepository = CreateEvent_FakeBillingRepository(),
             eventRepository = EventDetailFakeEventRepository(
@@ -2109,6 +2152,8 @@ private class EventDetailFakeEventRepository(
 
     val staffInviteRequests = mutableListOf<String>()
     val refreshRequests = mutableListOf<String>()
+    val eventWithRelationsFlowRequests = mutableListOf<String>()
+    val cachedEventWithRelationsFlowRequests = mutableListOf<String>()
     var joinCallCount = 0
     var syncCallCount = 0
     var lastSyncedOccurrence: EventOccurrenceSelection? = null
@@ -2119,9 +2164,15 @@ private class EventDetailFakeEventRepository(
     var teamComplianceCallCount = 0
     var userComplianceCallCount = 0
 
-    override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> = eventFlow
+    override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> {
+        eventWithRelationsFlowRequests += eventId
+        return eventFlow
+    }
 
-    override fun getCachedEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> = eventFlow
+    override fun getCachedEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> {
+        cachedEventWithRelationsFlowRequests += eventId
+        return eventFlow
+    }
 
     override suspend fun getEvent(eventId: String): Result<Event> {
         refreshRequests += eventId
@@ -2474,7 +2525,13 @@ private class EventDetailFakeTeamRepository(
         teamsById[teamId]?.let { team -> Result.success(team) }
             ?: Result.failure(IllegalStateException("Team $teamId not found"))
     override suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit> = Result.success(Unit)
-    override fun getTeamsWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>> = flowOf(Result.success(emptyList()))
+    override fun getTeamsWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>> = flowOf(
+        Result.success(
+            buildTeamRelations().filter { team ->
+                team.team.managerId == id || team.players.any { player -> player.id == id }
+            },
+        ),
+    )
     override fun getTeamsWithPlayersLoadingFlow(id: String): Flow<Boolean> = flowOf(false)
     override fun getTeamWithPlayersFlow(id: String): Flow<Result<TeamWithRelations>> =
         flowOf(Result.failure(IllegalStateException("unused")))
@@ -2523,6 +2580,8 @@ private class EventDetailFakeUserRepository(
     )
 
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = Result.success(emptyList())
+    override suspend fun ensureUserByEmail(email: String): Result<UserData> =
+        Result.success(mobileUser(id = email.substringBefore('@'), firstName = "Email", lastName = "User"))
     override suspend fun createInvites(invites: List<InviteCreateDto>): Result<List<Invite>> {
         createdInviteRequests += invites
         return Result.success(emptyList())
@@ -2531,7 +2590,6 @@ private class EventDetailFakeUserRepository(
     override suspend fun findEmailMembership(
         emails: List<String>,
         userIds: List<String>,
-        eventId: String?,
     ): Result<List<UserEmailMembershipMatch>> = Result.success(emptyList())
     override suspend fun listInvites(userId: String, type: String?): Result<List<Invite>> = Result.success(emptyList())
     override suspend fun acceptInvite(inviteId: String): Result<Unit> = Result.success(Unit)
@@ -2579,8 +2637,6 @@ private class EventDetailFakeUserRepository(
         firstName: String,
         lastName: String,
         email: String,
-        currentPassword: String,
-        newPassword: String,
         userName: String,
         profileImageId: String?,
     ): Result<Unit> = Result.success(Unit)
@@ -2615,6 +2671,7 @@ private object NoopPushNotificationsRepository : IPushNotificationsRepository {
     override suspend fun createChatGroupTopic(chatGroup: com.razumly.mvp.core.data.dataTypes.ChatGroup): Result<Unit> =
         Result.success(Unit)
     override fun setActiveChat(chatGroupId: String?) = Unit
+    override fun clearActiveChatIfMatches(chatGroupId: String?) = Unit
     override suspend fun addDeviceAsTarget(): Result<Unit> = Result.success(Unit)
     override suspend fun removeDeviceAsTarget(): Result<Unit> = Result.success(Unit)
     override suspend fun getDeviceTargetDebugStatus(syncBeforeCheck: Boolean): Result<com.razumly.mvp.core.data.repositories.PushDeviceTargetDebugStatus> =
@@ -2622,12 +2679,12 @@ private object NoopPushNotificationsRepository : IPushNotificationsRepository {
 }
 
 private object NoopNavigationHandler : INavigationHandler {
-    override fun navigateToMatch(match: MatchWithRelations, event: Event) = Unit
-    override fun navigateToTeams(freeAgents: List<String>, event: Event?, selectedFreeAgentId: String?) = Unit
-    override fun navigateToChat(user: UserData?, chat: com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations?) = Unit
+    override fun navigateToMatch(matchId: String, eventId: String) = Unit
+    override fun navigateToTeams(freeAgents: List<String>, eventId: String?, selectedFreeAgentId: String?) = Unit
+    override fun navigateToChat(messageUserId: String?, chatId: String?) = Unit
     override fun navigateToCreate() = Unit
     override fun navigateToSearch() = Unit
-    override fun navigateToEvent(event: Event) = Unit
+    override fun navigateToEvent(eventId: String) = Unit
     override fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab) = Unit
     override fun navigateToEvents() = Unit
     override fun navigateToRefunds() = Unit
@@ -2636,20 +2693,10 @@ private object NoopNavigationHandler : INavigationHandler {
 }
 
 private class EventDetailTestLoadingHandler : LoadingHandler {
-    private val loadingStateFlow = MutableStateFlow(LoadingState())
-    override val loadingState: StateFlow<LoadingState> = loadingStateFlow.asStateFlow()
+    private val delegate = LoadingHandlerImpl()
+    override val loadingState = delegate.loadingState
 
-    override fun showLoading(message: String, progress: Float?) {
-        loadingStateFlow.value = LoadingState(isLoading = true, message = message, progress = progress)
-    }
-
-    override fun hideLoading() {
-        loadingStateFlow.value = LoadingState()
-    }
-
-    override fun updateProgress(progress: Float) {
-        loadingStateFlow.value = loadingStateFlow.value.copy(progress = progress)
-    }
+    override fun newOperation(): LoadingOperation = delegate.newOperation()
 }
 
 private fun createTestComponentContext(): DefaultComponentContext {

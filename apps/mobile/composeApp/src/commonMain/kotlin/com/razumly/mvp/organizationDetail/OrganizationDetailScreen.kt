@@ -30,6 +30,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -78,8 +79,11 @@ import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventDetail.TextSignatureDialog
 import com.razumly.mvp.eventSearch.RentalConfirmationContent
+import com.razumly.mvp.eventSearch.RentalAvailabilityWindow
+import com.razumly.mvp.eventSearch.RentalBusyBlock
 import com.razumly.mvp.eventSearch.RentalDetailsContent
 import com.razumly.mvp.eventSearch.RentalDetailsStep
+import com.razumly.mvp.eventSearch.RentalFieldOption
 import com.razumly.mvp.eventSearch.RentalSelectionDraft
 import com.razumly.mvp.eventSearch.ResolvedRentalSelection
 import com.razumly.mvp.eventSearch.SLOT_INTERVAL_MINUTES
@@ -87,8 +91,10 @@ import com.razumly.mvp.eventSearch.canApplyRentalSelectionRange
 import com.razumly.mvp.eventSearch.displayLabel
 import com.razumly.mvp.eventSearch.isRentalIntervalInPast
 import com.razumly.mvp.eventSearch.isRangeCoveredByRentalAvailability
+import com.razumly.mvp.eventSearch.isRentalSelectionValidForAvailabilitySnapshot
 import com.razumly.mvp.eventSearch.rangeOverlapsBusyBlockOnDate
-import com.razumly.mvp.eventSearch.rangesOverlap
+import com.razumly.mvp.eventSearch.rentalAvailabilityFetchWindowForDate
+import com.razumly.mvp.eventSearch.rentalSelectionOverlapsRange
 import com.razumly.mvp.eventSearch.resolveRentalSelection
 import com.razumly.mvp.eventSearch.resolvedRentalTimeZone
 import com.razumly.mvp.eventSearch.toRentalDayIndex
@@ -117,12 +123,20 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val startingProductCheckoutId by component.startingProductCheckoutId.collectAsState()
     val rentalFieldOptions by component.rentalFieldOptions.collectAsState()
     val rentalBusyBlocks by component.rentalBusyBlocks.collectAsState()
+    val loadedRentalAvailabilityWindow by component.loadedRentalAvailabilityWindow.collectAsState()
     val isLoadingOrganization by component.isLoadingOrganization.collectAsState()
     val isLoadingEvents by component.isLoadingEvents.collectAsState()
     val isLoadingTeams by component.isLoadingTeams.collectAsState()
+    val canLoadMoreEvents by component.canLoadMoreEvents.collectAsState()
+    val canLoadMoreTeams by component.canLoadMoreTeams.collectAsState()
+    val isLoadingMoreEvents by component.isLoadingMoreEvents.collectAsState()
+    val isLoadingMoreTeams by component.isLoadingMoreTeams.collectAsState()
     val isLoadingProducts by component.isLoadingProducts.collectAsState()
     val isLoadingReviews by component.isLoadingReviews.collectAsState()
+    val canLoadMoreReviews by component.canLoadMoreReviews.collectAsState()
+    val isLoadingMoreReviews by component.isLoadingMoreReviews.collectAsState()
     val isMutatingReview by component.isMutatingReview.collectAsState()
+    val reviewSaveStatus by component.reviewSaveStatus.collectAsState()
     val isLoadingRentals by component.isLoadingRentals.collectAsState()
     val billingAddressPrompt by component.billingAddressPrompt.collectAsState()
     val currentUser by component.currentUser.collectAsState()
@@ -131,6 +145,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val loadingTeamMemberComplianceId by component.loadingTeamMemberComplianceId.collectAsState()
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val webSignaturePrompt by component.webSignaturePrompt.collectAsState()
+    val teamSignatureSyncProgress by component.teamSignatureSyncProgress.collectAsState()
     val discountCodePrompt by component.discountCodePrompt.collectAsState()
     val isReservingRental by component.isReservingRental.collectAsState()
     val completedRentalReservation by component.completedRentalReservation.collectAsState()
@@ -161,6 +176,10 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     }
     val today = remember(timeZone) { Clock.System.now().toLocalDateTime(timeZone).date }
     var selectedRentalDate by remember { mutableStateOf(today) }
+    val rentalAvailabilityWindow = remember(selectedRentalDate, timeZone) {
+        rentalAvailabilityFetchWindowForDate(selectedRentalDate, timeZone)
+    }
+    val isRentalAvailabilityCurrent = loadedRentalAvailabilityWindow == rentalAvailabilityWindow
     var rentalSelections by remember { mutableStateOf<List<RentalSelectionDraft>>(emptyList()) }
     var nextRentalSelectionId by remember { mutableStateOf(1L) }
     var rentalDetailsStep by remember { mutableStateOf(RentalDetailsStep.BUILDER) }
@@ -174,9 +193,23 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
             )
         }
     }
-    val validResolvedSelections = resolvedSelections
-    val invalidSelectionCount = remember(rentalSelections, resolvedSelections) {
-        rentalSelections.size - resolvedSelections.size
+    val validResolvedSelections = remember(
+        resolvedSelections,
+        loadedRentalAvailabilityWindow,
+        rentalBusyBlocks,
+    ) {
+        resolvedSelections.filter { selection ->
+            isRentalSelectionValidForAvailabilitySnapshot(
+                fieldId = selection.field.id,
+                start = selection.startInstant,
+                end = selection.endInstant,
+                availabilityWindow = loadedRentalAvailabilityWindow,
+                busyBlocks = rentalBusyBlocks,
+            )
+        }
+    }
+    val invalidSelectionCount = remember(rentalSelections, validResolvedSelections) {
+        rentalSelections.size - validResolvedSelections.size
     }
     val totalRentalPriceCents = remember(validResolvedSelections) {
         validResolvedSelections.sumOf { resolved -> resolved.totalPriceCents }
@@ -275,9 +308,13 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val organizationCanReserveRentals = organization?.let { org ->
         !org.publicSlug.isNullOrBlank() && org.publicPageEnabled
     } == true
-    val canGoToConfirmation = validResolvedSelections.isNotEmpty() &&
+    val canGoToConfirmation = isRentalAvailabilityCurrent &&
+        !isLoadingRentals &&
+        validResolvedSelections.isNotEmpty() &&
         invalidSelectionCount == 0
     val canContinueRental = organizationCanReserveRentals &&
+        isRentalAvailabilityCurrent &&
+        !isLoadingRentals &&
         rentalStartInstant != null &&
         rentalEndInstant != null &&
         selectedFieldIdsForCreate.isNotEmpty() &&
@@ -287,10 +324,11 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val rentalValidationMessage = when {
         organization == null -> "Organization is not available."
         !organizationCanReserveRentals -> "This organization needs a public rental checkout before resources can be reserved."
-        isLoadingRentals && rentalFieldOptions.isEmpty() -> "Loading resources and rental slots..."
+        isLoadingRentals -> "Loading resources and rental slots..."
+        !isRentalAvailabilityCurrent -> "Availability could not be loaded for this week. Try again."
         rentalFieldOptions.isEmpty() -> "No resources are configured for this organization."
         rentalSelections.isEmpty() -> "Tap any available 30-minute cell to add a rental selection."
-        invalidSelectionCount > 0 -> "One or more selections are outside available rental slot ranges."
+        invalidSelectionCount > 0 -> "One or more selections are outside loaded availability or overlap an unavailable time."
         else -> null
     }
 
@@ -311,9 +349,41 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
         }
     }
 
-    LaunchedEffect(selectedTab, organization?.id) {
+    LaunchedEffect(
+        selectedTab,
+        organization?.id,
+        rentalAvailabilityWindow.start,
+        rentalAvailabilityWindow.end,
+    ) {
         if (selectedTab == OrganizationDetailTab.RENTALS && organization != null) {
-            component.refreshRentals(force = true)
+            component.refreshRentals(
+                rangeStart = rentalAvailabilityWindow.start,
+                rangeEnd = rentalAvailabilityWindow.end,
+                force = true,
+            )
+        }
+    }
+
+    LaunchedEffect(rentalAvailabilityWindow.start, rentalAvailabilityWindow.end) {
+        rentalDetailsStep = RentalDetailsStep.BUILDER
+    }
+
+    LaunchedEffect(
+        loadedRentalAvailabilityWindow,
+        rentalAvailabilityWindow,
+        isLoadingRentals,
+        rentalFieldOptions,
+        rentalBusyBlocks,
+        timeZone,
+    ) {
+        if (!isLoadingRentals && loadedRentalAvailabilityWindow == rentalAvailabilityWindow) {
+            rentalSelections = retainRentalSelectionsCoveredBySnapshot(
+                selections = rentalSelections,
+                fieldOptions = rentalFieldOptions,
+                availabilityWindow = rentalAvailabilityWindow,
+                busyBlocks = rentalBusyBlocks,
+                timeZone = timeZone,
+            )
         }
     }
 
@@ -438,9 +508,13 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                     OrganizationReviewsTabContent(
                         payload = reviews,
                         isLoading = isLoadingReviews,
+                        canLoadMore = canLoadMoreReviews,
+                        isLoadingMore = isLoadingMoreReviews,
                         isMutating = isMutatingReview,
+                        reviewSaveStatus = reviewSaveStatus,
                         bottomPadding = bottomPadding,
                         onRefresh = { component.refreshReviews(force = true) },
+                        onLoadMore = component::loadMoreReviews,
                         onSave = component::saveReview,
                         onDelete = component::deleteReview,
                         onReport = component::reportReview,
@@ -452,9 +526,12 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                     EventsTabContent(
                         events = events,
                         isLoading = isLoadingEvents,
+                        canLoadMore = canLoadMoreEvents,
+                        isLoadingMore = isLoadingMoreEvents,
                         bottomPadding = bottomPadding,
                         organizationLogoId = organization?.logoId,
                         onEventClick = component::viewEvent,
+                        onLoadMore = component::loadMoreEvents,
                     )
                 }
 
@@ -462,8 +539,11 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                     TeamsTabContent(
                         teams = teams,
                         isLoading = isLoadingTeams,
+                        canLoadMore = canLoadMoreTeams,
+                        isLoadingMore = isLoadingMoreTeams,
                         bottomPadding = bottomPadding,
                         onTeamClick = { team -> selectedTeam = team },
+                        onLoadMore = component::loadMoreTeams,
                     )
                 }
 
@@ -486,17 +566,15 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                             },
                         )
                     } else if (rentalDetailsStep == RentalDetailsStep.BUILDER) {
-                        val selectionsForCurrentDate = remember(rentalSelections, selectedRentalDate) {
-                            rentalSelections.filter { selection -> selection.date == selectedRentalDate }
-                        }
                         RentalDetailsContent(
                             selectedDate = selectedRentalDate,
                             fieldOptions = rentalFieldOptions,
                             busyBlocks = rentalBusyBlocks,
-                            selectionsForSelectedDate = selectionsForCurrentDate,
+                            selections = rentalSelections,
                             allSelectionCount = rentalSelections.size,
                             totalPriceCents = totalRentalPriceCents,
                             isLoadingFields = isLoadingRentals,
+                            isAvailabilityInteractive = isRentalAvailabilityCurrent && !isLoadingRentals,
                             bottomPadding = bottomPadding,
                             canGoNext = canGoToConfirmation,
                             validationMessage = rentalValidationMessage,
@@ -504,6 +582,9 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                                 selectedRentalDate = selectedDate
                             },
                             onCreateSelection = { fieldId, startMinutes ->
+                                if (!isRentalAvailabilityCurrent || isLoadingRentals) {
+                                    return@RentalDetailsContent
+                                }
                                 val endMinutes = startMinutes + SLOT_INTERVAL_MINUTES
                                 val fieldOption = rentalFieldOptions.firstOrNull { option ->
                                     option.field.id == fieldId
@@ -511,12 +592,12 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                                 val fieldTimeZone = fieldOption?.resolvedRentalTimeZone(timeZone) ?: timeZone
                                 val overlapsSelection = rentalSelections.any { selection ->
                                     selection.fieldId == fieldId &&
-                                        selection.date == selectedRentalDate &&
-                                        rangesOverlap(
-                                            selection.startMinutes,
-                                            selection.endMinutes,
-                                            startMinutes,
-                                            endMinutes,
+                                        rentalSelectionOverlapsRange(
+                                            selection = selection,
+                                            date = selectedRentalDate,
+                                            startMinutes = startMinutes,
+                                            endMinutes = endMinutes,
+                                            timeZone = fieldTimeZone,
                                         )
                                 }
                                 val overlapsBusyBlock = rentalBusyBlocks.any { block ->
@@ -556,6 +637,9 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                                 }
                             },
                             onCanUpdateSelection = { selectionId, startMinutes, endMinutes ->
+                                if (!isRentalAvailabilityCurrent || isLoadingRentals) {
+                                    return@RentalDetailsContent false
+                                }
                                 val targetSelection = rentalSelections.firstOrNull { selection ->
                                     selection.id == selectionId
                                 } ?: return@RentalDetailsContent false
@@ -573,6 +657,9 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                                 )
                             },
                             onUpdateSelection = { selectionId, startMinutes, endMinutes ->
+                                if (!isRentalAvailabilityCurrent || isLoadingRentals) {
+                                    return@RentalDetailsContent false
+                                }
                                 val targetSelection = rentalSelections.firstOrNull { selection ->
                                     selection.id == selectionId
                                 }
@@ -702,6 +789,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
             prompt = prompt,
             onConfirm = component::confirmTextSignature,
             onDismiss = component::dismissTextSignature,
+            progressMessage = teamSignatureSyncProgress?.message,
         )
     }
 
@@ -715,7 +803,11 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
         } else {
             null
         }
-        val description = listOfNotNull(progressLabel, signerLabel).joinToString(" - ")
+        val description = listOfNotNull(
+            progressLabel,
+            signerLabel,
+            teamSignatureSyncProgress?.message,
+        ).joinToString(" - ")
 
         EmbeddedWebModal(
             title = prompt.step?.title ?: "Sign required document",
@@ -724,6 +816,28 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
             onDismiss = component::dismissWebSignaturePrompt,
         )
     }
+}
+
+internal fun retainRentalSelectionsCoveredBySnapshot(
+    selections: List<RentalSelectionDraft>,
+    fieldOptions: List<RentalFieldOption>,
+    availabilityWindow: RentalAvailabilityWindow,
+    busyBlocks: List<RentalBusyBlock>,
+    timeZone: TimeZone,
+): List<RentalSelectionDraft> = selections.filter { selection ->
+    val resolvedSelection = resolveRentalSelection(
+        selection = selection,
+        fieldOptions = fieldOptions,
+        timeZone = timeZone,
+    ) ?: return@filter false
+
+    isRentalSelectionValidForAvailabilitySnapshot(
+        fieldId = resolvedSelection.field.id,
+        start = resolvedSelection.startInstant,
+        end = resolvedSelection.endInstant,
+        availabilityWindow = availabilityWindow,
+        busyBlocks = busyBlocks,
+    )
 }
 
 private fun OrganizationDetailTab.label(): String {
@@ -1155,11 +1269,14 @@ private fun ProductPreviewCard(
 private fun EventsTabContent(
     events: List<Event>,
     isLoading: Boolean,
+    canLoadMore: Boolean,
+    isLoadingMore: Boolean,
     bottomPadding: androidx.compose.ui.unit.Dp,
     organizationLogoId: String?,
     onEventClick: (Event) -> Unit,
+    onLoadMore: () -> Unit,
 ) {
-    if (isLoading) {
+    if (isLoading && events.isEmpty()) {
         EmptyState(message = "Loading events...")
         return
     }
@@ -1189,6 +1306,17 @@ private fun EventsTabContent(
                     )
                 }
             }
+            if (canLoadMore) {
+                item(key = "load-more-events") {
+                    OutlinedButton(
+                        onClick = onLoadMore,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isLoadingMore && !isLoading,
+                    ) {
+                        Text(if (isLoadingMore) "Loading more…" else "Load more events")
+                    }
+                }
+            }
         }
     }
 }
@@ -1197,10 +1325,13 @@ private fun EventsTabContent(
 private fun TeamsTabContent(
     teams: List<TeamWithPlayers>,
     isLoading: Boolean,
+    canLoadMore: Boolean,
+    isLoadingMore: Boolean,
     bottomPadding: androidx.compose.ui.unit.Dp,
     onTeamClick: (TeamWithPlayers) -> Unit,
+    onLoadMore: () -> Unit,
 ) {
-    if (isLoading) {
+    if (isLoading && teams.isEmpty()) {
         EmptyState(message = "Loading teams...")
         return
     }
@@ -1220,6 +1351,17 @@ private fun TeamsTabContent(
                     team = team,
                     modifier = Modifier.clickable { onTeamClick(team) },
                 )
+            }
+            if (canLoadMore) {
+                item(key = "load-more-teams") {
+                    OutlinedButton(
+                        onClick = onLoadMore,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isLoadingMore && !isLoading,
+                    ) {
+                        Text(if (isLoadingMore) "Loading more…" else "Load more teams")
+                    }
+                }
             }
         }
     }

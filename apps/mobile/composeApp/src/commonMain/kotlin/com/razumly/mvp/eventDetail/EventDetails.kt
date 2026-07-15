@@ -80,6 +80,7 @@ import com.razumly.mvp.core.data.dataTypes.officialPositionSummary
 import com.razumly.mvp.core.data.dataTypes.positionSummary
 import com.razumly.mvp.core.data.dataTypes.toLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
+import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.dataTypes.withLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.withTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
@@ -93,6 +94,8 @@ import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
@@ -120,7 +123,7 @@ import dev.chrisbanes.haze.ExperimentalHazeApi
 import io.github.aakira.napier.Napier
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import io.github.ismoy.imagepickerkmp.domain.models.MimeType
-import io.github.ismoy.imagepickerkmp.presentation.ui.components.GalleryPickerLauncher
+import io.github.ismoy.imagepickerkmp.features.imagepicker.ui.rememberImagePickerKMP
 import io.ktor.http.Url
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -156,6 +159,12 @@ private val readOnlyNameListSpacing = 4.dp
 private val editableOfficialStaffListHeight = 160.dp * STAFF_LAZY_LIST_VISIBLE_COUNT
 private val editableHostStaffListHeight = 130.dp * STAFF_LAZY_LIST_VISIBLE_COUNT
 
+internal fun isEventInclusivePriceReady(
+    editView: Boolean,
+    manualPaymentsEnabled: Boolean,
+    isQuoteConfirmed: Boolean,
+): Boolean = !editView || manualPaymentsEnabled || isQuoteConfirmed
+
 private fun kotlin.time.Instant.reinterpretSystemLocalSelectionIn(timeZone: TimeZone): kotlin.time.Instant {
     val local = toLocalDateTime(TimeZone.currentSystemDefault())
     return LocalDateTime(local.date, local.time).toInstant(timeZone)
@@ -182,6 +191,7 @@ fun EventDetails(
     navPadding: PaddingValues = PaddingValues(),
     topInset: Dp = 0.dp,
     isNewEvent: Boolean,
+    showValidationErrors: Boolean = true,
     rentalTimeLocked: Boolean = false,
     onHostCreateAccount: () -> Unit,
     onOpenLocationMap: () -> Unit,
@@ -197,6 +207,7 @@ fun EventDetails(
     leagueTimeSlots: List<TimeSlot> = emptyList(),
     availableRentalResources: List<RentalResourceOption> = emptyList(),
     selectedRentalResourceIds: Set<String> = emptySet(),
+    rentalResourceSelectionLocked: Boolean = false,
     onRentalResourceSelectionChange: (String, Boolean) -> Unit = { _, _ -> },
     leagueScoringConfig: LeagueScoringConfigDTO = LeagueScoringConfigDTO(),
     organizationTemplates: List<OrganizationTemplateDocument> = emptyList(),
@@ -222,6 +233,9 @@ fun EventDetails(
     onLeagueScoringConfigChange: (LeagueScoringConfigDTO) -> Unit = {},
     userSuggestions: List<UserData> = emptyList(),
     onSearchUsers: (String) -> Unit = {},
+    onEnsureUserByEmail: suspend (String) -> Result<UserData> = {
+        Result.failure(IllegalStateException("Invite by email is not supported."))
+    },
     onAddPendingStaffInvite: suspend (
         firstName: String,
         lastName: String,
@@ -254,8 +268,8 @@ fun EventDetails(
     onUpdateInstallmentDueDate: (Int, String) -> Unit = { _, _ -> },
     onAddInstallmentRow: () -> Unit = {},
     onRemoveInstallmentRow: (Int) -> Unit = {},
-    onUploadSelected: (GalleryPhotoResult) -> Unit,
-    onDeleteImage: (String) -> Unit,
+    onUploadSelected: (GalleryPhotoResult, () -> Unit) -> Unit,
+    onDeleteImage: (String, () -> Unit) -> Unit,
     currentUserForHostActions: UserData? = null,
     onHostMessageUser: (UserData) -> Unit = {},
     onHostSendFriendRequest: (UserData) -> Unit = {},
@@ -263,10 +277,16 @@ fun EventDetails(
     onHostUnfollowUser: (UserData) -> Unit = {},
     onHostBlockUser: (UserData, Boolean) -> Unit = { _, _ -> },
     onHostUnblockUser: (UserData) -> Unit = {},
-    onHostFollowOrganization: (Organization) -> Unit = {},
     onMapRevealCenterChange: (Offset) -> Unit = {},
     onFloatingDockVisibilityChange: (Boolean) -> Unit = {},
     onValidationChange: (Boolean, List<String>) -> Unit = { _, _ -> },
+    quoteInclusivePrice: suspend (
+        InclusivePriceQuoteDirection,
+        Int,
+        String?,
+    ) -> Result<InclusivePriceQuote> = { _, _, _ ->
+        Result.failure(UnsupportedOperationException("Inclusive price quotes are unavailable."))
+    },
     heroTopControls: @Composable BoxScope.() -> Unit = {},
     modifier: Modifier = Modifier,
     joinButton: @Composable (isValid: Boolean) -> Unit
@@ -282,7 +302,6 @@ fun EventDetails(
     var installmentDueDatePickerIndex by remember { mutableStateOf<Int?>(null) }
     var divisionInstallmentDueDatePickerIndex by remember { mutableStateOf<Int?>(null) }
     var showImageSelector by rememberSaveable { mutableStateOf(false) }
-    var showUploadImagePicker by rememberSaveable { mutableStateOf(false) }
     // Validation states
     var isPriceValid by remember { mutableStateOf(editEvent.priceCents >= 0) }
     var isMaxParticipantsValid by remember { mutableStateOf(true) }
@@ -307,6 +326,15 @@ fun EventDetails(
     var validationErrors by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val coroutineScope = rememberCoroutineScope()
+    val eventImagePicker = rememberImagePickerKMP()
+    val launchEventImagePicker = remember(eventImagePicker) {
+        {
+            eventImagePicker.launchGallery(
+                allowMultiple = false,
+                mimeTypes = listOf(MimeType.IMAGE_ALL),
+            )
+        }
+    }
     val selectedUsersById = remember { mutableStateMapOf<String, UserData>() }
     var staffSearchQuery by rememberSaveable { mutableStateOf("") }
     var staffInviteFirstName by rememberSaveable { mutableStateOf("") }
@@ -500,6 +528,26 @@ fun EventDetails(
     var divisionEditorDefaults by remember(editEvent.id) {
         mutableStateOf(divisionEditorBaseState)
     }
+    val inclusivePriceEditorKey = remember(
+        editEvent.id,
+        editEvent.singleDivision,
+        divisionEditor.editingId,
+    ) {
+        if (editEvent.singleDivision) {
+            "event-price:${editEvent.id}:single"
+        } else {
+            "event-price:${editEvent.id}:division:${divisionEditor.editingId.orEmpty().ifBlank { "new" }}"
+        }
+    }
+    var confirmedInclusivePriceEditorKey by remember(editEvent.id) {
+        mutableStateOf<String?>(null)
+    }
+    val isInclusivePriceQuoteConfirmed = isEventInclusivePriceReady(
+        editView = editView,
+        manualPaymentsEnabled = editEvent.usesManualRegistrationPayments(),
+        isQuoteConfirmed = confirmedInclusivePriceEditorKey == inclusivePriceEditorKey,
+    )
+    val effectiveIsValid = isValid && isInclusivePriceQuoteConfirmed
     LaunchedEffect(editEvent.id, divisionEditorBaseState) {
         divisionEditorDefaults = divisionEditorBaseState
         val editorIsIdle = divisionEditor.editingId.isNullOrBlank() &&
@@ -923,6 +971,12 @@ fun EventDetails(
         )
     }
     fun handleSaveDivisionDetail() {
+        if (!isInclusivePriceQuoteConfirmed) {
+            divisionEditor = divisionEditor.copy(
+                error = "Wait for the online price quote before saving this division.",
+            )
+            return
+        }
         val normalizedGender = divisionEditor.gender.uppercase()
         val normalizedSkillDivisionTypeId = divisionEditor.skillDivisionTypeId.normalizeDivisionIdentifier()
         val normalizedAgeDivisionTypeId = divisionEditor.ageDivisionTypeId.normalizeDivisionIdentifier()
@@ -1505,6 +1559,7 @@ fun EventDetails(
         isColorLoaded,
         isNewEvent,
         scheduleTimeLocked,
+        isInclusivePriceQuoteConfirmed,
     ) {
         // Coalesce rapid keystrokes so validation work does not contend with typing.
         delay(80)
@@ -1541,12 +1596,16 @@ fun EventDetails(
         isFixedEndDateRangeValid = result.isFixedEndDateRangeValid
         isPaymentPlansValid = result.isPaymentPlansValid
         paymentPlanValidationErrors = result.paymentPlanValidationErrors
-        validationErrors = result.validationErrors
+        validationErrors = if (isInclusivePriceQuoteConfirmed) {
+            result.validationErrors
+        } else {
+            result.validationErrors + "Wait for the online price quote before continuing."
+        }
         isValid = result.isValid
     }
 
-    LaunchedEffect(isValid, validationErrors) {
-        onValidationChange(isValid, validationErrors)
+    LaunchedEffect(effectiveIsValid, validationErrors) {
+        onValidationChange(effectiveIsValid, validationErrors)
     }
 
     LaunchedEffect(lazyListState) {
@@ -2011,7 +2070,7 @@ fun EventDetails(
         }
         listOfNotNull(fieldSummary, slotSummary).joinToString(" - ")
     }
-    val showSectionMissingBadges = isNewEvent && editView
+    val showSectionMissingBadges = isNewEvent && editView && showValidationErrors
     val basicsMissingRequiredCount = if (showSectionMissingBadges) {
         listOf(
             !isSportValid,
@@ -2067,7 +2126,6 @@ fun EventDetails(
         onHostUnfollowUser,
         onHostBlockUser,
         onHostUnblockUser,
-        onHostFollowOrganization,
     ) {
         EventDetailsReadOnlyActions(
             onOpenLocationMap = onOpenLocationMap,
@@ -2077,7 +2135,6 @@ fun EventDetails(
             onUnfollowUser = onHostUnfollowUser,
             onBlockUser = onHostBlockUser,
             onUnblockUser = onHostUnblockUser,
-            onFollowOrganization = onHostFollowOrganization,
         )
     }
     val editActions = remember(
@@ -2317,10 +2374,11 @@ fun EventDetails(
                     state = EventDetailsHeroState(
                         editView = editView,
                         isNewEvent = isNewEvent,
+                        showValidationErrors = showValidationErrors,
                         event = event,
                         editEvent = editEvent,
                         eventNameInput = eventNameInput,
-                        isValid = isValid,
+                        isValid = effectiveIsValid,
                         isLocationValid = isLocationValid,
                         isColorLoaded = isColorLoaded,
                         heroSpacerHeight = heroSpacerHeight,
@@ -2359,6 +2417,7 @@ fun EventDetails(
                         sports = sports,
                         eventTagOptions = eventTagOptions,
                         isSportValid = isSportValid,
+                        showValidationErrors = showValidationErrors,
                         scheduleTimeLocked = scheduleTimeLocked,
                         rentalTimeLocked = rentalTimeLocked,
                     ),
@@ -2389,6 +2448,7 @@ fun EventDetails(
                         registrationSummary = registrationSummary,
                         refundSummary = refundSummary,
                         isTeamSizeValid = isTeamSizeValid,
+                        showValidationErrors = showValidationErrors,
                         isOrganizationEvent = isOrganizationEvent,
                         organizationTemplatesLoading = organizationTemplatesLoading,
                         organizationTemplatesError = organizationTemplatesError,
@@ -2581,7 +2641,9 @@ fun EventDetails(
                                 divisionInputsExpanded = divisionInputsExpanded,
                                 hostHasAccount = hostHasAccount,
                                 isNewEvent = isNewEvent,
+                                showValidationErrors = showValidationErrors,
                                 addSelfToEvent = addSelfToEvent,
+                                inclusivePriceEditorKey = inclusivePriceEditorKey,
                             ),
                             actions = EventDetailsDivisionEditorFormActions(
                                 onEditEvent = onEditEvent,
@@ -2602,6 +2664,21 @@ fun EventDetails(
                                 onAddSelfToEventChange = { addSelfToEvent = it },
                                 onAddCurrentUser = onAddCurrentUser,
                                 onDivisionInputsExpandedChange = { divisionInputsExpanded = it },
+                                quoteInclusivePrice = quoteInclusivePrice,
+                                onPriceQuoteConfirmationChange = { isConfirmed ->
+                                    if (isConfirmed) {
+                                        confirmedInclusivePriceEditorKey = inclusivePriceEditorKey
+                                    } else if (confirmedInclusivePriceEditorKey == inclusivePriceEditorKey) {
+                                        confirmedInclusivePriceEditorKey = null
+                                    }
+                                    if (!isConfirmed) {
+                                        onValidationChange(
+                                            false,
+                                            (validationErrors +
+                                                "Wait for the online price quote before continuing.").distinct(),
+                                        )
+                                    }
+                                },
                             ),
                         )
 
@@ -2612,7 +2689,9 @@ fun EventDetails(
                             divisionEditorReady = divisionEditorReady,
                             isSkillLevelValid = isSkillLevelValid,
                             isLeaguePlayoffTeamsValid = isLeaguePlayoffTeamsValid,
+                            showValidationErrors = showValidationErrors,
                             divisionDetails = divisionDetailsForSettings,
+                            isPriceQuoteConfirmed = isInclusivePriceQuoteConfirmed,
                         ),
                         actions = EventDetailsDivisionEditorActions(
                             onDivisionEditorChange = { divisionEditor = it },
@@ -2666,6 +2745,7 @@ fun EventDetails(
                         leagueTimeSlots = leagueTimeSlots,
                         availableRentalResources = availableRentalResources,
                         selectedRentalResourceIds = selectedRentalResourceIds,
+                        rentalResourceSelectionLocked = rentalResourceSelectionLocked,
                         eventTimeZone = editEventTimeZone,
                         slotErrors = leagueSlotErrors,
                         slotEditorEnabled = slotEditorEnabled,
@@ -2677,6 +2757,7 @@ fun EventDetails(
                         allowLocalResourceCreationWithRentalResources = allowLocalResourceCreationWithRentalResources,
                         isFieldCountValid = isFieldCountValid,
                         isLeagueSlotsValid = isLeagueSlotsValid,
+                        showValidationErrors = showValidationErrors,
                         scheduleTimeLocked = scheduleTimeLocked,
                     ),
                     actions = EventDetailsScheduleActions(
@@ -2804,21 +2885,26 @@ fun EventDetails(
         initialDate = divisionInstallmentInitialDate,
     )
 
-    // ImagePickerKMP Integration
-    if (showUploadImagePicker) {
-        GalleryPickerLauncher(
-            onPhotosSelected = { photos ->
-            showUploadImagePicker = false
-            if (photos.isNotEmpty()) {
-                onUploadSelected(photos.first())
+    LaunchedEffect(eventImagePicker.result) {
+        when (val outcome = resolveEventImagePickerOutcome(eventImagePicker.result)) {
+            EventImagePickerOutcome.Ignore -> Unit
+            is EventImagePickerOutcome.Upload -> {
+                eventImagePicker.reset()
+                onUploadSelected(
+                    outcome.photo,
+                    launchEventImagePicker,
+                )
             }
-        }, onError = { error ->
-            Napier.d("Error uploading image: $error")
-            showUploadImagePicker = false
-        }, onDismiss = {
-            showUploadImagePicker = false
-        }, allowMultiple = false, mimeTypes = listOf(MimeType.IMAGE_ALL)
-        )
+            is EventImagePickerOutcome.Failure -> {
+                eventImagePicker.reset()
+                popupHandler.showPopup(
+                    eventImageRetryError(
+                        message = outcome.message,
+                        onRetry = launchEventImagePicker,
+                    ),
+                )
+            }
+        }
     }
 
     var showImageDelete by remember { mutableStateOf(false) }
@@ -2858,7 +2944,8 @@ fun EventDetails(
                     imageIds = (imageIds + editEvent.imageId)
                         .filter(String::isNotBlank)
                         .distinct(),
-                    onUploadSelected = { showUploadImagePicker = true },
+                    initialSelectedImageId = editEvent.imageId,
+                    onUploadSelected = launchEventImagePicker,
                     onDeleteImage = {
                         showImageDelete = true
                         deleteImage = it
@@ -2878,8 +2965,9 @@ fun EventDetails(
                     text = { Text("Are you sure you want to delete this image?") },
                     confirmButton = {
                         TextButton(onClick = {
-                            onDeleteImage(deleteImage)
-                            onEditEvent { copy(imageId = "") }
+                            onDeleteImage(deleteImage) {
+                                onEditEvent { copy(imageId = "") }
+                            }
                             showImageDelete = false
                         }) {
                             Text("Delete")

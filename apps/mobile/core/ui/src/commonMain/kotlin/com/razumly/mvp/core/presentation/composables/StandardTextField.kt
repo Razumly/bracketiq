@@ -2,12 +2,12 @@ package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,7 +16,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
@@ -27,9 +26,14 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
@@ -150,12 +154,10 @@ fun StandardTextField(
         )
 
     val usesPasswordKeyboard = isPassword || keyboardType == "password"
-    val keyboardTypeValue = when {
-        usesPasswordKeyboard -> KeyboardType.Password
-        keyboardType == "email" -> KeyboardType.Email
-        keyboardType == "number" || keyboardType == "numbers" || keyboardType == "money" -> KeyboardType.Number
-        else -> KeyboardType.Text
-    }
+    val keyboardTypeValue = resolveComposeKeyboardType(
+        keyboardType = keyboardType,
+        usesPasswordKeyboard = usesPasswordKeyboard,
+    )
 
     val visualTransformation = when {
         isPassword -> PasswordVisualTransformation()
@@ -287,14 +289,23 @@ fun StandardTextField(
 
     if (readOnly && onTap != null) {
         Box(
-            modifier = finalModifier.clickable(
-                enabled = enabled,
-                indication = null,
-                interactionSource = remember { MutableInteractionSource() },
-            ) {
-                onTap()
-                focusManager.clearFocus()
-            }
+            modifier = finalModifier
+                .semantics {
+                    contentDescription = label.ifBlank { placeholder.ifBlank { value } }
+                    if (value.isNotBlank() && value != label) {
+                        stateDescription = value
+                    }
+                    if (isError && supportingText.isNotBlank()) {
+                        error(supportingText)
+                    }
+                }
+                .clickable(
+                    enabled = enabled,
+                    role = Role.Button,
+                ) {
+                    onTap()
+                    focusManager.clearFocus()
+                },
         ) {
             OutlinedTextField(
                 value = value,
@@ -306,7 +317,7 @@ fun StandardTextField(
                 } else {
                     null
                 },
-                enabled = false,
+                enabled = enabled,
                 readOnly = true,
                 textStyle = finalTextStyle,
                 visualTransformation = visualTransformation,
@@ -325,6 +336,19 @@ fun StandardTextField(
                 singleLine = true,
                 shape = fieldShape,
                 colors = colors,
+            )
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(fieldShape)
+                    .clickable(
+                        enabled = enabled,
+                        role = Role.Button,
+                    ) {
+                        onTap()
+                        focusManager.clearFocus()
+                    }
+                    .clearAndSetSemantics {},
             )
         }
         return

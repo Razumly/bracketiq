@@ -2,7 +2,6 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
-import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 
@@ -59,7 +58,6 @@ internal data class EventDetailsReadOnlyActions(
     val onUnfollowUser: (UserData) -> Unit = {},
     val onBlockUser: (UserData, Boolean) -> Unit = { _, _ -> },
     val onUnblockUser: (UserData) -> Unit = {},
-    val onFollowOrganization: (Organization) -> Unit = {},
 )
 
 internal data class EventDetailsEditActions(

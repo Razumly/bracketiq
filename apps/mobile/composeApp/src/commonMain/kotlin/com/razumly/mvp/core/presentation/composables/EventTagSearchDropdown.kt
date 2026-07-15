@@ -23,7 +23,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -61,7 +69,9 @@ fun EventTagSearchDropdown(
     maxVisibleTags: Int = 5,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    var hasFocus by remember { mutableStateOf(false) }
+    var suppressFocusedExpansion by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val focusRequester = remember { FocusRequester() }
     val normalizedQuery = value.trim().lowercase()
     val visibleTags = remember(tags, selectedTagSlugs, normalizedQuery, hideSelectedOptions, excludedTagSlugs, maxVisibleTags) {
         tags
@@ -124,8 +134,10 @@ fun EventTagSearchDropdown(
         if (clearQueryOnSelect) {
             onValueChange("")
         }
-        if (collapseOnSelect && !hasFocus) {
+        if (collapseOnSelect) {
+            suppressFocusedExpansion = true
             expanded = false
+            focusManager.clearFocus()
         } else {
             expanded = true
         }
@@ -137,8 +149,10 @@ fun EventTagSearchDropdown(
         if (clearQueryOnSelect) {
             onValueChange("")
         }
-        if (collapseOnSelect && !hasFocus) {
+        if (collapseOnSelect) {
+            suppressFocusedExpansion = true
             expanded = false
+            focusManager.clearFocus()
         } else {
             expanded = true
         }
@@ -148,6 +162,7 @@ fun EventTagSearchDropdown(
         StandardTextField(
             value = value,
             onValueChange = {
+                suppressFocusedExpansion = false
                 onValueChange(it)
                 expanded = true
             },
@@ -166,14 +181,44 @@ fun EventTagSearchDropdown(
                     addTypedTag()
                 }
             },
-            onTap = { expanded = true },
+            onTap = {
+                suppressFocusedExpansion = false
+                expanded = true
+            },
             onFocusChanged = { isFocused ->
-                hasFocus = isFocused
-                if (isFocused) {
+                if (isFocused && !suppressFocusedExpansion) {
                     expanded = true
                 }
             },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(focusRequester)
+                .then(
+                    if (enabled) {
+                        Modifier.semantics {
+                            onClick {
+                                suppressFocusedExpansion = false
+                                expanded = true
+                                focusRequester.requestFocus()
+                                true
+                            }
+                        }
+                    } else {
+                        Modifier
+                    },
+                )
+                .pointerInput(enabled) {
+                    if (!enabled) return@pointerInput
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            if (event.changes.any { it.changedToDownIgnoreConsumed() }) {
+                                suppressFocusedExpansion = false
+                                expanded = true
+                            }
+                        }
+                    }
+                },
         )
         DropdownMenu(
             expanded = enabled && expanded,

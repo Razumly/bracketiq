@@ -10,6 +10,7 @@ import com.arkivanov.decompose.router.stack.childStack
 import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.push
 import com.arkivanov.decompose.value.Value
+import com.arkivanov.essenty.lifecycle.doOnDestroy
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.dataTypes.Bill
@@ -49,6 +50,7 @@ import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.PushDeviceTargetDebugStatus
 import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
+import com.razumly.mvp.core.data.repositories.RepositoryPage
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.IUserRepository
@@ -57,19 +59,21 @@ import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.network.apiBaseUrl
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
-import com.razumly.mvp.core.presentation.PaymentSheetOperation
-import com.razumly.mvp.core.presentation.PaymentSheetOperationHost
 import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
+import com.razumly.mvp.core.util.LoadingOperation
 import com.razumly.mvp.core.util.Platform
+import com.razumly.mvp.core.util.finishAllLoadingOperations
 import com.razumly.mvp.core.util.newId
+import com.razumly.mvp.core.util.trustedBoldSignSigningUrlOrNull
 import com.razumly.mvp.eventDetail.DiscountCodePromptState
 import io.github.aakira.napier.Napier
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import com.razumly.mvp.profile.profileDetails.ProfileDetailsComponent
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -148,7 +152,51 @@ data class ProfilePaymentPlansState(
     val isLoading: Boolean = false,
     val plans: List<ProfilePaymentPlan> = emptyList(),
     val error: String? = null,
+    val warning: String? = null,
 )
+
+private const val PROFILE_BILLS_PAGE_SIZE = 100
+private const val PROFILE_BILLS_MAX_PAGES = 100
+
+internal suspend fun loadAllProfileBills(
+    loadPage: suspend (limit: Int, offset: Int) -> Result<RepositoryPage<Bill>>,
+    isCurrent: () -> Boolean,
+    pageSize: Int = PROFILE_BILLS_PAGE_SIZE,
+    maxPages: Int = PROFILE_BILLS_MAX_PAGES,
+): Result<List<Bill>?> {
+    val normalizedPageSize = pageSize.coerceAtLeast(1)
+    val normalizedMaxPages = maxPages.coerceAtLeast(1)
+    val billsById = linkedMapOf<String, Bill>()
+    var offset = 0
+    var pageCount = 0
+
+    while (isCurrent()) {
+        if (pageCount >= normalizedMaxPages) {
+            return Result.failure(
+                IllegalStateException("Bill pagination exceeded the safe page limit."),
+            )
+        }
+        pageCount += 1
+        val pageResult = loadPage(normalizedPageSize, offset)
+        if (!isCurrent()) return Result.success(null)
+        val page = pageResult.getOrElse { return Result.failure(it) }
+        page.items.forEach { bill -> billsById[bill.id] = bill }
+
+        if (!page.pagination.hasMore) {
+            return Result.success(billsById.values.toList())
+        }
+
+        val nextOffset = page.pagination.nextOffset
+        if (nextOffset <= offset) {
+            return Result.failure(
+                IllegalStateException("Bill pagination did not advance beyond offset $offset."),
+            )
+        }
+        offset = nextOffset
+    }
+
+    return Result.success(null)
+}
 
 private data class ActiveBillPaymentAttempt(
     val checkoutOperationId: String,
@@ -161,11 +209,6 @@ private data class PendingChildTeamRegistrationPayment(
     val checkoutOperationId: String,
     val team: Team,
 )
-
-private enum class ProfileCheckoutOwner {
-    BILL_INSTALLMENT,
-    CHILD_TEAM_REGISTRATION,
-}
 
 data class ProfileMembership(
     val subscription: Subscription,
@@ -262,6 +305,52 @@ data class ProfileConnectionsState(
     val activeUserId: String? = null,
     val error: String? = null,
 )
+
+/**
+ * Identifies the most recent connection-search request so an older response can never
+ * replace results for the query currently shown to the user.
+ */
+internal class ConnectionSearchRequestTracker {
+    private var latestRequestId = 0L
+
+    fun begin(query: String): ConnectionSearchRequest {
+        latestRequestId += 1
+        return ConnectionSearchRequest(
+            id = latestRequestId,
+            query = query,
+        )
+    }
+
+    fun isCurrent(request: ConnectionSearchRequest, currentQuery: String): Boolean =
+        request.id == latestRequestId && request.query == currentQuery
+}
+
+internal data class ConnectionSearchRequest(
+    val id: Long,
+    val query: String,
+)
+
+internal class ConnectionRefreshRequestTracker {
+    private var latestRequestId = 0L
+
+    fun begin(): Long {
+        latestRequestId += 1
+        return latestRequestId
+    }
+
+    fun isCurrent(requestId: Long): Boolean = requestId == latestRequestId
+}
+
+internal class MyScheduleRefreshRequestTracker {
+    private var latestRequestId = 0L
+
+    fun begin(): Long {
+        latestRequestId += 1
+        return latestRequestId
+    }
+
+    fun isCurrent(requestId: Long): Boolean = requestId == latestRequestId
+}
 
 data class ProfileDocumentsState(
     val isLoading: Boolean = false,
@@ -389,6 +478,20 @@ internal fun discountPercentForFinalPrice(
     return (discountAmount * 100.0 / original).coerceIn(0.0, 100.0)
 }
 
+/**
+ * A requested profile document must resolve to exactly its own server-issued signing step.
+ * Returning all matches lets the caller distinguish missing and ambiguous server responses
+ * without ever falling back to a different document.
+ */
+internal fun matchingSignStepsForTemplate(
+    steps: List<SignStep>,
+    templateId: String,
+): List<SignStep> {
+    val requestedTemplateId = templateId.trim()
+    if (requestedTemplateId.isEmpty()) return emptyList()
+    return steps.filter { step -> step.templateId.trim() == requestedTemplateId }
+}
+
 data class ProfileMyScheduleState(
     val isLoading: Boolean = false,
     val events: List<Event> = emptyList(),
@@ -464,21 +567,6 @@ data class ProfileWebDocumentPromptState(
     @property:ObjCName(swiftName = "promptDescription")
     val description: String? = null,
 )
-
-/**
- * Resolves the signing response for one profile document. The profile document
- * is the user's explicit selection, so an absent or duplicated template must
- * not be substituted with another response item.
- */
-internal fun selectProfileDocumentSigningStep(
-    requestedTemplateId: String,
-    steps: List<SignStep>,
-): SignStep? {
-    val normalizedTemplateId = requestedTemplateId.trim().takeIf(String::isNotBlank) ?: return null
-    return steps
-        .filter { step -> step.templateId.trim() == normalizedTemplateId }
-        .singleOrNull()
-}
 
 interface ProfileComponent : IPaymentProcessor {
     val childStack: Value<ChildStack<*, Child>>
@@ -741,7 +829,8 @@ class DefaultProfileComponent(
 
     private val _activeBillPaymentId = MutableStateFlow<String?>(null)
     override val activeBillPaymentId = _activeBillPaymentId.asStateFlow()
-    private val checkoutOperationHost = PaymentSheetOperationHost<ProfileCheckoutOwner>()
+    private val checkoutSessionCoordinator = ProfileCheckoutSessionCoordinator()
+    private val checkoutLoadingOperations = mutableMapOf<String, LoadingOperation>()
     private var activeBillPaymentAttempt: ActiveBillPaymentAttempt? = null
 
     private val _activeMembershipActionId = MutableStateFlow<String?>(null)
@@ -762,6 +851,13 @@ class DefaultProfileComponent(
     private var loadingHandler: LoadingHandler? = null
     private var eventTemplatesJob: Job? = null
     private var discountTargetsJob: Job? = null
+    private var connectionsRefreshJob: Job? = null
+    private var connectionSearchJob: Job? = null
+    private val paymentPlansRefreshes = ProfilePaymentPlanRefreshCoordinator()
+    private val connectionsRefreshRequests = ConnectionRefreshRequestTracker()
+    private val connectionSearchRequests = ConnectionSearchRequestTracker()
+    private var myScheduleRefreshJob: Job? = null
+    private val myScheduleRefreshRequests = MyScheduleRefreshRequestTracker()
     private var childrenTabVisibilityUserId: String? = null
     private var pendingDocumentSyncJob: Job? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
@@ -777,6 +873,10 @@ class DefaultProfileComponent(
     )
 
     init {
+        lifecycle.doOnDestroy {
+            checkoutLoadingOperations.finishAllLoadingOperations()
+            paymentPlansRefreshes.cancel()
+        }
         scope.launch {
             billingRepository.observeDiscounts(ownerType = "USER").collect { discounts ->
                 _discountsState.value = _discountsState.value.copy(discounts = discounts)
@@ -812,24 +912,29 @@ class DefaultProfileComponent(
         scope.launch {
             paymentResult.collect { payment ->
                 if (payment == null) return@collect
-                val checkout = checkoutOperationHost.claimResult()
+                val checkout = checkoutSessionCoordinator.claimPaymentResult()
                 if (checkout == null) {
-                    Napier.w("Ignoring profile payment result without an active presented checkout.")
-                    clearPaymentResult()
-                    return@collect
-                }
-                if (!matchesProfileCheckout(checkout)) {
                     Napier.w(
-                        "Ignoring profile payment result for unmatched checkout ${checkout.operationId}.",
+                        "Ignoring profile payment result without an active presented checkout.",
+                        tag = "ProfileCheckout",
                     )
-                    checkoutOperationHost.releaseResultClaim(checkout)
                     clearPaymentResult()
                     return@collect
                 }
 
                 when (checkout.owner) {
                     ProfileCheckoutOwner.BILL_INSTALLMENT -> {
-                        val activeAttempt = requireNotNull(activeBillPaymentAttempt)
+                        val activeAttempt = activeBillPaymentAttempt
+                        if (activeAttempt == null || activeAttempt.checkoutOperationId != checkout.operationId) {
+                            Napier.w(
+                                "Ignoring bill payment result for checkout ${checkout.operationId} with no matching attempt.",
+                                tag = "ProfileCheckout",
+                            )
+                            checkoutSessionCoordinator.releasePaymentResultClaim(checkout)
+                            clearPaymentResult()
+                            return@collect
+                        }
+
                         when (payment) {
                             PaymentResult.Canceled -> _errorState.value = ErrorMessage("Payment canceled.")
                             is PaymentResult.Failed -> _errorState.value = ErrorMessage(payment.error)
@@ -851,13 +956,26 @@ class DefaultProfileComponent(
                     }
 
                     ProfileCheckoutOwner.CHILD_TEAM_REGISTRATION -> {
-                        val pendingTeam = requireNotNull(pendingChildTeamRegistrationPayment)
+                        val pendingTeamPayment = pendingChildTeamRegistrationPayment
+                        if (
+                            pendingTeamPayment == null ||
+                            pendingTeamPayment.checkoutOperationId != checkout.operationId
+                        ) {
+                            Napier.w(
+                                "Ignoring child team payment result for checkout ${checkout.operationId} with no matching registration.",
+                                tag = "ProfileCheckout",
+                            )
+                            checkoutSessionCoordinator.releasePaymentResultClaim(checkout)
+                            clearPaymentResult()
+                            return@collect
+                        }
+
                         when (payment) {
                             PaymentResult.Canceled -> _errorState.value = ErrorMessage("Payment canceled.")
                             is PaymentResult.Failed -> _errorState.value = ErrorMessage(payment.error)
                             PaymentResult.Completed -> {
                                 _errorState.value = ErrorMessage(
-                                    "Payment submitted for ${pendingTeam.team.name}. Registration is pending until the bank payment clears.",
+                                    "Payment submitted for ${pendingTeamPayment.team.name}. Registration is pending until the bank payment clears.",
                                 )
                                 refreshChildren()
                                 refreshPaymentPlans()
@@ -866,53 +984,71 @@ class DefaultProfileComponent(
                     }
                 }
 
-                if (finishProfileCheckout(checkout)) {
-                    loadingHandler?.hideLoading()
-                }
+                finishProfileCheckout(checkout)
                 clearPaymentResult()
             }
         }
     }
 
-    private fun matchesProfileCheckout(checkout: PaymentSheetOperation<ProfileCheckoutOwner>): Boolean =
-        when (checkout.owner) {
-            ProfileCheckoutOwner.BILL_INSTALLMENT ->
-                _activeBillPaymentId.value != null &&
-                    activeBillPaymentAttempt?.checkoutOperationId == checkout.operationId
-            ProfileCheckoutOwner.CHILD_TEAM_REGISTRATION ->
-                pendingChildTeamRegistrationPayment?.checkoutOperationId == checkout.operationId
-        }
+    private fun hasActiveProfilePaymentAction(): Boolean {
+        return checkoutSessionCoordinator.activeSession != null || _activeBillPaymentId.value != null
+    }
 
-    private fun hasActiveProfilePaymentAction(): Boolean =
-        checkoutOperationHost.activeOperation != null || _activeBillPaymentId.value != null
-
-    private fun beginProfileCheckout(
-        owner: ProfileCheckoutOwner,
-    ): PaymentSheetOperation<ProfileCheckoutOwner>? {
+    private fun beginProfileCheckout(owner: ProfileCheckoutOwner): ProfileCheckoutSession? {
         if (hasActiveProfilePaymentAction()) {
             _errorState.value = ErrorMessage("Another checkout is already in progress.")
             return null
         }
 
-        return checkoutOperationHost.start(owner)
+        val checkout = checkoutSessionCoordinator.start(owner)
+        if (checkout == null) {
+            _errorState.value = ErrorMessage("Another checkout is already in progress.")
+        }
+        return checkout
     }
 
-    private fun finishProfileCheckout(
-        checkout: PaymentSheetOperation<ProfileCheckoutOwner>,
-    ): Boolean {
-        if (!checkoutOperationHost.finish(checkout)) return false
+    private fun finishProfileCheckout(checkout: ProfileCheckoutSession): Boolean {
+        if (!checkoutSessionCoordinator.finish(checkout)) return false
+
+        checkoutLoadingOperations.remove(checkout.operationId)?.hideLoading()
 
         when (checkout.owner) {
             ProfileCheckoutOwner.BILL_INSTALLMENT -> {
                 _activeBillPaymentId.value = null
                 activeBillPaymentAttempt = null
             }
+
             ProfileCheckoutOwner.CHILD_TEAM_REGISTRATION -> {
                 pendingChildTeamRegistrationPayment = null
             }
         }
 
         return true
+    }
+
+    private fun showProfileCheckoutLoading(
+        checkout: ProfileCheckoutSession,
+        message: String,
+    ) {
+        val operation = checkoutLoadingOperations[checkout.operationId]
+            ?: loadingHandler?.newOperation()?.also { created ->
+                checkoutLoadingOperations[checkout.operationId] = created
+            }
+            ?: return
+        operation.showLoading(message)
+    }
+
+    private suspend fun <T> withProfileLoading(
+        message: String,
+        action: suspend () -> T,
+    ): T {
+        val operation = loadingHandler?.newOperation()
+        operation?.showLoading(message)
+        return try {
+            action()
+        } finally {
+            operation?.hideLoading()
+        }
     }
 
     override fun onBackClicked() {
@@ -959,19 +1095,18 @@ class DefaultProfileComponent(
         }
 
         scope.launch {
-            loadingHandler?.showLoading("Starting from template...")
-            eventRepository.seedEventTemplate(
-                templateId = templateId,
-                newEventId = newId(),
-                newStartDate = newStartDate,
-            ).onSuccess { seed ->
-                loadingHandler?.hideLoading()
-                navigationHandler.navigateToCreate(seed)
-            }.onFailure { throwable ->
-                loadingHandler?.hideLoading()
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Failed to start event from template."),
-                )
+            withProfileLoading("Starting from template...") {
+                eventRepository.seedEventTemplate(
+                    templateId = templateId,
+                    newEventId = newId(),
+                    newStartDate = newStartDate,
+                ).onSuccess { seed ->
+                    navigationHandler.navigateToCreate(seed)
+                }.onFailure { throwable ->
+                    _errorState.value = ErrorMessage(
+                        throwable.userMessage("Failed to start event from template."),
+                    )
+                }
             }
         }
     }
@@ -1006,27 +1141,26 @@ class DefaultProfileComponent(
 
     override fun editBillingAddress() {
         scope.launch {
-            loadingHandler?.showLoading("Loading billing address...")
-            val billingAddress = billingRepository.getBillingAddress()
-                .onFailure { error ->
-                    _errorState.value = ErrorMessage(error.userMessage("Unable to load billing address."))
-                }
-                .getOrNull()
-                ?.billingAddress
-                ?.normalized()
+            withProfileLoading("Loading billing address...") {
+                val billingAddress = billingRepository.getBillingAddress()
+                    .onFailure { error ->
+                        _errorState.value = ErrorMessage(error.userMessage("Unable to load billing address."))
+                    }
+                    .getOrNull()
+                    ?.billingAddress
+                    ?.normalized()
 
-            pendingBillingAddressAction = null
-            _billingAddressPrompt.value = billingAddress ?: BillingAddressDraft()
-            loadingHandler?.hideLoading()
+                pendingBillingAddressAction = null
+                _billingAddressPrompt.value = billingAddress ?: BillingAddressDraft()
+            }
         }
     }
 
     override fun onLogout() {
         scope.launch {
-            userRepository.logout().onFailure {
-                _errorState.value = ErrorMessage(it.userMessage())
-            }
-            navigationHandler.navigateToLogin()
+            userRepository.logout()
+                .onSuccess { navigationHandler.navigateToLogin() }
+                .onFailure { _errorState.value = ErrorMessage(it.userMessage()) }
         }
     }
 
@@ -1074,9 +1208,15 @@ class DefaultProfileComponent(
 
     override fun resetOnboardingForDebug() {
         if (!Platform.isDebugBuild) return
+        val userId = userRepository.currentUser.value
+            .getOrNull()
+            ?.id
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: return
 
         scope.launch {
-            currentUserDataSource.clearCompletedGuideIds()
+            currentUserDataSource.clearCompletedGuideIds(userId)
             navigationHandler.navigateToSearch()
         }
     }
@@ -1110,9 +1250,7 @@ class DefaultProfileComponent(
                 error = null,
             )
 
-            userRepository.updateUser(
-                currentUser.copy(notificationSettings = normalizedSettings),
-            ).onSuccess { updatedUser ->
+            userRepository.updateNotificationSettings(normalizedSettings).onSuccess { updatedUser ->
                 _notificationSettingsState.value = ProfileNotificationSettingsState(
                     settings = normalizeNotificationSettings(updatedUser.notificationSettings),
                 )
@@ -1189,7 +1327,10 @@ class DefaultProfileComponent(
     }
 
     override fun refreshMySchedule() {
-        scope.launch {
+        myScheduleRefreshJob?.cancel()
+        val refreshRequestId = myScheduleRefreshRequests.begin()
+        myScheduleRefreshJob = scope.launch {
+            if (!myScheduleRefreshRequests.isCurrent(refreshRequestId)) return@launch
             _myScheduleState.value = _myScheduleState.value.copy(
                 isLoading = true,
                 error = null,
@@ -1197,6 +1338,7 @@ class DefaultProfileComponent(
 
             eventRepository.getMySchedule()
                 .onSuccess { snapshot ->
+                    if (!myScheduleRefreshRequests.isCurrent(refreshRequestId)) return@onSuccess
                     _myScheduleState.value = ProfileMyScheduleState(
                         isLoading = false,
                         events = snapshot.events,
@@ -1207,6 +1349,7 @@ class DefaultProfileComponent(
                     )
                 }
                 .onFailure { throwable ->
+                    if (!myScheduleRefreshRequests.isCurrent(refreshRequestId)) return@onFailure
                     _myScheduleState.value = _myScheduleState.value.copy(
                         isLoading = false,
                         error = throwable.userMessage("Failed to load schedule."),
@@ -1418,14 +1561,14 @@ class DefaultProfileComponent(
 
         val cachedEvent = _myScheduleState.value.events.firstOrNull { event -> event.id == eventId }
         if (cachedEvent != null) {
-            navigationHandler.navigateToMatchFromSchedule(match, cachedEvent)
+            navigationHandler.navigateToMatchFromSchedule(match.match.id, cachedEvent.id)
             return
         }
 
         scope.launch {
             eventRepository.getEvent(eventId)
                 .onSuccess { event ->
-                    navigationHandler.navigateToMatchFromSchedule(match, event)
+                    navigationHandler.navigateToMatchFromSchedule(match.match.id, event.id)
                 }
                 .onFailure {
                     _errorState.value = ErrorMessage(it.userMessage("Unable to open match."))
@@ -1440,14 +1583,14 @@ class DefaultProfileComponent(
                 "Manage Stripe onboarding tapped: hasStripeAccount=${currentUser?.hasStripeAccount} apiBaseUrl=$apiBaseUrl",
                 tag = "Stripe",
             )
-            loadingHandler?.showLoading("Redirecting to Stripe ...")
-            billingRepository.createAccount().onSuccess { onboardingUrl ->
-                Napier.i("Manage Stripe onboarding returned URL=$onboardingUrl", tag = "Stripe")
-                urlHandler?.openUrlInWebView(url = onboardingUrl)
-            }.onFailure {
-                _errorState.value = ErrorMessage(it.userMessage())
+            withProfileLoading("Redirecting to Stripe ...") {
+                billingRepository.createAccount().onSuccess { onboardingUrl ->
+                    Napier.i("Manage Stripe onboarding returned URL=$onboardingUrl", tag = "Stripe")
+                    urlHandler?.openUrlInWebView(url = onboardingUrl)
+                }.onFailure {
+                    _errorState.value = ErrorMessage(it.userMessage())
+                }
             }
-            loadingHandler?.hideLoading()
         }
     }
 
@@ -1458,17 +1601,17 @@ class DefaultProfileComponent(
                 "Manage Stripe account tapped: hasStripeAccount=${currentUser?.hasStripeAccount} apiBaseUrl=$apiBaseUrl",
                 tag = "Stripe",
             )
-            loadingHandler?.showLoading("Redirecting to Stripe ...")
-            billingRepository.getOnboardingLink().onSuccess { onboardingUrl ->
-                Napier.i("Manage Stripe account returned URL=$onboardingUrl", tag = "Stripe")
-                urlHandler?.openUrlInWebView(url = onboardingUrl)
-                    ?.onFailure {
-                        _errorState.value = ErrorMessage(it.userMessage())
-                    }
-            }.onFailure {
+            withProfileLoading("Redirecting to Stripe ...") {
+                billingRepository.getOnboardingLink().onSuccess { onboardingUrl ->
+                    Napier.i("Manage Stripe account returned URL=$onboardingUrl", tag = "Stripe")
+                    urlHandler?.openUrlInWebView(url = onboardingUrl)
+                        ?.onFailure {
+                            _errorState.value = ErrorMessage(it.userMessage())
+                        }
+                }.onFailure {
                     _errorState.value = ErrorMessage(it.userMessage())
+                }
             }
-            loadingHandler?.hideLoading()
         }
     }
 
@@ -1511,14 +1654,14 @@ class DefaultProfileComponent(
 
         val cached = cachedEvents.firstOrNull { it.id == normalizedId }
         if (cached != null) {
-            navigationHandler.navigateToEvent(cached)
+            navigationHandler.navigateToEvent(cached.id)
             return
         }
 
         scope.launch {
             eventRepository.getEvent(normalizedId)
                 .onSuccess { event ->
-                    navigationHandler.navigateToEvent(event)
+                    navigationHandler.navigateToEvent(event.id)
                 }
                 .onFailure {
                     _errorState.value = ErrorMessage(it.userMessage("Unable to open event."))
@@ -1527,85 +1670,129 @@ class DefaultProfileComponent(
     }
 
     override fun refreshPaymentPlans() {
-        scope.launch {
+        paymentPlansRefreshes.replace(scope) { isCurrent ->
+            if (!isCurrent()) return@replace
             _paymentPlansState.value = _paymentPlansState.value.copy(
                 isLoading = true,
                 error = null,
+                warning = null,
             )
 
             val currentUser = userRepository.currentUser.value.getOrNull()
             if (currentUser == null) {
-                _paymentPlansState.value = ProfilePaymentPlansState(
-                    isLoading = false,
-                    plans = emptyList(),
-                    error = "Unable to load payment plans for the current user.",
-                )
-                return@launch
-            }
-
-            val plans = mutableListOf<ProfilePaymentPlan>()
-            val userBills = billingRepository.listBills(ownerType = "USER", ownerId = currentUser.id)
-                .getOrElse {
+                if (isCurrent()) {
                     _paymentPlansState.value = ProfilePaymentPlansState(
                         isLoading = false,
                         plans = emptyList(),
-                        error = it.userMessage("Failed to load bills."),
+                        error = "Unable to load payment plans for the current user.",
                     )
-                    return@launch
                 }
-            plans.addAll(buildPaymentPlans(bills = userBills, ownerLabel = currentUser.fullName))
+                return@replace
+            }
+
+            val billSources = mutableListOf<ProfilePaymentPlanBillSource>()
+            val userBills = loadAllProfileBills(
+                loadPage = { limit, offset ->
+                    billingRepository.listBillsPage(
+                        ownerType = "USER",
+                        ownerId = currentUser.id,
+                        limit = limit,
+                        offset = offset,
+                    )
+                },
+                isCurrent = isCurrent,
+            )
+                .getOrElse {
+                    if (isCurrent()) {
+                        _paymentPlansState.value = ProfilePaymentPlansState(
+                            isLoading = false,
+                            plans = emptyList(),
+                            error = it.userMessage("Failed to load bills."),
+                        )
+                    }
+                    return@replace
+                } ?: return@replace
+            userBills.mapTo(billSources) { bill ->
+                ProfilePaymentPlanBillSource(
+                    bill = bill,
+                    ownerLabel = currentUser.fullName,
+                )
+            }
+
+            if (!isCurrent()) return@replace
 
             val teams = teamRepository.getTeamsForUser(currentUser.id)
                 .getOrElse { throwable ->
+                    if (throwable is CancellationException) throw throwable
                     Napier.w("Unable to load teams for bills by membership.", throwable)
                     teamRepository.getTeams(currentUser.teamIds).getOrElse { emptyList() }
                 }
                 .distinctBy { it.id }
-            teams.forEach { team ->
-                val ownerLabel = team.name.takeIf { it.isNotBlank() } ?: "Team"
-                val teamBills = billingRepository.listBills(ownerType = "TEAM", ownerId = team.id)
-                    .getOrElse { throwable ->
-                        Napier.w("Unable to load team bills for team ${team.id}", throwable)
-                        return@forEach
+            if (!isCurrent()) return@replace
+
+            val teamBillResults = mapProfilePaymentPlanRequestsBounded(
+                items = teams,
+                isCurrent = isCurrent,
+            ) { team ->
+                loadAllProfileBills(
+                    loadPage = { limit, offset ->
+                        billingRepository.listBillsPage(
+                            ownerType = "TEAM",
+                            ownerId = team.id,
+                            limit = limit,
+                            offset = offset,
+                        )
+                    },
+                    isCurrent = isCurrent,
+                )
+            } ?: return@replace
+
+            teamBillResults.forEachIndexed { index, result ->
+                val teamBills = result.getOrElse { throwable ->
+                    if (isCurrent()) {
+                        _paymentPlansState.value = ProfilePaymentPlansState(
+                            isLoading = false,
+                            plans = emptyList(),
+                            error = throwable.userMessage("Failed to load bills."),
+                        )
                     }
-                plans.addAll(buildPaymentPlans(bills = teamBills, ownerLabel = ownerLabel))
+                    return@replace
+                } ?: return@replace
+                val team = teams[index]
+                val ownerLabel = team.name.takeIf { it.isNotBlank() } ?: "Team"
+                teamBills.mapTo(billSources) { bill ->
+                    ProfilePaymentPlanBillSource(
+                        bill = bill,
+                        ownerLabel = ownerLabel,
+                    )
+                }
             }
 
-            _paymentPlansState.value = ProfilePaymentPlansState(
-                isLoading = false,
-                plans = plans
-                    .distinctBy { it.bill.id }
-                    .sortedByDescending { it.nextPaymentDue ?: "" },
-            )
-        }
-    }
-
-    private suspend fun buildPaymentPlans(
-        bills: List<Bill>,
-        ownerLabel: String,
-    ): List<ProfilePaymentPlan> {
-        return bills.map { bill ->
-            val payments = billingRepository.getBillPayments(bill.id)
-                .onFailure { throwable ->
+            val hydration = hydrateProfilePaymentPlans(
+                sources = billSources,
+                isCurrent = isCurrent,
+                loadPayments = { bill -> billingRepository.getBillPayments(bill.id) },
+                loadEvent = { eventId -> eventRepository.getEvent(eventId) },
+                onPaymentFailure = { bill, throwable ->
                     Napier.w("Unable to load payments for bill ${bill.id}", throwable)
-                }
-                .getOrElse { emptyList() }
+                },
+                onEventFailure = { eventId, bills, throwable ->
+                    Napier.w(
+                        "Unable to load event $eventId for bills ${bills.joinToString { it.id }}",
+                        throwable,
+                    )
+                },
+            ) ?: return@replace
 
-            ProfilePaymentPlan(
-                bill = bill,
-                ownerLabel = ownerLabel,
-                payments = payments,
-                event = bill.eventId
-                    ?.trim()
-                    ?.takeIf(String::isNotBlank)
-                    ?.let { eventId ->
-                        eventRepository.getEvent(eventId)
-                            .onFailure { throwable ->
-                                Napier.w("Unable to load event $eventId for bill ${bill.id}", throwable)
-                            }
-                            .getOrNull()
-                    },
-            )
+            if (isCurrent()) {
+                _paymentPlansState.value = ProfilePaymentPlansState(
+                    isLoading = false,
+                    plans = hydration.plans
+                        .distinctBy { it.bill.id }
+                        .sortedByDescending { it.nextPaymentDue ?: "" },
+                    warning = hydration.warning,
+                )
+            }
         }
     }
 
@@ -1634,13 +1821,13 @@ class DefaultProfileComponent(
             }
             val checkout = beginProfileCheckout(ProfileCheckoutOwner.BILL_INSTALLMENT) ?: return@launch
             _activeBillPaymentId.value = paymentPlan.bill.id
-            loadingHandler?.showLoading("Preparing payment ...")
+            showProfileCheckoutLoading(checkout, "Preparing payment ...")
 
             billingRepository.createBillingIntent(
                 billId = paymentPlan.bill.id,
                 billPaymentId = nextPayment.id,
             ).onSuccess { intent ->
-                if (!checkoutOperationHost.isCurrent(checkout)) {
+                if (!checkoutSessionCoordinator.isCurrent(checkout)) {
                     Napier.w(
                         "Ignoring a bill intent for inactive checkout ${checkout.operationId}.",
                         tag = "ProfileCheckout",
@@ -1663,8 +1850,8 @@ class DefaultProfileComponent(
                     val account = userRepository.currentAccount.value.getOrThrow()
                     val user = userRepository.currentUser.value.getOrThrow()
                     val billingAddress = loadSavedBillingAddress()
-                    loadingHandler?.showLoading("Waiting for payment completion ...")
-                    check(checkoutOperationHost.awaitResult(checkout)) {
+                    showProfileCheckoutLoading(checkout, "Waiting for payment completion ...")
+                    check(checkoutSessionCoordinator.awaitPaymentResult(checkout)) {
                         "Checkout is no longer active."
                     }
                     presentPaymentSheet(
@@ -1674,13 +1861,11 @@ class DefaultProfileComponent(
                     )
                 }.onFailure { error ->
                     if (finishProfileCheckout(checkout)) {
-                        loadingHandler?.hideLoading()
                         _errorState.value = ErrorMessage(error.userMessage("Unable to start payment sheet."))
                     }
                 }
             }.onFailure { error ->
                 if (finishProfileCheckout(checkout)) {
-                    loadingHandler?.hideLoading()
                     _errorState.value = ErrorMessage(error.userMessage("Unable to create payment intent."))
                 }
             }
@@ -1703,26 +1888,27 @@ class DefaultProfileComponent(
         }
         scope.launch {
             _activeBillPaymentId.value = paymentPlan.bill.id
-            loadingHandler?.showLoading("Uploading proof ...")
-            imageRepository.uploadImage(convertPhotoResultToUploadFile(photo))
-                .mapCatching { fileId ->
-                    billingRepository.submitManualPaymentProof(
-                        billId = paymentPlan.bill.id,
-                        billPaymentId = nextPayment.id,
-                        fileId = fileId,
-                    ).getOrThrow()
-                }
-                .onSuccess {
-                    loadingHandler?.hideLoading()
-                    _activeBillPaymentId.value = null
-                    _errorState.value = ErrorMessage("Payment proof submitted for host review.")
-                    refreshPaymentPlans()
-                }
-                .onFailure { throwable ->
-                    loadingHandler?.hideLoading()
-                    _activeBillPaymentId.value = null
-                    _errorState.value = ErrorMessage(throwable.userMessage("Failed to upload payment proof."))
-                }
+            val loadingOperation = loadingHandler?.newOperation()
+            loadingOperation?.showLoading("Uploading proof ...")
+            try {
+                val uploadFile = convertPhotoResultToUploadFile(photo)
+                val fileId = imageRepository.uploadImage(uploadFile).getOrThrow()
+                billingRepository.submitManualPaymentProof(
+                    billId = paymentPlan.bill.id,
+                    billPaymentId = nextPayment.id,
+                    fileId = fileId,
+                ).getOrThrow()
+
+                _errorState.value = ErrorMessage("Payment proof submitted for host review.")
+                refreshPaymentPlans()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (throwable: Throwable) {
+                _errorState.value = ErrorMessage(throwable.userMessage("Failed to upload payment proof."))
+            } finally {
+                loadingOperation?.hideLoading()
+                _activeBillPaymentId.value = null
+            }
         }
     }
 
@@ -1739,18 +1925,21 @@ class DefaultProfileComponent(
 
         scope.launch {
             _activeBillPaymentId.value = paymentPlan.bill.id
-            loadingHandler?.showLoading("Cancelling payment ...")
-            billingRepository.cancelBillPayment(
-                billId = paymentPlan.bill.id,
-                billPaymentId = processingPayment.id,
-            ).onSuccess {
-                _errorState.value = ErrorMessage("Pending payment cancelled.")
-                refreshPaymentPlans()
-            }.onFailure {
-                _errorState.value = ErrorMessage(it.userMessage("Unable to cancel pending payment."))
+            try {
+                withProfileLoading("Cancelling payment ...") {
+                    billingRepository.cancelBillPayment(
+                        billId = paymentPlan.bill.id,
+                        billPaymentId = processingPayment.id,
+                    ).onSuccess {
+                        _errorState.value = ErrorMessage("Pending payment cancelled.")
+                        refreshPaymentPlans()
+                    }.onFailure {
+                        _errorState.value = ErrorMessage(it.userMessage("Unable to cancel pending payment."))
+                    }
+                }
+            } finally {
+                _activeBillPaymentId.value = null
             }
-            loadingHandler?.hideLoading()
-            _activeBillPaymentId.value = null
         }
     }
 
@@ -1989,13 +2178,13 @@ class DefaultProfileComponent(
             )
 
             val checkout = beginProfileCheckout(ProfileCheckoutOwner.CHILD_TEAM_REGISTRATION) ?: return@launch
-            loadingHandler?.showLoading("Preparing checkout...")
+            showProfileCheckoutLoading(checkout, "Preparing checkout...")
             billingRepository.createTeamRegistrationPurchaseIntent(
                 team = team,
                 teamRegistration = registration,
                 discountCode = discountCode,
             ).onSuccess { intent ->
-                if (!checkoutOperationHost.isCurrent(checkout)) {
+                if (!checkoutSessionCoordinator.isCurrent(checkout)) {
                     Napier.w(
                         "Ignoring a child team intent for inactive checkout ${checkout.operationId}.",
                         tag = "ProfileCheckout",
@@ -2012,8 +2201,8 @@ class DefaultProfileComponent(
                     val account = userRepository.currentAccount.value.getOrThrow()
                     val user = userRepository.currentUser.value.getOrThrow()
                     val billingAddress = loadSavedBillingAddress()
-                    loadingHandler?.showLoading("Waiting for payment completion ...")
-                    check(checkoutOperationHost.awaitResult(checkout)) {
+                    showProfileCheckoutLoading(checkout, "Waiting for payment completion ...")
+                    check(checkoutSessionCoordinator.awaitPaymentResult(checkout)) {
                         "Checkout is no longer active."
                     }
                     presentPaymentSheet(
@@ -2023,13 +2212,11 @@ class DefaultProfileComponent(
                     )
                 }.onFailure { error ->
                     if (finishProfileCheckout(checkout)) {
-                        loadingHandler?.hideLoading()
                         _errorState.value = ErrorMessage(error.userMessage("Unable to start payment sheet."))
                     }
                 }
             }.onFailure { error ->
                 if (finishProfileCheckout(checkout)) {
-                    loadingHandler?.hideLoading()
                     _errorState.value = ErrorMessage(error.userMessage("Unable to create payment intent."))
                 }
             }
@@ -2037,9 +2224,16 @@ class DefaultProfileComponent(
     }
 
     override fun refreshConnections() {
-        scope.launch {
+        connectionsRefreshJob?.cancel()
+        val refreshRequestId = connectionsRefreshRequests.begin()
+
+        connectionsRefreshJob = scope.launch {
             val currentUser = userRepository.currentUser.value.getOrNull()
+            if (!connectionsRefreshRequests.isCurrent(refreshRequestId)) return@launch
+
             if (currentUser == null) {
+                connectionSearchJob?.cancel()
+                connectionSearchRequests.begin("")
                 _connectionsState.value = ProfileConnectionsState(
                     isLoading = false,
                     error = "Unable to load connections for the current user.",
@@ -2075,18 +2269,9 @@ class DefaultProfileComponent(
                 emptyList()
             }
 
-            val existingState = _connectionsState.value
-            val refreshedQuery = existingState.searchQuery
-            val searchResults = if (refreshedQuery.trim().length >= 2) {
-                userRepository.searchPlayers(refreshedQuery)
-                    .getOrElse { emptyList() }
-                    .filter { it.id != currentUser.id }
-                    .distinctBy { it.id }
-            } else {
-                emptyList()
-            }
+            if (!connectionsRefreshRequests.isCurrent(refreshRequestId)) return@launch
 
-            _connectionsState.value = existingState.copy(
+            _connectionsState.value = _connectionsState.value.copy(
                 isLoading = false,
                 currentUser = currentUser,
                 friends = friends,
@@ -2094,19 +2279,19 @@ class DefaultProfileComponent(
                 blockedUsers = blockedUsers,
                 incomingFriendRequests = incomingFriendRequests,
                 outgoingFriendRequests = outgoingFriendRequests,
-                searchResults = searchResults,
                 error = failureMessage,
             )
         }
     }
 
     override fun searchConnections(query: String) {
-        val normalizedQuery = query
+        connectionSearchJob?.cancel()
+        val request = connectionSearchRequests.begin(query)
         _connectionsState.value = _connectionsState.value.copy(
-            searchQuery = normalizedQuery,
+            searchQuery = request.query,
         )
 
-        if (normalizedQuery.trim().length < 2) {
+        if (request.query.trim().length < 2) {
             _connectionsState.value = _connectionsState.value.copy(
                 isSearching = false,
                 searchResults = emptyList(),
@@ -2115,15 +2300,20 @@ class DefaultProfileComponent(
             return
         }
 
-        scope.launch {
-            val currentUserId = userRepository.currentUser.value.getOrNull()?.id
-            _connectionsState.value = _connectionsState.value.copy(
-                isSearching = true,
-                error = null,
-            )
+        _connectionsState.value = _connectionsState.value.copy(
+            isSearching = true,
+            searchResults = emptyList(),
+            error = null,
+        )
 
-            userRepository.searchPlayers(normalizedQuery)
+        connectionSearchJob = scope.launch {
+            val currentUserId = userRepository.currentUser.value.getOrNull()?.id
+
+            userRepository.searchPlayers(request.query)
                 .onSuccess { users ->
+                    if (!connectionSearchRequests.isCurrent(request, _connectionsState.value.searchQuery)) {
+                        return@onSuccess
+                    }
                     _connectionsState.value = _connectionsState.value.copy(
                         isSearching = false,
                         searchResults = users
@@ -2132,6 +2322,9 @@ class DefaultProfileComponent(
                     )
                 }
                 .onFailure { throwable ->
+                    if (!connectionSearchRequests.isCurrent(request, _connectionsState.value.searchQuery)) {
+                        return@onFailure
+                    }
                     _connectionsState.value = _connectionsState.value.copy(
                         isSearching = false,
                         searchResults = emptyList(),
@@ -2542,79 +2735,86 @@ class DefaultProfileComponent(
 
         scope.launch {
             _activeDocumentActionId.value = document.id
-            loadingHandler?.showLoading("Preparing document signing ...")
+            try {
+                withProfileLoading("Preparing document signing ...") {
 
-            val signLinksResult = teamId?.let { normalizedTeamId ->
-                billingRepository.getRequiredTeamSignLinks(
-                    teamId = normalizedTeamId,
-                    signerContext = document.signerContext,
-                    childUserId = document.childUserId,
-                    childUserEmail = document.childEmail,
-                )
-            } ?: billingRepository.getRequiredSignLinks(
-                eventId = eventId.orEmpty(),
-                signerContext = document.signerContext,
-                childUserId = document.childUserId,
-                childUserEmail = document.childEmail,
-            )
-
-            signLinksResult.onSuccess { steps ->
-                val step = selectProfileDocumentSigningStep(document.templateId, steps)
-                if (step == null) {
-                    _errorState.value = ErrorMessage(
-                        "The requested document is unavailable or ambiguous. Refresh your documents and try again.",
+                    val signLinksResult = teamId?.let { normalizedTeamId ->
+                        billingRepository.getRequiredTeamSignLinks(
+                            teamId = normalizedTeamId,
+                            signerContext = document.signerContext,
+                            childUserId = document.childUserId,
+                            childUserEmail = document.childEmail,
+                        )
+                    } ?: billingRepository.getRequiredSignLinks(
+                        eventId = eventId.orEmpty(),
+                        signerContext = document.signerContext,
+                        childUserId = document.childUserId,
+                        childUserEmail = document.childEmail,
                     )
-                    return@onSuccess
-                }
 
-                if (step.isTextStep()) {
-                    _textSignaturePrompt.value = ProfileTextSignaturePromptState(
-                        document = document,
-                        step = step,
-                    )
-                    return@onSuccess
-                }
+                    signLinksResult.onSuccess { steps ->
+                        val matchingSteps = matchingSignStepsForTemplate(steps, document.templateId)
+                        val step = matchingSteps.singleOrNull()
+                        if (step == null) {
+                            _errorState.value = ErrorMessage(
+                                if (matchingSteps.isEmpty()) {
+                                    "The selected document is not available for signing. Refresh and try again."
+                                } else {
+                                    "Multiple signing steps matched the selected document. Refresh and try again."
+                                },
+                            )
+                            return@onSuccess
+                        }
 
-                val signingUrl = step.resolvedSigningUrl()
-                if (signingUrl.isNullOrBlank()) {
-                    _errorState.value = ErrorMessage("Document is missing a signing URL.")
-                    return@onSuccess
-                }
+                        if (step.isTextStep()) {
+                            _textSignaturePrompt.value = ProfileTextSignaturePromptState(
+                                document = document,
+                                step = step,
+                            )
+                            return@onSuccess
+                        }
 
-                _webDocumentPrompt.value = ProfileWebDocumentPromptState(
-                    title = step.title?.trim()?.takeIf(String::isNotBlank) ?: document.title,
-                    url = signingUrl,
-                    mode = ProfileWebDocumentPromptMode.SIGN,
-                    description = "Signer: ${document.signerContextLabel}",
-                )
+                        val signingUrl = trustedBoldSignSigningUrlOrNull(step.resolvedSigningUrl())
+                        if (signingUrl == null) {
+                            _errorState.value = ErrorMessage("Document has an unavailable or invalid signing URL.")
+                            return@onSuccess
+                        }
 
-                val operationId = step.operationId?.trim()?.takeIf(String::isNotBlank)
-                if (operationId == null) {
-                    _errorState.value = ErrorMessage("Complete signing in the modal, then refresh documents.")
-                    return@onSuccess
-                }
+                        _webDocumentPrompt.value = ProfileWebDocumentPromptState(
+                            title = step.title?.trim()?.takeIf(String::isNotBlank) ?: document.title,
+                            url = signingUrl,
+                            mode = ProfileWebDocumentPromptMode.SIGN,
+                            description = "Signer: ${document.signerContextLabel}",
+                        )
 
-                pendingDocumentSyncJob?.cancel()
-                pendingDocumentSyncJob = scope.launch {
-                    _errorState.value = ErrorMessage("Waiting for signature sync...")
-                    billingRepository.pollBoldSignOperation(operationId).onSuccess {
-                        _webDocumentPrompt.value = null
-                        _errorState.value = ErrorMessage("Document signed.")
-                        refreshDocuments()
+                        val operationId = step.operationId?.trim()?.takeIf(String::isNotBlank)
+                        if (operationId == null) {
+                            _errorState.value = ErrorMessage("Complete signing in the modal, then refresh documents.")
+                            return@onSuccess
+                        }
+
+                        pendingDocumentSyncJob?.cancel()
+                        pendingDocumentSyncJob = scope.launch {
+                            _errorState.value = ErrorMessage("Waiting for signature sync...")
+                            billingRepository.pollBoldSignOperation(operationId).onSuccess {
+                                _webDocumentPrompt.value = null
+                                _errorState.value = ErrorMessage("Document signed.")
+                                refreshDocuments()
+                            }.onFailure { throwable ->
+                                _errorState.value = ErrorMessage(
+                                    throwable.userMessage("Failed to confirm signature status."),
+                                )
+                            }
+                        }
                     }.onFailure { throwable ->
                         _errorState.value = ErrorMessage(
-                            throwable.userMessage("Failed to confirm signature status."),
+                            throwable.userMessage("Unable to load signing links."),
                         )
                     }
                 }
-            }.onFailure { throwable ->
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Unable to load signing links."),
-                )
+            } finally {
+                _activeDocumentActionId.value = null
             }
-
-            _activeDocumentActionId.value = null
-            loadingHandler?.hideLoading()
         }
     }
 
@@ -2631,26 +2831,27 @@ class DefaultProfileComponent(
 
         scope.launch {
             _activeDocumentActionId.value = document.id
-            loadingHandler?.showLoading("Opening document ...")
+            try {
+                withProfileLoading("Opening document ...") {
+                    val resolvedUrl = if (
+                        viewUrl.startsWith("http://", ignoreCase = true) ||
+                        viewUrl.startsWith("https://", ignoreCase = true)
+                    ) {
+                        viewUrl
+                    } else {
+                        "${apiBaseUrl.trimEnd('/')}/${viewUrl.trimStart('/')}"
+                    }
 
-            val resolvedUrl = if (
-                viewUrl.startsWith("http://", ignoreCase = true) ||
-                viewUrl.startsWith("https://", ignoreCase = true)
-            ) {
-                viewUrl
-            } else {
-                "${apiBaseUrl.trimEnd('/')}/${viewUrl.trimStart('/')}"
+                    _webDocumentPrompt.value = ProfileWebDocumentPromptState(
+                        title = document.title,
+                        url = resolvedUrl,
+                        mode = ProfileWebDocumentPromptMode.VIEW,
+                        description = document.organizationName,
+                    )
+                }
+            } finally {
+                _activeDocumentActionId.value = null
             }
-
-            _webDocumentPrompt.value = ProfileWebDocumentPromptState(
-                title = document.title,
-                url = resolvedUrl,
-                mode = ProfileWebDocumentPromptMode.VIEW,
-                description = document.organizationName,
-            )
-
-            _activeDocumentActionId.value = null
-            loadingHandler?.hideLoading()
         }
     }
 
@@ -2665,41 +2866,42 @@ class DefaultProfileComponent(
 
         scope.launch {
             _activeDocumentActionId.value = prompt.document.id
-            loadingHandler?.showLoading("Recording signature ...")
+            try {
+                withProfileLoading("Recording signature ...") {
+                    val documentId = prompt.step.resolvedDocumentId()
+                        ?: "mobile-profile-text-${prompt.step.templateId}-${Clock.System.now().toEpochMilliseconds()}"
 
-            val documentId = prompt.step.resolvedDocumentId()
-                ?: "mobile-profile-text-${prompt.step.templateId}-${Clock.System.now().toEpochMilliseconds()}"
+                    val recordSignatureResult = teamId?.let { normalizedTeamId ->
+                        billingRepository.recordTeamSignature(
+                            teamId = normalizedTeamId,
+                            templateId = prompt.step.templateId,
+                            documentId = documentId,
+                            type = prompt.step.type,
+                            signerContext = prompt.document.signerContext,
+                            childUserId = prompt.document.childUserId,
+                        )
+                    } ?: billingRepository.recordSignature(
+                        eventId = eventId.orEmpty(),
+                        templateId = prompt.step.templateId,
+                        documentId = documentId,
+                        type = prompt.step.type,
+                        signerContext = prompt.document.signerContext,
+                        childUserId = prompt.document.childUserId,
+                    )
 
-            val recordSignatureResult = teamId?.let { normalizedTeamId ->
-                billingRepository.recordTeamSignature(
-                    teamId = normalizedTeamId,
-                    templateId = prompt.step.templateId,
-                    documentId = documentId,
-                    type = prompt.step.type,
-                    signerContext = prompt.document.signerContext,
-                    childUserId = prompt.document.childUserId,
-                )
-            } ?: billingRepository.recordSignature(
-                eventId = eventId.orEmpty(),
-                templateId = prompt.step.templateId,
-                documentId = documentId,
-                type = prompt.step.type,
-                signerContext = prompt.document.signerContext,
-                childUserId = prompt.document.childUserId,
-            )
-
-            recordSignatureResult.onSuccess {
-                _textSignaturePrompt.value = null
-                _errorState.value = ErrorMessage("Document signed.")
-                refreshDocuments()
-            }.onFailure { throwable ->
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Failed to record signature."),
-                )
+                    recordSignatureResult.onSuccess {
+                        _textSignaturePrompt.value = null
+                        _errorState.value = ErrorMessage("Document signed.")
+                        refreshDocuments()
+                    }.onFailure { throwable ->
+                        _errorState.value = ErrorMessage(
+                            throwable.userMessage("Failed to record signature."),
+                        )
+                    }
+                }
+            } finally {
+                _activeDocumentActionId.value = null
             }
-
-            _activeDocumentActionId.value = null
-            loadingHandler?.hideLoading()
         }
     }
 
@@ -2721,19 +2923,19 @@ class DefaultProfileComponent(
 
     override fun submitBillingAddress(address: BillingAddressDraft) {
         scope.launch {
-            loadingHandler?.showLoading("Saving billing address...")
-            billingRepository.updateBillingAddress(address)
-                .onSuccess {
-                    _billingAddressPrompt.value = null
-                    _errorState.value = ErrorMessage("Billing address saved.")
-                    val action = pendingBillingAddressAction
-                    pendingBillingAddressAction = null
-                    action?.invoke()
-                }
-                .onFailure { error ->
-                    _errorState.value = ErrorMessage(error.userMessage("Unable to save billing address."))
-                }
-            loadingHandler?.hideLoading()
+            withProfileLoading("Saving billing address...") {
+                billingRepository.updateBillingAddress(address)
+                    .onSuccess {
+                        _billingAddressPrompt.value = null
+                        _errorState.value = ErrorMessage("Billing address saved.")
+                        val action = pendingBillingAddressAction
+                        pendingBillingAddressAction = null
+                        action?.invoke()
+                    }
+                    .onFailure { error ->
+                        _errorState.value = ErrorMessage(error.userMessage("Unable to save billing address."))
+                    }
+            }
         }
     }
 

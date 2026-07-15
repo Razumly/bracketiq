@@ -4,7 +4,9 @@ import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.AppVersionCheckResponseDto
 import com.razumly.mvp.core.network.dto.AppVersionDto
+import com.razumly.mvp.core.util.AppUpdatePlatform
 import com.razumly.mvp.core.util.Platform
+import com.razumly.mvp.core.util.trustedAppUpdateUrlOrNull
 import io.github.aakira.napier.Napier
 import io.ktor.http.encodeURLQueryComponent
 
@@ -61,8 +63,13 @@ class AppUpdateRepository(
         currentUserDataSource.saveDismissedAppReleaseKey(prompt.releaseKey)
     }
 
-    override suspend fun openUpdate(prompt: AppUpdatePrompt): Result<Unit> =
-        openAppUpdateUrl(prompt.updateUrl)
+    override suspend fun openUpdate(prompt: AppUpdatePrompt): Result<Unit> {
+        val trustedUrl = trustedAppUpdateUrlOrNull(
+            rawUrl = prompt.updateUrl,
+            platform = currentAppUpdatePlatform(),
+        ) ?: return Result.failure(IllegalArgumentException("The update link is invalid."))
+        return openAppUpdateUrl(trustedUrl)
+    }
 
     private fun versionCheckPath(): String {
         val queryParams = listOfNotNull(
@@ -74,13 +81,18 @@ class AppUpdateRepository(
         return "api/app-version?${queryParams.joinToString("&")}"
     }
 
-    private fun platformValue(): String = if (Platform.isIOS) "IOS" else "ANDROID"
+    private fun currentAppUpdatePlatform(): AppUpdatePlatform =
+        if (Platform.isIOS) AppUpdatePlatform.IOS else AppUpdatePlatform.ANDROID
+
+    private fun platformValue(): String = currentAppUpdatePlatform().name
 
     private fun AppVersionCheckResponseDto.toPrompt(): AppUpdatePrompt? {
         val latest = latestVersion ?: return null
         val latestRelease = latest.toReleaseSummary() ?: return null
-        val normalizedUrl = latest.updateUrl?.trim()?.takeIf(String::isNotBlank) ?: return null
-        val normalizedPlatform = latest.platform.trim().uppercase().takeIf(String::isNotBlank) ?: platformValue()
+        val expectedPlatform = currentAppUpdatePlatform()
+        val responsePlatform = latest.platform.trim().uppercase().takeIf(String::isNotBlank)
+        if (responsePlatform != null && responsePlatform != expectedPlatform.name) return null
+        val normalizedUrl = trustedAppUpdateUrlOrNull(latest.updateUrl, expectedPlatform) ?: return null
         val responseReleaseSections = releases
             .mapNotNull { release -> release.toReleaseSummary() }
         val releaseSections = when {
@@ -89,7 +101,7 @@ class AppUpdateRepository(
             else -> responseReleaseSections + latestRelease
         }
         val releaseKey = buildString {
-            append(normalizedPlatform)
+            append(expectedPlatform.name)
             append(":")
             append(latestRelease.versionName)
             append(":")

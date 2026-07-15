@@ -7,48 +7,48 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.repositories.ChatTermsConsentState
-import com.razumly.mvp.core.network.apiBaseUrl
 
-internal data class TermsAgreementPresentation(
-    val url: String?,
-    val versionLabel: String?,
+private val defaultSummaryLines = listOf(
+    "There is no tolerance for objectionable content or abusive users.",
+    "Users can report chats, events, and abusive users.",
+    "Moderation acts on reports within 24 hours.",
 )
 
+private const val CANONICAL_TERMS_ORIGIN = "https://bracket-iq.com"
+private const val CANONICAL_TERMS_PATH = "/terms"
+
 /**
- * The consent API owns both the terms revision and its canonical location. The app must not
- * replace those terms with a local approximation: a revision can change without a mobile
- * release.
+ * Accept only the canonical BracketIQ terms endpoint.  The API normally sends
+ * a relative `/terms` path, which we resolve locally without ever substituting
+ * a missing or untrusted value with a fallback URL.
  */
-internal fun termsAgreementPresentation(
-    state: ChatTermsConsentState,
-    baseUrl: String = apiBaseUrl,
-): TermsAgreementPresentation {
-    val version = state.version.trim().takeIf(String::isNotBlank)
-    return TermsAgreementPresentation(
-        url = resolveTermsAgreementUrl(state.url, baseUrl),
-        versionLabel = version?.let { "Terms and EULA version $it" },
-    )
-}
+internal fun resolveCanonicalTermsUrl(rawUrl: String?): String? {
+    val url = rawUrl?.trim()?.takeIf(String::isNotBlank) ?: return null
+    if (url.any { it.isWhitespace() || it.code < 0x20 || it.code == 0x7f } || url.contains('\\')) return null
 
-internal fun resolveTermsAgreementUrl(rawUrl: String, baseUrl: String): String? {
-    val url = rawUrl.trim()
-    if (url.isBlank()) return null
-    if (url.startsWith("https://", ignoreCase = true) || url.startsWith("http://", ignoreCase = true)) {
-        return url
+    if (url.startsWith(CANONICAL_TERMS_PATH)) {
+        val suffix = url.removePrefix(CANONICAL_TERMS_PATH)
+        return if (suffix.isEmpty() || suffix.startsWith('?') || suffix.startsWith('#')) {
+            "$CANONICAL_TERMS_ORIGIN$url"
+        } else {
+            null
+        }
     }
-    if (!url.startsWith('/') || url.startsWith("//")) return null
 
-    val origin = baseUrl.trim().trimEnd('/')
-    if (!origin.startsWith("https://", ignoreCase = true) &&
-        !origin.startsWith("http://", ignoreCase = true)
+    if (!url.startsWith(CANONICAL_TERMS_ORIGIN, ignoreCase = true)) return null
+    val suffix = url.substring(CANONICAL_TERMS_ORIGIN.length)
+    return if (
+        suffix.startsWith(CANONICAL_TERMS_PATH) &&
+        (suffix.length == CANONICAL_TERMS_PATH.length ||
+            suffix[CANONICAL_TERMS_PATH.length] in charArrayOf('?', '#'))
     ) {
-        return null
+        "$CANONICAL_TERMS_ORIGIN$suffix"
+    } else {
+        null
     }
-    return "$origin/${url.trimStart('/')}"
 }
 
 @Composable
@@ -62,10 +62,9 @@ fun TermsConsentDialog(
     confirmLabel: String = "Agree",
     dismissLabel: String = "Not now",
 ) {
-    val agreement = remember(state.url, state.version) { termsAgreementPresentation(state) }
-    val agreementUrl = agreement.url
-    val agreementVersion = agreement.versionLabel
-    val showAgreement = remember { mutableStateOf(false) }
+    val summaryLines = state.summary.ifEmpty { defaultSummaryLines }
+    val uriHandler = LocalUriHandler.current
+    val agreementUrl = resolveCanonicalTermsUrl(state.url)
 
     AlertDialog(
         onDismissRequest = { onDismiss?.invoke() },
@@ -73,27 +72,37 @@ fun TermsConsentDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(intro)
+                state.version.trim().takeIf(String::isNotBlank)?.let { version ->
+                    Text("Agreement version: $version", style = MaterialTheme.typography.labelMedium)
+                }
                 if (loading && state.summary.isEmpty() && !state.accepted) {
                     Text(
                         "Checking your Terms and EULA status...",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                state.summary.forEach { summaryLine ->
+                summaryLines.forEach { summaryLine ->
                     Text(summaryLine, style = MaterialTheme.typography.bodySmall)
                 }
-                agreementVersion?.let { version ->
-                    Text(version, style = MaterialTheme.typography.bodySmall)
-                }
-                if (agreementUrl != null) {
-                    TextButton(onClick = { showAgreement.value = true }) {
-                        Text("Review the current Terms and EULA")
+                Text(
+                    "Moderation reports are reviewed within 24 hours. Confirmed objectionable content is removed and abusive users are ejected or suspended.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (agreementUrl == null) {
+                    Text(
+                        "The authoritative Terms and EULA link is unavailable. You cannot agree until it can be verified.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                } else {
+                    TextButton(onClick = { runCatching { uriHandler.openUri(agreementUrl) } }) {
+                        Text("View authoritative full agreement")
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onAccept, enabled = !loading) {
+            TextButton(onClick = onAccept, enabled = !loading && agreementUrl != null) {
                 Text(if (loading) "Saving..." else confirmLabel)
             }
         },
@@ -105,13 +114,4 @@ fun TermsConsentDialog(
             }
         },
     )
-
-    if (showAgreement.value && agreementUrl != null) {
-        EmbeddedWebModal(
-            title = agreementVersion ?: "Terms and EULA",
-            url = agreementUrl,
-            description = "Review the current agreement before accepting.",
-            onDismiss = { showAgreement.value = false },
-        )
-    }
 }

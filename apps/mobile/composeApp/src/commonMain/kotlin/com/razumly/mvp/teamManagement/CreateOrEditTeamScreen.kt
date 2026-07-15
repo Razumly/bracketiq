@@ -76,6 +76,8 @@ import com.razumly.mvp.core.data.repositories.EventCompliancePaymentSummary
 import com.razumly.mvp.core.data.repositories.EventComplianceRequiredDocument
 import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
 import com.razumly.mvp.core.data.repositories.RegistrationQuestionAnswerSummary
 import com.razumly.mvp.core.data.repositories.TeamInviteFreeAgentContext
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
@@ -169,6 +171,12 @@ internal fun shouldRequireTeamDivision(joinPolicy: String): Boolean =
 
 internal fun shouldShowTeamDivisionFields(joinPolicy: String, sportInput: String): Boolean =
     shouldRequireTeamDivision(joinPolicy) && sportInput.trim().isNotBlank()
+
+internal fun isTeamRegistrationPriceReady(
+    joinPolicy: String,
+    isQuoteConfirmed: Boolean,
+): Boolean = !normalizeTeamJoinPolicyInput(joinPolicy, openRegistration = false)
+    .allowsRegistrationCostLabel() || isQuoteConfirmed
 
 internal fun syncedRegistrationInputs(
     registrationSettingsEdited: Boolean,
@@ -314,6 +322,13 @@ fun CreateOrEditTeamScreen(
         inviteType: String,
         email: String?,
     ) -> Unit)? = null,
+    quoteInclusivePrice: suspend (
+        InclusivePriceQuoteDirection,
+        Int,
+        String?,
+    ) -> Result<InclusivePriceQuote> = { _, _, _ ->
+        Result.failure(UnsupportedOperationException("Inclusive price quotes are unavailable."))
+    },
 ) {
     val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
     val syncedTeam = remember(team.team) { team.team.withSynchronizedMembership() }
@@ -326,6 +341,18 @@ fun CreateOrEditTeamScreen(
         mutableStateOf(formatRegistrationCostInput(team.team.registrationPriceCents))
     }
     var registrationSettingsEdited by remember(team.team.id) { mutableStateOf(false) }
+    var registrationPriceQuoteConfirmed by remember(team.team.id) {
+        mutableStateOf(
+            !normalizeTeamJoinPolicyInput(team.team.joinPolicy, team.team.openRegistration)
+                .allowsRegistrationCostLabel(),
+        )
+    }
+    var hasAttemptedTeamSubmit by remember(team.team.id, isNewTeam) { mutableStateOf(false) }
+    var teamNameTouched by remember(team.team.id) { mutableStateOf(false) }
+    var teamNameWasFocused by remember(team.team.id) { mutableStateOf(false) }
+    var teamSizeTouched by remember(team.team.id) { mutableStateOf(false) }
+    var teamSizeWasFocused by remember(team.team.id) { mutableStateOf(false) }
+    var teamDivisionTouched by remember(team.team.id) { mutableStateOf(false) }
     var showSearchDialog by remember { mutableStateOf(false) }
     var invitedPlayers by remember { mutableStateOf(team.pendingPlayers) }
     var playersInTeam by remember { mutableStateOf(team.players) }
@@ -619,6 +646,10 @@ fun CreateOrEditTeamScreen(
         optionLabels.map { label -> DropdownOption(value = label, label = label) }
     }
     val isTeamNameValid = normalizedTeamName.isNotBlank()
+    val showTeamNameError = !isTeamNameValid && (hasAttemptedTeamSubmit || teamNameTouched)
+    val showTeamSizeError = !isTeamSizeValid && (hasAttemptedTeamSubmit || teamSizeTouched)
+    val showTeamDivisionError = !isTeamDivisionValid &&
+        (hasAttemptedTeamSubmit || teamDivisionTouched)
     LaunchedEffect(team.team.id, resolvedEventSportName) {
         if (sportInput.isBlank() && resolvedEventSportName.isNotBlank()) {
             sportInput = resolvedEventSportName
@@ -872,17 +903,25 @@ fun CreateOrEditTeamScreen(
                 StandardTextField(
                     value = teamName,
                     onValueChange = {
+                        teamNameTouched = true
                         teamName = it
                     },
                     modifier = Modifier.fillMaxWidth(),
                     label = "Team Name",
-                    isError = !isTeamNameValid,
-                    supportingText = if (!isTeamNameValid) {
+                    isError = showTeamNameError,
+                    supportingText = if (showTeamNameError) {
                         "Team name is required."
                     } else {
                         ""
                     },
-                    readOnly = !canEditFields
+                    readOnly = !canEditFields,
+                    onFocusChanged = { isFocused ->
+                        if (isFocused) {
+                            teamNameWasFocused = true
+                        } else if (teamNameWasFocused) {
+                            teamNameTouched = true
+                        }
+                    },
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -894,17 +933,27 @@ fun CreateOrEditTeamScreen(
                 ) {
                     StandardTextField(
                         value = teamSizeInput,
-                        onValueChange = { teamSizeInput = it },
+                        onValueChange = {
+                            teamSizeTouched = true
+                            teamSizeInput = it
+                        },
                         modifier = Modifier.weight(1f),
                         label = "Team Size",
                         keyboardType = "number",
                         inputFilter = { value -> value.filter(Char::isDigit) },
                         readOnly = !canEditFields,
-                        isError = !isTeamSizeValid,
-                        supportingText = if (!isTeamSizeValid) {
+                        isError = showTeamSizeError,
+                        supportingText = if (showTeamSizeError) {
                             "Enter a team size greater than 0."
                         } else {
                             ""
+                        },
+                        onFocusChanged = { isFocused ->
+                            if (isFocused) {
+                                teamSizeWasFocused = true
+                            } else if (teamSizeWasFocused) {
+                                teamSizeTouched = true
+                            }
                         },
                     )
                     PlatformDropdown(
@@ -922,8 +971,10 @@ fun CreateOrEditTeamScreen(
                 PlatformDropdown(
                     selectedValue = joinPolicyInput,
                     onSelectionChange = { value ->
+                        val nextJoinPolicy = normalizeTeamJoinPolicyInput(value, openRegistration = false)
                         registrationSettingsEdited = true
-                        joinPolicyInput = normalizeTeamJoinPolicyInput(value, openRegistration = false)
+                        registrationPriceQuoteConfirmed = !nextJoinPolicy.allowsRegistrationCostLabel()
+                        joinPolicyInput = nextJoinPolicy
                     },
                     options = TeamJoinPolicyOptions,
                     modifier = Modifier.fillMaxWidth(),
@@ -946,17 +997,21 @@ fun CreateOrEditTeamScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     InclusivePriceInput(
                         totalPriceCents = registrationPriceCentsInput,
-                        onTotalPriceChange = { nextCents ->
-                            registrationSettingsEdited = true
+                        onConfirmedTotalPriceChange = { nextCents ->
                             registrationCostInput = nextCents
                                 .coerceAtLeast(0)
                                 .takeIf { it > 0 }
                                 ?.toString()
                                 .orEmpty()
                         },
+                        quoteInclusivePrice = quoteInclusivePrice,
+                        onQuoteConfirmationChange = { registrationPriceQuoteConfirmed = it },
+                        onUserEdit = { registrationSettingsEdited = true },
                         modifier = Modifier.fillMaxWidth(),
                         totalLabel = "Registration price",
                         enabled = canEditFields && !(isOpenRegistrationInput && !canChargeRegistration),
+                        editorKey = "team-registration:${team.team.id}:${joinPolicyInput}",
+                        eventType = selectedEvent?.eventType?.name,
                     )
                     Text(
                         text = when {
@@ -982,6 +1037,7 @@ fun CreateOrEditTeamScreen(
                         PlatformDropdown(
                             selectedValue = divisionGenderInput,
                             onSelectionChange = { value ->
+                                teamDivisionTouched = true
                                 divisionGenderInput = value
                             },
                             options = genderOptions,
@@ -993,6 +1049,7 @@ fun CreateOrEditTeamScreen(
                         PlatformDropdown(
                             selectedValue = skillDivisionTypeInput,
                             onSelectionChange = { value ->
+                                teamDivisionTouched = true
                                 skillDivisionTypeInput = value
                             },
                             options = skillDivisionOptions,
@@ -1006,6 +1063,7 @@ fun CreateOrEditTeamScreen(
                     PlatformDropdown(
                         selectedValue = ageDivisionTypeInput,
                         onSelectionChange = { value ->
+                            teamDivisionTouched = true
                             ageDivisionTypeInput = value
                         },
                         options = ageDivisionOptions,
@@ -1014,7 +1072,7 @@ fun CreateOrEditTeamScreen(
                         placeholder = "Select age",
                         enabled = canEditFields,
                     )
-                    if (!isTeamDivisionValid) {
+                    if (showTeamDivisionError) {
                         Text(
                             text = "Select gender, skill division, and age division.",
                             style = MaterialTheme.typography.bodySmall,
@@ -1226,6 +1284,18 @@ fun CreateOrEditTeamScreen(
                 ) {
                     if (showEditDetails) {
                         Button(onClick = {
+                            if (
+                                !isTeamSizeValid ||
+                                !isTeamDivisionValid ||
+                                !isTeamNameValid ||
+                                !isTeamRegistrationPriceReady(
+                                    joinPolicy = joinPolicyInput,
+                                    isQuoteConfirmed = registrationPriceQuoteConfirmed,
+                                )
+                            ) {
+                                hasAttemptedTeamSubmit = true
+                                return@Button
+                            }
                             onFinish(
                                 buildUpdatedTeam(
                                     activePlayers = playersInTeam,
@@ -1234,7 +1304,10 @@ fun CreateOrEditTeamScreen(
                                     resolvedSize = resolvedTeamSize,
                                 )
                             )
-                        }, enabled = !isBusy && isTeamSizeValid && isTeamDivisionValid && isTeamNameValid) {
+                        }, enabled = !isBusy && isTeamRegistrationPriceReady(
+                            joinPolicy = joinPolicyInput,
+                            isQuoteConfirmed = registrationPriceQuoteConfirmed,
+                        )) {
                             if (isSaving) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(18.dp),
@@ -1393,6 +1466,7 @@ fun CreateOrEditTeamScreen(
                         email,
                     )
                 }
+                onSearch("")
                 showSearchDialog = false
             },
         )
@@ -1430,9 +1504,7 @@ internal fun TeamInviteDialog(
     var selectedUser by remember { mutableStateOf<UserData?>(null) }
 
     LaunchedEffect(mode, query) {
-        if (mode == TeamInviteDialogMode.InviteUser && query.trim().length >= 2) {
-            onSearch(query)
-        }
+        onSearch(if (mode == TeamInviteDialogMode.InviteUser) query else "")
     }
 
     val normalizedQuery = query.trim()
@@ -1463,9 +1535,13 @@ internal fun TeamInviteDialog(
         if (playerInviteBlocked) return
         selectedUser = user
     }
+    val dismissInviteDialog = {
+        onSearch("")
+        onDismiss()
+    }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = dismissInviteDialog,
         title = { Text("Invite to $teamName") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1581,7 +1657,7 @@ internal fun TeamInviteDialog(
             }
         },
         dismissButton = {
-            OutlinedButton(onClick = onDismiss) {
+            OutlinedButton(onClick = dismissInviteDialog) {
                 Text("Cancel")
             }
         },

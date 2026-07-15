@@ -89,7 +89,9 @@ internal data class EventDetailsDivisionEditorActionsState(
     val divisionEditorReady: Boolean,
     val isSkillLevelValid: Boolean,
     val isLeaguePlayoffTeamsValid: Boolean,
+    val showValidationErrors: Boolean,
     val divisionDetails: List<DivisionDetail>,
+    val isPriceQuoteConfirmed: Boolean = true,
 )
 
 internal data class EventDetailsDivisionEditorActions(
@@ -253,7 +255,8 @@ internal fun EventDetailsDivisionEditorActionsContent(
                             )
                         }
                     },
-                    isError = (state.divisionEditor.playoffTeamCount ?: 0) < 2,
+                    isError = state.showValidationErrors &&
+                        (state.divisionEditor.playoffTeamCount ?: 0) < 2,
                     errorMessage = "Required and must be at least 2.",
                 )
             }
@@ -281,7 +284,7 @@ internal fun EventDetailsDivisionEditorActionsContent(
             ) {
                 Button(
                     onClick = actions.onSaveDivision,
-                    enabled = true,
+                    enabled = state.isPriceQuoteConfirmed,
                 ) {
                     Text("Update Division")
                 }
@@ -298,7 +301,7 @@ internal fun EventDetailsDivisionEditorActionsContent(
                 DivisionActionLeadingField(Modifier.weight(1f))
                 Button(
                     onClick = actions.onSaveDivision,
-                    enabled = true,
+                    enabled = state.isPriceQuoteConfirmed,
                 ) {
                     Text("Add Division")
                 }
@@ -313,7 +316,7 @@ internal fun EventDetailsDivisionEditorActionsContent(
             color = MaterialTheme.colorScheme.error,
         )
     }
-    if (!state.isSkillLevelValid) {
+    if (state.showValidationErrors && !state.isSkillLevelValid) {
         Text(
             text = "Add at least one division.",
             style = MaterialTheme.typography.bodySmall,
@@ -323,7 +326,7 @@ internal fun EventDetailsDivisionEditorActionsContent(
     if (
         state.editEvent.eventType == EventType.TOURNAMENT &&
         state.editEvent.includePlayoffs &&
-        !state.isLeaguePlayoffTeamsValid
+        state.showValidationErrors && !state.isLeaguePlayoffTeamsValid
     ) {
         Text(
             text = "Pool play requires pool count, bracket team count, and even pool sizing for each division.",

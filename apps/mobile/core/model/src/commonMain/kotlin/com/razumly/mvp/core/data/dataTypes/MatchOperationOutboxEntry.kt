@@ -8,23 +8,10 @@ import kotlinx.serialization.Serializable
 const val MATCH_OPERATION_STATUS_PENDING = "PENDING"
 const val MATCH_OPERATION_STATUS_SYNCING = "SYNCING"
 const val MATCH_OPERATION_STATUS_ACKED = "ACKED"
-/**
- * A transport or server availability failure. The operation remains an optimistic overlay and
- * can be retried with the same client-operation receipt metadata.
- */
-const val MATCH_OPERATION_STATUS_RETRYABLE = "RETRYABLE"
-
-/**
- * A request the authoritative server rejected. It is retained for diagnostics, but must never
- * be retried or re-applied over a fresh server match.
- */
-const val MATCH_OPERATION_STATUS_TERMINAL = "TERMINAL"
-
-/**
- * Legacy state written before retryable and terminal failures were distinguished. Existing rows
- * are recovered into RETRYABLE when the outbox next drains.
- */
 const val MATCH_OPERATION_STATUS_FAILED = "FAILED"
+const val MATCH_OPERATION_STATUS_REJECTED = "REJECTED"
+/** The server rejected the write; only a remote read may reconcile this operation. */
+const val MATCH_OPERATION_STATUS_RECONCILING = "RECONCILING"
 
 const val MATCH_OPERATION_KIND_UPDATE = "MATCH_UPDATE"
 const val MATCH_OPERATION_KIND_SCORE_SET = "SCORE_SET"

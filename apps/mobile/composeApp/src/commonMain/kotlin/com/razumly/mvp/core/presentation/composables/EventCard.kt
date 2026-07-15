@@ -398,24 +398,29 @@ internal fun ComposeEventCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                }
-                data.lifecycleLabel?.let { label ->
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 12.dp)
-                            .background(
-                                color = eventLifecycleColor(data.lifecycleTone),
-                                shape = RoundedCornerShape(999.dp),
-                            )
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
-                    ) {
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White,
-                        )
+                    data.lifecycleLabel?.let { label ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        color = eventLifecycleColor(data.lifecycleTone),
+                                        shape = RoundedCornerShape(999.dp),
+                                    )
+                                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                            ) {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White,
+                                )
+                            }
+                        }
                     }
                 }
             }

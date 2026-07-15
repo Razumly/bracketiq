@@ -26,6 +26,7 @@ class GuideController(
     private val onGuideCompleted: (String) -> Unit,
 ) {
     private val targets = mutableStateMapOf<String, GuideTarget>()
+    private var accountId: String? = null
 
     var completedGuideIds by mutableStateOf<Set<String>>(emptySet())
         private set
@@ -48,10 +49,24 @@ class GuideController(
     val hasActiveGuide: Boolean
         get() = activeGuide != null
 
+    fun updateAccount(rawAccountId: String?) {
+        val normalizedAccountId = rawAccountId?.trim()?.takeIf(String::isNotBlank)
+        if (accountId == normalizedAccountId) return
+
+        accountId = normalizedAccountId
+        completedGuideIds = emptySet()
+        completedGuideIdsLoaded = false
+        clearActiveGuide()
+    }
+
     fun updateCompletedGuideIds(
+        accountId: String?,
         ids: Set<String>,
         loaded: Boolean,
     ) {
+        val normalizedAccountId = accountId?.trim()?.takeIf(String::isNotBlank)
+        if (normalizedAccountId != this.accountId) return
+
         completedGuideIds = ids
         completedGuideIdsLoaded = loaded
         val activeGuideId = activeGuide?.id

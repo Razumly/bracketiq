@@ -9,7 +9,6 @@ import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.analytics.AnalyticsEvent
 import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.data.dataTypes.Bounds
-import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.Facility
@@ -42,14 +41,13 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.time.ExperimentalTime
-import kotlin.math.roundToInt
+import kotlin.time.Instant
 
 interface EventSearchComponent {
     val locationTracker: LocationTracker
@@ -62,7 +60,6 @@ interface EventSearchComponent {
     val currentLocation: StateFlow<LatLng?>
     val selectedSearchLocationLabel: StateFlow<String?>
     val sports: StateFlow<List<Sport>>
-    val divisionTypeParameters: StateFlow<DivisionTypeParameters>
     val eventTags: StateFlow<List<EventTag>>
     val organizationTags: StateFlow<List<EventTag>>
     val organizationFilter: StateFlow<EventFilter>
@@ -112,7 +109,7 @@ interface EventSearchComponent {
     fun selectSearchLocation(label: String, center: LatLng)
     fun useCurrentLocationForSearch()
     fun loadRentalFieldOptions(fieldIds: List<String>)
-    fun loadRentalBusyBlocks(organizationId: String, fieldIds: List<String>)
+    fun loadRentalAvailability(organizationId: String, rangeStart: Instant, rangeEnd: Instant)
     fun clearRentalFieldOptions()
     fun clearRentalBusyBlocks()
 }
@@ -154,11 +151,7 @@ class DefaultEventSearchComponent(
         }
     }
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob() + scopeExceptionHandler)
-    private val rentalAvailabilityLoader = RentalAvailabilityLoader(
-        eventRepository = eventRepository,
-        matchRepository = matchRepository,
-        fieldRepository = fieldRepository,
-    )
+    private val rentalAvailabilityLoader = RentalAvailabilityLoader(fieldRepository)
 
     private val _currentRadius = MutableStateFlow(0.0)
     override val currentRadius: StateFlow<Double> = _currentRadius.asStateFlow()
@@ -185,9 +178,6 @@ class DefaultEventSearchComponent(
     override val suggestedTeams: StateFlow<List<Team>> = _suggestedTeams.asStateFlow()
     private val _sports = MutableStateFlow<List<Sport>>(emptyList())
     override val sports: StateFlow<List<Sport>> = _sports.asStateFlow()
-    private val _divisionTypeParameters = MutableStateFlow(DivisionTypeParameters())
-    override val divisionTypeParameters: StateFlow<DivisionTypeParameters> =
-        _divisionTypeParameters.asStateFlow()
     private val _eventTags = MutableStateFlow<List<EventTag>>(emptyList())
     override val eventTags: StateFlow<List<EventTag>> = _eventTags.asStateFlow()
     private val _organizationTags = MutableStateFlow<List<EventTag>>(emptyList())
@@ -243,8 +233,10 @@ class DefaultEventSearchComponent(
     private var suggestEventsJob: Job? = null
     private var suggestOrganizationsJob: Job? = null
     private var suggestTeamsJob: Job? = null
-    private var organizationFilterReloadJob: Job? = null
     private var cachedEventsSyncJob: Job? = null
+    private var eventPageLoadJob: Job? = null
+    private val discoverEventRequests = DiscoverRequestGenerationTracker()
+    private val discoverOrganizationRequests = DiscoverRequestGenerationTracker()
     private var isAwaitingInitialEventLocation = true
     private var eventOffset = 0
     private var organizationFieldIdsFromFieldsCache: Map<String, List<String>> = emptyMap()
@@ -264,7 +256,7 @@ class DefaultEventSearchComponent(
         if (eventId != null) {
             scope.launch {
                 eventRepository.getEvent(eventId).onSuccess {
-                    navigationHandler.navigateToEvent(it)
+                    navigationHandler.navigateToEvent(it.id)
                 }.onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to fetch event: ${e.userMessage()}")
                 }
@@ -313,7 +305,6 @@ class DefaultEventSearchComponent(
 
         observeCachedEvents()
         loadSports()
-        loadDivisionTypeParameters()
         loadEventTags()
         loadOrganizationTags()
         refreshEvents(
@@ -343,7 +334,7 @@ class DefaultEventSearchComponent(
             AnalyticsEvent.EventClicked,
             event.analyticsProperties("discover_events"),
         )
-        navigationHandler.navigateToEvent(event)
+        navigationHandler.navigateToEvent(event.id)
     }
 
     override fun viewOrganization(organization: Organization, initialTab: OrganizationDetailTab) {
@@ -476,10 +467,12 @@ class DefaultEventSearchComponent(
     ) {
         if (_isLoadingMore.value || !_hasMoreEvents.value || _isLoading.value) return
 
-        scope.launch {
-            if (showLoading) {
-                _isLoadingMore.value = true
-            }
+        val generation = discoverEventRequests.currentGeneration()
+        _isLoading.value = true
+        if (showLoading) {
+            _isLoadingMore.value = true
+        }
+        eventPageLoadJob = scope.launch {
             try {
                 val activeFilter = _filter.value
                 val currentLocation = activeSearchLocation()
@@ -503,13 +496,16 @@ class DefaultEventSearchComponent(
                     includeDistanceFilter = includeDistanceFilter,
                 )
                     .onSuccess { (eventsPage, hasMore) ->
+                        if (!discoverEventRequests.isCurrent(generation)) return@onSuccess
                         loadOrganizationsForEvents(eventsPage)
+                        if (!discoverEventRequests.isCurrent(generation)) return@onSuccess
                         eventOffset += eventsPage.size
                         _hasMoreEvents.value = hasMore
                         _rawEvents.value = mergeEvents(_rawEvents.value, eventsPage)
-                        _events.value = applyEventFilter(_rawEvents.value, activeFilter)
+                        _events.value = applyEventFilter(_rawEvents.value, _filter.value)
                     }
                     .onFailure { e ->
+                        if (!discoverEventRequests.isCurrent(generation)) return@onFailure
                         if (reportErrors) {
                             _errorState.value = ErrorMessage("Failed to load more events: ${e.userMessage()}")
                         } else {
@@ -517,8 +513,12 @@ class DefaultEventSearchComponent(
                         }
                     }
             } finally {
-                if (showLoading) {
-                    _isLoadingMore.value = false
+                if (discoverEventRequests.isCurrent(generation)) {
+                    _isLoading.value = false
+                    if (showLoading) {
+                        _isLoadingMore.value = false
+                    }
+                    eventPageLoadJob = null
                 }
             }
         }
@@ -539,7 +539,14 @@ class DefaultEventSearchComponent(
         clearExisting: Boolean,
         reportErrors: Boolean,
     ) {
-        if (!force && _isLoadingMore.value) return
+        if (!force && (_isLoadingMore.value || _isLoading.value)) return
+        if (force) {
+            discoverEventRequests.invalidate()
+            eventPageLoadJob?.cancel()
+            eventPageLoadJob = null
+            _isLoading.value = false
+            _isLoadingMore.value = false
+        }
         if (shouldWaitForLocationBeforeEventSearch()) {
             isAwaitingInitialEventLocation = true
             if (showLoading) {
@@ -598,14 +605,18 @@ class DefaultEventSearchComponent(
         _organizationFilter.value = updated
         _selectedOrganizationTagSlugs.value = updated.tagSlugs
 
-        organizationsLoaded = false
-        organizationFilterReloadJob?.cancel()
-        organizationFilterReloadJob = scope.launch {
-            delay(ORGANIZATION_FILTER_DEBOUNCE_MILLIS)
-            while (_isLoadingOrganizations.value) {
-                delay(25)
+        if (previous.tagSlugs != updated.tagSlugs) {
+            organizationsLoaded = false
+            scope.launch {
+                loadOrganizations(force = true)
             }
-            loadOrganizations(force = true)
+        } else {
+            val source = if (_allOrganizations.value.isNotEmpty()) {
+                _allOrganizations.value
+            } else {
+                _organizations.value
+            }
+            _organizations.value = applyOrganizationFilters(source)
         }
     }
 
@@ -676,16 +687,26 @@ class DefaultEventSearchComponent(
         }
     }
 
-    override fun loadRentalBusyBlocks(organizationId: String, fieldIds: List<String>) {
+    override fun loadRentalAvailability(
+        organizationId: String,
+        rangeStart: Instant,
+        rangeEnd: Instant,
+    ) {
         scope.launch {
-            rentalAvailabilityLoader.loadBusyBlocks(organizationId = organizationId, fieldIds = fieldIds)
-                .onSuccess { busyBlocks ->
-                    _rentalBusyBlocks.value = busyBlocks
+            _isLoadingRentalFields.value = true
+            rentalAvailabilityLoader.loadAvailability(
+                organizationId = organizationId,
+                rangeStart = rangeStart,
+                rangeEnd = rangeEnd,
+            )
+                .onSuccess { snapshot ->
+                    _rentalFieldOptions.value = snapshot.fieldOptions
+                    _rentalBusyBlocks.value = snapshot.busyBlocks
                 }
                 .onFailure { error ->
-                    _rentalBusyBlocks.value = emptyList()
-                    _errorState.value = ErrorMessage("Failed to load existing field events: ${error.userMessage()}")
+                    _errorState.value = ErrorMessage("Failed to load rental availability: ${error.userMessage()}")
                 }
+            _isLoadingRentalFields.value = false
         }
     }
 
@@ -710,18 +731,6 @@ class DefaultEventSearchComponent(
                 }
                 .onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to load sports: ${e.userMessage()}")
-                }
-        }
-    }
-
-    private fun loadDivisionTypeParameters() {
-        scope.launch {
-            sportsRepository.getDivisionTypeParameters()
-                .onSuccess { parameters ->
-                    _divisionTypeParameters.value = parameters
-                }
-                .onFailure { e ->
-                    _errorState.value = ErrorMessage("Failed to load division filters: ${e.userMessage()}")
                 }
         }
     }
@@ -948,7 +957,7 @@ class DefaultEventSearchComponent(
     }
 
     private suspend fun loadOrganizations(force: Boolean = false): List<Organization> {
-        if (_isLoadingOrganizations.value) return _organizations.value
+        if (!force && _isLoadingOrganizations.value) return _organizations.value
         if (organizationsLoaded && !force) {
             val source = if (_allOrganizations.value.isNotEmpty()) {
                 _allOrganizations.value
@@ -960,71 +969,81 @@ class DefaultEventSearchComponent(
             return filtered
         }
 
+        val generation = if (force) {
+            discoverOrganizationRequests.invalidate()
+        } else {
+            discoverOrganizationRequests.currentGeneration()
+        }
+        val activeTagSlugs = _organizationFilter.value.tagSlugs
         _isLoadingOrganizations.value = true
-        organizationOffset = 0
-        _hasMoreOrganizations.value = true
-        val activeFilter = _organizationFilter.value
-        val page = billingRepository.listOrganizationsPage(
-            limit = DISCOVER_PAGE_SIZE,
-            offset = 0,
-            tagSlugs = activeFilter.tagSlugs,
-            sportIds = activeFilter.sportIds,
-            divisionGenders = activeFilter.divisionGenders,
-            skillDivisionTypeIds = activeFilter.skillDivisionTypeIds,
-            ageDivisionTypeIds = activeFilter.ageDivisionTypeIds,
-            divisionPriceMinCents = activeFilter.divisionPriceMin.toPriceCents(),
-            divisionPriceMaxCents = activeFilter.divisionPriceMax.toPriceCents(),
-        )
-            .onFailure { e ->
-                _errorState.value = ErrorMessage("Failed to fetch organizations: ${e.userMessage()}")
+        try {
+            val page = billingRepository.listOrganizationsPage(
+                limit = DISCOVER_PAGE_SIZE,
+                offset = 0,
+                tagSlugs = activeTagSlugs,
+            )
+                .onFailure { e ->
+                    if (discoverOrganizationRequests.isCurrent(generation)) {
+                        _errorState.value = ErrorMessage("Failed to fetch organizations: ${e.userMessage()}")
+                    }
+                }
+                .getOrNull()
+            if (!discoverOrganizationRequests.isCurrent(generation)) return _organizations.value
+
+            val organizations = page?.items.orEmpty()
+            val sortedOrganizations = organizations.sortedBy { organization -> organization.name.lowercase() }
+            _allOrganizations.value = sortedOrganizations
+            organizationFieldIdsFromFieldsCache = emptyMap()
+            organizationOffset = page?.pagination?.nextOffset ?: organizations.size
+            _hasMoreOrganizations.value = page?.pagination?.hasMore ?: false
+
+            val filtered = applyOrganizationFilters(sortedOrganizations)
+            _organizations.value = filtered
+            organizationsLoaded = true
+            return filtered
+        } finally {
+            if (discoverOrganizationRequests.isCurrent(generation)) {
+                _isLoadingOrganizations.value = false
             }
-            .getOrNull()
-        val organizations = page?.items.orEmpty()
-
-        val sortedOrganizations = organizations.sortedBy { organization -> organization.name.lowercase() }
-        _allOrganizations.value = sortedOrganizations
-        organizationFieldIdsFromFieldsCache = emptyMap()
-        organizationOffset = page?.pagination?.nextOffset ?: organizations.size
-        _hasMoreOrganizations.value = page?.pagination?.hasMore ?: false
-
-        val filtered = applyOrganizationFilters(sortedOrganizations)
-        _organizations.value = filtered
-        organizationsLoaded = true
-        _isLoadingOrganizations.value = false
-        return filtered
+        }
     }
 
     private suspend fun loadMoreOrganizationsPage() {
         if (_isLoadingOrganizations.value || !_hasMoreOrganizations.value) return
 
+        val generation = discoverOrganizationRequests.currentGeneration()
+        val offset = organizationOffset
+        val activeTagSlugs = _organizationFilter.value.tagSlugs
         _isLoadingOrganizations.value = true
-        val activeFilter = _organizationFilter.value
-        val page = billingRepository.listOrganizationsPage(
-            limit = DISCOVER_PAGE_SIZE,
-            offset = organizationOffset,
-            tagSlugs = activeFilter.tagSlugs,
-            sportIds = activeFilter.sportIds,
-            divisionGenders = activeFilter.divisionGenders,
-            skillDivisionTypeIds = activeFilter.skillDivisionTypeIds,
-            ageDivisionTypeIds = activeFilter.ageDivisionTypeIds,
-            divisionPriceMinCents = activeFilter.divisionPriceMin.toPriceCents(),
-            divisionPriceMaxCents = activeFilter.divisionPriceMax.toPriceCents(),
-        )
-            .onFailure { e ->
-                _errorState.value = ErrorMessage("Failed to fetch more organizations: ${e.userMessage()}")
-            }
-            .getOrNull()
-        val organizations = page?.items.orEmpty()
-        val merged = mergeOrganizations(_allOrganizations.value, organizations)
-            .sortedBy { organization -> organization.name.lowercase() }
-        _allOrganizations.value = merged
-        organizationOffset = page?.pagination?.nextOffset ?: organizationOffset + organizations.size
-        _hasMoreOrganizations.value = page?.pagination?.hasMore ?: false
+        try {
+            val page = billingRepository.listOrganizationsPage(
+                limit = DISCOVER_PAGE_SIZE,
+                offset = offset,
+                tagSlugs = activeTagSlugs,
+            )
+                .onFailure { e ->
+                    if (discoverOrganizationRequests.isCurrent(generation)) {
+                        _errorState.value = ErrorMessage("Failed to fetch more organizations: ${e.userMessage()}")
+                    }
+                }
+                .getOrNull()
+            if (!discoverOrganizationRequests.isCurrent(generation)) return
 
-        val filtered = applyOrganizationFilters(merged)
-        _organizations.value = filtered
-        organizationsLoaded = true
-        _isLoadingOrganizations.value = false
+            val organizations = page?.items.orEmpty()
+            val merged = mergeOrganizations(_allOrganizations.value, organizations)
+                .sortedBy { organization -> organization.name.lowercase() }
+            _allOrganizations.value = merged
+            organizationOffset = page?.pagination?.nextOffset ?: offset + organizations.size
+            _hasMoreOrganizations.value = page?.pagination?.hasMore ?: false
+
+            val filtered = applyOrganizationFilters(merged)
+            _organizations.value = filtered
+            organizationsLoaded = true
+        } finally {
+            if (discoverOrganizationRequests.isCurrent(generation)) {
+                _isLoadingOrganizations.value = false
+            }
+        }
     }
 
     private suspend fun resolveOrganizationsWithFieldIds(
@@ -1077,7 +1096,25 @@ class DefaultEventSearchComponent(
     }
 
     private fun applyOrganizationFilters(organizations: List<Organization>): List<Organization> {
-        return applyDistanceFilter(organizations)
+        val filter = _organizationFilter.value
+        val sportNames = selectedSportNames(filter)
+            .map { sport -> sport.trim().lowercase() }
+            .filter(String::isNotBlank)
+            .toSet()
+        val sportFiltered = if (sportNames.isEmpty() && filter.sportIds.isEmpty()) {
+            organizations
+        } else {
+            organizations.filter { organization ->
+                val organizationSports = organization.sports
+                    .map { sport -> sport.trim().lowercase() }
+                    .filter(String::isNotBlank)
+                    .toSet()
+                organizationSports.any { sport ->
+                    sport in sportNames || sport in filter.sportIds
+                }
+            }
+        }
+        return applyDistanceFilter(sportFiltered)
     }
 
     private fun applyDistanceFilter(organizations: List<Organization>): List<Organization> {
@@ -1184,7 +1221,6 @@ class DefaultEventSearchComponent(
         private const val EVENTS_PAGE_SIZE = DISCOVER_PAGE_SIZE
         private const val SEARCH_MIN_QUERY_LENGTH = 2
         private const val SEARCH_SUGGESTION_LIMIT = 50
-        private const val ORGANIZATION_FILTER_DEBOUNCE_MILLIS = 200L
     }
 }
 
@@ -1198,11 +1234,6 @@ private fun Organization.toDiscoverRentalEntries(): List<Organization> {
     }
     return entries
 }
-
-private fun Double?.toPriceCents(): Int? =
-    this
-        ?.takeIf { it.isFinite() && it >= 0.0 }
-        ?.let { dollars -> (dollars * 100.0).roundToInt() }
 
 private fun Event.analyticsProperties(source: String): Map<String, String> = buildMap {
     put("event_id", id)

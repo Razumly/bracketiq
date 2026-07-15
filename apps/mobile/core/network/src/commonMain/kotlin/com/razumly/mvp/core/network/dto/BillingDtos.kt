@@ -1,21 +1,42 @@
 package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
-import com.razumly.mvp.core.data.dataTypes.dtos.RefundRequestDTO
+import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class InclusivePriceQuoteRequestDto(
+    val direction: String,
+    val amountCents: Int,
+    val eventType: String? = null,
+)
+
+@Serializable
+data class InclusivePriceBreakdownDto(
+    val hostReceivesCents: Int,
+    val processingFeeCents: Int,
+    val platformFeeCents: Int,
+    val totalPriceCents: Int,
+    val platformFeePercentage: Double,
+)
+
+@Serializable
+data class InclusivePriceQuoteResponseDto(
+    val version: Int,
+    val direction: String,
+    val breakdown: InclusivePriceBreakdownDto,
+)
+
+@Serializable
 data class BillingUserRefDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val email: String? = null,
 )
 
 @Serializable
 data class BillingEventRefDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val eventType: String? = null,
     @SerialName("price") val priceCents: Int? = null,
     val hostId: String? = null,
@@ -25,7 +46,6 @@ data class BillingEventRefDto(
 @Serializable
 data class BillingTeamRefDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     val teamId: String? = null,
     val name: String? = null,
     val registrantId: String? = null,
@@ -40,13 +60,26 @@ data class BillingTeamRefDto(
 @Serializable
 data class BillingTimeSlotRefDto(
     val id: String? = null,
-    @SerialName("\$id") val legacyId: String? = null,
     @SerialName("price") val priceCents: Int? = null,
     val startDate: String? = null,
     val endDate: String? = null,
     val scheduledFieldId: String? = null,
     val scheduledFieldIds: List<String> = emptyList(),
     val hostRequiredTemplateIds: List<String> = emptyList(),
+)
+
+@Serializable
+data class BillingRentalSelectionDto(
+    val key: String? = null,
+    val scheduledFieldIds: List<String>,
+    val dayOfWeek: Int? = null,
+    val daysOfWeek: List<Int> = emptyList(),
+    val startTimeMinutes: Int? = null,
+    val endTimeMinutes: Int? = null,
+    val startDate: String,
+    val endDate: String,
+    val timeZone: String? = null,
+    val repeating: Boolean = false,
 )
 
 @Serializable
@@ -66,6 +99,7 @@ data class PurchaseIntentRequestDto(
     val divisionTypeId: String? = null,
     val divisionTypeKey: String? = null,
     val timeSlot: BillingTimeSlotRefDto? = null,
+    val rentalSelections: List<BillingRentalSelectionDto> = emptyList(),
     val slotId: String? = null,
     val occurrenceDate: String? = null,
     val productId: String? = null,
@@ -129,12 +163,10 @@ data class RefundAllRequestDto(
 
 @Serializable
 data class RefundRequestsResponseDto(
-    val refunds: List<RefundRequestDTO> = emptyList(),
+    val refunds: List<RefundRequest> = emptyList(),
 )
 
 @Serializable
 data class UpdateRefundRequestDto(
     val status: String,
-    val expectedScopeVersion: Int? = null,
-    val expectedScopeHash: String? = null,
 )

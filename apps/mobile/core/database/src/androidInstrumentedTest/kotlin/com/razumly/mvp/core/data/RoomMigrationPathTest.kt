@@ -3,14 +3,25 @@ package com.razumly.mvp.core.data
 import androidx.room.Room
 import androidx.room.testing.MigrationTestHelper
 import androidx.test.platform.app.InstrumentationRegistry
+import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.MessageMVP
+import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_STATUS_ACKED
+import com.razumly.mvp.core.data.dataTypes.MatchOperationOutboxEntry
 import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_LEGACY_UNKNOWN_PAYER_ID
 import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_STATUS_REJECTED
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
+import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.normalizedStatus
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.db.MVP_DATABASE_VERSION
 import com.razumly.mvp.core.db.MVPDatabaseService
 import kotlinx.coroutines.runBlocking
+import kotlin.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFails
 import kotlin.test.assertTrue
 import org.junit.Rule
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -172,6 +183,350 @@ class RoomMigrationPathTest {
 
             val cached = database.getFieldDao.getFieldsByIds(listOf("field-1")).single()
             assertEquals("facility-1", cached.facilityId)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun v92MembershipMigration_backfillsExactIdsAndRemovesDuplicateColumns() {
+        val databaseName = "room-canonical-membership-v92"
+        migrationHelper.createDatabase(databaseName, 92).use { database ->
+            database.execSQL(
+                """
+                INSERT INTO `Team` (
+                    `division`, `name`, `captainId`, `coachIds`, `playerIds`,
+                    `playerRegistrationIds`, `pending`, `staffAssignmentIds`, `teamSize`,
+                    `joinPolicy`, `openRegistration`, `registrationPriceCents`,
+                    `requiredTemplateIds`, `playerRegistrations`, `staffAssignments`, `id`
+                ) VALUES
+                    ('OPEN', 'Array team', 'user_10', '[]', '["user_10","missing_user"]', '[]', '["missing_pending"]', '[]', 2, 'CLOSED', 0, 0, '[]', '[]', '[]', 'team-array'),
+                    ('OPEN', 'User team', 'user_10', '[]', '[]', '[]', '[]', '[]', 2, 'CLOSED', 0, 0, '[]', '[]', '[]', 'team-from-user')
+                """.trimIndent(),
+            )
+            database.execSQL(
+                """
+                INSERT INTO `UserData` (
+                    `firstName`, `lastName`, `teamIds`, `friendIds`, `friendRequestIds`,
+                    `friendRequestSentIds`, `followingIds`, `blockedUserIds`, `hiddenEventIds`,
+                    `userName`, `uploadedImages`, `isMinor`, `isIdentityHidden`,
+                    `notificationSettings`, `id`
+                ) VALUES
+                    ('Exact', 'User', '["team-from-user"]', '[]', '[]', '[]', '[]', '[]', '[]', 'user_10', '[]', 0, 0, '{}', 'user_10'),
+                    ('Existing', 'User', '[]', '[]', '[]', '[]', '[]', '[]', '[]', 'existing_user', '[]', 0, 0, '{}', 'existing_user')
+                """.trimIndent(),
+            )
+            database.execSQL(
+                "INSERT INTO `ChatGroup` (`id`, `name`, `userIds`, `hostId`, `displayName`) VALUES ('chat-array', 'Array chat', '[\"user_10\",\"missing_chat_user\"]', 'user_10', '')",
+            )
+            database.execSQL(
+                "INSERT INTO `team_user_cross_ref` (`teamId`, `userId`) VALUES ('team-array', 'existing_user')",
+            )
+            database.execSQL(
+                "INSERT INTO `chat_user_cross_ref` (`chatId`, `userId`) VALUES ('chat-array', 'existing_user')",
+            )
+        }
+
+        migrationHelper.runMigrationsAndValidate(
+            databaseName,
+            MVP_DATABASE_VERSION,
+            true,
+            *MVP_DATABASE_MIGRATIONS,
+        ).use { database ->
+            database.query(
+                "SELECT `teamId`, `userId` FROM `team_user_cross_ref` ORDER BY `teamId`, `userId`",
+            ).use { cursor ->
+                val pairs = buildList {
+                    while (cursor.moveToNext()) add("${cursor.getString(0)}:${cursor.getString(1)}")
+                }
+                assertEquals(
+                    listOf(
+                        "team-array:existing_user",
+                        "team-array:missing_user",
+                        "team-array:user_10",
+                        "team-from-user:user_10",
+                    ),
+                    pairs,
+                )
+            }
+            database.query(
+                "SELECT `userId` FROM `team_pending_player_cross_ref` WHERE `teamId` = 'team-array'",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("missing_pending", cursor.getString(0))
+            }
+            database.query(
+                "SELECT `userId` FROM `chat_user_cross_ref` WHERE `chatId` = 'chat-array' ORDER BY `userId`",
+            ).use { cursor ->
+                val ids = buildList { while (cursor.moveToNext()) add(cursor.getString(0)) }
+                assertEquals(listOf("existing_user", "missing_chat_user", "user_10"), ids)
+            }
+
+            assertColumnAbsent(database, "Team", "playerIds")
+            assertColumnAbsent(database, "Team", "pending")
+            assertColumnAbsent(database, "ChatGroup", "userIds")
+            assertColumnAbsent(database, "UserData", "teamIds")
+            assertForeignKeyParents(database, "team_user_cross_ref", listOf("Team"))
+            assertForeignKeyParents(database, "team_pending_player_cross_ref", listOf("Team"))
+            assertForeignKeyParents(database, "chat_user_cross_ref", listOf("ChatGroup"))
+
+            database.execSQL("PRAGMA foreign_keys = ON")
+            database.execSQL(
+                "INSERT INTO `team_user_cross_ref` (`teamId`, `userId`) VALUES ('team-array', 'arrived-before-profile')",
+            )
+            database.execSQL("DELETE FROM `Team` WHERE `id` = 'team-array'")
+            database.query(
+                "SELECT COUNT(*) FROM `team_user_cross_ref` WHERE `teamId` = 'team-array'",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(0, cursor.getInt(0))
+            }
+        }
+    }
+
+    @Test
+    fun membershipDaos_reconstructMissingProfilesAndRollbackRejectedReplacements() = runBlocking {
+        val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(
+            InstrumentationRegistry.getInstrumentation().targetContext,
+        ).allowMainThreadQueries().build()
+
+        try {
+            val originalTeam = Team(
+                id = "team_exact",
+                division = "OPEN",
+                name = "Original team",
+                captainId = "user_10",
+                managerId = "user_10",
+                playerIds = listOf("user_10", "missing_user"),
+                pending = listOf("missing_pending"),
+                playerRegistrations = listOf(
+                    TeamPlayerRegistration(
+                        id = "registration-user-10",
+                        teamId = "team_exact",
+                        userId = "user_10",
+                        status = "ACTIVE",
+                        isCaptain = true,
+                    ),
+                    TeamPlayerRegistration(
+                        id = "registration-missing-started",
+                        teamId = "team_exact",
+                        userId = "missing_user",
+                        status = "STARTED",
+                        consentStatus = "sent",
+                    ),
+                    TeamPlayerRegistration(
+                        id = "registration-missing-pending",
+                        teamId = "team_exact",
+                        userId = "missing_pending",
+                        status = "INVITED",
+                    ),
+                ),
+                teamSize = 3,
+            )
+            database.getTeamDao.upsertTeamWithRelations(originalTeam)
+
+            val roomReadTeam = database.getTeamDao.getTeam("team_exact")
+            database.getTeamDao.upsertTeamWithRelations(roomReadTeam.copy(name = "Room-read team"))
+            val roomReadRewrite = database.getTeamDao.getTeam("team_exact")
+            assertEquals(setOf("user_10", "missing_user"), roomReadRewrite.playerIds.toSet())
+            assertEquals(listOf("missing_pending"), roomReadRewrite.pending)
+            assertEquals(
+                "ACTIVE" to "sent",
+                roomReadRewrite.playerRegistrations
+                    .single { it.userId == "missing_user" }
+                    .let { it.normalizedStatus() to it.consentStatus },
+            )
+
+            assertTrue(database.getTeamDao.getTeamsForUser("user_1").isEmpty())
+            assertEquals(
+                listOf("team_exact"),
+                database.getTeamDao.getTeamsForUser("user_10").map(Team::id),
+            )
+            assertEquals(
+                setOf("user_10", "missing_user"),
+                database.getTeamDao.getTeam("team_exact").playerIds.toSet(),
+            )
+
+            database.getUserDataDao.upsertUserWithRelations(relationshipTestUser("user_10"))
+            assertEquals(
+                listOf("team_exact"),
+                database.getUserDataDao.getUserDataById("user_10")?.teamIds,
+            )
+            val teamWithPlayers = database.getTeamDao.getTeamWithPlayers("team_exact")
+            assertEquals(setOf("user_10", "missing_user"), teamWithPlayers.team.playerIds.toSet())
+            assertEquals(listOf("user_10"), teamWithPlayers.players.map(UserData::id))
+
+            val originalChat = ChatGroup(
+                id = "chat_exact",
+                name = "Original chat",
+                userIds = listOf("user_10", "missing_chat_user"),
+                hostId = "user_10",
+            )
+            database.getChatGroupDao.upsertChatGroupWithRelations(originalChat)
+            assertTrue(database.getChatGroupDao.getChatGroupsByUserId("user_1").isEmpty())
+            assertEquals(
+                setOf("user_10", "missing_chat_user"),
+                database.getChatGroupDao.getChatGroupsByUserId("missing_chat_user").single().userIds.toSet(),
+            )
+            val chatWithRelations = database.getChatGroupDao.getChatGroupWithRelations("missing_chat_user")
+            assertEquals(setOf("user_10", "missing_chat_user"), chatWithRelations.chatGroup.userIds.toSet())
+            assertEquals(listOf("user_10"), chatWithRelations.users.map(UserData::id))
+
+            val canonicalReplacement = database.getTeamDao.getTeam("team_exact").copy(
+                name = "Canonical replacement",
+                playerIds = listOf("replacement_user"),
+                pending = listOf("replacement_pending"),
+            )
+            database.getTeamDao.upsertTeamWithRelations(canonicalReplacement)
+            val replacedTeam = database.getTeamDao.getTeam("team_exact")
+            assertEquals("Canonical replacement", replacedTeam.name)
+            assertEquals(listOf("replacement_user"), replacedTeam.playerIds)
+            assertEquals(listOf("replacement_pending"), replacedTeam.pending)
+            val resynchronizedReplacement = replacedTeam.withSynchronizedMembership()
+            assertEquals(listOf("replacement_user"), resynchronizedReplacement.playerIds)
+            assertEquals(listOf("replacement_pending"), resynchronizedReplacement.pending)
+
+            database.openHelper.writableDatabase.execSQL(
+                """
+                CREATE TRIGGER reject_team_membership
+                BEFORE INSERT ON team_user_cross_ref
+                WHEN NEW.userId = 'reject_user'
+                BEGIN
+                    SELECT RAISE(ABORT, 'rejected team membership');
+                END
+                """.trimIndent(),
+            )
+            assertFails {
+                database.getTeamDao.upsertTeamWithRelations(
+                    replacedTeam.copy(
+                        name = "Partially changed team",
+                        playerIds = listOf("replacement_user", "reject_user"),
+                    ),
+                )
+            }
+            val rolledBackTeam = database.getTeamDao.getTeam("team_exact")
+            assertEquals("Canonical replacement", rolledBackTeam.name)
+            assertEquals(listOf("replacement_user"), rolledBackTeam.playerIds)
+            assertEquals(listOf("replacement_pending"), rolledBackTeam.pending)
+
+            database.openHelper.writableDatabase.execSQL(
+                """
+                CREATE TRIGGER reject_chat_membership
+                BEFORE INSERT ON chat_user_cross_ref
+                WHEN NEW.userId = 'reject_user'
+                BEGIN
+                    SELECT RAISE(ABORT, 'rejected chat membership');
+                END
+                """.trimIndent(),
+            )
+            assertFails {
+                database.getChatGroupDao.upsertChatGroupWithRelations(
+                    originalChat.copy(
+                        name = "Partially changed chat",
+                        userIds = listOf("replacement_user", "reject_user"),
+                    ),
+                )
+            }
+            val rolledBackChat = database.getChatGroupDao
+                .getChatGroupsByUserId("missing_chat_user")
+                .single()
+            assertEquals("Original chat", rolledBackChat.name)
+            assertEquals(setOf("user_10", "missing_chat_user"), rolledBackChat.userIds.toSet())
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun matchOperationOutboxDao_prunes_old_acknowledgements_but_retains_the_sequence_sentinel() = runBlocking {
+        val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(
+            InstrumentationRegistry.getInstrumentation().targetContext,
+        ).allowMainThreadQueries().build()
+
+        try {
+            val acknowledged = (1L..3L).map { sequence ->
+                MatchOperationOutboxEntry(
+                    id = "device-1:match-1:$sequence",
+                    eventId = "event-1",
+                    matchId = "match-1",
+                    operationKind = "SCORE_SET",
+                    payloadJson = "{}",
+                    status = MATCH_OPERATION_STATUS_ACKED,
+                    sourceDevice = "PHONE",
+                    clientDeviceId = "device-1",
+                    clientSequence = sequence,
+                    clientCreatedAt = "2026-01-0${sequence}T00:00:00Z",
+                    ackedAt = "2026-01-0${sequence}T00:01:00Z",
+                )
+            }
+            database.getMatchOperationOutboxDao.upsertOperations(acknowledged)
+
+            database.getMatchOperationOutboxDao.deleteAckedOlderThan("2026-02-01T00:00:00Z")
+
+            assertEquals(
+                listOf(3L),
+                database.getMatchOperationOutboxDao
+                    .getOperationsByIds(acknowledged.map(MatchOperationOutboxEntry::id))
+                    .map(MatchOperationOutboxEntry::clientSequence),
+            )
+            assertEquals(3L, database.getMatchOperationOutboxDao.maxClientSequence())
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun messageDao_orders_cached_messages_by_time_then_id() = runBlocking {
+        val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(
+            InstrumentationRegistry.getInstrumentation().targetContext,
+        ).allowMainThreadQueries().build()
+
+        try {
+            database.getMessageDao.upsertMessages(
+                listOf(
+                    MessageMVP(
+                        id = "message_z",
+                        userId = "user_1",
+                        body = "later",
+                        attachmentUrls = emptyList(),
+                        chatId = "chat_1",
+                        readByIds = emptyList(),
+                        sentTime = Instant.parse("2026-07-12T12:01:00Z"),
+                    ),
+                    MessageMVP(
+                        id = "message_b",
+                        userId = "user_1",
+                        body = "tie second",
+                        attachmentUrls = emptyList(),
+                        chatId = "chat_1",
+                        readByIds = emptyList(),
+                        sentTime = Instant.parse("2026-07-12T12:00:00Z"),
+                    ),
+                    MessageMVP(
+                        id = "message_a",
+                        userId = "user_2",
+                        body = "tie first",
+                        attachmentUrls = emptyList(),
+                        chatId = "chat_1",
+                        readByIds = emptyList(),
+                        sentTime = Instant.parse("2026-07-12T12:00:00Z"),
+                    ),
+                    MessageMVP(
+                        id = "other_chat",
+                        userId = "user_1",
+                        body = "ignore",
+                        attachmentUrls = emptyList(),
+                        chatId = "chat_2",
+                        readByIds = emptyList(),
+                        sentTime = Instant.parse("2026-07-12T11:59:00Z"),
+                    ),
+                ),
+            )
+
+            assertEquals(
+                listOf("message_a", "message_b", "message_z"),
+                database.getMessageDao.getMessagesInChatGroup("chat_1").map { message -> message.id },
+            )
         } finally {
             database.close()
         }
@@ -359,7 +714,44 @@ class RoomMigrationPathTest {
         val supportedSourceVersions =
             (3..25).toList() +
                 (28..32).toList() +
-                listOf(34, 35, 90) +
+                listOf(34, 35, 90, 91, 92) +
                 legacyFixtureSourceVersions.sorted()
+    }
+}
+
+private fun relationshipTestUser(id: String): UserData = UserData(
+    id = id,
+    firstName = "Test",
+    lastName = "User",
+    teamIds = emptyList(),
+    friendIds = emptyList(),
+    friendRequestIds = emptyList(),
+    friendRequestSentIds = emptyList(),
+    followingIds = emptyList(),
+    userName = id,
+    hasStripeAccount = false,
+    uploadedImages = emptyList(),
+)
+
+private fun assertColumnAbsent(
+    database: androidx.sqlite.db.SupportSQLiteDatabase,
+    tableName: String,
+    columnName: String,
+) {
+    database.query("PRAGMA table_info(`$tableName`)").use { cursor ->
+        while (cursor.moveToNext()) {
+            check(cursor.getString(1) != columnName) { "Expected $tableName.$columnName to be removed." }
+        }
+    }
+}
+
+private fun assertForeignKeyParents(
+    database: androidx.sqlite.db.SupportSQLiteDatabase,
+    tableName: String,
+    expectedParents: List<String>,
+) {
+    database.query("PRAGMA foreign_key_list(`$tableName`)").use { cursor ->
+        val parents = buildList { while (cursor.moveToNext()) add(cursor.getString(2)) }
+        assertEquals(expectedParents, parents)
     }
 }

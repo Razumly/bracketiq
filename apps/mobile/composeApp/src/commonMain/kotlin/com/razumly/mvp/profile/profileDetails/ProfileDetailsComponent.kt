@@ -5,20 +5,19 @@ import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.repositories.AccountDeletionMfaChallenge
-import com.razumly.mvp.core.data.repositories.AccountDeletionMfaRequiredException
-import com.razumly.mvp.core.data.repositories.AccountDeletionRequest
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
+import com.razumly.mvp.core.presentation.util.ImageUploadTooLargeException
 import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -30,29 +29,28 @@ import kotlinx.coroutines.launch
 interface ProfileDetailsComponent : IPaymentProcessor {
     val errorState: StateFlow<ErrorMessage?>
     val message: StateFlow<String?>
+    val passwordChangeCompleted: StateFlow<Boolean>
     val currentUser: StateFlow<UserData>
     val currentAccount: StateFlow<AuthAccount>
     val lastUploadedImageId: StateFlow<String?>
-    val accountDeletionMfaChallenge: StateFlow<AccountDeletionMfaChallenge?>
-    val accountDeletionError: StateFlow<String?>
 
     fun onBackClicked()
     fun setLoadingHandler(loadingHandler: LoadingHandler)
-    fun onUploadSelected(photo: GalleryPhotoResult)
+    fun onUploadSelected(photo: GalleryPhotoResult, onRetry: () -> Unit = {})
     fun consumeUploadedImageSelection()
+    fun consumePasswordChangeCompletion()
     fun deleteImage(imageId: String)
-    fun clearAccountDeletionState()
-    fun deleteAccount(request: AccountDeletionRequest)
+    fun deleteAccount(confirmationText: String)
 
     fun updateProfile(
         firstName: String,
         lastName: String,
         email: String,
-        currentPassword: String,
-        newPassword: String,
         userName: String,
         profileImageId: String?,
     )
+
+    fun changePassword(currentPassword: String, newPassword: String)
 }
 
 class DefaultProfileDetailsComponent(
@@ -69,14 +67,11 @@ class DefaultProfileDetailsComponent(
     private val _message = MutableStateFlow<String?>(null)
     override val message = _message.asStateFlow()
 
+    private val _passwordChangeCompleted = MutableStateFlow(false)
+    override val passwordChangeCompleted = _passwordChangeCompleted.asStateFlow()
+
     private val _lastUploadedImageId = MutableStateFlow<String?>(null)
     override val lastUploadedImageId = _lastUploadedImageId.asStateFlow()
-
-    private val _accountDeletionMfaChallenge = MutableStateFlow<AccountDeletionMfaChallenge?>(null)
-    override val accountDeletionMfaChallenge = _accountDeletionMfaChallenge.asStateFlow()
-
-    private val _accountDeletionError = MutableStateFlow<String?>(null)
-    override val accountDeletionError = _accountDeletionError.asStateFlow()
 
     override val currentUser = userRepository.currentUser
         .map { result -> result.getOrNull() ?: UserData() }
@@ -107,20 +102,41 @@ class DefaultProfileDetailsComponent(
         this.loadingHandler = loadingHandler
     }
 
-    override fun onUploadSelected(photo: GalleryPhotoResult) {
+    override fun onUploadSelected(photo: GalleryPhotoResult, onRetry: () -> Unit) {
         scope.launch {
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.showLoading("Uploading image...")
-            }
-            imageRepository.uploadImage(convertPhotoResultToUploadFile(photo))
-                .onFailure { error ->
-                    _errorState.value = ErrorMessage("Failed to upload image: ${error.userMessage()}")
+            val loadingOperation = if (::loadingHandler.isInitialized) loadingHandler.newOperation() else null
+            loadingOperation?.showLoading("Uploading image...")
+            try {
+                val uploadFile = try {
+                    convertPhotoResultToUploadFile(photo)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: ImageUploadTooLargeException) {
+                    _errorState.value = profilePhotoRetryError(
+                        message = profilePhotoUploadFailureMessage(ProfilePhotoUploadFailure.TOO_LARGE),
+                        onRetry = onRetry,
+                    )
+                    return@launch
+                } catch (_: Throwable) {
+                    _errorState.value = profilePhotoRetryError(
+                        message = profilePhotoUploadFailureMessage(ProfilePhotoUploadFailure.CONVERSION),
+                        onRetry = onRetry,
+                    )
+                    return@launch
                 }
-                .onSuccess { imageId ->
-                    _lastUploadedImageId.value = imageId
+
+                try {
+                    _lastUploadedImageId.value = imageRepository.uploadImage(uploadFile).getOrThrow()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    _errorState.value = profilePhotoRetryError(
+                        message = profilePhotoUploadFailureMessage(ProfilePhotoUploadFailure.UPLOAD),
+                        onRetry = onRetry,
+                    )
                 }
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.hideLoading()
+            } finally {
+                loadingOperation?.hideLoading()
             }
         }
     }
@@ -129,49 +145,42 @@ class DefaultProfileDetailsComponent(
         _lastUploadedImageId.value = null
     }
 
+    override fun consumePasswordChangeCompletion() {
+        _passwordChangeCompleted.value = false
+    }
+
     override fun deleteImage(imageId: String) {
         scope.launch {
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.showLoading("Deleting image...")
-            }
-            imageRepository.deleteImage(imageId)
-                .onFailure { error ->
-                    _errorState.value = ErrorMessage("Failed to delete image: ${error.userMessage()}")
-                }
-                .onSuccess {
-                    _message.value = "Image deleted"
-                }
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.hideLoading()
+            val loadingOperation = if (::loadingHandler.isInitialized) loadingHandler.newOperation() else null
+            loadingOperation?.showLoading("Deleting image...")
+            try {
+                imageRepository.deleteImage(imageId)
+                    .onFailure { error ->
+                        _errorState.value = ErrorMessage("Failed to delete image: ${error.userMessage()}")
+                    }
+                    .onSuccess {
+                        _message.value = "Image deleted"
+                    }
+            } finally {
+                loadingOperation?.hideLoading()
             }
         }
     }
 
-    override fun clearAccountDeletionState() {
-        _accountDeletionMfaChallenge.value = null
-        _accountDeletionError.value = null
-    }
-
-    override fun deleteAccount(request: AccountDeletionRequest) {
+    override fun deleteAccount(confirmationText: String) {
         scope.launch {
-            _accountDeletionError.value = null
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.showLoading("Deleting account...")
-            }
-            userRepository.deleteAccount(request)
-                .onFailure { error ->
-                    val mfaChallenge = (error as? AccountDeletionMfaRequiredException)?.challenge
-                    if (mfaChallenge != null) {
-                        _accountDeletionMfaChallenge.value = mfaChallenge
+            val loadingOperation = if (::loadingHandler.isInitialized) loadingHandler.newOperation() else null
+            loadingOperation?.showLoading("Deleting account...")
+            try {
+                userRepository.deleteAccount(confirmationText)
+                    .onFailure { error ->
+                        _errorState.value = ErrorMessage("Failed to delete account: ${error.userMessage()}")
                     }
-                    _accountDeletionError.value = error.userMessage("Failed to delete account.")
-                }
-                .onSuccess {
-                    clearAccountDeletionState()
-                    navigationHandler.navigateToLogin()
-                }
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.hideLoading()
+                    .onSuccess {
+                        navigationHandler.navigateToLogin()
+                    }
+            } finally {
+                loadingOperation?.hideLoading()
             }
         }
     }
@@ -180,29 +189,48 @@ class DefaultProfileDetailsComponent(
         firstName: String,
         lastName: String,
         email: String,
-        currentPassword: String,
-        newPassword: String,
         userName: String,
         profileImageId: String?,
     ) {
         scope.launch {
-            loadingHandler.showLoading("Updating Profile...")
-            userRepository.updateProfile(
-                firstName = firstName,
-                lastName = lastName,
-                email = email,
-                currentPassword = currentPassword,
-                newPassword = newPassword,
-                userName = userName,
-                profileImageId = profileImageId,
-            )
-                .onFailure { error ->
-                    _errorState.value = ErrorMessage("Failed to update profile: ${error.userMessage()}")
-                }
-                .onSuccess {
-                    _message.value = "Profile updated successfully"
-                }
-            loadingHandler.hideLoading()
+            val loadingOperation = loadingHandler.newOperation()
+            loadingOperation.showLoading("Updating Profile...")
+            try {
+                userRepository.updateProfile(
+                    firstName = firstName,
+                    lastName = lastName,
+                    email = email,
+                    userName = userName,
+                    profileImageId = profileImageId,
+                )
+                    .onFailure { error ->
+                        _errorState.value = ErrorMessage("Failed to update profile: ${error.userMessage()}")
+                    }
+                    .onSuccess {
+                        _message.value = "Profile updated successfully"
+                    }
+            } finally {
+                loadingOperation.hideLoading()
+            }
+        }
+    }
+
+    override fun changePassword(currentPassword: String, newPassword: String) {
+        scope.launch {
+            val loadingOperation = loadingHandler.newOperation()
+            loadingOperation.showLoading("Changing password...")
+            try {
+                userRepository.updatePassword(currentPassword, newPassword)
+                    .onFailure { error ->
+                        _errorState.value = ErrorMessage("Failed to change password: ${error.userMessage()}")
+                    }
+                    .onSuccess {
+                        _passwordChangeCompleted.value = true
+                        _message.value = "Password changed successfully"
+                    }
+            } finally {
+                loadingOperation.hideLoading()
+            }
         }
     }
 }

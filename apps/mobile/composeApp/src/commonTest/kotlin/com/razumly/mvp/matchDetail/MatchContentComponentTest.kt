@@ -19,6 +19,7 @@ import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchTimekeepingConfigMVP
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -27,17 +28,21 @@ import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import com.razumly.mvp.core.data.repositories.IUserRepository
-import com.razumly.mvp.core.network.dto.MatchActionOperationDto
 import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
+import com.razumly.mvp.core.network.dto.MatchActionOperationDto
 import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
+import com.razumly.mvp.core.network.dto.MatchUpdateDto
+import com.razumly.mvp.core.network.dto.TeamCheckInDto
+import com.razumly.mvp.core.network.dto.TeamCheckInsResponseDto
 import com.razumly.mvp.eventCreate.CreateEvent_FakeEventRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeMatchRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeUserRepository
 import com.razumly.mvp.eventCreate.MainDispatcherTest
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.eventDetail.data.StagedMatchCreate
+import com.razumly.mvp.eventDetail.data.applyLocalMatchUpdate
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -55,21 +60,6 @@ import kotlin.time.Instant
 private const val TEST_ACTUAL_START = "2026-06-08T07:52:35.109Z"
 
 class MatchContentComponentTest : MainDispatcherTest() {
-    @Test
-    fun resolving_match_completion_time_uses_explicit_actual_end_or_current_completion_instant() {
-        val currentCompletion = Instant.parse("2026-07-11T19:15:00.000Z")
-        val officialActualEnd = "2026-07-11T19:10:00.000Z"
-
-        assertEquals(
-            Instant.parse(officialActualEnd),
-            resolveMatchCompletionTime(officialActualEnd, currentCompletion),
-        )
-        assertEquals(
-            currentCompletion,
-            resolveMatchCompletionTime(actualEnd = null, completionInstant = currentCompletion),
-        )
-    }
-
     @Test
     fun given_set_scoring_when_displaying_main_score_then_current_segment_score_is_returned() {
         val segments = listOf(
@@ -646,7 +636,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_assigned_official_team_when_match_not_checked_in_then_team_is_ready_without_prompt() = runTest(testDispatcher) {
+    fun given_assigned_official_team_when_match_not_checked_in_then_check_in_prompt_is_shown() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
         val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c"))
         val match = createMatch(
@@ -670,8 +660,8 @@ class MatchContentComponentTest : MainDispatcherTest() {
         advance()
 
         assertTrue(harness.component.isOfficial.value)
-        assertTrue(harness.component.officialCheckedIn.value)
-        assertFalse(harness.component.showOfficialCheckInDialog.value)
+        assertFalse(harness.component.officialCheckedIn.value)
+        assertTrue(harness.component.showOfficialCheckInDialog.value)
     }
 
     @Test
@@ -697,7 +687,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
         )
 
         advance()
-        assertFalse(harness.component.showOfficialCheckInDialog.value)
+        assertTrue(harness.component.showOfficialCheckInDialog.value)
 
         harness.component.dismissOfficialDialog()
         assertFalse(harness.component.showOfficialCheckInDialog.value)
@@ -706,7 +696,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
         advance()
 
         assertTrue(harness.component.isOfficial.value)
-        assertTrue(harness.component.officialCheckedIn.value)
+        assertFalse(harness.component.officialCheckedIn.value)
         assertFalse(harness.component.showOfficialCheckInDialog.value)
     }
 
@@ -733,7 +723,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
         )
 
         advance()
-        assertFalse(harness.component.showOfficialCheckInDialog.value)
+        assertTrue(harness.component.showOfficialCheckInDialog.value)
 
         harness.component.confirmOfficialCheckIn()
         advance()
@@ -774,14 +764,14 @@ class MatchContentComponentTest : MainDispatcherTest() {
         advance()
 
         assertTrue(harness.component.isOfficial.value)
-        assertTrue(harness.component.officialCheckedIn.value)
+        assertFalse(harness.component.officialCheckedIn.value)
         assertFalse(harness.component.showOfficialCheckInDialog.value)
 
         harness.component.confirmOfficialCheckIn()
         advance()
 
         assertTrue(harness.matchRepository.updatedMatches.isEmpty())
-        assertTrue(harness.component.officialCheckedIn.value)
+        assertFalse(harness.component.officialCheckedIn.value)
     }
 
     @Test
@@ -792,19 +782,8 @@ class MatchContentComponentTest : MainDispatcherTest() {
             eventId = event.id,
             team1Id = "team-a",
             team2Id = "team-b",
-            teamOfficialId = "team-a",
+            teamOfficialId = "team-c",
             officialCheckedIn = false,
-        ).copy(
-            officialIds = listOf(
-                MatchOfficialAssignment(
-                    positionId = "position-referee",
-                    slotIndex = 0,
-                    holderType = OfficialAssignmentHolderType.OFFICIAL,
-                    userId = user.id,
-                    eventOfficialId = "event-official-1",
-                    checkedIn = false,
-                ),
-            ),
         )
         val harness = MatchDetailHarness(
             event = event,
@@ -835,7 +814,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_event_team_member_swap_when_confirming_then_match_updates_and_team_is_ready() = runTest(testDispatcher) {
+    fun given_event_team_member_swap_when_confirming_then_match_updates_then_check_in_prompt_is_shown() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
         val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c"))
         val match = createMatch(
@@ -868,6 +847,15 @@ class MatchContentComponentTest : MainDispatcherTest() {
         assertEquals(1, harness.matchRepository.updatedMatches.size)
         assertEquals("team-c", harness.matchRepository.updatedMatches[0].teamOfficialId)
         assertEquals(false, harness.matchRepository.updatedMatches[0].officialCheckedIn)
+        assertTrue(harness.component.isOfficial.value)
+        assertFalse(harness.component.officialCheckedIn.value)
+        assertTrue(harness.component.showOfficialCheckInDialog.value)
+
+        harness.component.confirmOfficialCheckIn()
+        advance()
+
+        assertEquals(2, harness.matchRepository.updatedMatches.size)
+        assertEquals(true, harness.matchRepository.updatedMatches[1].officialCheckedIn)
         assertTrue(harness.component.isOfficial.value)
         assertTrue(harness.component.officialCheckedIn.value)
         assertFalse(harness.component.showOfficialCheckInDialog.value)
@@ -931,6 +919,50 @@ class MatchContentComponentTest : MainDispatcherTest() {
         assertFalse(harness.component.isOfficial.value)
         assertFalse(harness.component.officialCheckedIn.value)
         assertTrue(harness.component.showOfficialCheckInDialog.value)
+    }
+
+    @Test
+    fun given_transient_match_check_in_read_failure_then_component_retries_and_recovers() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
+            teamSignup = true,
+            teamCheckInMode = TeamCheckInMode.MATCH,
+        )
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = true,
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+            matchTeamCheckInFailure = IllegalStateException("offline"),
+            matchTeamCheckInsResponse = TeamCheckInsResponseDto(
+                checkIns = listOf(
+                    TeamCheckInDto(eventTeamId = "team-a", status = "CHECKED_IN"),
+                ),
+            ),
+        )
+
+        testDispatcher.scheduler.runCurrent()
+
+        assertEquals(1, harness.matchRepository.matchTeamCheckInCalls.size)
+        assertTrue(harness.component.matchTeamCheckIns.value.isEmpty())
+
+        harness.matchRepository.matchTeamCheckInFailure = null
+        testDispatcher.scheduler.advanceTimeBy(3_000)
+        testDispatcher.scheduler.runCurrent()
+
+        assertEquals(2, harness.matchRepository.matchTeamCheckInCalls.size)
+        assertEquals("CHECKED_IN", harness.component.matchTeamCheckIns.value["team-a"]?.status)
     }
 
     @Test
@@ -1176,8 +1208,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
         advance()
 
         harness.component.updateScore(isTeam1 = true, increment = true)
-        harness.component.requestSetConfirmation()
-        harness.component.confirmSet()
+        harness.component.completeCurrentSet()
         advance()
 
         assertTrue(harness.matchRepository.scoreSetCalls.isEmpty())
@@ -1227,8 +1258,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
         testDispatcher.scheduler.runCurrent()
 
         assertEquals(21, harness.component.matchWithTeams.value.match.team1Points.first())
-        assertFalse(harness.component.showSetConfirmDialog.value)
-
         harness.component.updateScore(isTeam1 = true, increment = true)
         testDispatcher.scheduler.runCurrent()
 
@@ -1348,7 +1377,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_final_set_is_confirmed_when_confirming_again_then_no_second_sync_occurs() = runTest(testDispatcher) {
+    fun given_final_set_is_confirmed_when_confirming_again_then_completion_uses_the_actual_finish_time_once() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
         val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
             eventType = EventType.LEAGUE,
@@ -1367,7 +1396,8 @@ class MatchContentComponentTest : MainDispatcherTest() {
             team2Points = listOf(18),
             setResults = listOf(0),
             segments = listOf(createSegment(sequence = 1, team1Score = 21, team2Score = 18)),
-            end = Instant.fromEpochMilliseconds(1_700_003_600_000),
+            start = Instant.parse("2025-01-01T12:00:00Z"),
+            end = Instant.parse("2025-01-01T13:00:00Z"),
         )
         val harness = MatchDetailHarness(
             event = event,
@@ -1382,29 +1412,23 @@ class MatchContentComponentTest : MainDispatcherTest() {
 
         advance()
 
-        val beforeConfirmation = Clock.System.now()
-        harness.component.confirmSet()
+        harness.component.completeCurrentSet()
         advance()
-        val afterConfirmation = Clock.System.now()
 
         assertTrue(harness.component.matchFinished.value)
-        val completionTime = requireNotNull(harness.matchRepository.operationCalls.single().time)
-        assertTrue(completionTime >= beforeConfirmation)
-        assertTrue(completionTime <= afterConfirmation)
-        assertTrue(completionTime != match.start)
-        assertTrue(completionTime != match.end)
-        val finalizedMatch = harness.component.matchWithTeams.value.match
-        assertEquals("COMPLETE", finalizedMatch.status)
-        assertEquals("FINAL", finalizedMatch.resultStatus)
-        assertEquals(completionTime.toString(), finalizedMatch.actualEnd)
-        assertEquals("COMPLETE", finalizedMatch.segments.first().status)
-        val savedMatch = harness.matchRepository.savedMatches.last()
-        assertEquals("COMPLETE", savedMatch.status)
-        assertEquals("FINAL", savedMatch.resultStatus)
-        assertEquals(completionTime.toString(), savedMatch.actualEnd)
+        assertEquals("COMPLETE", harness.component.matchWithTeams.value.match.segments.first().status)
+        assertEquals("COMPLETE", harness.component.matchWithTeams.value.match.status)
+        assertEquals("FINAL", harness.component.matchWithTeams.value.match.resultStatus)
+        val completionOperation = harness.matchRepository.operationCalls.single()
+        assertTrue(completionOperation.time != match.start)
+        assertTrue(completionOperation.time != match.end)
+        assertEquals(
+            completionOperation.time?.toString(),
+            harness.component.matchWithTeams.value.match.actualEnd,
+        )
         assertEquals(1, harness.matchRepository.operationCalls.size)
 
-        harness.component.confirmSet()
+        harness.component.completeCurrentSet()
         advance()
 
         assertEquals(1, harness.matchRepository.operationCalls.size)
@@ -1448,7 +1472,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
 
         advance()
 
-        harness.component.confirmSet()
+        harness.component.completeCurrentSet()
         advance()
 
         assertFalse(harness.component.matchFinished.value)
@@ -1688,14 +1712,13 @@ class MatchContentComponentTest : MainDispatcherTest() {
         advance()
         harness.matchRepository.updateFailure = null
 
-        harness.component.requestSetConfirmation()
-        harness.component.confirmSet()
+        harness.component.completeCurrentSet()
         advance()
 
-        val confirmationSync = harness.matchRepository.operationCalls.last()
+        val confirmationSync = harness.matchRepository.operationCalls.single()
+        assertTrue(confirmationSync.finalize)
         assertEquals(1, harness.matchRepository.scoreSetCalls.size)
         assertEquals(1, harness.matchRepository.operationCalls.size)
-        assertTrue(confirmationSync.finalize)
         assertEquals(listOf(1), confirmationSync.match.team1Points)
         assertEquals("COMPLETE", confirmationSync.match.segments.first().status)
         assertEquals(1, confirmationSync.match.segments.first().scores["team-a"])
@@ -1739,8 +1762,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
 
         advance()
 
-        harness.component.requestSetConfirmation()
-        harness.component.confirmSet()
+        harness.component.completeCurrentSet()
         advance()
 
         assertEquals("COMPLETE", harness.matchRepository.updatedMatches.single().segments.first().status)
@@ -1804,15 +1826,14 @@ class MatchContentComponentTest : MainDispatcherTest() {
 
         advance()
 
-        harness.component.requestSetConfirmation()
-        harness.component.confirmSet()
+        harness.component.completeCurrentSet()
         advance()
 
         val incidentCall = harness.matchRepository.incidentCalls.first()
         assertEquals("client:match-incident:match-1:segment-1:1", incidentCall.operation.id)
         assertTrue(harness.matchRepository.incidentCalls.size > 1)
         assertTrue(harness.matchRepository.operationCalls.isEmpty())
-        assertTrue(harness.matchRepository.savedMatches.isNotEmpty())
+        assertTrue(harness.matchRepository.savedMatches.isEmpty())
         assertEquals("IN_PROGRESS", harness.component.matchWithTeams.value.match.segments.first().status)
         assertEquals(0, harness.component.currentSet.value)
         assertEquals(
@@ -1890,6 +1911,10 @@ class MatchContentComponentTest : MainDispatcherTest() {
         assertEquals(12, incident.minute)
         assertEquals("Header", incident.note)
         assertEquals(1, harness.component.matchWithTeams.value.match.incidents.size)
+        assertEquals(listOf(1), harness.component.matchWithTeams.value.match.team1Points)
+        assertEquals(1, harness.component.matchWithTeams.value.match.segments.single().scores["team-a"])
+        assertEquals("IN_PROGRESS", harness.component.matchWithTeams.value.match.segments.single().status)
+        assertTrue(harness.matchRepository.savedMatches.isEmpty())
     }
 
     @Test
@@ -1962,7 +1987,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_incident_update_failure_when_recording_score_then_optimistic_score_is_kept() = runTest(testDispatcher) {
+    fun given_incident_enqueue_failure_when_recording_score_then_optimistic_state_is_reverted() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
         val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
             usesSets = false,
@@ -2006,110 +2031,71 @@ class MatchContentComponentTest : MainDispatcherTest() {
         )
         testDispatcher.scheduler.runCurrent()
 
-        assertEquals(listOf(1), harness.component.matchWithTeams.value.match.team1Points)
-        assertEquals(1, harness.component.matchWithTeams.value.match.segments.single().scores["team-a"])
-        val pendingIncident = harness.component.matchWithTeams.value.match.incidents.single()
-        assertEquals("FAILED", pendingIncident.uploadStatus)
-        assertEquals(null, harness.component.errorState.value)
-
-        harness.matchRepository.operationFailure = null
-        testDispatcher.scheduler.advanceTimeBy(3_000)
-        testDispatcher.scheduler.runCurrent()
+        assertEquals(1, harness.matchRepository.incidentCalls.size)
+        assertEquals(listOf(0), harness.component.matchWithTeams.value.match.team1Points)
+        assertEquals(0, harness.component.matchWithTeams.value.match.segments.single().scores["team-a"])
+        assertTrue(harness.component.matchWithTeams.value.match.incidents.isEmpty())
+        assertTrue(harness.matchRepository.savedMatches.isEmpty())
+        assertTrue(harness.component.errorState.value?.startsWith("Failed to save incident locally:") == true)
     }
 
     @Test
-    fun given_queued_incident_when_sync_fails_then_it_backs_off_retries_and_resets_after_success() = runTest(testDispatcher) {
+    fun given_incident_enqueue_failure_when_removing_then_cached_score_and_incident_are_kept() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
-        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
-            usesSets = false,
-            autoCreatePointMatchIncidents = true,
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(usesSets = false)
+        val incident = MatchIncidentMVP(
+            id = "incident-1",
+            eventId = event.id,
+            matchId = "match-1",
+            segmentId = "segment-1",
+            eventTeamId = "team-a",
+            participantUserId = "player-a",
+            incidentType = "GOAL",
+            sequence = 1,
+            linkedPointDelta = 1,
+            minute = 5,
+        )
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = true,
+        ).copy(
+            resolvedMatchRules = ResolvedMatchRulesMVP(
+                scoringModel = "POINTS_ONLY",
+                segmentCount = 1,
+                segmentLabel = "Total",
+                autoCreatePointIncidentType = "GOAL",
+            ),
+            team1Points = listOf(1),
+            team2Points = listOf(0),
+            segments = listOf(createSegment(sequence = 1, team1Score = 1, team2Score = 0)),
+            incidents = listOf(incident),
         )
         val harness = MatchDetailHarness(
             event = event,
-            initialMatch = createMatch(
-                eventId = event.id,
-                team1Id = "team-a",
-                team2Id = "team-b",
-                teamOfficialId = "team-c",
-                officialCheckedIn = true,
-            ).copy(
-                actualStart = TEST_ACTUAL_START,
-                resolvedMatchRules = ResolvedMatchRulesMVP(
-                    scoringModel = "POINTS_ONLY",
-                    segmentCount = 1,
-                    segmentLabel = "Total",
-                    pointIncidentRequiresParticipant = true,
-                )
-            ),
+            initialMatch = match,
             currentUser = user,
             teams = listOf(
                 createTeam(id = "team-a", captainId = "captain-a"),
                 createTeam(id = "team-b", captainId = "captain-b"),
                 createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
             ),
-            operationFailure = IllegalStateException("incident write failed"),
+            operationFailure = IllegalStateException("incident delete could not be saved"),
         )
 
         advance()
 
-        harness.component.recordPointIncident(
-            isTeam1 = true,
-            eventRegistrationId = "reg-a",
-            participantUserId = "player-a",
-            minute = 12,
-            clockInput = null,
-            note = "Header",
-        )
-        testDispatcher.scheduler.runCurrent()
+        harness.component.removeMatchIncident(incident.id)
+        advance()
 
-        assertEquals(1, harness.matchRepository.incidentCalls.size)
-        assertEquals("FAILED", harness.component.matchWithTeams.value.match.incidents.single().uploadStatus)
-
-        testDispatcher.scheduler.advanceTimeBy(2_999)
-        testDispatcher.scheduler.runCurrent()
-        assertEquals(1, harness.matchRepository.incidentCalls.size)
-
-        testDispatcher.scheduler.advanceTimeBy(1)
-        testDispatcher.scheduler.runCurrent()
-
-        assertEquals(2, harness.matchRepository.incidentCalls.size)
-        assertEquals("FAILED", harness.component.matchWithTeams.value.match.incidents.single().uploadStatus)
-
-        harness.matchRepository.operationFailure = null
-        testDispatcher.scheduler.advanceTimeBy(14_999)
-        testDispatcher.scheduler.runCurrent()
-        assertEquals(2, harness.matchRepository.incidentCalls.size)
-
-        testDispatcher.scheduler.advanceTimeBy(1)
-        testDispatcher.scheduler.runCurrent()
-
-        assertEquals(3, harness.matchRepository.incidentCalls.size)
-        assertEquals(null, harness.component.matchWithTeams.value.match.incidents.single().uploadStatus)
-
-        harness.matchRepository.operationFailure = IllegalStateException("incident write failed again")
-        harness.component.recordPointIncident(
-            isTeam1 = true,
-            eventRegistrationId = "reg-a",
-            participantUserId = "player-a",
-            minute = 13,
-            clockInput = null,
-            note = "Volley",
-        )
-        testDispatcher.scheduler.runCurrent()
-
-        assertEquals(4, harness.matchRepository.incidentCalls.size)
-        assertEquals(1, harness.component.matchWithTeams.value.match.incidents.count { it.uploadStatus == "FAILED" })
-
-        harness.matchRepository.operationFailure = null
-        testDispatcher.scheduler.advanceTimeBy(2_999)
-        testDispatcher.scheduler.runCurrent()
-        assertEquals(4, harness.matchRepository.incidentCalls.size)
-
-        testDispatcher.scheduler.advanceTimeBy(1)
-        testDispatcher.scheduler.runCurrent()
-
-        assertEquals(5, harness.matchRepository.incidentCalls.size)
-        assertTrue(harness.component.matchWithTeams.value.match.incidents.all { it.uploadStatus == null })
+        val operationCall = harness.matchRepository.operationCalls.single()
+        assertEquals("DELETE", operationCall.incidentOperations.single().action)
+        assertEquals(listOf(1), harness.component.matchWithTeams.value.match.team1Points)
+        assertEquals(incident.id, harness.component.matchWithTeams.value.match.incidents.single().id)
+        assertTrue(harness.matchRepository.savedMatches.isEmpty())
+        assertTrue(harness.component.errorState.value?.startsWith("Failed to save incident locally:") == true)
     }
 
     @Test
@@ -2332,7 +2318,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_persisted_pending_incident_when_scoring_reopens_then_it_is_enqueued_and_drained() = runTest(testDispatcher) {
+    fun given_pending_local_incident_when_confirming_segment_then_incident_is_resent_with_segment() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
         val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
             usesSets = false,
@@ -2384,20 +2370,74 @@ class MatchContentComponentTest : MainDispatcherTest() {
 
         advance()
 
-        val incidentCall = harness.matchRepository.incidentCalls.single()
-        assertEquals("client:match-incident:match-1:segment-1:1", incidentCall.operation.id)
-        assertEquals(match.id, harness.matchRepository.pendingOperationSyncMatchIds.single())
-        assertEquals(null, harness.component.matchWithTeams.value.match.incidents.single().uploadStatus)
-
-        harness.component.requestSetConfirmation()
-        harness.component.confirmSet()
+        harness.component.completeCurrentSet()
         advance()
 
-        assertEquals(1, harness.matchRepository.incidentCalls.size)
+        val incidentCall = harness.matchRepository.incidentCalls.single()
+        assertEquals("client:match-incident:match-1:segment-1:1", incidentCall.operation.id)
         val operationCall = harness.matchRepository.operationCalls.single()
         assertTrue(operationCall.finalize)
         assertTrue(operationCall.incidentOperations.isEmpty())
         assertEquals("COMPLETE", operationCall.segmentOperations.single().status)
+    }
+
+    @Test
+    fun given_persisted_failed_incident_when_reopening_as_official_then_queue_resumes() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
+            usesSets = false,
+            autoCreatePointMatchIncidents = true,
+        )
+        val pendingIncident = MatchIncidentMVP(
+            id = "client:match-incident:match-1:segment-1:1",
+            eventId = event.id,
+            matchId = "match-1",
+            segmentId = "segment-1",
+            eventTeamId = "team-a",
+            participantUserId = "player-a",
+            officialUserId = user.id,
+            incidentType = "GOAL",
+            sequence = 1,
+            linkedPointDelta = 1,
+            minute = 5,
+            uploadStatus = "FAILED",
+        )
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = true,
+        ).copy(
+            actualStart = TEST_ACTUAL_START,
+            resolvedMatchRules = ResolvedMatchRulesMVP(
+                scoringModel = "POINTS_ONLY",
+                segmentCount = 1,
+                segmentLabel = "Total",
+                autoCreatePointIncidentType = "GOAL",
+                pointIncidentRequiresParticipant = true,
+            ),
+            team1Points = listOf(1),
+            team2Points = listOf(0),
+            segments = listOf(createSegment(sequence = 1, team1Score = 1, team2Score = 0)),
+            incidents = listOf(pendingIncident),
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+        )
+
+        advance()
+
+        assertEquals(1, harness.matchRepository.incidentCalls.size)
+        assertEquals(pendingIncident.id, harness.matchRepository.incidentCalls.single().operation.id)
+        assertEquals(null, harness.component.matchWithTeams.value.match.incidents.single().uploadStatus)
     }
 }
 
@@ -2413,6 +2453,8 @@ private class MatchDetailHarness(
     scoreSetDelaySequence: List<Long> = emptyList(),
     operationFailure: Throwable? = null,
     updateFailure: Throwable? = null,
+    matchTeamCheckInFailure: Throwable? = null,
+    matchTeamCheckInsResponse: TeamCheckInsResponseDto = TeamCheckInsResponseDto(),
 ) {
     val matchRepository = MatchDetailFakeMatchRepository(
         initialMatch = repositoryMatch,
@@ -2421,12 +2463,14 @@ private class MatchDetailHarness(
         scoreSetDelaySequence = scoreSetDelaySequence,
         operationFailure = operationFailure,
         updateFailure = updateFailure,
+        matchTeamCheckInFailure = matchTeamCheckInFailure,
+        matchTeamCheckInsResponse = matchTeamCheckInsResponse,
     )
 
     val component = DefaultMatchContentComponent(
         componentContext = createTestComponentContext(),
-        selectedMatch = initialMatch.toMatchWithRelations(),
-        selectedEvent = event,
+        selectedMatchId = initialMatch.id,
+        selectedEventId = event.id,
         eventRepository = MatchDetailFakeEventRepository(event),
         matchRepository = matchRepository,
         userRepository = MatchDetailFakeUserRepository(currentUser),
@@ -2456,20 +2500,33 @@ private class MatchDetailFakeMatchRepository(
     scoreSetDelaySequence: List<Long> = emptyList(),
     operationFailure: Throwable? = null,
     updateFailure: Throwable? = null,
+    matchTeamCheckInFailure: Throwable? = null,
+    matchTeamCheckInsResponse: TeamCheckInsResponseDto = TeamCheckInsResponseDto(),
 ) : IMatchRepository by CreateEvent_FakeMatchRepository() {
     private val matchFlow = MutableStateFlow(Result.success(initialMatch.toMatchWithRelations()))
     private val scoreSetDelaySequence = scoreSetDelaySequence.toMutableList()
     var operationFailure: Throwable? = operationFailure
     var updateFailure: Throwable? = updateFailure
+    var matchTeamCheckInFailure: Throwable? = matchTeamCheckInFailure
+    var matchTeamCheckInsResponse: TeamCheckInsResponseDto = matchTeamCheckInsResponse
     val savedMatches = mutableListOf<MatchMVP>()
     val updatedMatches = mutableListOf<MatchMVP>()
     val operationCalls = mutableListOf<MatchOperationCall>()
     val scoreSetCalls = mutableListOf<MatchScoreSetCall>()
     val incidentCalls = mutableListOf<MatchIncidentCall>()
-    val pendingOperationSyncMatchIds = mutableListOf<String?>()
+    val matchTeamCheckInCalls = mutableListOf<Pair<String, String>>()
 
     override suspend fun getMatch(matchId: String): Result<MatchMVP> =
         Result.success(matchFlow.value.getOrThrow().match)
+
+    override suspend fun getMatchTeamCheckIns(
+        eventId: String,
+        matchId: String,
+    ): Result<TeamCheckInsResponseDto> {
+        matchTeamCheckInCalls += eventId to matchId
+        matchTeamCheckInFailure?.let { return Result.failure(it) }
+        return Result.success(matchTeamCheckInsResponse)
+    }
 
     override fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>> = matchFlow
 
@@ -2514,17 +2571,19 @@ private class MatchDetailFakeMatchRepository(
             time = time,
         )
         operationFailure?.let { return Result.failure(it) }
-        val appliedMatch = if (finalize) {
-            match.copy(
-                status = "COMPLETE",
-                resultStatus = "FINAL",
-                actualEnd = time?.toString() ?: match.actualEnd,
-            )
-        } else {
-            match
-        }
-        matchFlow.value = Result.success(appliedMatch.toMatchWithRelations())
-        return Result.success(appliedMatch)
+        val locallyApplied = match.applyLocalMatchUpdate(
+            MatchUpdateDto(
+                lifecycle = lifecycle,
+                segmentOperations = segmentOperations,
+                incidentOperations = incidentOperations,
+                officialCheckIn = officialCheckIn,
+                matchAction = matchAction,
+                finalize = finalize,
+                time = time?.toString(),
+            ),
+        )
+        matchFlow.value = Result.success(locallyApplied.toMatchWithRelations())
+        return Result.success(locallyApplied)
     }
 
     override suspend fun setMatchScore(
@@ -2560,13 +2619,11 @@ private class MatchDetailFakeMatchRepository(
     ): Result<MatchMVP> {
         incidentCalls += MatchIncidentCall(match = match, operation = operation)
         operationFailure?.let { return Result.failure(it) }
-        matchFlow.value = Result.success(match.toMatchWithRelations())
-        return Result.success(match)
-    }
-
-    override suspend fun syncPendingMatchOperations(matchId: String?): Result<Int> {
-        pendingOperationSyncMatchIds += matchId
-        return Result.success(0)
+        val locallyApplied = match.applyLocalMatchUpdate(
+            MatchUpdateDto(incidentOperations = listOf(operation.copy(action = "CREATE"))),
+        )
+        matchFlow.value = Result.success(locallyApplied.toMatchWithRelations())
+        return Result.success(locallyApplied)
     }
 }
 

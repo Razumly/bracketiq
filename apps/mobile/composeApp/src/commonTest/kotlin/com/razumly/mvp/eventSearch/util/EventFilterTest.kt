@@ -4,6 +4,7 @@ package com.razumly.mvp.eventSearch.util
 
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventTag
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -36,6 +37,43 @@ class EventFilterTest {
         val event = eventAt(now + 2.days)
 
         assertFalse(filter.filter(event, includePastEvents = true))
+    }
+
+    @Test
+    fun givenWeeklySeasonSpanningSelectedRange_whenFiltering_thenFilterReturnsTrue() {
+        val filter = EventFilter(date = now + 7.days to now + 13.days)
+        val event = eventAt(
+            start = now,
+            end = now + 30.days,
+            eventType = EventType.WEEKLY_EVENT,
+        )
+
+        assertTrue(filter.filter(event))
+    }
+
+    @Test
+    fun givenWeeklySeasonAfterSelectedRange_whenFiltering_thenFilterReturnsFalse() {
+        val filter = EventFilter(date = now to now + 3.days)
+        val event = eventAt(
+            start = now + 7.days,
+            end = now + 30.days,
+            eventType = EventType.WEEKLY_EVENT,
+        )
+
+        assertFalse(filter.filter(event))
+    }
+
+    @Test
+    fun givenNoFixedEndWeeklyEventCoveringSelectedMultiDayRange_whenFiltering_thenFilterReturnsTrue() {
+        val filter = EventFilter(date = now to now + 4.days)
+        val event = eventAt(
+            start = now - 14.days,
+            end = now - 14.days,
+            eventType = EventType.WEEKLY_EVENT,
+            noFixedEndDateTime = true,
+        )
+
+        assertTrue(filter.filter(event))
     }
 
     @Test
@@ -72,14 +110,19 @@ class EventFilterTest {
 
     private fun eventAt(
         start: Instant,
+        end: Instant = start,
         sportId: String? = null,
         tags: List<EventTag> = emptyList(),
+        eventType: EventType = EventType.EVENT,
+        noFixedEndDateTime: Boolean = false,
     ): Event = Event(
         name = "Test League",
         start = start,
-        end = start,
+        end = end,
         sportId = sportId,
         tags = tags,
+        eventType = eventType,
+        noFixedEndDateTime = noFixedEndDateTime,
         state = "PUBLISHED",
     )
 }

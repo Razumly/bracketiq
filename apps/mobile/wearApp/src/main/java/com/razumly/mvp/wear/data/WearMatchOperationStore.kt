@@ -44,22 +44,80 @@ private data class WearMatchCache(
     val matches: Map<String, WearMatchDto> = emptyMap(),
 )
 
-class WearMatchOperationStore(
-    context: Context,
-    private val json: Json = createWearJson(),
-) {
-    private val preferences: SharedPreferences =
-        context.getSharedPreferences("mvp_wear_match_operations", Context.MODE_PRIVATE)
+internal data class WearMatchOperationStoreSnapshot(
+    val deviceId: String? = null,
+    val lastSequence: Long = 0L,
+    val operationsJson: String? = null,
+    val cacheJson: String? = null,
+)
 
-    fun clear() {
-        preferences.edit().clear().apply()
+internal interface WearMatchOperationStorage {
+    fun snapshot(): WearMatchOperationStoreSnapshot
+
+    fun replace(snapshot: WearMatchOperationStoreSnapshot)
+
+    fun clear()
+}
+
+private class SharedPreferencesWearMatchOperationStorage(
+    private val preferences: SharedPreferences,
+) : WearMatchOperationStorage {
+    override fun snapshot(): WearMatchOperationStoreSnapshot = WearMatchOperationStoreSnapshot(
+        deviceId = preferences.getString(KEY_DEVICE_ID, null),
+        lastSequence = preferences.getLong(KEY_LAST_SEQUENCE, 0L),
+        operationsJson = preferences.getString(KEY_OPERATIONS, null),
+        cacheJson = preferences.getString(KEY_CACHE, null),
+    )
+
+    override fun replace(snapshot: WearMatchOperationStoreSnapshot) {
+        val editor = preferences.edit()
+        editor.putOrRemove(KEY_DEVICE_ID, snapshot.deviceId)
+        editor.putLong(KEY_LAST_SEQUENCE, snapshot.lastSequence)
+        editor.putOrRemove(KEY_OPERATIONS, snapshot.operationsJson)
+        editor.putOrRemove(KEY_CACHE, snapshot.cacheJson)
+        check(editor.commit()) { "Failed to persist Wear match operations." }
     }
 
-    fun deviceId(): String {
-        preferences.getString(KEY_DEVICE_ID, null).normalizedId()?.let { return it }
+    override fun clear() {
+        check(preferences.edit().clear().commit()) { "Failed to clear Wear match operations." }
+    }
+
+    private fun SharedPreferences.Editor.putOrRemove(key: String, value: String?) {
+        if (value == null) remove(key) else putString(key, value)
+    }
+
+    private companion object {
+        const val KEY_DEVICE_ID = "device_id"
+        const val KEY_LAST_SEQUENCE = "last_sequence"
+        const val KEY_OPERATIONS = "operations"
+        const val KEY_CACHE = "cache"
+    }
+}
+
+class WearMatchOperationStore internal constructor(
+    private val storage: WearMatchOperationStorage,
+    private val json: Json = createWearJson(),
+) {
+    constructor(
+        context: Context,
+        json: Json = createWearJson(),
+    ) : this(
+        storage = SharedPreferencesWearMatchOperationStorage(
+            context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE),
+        ),
+        json = json,
+    )
+
+    fun clear() = serialized {
+        storage.clear()
+    }
+
+    fun deviceId(): String = serialized {
+        val snapshot = storage.snapshot()
+        snapshot.deviceId.normalizedId()?.let { return@serialized it }
         val generated = "wear-${UUID.randomUUID()}"
-        preferences.edit().putString(KEY_DEVICE_ID, generated).apply()
-        return generated
+        storage.replace(snapshot.copy(deviceId = generated))
+        generated
     }
 
     fun newOperation(
@@ -67,10 +125,14 @@ class WearMatchOperationStore(
         matchId: String,
         kind: String,
         payloadJson: String,
-    ): WearPendingMatchOperation {
-        val sequence = nextSequence()
-        val deviceId = deviceId()
-        return WearPendingMatchOperation(
+    ): WearPendingMatchOperation = serialized {
+        val snapshot = storage.snapshot()
+        val sequence = (snapshot.lastSequence + 1L).coerceAtLeast(
+            (decodeOperations(snapshot).maxOfOrNull { it.clientSequence } ?: 0L) + 1L,
+        )
+        val deviceId = snapshot.deviceId.normalizedId() ?: "wear-${UUID.randomUUID()}"
+        storage.replace(snapshot.copy(deviceId = deviceId, lastSequence = sequence))
+        WearPendingMatchOperation(
             id = "$deviceId:$matchId:$sequence",
             eventId = eventId,
             matchId = matchId,
@@ -82,22 +144,23 @@ class WearMatchOperationStore(
         )
     }
 
-    fun upsertOperation(operation: WearPendingMatchOperation) {
-        val next = operations()
+    fun upsertOperation(operation: WearPendingMatchOperation) = serialized {
+        val snapshot = storage.snapshot()
+        val next = decodeOperations(snapshot)
             .filterNot { it.id == operation.id }
             .plus(operation)
             .sortedWith(compareBy<WearPendingMatchOperation> { it.clientSequence }.thenBy { it.clientCreatedAt })
-        writeOperations(next)
+        writeOperations(snapshot, next)
     }
 
-    fun pendingOperations(matchId: String? = null): List<WearPendingMatchOperation> {
+    fun pendingOperations(matchId: String? = null): List<WearPendingMatchOperation> = serialized {
         val normalizedMatchId = matchId.normalizedId()
         val statuses = setOf(
             WEAR_MATCH_OPERATION_STATUS_PENDING,
             WEAR_MATCH_OPERATION_STATUS_FAILED,
             WEAR_MATCH_OPERATION_STATUS_SYNCING,
         )
-        return operations()
+        decodeOperations(storage.snapshot())
             .asSequence()
             .filter { it.sourceDevice.equals("WEAR_OS", ignoreCase = true) }
             .filter { it.status in statuses }
@@ -106,7 +169,7 @@ class WearMatchOperationStore(
             .toList()
     }
 
-    fun localOverlayOperations(matchId: String? = null): List<WearPendingMatchOperation> {
+    fun localOverlayOperations(matchId: String? = null): List<WearPendingMatchOperation> = serialized {
         val normalizedMatchId = matchId.normalizedId()
         val statuses = setOf(
             WEAR_MATCH_OPERATION_STATUS_PENDING,
@@ -114,7 +177,7 @@ class WearMatchOperationStore(
             WEAR_MATCH_OPERATION_STATUS_SYNCING,
             WEAR_MATCH_OPERATION_STATUS_IMPORTED,
         )
-        return operations()
+        decodeOperations(storage.snapshot())
             .asSequence()
             .filter { it.status in statuses }
             .filter { normalizedMatchId == null || it.matchId.normalizedId() == normalizedMatchId }
@@ -124,6 +187,26 @@ class WearMatchOperationStore(
                     .thenBy { it.clientSequence },
             )
             .toList()
+    }
+
+    /**
+     * Phone-imported operations are only an optimistic bridge until a fresh
+     * server schedule is available. Keeping them after that point would let a
+     * stale phone snapshot permanently override the authoritative response.
+     */
+    fun removeImportedOperations(matchId: String? = null): Int = serialized {
+        val normalizedMatchId = matchId.normalizedId()
+        val snapshot = storage.snapshot()
+        val operations = decodeOperations(snapshot)
+        val retained = operations.filterNot { operation ->
+            operation.status == WEAR_MATCH_OPERATION_STATUS_IMPORTED &&
+                (normalizedMatchId == null || operation.matchId.normalizedId() == normalizedMatchId)
+        }
+        val removedCount = operations.size - retained.size
+        if (removedCount > 0) {
+            writeOperations(snapshot, retained)
+        }
+        removedCount
     }
 
     fun markAttempting(operationId: String) {
@@ -147,78 +230,82 @@ class WearMatchOperationStore(
         }
     }
 
-    fun markAcked(operationId: String) {
-        writeOperations(operations().filterNot { it.id == operationId })
+    fun markAcked(operationId: String) = serialized {
+        val snapshot = storage.snapshot()
+        writeOperations(snapshot, decodeOperations(snapshot).filterNot { it.id == operationId })
     }
 
-    fun cacheSchedule(schedule: WearScheduleResponseDto) {
-        writeCache(cache().copy(schedule = schedule))
+    fun cacheSchedule(schedule: WearScheduleResponseDto) = serialized {
+        val snapshot = storage.snapshot()
+        writeCache(snapshot, decodeCache(snapshot).copy(schedule = schedule))
     }
 
-    fun cachedSchedule(): WearScheduleResponseDto? = cache().schedule
-
-    fun cacheMatch(match: WearMatchDto) {
-        val matchId = match.resolvedId() ?: return
-        val current = cache()
-        writeCache(current.copy(matches = current.matches + (matchId to match)))
+    fun cachedSchedule(): WearScheduleResponseDto? = serialized {
+        decodeCache(storage.snapshot()).schedule
     }
 
-    fun cachedMatches(): Map<String, WearMatchDto> = cache().matches
+    fun cacheMatch(match: WearMatchDto) = serialized {
+        val matchId = match.resolvedId() ?: return@serialized
+        val snapshot = storage.snapshot()
+        val current = decodeCache(snapshot)
+        writeCache(snapshot, current.copy(matches = current.matches + (matchId to match)))
+    }
 
-    fun pruneCachedMatches(retainedMatchIds: Set<String>) {
-        val current = cache()
+    fun cachedMatches(): Map<String, WearMatchDto> = serialized {
+        decodeCache(storage.snapshot()).matches
+    }
+
+    fun pruneCachedMatches(retainedMatchIds: Set<String>) = serialized {
+        val snapshot = storage.snapshot()
+        val current = decodeCache(snapshot)
         val retained = current.matches.filterKeys { matchId -> matchId in retainedMatchIds }
-        if (retained.size == current.matches.size) return
-        writeCache(current.copy(matches = retained))
-    }
-
-    private fun nextSequence(): Long {
-        val next = (preferences.getLong(KEY_LAST_SEQUENCE, 0L) + 1L).coerceAtLeast(
-            (operations().maxOfOrNull { it.clientSequence } ?: 0L) + 1L,
-        )
-        preferences.edit().putLong(KEY_LAST_SEQUENCE, next).apply()
-        return next
-    }
-
-    private fun operations(): List<WearPendingMatchOperation> =
-        runCatching {
-            json.decodeFromString<WearPendingMatchOperationList>(
-                preferences.getString(KEY_OPERATIONS, null).orEmpty(),
-            ).operations
-        }.getOrDefault(emptyList())
-
-    private fun writeOperations(operations: List<WearPendingMatchOperation>) {
-        preferences.edit()
-            .putString(KEY_OPERATIONS, json.encodeToString(WearPendingMatchOperationList(operations)))
-            .apply()
+        if (retained.size != current.matches.size) {
+            writeCache(snapshot, current.copy(matches = retained))
+        }
     }
 
     private fun updateOperation(
         operationId: String,
         update: (WearPendingMatchOperation) -> WearPendingMatchOperation,
+    ) = serialized {
+        val snapshot = storage.snapshot()
+        writeOperations(
+            snapshot,
+            decodeOperations(snapshot).map { operation ->
+                if (operation.id == operationId) update(operation) else operation
+            },
+        )
+    }
+
+    private fun decodeOperations(snapshot: WearMatchOperationStoreSnapshot): List<WearPendingMatchOperation> {
+        val raw = snapshot.operationsJson?.takeIf(String::isNotBlank) ?: return emptyList()
+        return json.decodeFromString<WearPendingMatchOperationList>(raw).operations
+    }
+
+    private fun writeOperations(
+        snapshot: WearMatchOperationStoreSnapshot,
+        operations: List<WearPendingMatchOperation>,
     ) {
-        writeOperations(operations().map { operation ->
-            if (operation.id == operationId) update(operation) else operation
-        })
+        storage.replace(
+            snapshot.copy(
+                operationsJson = json.encodeToString(WearPendingMatchOperationList(operations)),
+            ),
+        )
     }
 
-    private fun cache(): WearMatchCache =
-        runCatching {
-            json.decodeFromString<WearMatchCache>(
-                preferences.getString(KEY_CACHE, null).orEmpty(),
-            )
-        }.getOrDefault(WearMatchCache())
-
-    private fun writeCache(cache: WearMatchCache) {
-        preferences.edit()
-            .putString(KEY_CACHE, json.encodeToString(cache))
-            .apply()
+    private fun decodeCache(snapshot: WearMatchOperationStoreSnapshot): WearMatchCache {
+        val raw = snapshot.cacheJson?.takeIf(String::isNotBlank) ?: return WearMatchCache()
+        return json.decodeFromString<WearMatchCache>(raw)
     }
 
-    companion object {
-        private const val KEY_DEVICE_ID = "device_id"
-        private const val KEY_LAST_SEQUENCE = "last_sequence"
-        private const val KEY_OPERATIONS = "operations"
-        private const val KEY_CACHE = "cache"
+    private fun writeCache(snapshot: WearMatchOperationStoreSnapshot, cache: WearMatchCache) {
+        storage.replace(snapshot.copy(cacheJson = json.encodeToString(cache)))
+    }
+
+    private inline fun <T> serialized(block: () -> T): T = synchronized(STORE_LOCK, block)
+
+    private companion object {
+        const val PREFERENCES_NAME = "mvp_wear_match_operations"
+        val STORE_LOCK = Any()
     }
 }

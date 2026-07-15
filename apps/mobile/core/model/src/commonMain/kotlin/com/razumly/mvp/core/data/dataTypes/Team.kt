@@ -3,14 +3,12 @@ package com.razumly.mvp.core.data.dataTypes
 import androidx.room.Entity
 import androidx.room.Ignore
 import androidx.room.PrimaryKey
-import com.razumly.mvp.core.data.dataTypes.dtos.TeamDTO
-import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import com.razumly.mvp.core.util.newId
 import kotlinx.serialization.Serializable
 
 @Entity
 @Serializable
-data class Team(
+data class Team @Ignore constructor(
     val division: String,
     val name: String,
     val kind: String? = null,
@@ -19,9 +17,9 @@ data class Team(
     val headCoachId: String? = null,
     val coachIds: List<String> = emptyList(),
     val parentTeamId: String? = null,
-    val playerIds: List<String> = emptyList(),
+    @Ignore val playerIds: List<String> = emptyList(),
     val playerRegistrationIds: List<String> = emptyList(),
-    val pending: List<String> = emptyList(),
+    @Ignore val pending: List<String> = emptyList(),
     val staffAssignmentIds: List<String> = emptyList(),
     val teamSize: Int,
     val profileImageId: String? = null,
@@ -43,6 +41,70 @@ data class Team(
     val staffAssignments: List<TeamStaffAssignment> = emptyList(),
     @PrimaryKey override val id: String
 ) : MVPDocument, DisplayableEntity {
+    constructor(
+        division: String,
+        name: String,
+        kind: String? = null,
+        captainId: String,
+        managerId: String? = null,
+        headCoachId: String? = null,
+        coachIds: List<String> = emptyList(),
+        parentTeamId: String? = null,
+        playerRegistrationIds: List<String> = emptyList(),
+        staffAssignmentIds: List<String> = emptyList(),
+        teamSize: Int,
+        profileImageId: String? = null,
+        sport: String? = null,
+        divisionTypeId: String? = null,
+        skillDivisionTypeId: String? = null,
+        skillDivisionTypeName: String? = null,
+        ageDivisionTypeId: String? = null,
+        ageDivisionTypeName: String? = null,
+        divisionGender: String? = null,
+        organizationId: String? = null,
+        createdBy: String? = null,
+        joinPolicy: String = "CLOSED",
+        openRegistration: Boolean = false,
+        registrationPriceCents: Int = 0,
+        affiliateUrl: String? = null,
+        requiredTemplateIds: List<String> = emptyList(),
+        playerRegistrations: List<TeamPlayerRegistration> = emptyList(),
+        staffAssignments: List<TeamStaffAssignment> = emptyList(),
+        id: String,
+    ) : this(
+        division = division,
+        name = name,
+        kind = kind,
+        captainId = captainId,
+        managerId = managerId,
+        headCoachId = headCoachId,
+        coachIds = coachIds,
+        parentTeamId = parentTeamId,
+        playerIds = emptyList(),
+        playerRegistrationIds = playerRegistrationIds,
+        pending = emptyList(),
+        staffAssignmentIds = staffAssignmentIds,
+        teamSize = teamSize,
+        profileImageId = profileImageId,
+        sport = sport,
+        divisionTypeId = divisionTypeId,
+        skillDivisionTypeId = skillDivisionTypeId,
+        skillDivisionTypeName = skillDivisionTypeName,
+        ageDivisionTypeId = ageDivisionTypeId,
+        ageDivisionTypeName = ageDivisionTypeName,
+        divisionGender = divisionGender,
+        organizationId = organizationId,
+        createdBy = createdBy,
+        joinPolicy = joinPolicy,
+        openRegistration = openRegistration,
+        registrationPriceCents = registrationPriceCents,
+        affiliateUrl = affiliateUrl,
+        requiredTemplateIds = requiredTemplateIds,
+        playerRegistrations = playerRegistrations,
+        staffAssignments = staffAssignments,
+        id = id,
+    )
+
     @Ignore
     override var displayName: String = ""
         get() = name.ifBlank { "Team ${activePlayerRegistrations().size}" }
@@ -89,39 +151,6 @@ data class Team(
                 staffAssignments = emptyList(),
             ).withSynchronizedMembership()
         }
-    }
-
-    fun toTeamDTO(): TeamDTO {
-        val synced = withSynchronizedMembership()
-        return TeamDTO(
-            name = synced.name,
-            division = synced.division.normalizeDivisionLabel(),
-            playerIds = synced.playerIds,
-            captainId = synced.captainId,
-            managerId = synced.managerId,
-            headCoachId = synced.headCoachId,
-            assistantCoachIds = synced.assistantCoachIds,
-            coachIds = synced.coachIds,
-            parentTeamId = synced.parentTeamId,
-            teamSize = synced.teamSize,
-            id = synced.id,
-            pending = synced.pending,
-            profileImageId = synced.profileImageId,
-            sport = synced.sport,
-            divisionTypeId = synced.divisionTypeId,
-            skillDivisionTypeId = synced.skillDivisionTypeId,
-            skillDivisionTypeName = synced.skillDivisionTypeName,
-            ageDivisionTypeId = synced.ageDivisionTypeId,
-            ageDivisionTypeName = synced.ageDivisionTypeName,
-            divisionGender = synced.divisionGender,
-            organizationId = synced.organizationId,
-            createdBy = synced.createdBy,
-            joinPolicy = synced.joinPolicy,
-            openRegistration = synced.openRegistration,
-            registrationPriceCents = synced.registrationPriceCents,
-            affiliateUrl = synced.affiliateUrl,
-            requiredTemplateIds = synced.requiredTemplateIds,
-        )
     }
 }
 
