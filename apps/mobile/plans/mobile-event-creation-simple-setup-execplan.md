@@ -13,7 +13,11 @@ Mobile event creation currently opens one long advanced event-details form. Afte
 - [x] (2026-07-13) Added the Simple/Advanced mode control, labeled progress rail, planning pages, and page navigation.
 - [x] (2026-07-13) Filtered the existing EventDetails sections per Simple Setup page while retaining the complete Advanced layout.
 - [x] (2026-07-13) Added focused resolver tests and compiled the common, Android, and iOS production targets.
-- [ ] Run the focused tests after the branch's existing common-test fixture compilation errors are repaired.
+- [x] (2026-07-15) Audited the shipped Simple Setup layout and confirmed that it embeds the scrolling, collapsible advanced editor beneath a second tall header and floating action buttons.
+- [x] (2026-07-15) Rebuilt Simple Setup as compact page-specific content with no expandable sections and no vertical scrolling at a 360 x 800 dp stress viewport.
+- [x] (2026-07-15) Replaced floating action buttons with a full-width bottom action bar that participates in `Scaffold` content padding and sits above the app navigation bar exactly once.
+- [x] (2026-07-15) Added draft-mapping and validation regression tests, compiled and assembled Android, and verified all base and conditional pages on an Android emulator.
+- [x] (2026-07-15) Ran the focused Android JVM test suite successfully; the current checkout supplies the required local manifest configuration.
 
 ## Surprises & Discoveries
 
@@ -31,6 +35,18 @@ Mobile event creation currently opens one long advanced event-details form. Afte
 
 - Observation: The branch's common test source set has unrelated compile failures that predate this wizard.
   Evidence: `:composeApp:compileTestKotlinIosSimulatorArm64` reports stale `MatchRepository` fakes and payment-flow test APIs outside `eventCreate`. The new test fixture's own `Event` coordinate construction was corrected to the current model contract.
+
+- Observation: Section visibility did not make the advanced editor suitable for a page-sized mobile wizard.
+  Evidence: `EventDetails.kt` still renders a `LazyColumn`, a hero as tall as 60 percent of the screen in edit mode, and collapsible section cards even when only one section is visible.
+
+- Observation: The create screen reserves bottom-navigation space twice and ignores the nested `Scaffold` content padding.
+  Evidence: `CreateEventScreen.kt` applies `LocalNavBarPadding` to the whole `Scaffold`, passes the same padding into `EventDetails`, and does not consume the `PaddingValues` supplied to the scaffold content lambda.
+
+- Observation: Narrow-device screenshots exposed problems that were not obvious from source inspection alone.
+  Evidence: At 360 x 800 dp, the old date format clipped, long page titles collided with the Advanced action, helper-card actions squeezed their copy, and two-column cutoff/staff dropdowns clipped their values.
+
+- Observation: The final shared-UI change compiles on Android, while the iOS simulator target is currently blocked outside this change.
+  Evidence: `:composeApp:compileKotlinIosSimulatorArm64` reaches `PaymentProcessor.ios.kt` and fails because the actual class does not implement the expected `emitPaymentResult`; none of the event-create files modify that contract.
 
 ## Decision Log
 
@@ -50,11 +66,29 @@ Mobile event creation currently opens one long advanced event-details form. Afte
   Rationale: The product decision is that only organizations create Tryouts through the web organization flow.
   Date/Author: 2026-07-13 / Codex
 
+- Decision: Stop reusing `EventDetails` inside Simple Setup; retain it unchanged for Advanced Setup.
+  Rationale: A compact, non-collapsible, no-scroll wizard needs page-specific controls. The full editor's hero, expandable sections, and long lists cannot meet that layout contract without harming Advanced Setup.
+  Date/Author: 2026-07-15 / Codex
+
+- Decision: Replace the horizontal fourteen-card progress rail with a page title, step count, and linear progress indicator.
+  Rationale: The rail consumes vertical space, introduces a second scrolling axis, and competes with the form. A compact progress summary preserves orientation without crowding the viewport.
+  Date/Author: 2026-07-15 / Codex
+
+- Decision: Use a nested scaffold bottom bar with rectangular Back and Continue/Create actions instead of floating buttons.
+  Rationale: The bottom bar reserves its own content inset, offers larger labeled touch targets, and can be positioned above the app navigation bar without duplicate padding.
+  Date/Author: 2026-07-15 / Codex
+
+- Decision: Use compact, explicit field values instead of relying on empty dropdown selections.
+  Rationale: Empty dropdown values render as ambiguous centered labels on Android. Compact date labels and an explicit `No cutoff` option remain readable on narrow screens and preserve the underlying nullable model.
+  Date/Author: 2026-07-15 / Codex
+
 ## Outcomes & Retrospective
 
-The mobile create screen now starts in Simple Setup, exposes the current complete form through Advanced, preserves one `Event` draft across both layouts, and continues to submit through `DefaultCreateEventComponent`. The fourteen-page resolver and rail match the web page order, dependent pages are skipped or explained based on earlier choices, and existing EventDetails editors are reused through an optional section-visibility contract. Mobile creation offers Event, Weekly Event, League, and Tournament only; Tryout remains web-only for organizations.
+The mobile create screen now starts in a purpose-built Simple Setup instead of embedding the advanced editor. Each used page presents only the controls needed for that decision, has no collapsible container or scrollable form, and writes into the same `Event` draft used by Advanced Setup and final creation. The compact title, step count, and progress indicator retain orientation while the inset-aware Back/Continue bar remains above the app navigation and system gesture area.
 
-Production compilation passes for common metadata, Android debug Kotlin, and iOS simulator Kotlin. Focused resolver tests are present, but the repository currently cannot compile the complete common test source set because unrelated repository fakes and payment-flow tests no longer match their production interfaces. The Android JVM test path is additionally blocked in this isolated worktree by the missing Maps manifest placeholder.
+The complete base path and the tallest conditional paths were inspected on an Android emulator at 360 x 800 dp: manual scheduling, competition rules with all custom fields, paid pricing, documents/questions, staff plus officials, and review all fit without vertical scrolling. The screenshot pass directly led to compact date formatting, narrower header typography, full-width pricing cutoff fields, an explicit no-cutoff value, and non-squeezing helper-card actions.
+
+Android debug Kotlin compilation, debug APK assembly, and all nine focused `EventCreateSimpleSetupTest` tests pass. The iOS simulator compile is blocked by the unrelated existing `PaymentProcessor.ios.kt` expect/actual mismatch described above.
 
 ## Context and Orientation
 
@@ -66,24 +100,25 @@ The fourteen pages are Format, Basics, Participation Plan, Divisions, Schedule P
 
 First add pure setup types and resolver functions. They must exclude Tryout, mark competition pages unused for Event and Weekly Event, mark documents/questions unused until enabled, and mark staff/operations unused until enabled or team operations apply. Add tests before wiring UI.
 
-Next add a stable Simple/Advanced segmented control and horizontally scrolling labeled progress rail. Clicking a complete or available page navigates directly. Clicking a locked page goes to its earliest incomplete prerequisite. Clicking a not-used page opens a short explanation and identifies the planning page that enables it.
+Next add a stable Simple/Advanced mode action and compact title, step count, and linear progress indicator. Back and Continue move through only the pages used by the current choices.
 
 Then add planning-page controls for participation, schedule, competition, registration, and operations. These controls update the existing event draft where a persisted field already exists and keep transient choices only for layout decisions that are not event fields.
 
-Finally add optional section visibility to EventDetails. Advanced passes the default all-visible configuration. Simple passes page-specific visibility, preserving existing field editors and callbacks. Review renders the existing event-card preview and publishes through the same component validation and create method.
+Finally build page-specific Simple Setup composables that update the established draft callbacks. Advanced continues to render the complete `EventDetails` editor unchanged. Review summarizes the draft and publishes through the same component validation and create method.
 
 ## Concrete Steps
 
-Run from `/Users/elesesy/StudioProjects/mvp-app-club-tryouts`:
+Run from `/Users/elesesy/StudioProjects/mvp-app`:
 
-    ./gradlew :composeApp:compileCommonMainKotlinMetadata
-    ./gradlew :composeApp:allTests
+    JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :composeApp:compileDebugKotlinAndroid
+    JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :composeApp:assembleDebug
+    JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventCreate.EventCreateSimpleSetupTest'
 
 If the full multiplatform test task is blocked by an unrelated native environment issue, run focused common tests and record the exact failure in this plan.
 
 ## Validation and Acceptance
 
-Creating a new event must open Simple Setup on Format. Event, Weekly Event, League, and Tournament must be selectable; Tryout must not appear. The progress rail must retain full labels, show unavailable pages in a muted style, and permit direct navigation according to page status. Switching to Advanced and back must preserve name, sport, event type, division, schedule, pricing, and staffing values. Review must use the existing preview and create action. Existing event detail and edit screens must render all sections unchanged.
+Creating a new event must open Simple Setup on Format. Event, Weekly Event, League, and Tournament must be selectable; Tryout must not appear. The title, step count, and linear indicator must reflect only used pages. Every Simple page must fit at 360 x 800 dp without a scroll container or collapsible section. Switching to Advanced and back must preserve name, sport, event type, division, schedule, pricing, and staffing values. Review must submit through the existing create action. Existing event detail and edit screens must render all sections unchanged.
 
 ## Idempotence and Recovery
 
@@ -93,18 +128,18 @@ The change is additive. The section-visibility default preserves all existing ca
 
 Validation transcripts:
 
-    ./gradlew :composeApp:compileCommonMainKotlinMetadata
+    JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :composeApp:compileDebugKotlinAndroid
     BUILD SUCCESSFUL
 
-    ./gradlew :composeApp:compileDebugKotlinAndroid
+    JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :composeApp:assembleDebug
     BUILD SUCCESSFUL
 
-    ./gradlew :composeApp:iosSimulatorArm64Test --tests 'com.razumly.mvp.eventCreate.EventCreateSimpleSetupTest' --tests 'com.razumly.mvp.eventCreate.CreateEventSelectionRulesTest'
-    Production iOS compilation succeeded; test compilation stopped on unrelated stale common-test fixtures.
+    JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventCreate.EventCreateSimpleSetupTest'
+    BUILD SUCCESSFUL; 9 focused tests passed.
 
-    ./gradlew :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventCreate.EventCreateSimpleSetupTest'
-    Stopped before test compilation because the isolated worktree has no MAPS_API_KEY manifest placeholder.
+    JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :composeApp:compileKotlinIosSimulatorArm64
+    BLOCKED by pre-existing PaymentProcessor.ios.kt expect/actual mismatch for emitPaymentResult.
 
 ## Interfaces and Dependencies
 
-Define `EventCreateSetupMode`, `EventCreateSetupPageId`, `EventCreateSetupChoices`, `EventCreateSetupPage`, and resolver functions in the `eventCreate` package. Define `EventDetailsSectionVisibility` in the `eventDetail` package with an `All` default. Do not add a new persistence model or endpoint.
+`EventCreateSetupMode`, `EventCreateSetupPageId`, `EventCreateSetupChoices`, `EventCreateSetupPage`, resolver functions, page composables, and draft-mapping helpers live in the `eventCreate` package. Advanced Setup continues to use `EventDetails`. No persistence model or endpoint was added.

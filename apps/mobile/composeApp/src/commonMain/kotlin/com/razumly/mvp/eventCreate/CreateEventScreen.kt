@@ -1,22 +1,10 @@
 package com.razumly.mvp.eventCreate
 
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.FabPosition
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -49,6 +37,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.withOfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.TermsConsentDialog
 import com.razumly.mvp.core.presentation.util.backAnimation
@@ -57,16 +46,10 @@ import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventCreate.steps.Preview
 import com.razumly.mvp.eventDetail.EventDetails
-import com.razumly.mvp.eventDetail.EventDetailsSectionVisibility
 import com.razumly.mvp.eventDetail.toEventWithFullRelations
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import dev.icerock.moko.geo.LatLng
-import mvp.composeapp.generated.resources.Res
-import mvp.composeapp.generated.resources.create_tournament
-import mvp.composeapp.generated.resources.next
-import mvp.composeapp.generated.resources.previous
-import org.jetbrains.compose.resources.stringResource
 
 @OptIn(ExperimentalDecomposeApi::class)
 @Composable
@@ -85,6 +68,9 @@ fun CreateEventScreen(
     var setupChoices by remember { mutableStateOf(EventCreateSetupChoices()) }
     val defaultEvent by component.defaultEvent.collectAsState()
     val newEventState by component.newEventState.collectAsState()
+    var simplePriceQuoteConfirmed by rememberSaveable(newEventState.id) {
+        mutableStateOf(newEventState.priceCents <= 0)
+    }
     fun originalLocationPlace(): MVPPlace? {
         val lat = newEventState.lat
         val long = newEventState.long
@@ -198,6 +184,10 @@ fun CreateEventScreen(
     }
     val currentSetupPage = remember(setupPages, currentSetupPageId) {
         setupPages.first { page -> page.id == currentSetupPageId }
+    }
+    val usedSetupPages = remember(setupPages) { setupPages.filter(EventCreateSetupPage::used) }
+    val currentUsedSetupPageIndex = remember(usedSetupPages, currentSetupPageId) {
+        usedSetupPages.indexOfFirst { page -> page.id == currentSetupPageId }.coerceAtLeast(0)
     }
 
     val onEditEvent: (Event.() -> Event) -> Unit = remember(component) {
@@ -352,6 +342,86 @@ fun CreateEventScreen(
         (String, com.razumly.mvp.eventDetail.EventStaffRole?) -> Unit =
         remember(component) { component::removePendingStaffInvite }
 
+    val isEventInfoStep = childStack.active.instance == CreateEventComponent.Child.EventInfo
+    val previousSimplePageId = if (setupMode == EventCreateSetupMode.SIMPLE && isEventInfoStep) {
+        previousUsedSetupPage(setupPages, currentSetupPageId)
+    } else {
+        null
+    }
+    val actionBackEnabled = previousSimplePageId != null || !isEventInfoStep
+    val actionPrimaryLabel = when {
+        !isEventInfoStep -> "Create event"
+        setupMode == EventCreateSetupMode.ADVANCED -> "Review"
+        currentSetupPageId == EventCreateSetupPageId.REVIEW_PUBLISH -> "Create event"
+        else -> "Continue"
+    }
+
+    fun handleCreateEventBack() {
+        if (isEventInfoStep) {
+            previousSimplePageId?.let { pageId -> currentSetupPageId = pageId }
+        } else {
+            component.previousStep()
+        }
+    }
+
+    fun handleSimpleSetupPrimary() {
+        if (!currentSetupPage.used) {
+            currentSetupPage.controlledByPageId?.let { controllerPageId ->
+                currentSetupPageId = controllerPageId
+            } ?: nextUsedSetupPage(setupPages, currentSetupPageId)?.let { pageId ->
+                currentSetupPageId = pageId
+            }
+            return
+        }
+
+        val isComplete = isSimpleSetupPageComplete(
+            pageId = currentSetupPageId,
+            event = newEventState,
+            choices = setupChoices,
+            priceQuoteConfirmed = simplePriceQuoteConfirmed,
+        )
+        if (!isComplete) {
+            errorHandler.showPopup(
+                simpleSetupPageError(
+                    pageId = currentSetupPageId,
+                    event = newEventState,
+                    choices = setupChoices,
+                    priceQuoteConfirmed = simplePriceQuoteConfirmed,
+                ),
+            )
+            return
+        }
+
+        if (currentSetupPageId == EventCreateSetupPageId.REVIEW_PUBLISH) {
+            component.createEvent()
+            return
+        }
+
+        completedSetupPageIds = completedSetupPageIds + currentSetupPageId
+        nextUsedSetupPage(setupPages, currentSetupPageId)?.let { pageId ->
+            currentSetupPageId = pageId
+        }
+    }
+
+    fun handleCreateEventPrimary() {
+        when {
+            !isEventInfoStep -> {
+                if (canProceed) {
+                    component.createEvent()
+                } else {
+                    hasAttemptedEventSubmit = true
+                    errorHandler.showPopup(buildValidationPopupMessage(validationErrors))
+                }
+            }
+            setupMode == EventCreateSetupMode.SIMPLE -> handleSimpleSetupPrimary()
+            canProceed -> component.nextStep()
+            else -> {
+                hasAttemptedEventSubmit = true
+                errorHandler.showPopup(buildValidationPopupMessage(validationErrors))
+            }
+        }
+    }
+
     CircularRevealUnderlay(
         isRevealed = showMap,
         revealCenterInWindow = mapRevealCenter,
@@ -407,299 +477,251 @@ fun CreateEventScreen(
         },
     ) {
         Scaffold(
-            modifier = Modifier.padding(LocalNavBarPadding.current),
-            floatingActionButton = {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    if (childStack.active.instance == CreateEventComponent.Child.EventInfo) {
-                        val previousPageId = if (setupMode == EventCreateSetupMode.SIMPLE) {
-                            previousUsedSetupPage(setupPages, currentSetupPageId)
-                        } else {
-                            null
-                        }
-                        if (previousPageId != null) {
-                            FloatingActionButton(onClick = { currentSetupPageId = previousPageId }) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = stringResource(Res.string.previous),
-                                )
-                            }
-                        } else {
-                            Spacer(Modifier.width(48.dp))
-                        }
-                        FloatingActionButton(
-                            onClick = {
-                                if (setupMode == EventCreateSetupMode.ADVANCED) {
-                                    if (canProceed) {
-                                        component.nextStep()
-                                    } else {
-                                        hasAttemptedEventSubmit = true
-                                        errorHandler.showPopup(buildValidationPopupMessage(validationErrors))
-                                    }
-                                    return@FloatingActionButton
-                                }
-
-                                if (currentSetupPageId == EventCreateSetupPageId.REVIEW_PUBLISH) {
-                                    if (canProceed) {
-                                        component.createEvent()
-                                    } else {
-                                        errorHandler.showPopup(buildValidationPopupMessage(validationErrors))
-                                    }
-                                    return@FloatingActionButton
-                                }
-
-                                if (!currentSetupPage.used) {
-                                    currentSetupPage.controlledByPageId?.let { controllerPageId ->
-                                        currentSetupPageId = controllerPageId
-                                    } ?: nextUsedSetupPage(setupPages, currentSetupPageId)?.let { nextPageId ->
-                                        currentSetupPageId = nextPageId
-                                    }
-                                    return@FloatingActionButton
-                                }
-
-                                if (!isSimpleSetupPageComplete(currentSetupPageId, newEventState)) {
-                                    errorHandler.showPopup(simpleSetupPageError(currentSetupPageId))
-                                    return@FloatingActionButton
-                                }
-
-                                completedSetupPageIds = completedSetupPageIds + currentSetupPageId
-                                nextUsedSetupPage(setupPages, currentSetupPageId)?.let { nextPageId ->
-                                    currentSetupPageId = nextPageId
-                                }
-                            }
-                        ) {
-                            Icon(
-                                imageVector = if (
-                                    setupMode == EventCreateSetupMode.SIMPLE &&
-                                    currentSetupPageId != EventCreateSetupPageId.REVIEW_PUBLISH
-                                ) {
-                                    Icons.AutoMirrored.Filled.ArrowForward
-                                } else {
-                                    Icons.Default.Check
-                                },
-                                contentDescription = stringResource(Res.string.next)
-                            )
-                        }
-                    } else {
-                        FloatingActionButton(
-                            onClick = {
-                                component.previousStep()
-                            }
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = stringResource(Res.string.previous)
-                            )
-                        }
-                        FloatingActionButton(
-                            onClick = {
-                                if (canProceed) {
-                                    component.createEvent()
-                                } else {
-                                    hasAttemptedEventSubmit = true
-                                    errorHandler.showPopup(buildValidationPopupMessage(validationErrors))
-                                }
-                            }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = stringResource(Res.string.create_tournament)
-                            )
-                        }
-                    }
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = LocalNavBarPadding.current.calculateBottomPadding()),
+            contentWindowInsets = NoScaffoldContentInsets,
+            topBar = {
+                if (isEventInfoStep) {
+                    EventCreateSetupHeader(
+                        mode = setupMode,
+                        currentPageLabel = currentSetupPage.id.label,
+                        currentStep = currentUsedSetupPageIndex + 1,
+                        totalSteps = usedSetupPages.size,
+                        onModeChange = { mode -> setupMode = mode },
+                    )
                 }
             },
-            floatingActionButtonPosition = FabPosition.Center,
-            content = {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    if (childStack.active.instance == CreateEventComponent.Child.EventInfo) {
-                        EventCreateSetupHeader(
-                            mode = setupMode,
-                            pages = setupPages,
-                            onModeChange = { setupMode = it },
-                            onPageSelected = { page ->
-                                currentSetupPageId = when (page.status) {
-                                    EventCreateSetupPageStatus.LOCKED -> page.prerequisitePageId ?: page.id
-                                    else -> page.id
-                                }
-                            },
-                        )
-                    }
-                    Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
-                        ChildStack(childStack, animation = backAnimation(
-                            backHandler = component.backHandler,
-                            onBack = component::onBackClicked,
-                        )) { child ->
-                            when (child.instance) {
-                                is CreateEventComponent.Child.EventInfo -> when {
-                                    setupMode == EventCreateSetupMode.SIMPLE && !currentSetupPage.used -> {
-                                        EventCreateUnavailablePage(
-                                            page = currentSetupPage,
-                                            onOpenController = {
-                                                currentSetupPage.controlledByPageId?.let { currentSetupPageId = it }
-                                            },
-                                        )
-                                    }
-
-                                    setupMode == EventCreateSetupMode.SIMPLE && isPlanningSetupPage(currentSetupPageId) -> {
-                                        EventCreatePlanningPage(
-                                            pageId = currentSetupPageId,
-                                            event = newEventState,
-                                            choices = setupChoices,
-                                            useManualTimeSlots = useManualTimeSlots,
-                                            onEventTypeSelected = { selectedType ->
-                                                completedSetupPageIds = completedSetupPageIds.filterTo(mutableSetOf()) {
-                                                    pageId -> pageId == EventCreateSetupPageId.FORMAT
-                                                }
-                                                onEventTypeSelected(selectedType)
-                                            },
-                                            onEditEvent = onEditEvent,
-                                            onChoicesChange = { updatedChoices ->
-                                                setupChoices = updatedChoices
-                                            },
-                                            onUseManualTimeSlotsChange = component::setUseManualTimeSlots,
-                                        )
-                                    }
-
-                                    setupMode == EventCreateSetupMode.SIMPLE &&
-                                        currentSetupPageId == EventCreateSetupPageId.REVIEW_PUBLISH -> {
-                                        Preview(
-                                            modifier = Modifier.fillMaxSize(),
-                                            component = component,
-                                        )
-                                    }
-
-                                    else -> EventDetails(
-                            paymentProcessor = component,
-                            mapComponent = mapComponent,
-                            hostHasAccount = currentUser?.hasStripeAccount ?: false,
-                            eventWithRelations = eventWithCreateRelations,
-                            editEvent = newEventState,
-                            navPadding = LocalNavBarPadding.current,
-                            editView = isEditing,
-                            isNewEvent = true,
-                            showValidationErrors = hasAttemptedEventSubmit,
-                            rentalTimeLocked = false,
-                            onAddCurrentUser = component::addUserToEvent,
-                            imageScheme = imageScheme,
-                            imageIds = eventImageUrls,
-                            sports = sports,
-                            eventTagOptions = eventTags,
-                            divisionTypeParameters = divisionTypeParameters,
-                            organizationTemplates = organizationTemplates,
-                            organizationTemplatesLoading = organizationTemplatesLoading,
-                            organizationTemplatesError = organizationTemplatesError,
-                            editableFields = localFields,
-                            leagueTimeSlots = leagueSlots,
-                            availableRentalResources = availableRentalResources,
-                            selectedRentalResourceIds = selectedRentalResourceIds,
-                            rentalResourceSelectionLocked = component.isRentalResourceSelectionLocked,
-                            onRentalResourceSelectionChange = component::setRentalResourceSelected,
-                            leagueScoringConfig = leagueScoringConfig,
-                            onHostCreateAccount = component::createAccount,
-                            onOpenLocationMap = {
-                                pendingMapPlace = null
-                                mapComponent.toggleMap()
-                            },
-                            onPlaceSelected = component::selectPlace,
-                            onEditEvent = onEditEvent,
-                            onEditTournament = onEditTournament,
-                            onEventTypeSelected = onEventTypeSelected,
-                            onSportSelected = { sportId ->
-                                onEditEvent {
-                                    copy(
-                                        sportId = sportId.takeIf(String::isNotBlank),
-                                        matchRulesOverride = null,
-                                        resolvedMatchRules = null,
-                                    )
-                                }
-                            },
-                            onSelectFieldCount = component::selectFieldCount,
-                            onUpdateLocalFieldName = component::updateLocalFieldName,
-                            onUpdateLocalFieldDivisions = component::updateLocalFieldDivisions,
-                            useManualTimeSlots = useManualTimeSlots,
-                            onUseManualTimeSlotsChange = component::setUseManualTimeSlots,
-                            onAddLeagueTimeSlot = component::addLeagueTimeSlot,
-                            onUpdateLeagueTimeSlot = { index, updated ->
-                                component.updateLeagueTimeSlot(index) { updated }
-                            },
-                            onRemoveLeagueTimeSlot = component::removeLeagueTimeSlot,
-                            onLeagueScoringConfigChange = { updated ->
-                                component.updateLeagueScoringConfig { updated }
-                            },
-                            pendingStaffInvites = pendingStaffInvites,
-                            userSuggestions = suggestedUsers,
-                            onSearchUsers = onSearchUsers,
-                            onAddPendingStaffInvite = onAddPendingStaffInvite,
-                            onRemovePendingStaffInvite = onRemovePendingStaffInvite,
-                            onUpdateHostId = onUpdateHostId,
-                            onUpdateAssistantHostIds = onUpdateAssistantHostIds,
-                            onUpdateDoTeamsOfficiate = onUpdateDoTeamsOfficiate,
-                            onUpdateTeamOfficialsMaySwap = onUpdateTeamOfficialsMaySwap,
-                            onUpdateTeamCheckInMode = onUpdateTeamCheckInMode,
-                            onUpdateTeamCheckInOpenMinutesBefore = onUpdateTeamCheckInOpenMinutesBefore,
-                            onUpdateAllowMatchRosterEdits = onUpdateAllowMatchRosterEdits,
-                            onUpdateAllowTemporaryMatchPlayers = onUpdateAllowTemporaryMatchPlayers,
-                            onAddOfficialId = onAddOfficialId,
-                            onRemoveOfficialId = onRemoveOfficialId,
-                            onUpdateOfficialSchedulingMode = onUpdateOfficialSchedulingMode,
-                            onLoadOfficialPositionDefaults = {
-                                onEditEvent {
-                                    syncOfficialStaffing(
-                                        sport = sports.firstOrNull { sport -> sport.id == sportId },
-                                        replacePositionsWithSportDefaults = true,
-                                    )
-                                }
-                            },
-                            onAddOfficialPosition = onAddOfficialPosition,
-                            onUpdateOfficialPositionName = onUpdateOfficialPositionName,
-                            onUpdateOfficialPositionCount = onUpdateOfficialPositionCount,
-                            onRemoveOfficialPosition = onRemoveOfficialPosition,
-                            onUpdateOfficialUserPositions = onUpdateOfficialUserPositions,
-                            onSetPaymentPlansEnabled = onSetPaymentPlansEnabled,
-                            onSetInstallmentCount = onSetInstallmentCount,
-                            onUpdateInstallmentAmount = onUpdateInstallmentAmount,
-                            onUpdateInstallmentDueDate = onUpdateInstallmentDueDate,
-                            onAddInstallmentRow = onAddInstallmentRow,
-                            onRemoveInstallmentRow = onRemoveInstallmentRow,
-                            onUploadSelected = component::onUploadSelected,
-                            onDeleteImage = component::deleteImage,
-                            onMapRevealCenterChange = { center ->
-                                mapRevealCenter = center
-                            },
-                            onValidationChange = { isValid, errors ->
-                                canProceed = isValid
-                                validationErrors = errors
-                            },
-                            quoteInclusivePrice = component::quoteInclusivePrice,
-                            sectionVisibility = if (setupMode == EventCreateSetupMode.ADVANCED) {
-                                EventDetailsSectionVisibility.All
-                            } else {
-                                simpleSetupSectionVisibility(currentSetupPageId)
-                            },
-                            joinButton = {}
-                        )
-                                }
-
-                                is CreateEventComponent.Child.Preview -> Preview(
+            bottomBar = {
+                EventCreateActionBar(
+                    backEnabled = actionBackEnabled,
+                    primaryLabel = actionPrimaryLabel,
+                    onBack = ::handleCreateEventBack,
+                    onPrimary = ::handleCreateEventPrimary,
+                )
+            },
+        ) { scaffoldPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(scaffoldPadding),
+            ) {
+                ChildStack(
+                    stack = childStack,
+                    animation = backAnimation(
+                        backHandler = component.backHandler,
+                        onBack = component::onBackClicked,
+                    ),
+                ) { child ->
+                    when (child.instance) {
+                        is CreateEventComponent.Child.EventInfo -> {
+                            if (setupMode == EventCreateSetupMode.SIMPLE) {
+                                EventCreateSimpleSetupPage(
+                                    state = EventCreateSimpleSetupUiState(
+                                        page = currentSetupPage,
+                                        event = newEventState,
+                                        choices = setupChoices,
+                                        sports = sports,
+                                        divisionTypeParameters = divisionTypeParameters,
+                                        organizationTemplates = organizationTemplates,
+                                        organizationTemplatesLoading = organizationTemplatesLoading,
+                                        organizationTemplatesError = organizationTemplatesError,
+                                        localFieldCount = localFields.size.coerceAtLeast(1),
+                                        leagueScoringConfig = leagueScoringConfig,
+                                        suggestedUsers = suggestedUsers,
+                                        useManualTimeSlots = useManualTimeSlots,
+                                        priceQuoteConfirmed = simplePriceQuoteConfirmed,
+                                    ),
+                                    actions = EventCreateSimpleSetupUiActions(
+                                        onEventTypeSelected = { selectedType ->
+                                            completedSetupPageIds = emptySet()
+                                            onEventTypeSelected(selectedType)
+                                        },
+                                        onEditEvent = onEditEvent,
+                                        onSportSelected = { sportId ->
+                                            onEditEvent {
+                                                copy(
+                                                    sportId = sportId.takeIf(String::isNotBlank),
+                                                    matchRulesOverride = null,
+                                                    resolvedMatchRules = null,
+                                                )
+                                            }
+                                        },
+                                        onChoicesChange = { choices -> setupChoices = choices },
+                                        onUseManualTimeSlotsChange = component::setUseManualTimeSlots,
+                                        onOpenLocationMap = {
+                                            pendingMapPlace = null
+                                            mapComponent.toggleMap()
+                                        },
+                                        onSelectFieldCount = component::selectFieldCount,
+                                        onLeagueScoringConfigChange = { updated ->
+                                            component.updateLeagueScoringConfig { updated }
+                                        },
+                                        onSearchUsers = onSearchUsers,
+                                        onUpdateAssistantHostIds = onUpdateAssistantHostIds,
+                                        onUpdateOfficialIds = { updatedIds ->
+                                            val currentIds = (
+                                                newEventState.officialIds +
+                                                    newEventState.eventOfficials.map { official -> official.userId }
+                                                ).toSet()
+                                            (updatedIds.toSet() - currentIds).forEach(onAddOfficialId)
+                                            (currentIds - updatedIds.toSet()).forEach(onRemoveOfficialId)
+                                        },
+                                        onUpdateOfficialSchedulingMode = onUpdateOfficialSchedulingMode,
+                                        onUpdateDoTeamsOfficiate = onUpdateDoTeamsOfficiate,
+                                        onUpdateAllowMatchRosterEdits = onUpdateAllowMatchRosterEdits,
+                                        onPriceQuoteConfirmationChange = { confirmed ->
+                                            simplePriceQuoteConfirmed = confirmed
+                                        },
+                                        quoteInclusivePrice = component::quoteInclusivePrice,
+                                        onOpenAdvanced = { setupMode = EventCreateSetupMode.ADVANCED },
+                                    ),
                                     modifier = Modifier.fillMaxSize(),
-                                    component = component
+                                )
+                            } else {
+                                EventDetails(
+                                    paymentProcessor = component,
+                                    mapComponent = mapComponent,
+                                    hostHasAccount = currentUser?.hasStripeAccount ?: false,
+                                    eventWithRelations = eventWithCreateRelations,
+                                    editEvent = newEventState,
+                                    navPadding = PaddingValues(),
+                                    editView = isEditing,
+                                    isNewEvent = true,
+                                    showValidationErrors = hasAttemptedEventSubmit,
+                                    rentalTimeLocked = false,
+                                    onAddCurrentUser = component::addUserToEvent,
+                                    imageScheme = imageScheme,
+                                    imageIds = eventImageUrls,
+                                    sports = sports,
+                                    eventTagOptions = eventTags,
+                                    divisionTypeParameters = divisionTypeParameters,
+                                    organizationTemplates = organizationTemplates,
+                                    organizationTemplatesLoading = organizationTemplatesLoading,
+                                    organizationTemplatesError = organizationTemplatesError,
+                                    editableFields = localFields,
+                                    leagueTimeSlots = leagueSlots,
+                                    availableRentalResources = availableRentalResources,
+                                    selectedRentalResourceIds = selectedRentalResourceIds,
+                                    rentalResourceSelectionLocked = component.isRentalResourceSelectionLocked,
+                                    onRentalResourceSelectionChange = component::setRentalResourceSelected,
+                                    leagueScoringConfig = leagueScoringConfig,
+                                    onHostCreateAccount = component::createAccount,
+                                    onOpenLocationMap = {
+                                        pendingMapPlace = null
+                                        mapComponent.toggleMap()
+                                    },
+                                    onPlaceSelected = component::selectPlace,
+                                    onEditEvent = onEditEvent,
+                                    onEditTournament = onEditTournament,
+                                    onEventTypeSelected = onEventTypeSelected,
+                                    onSportSelected = { sportId ->
+                                        onEditEvent {
+                                            copy(
+                                                sportId = sportId.takeIf(String::isNotBlank),
+                                                matchRulesOverride = null,
+                                                resolvedMatchRules = null,
+                                            )
+                                        }
+                                    },
+                                    onSelectFieldCount = component::selectFieldCount,
+                                    onUpdateLocalFieldName = component::updateLocalFieldName,
+                                    onUpdateLocalFieldDivisions = component::updateLocalFieldDivisions,
+                                    useManualTimeSlots = useManualTimeSlots,
+                                    onUseManualTimeSlotsChange = component::setUseManualTimeSlots,
+                                    onAddLeagueTimeSlot = component::addLeagueTimeSlot,
+                                    onUpdateLeagueTimeSlot = { index, updated ->
+                                        component.updateLeagueTimeSlot(index) { updated }
+                                    },
+                                    onRemoveLeagueTimeSlot = component::removeLeagueTimeSlot,
+                                    onLeagueScoringConfigChange = { updated ->
+                                        component.updateLeagueScoringConfig { updated }
+                                    },
+                                    pendingStaffInvites = pendingStaffInvites,
+                                    userSuggestions = suggestedUsers,
+                                    onSearchUsers = onSearchUsers,
+                                    onAddPendingStaffInvite = onAddPendingStaffInvite,
+                                    onRemovePendingStaffInvite = onRemovePendingStaffInvite,
+                                    onUpdateHostId = onUpdateHostId,
+                                    onUpdateAssistantHostIds = onUpdateAssistantHostIds,
+                                    onUpdateDoTeamsOfficiate = onUpdateDoTeamsOfficiate,
+                                    onUpdateTeamOfficialsMaySwap = onUpdateTeamOfficialsMaySwap,
+                                    onUpdateTeamCheckInMode = onUpdateTeamCheckInMode,
+                                    onUpdateTeamCheckInOpenMinutesBefore = onUpdateTeamCheckInOpenMinutesBefore,
+                                    onUpdateAllowMatchRosterEdits = onUpdateAllowMatchRosterEdits,
+                                    onUpdateAllowTemporaryMatchPlayers = onUpdateAllowTemporaryMatchPlayers,
+                                    onAddOfficialId = onAddOfficialId,
+                                    onRemoveOfficialId = onRemoveOfficialId,
+                                    onUpdateOfficialSchedulingMode = onUpdateOfficialSchedulingMode,
+                                    onLoadOfficialPositionDefaults = {
+                                        onEditEvent {
+                                            syncOfficialStaffing(
+                                                sport = sports.firstOrNull { sport -> sport.id == sportId },
+                                                replacePositionsWithSportDefaults = true,
+                                            )
+                                        }
+                                    },
+                                    onAddOfficialPosition = onAddOfficialPosition,
+                                    onUpdateOfficialPositionName = onUpdateOfficialPositionName,
+                                    onUpdateOfficialPositionCount = onUpdateOfficialPositionCount,
+                                    onRemoveOfficialPosition = onRemoveOfficialPosition,
+                                    onUpdateOfficialUserPositions = onUpdateOfficialUserPositions,
+                                    onSetPaymentPlansEnabled = onSetPaymentPlansEnabled,
+                                    onSetInstallmentCount = onSetInstallmentCount,
+                                    onUpdateInstallmentAmount = onUpdateInstallmentAmount,
+                                    onUpdateInstallmentDueDate = onUpdateInstallmentDueDate,
+                                    onAddInstallmentRow = onAddInstallmentRow,
+                                    onRemoveInstallmentRow = onRemoveInstallmentRow,
+                                    onUploadSelected = component::onUploadSelected,
+                                    onDeleteImage = component::deleteImage,
+                                    onMapRevealCenterChange = { center -> mapRevealCenter = center },
+                                    onValidationChange = { isValid, errors ->
+                                        canProceed = isValid
+                                        validationErrors = errors
+                                    },
+                                    quoteInclusivePrice = component::quoteInclusivePrice,
+                                    joinButton = {},
                                 )
                             }
                         }
+
+                        is CreateEventComponent.Child.Preview -> Preview(
+                            modifier = Modifier.fillMaxSize(),
+                            component = component,
+                        )
                     }
                 }
             }
-        )
+        }
     }
 }
 
-private fun simpleSetupPageError(pageId: EventCreateSetupPageId): String = when (pageId) {
+private fun simpleSetupPageError(
+    pageId: EventCreateSetupPageId,
+    event: Event,
+    choices: EventCreateSetupChoices,
+    priceQuoteConfirmed: Boolean,
+): String = when (pageId) {
     EventCreateSetupPageId.BASICS -> "Add an event name and select a sport before continuing."
     EventCreateSetupPageId.DIVISIONS -> "Add at least one division before continuing."
-    EventCreateSetupPageId.SCHEDULE_LOCATION -> "Select a mapped location before continuing."
+    EventCreateSetupPageId.SCHEDULE_LOCATION -> when {
+        event.location.isBlank() || event.lat == 0.0 || event.long == 0.0 -> {
+            "Select a mapped location before continuing."
+        }
+        !event.noFixedEndDateTime && event.end <= event.start -> "Choose an end time after the start time."
+        else -> "Complete the schedule before continuing."
+    }
+    EventCreateSetupPageId.COMPETITION_RULES -> "Choose at least two playoff teams before continuing."
+    EventCreateSetupPageId.PRICING_REGISTRATION -> when {
+        event.maxParticipants < 2 -> "Capacity must be at least 2."
+        choices.paidRegistration && event.priceCents <= 0 -> "Enter a registration price."
+        choices.paidRegistration && !priceQuoteConfirmed -> "Wait for the online price quote."
+        else -> "Complete the registration settings before continuing."
+    }
+    EventCreateSetupPageId.DOCUMENTS_QUESTIONS -> "Select at least one required document."
+    EventCreateSetupPageId.REVIEW_PUBLISH -> buildValidationPopupMessage(
+        simpleSetupValidationErrors(event, choices, priceQuoteConfirmed),
+    )
     else -> "Complete the required fields on this page before continuing."
 }
 
