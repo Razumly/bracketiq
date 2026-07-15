@@ -18,6 +18,7 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentProof
 import com.razumly.mvp.core.data.dataTypes.Organization
@@ -165,6 +166,9 @@ internal class CreateEventHarness(
 internal fun createSport(id: String, usePointsPerSetWin: Boolean): Sport =
     SportDTO(
         name = id,
+        matchRulesTemplate = MatchRulesConfigMVP(
+            scoringModel = if (usePointsPerSetWin) "SETS" else "POINTS_ONLY",
+        ),
         usePointsPerSetWin = usePointsPerSetWin,
     ).toSport(id)
 

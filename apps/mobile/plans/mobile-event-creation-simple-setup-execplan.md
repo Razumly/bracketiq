@@ -22,6 +22,7 @@ Mobile event creation currently opens one long advanced event-details form. Afte
 - [x] (2026-07-15) Replaced the manual-timeslot toggle with one automatic event-range slot plus compact custom-timeslot editing on Schedule & Location.
 - [x] (2026-07-15) Replaced the generic timed/set selector with sport-structured duration, per-set score, playoff, and explained standings controls.
 - [x] (2026-07-15) Verified division reopening, finite competition defaults, timeslot save/reopen, soccer durations, and volleyball set targets in the Android emulator; ran 27 focused regression tests and assembled the final debug APK.
+- [x] (2026-07-15) Added compact 1/3/5 set-count customization that preserves regulation scores and keeps the deciding-set target last.
 
 ## Surprises & Discoveries
 
@@ -108,6 +109,10 @@ Mobile event creation currently opens one long advanced event-details form. Afte
 
 - Decision: Render Schedule & Location in either summary mode or in-place timeslot-edit mode instead of stacking both forms.
   Rationale: The editor remains on the requested page while its start/end, resources, divisions, and save actions all fit within one standard viewport.
+  Date/Author: 2026-07-15 / Codex
+
+- Decision: Offer set counts as explicit 1, 3, and 5 choices and resize the per-set score row immediately.
+  Rationale: Set-based sports need an editable best-of structure, while restricting the choices to valid odd counts prevents tied matches and keeps the control compact enough for the fixed mobile viewport.
   Date/Author: 2026-07-15 / Codex
 
 ## Outcomes & Retrospective

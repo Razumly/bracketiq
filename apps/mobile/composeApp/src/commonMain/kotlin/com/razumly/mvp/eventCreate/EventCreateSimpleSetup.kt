@@ -405,6 +405,54 @@ fun Event.withSimplePlayoffMatchDuration(totalMinutes: Int?): Event {
     )
 }
 
+fun resizeSimpleSetPointTargets(
+    currentTargets: List<Int>,
+    setCount: Int,
+    sportDefaults: List<Int> = emptyList(),
+): List<Int> {
+    val normalizedSetCount = when {
+        setCount <= 1 -> 1
+        setCount <= 3 -> 3
+        else -> 5
+    }
+    val normalizedCurrent = currentTargets.map { target -> target.coerceAtLeast(1) }
+    val normalizedDefaults = sportDefaults.map { target -> target.coerceAtLeast(1) }
+    val regulationTarget = normalizedCurrent.firstOrNull()
+        ?: normalizedDefaults.firstOrNull()
+        ?: 21
+    if (normalizedSetCount == 1) {
+        return listOf(regulationTarget)
+    }
+    val decidingTarget = normalizedCurrent.takeIf { targets -> targets.size > 1 }?.last()
+        ?: normalizedDefaults.takeIf { targets -> targets.size > 1 }?.last()
+        ?: regulationTarget
+    val existingRegulationTargets = normalizedCurrent.dropLast(1)
+    return List(normalizedSetCount) { index ->
+        when {
+            index == normalizedSetCount - 1 -> decidingTarget
+            index < existingRegulationTargets.size -> existingRegulationTargets[index]
+            else -> regulationTarget
+        }
+    }
+}
+
+fun resolveSimpleCompetitionSegmentCount(
+    event: Event,
+    scoringModel: String,
+    sportSegmentCount: Int,
+): Int {
+    val normalizedSportCount = sportSegmentCount.coerceAtLeast(1)
+    if (!scoringModel.equals("SETS", ignoreCase = true)) return normalizedSportCount
+
+    val configuredCount = when (event.eventType) {
+        EventType.LEAGUE -> event.setsPerMatch
+        EventType.TOURNAMENT -> event.winnerSetCount
+        EventType.EVENT, EventType.TRYOUT, EventType.WEEKLY_EVENT -> null
+    }
+    return configuredCount?.takeIf { count -> count in setOf(1, 3, 5) }
+        ?: normalizedSportCount
+}
+
 fun Event.withSimpleSetPointTargets(targets: List<Int>): Event {
     val normalizedTargets = targets.map { value -> value.coerceAtLeast(1) }.ifEmpty { listOf(21) }
     val setCount = normalizedTargets.size

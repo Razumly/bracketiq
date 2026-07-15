@@ -1961,11 +1961,18 @@ class DefaultCreateEventComponent(
     ): Event {
         return if (requiresSets) {
             val allowedSetCounts = setOf(1, 3, 5)
-            val normalizedSets = rules.segmentCount.takeIf(allowedSetCounts::contains) ?: 1
+            val sportDefaultSets = rules.segmentCount.takeIf(allowedSetCounts::contains) ?: 1
+            val normalizedSets = if (applySportDefaults) {
+                sportDefaultSets
+            } else {
+                setsPerMatch?.takeIf(allowedSetCounts::contains) ?: sportDefaultSets
+            }
             val sportTargets = rules.setPointTargets.take(normalizedSets)
-            val normalizedPoints = pointsToVictory.takeIf { values ->
-                values.size >= normalizedSets && values.take(normalizedSets).all { value -> value > 0 }
-            }?.take(normalizedSets) ?: List(normalizedSets) { index -> sportTargets.getOrNull(index) ?: 21 }
+            val normalizedPoints = List(normalizedSets) { index ->
+                pointsToVictory.getOrNull(index)?.takeIf { value -> value > 0 }
+                    ?: sportTargets.getOrNull(index)
+                    ?: 21
+            }
             copy(
                 usesSets = true,
                 setsPerMatch = normalizedSets,
@@ -2015,8 +2022,17 @@ class DefaultCreateEventComponent(
             )
         } else {
             val allowedSetCounts = setOf(1, 3, 5)
-            val winnerSets = rules.segmentCount.takeIf(allowedSetCounts::contains) ?: 1
-            val loserSets = winnerSets
+            val sportDefaultSets = rules.segmentCount.takeIf(allowedSetCounts::contains) ?: 1
+            val winnerSets = if (applySportDefaults) {
+                sportDefaultSets
+            } else {
+                winnerSetCount.takeIf(allowedSetCounts::contains) ?: 1
+            }
+            val loserSets = if (applySportDefaults) {
+                sportDefaultSets
+            } else {
+                loserSetCount.takeIf(allowedSetCounts::contains) ?: winnerSets
+            }
             val sportTargets = rules.setPointTargets.take(winnerSets)
             copy(
                 usesSets = true,
@@ -2024,12 +2040,16 @@ class DefaultCreateEventComponent(
                 matchDurationMinutes = null,
                 winnerSetCount = winnerSets,
                 loserSetCount = loserSets,
-                winnerBracketPointsToVictory = winnerBracketPointsToVictory.takeIf { values ->
-                    values.size >= winnerSets && values.take(winnerSets).all { value -> value > 0 }
-                }?.take(winnerSets) ?: List(winnerSets) { index -> sportTargets.getOrNull(index) ?: 21 },
-                loserBracketPointsToVictory = loserBracketPointsToVictory.takeIf { values ->
-                    values.size >= loserSets && values.take(loserSets).all { value -> value > 0 }
-                }?.take(loserSets) ?: List(loserSets) { index -> sportTargets.getOrNull(index) ?: 21 },
+                winnerBracketPointsToVictory = List(winnerSets) { index ->
+                    winnerBracketPointsToVictory.getOrNull(index)?.takeIf { value -> value > 0 }
+                        ?: sportTargets.getOrNull(index)
+                        ?: 21
+                },
+                loserBracketPointsToVictory = List(loserSets) { index ->
+                    loserBracketPointsToVictory.getOrNull(index)?.takeIf { value -> value > 0 }
+                        ?: sportTargets.getOrNull(index)
+                        ?: 21
+                },
             )
         }
     }

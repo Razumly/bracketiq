@@ -45,6 +45,29 @@ class LeagueSportRulesTest : MainDispatcherTest() {
     }
 
     @Test
+    fun given_set_based_league_when_selecting_best_of_five_then_custom_set_count_is_preserved() = runTest(testDispatcher) {
+        val volleyball = createSport(
+            id = "Indoor Volleyball",
+            usePointsPerSetWin = true,
+        )
+        val harness = CreateEventHarness(sports = listOf(volleyball, timedSport))
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        advance()
+        harness.component.updateEventField { copy(sportId = volleyball.id) }
+        advance()
+        harness.component.updateEventField {
+            withSimpleSetPointTargets(listOf(21, 21, 21, 21, 15))
+        }
+        advance()
+
+        val updated = harness.component.newEventState.value
+        assertEquals(5, updated.setsPerMatch)
+        assertEquals(listOf(21, 21, 21, 21, 15), updated.pointsToVictory)
+    }
+
+    @Test
     fun given_timed_league_when_updating_match_structure_then_set_fields_are_cleared() = runTest(testDispatcher) {
         val harness = CreateEventHarness(sports = listOf(setBasedSport, timedSport))
         advance()
@@ -117,9 +140,11 @@ class LeagueSportRulesTest : MainDispatcherTest() {
         harness.component.onTypeSelected(EventType.TOURNAMENT)
         advance()
 
+        harness.component.updateTournamentField { copy(sportId = setBasedSport.id) }
+        advance()
+
         harness.component.updateTournamentField {
             copy(
-                sportId = setBasedSport.id,
                 winnerSetCount = 4,
                 loserSetCount = 5,
                 winnerBracketPointsToVictory = listOf(25),

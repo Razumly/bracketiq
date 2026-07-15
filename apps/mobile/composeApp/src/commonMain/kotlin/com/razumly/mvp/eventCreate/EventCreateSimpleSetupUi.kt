@@ -23,6 +23,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -864,7 +865,11 @@ private fun SimpleCompetitionRulesPage(
     val event = state.event
     val sport = state.sports.firstOrNull { candidate -> candidate.id == event.sportId }
     val rules = remember(event, sport) { resolveEventMatchRules(event, sport) }
-    val segmentCount = rules.segmentCount.coerceAtLeast(1)
+    val segmentCount = resolveSimpleCompetitionSegmentCount(
+        event = event,
+        scoringModel = rules.scoringModel,
+        sportSegmentCount = rules.segmentCount,
+    )
     val segmentPlural = when {
         segmentCount == 1 -> rules.segmentLabel
         rules.segmentLabel.equals("Half", ignoreCase = true) -> "Halves"
@@ -934,6 +939,32 @@ private fun SimpleCompetitionRulesPage(
             }
 
             "SETS" -> {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Sets per match",
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.weight(1f),
+                    )
+                    listOf(1, 3, 5).forEach { count ->
+                        FilterChip(
+                            selected = segmentCount == count,
+                            onClick = {
+                                val resizedTargets = resizeSimpleSetPointTargets(
+                                    currentTargets = setTargets,
+                                    setCount = count,
+                                    sportDefaults = rules.setPointTargets,
+                                )
+                                actions.onEditEvent { withSimpleSetPointTargets(resizedTargets) }
+                            },
+                            label = { Text(count.toString()) },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        )
+                    }
+                }
                 Text(
                     text = "Scores required to win each set",
                     style = MaterialTheme.typography.labelLarge,

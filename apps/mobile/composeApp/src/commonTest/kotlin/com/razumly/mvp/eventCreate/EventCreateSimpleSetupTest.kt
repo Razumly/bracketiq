@@ -220,6 +220,60 @@ class EventCreateSimpleSetupTest {
     }
 
     @Test
+    fun resizing_set_targets_keeps_the_deciding_set_score_last() {
+        assertEquals(
+            listOf(21, 21, 21, 21, 15),
+            resizeSimpleSetPointTargets(
+                currentTargets = listOf(21, 21, 15),
+                setCount = 5,
+                sportDefaults = listOf(21, 21, 15),
+            ),
+        )
+        assertEquals(
+            listOf(21, 21, 15),
+            resizeSimpleSetPointTargets(
+                currentTargets = listOf(21, 21, 21, 21, 15),
+                setCount = 3,
+                sportDefaults = listOf(21, 21, 15),
+            ),
+        )
+        assertEquals(
+            listOf(21),
+            resizeSimpleSetPointTargets(
+                currentTargets = listOf(21, 21, 15),
+                setCount = 1,
+                sportDefaults = listOf(21, 21, 15),
+            ),
+        )
+    }
+
+    @Test
+    fun custom_set_count_overrides_the_sport_default_on_the_simple_rules_page() {
+        assertEquals(
+            5,
+            resolveSimpleCompetitionSegmentCount(
+                event = Event(
+                    eventType = EventType.LEAGUE,
+                    setsPerMatch = 5,
+                ),
+                scoringModel = "SETS",
+                sportSegmentCount = 3,
+            ),
+        )
+        assertEquals(
+            2,
+            resolveSimpleCompetitionSegmentCount(
+                event = Event(
+                    eventType = EventType.LEAGUE,
+                    setsPerMatch = 5,
+                ),
+                scoringModel = "PERIODS",
+                sportSegmentCount = 2,
+            ),
+        )
+    }
+
+    @Test
     fun registration_values_are_applied_to_event_and_every_division() {
         val event = Event(
             priceCents = 500,
