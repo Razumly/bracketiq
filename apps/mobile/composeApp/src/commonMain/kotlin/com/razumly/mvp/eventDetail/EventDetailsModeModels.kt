@@ -11,6 +11,31 @@ internal enum class EventDetailsMode {
     EDIT,
 }
 
+data class EventDetailsSectionVisibility(
+    val hero: Boolean = true,
+    val basics: Boolean = true,
+    val registration: Boolean = true,
+    val matchRules: Boolean = true,
+    val staff: Boolean = true,
+    val divisions: Boolean = true,
+    val leagueScoring: Boolean = true,
+    val schedule: Boolean = true,
+) {
+    companion object {
+        val All = EventDetailsSectionVisibility()
+        val None = EventDetailsSectionVisibility(
+            hero = false,
+            basics = false,
+            registration = false,
+            matchRules = false,
+            staff = false,
+            divisions = false,
+            leagueScoring = false,
+            schedule = false,
+        )
+    }
+}
+
 internal data class EventDetailsReadOnlyUiModel(
     val eventId: String,
     val basics: ReadOnlySectionModel,

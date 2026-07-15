@@ -270,6 +270,7 @@ fun EventDetails(
     onMapRevealCenterChange: (Offset) -> Unit = {},
     onFloatingDockVisibilityChange: (Boolean) -> Unit = {},
     onValidationChange: (Boolean, List<String>) -> Unit = { _, _ -> },
+    sectionVisibility: EventDetailsSectionVisibility = EventDetailsSectionVisibility.All,
     heroTopControls: @Composable BoxScope.() -> Unit = {},
     modifier: Modifier = Modifier,
     joinButton: @Composable (isValid: Boolean) -> Unit
@@ -2218,8 +2219,8 @@ fun EventDetails(
     val fieldsById = remember(editableFields) {
         editableFields.associateBy(Field::id)
     }
-    val heroHeightFraction = if (editView) 0.6f else 0.32f
-    val heroSpacerFraction = if (editView) 0.5f else 0.24f
+    val heroHeightFraction = if (!sectionVisibility.hero) 0f else if (editView) 0.6f else 0.32f
+    val heroSpacerFraction = if (!sectionVisibility.hero) 0f else if (editView) 0.5f else 0.24f
     val heroHeight = (getScreenHeight() * heroHeightFraction).dp
     val statusBarInset = with(LocalDensity.current) { WindowInsets.statusBars.getTop(this).toDp() }
     val stickyHeaderTopInset = maxOf(topInset, statusBarInset) + 6.dp
@@ -2285,16 +2286,18 @@ fun EventDetails(
 
     CompositionLocalProvider(localImageScheme provides imageScheme) {
         Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(heroHeight)
-                    .graphicsLayer(translationY = -heroParallaxOffset),
-            ) {
-                BackgroundImage(
-                    modifier = Modifier.fillMaxSize(),
-                    imageUrl = heroImageUrl,
-                )
+            if (sectionVisibility.hero) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(heroHeight)
+                        .graphicsLayer(translationY = -heroParallaxOffset),
+                ) {
+                    BackgroundImage(
+                        modifier = Modifier.fillMaxSize(),
+                        imageUrl = heroImageUrl,
+                    )
+                }
             }
             Box(
                 modifier = Modifier
@@ -2318,7 +2321,7 @@ fun EventDetails(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
 
-                eventDetailsHeroSection(
+                if (sectionVisibility.hero) eventDetailsHeroSection(
                     state = EventDetailsHeroState(
                         editView = editView,
                         isNewEvent = isNewEvent,
@@ -2344,7 +2347,7 @@ fun EventDetails(
                     ),
                 )
 
-                eventDetailsBasicInfoSection(
+                if (sectionVisibility.basics) eventDetailsBasicInfoSection(
                     state = EventDetailsBasicInfoState(
                         readOnlySection = readOnlyUiModel.basics,
                         editSection = editUiModel.basics,
@@ -2376,7 +2379,7 @@ fun EventDetails(
                     ),
                 )
 
-                eventDetailsRegistrationSection(
+                if (sectionVisibility.registration) eventDetailsRegistrationSection(
                     state = EventDetailsRegistrationState(
                         readOnlySection = readOnlyUiModel.registration,
                         editSection = editUiModel.registration,
@@ -2413,7 +2416,7 @@ fun EventDetails(
                     ),
                 )
 
-                eventDetailsMatchRulesSection(
+                if (sectionVisibility.matchRules) eventDetailsMatchRulesSection(
                     state = EventDetailsMatchRulesState(
                         readOnlySection = readOnlyUiModel.matchRules,
                         sectionExpansionStates = sectionExpansionStates,
@@ -2439,7 +2442,7 @@ fun EventDetails(
                     ),
                 )
 
-                eventDetailsStaffSection(
+                if (sectionVisibility.staff) eventDetailsStaffSection(
                     state = EventDetailsStaffState(
                         readOnlySection = readOnlyUiModel.staff,
                         sectionExpansionStates = sectionExpansionStates,
@@ -2553,7 +2556,7 @@ fun EventDetails(
                     ),
                 )
 
-                eventDetailsDivisionsSection(
+                if (sectionVisibility.divisions) eventDetailsDivisionsSection(
                     state = EventDetailsDivisionsSectionState(
                         readOnlySection = readOnlyUiModel.divisions,
                         editSection = editUiModel.divisions,
@@ -2630,7 +2633,7 @@ fun EventDetails(
                     },
                 )
 
-                eventDetailsLeagueScoringSection(
+                if (sectionVisibility.leagueScoring) eventDetailsLeagueScoringSection(
                     state = EventDetailsLeagueScoringState(
                         readOnlySection = readOnlyUiModel.leagueScoring,
                         editSection = editUiModel.leagueScoring,
@@ -2649,7 +2652,7 @@ fun EventDetails(
                     ),
                 )
 
-                eventDetailsScheduleSection(
+                if (sectionVisibility.schedule) eventDetailsScheduleSection(
                     state = EventDetailsScheduleState(
                         readOnlySection = readOnlyUiModel.schedule,
                         editSection = editUiModel.schedule,
