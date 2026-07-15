@@ -611,6 +611,7 @@ fun CreateEventScreen(
                                     eventWithRelations = eventWithCreateRelations,
                                     editEvent = newEventState,
                                     navPadding = PaddingValues(),
+                                    includeStatusBarInsetInStickyHeaders = false,
                                     editView = isEditing,
                                     isNewEvent = true,
                                     showValidationErrors = hasAttemptedEventSubmit,

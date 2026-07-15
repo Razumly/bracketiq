@@ -190,6 +190,7 @@ fun EventDetails(
     showOfficialsPanel: Boolean = true,
     navPadding: PaddingValues = PaddingValues(),
     topInset: Dp = 0.dp,
+    includeStatusBarInsetInStickyHeaders: Boolean = true,
     isNewEvent: Boolean,
     showValidationErrors: Boolean = true,
     rentalTimeLocked: Boolean = false,
@@ -2277,7 +2278,11 @@ fun EventDetails(
     val heroSpacerFraction = if (!sectionVisibility.hero) 0f else if (editView) 0.5f else 0.24f
     val heroHeight = (getScreenHeight() * heroHeightFraction).dp
     val statusBarInset = with(LocalDensity.current) { WindowInsets.statusBars.getTop(this).toDp() }
-    val stickyHeaderTopInset = maxOf(topInset, statusBarInset) + 6.dp
+    val stickyHeaderTopInset = resolveEventDetailsStickyHeaderTopInset(
+        topInset = topInset,
+        statusBarInset = statusBarInset,
+        includeStatusBarInset = includeStatusBarInsetInStickyHeaders,
+    )
     val heroSpacerHeight = (getScreenHeight() * heroSpacerFraction).dp
     val heroSpacerHeightPx = with(LocalDensity.current) { heroSpacerHeight.toPx() }
     val heroParallaxOffset by remember(lazyListState, heroSpacerHeightPx) {
@@ -2987,3 +2992,12 @@ fun EventDetails(
         }
     }
 }
+
+internal fun resolveEventDetailsStickyHeaderTopInset(
+    topInset: Dp,
+    statusBarInset: Dp,
+    includeStatusBarInset: Boolean,
+): Dp = maxOf(
+    topInset,
+    if (includeStatusBarInset) statusBarInset else 0.dp,
+) + 6.dp
