@@ -37,6 +37,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -59,6 +60,7 @@ import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.label
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
@@ -67,6 +69,8 @@ import com.razumly.mvp.core.data.dataTypes.skillsForSport
 import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
 import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
 import com.razumly.mvp.core.data.repositories.RegistrationQuestionDraft
+import com.razumly.mvp.core.data.repositories.REGISTRATION_LONG_ANSWER_CHARACTER_LIMIT
+import com.razumly.mvp.core.data.repositories.REGISTRATION_SHORT_ANSWER_CHARACTER_LIMIT
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.InclusivePriceInput
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
@@ -74,6 +78,11 @@ import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.util.toEnumTitleCase
 import com.razumly.mvp.eventDetail.resolveEventMatchRules
+import com.razumly.mvp.eventDetail.EventStaffRole
+import com.razumly.mvp.eventDetail.PendingStaffInviteDraft
+import com.razumly.mvp.eventDetail.displayName
+import com.razumly.mvp.eventDetail.label
+import kotlinx.coroutines.launch
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Duration.Companion.hours
@@ -89,6 +98,7 @@ data class EventCreateSimpleSetupUiState(
     val localFields: List<Field>,
     val leagueTimeSlots: List<TimeSlot>,
     val registrationQuestions: List<RegistrationQuestionDraft>,
+    val pendingStaffInvites: List<PendingStaffInviteDraft>,
     val leagueScoringConfig: LeagueScoringConfigDTO,
     val suggestedUsers: List<UserData>,
     val userSearchLoading: Boolean,
@@ -115,7 +125,19 @@ data class EventCreateSimpleSetupUiActions(
     val onUpdateOfficialIds: (List<String>) -> Unit,
     val onUpdateOfficialSchedulingMode: (OfficialSchedulingMode) -> Unit,
     val onUpdateDoTeamsOfficiate: (Boolean) -> Unit,
+    val onUpdateTeamOfficialsMaySwap: (Boolean) -> Unit,
+    val onUpdateTeamCheckInMode: (com.razumly.mvp.core.data.dataTypes.TeamCheckInMode) -> Unit,
+    val onUpdateTeamCheckInOpenMinutesBefore: (Int) -> Unit,
     val onUpdateAllowMatchRosterEdits: (Boolean) -> Unit,
+    val onUpdateAllowTemporaryMatchPlayers: (Boolean) -> Unit,
+    val onLoadOfficialPositionDefaults: () -> Unit,
+    val onAddOfficialPosition: () -> Unit,
+    val onUpdateOfficialPositionName: (String, String) -> Unit,
+    val onUpdateOfficialPositionCount: (String, Int) -> Unit,
+    val onRemoveOfficialPosition: (String) -> Unit,
+    val onAddPendingStaffInvite: suspend (String, String, String, Set<EventStaffRole>) -> Result<Unit>,
+    val onRemovePendingStaffInvite: (String, EventStaffRole?) -> Unit,
+    val onUpdateOfficialUserPositions: (String, List<String>) -> Unit,
     val onPriceQuoteConfirmationChange: (Boolean) -> Unit,
     val quoteInclusivePrice: suspend (
         InclusivePriceQuoteDirection,
@@ -262,7 +284,6 @@ fun EventCreateSimpleSetupPage(
             EventCreateSetupPageId.TIMESLOTS -> SimpleTimeslotsPage(state, actions)
             EventCreateSetupPageId.COMPETITION_RULES -> SimpleCompetitionRulesPage(state, actions)
             EventCreateSetupPageId.WINNER_BRACKET_RULES -> SimpleWinnerBracketRulesPage(state, actions)
-            EventCreateSetupPageId.LOSER_BRACKET_RULES -> SimpleLoserBracketRulesPage(state, actions)
             EventCreateSetupPageId.REGISTRATION_PLAN -> SimpleRegistrationPlanPage(state, actions)
             EventCreateSetupPageId.PRICING_REGISTRATION -> SimplePricingPage(state, actions)
             EventCreateSetupPageId.QUESTIONS -> SimpleQuestionsPage(state, actions)
@@ -949,12 +970,6 @@ private fun SimpleCompetitionRulesPage(
         rules.segmentLabel.equals("Half", ignoreCase = true) -> "Halves"
         else -> "${rules.segmentLabel}s"
     }
-    val defaultMatchMinutes = rules.timekeeping.segmentDurationMinutesBySequence
-        .takeIf { durations -> durations.size >= segmentCount }
-        ?.take(segmentCount)
-        ?.sum()
-        ?: rules.timekeeping.segmentDurationMinutes?.times(segmentCount)
-        ?: 60
     val setTargets = when (event.eventType) {
         EventType.LEAGUE -> event.pointsToVictory
         EventType.TOURNAMENT -> event.pointsToVictory
@@ -996,10 +1011,13 @@ private fun SimpleCompetitionRulesPage(
         )
         when (rules.scoringModel) {
             "PERIODS" -> {
-                val matchMinutes = event.matchDurationMinutes ?: defaultMatchMinutes
-                val playoffMinutes = event.divisionDetails
-                    .firstNotNullOfOrNull { detail -> detail.playoffConfig?.matchDurationMinutes }
-                    ?: matchMinutes
+                val matchMinutes = event.matchDurationMinutes
+                val playoffConfig = event.divisionDetails.firstNotNullOfOrNull(DivisionDetail::playoffConfig)
+                val playoffMinutes = if (playoffConfig != null) {
+                    playoffConfig.matchDurationMinutes
+                } else {
+                    matchMinutes
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1029,7 +1047,7 @@ private fun SimpleCompetitionRulesPage(
                 Row(modifier = Modifier.fillMaxWidth()) {
                     SimpleNumberField(
                         label = "Set duration (min)",
-                        value = event.setDurationMinutes ?: 20,
+                        value = event.setDurationMinutes,
                         onChange = { minutes -> actions.onEditEvent { withSimpleSetDurationMinutes(minutes) } },
                     )
                     Spacer(Modifier.weight(1f))
@@ -1074,14 +1092,32 @@ private fun SimpleCompetitionRulesPage(
             }
 
             "POINTS_ONLY" -> {
-                Row(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     SimpleNumberField(
                         label = "Target score",
-                        value = event.pointsToVictory.firstOrNull() ?: setTargets.first(),
-                        onChange = { score -> actions.onEditEvent { withSimpleSetPointTargets(listOf(score ?: 1)) } },
+                        value = event.pointsToVictory.firstOrNull(),
+                        onChange = { score ->
+                            actions.onEditEvent { withSimplePointTarget(score) }
+                        },
                     )
-                    Spacer(Modifier.weight(1f))
+                    SimpleNumberField(
+                        label = "Match duration (min)",
+                        value = event.matchDurationMinutes,
+                        onChange = { minutes -> actions.onEditEvent { withSimpleScheduleMatchDuration(minutes) } },
+                    )
                 }
+            }
+
+            "INNINGS" -> Row(modifier = Modifier.fillMaxWidth()) {
+                SimpleNumberField(
+                    label = "Match duration (min)",
+                    value = event.matchDurationMinutes,
+                    onChange = { minutes -> actions.onEditEvent { withSimpleScheduleMatchDuration(minutes) } },
+                )
+                Spacer(Modifier.weight(1f))
             }
         }
         if (tournamentPoolPlayEnabled) {
@@ -1194,9 +1230,9 @@ private fun SimpleWinnerBracketRulesPage(
             sportDefaults = rules.setPointTargets,
         )
     val bracketDuration = if (setBased) {
-        config?.setDurationMinutes ?: event.setDurationMinutes ?: 20
+        if (config != null) config.setDurationMinutes else event.setDurationMinutes
     } else {
-        config?.matchDurationMinutes ?: event.matchDurationMinutes ?: 60
+        if (config != null) config.matchDurationMinutes else event.matchDurationMinutes
     }
 
     Column(
@@ -1237,7 +1273,9 @@ private fun SimpleWinnerBracketRulesPage(
             )
             SimplePoolValueCard(
                 label = if (setBased) "Winner match max" else "Both brackets",
-                value = if (setBased) "${bracketDuration * winnerSetCount} min" else "$bracketDuration min",
+                value = bracketDuration?.let { duration ->
+                    if (setBased) "${duration * winnerSetCount} min" else "$duration min"
+                } ?: "Required",
                 modifier = Modifier.weight(1f),
             )
         }
@@ -1258,6 +1296,14 @@ private fun SimpleWinnerBracketRulesPage(
                     actions.onEditEvent { withSimpleTournamentBracketTargets(false, updated) }
                 },
             )
+            if (event.doubleElimination) {
+                SimpleLoserBracketRulesSection(
+                    event = event,
+                    rules = rules,
+                    setDuration = bracketDuration,
+                    actions = actions,
+                )
+            }
         } else if (event.doubleElimination) {
             Text(
                 text = "Timed winner- and loser-bracket matches use the same duration.",
@@ -1269,13 +1315,12 @@ private fun SimpleWinnerBracketRulesPage(
 }
 
 @Composable
-private fun SimpleLoserBracketRulesPage(
-    state: EventCreateSimpleSetupUiState,
+private fun SimpleLoserBracketRulesSection(
+    event: Event,
+    rules: com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP,
+    setDuration: Int?,
     actions: EventCreateSimpleSetupUiActions,
 ) {
-    val event = state.event
-    val sport = state.sports.firstOrNull { candidate -> candidate.id == event.sportId }
-    val rules = remember(event, sport) { resolveEventMatchRules(event, sport) }
     val config = event.divisionDetails.firstNotNullOfOrNull(DivisionDetail::playoffConfig)
     val loserSetCount = (config?.loserSetCount ?: event.loserSetCount).takeIf { it in setOf(1, 3, 5) } ?: 1
     val loserTargets = (config?.loserBracketPointsToVictory ?: event.loserBracketPointsToVictory)
@@ -1286,39 +1331,23 @@ private fun SimpleLoserBracketRulesPage(
             setCount = loserSetCount,
             sportDefaults = rules.setPointTargets,
         )
-    val setDuration = config?.setDurationMinutes ?: event.setDurationMinutes ?: 20
-
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(
-            text = "Loser bracket • $setDuration minutes per set",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        SimplePoolValueCard(
-            label = "Scheduled match length",
-            value = "Up to ${setDuration * loserSetCount} minutes",
-            modifier = Modifier.fillMaxWidth(),
-        )
-        SimpleSetCountSelector(
-            label = "Loser bracket sets",
-            selectedCount = loserSetCount,
-            onCountSelected = { count ->
-                val targets = resizeSimpleSetPointTargets(loserTargets, count, rules.setPointTargets)
-                actions.onEditEvent { withSimpleTournamentBracketTargets(true, targets) }
-            },
-        )
-        Text("Loser bracket set scores", style = MaterialTheme.typography.labelLarge)
-        SimpleSetScoreFields(
-            targets = loserTargets,
-            onTargetChange = { index, value ->
-                val updated = loserTargets.toMutableList().also { targets -> targets[index] = value }
-                actions.onEditEvent { withSimpleTournamentBracketTargets(true, updated) }
-            },
-        )
-    }
+    Text("Loser bracket", style = MaterialTheme.typography.titleSmall)
+    SimpleSetCountSelector(
+        label = "Sets • ${setDuration?.let { it * loserSetCount } ?: "—"} min max",
+        selectedCount = loserSetCount,
+        onCountSelected = { count ->
+            val targets = resizeSimpleSetPointTargets(loserTargets, count, rules.setPointTargets)
+            actions.onEditEvent { withSimpleTournamentBracketTargets(true, targets) }
+        },
+    )
+    SimpleSetScoreFields(
+        targets = loserTargets,
+        labelPrefix = "L set",
+        onTargetChange = { index, value ->
+            val updated = loserTargets.toMutableList().also { targets -> targets[index] = value }
+            actions.onEditEvent { withSimpleTournamentBracketTargets(true, updated) }
+        },
+    )
 }
 
 @Composable
@@ -1372,6 +1401,8 @@ private fun RowScope.SimpleNumberField(
         value = value?.toString().orEmpty(),
         onValueChange = { input -> onChange(input.filter(Char::isDigit).toIntOrNull()) },
         label = label,
+        isError = value == null,
+        supportingText = if (value == null) "Required" else "",
         keyboardType = "number",
         modifier = Modifier.weight(1f),
     )
@@ -1380,6 +1411,7 @@ private fun RowScope.SimpleNumberField(
 @Composable
 private fun SimpleSetScoreFields(
     targets: List<Int>,
+    labelPrefix: String = "Set",
     onTargetChange: (Int, Int) -> Unit,
 ) {
     targets.chunked(3).forEachIndexed { rowIndex, rowTargets ->
@@ -1396,7 +1428,7 @@ private fun SimpleSetScoreFields(
                             onTargetChange(index, value)
                         }
                     },
-                    label = "Set ${index + 1}",
+                    label = "$labelPrefix ${index + 1}",
                     keyboardType = "number",
                     modifier = Modifier.weight(1f),
                 )
@@ -1542,6 +1574,7 @@ private fun SimpleQuestionsPage(
     state: EventCreateSimpleSetupUiState,
     actions: EventCreateSimpleSetupUiActions,
 ) {
+    val registrationSubject = if (state.event.teamSignup) "team" else "player"
     var editingQuestionIndex by remember(state.event.id) { mutableStateOf<Int?>(null) }
     var prompt by rememberSaveable(state.event.id) { mutableStateOf("") }
     var answerType by rememberSaveable(state.event.id) { mutableStateOf("TEXT") }
@@ -1558,11 +1591,20 @@ private fun SimpleQuestionsPage(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        Text(
+            text = if (state.event.teamSignup) {
+                "These questions are answered once for each team registration."
+            } else {
+                "These questions are answered by each player who registers."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         StandardTextField(
             value = prompt,
             onValueChange = { value -> prompt = value.take(500) },
             label = "Question",
-            placeholder = "What position do you play?",
+            placeholder = if (state.event.teamSignup) "What is your team's home club?" else "What position do you play?",
             imeAction = ImeAction.Done,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -1573,19 +1615,19 @@ private fun SimpleQuestionsPage(
             FilterChip(
                 selected = answerType == "TEXT",
                 onClick = { answerType = "TEXT" },
-                label = { Text("Short answer") },
+                label = { Text("Short • $REGISTRATION_SHORT_ANSWER_CHARACTER_LIMIT") },
                 modifier = Modifier.weight(1f),
             )
             FilterChip(
                 selected = answerType == "LONG_TEXT",
                 onClick = { answerType = "LONG_TEXT" },
-                label = { Text("Long answer") },
+                label = { Text("Long • $REGISTRATION_LONG_ANSWER_CHARACTER_LIMIT") },
                 modifier = Modifier.weight(1f),
             )
         }
         SetupChoiceSwitch(
             title = "Required question",
-            description = "Registration cannot finish until this question is answered.",
+            description = "The $registrationSubject cannot finish registration until this is answered.",
             checked = required,
             onCheckedChange = { required = it },
         )
@@ -1637,6 +1679,15 @@ private fun SimpleQuestionsPage(
                 title = question.prompt,
                 body = buildString {
                     append(if (question.answerType == "LONG_TEXT") "Long answer" else "Short answer")
+                    append(" • Up to ")
+                    append(
+                        if (question.answerType == "LONG_TEXT") {
+                            REGISTRATION_LONG_ANSWER_CHARACTER_LIMIT
+                        } else {
+                            REGISTRATION_SHORT_ANSWER_CHARACTER_LIMIT
+                        },
+                    )
+                    append(" characters")
                     append(if (question.required) " • Required" else " • Optional")
                 },
                 onClick = {
@@ -1687,137 +1738,292 @@ private fun SimpleStaffOperationsPage(
     actions: EventCreateSimpleSetupUiActions,
 ) {
     var search by rememberSaveable { mutableStateOf("") }
+    var inviteFirstName by rememberSaveable { mutableStateOf("") }
+    var inviteLastName by rememberSaveable { mutableStateOf("") }
+    var inviteEmail by rememberSaveable { mutableStateOf("") }
+    var inviteOfficial by rememberSaveable { mutableStateOf(false) }
+    var inviteAssistant by rememberSaveable { mutableStateOf(false) }
+    var staffError by remember { mutableStateOf<String?>(null) }
+    val coroutineScope = rememberCoroutineScope()
     val currentOfficialIds = (state.event.officialIds + state.event.eventOfficials.map { official -> official.userId })
         .distinct()
-    val selectedIds = (state.event.assistantHostIds + currentOfficialIds).toSet()
-    val userOptions = buildList {
-        state.suggestedUsers.forEach { user ->
-            val name = listOf(user.firstName, user.lastName).filter(String::isNotBlank).joinToString(" ")
-                .ifBlank { user.userName.ifBlank { user.id } }
-            add(DropdownOption(user.id, name))
-        }
-        selectedIds.filter { id -> none { option -> option.value == id } }.forEach { id ->
-            add(DropdownOption(id, "Selected staff"))
-        }
-    }.distinctBy(DropdownOption::value)
+    val knownUsers = state.suggestedUsers.associateBy(UserData::id)
     val visibleUserSuggestions = state.suggestedUsers
         .distinctBy(UserData::id)
-        .filter { user ->
-            state.choices.useDedicatedOfficials ||
-                (state.choices.useStaffAssignments && user.id != state.event.hostId)
-        }
+        .filter { user -> user.id != state.event.hostId }
         .take(6)
+    val schedulingOptions = OfficialSchedulingMode.entries.map { mode -> DropdownOption(mode.name, mode.label()) }
+    val checkInOptions = TeamCheckInMode.entries.map { mode ->
+        DropdownOption(
+            mode.name,
+            when (mode) {
+                TeamCheckInMode.OFF -> "Off"
+                TeamCheckInMode.EVENT -> "Event check-in"
+                TeamCheckInMode.MATCH -> "Match check-in"
+            },
+        )
+    }
+    val positionOptions = state.event.officialPositions.sortedBy { position -> position.order }.map { position ->
+        DropdownOption(position.id, "${position.name} x${position.count.coerceAtLeast(1)}")
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (state.choices.useStaffAssignments || state.choices.useDedicatedOfficials) {
-            StandardTextField(
-                value = search,
-                onValueChange = { value ->
-                    search = value
-                    actions.onSearchUsers(value)
-                },
-                label = "Search people",
-                placeholder = "Name or email",
-                modifier = Modifier.fillMaxWidth(),
+        SetupChoiceSwitch(
+            title = "Teams provide officials",
+            description = "Schedule participant teams for officiating duties.",
+            checked = state.event.doTeamsOfficiate == true,
+            onCheckedChange = actions.onUpdateDoTeamsOfficiate,
+        )
+        if (state.event.doTeamsOfficiate == true) {
+            SetupChoiceSwitch(
+                title = "Team officials may swap",
+                description = "Teams may exchange assigned officiating duties.",
+                checked = state.event.teamOfficialsMaySwap == true,
+                onCheckedChange = actions.onUpdateTeamOfficialsMaySwap,
             )
-            when {
-                state.userSearchLoading -> Text(
-                    text = "Searching…",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                search.isNotBlank() && visibleUserSuggestions.isEmpty() -> Text(
-                    text = "No matching people.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                search.isNotBlank() -> visibleUserSuggestions.forEach { user ->
-                        SimpleStaffSuggestionCard(
-                            user = user,
-                            allowAssistantHost = state.choices.useStaffAssignments && user.id != state.event.hostId,
-                            assistantHostSelected = user.id in state.event.assistantHostIds,
-                            onAssistantHostChange = { selected ->
-                                actions.onUpdateAssistantHostIds(
-                                    if (selected) {
-                                        state.event.assistantHostIds + user.id
-                                    } else {
-                                        state.event.assistantHostIds - user.id
-                                    },
-                                )
-                            },
-                            allowOfficial = state.choices.useDedicatedOfficials,
-                            officialSelected = user.id in currentOfficialIds,
-                            onOfficialChange = { selected ->
-                                actions.onUpdateOfficialIds(
-                                    if (selected) currentOfficialIds + user.id else currentOfficialIds - user.id,
-                                )
-                            },
-                        )
-                    }
-            }
-        }
-        if (state.choices.useStaffAssignments) {
-            PlatformDropdown(
-                selectedValue = "",
-                onSelectionChange = {},
-                options = userOptions,
-                label = "Assistant hosts",
-                placeholder = "Select staff",
-                multiSelect = true,
-                selectedValues = state.event.assistantHostIds,
-                onMultiSelectionChange = actions.onUpdateAssistantHostIds,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        if (state.choices.useDedicatedOfficials) {
-            PlatformDropdown(
-                selectedValue = "",
-                onSelectionChange = {},
-                options = userOptions,
-                label = "Officials",
-                placeholder = "Select officials",
-                multiSelect = true,
-                selectedValues = currentOfficialIds,
-                onMultiSelectionChange = actions.onUpdateOfficialIds,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Text(
-                text = "Scheduling priority",
-                style = MaterialTheme.typography.titleSmall,
-            )
-            OfficialSchedulingMode.entries.chunked(2).forEach { rowModes ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    rowModes.forEach { mode ->
-                        SchedulingPriorityCard(
-                            mode = mode,
-                            selected = state.event.officialSchedulingMode == mode,
-                            onClick = { actions.onUpdateOfficialSchedulingMode(mode) },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    if (rowModes.size == 1) Spacer(Modifier.weight(1f))
-                }
-            }
         }
         if (state.event.teamSignup) {
-            SetupChoiceSwitch(
-                title = "Teams officiate",
-                description = "Schedule participant teams for officiating duties.",
-                checked = state.event.doTeamsOfficiate == true,
-                onCheckedChange = actions.onUpdateDoTeamsOfficiate,
+            Text("Team check-in and match rosters", style = MaterialTheme.typography.titleSmall)
+            PlatformDropdown(
+                selectedValue = state.event.teamCheckInMode.name,
+                onSelectionChange = { value ->
+                    TeamCheckInMode.entries.firstOrNull { mode -> mode.name == value }
+                        ?.let(actions.onUpdateTeamCheckInMode)
+                },
+                options = checkInOptions,
+                label = "Check-in mode",
+                modifier = Modifier.fillMaxWidth(),
             )
+            if (state.event.teamCheckInMode != TeamCheckInMode.OFF) {
+                StandardTextField(
+                    value = state.event.teamCheckInOpenMinutesBefore.toString(),
+                    onValueChange = { input ->
+                        input.filter(Char::isDigit).toIntOrNull()?.let(actions.onUpdateTeamCheckInOpenMinutesBefore)
+                    },
+                    label = "Opens before start (minutes)",
+                    keyboardType = "number",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             SetupChoiceSwitch(
-                title = "Allow roster edits",
+                title = "Allow match roster edits",
                 description = "Captains can adjust match rosters before play.",
                 checked = state.event.allowMatchRosterEdits,
                 onCheckedChange = actions.onUpdateAllowMatchRosterEdits,
             )
+            if (state.event.allowMatchRosterEdits) {
+                SetupChoiceSwitch(
+                    title = "Allow temporary match players",
+                    description = "Captains may add players for an individual match.",
+                    checked = state.event.allowTemporaryMatchPlayers,
+                    onCheckedChange = actions.onUpdateAllowTemporaryMatchPlayers,
+                )
+            }
+        }
+        Text("Official scheduling", style = MaterialTheme.typography.titleSmall)
+        PlatformDropdown(
+            selectedValue = state.event.officialSchedulingMode.name,
+            onSelectionChange = { value ->
+                OfficialSchedulingMode.entries.firstOrNull { mode -> mode.name == value }
+                    ?.let(actions.onUpdateOfficialSchedulingMode)
+            },
+            options = schedulingOptions,
+            label = "Scheduling mode",
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text("Event official positions", style = MaterialTheme.typography.titleSmall)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            TextButton(onClick = actions.onLoadOfficialPositionDefaults) { Text("Load defaults") }
+            TextButton(onClick = actions.onAddOfficialPosition) { Text("Add position") }
+        }
+        state.event.officialPositions.sortedBy { position -> position.order }.forEach { position ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    StandardTextField(
+                        value = position.name,
+                        onValueChange = { actions.onUpdateOfficialPositionName(position.id, it) },
+                        label = "Position name",
+                        modifier = Modifier.weight(2f),
+                    )
+                    StandardTextField(
+                        value = position.count.toString(),
+                        onValueChange = { input ->
+                            input.filter(Char::isDigit).toIntOrNull()
+                                ?.let { count -> actions.onUpdateOfficialPositionCount(position.id, count) }
+                        },
+                        label = "Slots",
+                        keyboardType = "number",
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { actions.onRemoveOfficialPosition(position.id) }) { Text("Remove") }
+                }
+            }
+        }
+        Text("Add / Invite Staff", style = MaterialTheme.typography.titleSmall)
+        StandardTextField(
+            value = search,
+            onValueChange = { value ->
+                search = value
+                staffError = null
+                actions.onSearchUsers(value)
+            },
+            label = "Search existing users",
+            placeholder = "Name or username",
+            modifier = Modifier.fillMaxWidth(),
+        )
+        when {
+            state.userSearchLoading -> Text("Searching…", style = MaterialTheme.typography.bodySmall)
+            search.isNotBlank() && visibleUserSuggestions.isEmpty() -> Text(
+                "No matching users.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            search.isNotBlank() -> visibleUserSuggestions.forEach { user ->
+                SimpleStaffSuggestionCard(
+                    user = user,
+                    allowAssistantHost = user.id !in state.event.assistantHostIds,
+                    assistantHostSelected = user.id in state.event.assistantHostIds,
+                    onAssistantHostChange = {
+                        actions.onUpdateAssistantHostIds((state.event.assistantHostIds + user.id).distinct())
+                    },
+                    allowOfficial = user.id !in currentOfficialIds,
+                    officialSelected = user.id in currentOfficialIds,
+                    onOfficialChange = { actions.onUpdateOfficialIds((currentOfficialIds + user.id).distinct()) },
+                )
+            }
+        }
+        Text("Email invite", style = MaterialTheme.typography.titleSmall)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StandardTextField(
+                value = inviteFirstName,
+                onValueChange = { inviteFirstName = it },
+                label = "First Name",
+                modifier = Modifier.weight(1f),
+            )
+            StandardTextField(
+                value = inviteLastName,
+                onValueChange = { inviteLastName = it },
+                label = "Last Name",
+                modifier = Modifier.weight(1f),
+            )
+        }
+        StandardTextField(
+            value = inviteEmail,
+            onValueChange = { inviteEmail = it },
+            label = "Email",
+            keyboardType = "email",
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = inviteOfficial,
+                onClick = { inviteOfficial = !inviteOfficial },
+                label = { Text("Official") },
+                modifier = Modifier.weight(1f),
+            )
+            FilterChip(
+                selected = inviteAssistant,
+                onClick = { inviteAssistant = !inviteAssistant },
+                label = { Text("Assistant Host") },
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Button(
+            onClick = {
+                val roles = buildSet {
+                    if (inviteOfficial) add(EventStaffRole.OFFICIAL)
+                    if (inviteAssistant) add(EventStaffRole.ASSISTANT_HOST)
+                }
+                coroutineScope.launch {
+                    actions.onAddPendingStaffInvite(inviteFirstName, inviteLastName, inviteEmail, roles)
+                        .onSuccess {
+                            inviteFirstName = ""
+                            inviteLastName = ""
+                            inviteEmail = ""
+                            inviteOfficial = false
+                            inviteAssistant = false
+                            staffError = null
+                        }
+                        .onFailure { error -> staffError = error.message ?: "Unable to add staff invite." }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Add email invite") }
+        staffError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        Text("Assigned staff", style = MaterialTheme.typography.titleSmall)
+        currentOfficialIds.forEach { userId ->
+            val official = state.event.eventOfficials.firstOrNull { record -> record.userId == userId }
+            SimpleAssignedStaffCard(
+                title = knownUsers[userId]?.fullName?.ifBlank { userId } ?: userId,
+                role = "Official",
+                onRemove = { actions.onUpdateOfficialIds(currentOfficialIds - userId) },
+                positionOptions = positionOptions,
+                selectedPositionIds = official?.positionIds.orEmpty(),
+                onPositionSelectionChange = { actions.onUpdateOfficialUserPositions(userId, it) },
+            )
+        }
+        state.event.assistantHostIds.forEach { userId ->
+            SimpleAssignedStaffCard(
+                title = knownUsers[userId]?.fullName?.ifBlank { userId } ?: userId,
+                role = "Assistant Host",
+                onRemove = { actions.onUpdateAssistantHostIds(state.event.assistantHostIds - userId) },
+            )
+        }
+        state.pendingStaffInvites.forEach { draft ->
+            draft.roles.forEach { role ->
+                SimpleAssignedStaffCard(
+                    title = draft.displayName(),
+                    role = "${role.label()} • Email invite",
+                    onRemove = { actions.onRemovePendingStaffInvite(draft.email, role) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SimpleAssignedStaffCard(
+    title: String,
+    role: String,
+    onRemove: () -> Unit,
+    positionOptions: List<DropdownOption> = emptyList(),
+    selectedPositionIds: List<String> = emptyList(),
+    onPositionSelectionChange: (List<String>) -> Unit = {},
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                    Text(role, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                TextButton(onClick = onRemove) { Text("Remove") }
+            }
+            if (positionOptions.isNotEmpty()) {
+                PlatformDropdown(
+                    selectedValue = "",
+                    onSelectionChange = {},
+                    options = positionOptions,
+                    label = "Eligible positions",
+                    multiSelect = true,
+                    selectedValues = selectedPositionIds,
+                    onMultiSelectionChange = onPositionSelectionChange,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }
@@ -1861,22 +2067,16 @@ internal fun SimpleStaffSuggestionCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (allowAssistantHost) {
-                    FilterChip(
-                        selected = assistantHostSelected,
-                        onClick = { onAssistantHostChange(!assistantHostSelected) },
-                        label = { Text("Assistant host") },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                if (allowOfficial) {
-                    FilterChip(
-                        selected = officialSelected,
-                        onClick = { onOfficialChange(!officialSelected) },
-                        label = { Text("Official") },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
+                Button(
+                    onClick = { onOfficialChange(true) },
+                    enabled = allowOfficial && !officialSelected,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Add as official") }
+                Button(
+                    onClick = { onAssistantHostChange(true) },
+                    enabled = allowAssistantHost && !assistantHostSelected,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Add as assistant") }
             }
         }
     }
@@ -2189,7 +2389,6 @@ private fun simpleSetupPageDescription(pageId: EventCreateSetupPageId): String =
     EventCreateSetupPageId.TIMESLOTS -> "Use the default event window or add custom windows for resources and divisions."
     EventCreateSetupPageId.COMPETITION_RULES -> ""
     EventCreateSetupPageId.WINNER_BRACKET_RULES -> ""
-    EventCreateSetupPageId.LOSER_BRACKET_RULES -> ""
     EventCreateSetupPageId.REGISTRATION_PLAN -> "Choose payments and registration requirements."
     EventCreateSetupPageId.PRICING_REGISTRATION -> "Set capacity, price, and registration cutoffs."
     EventCreateSetupPageId.QUESTIONS -> "Add the questions players answer before registration is complete."

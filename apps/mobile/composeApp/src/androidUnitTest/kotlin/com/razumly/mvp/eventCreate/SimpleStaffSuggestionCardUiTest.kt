@@ -48,8 +48,8 @@ class SimpleStaffSuggestionCardUiTest {
 
         composeRule.onNodeWithText("Phillip Ignatovitch").assertIsDisplayed()
         composeRule.onNodeWithText("@phillip_i").assertIsDisplayed()
-        composeRule.onNodeWithText("Assistant host").performClick()
-        composeRule.onNodeWithText("Official").performClick()
+        composeRule.onNodeWithText("Add as assistant").performClick()
+        composeRule.onNodeWithText("Add as official").performClick()
 
         composeRule.runOnIdle {
             assertTrue(assistantSelected)

@@ -39,7 +39,6 @@ enum class EventCreateSetupPageId(val label: String) {
     TIMESLOTS("Timeslots"),
     COMPETITION_RULES("Competition Rules"),
     WINNER_BRACKET_RULES("Winner Bracket"),
-    LOSER_BRACKET_RULES("Loser Bracket"),
     REGISTRATION_PLAN("Registration Plan"),
     PRICING_REGISTRATION("Pricing & Registration"),
     QUESTIONS("Registration Questions"),
@@ -190,11 +189,6 @@ private fun resolvePageUsage(
         used to if (used) null else "Bracket rules are used by tournaments."
     }
 
-    EventCreateSetupPageId.LOSER_BRACKET_RULES -> {
-        val used = event.eventType == EventType.TOURNAMENT && event.doubleElimination && event.usesSets
-        used to if (used) null else "Separate loser-bracket set rules are used by set-based double elimination."
-    }
-
     EventCreateSetupPageId.QUESTIONS -> {
         val used = choices.useRegistrationQuestions
         used to if (used) null else "Enable registration questions on Registration Plan."
@@ -251,15 +245,16 @@ fun isSimpleSetupPageComplete(
     }
     EventCreateSetupPageId.COMPETITION_RULES -> when {
         event.eventType == EventType.TOURNAMENT && event.includePlayoffs ->
-            simpleTournamentPoolValidationErrors(event, requireCapacity = false).isEmpty()
+            simpleCompetitionRulesValidationErrors(event).isEmpty() &&
+                simpleTournamentPoolValidationErrors(event, requireCapacity = false).isEmpty()
         event.eventType == EventType.LEAGUE && event.includePlayoffs ->
-            (event.playoffTeamCount ?: 0) >= 2
-        else -> true
+            simpleCompetitionRulesValidationErrors(event).isEmpty() &&
+                (event.playoffTeamCount ?: 0) >= 2
+        else -> simpleCompetitionRulesValidationErrors(event).isEmpty()
     }
     EventCreateSetupPageId.WINNER_BRACKET_RULES ->
-        simpleTournamentWinnerBracketValidationErrors(event).isEmpty()
-    EventCreateSetupPageId.LOSER_BRACKET_RULES ->
-        simpleTournamentLoserBracketValidationErrors(event).isEmpty()
+        simpleTournamentWinnerBracketValidationErrors(event).isEmpty() &&
+            simpleTournamentLoserBracketValidationErrors(event).isEmpty()
     EventCreateSetupPageId.PRICING_REGISTRATION -> event.maxParticipants >= 2 &&
         (!choices.paidRegistration || (event.priceCents > 0 && priceQuoteConfirmed))
     EventCreateSetupPageId.QUESTIONS -> !choices.useRegistrationQuestions ||
@@ -565,11 +560,12 @@ private fun Event.simpleTournamentBracketConfig(): TournamentConfig {
 
 fun simpleTournamentWinnerBracketValidationErrors(event: Event): List<String> {
     if (event.eventType != EventType.TOURNAMENT) return emptyList()
+    val persistedConfig = event.divisionDetails.firstNotNullOfOrNull(DivisionDetail::playoffConfig)
     val config = event.simpleTournamentBracketConfig()
     return buildList {
         if (event.usesSets) {
-            val duration = config.setDurationMinutes ?: event.setDurationMinutes ?: 20
-            if (duration < 1) add("Set duration must be at least one minute.")
+            val duration = if (persistedConfig != null) persistedConfig.setDurationMinutes else event.setDurationMinutes
+            if (duration == null || duration < 1) add("Enter the bracket set duration.")
             if (config.winnerSetCount !in setOf(1, 3, 5)) add("Choose 1, 3, or 5 winner-bracket sets.")
             if (
                 config.winnerBracketPointsToVictory.size < config.winnerSetCount ||
@@ -578,8 +574,8 @@ fun simpleTournamentWinnerBracketValidationErrors(event: Event): List<String> {
                 add("Enter a target score for every winner-bracket set.")
             }
         } else {
-            val duration = config.matchDurationMinutes ?: event.matchDurationMinutes ?: 60
-            if (duration < 1) add("Bracket match duration must be at least one minute.")
+            val duration = if (persistedConfig != null) persistedConfig.matchDurationMinutes else event.matchDurationMinutes
+            if (duration == null || duration < 1) add("Enter the bracket match duration.")
         }
     }
 }
@@ -677,6 +673,59 @@ fun Event.withSimpleTimedMatchDuration(
             )
         },
     )
+}
+
+fun Event.withSimpleScheduleMatchDuration(totalMinutes: Int?): Event {
+    val normalizedDuration = totalMinutes?.takeIf { value -> value > 0 }
+    return copy(
+        matchDurationMinutes = normalizedDuration,
+        setDurationMinutes = null,
+        divisionDetails = divisionDetails.map { detail ->
+            detail.copy(
+                matchDurationMinutes = normalizedDuration,
+                setDurationMinutes = null,
+            )
+        },
+    )
+}
+
+fun Event.withSimplePointTarget(target: Int?): Event {
+    val normalizedTarget = target?.takeIf { value -> value > 0 }
+    val targets = normalizedTarget?.let(::listOf).orEmpty()
+    return copy(
+        usesSets = false,
+        pointsToVictory = targets,
+        divisionDetails = divisionDetails.map { detail ->
+            detail.copy(usesSets = false, pointsToVictory = targets)
+        },
+    )
+}
+
+fun simpleCompetitionRulesValidationErrors(event: Event): List<String> = buildList {
+    if (event.usesSets) {
+        val duration = event.setDurationMinutes
+        if (duration == null || duration < 1) {
+            add("Enter the set duration.")
+        }
+    } else {
+        val duration = event.matchDurationMinutes
+        if (duration == null || duration < 1) {
+            add("Enter the match duration.")
+        }
+    }
+    if (event.eventType == EventType.LEAGUE && event.includePlayoffs) {
+        val playoffConfig = event.divisionDetails.firstNotNullOfOrNull(DivisionDetail::playoffConfig)
+        val playoffDuration = if (playoffConfig != null) {
+            if (event.usesSets) playoffConfig.setDurationMinutes else playoffConfig.matchDurationMinutes
+        } else if (event.usesSets) {
+            event.setDurationMinutes
+        } else {
+            event.matchDurationMinutes
+        }
+        if (playoffDuration == null || playoffDuration < 1) {
+            add("Enter the playoff duration.")
+        }
+    }
 }
 
 fun Event.withSimplePlayoffMatchDuration(totalMinutes: Int?): Event {
@@ -810,9 +859,13 @@ fun simpleSetupValidationErrors(
         add("Choose an end time after the start time.")
     }
     if (event.eventType == EventType.TOURNAMENT && event.includePlayoffs) {
+        addAll(simpleCompetitionRulesValidationErrors(event))
         addAll(simpleTournamentPoolValidationErrors(event))
     } else if (event.eventType == EventType.LEAGUE && event.includePlayoffs && (event.playoffTeamCount ?: 0) < 2) {
         add("Choose at least two playoff teams.")
+    }
+    if (event.eventType == EventType.LEAGUE) {
+        addAll(simpleCompetitionRulesValidationErrors(event))
     }
     if (event.eventType == EventType.TOURNAMENT) {
         addAll(simpleTournamentWinnerBracketValidationErrors(event))

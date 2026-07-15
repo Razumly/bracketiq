@@ -28,8 +28,11 @@ Mobile event creation currently opens one long advanced event-details form. Afte
 - [x] (2026-07-15) Replaced the official scheduling dropdown with explained single-select priority cards.
 - [x] (2026-07-15) Completed the tournament Simple Setup branches with explicit pool count, bracket-team advancement, derived pool summaries, and single/double-elimination selection.
 - [x] (2026-07-15) Added tournament payload and validation regressions and compacted the complete pool-play rules page to fit a 360 x 800 dp viewport.
-- [x] (2026-07-15) Split tournament scheduling rules into pool/regular matches, Winner Bracket, and conditional Loser Bracket pages.
+- [x] (2026-07-15) Split tournament scheduling rules into pool/regular matches and one bracket page with conditional loser-bracket controls.
 - [x] (2026-07-15) Added editable pool set duration, bracket set/match duration, and independent winner/loser set counts and target scores.
+- [x] (2026-07-15) Kept cleared schedule durations null, added inline required warnings, and prevented sport-default normalization from repopulating them.
+- [x] (2026-07-15) Combined loser-bracket rules beneath winner-bracket rules on one compact tournament page.
+- [x] (2026-07-15) Made registration-question wording registration-aware, exposed and enforced short/long response limits, and brought Simple Setup staff controls to Advanced Setup parity.
 
 ## Surprises & Discoveries
 
@@ -164,8 +167,16 @@ Mobile event creation currently opens one long advanced event-details form. Afte
   Rationale: Competition Rules precedes capacity entry. The page can validate pool and bracket divisibility immediately, then recompute and validate teams per pool once the organizer enters maximum teams.
   Date/Author: 2026-07-15 / Codex
 
-- Decision: Put winner- and loser-bracket rules on separate Simple Setup pages.
-  Rationale: Winner and loser set counts and target scores are independent scheduling inputs, and splitting them keeps best-of-five configurations editable without scrolling at the standard viewport. Loser Bracket is used only for set-based double elimination; timed double elimination uses the one bracket match duration supported by the established model.
+- Decision: Put loser-bracket rules directly beneath winner-bracket rules on one tournament bracket page.
+  Rationale: The bracket format, shared set duration, and role-specific best-of rules are one scheduling decision. The loser section appears only for set-based double elimination; timed double elimination uses the one bracket match duration supported by the established model.
+  Date/Author: 2026-07-15 / Codex
+
+- Decision: Treat sport defaults as initial values, not empty-input fallbacks.
+  Rationale: Clearing a numeric duration is intentional editing state. The draft remains null, the field renders a required warning, and page validation blocks continuation until the organizer enters a replacement.
+  Date/Author: 2026-07-15 / Codex
+
+- Decision: Match the Simple Setup staff editor to the Advanced Setup staff workflow.
+  Rationale: Team officiating, check-in, roster controls, scheduling mode, official positions, existing-user assignment, email-role invites, assigned staff, and official position eligibility all share the same event contract and should not diverge by setup mode.
   Date/Author: 2026-07-15 / Codex
 
 ## Outcomes & Retrospective
@@ -176,11 +187,13 @@ The complete base path and the tallest conditional paths were inspected on an An
 
 Tournament creation now distinguishes bracket-only competition from pool play that advances into a bracket. The pool path persists pool count, bracket teams, derived pool size, and bracket format through each division's established payload fields. The complete volleyball pool page, including single/double elimination, was verified at 360 x 800 dp without scrolling.
 
-Scheduling inputs now follow the same separation. Competition Rules owns pool or league duration and scoring. Winner Bracket owns bracket format, minutes per set or timed match duration, winner set count, and winner targets. A set-based double-elimination tournament adds Loser Bracket for its independent set count and targets, while showing the resulting scheduled match length. All three layouts fit at 360 x 800 dp without scrolling.
+Scheduling inputs now follow the same separation. Competition Rules owns pool or league duration and scoring. Winner Bracket owns bracket format, minutes per set or timed match duration, winner set count, and winner targets, with the conditional loser-bracket set count and targets directly beneath it. Defaults seed the initial draft, but clearing a duration preserves null and shows a required warning instead of silently restoring the default.
+
+Registration questions now explain whether the team or individual player answers them. Short answers are capped at 200 characters and long answers at 2,000, with the limit visible both while configuring and answering questions. The Simple Setup staff page now exposes the same operational controls as Advanced Setup, including team officiating and swaps, check-in and rosters, scheduling mode, official positions, existing-user assignment, email invites with roles, assigned staff removal, and official position eligibility.
 
 Android debug Kotlin compilation and debug APK assembly pass. The earlier scoring/layout pass ran 27 focused tests; the latest scheduling/question pass ran 18 focused tests across `EventCreateSimpleSetupTest`, the post-create question persistence regression, and the registration-question HTTP contract. The iOS simulator compile remains blocked by the unrelated existing `PaymentProcessor.ios.kt` expect/actual mismatch described above.
 
-The final tournament bracket-duration pass runs all 26 `EventCreateSimpleSetupTest` cases with zero failures and assembles the debug APK. A broader `DefaultCreateEventComponentTest` run still has seven schedule-slot assertions failing outside the files changed for the tournament branch; those failures are recorded separately from this focused green result.
+The latest setup pass runs all 28 `EventCreateSimpleSetupTest` cases plus focused default-preservation and staff-action UI regressions with zero failures and assembles the debug APK. A broader `DefaultCreateEventComponentTest` run still has seven schedule-slot assertions failing outside the files changed for the tournament branch; those failures are recorded separately from this focused green result.
 
 ## Context and Orientation
 

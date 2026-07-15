@@ -618,6 +618,26 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun clearing_seeded_set_duration_does_not_restore_the_sport_default() = runTest(testDispatcher) {
+        val setBasedSport = createSport(
+            id = "sport-clear-duration",
+            usePointsPerSetWin = true,
+        )
+        val harness = CreateEventHarness(sports = listOf(setBasedSport))
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        harness.component.updateEventField { copy(sportId = setBasedSport.id) }
+        advance()
+        assertEquals(20, harness.component.newEventState.value.setDurationMinutes)
+
+        harness.component.updateEventField { copy(setDurationMinutes = null) }
+        advance()
+
+        assertNull(harness.component.newEventState.value.setDurationMinutes)
+    }
+
+    @Test
     fun selecting_result_points_sport_applies_conventional_standings_defaults() = runTest(testDispatcher) {
         val soccer = createSport(
             id = "Indoor Soccer",

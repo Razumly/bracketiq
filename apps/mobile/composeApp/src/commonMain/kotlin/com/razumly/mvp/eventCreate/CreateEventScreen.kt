@@ -526,6 +526,7 @@ fun CreateEventScreen(
                                         localFields = localFields,
                                         leagueTimeSlots = leagueSlots,
                                         registrationQuestions = registrationQuestionDrafts,
+                                        pendingStaffInvites = pendingStaffInvites,
                                         leagueScoringConfig = leagueScoringConfig,
                                         suggestedUsers = suggestedUsers,
                                         userSearchLoading = userSearchLoading,
@@ -594,7 +595,26 @@ fun CreateEventScreen(
                                         },
                                         onUpdateOfficialSchedulingMode = onUpdateOfficialSchedulingMode,
                                         onUpdateDoTeamsOfficiate = onUpdateDoTeamsOfficiate,
+                                        onUpdateTeamOfficialsMaySwap = onUpdateTeamOfficialsMaySwap,
+                                        onUpdateTeamCheckInMode = onUpdateTeamCheckInMode,
+                                        onUpdateTeamCheckInOpenMinutesBefore = onUpdateTeamCheckInOpenMinutesBefore,
                                         onUpdateAllowMatchRosterEdits = onUpdateAllowMatchRosterEdits,
+                                        onUpdateAllowTemporaryMatchPlayers = onUpdateAllowTemporaryMatchPlayers,
+                                        onLoadOfficialPositionDefaults = {
+                                            component.updateEventField {
+                                                syncOfficialStaffing(
+                                                    sport = selectedSport,
+                                                    replacePositionsWithSportDefaults = true,
+                                                )
+                                            }
+                                        },
+                                        onAddOfficialPosition = onAddOfficialPosition,
+                                        onUpdateOfficialPositionName = onUpdateOfficialPositionName,
+                                        onUpdateOfficialPositionCount = onUpdateOfficialPositionCount,
+                                        onRemoveOfficialPosition = onRemoveOfficialPosition,
+                                        onAddPendingStaffInvite = onAddPendingStaffInvite,
+                                        onRemovePendingStaffInvite = onRemovePendingStaffInvite,
+                                        onUpdateOfficialUserPositions = onUpdateOfficialUserPositions,
                                         onPriceQuoteConfirmationChange = { confirmed ->
                                             simplePriceQuoteConfirmed = confirmed
                                         },
@@ -750,14 +770,25 @@ private fun simpleSetupPageError(
     EventCreateSetupPageId.COMPETITION_RULES -> if (
         event.eventType == EventType.TOURNAMENT && event.includePlayoffs
     ) {
-        buildValidationPopupMessage(simpleTournamentPoolValidationErrors(event, requireCapacity = false))
+        buildValidationPopupMessage(
+            simpleCompetitionRulesValidationErrors(event) +
+                simpleTournamentPoolValidationErrors(event, requireCapacity = false),
+        )
     } else {
-        "Choose at least two playoff teams before continuing."
+        buildValidationPopupMessage(
+            simpleCompetitionRulesValidationErrors(event) +
+                if (event.includePlayoffs && (event.playoffTeamCount ?: 0) < 2) {
+                    listOf("Choose at least two playoff teams.")
+                } else {
+                    emptyList()
+                },
+        )
     }
     EventCreateSetupPageId.WINNER_BRACKET_RULES ->
-        buildValidationPopupMessage(simpleTournamentWinnerBracketValidationErrors(event))
-    EventCreateSetupPageId.LOSER_BRACKET_RULES ->
-        buildValidationPopupMessage(simpleTournamentLoserBracketValidationErrors(event))
+        buildValidationPopupMessage(
+            simpleTournamentWinnerBracketValidationErrors(event) +
+                simpleTournamentLoserBracketValidationErrors(event),
+        )
     EventCreateSetupPageId.PRICING_REGISTRATION -> when {
         event.maxParticipants < 2 -> "Capacity must be at least 2."
         choices.paidRegistration && event.priceCents <= 0 -> "Enter a registration price."

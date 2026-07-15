@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.repositories.registrationAnswerCharacterLimit
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.StripeButton
@@ -758,20 +759,17 @@ internal fun EventRegistrationQuestionsDialog(
                 ) {
                     items(dialogState.questions, key = { question -> question.id }) { question ->
                         val answer = answers[question.id].orEmpty()
+                        val characterLimit = registrationAnswerCharacterLimit(question.answerType)
                         StandardTextField(
                             value = answer,
                             onValueChange = { value ->
-                                answers = answers + (question.id to value)
+                                answers = answers + (question.id to value.take(characterLimit))
                                 validationMessage = null
                             },
                             modifier = Modifier.fillMaxWidth(),
                             label = if (question.required) "${question.prompt} *" else question.prompt,
                             placeholder = "Answer",
-                            supportingText = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) {
-                                "A short paragraph is fine."
-                            } else {
-                                ""
-                            },
+                            supportingText = "${answer.length} / $characterLimit characters",
                             height = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) 128.dp else null,
                         )
                     }
@@ -852,20 +850,17 @@ internal fun TeamJoinQuestionsDialog(
                 ) {
                     items(dialogState.questions, key = { question -> question.id }) { question ->
                         val answer = answers[question.id].orEmpty()
+                        val characterLimit = registrationAnswerCharacterLimit(question.answerType)
                         StandardTextField(
                             value = answer,
                             onValueChange = { value ->
-                                answers = answers + (question.id to value)
+                                answers = answers + (question.id to value.take(characterLimit))
                                 validationMessage = null
                             },
                             modifier = Modifier.fillMaxWidth(),
                             label = if (question.required) "${question.prompt} *" else question.prompt,
                             placeholder = "Answer",
-                            supportingText = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) {
-                                "A short paragraph is fine."
-                            } else {
-                                ""
-                            },
+                            supportingText = "${answer.length} / $characterLimit characters",
                             height = if (question.answerType.equals("LONG_TEXT", ignoreCase = true)) 128.dp else null,
                         )
                     }

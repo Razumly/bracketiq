@@ -2018,7 +2018,7 @@ class DefaultCreateEventComponent(
             copy(
                 usesSets = true,
                 setsPerMatch = normalizedSets,
-                setDurationMinutes = setDurationMinutes ?: 20,
+                setDurationMinutes = setDurationMinutes ?: 20.takeIf { applySportDefaults },
                 pointsToVictory = normalizedPoints,
                 matchDurationMinutes = null,
             )
@@ -2078,7 +2078,7 @@ class DefaultCreateEventComponent(
             val sportTargets = rules.setPointTargets.take(winnerSets)
             copy(
                 usesSets = true,
-                setDurationMinutes = setDurationMinutes ?: 20,
+                setDurationMinutes = setDurationMinutes ?: 20.takeIf { applySportDefaults },
                 matchDurationMinutes = null,
                 winnerSetCount = winnerSets,
                 loserSetCount = loserSets,

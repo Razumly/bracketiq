@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.RegistrationQuestionDraft
+import com.razumly.mvp.core.data.repositories.registrationAnswerCharacterLimit
 import com.razumly.mvp.core.network.dto.toUpdateDto
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -19,8 +20,14 @@ import kotlin.test.assertTrue
 class EventCreateSimpleSetupTest {
 
     @Test
+    fun registration_answer_types_use_visible_short_and_long_character_limits() {
+        assertEquals(200, registrationAnswerCharacterLimit("TEXT"))
+        assertEquals(2_000, registrationAnswerCharacterLimit("LONG_TEXT"))
+    }
+
+    @Test
     fun redundant_schedule_and_competition_planning_pages_are_not_part_of_simple_setup() {
-        assertEquals(16, EventCreateSetupPageId.entries.size)
+        assertEquals(15, EventCreateSetupPageId.entries.size)
         assertFalse(EventCreateSetupPageId.entries.any { page -> page.label == "Schedule Plan" })
         assertFalse(EventCreateSetupPageId.entries.any { page -> page.label == "Competition Plan" })
     }
@@ -70,7 +77,7 @@ class EventCreateSimpleSetupTest {
     }
 
     @Test
-    fun tournament_path_separates_pool_winner_and_loser_bracket_rule_pages() {
+    fun tournament_path_uses_one_combined_winner_and_loser_bracket_rule_page() {
         val bracketOnly = resolveEventCreateSetupPages(
             event = Event(eventType = EventType.TOURNAMENT, usesSets = true),
             choices = EventCreateSetupChoices(),
@@ -80,7 +87,6 @@ class EventCreateSimpleSetupTest {
 
         assertFalse(bracketOnly.first { it.id == EventCreateSetupPageId.COMPETITION_RULES }.used)
         assertTrue(bracketOnly.first { it.id == EventCreateSetupPageId.WINNER_BRACKET_RULES }.used)
-        assertFalse(bracketOnly.first { it.id == EventCreateSetupPageId.LOSER_BRACKET_RULES }.used)
 
         val poolDoubleElimination = resolveEventCreateSetupPages(
             event = Event(
@@ -96,7 +102,7 @@ class EventCreateSimpleSetupTest {
 
         assertTrue(poolDoubleElimination.first { it.id == EventCreateSetupPageId.COMPETITION_RULES }.used)
         assertTrue(poolDoubleElimination.first { it.id == EventCreateSetupPageId.WINNER_BRACKET_RULES }.used)
-        assertTrue(poolDoubleElimination.first { it.id == EventCreateSetupPageId.LOSER_BRACKET_RULES }.used)
+        assertFalse(EventCreateSetupPageId.entries.any { page -> page.label == "Loser Bracket" })
     }
 
     @Test
@@ -350,6 +356,7 @@ class EventCreateSimpleSetupTest {
         val awaitingCapacity = Event(
             eventType = EventType.TOURNAMENT,
             includePlayoffs = true,
+            matchDurationMinutes = 60,
             maxParticipants = 2,
             divisions = listOf("open"),
             divisionDetails = listOf(DivisionDetail(id = "open", maxParticipants = 2)),
@@ -430,6 +437,40 @@ class EventCreateSimpleSetupTest {
         assertEquals(20, payloadBracket?.setDurationMinutes)
         assertEquals(3, payloadBracket?.winnerSetCount)
         assertEquals(1, payloadBracket?.loserSetCount)
+    }
+
+    @Test
+    fun clearing_schedule_durations_keeps_them_null_and_marks_the_pages_incomplete() {
+        val poolTournament = Event(
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            usesSets = true,
+            setDurationMinutes = 15,
+            divisionDetails = listOf(DivisionDetail(id = "open", setDurationMinutes = 15)),
+        ).withSimpleSetDurationMinutes(null)
+
+        assertNull(poolTournament.setDurationMinutes)
+        assertNull(poolTournament.divisionDetails.single().setDurationMinutes)
+        assertContains(simpleCompetitionRulesValidationErrors(poolTournament), "Enter the set duration.")
+        assertFalse(isSimpleSetupPageComplete(EventCreateSetupPageId.COMPETITION_RULES, poolTournament))
+
+        val bracketTournament = Event(
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            usesSets = true,
+            setDurationMinutes = 15,
+            divisionDetails = listOf(DivisionDetail(id = "open", setDurationMinutes = 15)),
+        )
+            .withSimpleTournamentBracketDuration(20)
+            .withSimpleTournamentBracketDuration(null)
+
+        assertEquals(15, bracketTournament.setDurationMinutes)
+        assertNull(bracketTournament.divisionDetails.single().playoffConfig?.setDurationMinutes)
+        assertContains(
+            simpleTournamentWinnerBracketValidationErrors(bracketTournament),
+            "Enter the bracket set duration.",
+        )
+        assertFalse(isSimpleSetupPageComplete(EventCreateSetupPageId.WINNER_BRACKET_RULES, bracketTournament))
     }
 
     @Test

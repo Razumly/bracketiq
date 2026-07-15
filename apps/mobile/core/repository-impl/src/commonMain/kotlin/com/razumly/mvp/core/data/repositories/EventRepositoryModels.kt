@@ -177,6 +177,16 @@ data class RegistrationQuestionDraft(
     val sortOrder: Int = 0,
 )
 
+const val REGISTRATION_SHORT_ANSWER_CHARACTER_LIMIT = 200
+const val REGISTRATION_LONG_ANSWER_CHARACTER_LIMIT = 2_000
+
+fun registrationAnswerCharacterLimit(answerType: String): Int =
+    if (answerType.equals("LONG_TEXT", ignoreCase = true)) {
+        REGISTRATION_LONG_ANSWER_CHARACTER_LIMIT
+    } else {
+        REGISTRATION_SHORT_ANSWER_CHARACTER_LIMIT
+    }
+
 data class EventComplianceUserSummary(
     val userId: String,
     val fullName: String,
