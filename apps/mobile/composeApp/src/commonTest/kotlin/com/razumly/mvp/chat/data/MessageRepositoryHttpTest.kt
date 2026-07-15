@@ -13,6 +13,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.configureMvpHttpClient
 import com.razumly.mvp.core.util.jsonMVP
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -28,6 +29,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -132,5 +134,76 @@ class MessageRepositoryHttpTest {
         assertEquals("Hello", saved.body)
         assertEquals("u1", saved.userId)
         assertEquals("c1", saved.chatId)
+    }
+
+    @OptIn(ExperimentalTime::class)
+    @Test
+    fun markMessagesRead_when_serverAcknowledges_then_marks_cached_messages_read() = runTest {
+        val tokenStore = MessageRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val messageDao = MessageRepositoryHttp_FakeMessageDao()
+        messageDao.upsertMessage(
+            MessageMVP(
+                id = "m1",
+                userId = "u2",
+                body = "Hello",
+                attachmentUrls = emptyList(),
+                chatId = "c1",
+                readByIds = emptyList(),
+                sentTime = Instant.parse("2026-02-10T00:00:00Z"),
+            ),
+        )
+        val db = MessageRepositoryHttp_FakeDatabaseService(messageDao)
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("/api/chat/groups/c1/messages/read", request.url.encodedPath)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            respond(
+                content = "{\"ok\":true}",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { configureMvpHttpClient() }
+        val repo = MessageRepository(MvpApiClient(http, "http://example.test", tokenStore), db)
+
+        val result = repo.markMessagesRead(chatGroupId = "c1", userId = "u1")
+
+        assertTrue(result.isSuccess)
+        assertEquals(listOf("u1"), messageDao.getMessageById("m1")?.readByIds)
+    }
+
+    @OptIn(ExperimentalTime::class)
+    @Test
+    fun markMessagesRead_when_serverRejects_then_keeps_cached_messages_unread() = runTest {
+        val tokenStore = MessageRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val messageDao = MessageRepositoryHttp_FakeMessageDao()
+        messageDao.upsertMessage(
+            MessageMVP(
+                id = "m1",
+                userId = "u2",
+                body = "Hello",
+                attachmentUrls = emptyList(),
+                chatId = "c1",
+                readByIds = emptyList(),
+                sentTime = Instant.parse("2026-02-10T00:00:00Z"),
+            ),
+        )
+        val db = MessageRepositoryHttp_FakeDatabaseService(messageDao)
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("/api/chat/groups/c1/messages/read", request.url.encodedPath)
+            respond(
+                content = "{\"error\":\"Read receipt failed\"}",
+                status = HttpStatusCode.InternalServerError,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { configureMvpHttpClient() }
+        val repo = MessageRepository(MvpApiClient(http, "http://example.test", tokenStore), db)
+
+        val result = repo.markMessagesRead(chatGroupId = "c1", userId = "u1")
+
+        assertTrue(result.isFailure)
+        assertEquals(emptyList(), messageDao.getMessageById("m1")?.readByIds)
     }
 }

@@ -196,12 +196,12 @@ private class FakeUserRepository : IUserRepository {
         visibilityContext: UserVisibilityContext,
     ): Flow<Result<List<UserData>>> = error("unused")
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = error("unused")
-    override suspend fun ensureUserByEmail(email: String): Result<UserData> = error("unused")
     override suspend fun createInvites(invites: List<com.razumly.mvp.core.network.dto.InviteCreateDto>): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
     override suspend fun deleteInvite(inviteId: String): Result<Unit> = error("unused")
     override suspend fun findEmailMembership(
         emails: List<String>,
         userIds: List<String>,
+        eventId: String?,
     ): Result<List<UserEmailMembershipMatch>> = error("unused")
     override suspend fun listInvites(userId: String, type: String?): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> {
         lastListInvitesInput = userId to type
@@ -1270,6 +1270,79 @@ class TeamRepositoryTeamsFetchTest {
         assertTrue("openRegistration" !in teamPayload)
         assertTrue("registrationPriceCents" !in teamPayload)
         assertTrue("assistantCoachIds" !in teamPayload)
+    }
+
+    @Test
+    fun updateTeam_sends_json_null_for_cached_nullable_fields_that_are_cleared() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+        var capturedRequestBody = ""
+        val existingTeam = Team(
+            division = "Open",
+            name = "Clearable Team",
+            captainId = "u1",
+            managerId = "u1",
+            headCoachId = "coach_1",
+            playerIds = listOf("u1"),
+            pending = emptyList(),
+            teamSize = 6,
+            affiliateUrl = "https://example.test/register",
+            id = "team_1",
+        ).withSynchronizedMembership()
+        teamDao.upsertTeamWithRelations(existingTeam)
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams/team_1", request.url.encodedPath)
+            assertEquals(HttpMethod.Patch, request.method)
+            capturedRequestBody = outgoingBodyText(request.body)
+            respond(
+                content = """
+                    {
+                      "id": "team_1",
+                      "name": "Clearable Team",
+                      "division": "Open",
+                      "captainId": "u1",
+                      "managerId": "u1",
+                      "playerIds": ["u1"],
+                      "pending": [],
+                      "teamSize": 6,
+                      "headCoachId": null,
+                      "affiliateUrl": null
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        // Staff assignments are canonical for coach roles. Clearing the legacy
+        // projection alone is normalized back to the active assignment, so a
+        // real coach removal must remove that assignment as well.
+        repo.updateTeam(
+            existingTeam.copy(
+                headCoachId = null,
+                affiliateUrl = null,
+                staffAssignments = existingTeam.staffAssignments.filterNot { assignment ->
+                    assignment.role == "HEAD_COACH"
+                },
+            ),
+        ).getOrThrow()
+
+        val teamPayload = jsonMVP.parseToJsonElement(capturedRequestBody)
+            .jsonObject
+            .getValue("team")
+            .jsonObject
+        assertEquals("null", teamPayload["headCoachId"]?.toString())
+        assertEquals("null", teamPayload["affiliateUrl"]?.toString())
+        assertTrue("profileImageId" !in teamPayload)
     }
 }
 

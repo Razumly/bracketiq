@@ -21,7 +21,6 @@ data class MessagingTopicMessageRequestDto(
     val title: String,
     val body: String,
     val userIds: List<String> = emptyList(),
-    val senderId: String? = null,
 )
 
 @Serializable

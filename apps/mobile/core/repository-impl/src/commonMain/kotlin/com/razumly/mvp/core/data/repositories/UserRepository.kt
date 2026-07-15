@@ -18,10 +18,10 @@ import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.AuthResponseDto
 import com.razumly.mvp.core.network.dto.AppleMobileLoginRequestDto
 import com.razumly.mvp.core.network.dto.CreateInvitesRequestDto
+import com.razumly.mvp.core.network.dto.DeleteAccountErrorResponseDto
 import com.razumly.mvp.core.network.dto.DeleteAccountRequestDto
 import com.razumly.mvp.core.network.dto.EmailMembershipLookupRequestDto
 import com.razumly.mvp.core.network.dto.EmailMembershipLookupResponseDto
-import com.razumly.mvp.core.network.dto.EnsureUserByEmailRequestDto
 import com.razumly.mvp.core.network.dto.GoogleMobileLoginRequestDto
 import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.network.dto.InvitesResponseDto
@@ -225,6 +225,23 @@ class EmailVerificationRequiredException(
     message: String,
 ) : Exception(message)
 
+data class AccountDeletionRequest(
+    val confirmationText: String,
+    val currentPassword: String? = null,
+    val mfaChallengeId: String? = null,
+    val mfaCode: String? = null,
+)
+
+data class AccountDeletionMfaChallenge(
+    val challengeId: String,
+    val expiresAt: String? = null,
+)
+
+class AccountDeletionMfaRequiredException(
+    val challenge: AccountDeletionMfaChallenge,
+    message: String,
+) : Exception(message)
+
 interface IUserRepository : IMVPRepository {
     val currentUser: StateFlow<Result<UserData>>
     val currentAccount: StateFlow<Result<AuthAccount>>
@@ -240,6 +257,8 @@ interface IUserRepository : IMVPRepository {
     suspend fun login(email: String, password: String): Result<UserData>
     suspend fun logout(): Result<Unit>
     suspend fun deleteAccount(confirmationText: String): Result<Unit>
+    suspend fun deleteAccount(request: AccountDeletionRequest): Result<Unit> =
+        deleteAccount(request.confirmationText)
 
     suspend fun getUsers(
         userIds: List<String>,
@@ -252,18 +271,12 @@ interface IUserRepository : IMVPRepository {
 
     suspend fun searchPlayers(search: String): Result<List<UserData>>
 
-    /**
-     * Server-side only behavior: ensures a public user profile exists for the given email.
-     * Used for invite flows where we only have an email address.
-     *
-     * The returned [UserData] must not contain sensitive information (email/password/etc).
-     */
-    suspend fun ensureUserByEmail(email: String): Result<UserData>
     suspend fun createInvites(invites: List<InviteCreateDto>): Result<List<Invite>>
     suspend fun deleteInvite(inviteId: String): Result<Unit>
     suspend fun findEmailMembership(
         emails: List<String>,
         userIds: List<String>,
+        eventId: String? = null,
     ): Result<List<UserEmailMembershipMatch>>
     suspend fun listInvites(userId: String, type: String? = null): Result<List<Invite>>
     suspend fun acceptInvite(inviteId: String): Result<Unit>
@@ -405,10 +418,15 @@ class UserRepository(
         val normalizedEmail = normalizeEmail(email)
         if (normalizedEmail.isBlank()) error("Email is required")
         Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Email login started for ${maskEmail(normalizedEmail)}" }
-        val res = api.post<LoginRequestDto, AuthResponseDto>(
-            path = "api/auth/login",
-            body = LoginRequestDto(email = normalizedEmail, password = password),
-        )
+        val res = try {
+            api.post<LoginRequestDto, AuthResponseDto>(
+                path = "api/auth/login",
+                body = LoginRequestDto(email = normalizedEmail, password = password),
+            )
+        } catch (apiException: ApiException) {
+            apiException.toEmailVerificationRequiredExceptionOrNull(normalizedEmail)?.let { throw it }
+            throw apiException
+        }
 
         val token = res.token?.takeIf(String::isNotBlank)
             ?: error("Login response missing token")
@@ -555,12 +573,8 @@ class UserRepository(
             throw apiException
         }
 
-        val hasAuthenticatedVerificationResponse = !res.token.isNullOrBlank() &&
-            res.user != null &&
-            res.profile != null
-        if ((res.requiresEmailVerification == true ||
-                res.code?.equals(EMAIL_NOT_VERIFIED_CODE, ignoreCase = true) == true
-            ) && !hasAuthenticatedVerificationResponse
+        if (res.requiresEmailVerification == true ||
+            res.code?.equals(EMAIL_NOT_VERIFIED_CODE, ignoreCase = true) == true
         ) {
             val verificationEmail = res.email?.trim()?.takeIf(String::isNotBlank) ?: normalizedEmail
             val verificationMessage = res.error?.trim()?.takeIf(String::isNotBlank)
@@ -602,15 +616,28 @@ class UserRepository(
         clearLoginState()
     }
 
-    override suspend fun deleteAccount(confirmationText: String): Result<Unit> = runCatching {
+    override suspend fun deleteAccount(confirmationText: String): Result<Unit> =
+        deleteAccount(AccountDeletionRequest(confirmationText = confirmationText))
+
+    override suspend fun deleteAccount(request: AccountDeletionRequest): Result<Unit> = runCatching {
         val currentUserId = currentUser.value.getOrNull()?.id?.trim()?.takeIf(String::isNotBlank)
             ?: currentAccount.value.getOrNull()?.id?.trim()?.takeIf(String::isNotBlank)
             ?: error("No user")
 
-        val response = api.delete<DeleteAccountRequestDto, OkResponseDto>(
-            path = "api/auth/account",
-            body = DeleteAccountRequestDto(confirmationText = confirmationText.trim()),
-        )
+        val response = try {
+            api.delete<DeleteAccountRequestDto, OkResponseDto>(
+                path = "api/auth/account",
+                body = DeleteAccountRequestDto(
+                    confirmationText = request.confirmationText.trim(),
+                    currentPassword = request.currentPassword?.takeIf(String::isNotBlank),
+                    mfaChallengeId = request.mfaChallengeId?.trim()?.takeIf(String::isNotBlank),
+                    mfaCode = request.mfaCode?.trim()?.takeIf(String::isNotBlank),
+                ),
+            )
+        } catch (apiException: ApiException) {
+            apiException.toAccountDeletionMfaRequiredExceptionOrNull()?.let { throw it }
+            throw apiException
+        }
         if (!response.ok) {
             error("Account deletion failed.")
         }
@@ -759,10 +786,13 @@ class UserRepository(
         _chatTermsConsentLoading.value = false
         runCatching { tokenStore.clear() }
         runCatching { currentUserDataSource.saveUserId("") }
+        // Root's cleanup collector keys off this state when the empty-user emission arrives.
+        // Publish the authorization state first so push, chat, registration, and shortcut cleanup
+        // cannot be skipped by flow ordering.
+        _startupAuthState.value = StartupAuthState.Unauthenticated
         _currentUser.value = Result.failure(Exception("No User"))
         _currentAccount.value = Result.failure(Exception("No Account"))
         updateRequiredProfileCompletionState(RequiredProfileCompletionState())
-        _startupAuthState.value = StartupAuthState.Unauthenticated
     }
 
     private fun updateStartupAuthStateFromCurrentUser() {
@@ -855,6 +885,49 @@ class UserRepository(
         )
     }
 
+    private fun ApiException.toEmailVerificationRequiredExceptionOrNull(
+        fallbackEmail: String,
+    ): EmailVerificationRequiredException? {
+        if (statusCode !in 400..499 || responseBody.isNullOrBlank()) return null
+        val payload = runCatching {
+            jsonMVP.decodeFromString<AuthResponseDto>(responseBody ?: return null)
+        }.getOrNull() ?: return null
+        if (!payload.code.equals(EMAIL_NOT_VERIFIED_CODE, ignoreCase = true) &&
+            payload.requiresEmailVerification != true
+        ) {
+            return null
+        }
+
+        return EmailVerificationRequiredException(
+            email = payload.email?.trim()?.takeIf(String::isNotBlank) ?: fallbackEmail,
+            message = payload.error?.trim()?.takeIf(String::isNotBlank)
+                ?: "Email verification is required. Check your inbox for a verification link, then sign in.",
+        )
+    }
+
+    private fun ApiException.toAccountDeletionMfaRequiredExceptionOrNull(): AccountDeletionMfaRequiredException? {
+        if (statusCode != 403 || responseBody.isNullOrBlank()) return null
+        val body = responseBody ?: return null
+
+        val payload = runCatching {
+            jsonMVP.decodeFromString<DeleteAccountErrorResponseDto>(body)
+        }.getOrNull() ?: return null
+        if (!payload.code.equals("MFA_REQUIRED", ignoreCase = true)) return null
+
+        val mfa = payload.mfa ?: return null
+        val challengeId = mfa.challengeId?.trim()?.takeIf(String::isNotBlank) ?: return null
+        if (!mfa.method.equals("totp", ignoreCase = true)) return null
+
+        return AccountDeletionMfaRequiredException(
+            challenge = AccountDeletionMfaChallenge(
+                challengeId = challengeId,
+                expiresAt = mfa.expiresAt?.trim()?.takeIf(String::isNotBlank),
+            ),
+            message = payload.error?.trim()?.takeIf(String::isNotBlank)
+                ?: "Enter the code from your authenticator to delete this account.",
+        )
+    }
+
     private fun inferDifferingFields(
         existing: SignupProfileSnapshot,
         incoming: SignupProfileSnapshot,
@@ -941,20 +1014,6 @@ class UserRepository(
         res.users.mapNotNull { it.toUserDataOrNull() }
     }
 
-    override suspend fun ensureUserByEmail(email: String): Result<UserData> = runCatching {
-        val normalized = email.trim().lowercase()
-        if (normalized.isBlank()) error("Email is required")
-
-        val res = api.post<EnsureUserByEmailRequestDto, UserResponseDto>(
-            path = "api/users/ensure",
-            body = EnsureUserByEmailRequestDto(email = normalized),
-        )
-
-        val user = res.user?.toUserDataOrNull() ?: error("Ensure user response missing user")
-        databaseService.getUserDataDao.upsertUserData(user)
-        user
-    }
-
     override suspend fun createInvites(invites: List<InviteCreateDto>): Result<List<Invite>> = runCatching {
         val normalizedInvites = invites.mapNotNull { invite ->
             val normalizedType = invite.type.trim()
@@ -997,6 +1056,7 @@ class UserRepository(
     override suspend fun findEmailMembership(
         emails: List<String>,
         userIds: List<String>,
+        eventId: String?,
     ): Result<List<UserEmailMembershipMatch>> = runCatching {
         val normalizedEmails = emails
             .map { email -> email.trim().lowercase() }
@@ -1006,6 +1066,7 @@ class UserRepository(
             .map { userId -> userId.trim() }
             .filter(String::isNotBlank)
             .distinct()
+        val normalizedEventId = eventId?.trim()?.takeIf(String::isNotBlank)
         if (normalizedEmails.isEmpty() || normalizedUserIds.isEmpty()) {
             emptyList()
         } else {
@@ -1014,6 +1075,7 @@ class UserRepository(
                 body = EmailMembershipLookupRequestDto(
                     emails = normalizedEmails,
                     userIds = normalizedUserIds,
+                    eventId = normalizedEventId,
                 ),
             ).matches.mapNotNull { match ->
                 val normalizedEmail = match.email.trim().lowercase()
@@ -1256,7 +1318,6 @@ class UserRepository(
                 friendRequestIds = normalizedUser.friendRequestIds,
                 friendRequestSentIds = normalizedUser.friendRequestSentIds,
                 followingIds = normalizedUser.followingIds,
-                hasStripeAccount = normalizedUser.hasStripeAccount,
                 uploadedImages = normalizedUser.uploadedImages,
                 profileImageId = normalizedUser.profileImageId,
                 notificationSettings = normalizedUser.notificationSettings,

@@ -532,13 +532,120 @@ class UserRepositoryAuthTest {
         val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
 
         repo.getCurrentAccount().getOrThrow()
-        repo.deleteAccount("delete my account").getOrThrow()
+        repo.deleteAccount(
+            AccountDeletionRequest(
+                confirmationText = "delete my account",
+                currentPassword = "correct-password",
+                mfaChallengeId = "mfa_delete_1",
+                mfaCode = "123456",
+            ),
+        ).getOrThrow()
 
         assertEquals(true, deleteBody.contains("\"confirmationText\":\"delete my account\""))
+        assertEquals(true, deleteBody.contains("\"currentPassword\":\"correct-password\""))
+        assertEquals(true, deleteBody.contains("\"mfaChallengeId\":\"mfa_delete_1\""))
+        assertEquals(true, deleteBody.contains("\"mfaCode\":\"123456\""))
         assertEquals("", tokenStore.get())
         assertEquals("", currentUserDataSource.getUserId().first())
         assertTrue(repo.currentAccount.value.isFailure)
         assertTrue(repo.currentUser.value.isFailure)
+    }
+
+    @Test
+    fun deleteAccount_surfaces_totp_challenge_without_clearing_local_auth() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("delete_token")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var deleteBody = ""
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u_delete", "email":"delete@example.com", "name":"Delete User" },
+                          "session": { "userId":"u_delete", "isAdmin":false },
+                          "token":"delete_token",
+                          "profile": {
+                            "id":"u_delete",
+                            "firstName":"Delete",
+                            "lastName":"User",
+                            "userName":"delete_user",
+                            "teamIds":[],
+                            "friendIds":[],
+                            "friendRequestIds":[],
+                            "friendRequestSentIds":[],
+                            "followingIds":[],
+                            "uploadedImages":[],
+                            "hasStripeAccount":false
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/account" -> {
+                    deleteBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
+                    respond(
+                        content = """
+                            {
+                              "error":"Authenticator verification is required before deleting this account.",
+                              "code":"MFA_REQUIRED",
+                              "mfa":{
+                                "challengeId":"mfa_delete_1",
+                                "expiresAt":"2026-07-11T12:10:00.000Z",
+                                "method":"totp"
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.Forbidden,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+            HttpResponseValidator {
+                validateResponse { response ->
+                    if (!response.status.isSuccess()) {
+                        throw com.razumly.mvp.core.network.ApiException(
+                            statusCode = response.status.value,
+                            url = response.call.request.url.toString(),
+                            responseBody = response.bodyAsText(),
+                        )
+                    }
+                }
+            }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        repo.getCurrentAccount().getOrThrow()
+        val result = repo.deleteAccount(
+            AccountDeletionRequest(
+                confirmationText = "delete my account",
+                currentPassword = "correct-password",
+            ),
+        )
+
+        assertTrue(result.isFailure)
+        val exception = assertIs<AccountDeletionMfaRequiredException>(result.exceptionOrNull())
+        assertEquals("mfa_delete_1", exception.challenge.challengeId)
+        assertEquals("2026-07-11T12:10:00.000Z", exception.challenge.expiresAt)
+        assertEquals(true, deleteBody.contains("\"currentPassword\":\"correct-password\""))
+        assertEquals("delete_token", tokenStore.get())
+        assertTrue(repo.currentAccount.value.isSuccess)
+        assertTrue(repo.currentUser.value.isSuccess)
     }
 
     @Test
@@ -616,7 +723,7 @@ class UserRepositoryAuthTest {
     }
 
     @Test
-    fun createNewUser_accepts_authenticated_email_verification_response() = runTest {
+    fun createNewUser_rejects_email_verification_response_even_if_it_contains_auth_fields() = runTest {
         val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
         val userDao = FakeUserDataDao()
         val db = UserRepositoryAuth_FakeDatabaseService(userDao)
@@ -680,10 +787,72 @@ class UserRepositoryAuthTest {
             dateOfBirth = "2008-05-02",
         )
 
-        val created = result.getOrThrow()
-        assertEquals("u_signup", created.id)
-        assertEquals("signup_token", tokenStore.get())
-        assertEquals("u_signup", currentUserDataSource.getUserId().first())
+        val exception = assertIs<EmailVerificationRequiredException>(result.exceptionOrNull())
+        assertEquals("signup@example.com", exception.email)
+        assertEquals("", tokenStore.get())
+        assertEquals("", currentUserDataSource.getUserId().first())
+        assertTrue(repo.currentAccount.value.isFailure)
+        assertTrue(repo.currentUser.value.isFailure)
+    }
+
+    @Test
+    fun login_surfaces_email_verification_without_storing_a_session() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """{"user":null,"session":null}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/login" -> respond(
+                    content = """
+                        {
+                          "error":"Email not verified. Check your inbox for a verification link.",
+                          "code":"EMAIL_NOT_VERIFIED",
+                          "email":"verify@example.com",
+                          "requiresEmailVerification":true
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.Forbidden,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+            HttpResponseValidator {
+                validateResponse { response ->
+                    if (!response.status.isSuccess()) {
+                        throw com.razumly.mvp.core.network.ApiException(
+                            statusCode = response.status.value,
+                            url = response.call.request.url.toString(),
+                            responseBody = response.bodyAsText(),
+                        )
+                    }
+                }
+            }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val result = repo.login("verify@example.com", "password123")
+
+        val exception = assertIs<EmailVerificationRequiredException>(result.exceptionOrNull())
+        assertEquals("verify@example.com", exception.email)
+        assertEquals("", tokenStore.get())
+        assertEquals("", currentUserDataSource.getUserId().first())
+        assertTrue(repo.currentAccount.value.isFailure)
+        assertTrue(repo.currentUser.value.isFailure)
     }
 
     @Test
@@ -922,69 +1091,6 @@ class UserRepositoryAuthTest {
         assertEquals(true, capturedBody.contains("\"profileSelection\""))
         assertEquals(true, capturedBody.contains("\"firstName\":\"Existing\""))
         assertEquals(true, capturedBody.contains("\"userName\":\"existing_user\""))
-    }
-
-    @Test
-    fun ensureUserByEmail_returns_public_user_and_persists_to_cache() = runTest {
-        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
-        val userDao = FakeUserDataDao()
-        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
-        val prefsStore = InMemoryPreferencesDataStore()
-        val currentUserDataSource = CurrentUserDataSource(prefsStore)
-
-        val engine = MockEngine { request ->
-            when (request.url.encodedPath) {
-                "/api/auth/me" -> respond(
-                    content = """
-                        {
-                          "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
-                          "session": { "userId":"u1", "isAdmin":false },
-                          "token":"t123"
-                        }
-                    """.trimIndent(),
-                    status = HttpStatusCode.OK,
-                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-                )
-
-                "/api/users/ensure" -> {
-                    assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
-                    respond(
-                        content = """
-                            {
-                              "user": {
-                                "id":"u2",
-                                "firstName":"Invited",
-                                "lastName":"User",
-                                "userName":"invited_user",
-                                "teamIds":[],
-                                "friendIds":[],
-                                "friendRequestIds":[],
-                                "friendRequestSentIds":[],
-                                "followingIds":[],
-                                "uploadedImages":[],
-                                "hasStripeAccount":false
-                              }
-                            }
-                        """.trimIndent(),
-                        status = HttpStatusCode.OK,
-                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-                    )
-                }
-
-                else -> error("Unexpected path ${request.url.encodedPath}")
-            }
-        }
-
-        val http = HttpClient(engine) {
-            install(ContentNegotiation) { json(jsonMVP) }
-        }
-
-        val api = MvpApiClient(http, "http://example.test", tokenStore)
-        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
-
-        val ensured = repo.ensureUserByEmail("u2@example.com").getOrThrow()
-        assertEquals("u2", ensured.id)
-        assertEquals("u2", userDao.getUserDataById("u2")?.id)
     }
 
     @Test

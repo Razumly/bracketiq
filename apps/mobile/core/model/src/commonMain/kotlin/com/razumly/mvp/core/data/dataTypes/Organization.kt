@@ -24,6 +24,13 @@ enum class OrganizationVerificationReviewStatus {
 }
 
 @Serializable
+data class OrganizationDivisionSummary(
+    val count: Int = 0,
+    val minPrice: Int? = null,
+    val maxPrice: Int? = null,
+)
+
+@Serializable
 data class Organization(
     val id: String,
     val name: String,
@@ -59,6 +66,7 @@ data class Organization(
     val staffEmailsByUserId: Map<String, String> = emptyMap(),
     val viewerPermissions: List<String> = emptyList(),
     val facilities: List<Facility> = emptyList(),
+    val divisionSummary: OrganizationDivisionSummary = OrganizationDivisionSummary(),
 )
 
 fun Organization.activeAffiliateRentalFacilities(): List<Facility> =
@@ -117,6 +125,7 @@ data class OrganizationDTO(
     val staffEmailsByUserId: Map<String, String> = emptyMap(),
     val viewerPermissions: List<String> = emptyList(),
     val facilities: List<Facility> = emptyList(),
+    val divisionSummary: OrganizationDivisionSummary = OrganizationDivisionSummary(),
 ) {
     fun toOrganization(id: String): Organization =
         Organization(
@@ -146,6 +155,7 @@ data class OrganizationDTO(
             staffEmailsByUserId = staffEmailsByUserId,
             viewerPermissions = viewerPermissions,
             facilities = facilities,
+            divisionSummary = divisionSummary,
         )
 }
 

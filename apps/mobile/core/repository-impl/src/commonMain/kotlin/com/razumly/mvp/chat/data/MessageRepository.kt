@@ -57,13 +57,16 @@ class MessageRepository(
         val unreadMessages = databaseService.getMessageDao.getMessagesInChatGroup(normalizedChatId)
             .filter { message -> message.isUnreadFor(normalizedUserId) }
 
+        // The server is authoritative for read receipts. Do not hide unread
+        // messages locally until its acknowledgement succeeds; otherwise a
+        // failed request leaves Room claiming a receipt the server never got.
+        api.postNoResponse("api/chat/groups/${normalizedChatId.encodeURLPathPart()}/messages/read")
+
         if (unreadMessages.isNotEmpty()) {
             val readMessages = unreadMessages.map { message ->
                 message.copy(readByIds = (message.readByIds + normalizedUserId).distinct())
             }
             databaseService.getMessageDao.upsertMessages(readMessages)
         }
-
-        api.postNoResponse("api/chat/groups/${normalizedChatId.encodeURLPathPart()}/messages/read")
     }
 }

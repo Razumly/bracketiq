@@ -257,6 +257,7 @@ data class TeamUpdateDto(
     val joinPolicy: String? = null,
     val openRegistration: Boolean? = null,
     val registrationPriceCents: Int? = null,
+    val affiliateUrl: String? = null,
     val requiredTemplateIds: List<String>? = null,
     val playerRegistrations: List<TeamPlayerRegistrationApiDto>? = null,
 )
@@ -328,6 +329,11 @@ fun Team.toUpdateDto(
         },
         registrationPriceCents = if (shouldIncludeTeamUpdateField("registrationPriceCents", omitFields, includeFields)) {
             synced.registrationPriceCents.coerceAtLeast(0)
+        } else {
+            null
+        },
+        affiliateUrl = if (shouldIncludeTeamUpdateField("affiliateUrl", omitFields, includeFields)) {
+            synced.affiliateUrl?.trim()?.takeIf(String::isNotBlank)
         } else {
             null
         },

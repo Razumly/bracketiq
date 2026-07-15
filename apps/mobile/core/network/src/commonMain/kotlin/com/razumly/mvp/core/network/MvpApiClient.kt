@@ -19,11 +19,27 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 
 class MvpApiClient(
-    val http: HttpClient,
+    private val httpFactory: () -> HttpClient,
     @PublishedApi
     internal val baseUrl: String,
     val tokenStore: AuthTokenStore,
 ) {
+    /**
+     * Creating a Ktor client loads its plugins and platform dependencies. Keep that work out of
+     * dependency-injection startup, where Android is still on the application main thread.
+     */
+    val http: HttpClient by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { httpFactory() }
+
+    constructor(
+        http: HttpClient,
+        baseUrl: String,
+        tokenStore: AuthTokenStore,
+    ) : this(
+        httpFactory = { http },
+        baseUrl = baseUrl,
+        tokenStore = tokenStore,
+    )
+
     fun urlFor(path: String): String {
         val b = baseUrl.trimEnd('/')
         val p = path.trimStart('/')

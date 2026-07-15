@@ -37,7 +37,10 @@ import com.razumly.mvp.core.network.dto.TeamRegistrationResponseDto
 import com.razumly.mvp.core.network.dto.TeamRefundRequestDto
 import com.razumly.mvp.core.network.dto.TeamRefundResponseDto
 import com.razumly.mvp.core.network.dto.TeamsResponseDto
+import com.razumly.mvp.core.network.dto.TeamUpdateDto
 import com.razumly.mvp.core.network.dto.UpdateTeamRequestDto
+import com.razumly.mvp.core.network.dto.encodeExplicitNullPatchObject
+import com.razumly.mvp.core.network.dto.explicitNullFieldsForPatch
 import com.razumly.mvp.core.network.dto.toTeamPlayerRegistrationOrNull
 import com.razumly.mvp.core.network.dto.toUpdateDto
 import com.razumly.mvp.core.network.dto.toUserDataOrNull
@@ -59,6 +62,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 
 interface ITeamRepository : IMVPRepository {
@@ -546,6 +550,7 @@ class TeamRepository(
             "joinPolicy",
             "openRegistration",
             "registrationPriceCents",
+            "affiliateUrl",
             "requiredTemplateIds",
             "playerRegistrations",
         )
@@ -557,6 +562,12 @@ class TeamRepository(
             "openRegistration",
             "registrationPriceCents",
             "requiredTemplateIds",
+        )
+        val TEAM_EXPLICIT_NULL_PATCH_FIELDS = setOf(
+            "headCoachId",
+            "divisionTypeId",
+            "parentTeamId",
+            "affiliateUrl",
         )
         val UNRECOGNIZED_KEYS_REGEX = Regex(
             pattern = "Unrecognized key\\(s\\) in object:\\s*(.+)",
@@ -827,7 +838,11 @@ class TeamRepository(
             }
 
             val updated = try {
-                patchTeamUpdate(teamId = syncedTeam.id, request = preparedUpdate.request)
+                patchTeamUpdate(
+                    teamId = syncedTeam.id,
+                    request = preparedUpdate.request,
+                    explicitNullFields = preparedUpdate.explicitNullFields,
+                )
             } catch (error: ApiException) {
                 if (error.statusCode != 400) {
                     throw error
@@ -848,6 +863,7 @@ class TeamRepository(
                 patchTeamUpdate(
                     teamId = syncedTeam.id,
                     request = retryPreparedUpdate.request,
+                    explicitNullFields = retryPreparedUpdate.explicitNullFields,
                 )
             }
 
@@ -1276,10 +1292,16 @@ class TeamRepository(
     private suspend fun patchTeamUpdate(
         teamId: String,
         request: UpdateTeamRequestDto,
+        explicitNullFields: Set<String>,
     ): Team {
-        return api.patch<UpdateTeamRequestDto, TeamApiDto>(
+        val teamPayload = encodeExplicitNullPatchObject(
+            serializer = TeamUpdateDto.serializer(),
+            value = request.team,
+            explicitNullFields = explicitNullFields,
+        )
+        return api.patch<JsonObject, TeamApiDto>(
             path = "api/teams/$teamId",
-            body = request,
+            body = buildJsonObject { put("team", teamPayload) },
         ).toTeamOrNull() ?: error("Update team response missing team")
     }
 
@@ -1298,14 +1320,22 @@ class TeamRepository(
         }
 
         val includedFields = changedFields - omitFields
+        val updateDto = syncedNewTeam.toUpdateDto(
+            omitFields = omitFields,
+            includeFields = syncedCachedTeam?.let { includedFields },
+        )
+        val explicitNullFields = syncedCachedTeam?.let { previousTeam ->
+            val previousDto = previousTeam.toUpdateDto(includeFields = includedFields)
+            explicitNullFieldsForPatch(
+                previous = encodeExplicitNullPatchObject(TeamUpdateDto.serializer(), previousDto),
+                updated = encodeExplicitNullPatchObject(TeamUpdateDto.serializer(), updateDto),
+                clearableFields = TEAM_EXPLICIT_NULL_PATCH_FIELDS.intersect(includedFields),
+            )
+        }.orEmpty()
         return PreparedTeamUpdate(
-            request = UpdateTeamRequestDto(
-                team = syncedNewTeam.toUpdateDto(
-                    omitFields = omitFields,
-                    includeFields = syncedCachedTeam?.let { includedFields },
-                ),
-            ),
+            request = UpdateTeamRequestDto(team = updateDto),
             includedFields = includedFields,
+            explicitNullFields = explicitNullFields,
         )
     }
 
@@ -1332,6 +1362,7 @@ class TeamRepository(
         if (existingTeam.joinPolicy != updatedTeam.joinPolicy) add("joinPolicy")
         if (existingTeam.openRegistration != updatedTeam.openRegistration) add("openRegistration")
         if (existingTeam.registrationPriceCents != updatedTeam.registrationPriceCents) add("registrationPriceCents")
+        if (existingTeam.affiliateUrl != updatedTeam.affiliateUrl) add("affiliateUrl")
         if (existingTeam.requiredTemplateIds != updatedTeam.requiredTemplateIds) add("requiredTemplateIds")
         if (!playerRegistrationsEquivalent(existingTeam, updatedTeam)) add("playerRegistrations")
     }
@@ -1403,6 +1434,7 @@ class TeamRepository(
     private data class PreparedTeamUpdate(
         val request: UpdateTeamRequestDto,
         val includedFields: Set<String>,
+        val explicitNullFields: Set<String>,
     )
 
 }

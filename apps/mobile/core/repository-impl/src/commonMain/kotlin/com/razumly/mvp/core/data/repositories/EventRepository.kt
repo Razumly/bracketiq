@@ -68,6 +68,7 @@ import com.razumly.mvp.core.network.dto.EventTemplateResponseDto
 import com.razumly.mvp.core.network.dto.EventTemplatesResponseDto
 import com.razumly.mvp.core.network.dto.EventUserComplianceResponseDto
 import com.razumly.mvp.core.network.dto.EventsResponseDto
+import com.razumly.mvp.core.network.dto.EventUpdateDto
 import com.razumly.mvp.core.network.dto.ProfileScheduleResponseDto
 import com.razumly.mvp.core.network.dto.RegistrationQuestionAnswerDto
 import com.razumly.mvp.core.network.dto.RegistrationQuestionAnswerSnapshotDto
@@ -78,7 +79,8 @@ import com.razumly.mvp.core.network.dto.StandingsConfirmRequestDto
 import com.razumly.mvp.core.network.dto.StandingsConfirmResponseDto
 import com.razumly.mvp.core.network.dto.StandingsDivisionDto
 import com.razumly.mvp.core.network.dto.StandingsResponseDto
-import com.razumly.mvp.core.network.dto.UpdateEventRequestDto
+import com.razumly.mvp.core.network.dto.encodeExplicitNullPatchObject
+import com.razumly.mvp.core.network.dto.explicitNullFieldsForPatch
 import com.razumly.mvp.core.network.dto.toUserDataOrNull
 import com.razumly.mvp.core.network.dto.toUpdateDto
 import io.ktor.http.encodeURLQueryComponent
@@ -100,8 +102,36 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlin.time.Clock
 import kotlin.time.Instant
+
+/**
+ * These are nullable scalar/JSON fields accepted as explicit nulls by the
+ * strict event PATCH route. Relationship and compatibility fields are kept
+ * out so a compact DTO can never accidentally clear them.
+ */
+private val EVENT_EXPLICIT_NULL_PATCH_FIELDS = setOf(
+    "address",
+    "rating",
+    "minAge",
+    "maxAge",
+    "cancellationRefundHours",
+    "affiliateUrl",
+    "manualPaymentInstructions",
+    "gamesPerOpponent",
+    "playoffTeamCount",
+    "matchDurationMinutes",
+    "setDurationMinutes",
+    "setsPerMatch",
+    "restTimeMinutes",
+    "sportId",
+    "matchRulesOverride",
+    "allowPaymentPlans",
+    "installmentCount",
+    "allowTeamSplitDefault",
+)
 
 interface IEventRepository : IMVPRepository {
     fun getCachedEventsFlow(): Flow<Result<List<Event>>>
@@ -2018,18 +2048,34 @@ class EventRepository(
         leagueScoringConfig: LeagueScoringConfigDTO?,
     ): Result<Event> =
         singleResponse(networkCall = {
-            val updated = api.patch<UpdateEventRequestDto, EventApiDto>(
+            val updateDto = newEvent.toUpdateDto(
+                leagueScoringConfigOverride = leagueScoringConfig,
+                fieldsOverride = fields,
+                timeSlotsOverride = timeSlots,
+                includeOrganizationId = false,
+                includeFieldObjects = fields != null,
+                includeTimeSlotObjects = timeSlots != null,
+            )
+            val previousDto = databaseService.getEventDao.getEventById(newEvent.id)
+                ?.toUpdateDto(
+                    includeOrganizationId = false,
+                    includeFieldObjects = false,
+                    includeTimeSlotObjects = false,
+                )
+            val updatePayload = encodeExplicitNullPatchObject(
+                serializer = EventUpdateDto.serializer(),
+                value = updateDto,
+                explicitNullFields = previousDto?.let { previous ->
+                    explicitNullFieldsForPatch(
+                        previous = encodeExplicitNullPatchObject(EventUpdateDto.serializer(), previous),
+                        updated = encodeExplicitNullPatchObject(EventUpdateDto.serializer(), updateDto),
+                        clearableFields = EVENT_EXPLICIT_NULL_PATCH_FIELDS,
+                    )
+                }.orEmpty(),
+            )
+            val updated = api.patch<JsonObject, EventApiDto>(
                 path = "api/events/${newEvent.id}",
-                body = UpdateEventRequestDto(
-                    event = newEvent.toUpdateDto(
-                        leagueScoringConfigOverride = leagueScoringConfig,
-                        fieldsOverride = fields,
-                        timeSlotsOverride = timeSlots,
-                        includeOrganizationId = false,
-                        includeFieldObjects = fields != null,
-                        includeTimeSlotObjects = timeSlots != null,
-                    ),
-                ),
+                body = buildJsonObject { put("event", updatePayload) },
             ).toEventOrNull() ?: error("Update event response missing event")
             updated
         }, saveCall = { event ->

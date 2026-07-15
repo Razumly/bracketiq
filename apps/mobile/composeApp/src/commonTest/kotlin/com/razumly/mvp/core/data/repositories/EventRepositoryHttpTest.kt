@@ -455,12 +455,12 @@ private class EventRepositoryHttp_FakeUserRepository(
     override suspend fun logout(): Result<Unit> = error("unused")
     override suspend fun deleteAccount(confirmationText: String): Result<Unit> = error("unused")
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = error("unused")
-    override suspend fun ensureUserByEmail(email: String): Result<UserData> = error("unused")
     override suspend fun createInvites(invites: List<com.razumly.mvp.core.network.dto.InviteCreateDto>): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
     override suspend fun deleteInvite(inviteId: String): Result<Unit> = error("unused")
     override suspend fun findEmailMembership(
         emails: List<String>,
         userIds: List<String>,
+        eventId: String?,
     ): Result<List<UserEmailMembershipMatch>> = error("unused")
     override suspend fun listInvites(userId: String, type: String?): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
     override suspend fun acceptInvite(inviteId: String): Result<Unit> = error("unused")
@@ -3560,5 +3560,64 @@ class EventRepositoryHttpTest {
         assertTrue(capturedBody.contains("\"applyReassignment\":false"))
         assertFalse(result.applyReassignment)
         assertEquals("e1__division__advanced", result.division.divisionId)
+    }
+
+    @Test
+    fun updateEvent_sends_json_null_for_cached_nullable_values_that_are_cleared() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("host_1"))
+        val existing = makeEvent(id = "e1", hostId = "host_1").copy(
+            address = "123 Main St",
+            minAge = 12,
+            sportId = "volleyball",
+        )
+        eventDao.upsertEvent(existing)
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/e1", request.url.encodedPath)
+            assertEquals(HttpMethod.Patch, request.method)
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+            respond(
+                content = """
+                    {
+                      "id": "e1",
+                      "name": "Ee1",
+                      "hostId": "host_1",
+                      "start": "2026-02-10T00:00:00Z",
+                      "end": "2026-02-10T01:00:00Z",
+                      "coordinates": [-80.0, 25.0],
+                      "address": null,
+                      "minAge": null,
+                      "sportId": null,
+                      "eventType": "EVENT",
+                      "userIds": [],
+                      "teamIds": []
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        repo.updateEvent(existing.copy(address = null, minAge = null, sportId = null)).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"address\":null"))
+        assertTrue(capturedBody.contains("\"minAge\":null"))
+        assertTrue(capturedBody.contains("\"sportId\":null"))
+        assertFalse(capturedBody.contains("\"organizationId\":null"))
     }
 }

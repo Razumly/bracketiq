@@ -104,6 +104,23 @@ data class PasswordRequestDto(
 @Serializable
 data class DeleteAccountRequestDto(
     val confirmationText: String,
+    val currentPassword: String? = null,
+    val mfaChallengeId: String? = null,
+    val mfaCode: String? = null,
+)
+
+@Serializable
+data class DeleteAccountMfaChallengeDto(
+    val challengeId: String? = null,
+    val expiresAt: String? = null,
+    val method: String? = null,
+)
+
+@Serializable
+data class DeleteAccountErrorResponseDto(
+    val error: String? = null,
+    val code: String? = null,
+    val mfa: DeleteAccountMfaChallengeDto? = null,
 )
 
 @Serializable
@@ -184,11 +201,6 @@ data class UserResponseDto(
 )
 
 @Serializable
-data class EnsureUserByEmailRequestDto(
-    val email: String,
-)
-
-@Serializable
 data class UpdateUserRequestDto(
     val data: UserUpdateDto,
 )
@@ -199,12 +211,10 @@ data class UserUpdateDto(
     val lastName: String? = null,
     val dateOfBirth: String? = null,
     val userName: String? = null,
-    val teamIds: List<String>? = null,
     val friendIds: List<String>? = null,
     val friendRequestIds: List<String>? = null,
     val friendRequestSentIds: List<String>? = null,
     val followingIds: List<String>? = null,
-    val hasStripeAccount: Boolean? = null,
     val uploadedImages: List<String>? = null,
     val profileImageId: String? = null,
     val notificationSettings: NotificationSettings? = null,

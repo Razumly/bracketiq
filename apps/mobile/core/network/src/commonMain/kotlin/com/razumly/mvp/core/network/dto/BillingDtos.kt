@@ -1,7 +1,7 @@
 package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
-import com.razumly.mvp.core.data.dataTypes.RefundRequest
+import com.razumly.mvp.core.data.dataTypes.dtos.RefundRequestDTO
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -129,10 +129,12 @@ data class RefundAllRequestDto(
 
 @Serializable
 data class RefundRequestsResponseDto(
-    val refunds: List<RefundRequest> = emptyList(),
+    val refunds: List<RefundRequestDTO> = emptyList(),
 )
 
 @Serializable
 data class UpdateRefundRequestDto(
     val status: String,
+    val expectedScopeVersion: Int? = null,
+    val expectedScopeHash: String? = null,
 )

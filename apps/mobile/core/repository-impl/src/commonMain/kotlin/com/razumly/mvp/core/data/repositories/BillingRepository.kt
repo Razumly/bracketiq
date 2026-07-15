@@ -19,6 +19,7 @@ import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentProof
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.OrganizationDivisionSummary
 import com.razumly.mvp.core.data.dataTypes.OrganizationReviewsPayload
 import com.razumly.mvp.core.data.dataTypes.OrganizationStaffMember
 import com.razumly.mvp.core.data.dataTypes.normalizedEventTags
@@ -101,6 +102,14 @@ private fun Set<String>.toOrganizationTagsQueryParam(): String {
         "&tags=${tag.encodeURLQueryComponent()}"
     }
 }
+
+private fun Set<String>.toOrganizationListQueryParam(key: String): String =
+    map(String::trim)
+        .filter(String::isNotBlank)
+        .distinct()
+        .joinToString(separator = "") { value ->
+            "&$key=${value.encodeURLQueryComponent()}"
+        }
 
 private fun Throwable.withFriendlyBoldSignMessage(): Throwable {
     val friendlyMessage = toFriendlyBoldSignMessage(message) ?: return this
@@ -669,6 +678,12 @@ interface IBillingRepository : IMVPRepository {
         offset: Int = 0,
         includeAffiliateRentals: Boolean = false,
         tagSlugs: Set<String> = emptySet(),
+        sportIds: Set<String> = emptySet(),
+        divisionGenders: Set<String> = emptySet(),
+        skillDivisionTypeIds: Set<String> = emptySet(),
+        ageDivisionTypeIds: Set<String> = emptySet(),
+        divisionPriceMinCents: Int? = null,
+        divisionPriceMaxCents: Int? = null,
     ): Result<RepositoryPage<Organization>> =
         listOrganizations(limit = limit, includeAffiliateRentals = includeAffiliateRentals, tagSlugs = tagSlugs)
             .map { organizations ->
@@ -2030,13 +2045,25 @@ class BillingRepository(
         offset: Int,
         includeAffiliateRentals: Boolean,
         tagSlugs: Set<String>,
+        sportIds: Set<String>,
+        divisionGenders: Set<String>,
+        skillDivisionTypeIds: Set<String>,
+        ageDivisionTypeIds: Set<String>,
+        divisionPriceMinCents: Int?,
+        divisionPriceMaxCents: Int?,
     ): Result<RepositoryPage<Organization>> = runCatching {
         val normalizedLimit = limit.coerceIn(1, 200)
         val normalizedOffset = offset.coerceAtLeast(0)
         val affiliateParam = if (includeAffiliateRentals) "&includeAffiliateRentals=true" else ""
         val tagsParam = tagSlugs.toOrganizationTagsQueryParam()
+        val sportsParam = sportIds.toOrganizationListQueryParam("sports")
+        val gendersParam = divisionGenders.toOrganizationListQueryParam("divisionGenders")
+        val skillsParam = skillDivisionTypeIds.toOrganizationListQueryParam("skillDivisionTypeIds")
+        val agesParam = ageDivisionTypeIds.toOrganizationListQueryParam("ageDivisionTypeIds")
+        val minPriceParam = divisionPriceMinCents?.coerceAtLeast(0)?.let { "&divisionPriceMin=$it" }.orEmpty()
+        val maxPriceParam = divisionPriceMaxCents?.coerceAtLeast(0)?.let { "&divisionPriceMax=$it" }.orEmpty()
         val response = api.get<OrganizationsResponseDto>(
-            path = "api/organizations?limit=$normalizedLimit&offset=$normalizedOffset$affiliateParam$tagsParam",
+            path = "api/organizations?limit=$normalizedLimit&offset=$normalizedOffset$affiliateParam$tagsParam$sportsParam$gendersParam$skillsParam$agesParam$minPriceParam$maxPriceParam",
         )
         val organizations = response.organizations.mapNotNull { it.toOrganizationOrNull() }
         RepositoryPage(
@@ -2201,7 +2228,12 @@ class BillingRepository(
             val currentUserId = userRepository.currentUser.value.getOrThrow().id
             val encoded = currentUserId.encodeURLQueryComponent()
 
-            val serverRefunds = api.get<RefundRequestsResponseDto>("api/refund-requests?hostId=$encoded&limit=200").refunds
+            val refundResponses =
+                api.get<RefundRequestsResponseDto>("api/refund-requests?hostId=$encoded&limit=200").refunds
+            val serverRefundsWithPreviews = refundResponses.map { response ->
+                response.toRefundRequest() to response.approvalPreview
+            }
+            val serverRefunds = serverRefundsWithPreviews.map { (refund, _) -> refund }
             databaseService.getRefundRequestDao.upsertRefundRequests(serverRefunds)
 
             val refundUserIds = serverRefunds.map { refund -> refund.userId }.distinct()
@@ -2218,22 +2250,43 @@ class BillingRepository(
                 }
             }
 
+            val approvalPreviewsByRefundId = serverRefundsWithPreviews.associate { (refund, preview) ->
+                refund.id to preview
+            }
             databaseService.getRefundRequestDao.getRefundRequestsWithRelations(currentUserId)
+                .map { refundWithRelations ->
+                    refundWithRelations.apply {
+                        approvalPreview = approvalPreviewsByRefundId[refundRequest.id]
+                    }
+                }
         }
 
     override suspend fun getRefunds(): Result<List<RefundRequest>> = runCatching {
         val currentUserId = userRepository.currentUser.value.getOrThrow().id
         val encoded = currentUserId.encodeURLQueryComponent()
 
-        val serverRefunds = api.get<RefundRequestsResponseDto>("api/refund-requests?hostId=$encoded&limit=200").refunds
+        val serverRefunds = api
+            .get<RefundRequestsResponseDto>("api/refund-requests?hostId=$encoded&limit=200")
+            .refunds
+            .map { response -> response.toRefundRequest() }
         databaseService.getRefundRequestDao.upsertRefundRequests(serverRefunds)
         serverRefunds
     }
 
     override suspend fun approveRefund(refundRequest: RefundRequest): Result<Unit> = runCatching {
+        val expectedScopeVersion = refundRequest.scopeVersion.takeIf { version -> version > 0 }
+            ?: error("This refund request needs a current approval preview before it can be approved.")
+        val expectedScopeHash = refundRequest.scopeHash
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: error("This refund request needs a current approval preview before it can be approved.")
         api.patch<UpdateRefundRequestDto, RefundRequest>(
             path = "api/refund-requests/${refundRequest.id}",
-            body = UpdateRefundRequestDto(status = "APPROVED"),
+            body = UpdateRefundRequestDto(
+                status = "APPROVED",
+                expectedScopeVersion = expectedScopeVersion,
+                expectedScopeHash = expectedScopeHash,
+            ),
         )
 
         databaseService.getRefundRequestDao.deleteRefundRequest(refundRequest.id)
@@ -3530,6 +3583,7 @@ private data class OrganizationApiDto(
     val staffEmailsByUserId: Map<String, String>? = null,
     val viewerPermissions: List<String>? = null,
     val facilities: List<RentalFacilityDto>? = null,
+    val divisionSummary: OrganizationDivisionSummary? = null,
 ) {
     fun toOrganizationOrNull(): Organization? {
         val resolvedId = id ?: legacyId
@@ -3577,6 +3631,7 @@ private data class OrganizationApiDto(
                 ?.filter(String::isNotBlank)
                 ?: emptyList(),
             facilities = facilities?.mapNotNull { facility -> facility.toFacilityOrNull() } ?: emptyList(),
+            divisionSummary = divisionSummary ?: OrganizationDivisionSummary(),
         )
     }
 }

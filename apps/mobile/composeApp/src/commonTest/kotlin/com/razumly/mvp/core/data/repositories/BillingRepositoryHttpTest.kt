@@ -142,12 +142,12 @@ private class BillingRepositoryHttp_FakeUserRepository(
     override suspend fun logout(): Result<Unit> = error("unused")
     override suspend fun deleteAccount(confirmationText: String): Result<Unit> = error("unused")
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = error("unused")
-    override suspend fun ensureUserByEmail(email: String): Result<UserData> = error("unused")
     override suspend fun createInvites(invites: List<com.razumly.mvp.core.network.dto.InviteCreateDto>): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
     override suspend fun deleteInvite(inviteId: String): Result<Unit> = error("unused")
     override suspend fun findEmailMembership(
         emails: List<String>,
         userIds: List<String>,
+        eventId: String?,
     ): Result<List<UserEmailMembershipMatch>> = error("unused")
     override suspend fun listInvites(userId: String, type: String?): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
     override suspend fun acceptInvite(inviteId: String): Result<Unit> = error("unused")
@@ -708,7 +708,7 @@ class BillingRepositoryHttpTest {
     }
 
     @Test
-    fun listOrganizationsPage_can_request_organization_tag_filters() = runTest {
+    fun listOrganizationsPage_can_request_organization_division_filters() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
         val userRepo = BillingRepositoryHttp_FakeUserRepository(
             currentUser = billingMakeUser("u1"),
@@ -718,14 +718,27 @@ class BillingRepositoryHttpTest {
 
         val engine = MockEngine { request ->
             assertEquals("/api/organizations", request.url.encodedPath)
-            assertEquals("limit=25&offset=50&tags=facility&tags=club", request.url.encodedQuery)
+            assertEquals(
+                "limit=25&offset=50&tags=facility&tags=club&sports=Soccer&sports=Volleyball" +
+                    "&divisionGenders=Women&skillDivisionTypeIds=premier&ageDivisionTypeIds=u16" +
+                    "&divisionPriceMin=12500&divisionPriceMax=17500",
+                request.url.encodedQuery,
+            )
             assertEquals(HttpMethod.Get, request.method)
 
             respond(
                 content = """
                     {
                       "organizations": [
-                        { "id": "org_facility", "name": "Facility Club" }
+                        {
+                          "id": "org_facility",
+                          "name": "Facility Club",
+                          "divisionSummary": {
+                            "count": 4,
+                            "minPrice": 12500,
+                            "maxPrice": 17500
+                          }
+                        }
                       ],
                       "pagination": {
                         "limit": 25,
@@ -748,9 +761,18 @@ class BillingRepositoryHttpTest {
             limit = 25,
             offset = 50,
             tagSlugs = linkedSetOf("facility", "club"),
+            sportIds = linkedSetOf("Soccer", "Volleyball"),
+            divisionGenders = setOf("Women"),
+            skillDivisionTypeIds = setOf("premier"),
+            ageDivisionTypeIds = setOf("u16"),
+            divisionPriceMinCents = 12_500,
+            divisionPriceMaxCents = 17_500,
         ).getOrThrow()
 
         assertEquals("org_facility", page.items.single().id)
+        assertEquals(4, page.items.single().divisionSummary.count)
+        assertEquals(12_500, page.items.single().divisionSummary.minPrice)
+        assertEquals(17_500, page.items.single().divisionSummary.maxPrice)
         assertEquals(51, page.pagination.nextOffset)
         assertEquals(false, page.pagination.hasMore)
     }
@@ -2181,7 +2203,29 @@ class BillingRepositoryHttpTest {
                           "userId": "user_1",
                           "hostId": "host_1",
                           "reason": "weather",
-                          "status": "PENDING"
+                          "status": "PENDING",
+                          "scopeVersion": 2,
+                          "scopeHash": "scope_hash_1",
+                          "approvalPreview": {
+                            "paymentScope": [
+                              {
+                                "paymentId": "payment_1",
+                                "billId": "bill_1",
+                                "refundableAmountCents": 1010,
+                                "currency": "usd"
+                              }
+                            ],
+                            "paymentCount": 1,
+                            "billIds": ["bill_1"],
+                            "paymentIds": ["payment_1"],
+                            "refundableAmountCents": 1010,
+                            "currency": "usd",
+                            "occurrence": {"slotId": "slot_1", "occurrenceDate": "2026-07-11"},
+                            "policyDecision": "WITHIN_CANCELLATION_WINDOW",
+                            "scopeVersion": 2,
+                            "scopeHash": "scope_hash_1",
+                            "isValid": true
+                          }
                         },
                         {
                           "id": "refund_2",
@@ -2217,6 +2261,70 @@ class BillingRepositoryHttpTest {
         assertEquals(listOf(listOf("user_1", "user_2")), requestedUserIds)
         assertEquals(listOf(listOf("event_1", "event_2")), requestedEventIds)
         assertEquals(listOf("refund_1", "refund_2", "refund_3"), refundDao.storedRefunds.map { refund -> refund.id })
+        assertEquals(2, refunds.first().refundRequest.scopeVersion)
+        assertEquals("scope_hash_1", refunds.first().refundRequest.scopeHash)
+        assertEquals(1, refunds.first().approvalPreview?.paymentCount)
+        assertEquals(1010, refunds.first().approvalPreview?.refundableAmountCents)
+        assertEquals("payment_1", refunds.first().approvalPreview?.paymentScope?.single()?.paymentId)
+    }
+
+    @Test
+    fun approveRefund_sends_the_reviewed_immutable_scope_token() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("host_1"),
+            currentAccount = AuthAccount(id = "host_1", email = "host_1@example.test", name = "Host User"),
+        )
+        val refundDao = BillingRepositoryHttp_FakeRefundRequestDao()
+        val db = BillingRepositoryHttp_FakeDatabaseService(refundDao)
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/refund-requests/refund_1", request.url.encodedPath)
+            assertEquals(HttpMethod.Patch, request.method)
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+            respond(
+                content = """
+                    {
+                      "id": "refund_1",
+                      "eventId": "event_1",
+                      "userId": "user_1",
+                      "hostId": "host_1",
+                      "reason": "weather",
+                      "status": "APPROVED"
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val repo = BillingRepository(
+            MvpApiClient(http, "http://example.test", tokenStore),
+            userRepo,
+            BillingRepositoryHttp_UnusedEventRepository,
+            db,
+        )
+
+        repo.approveRefund(
+            RefundRequest(
+                id = "refund_1",
+                eventId = "event_1",
+                userId = "user_1",
+                hostId = "host_1",
+                reason = "weather",
+                scopeVersion = 2,
+                scopeHash = "scope_hash_1",
+            ),
+        ).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"status\":\"APPROVED\""))
+        assertTrue(capturedBody.contains("\"expectedScopeVersion\":2"))
+        assertTrue(capturedBody.contains("\"expectedScopeHash\":\"scope_hash_1\""))
     }
 
     @Test
