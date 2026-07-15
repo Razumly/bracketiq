@@ -215,7 +215,6 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
     )
     val createInviteCalls = mutableListOf<List<InviteCreateDto>>()
     val deleteInviteCalls = mutableListOf<String>()
-    val emailMembershipEventIds = mutableListOf<String?>()
     var createdInvitesResult: List<com.razumly.mvp.core.data.dataTypes.Invite> = emptyList()
     var emailMembershipMatches: List<UserEmailMembershipMatch> = emptyList()
     var searchResults: List<UserData> = emptyList()
@@ -259,6 +258,7 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
     ): Flow<Result<List<UserData>>> =
         flowOf(Result.success(emptyList()))
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = Result.success(searchResults)
+    override suspend fun ensureUserByEmail(email: String): Result<UserData> = Result.success(user)
     override suspend fun createInvites(invites: List<InviteCreateDto>): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> =
         Result.success(createdInvitesResult).also {
             createInviteCalls += invites
@@ -269,10 +269,7 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
     override suspend fun findEmailMembership(
         emails: List<String>,
         userIds: List<String>,
-        eventId: String?,
-    ): Result<List<UserEmailMembershipMatch>> = Result.success(emailMembershipMatches).also {
-        emailMembershipEventIds += eventId
-    }
+    ): Result<List<UserEmailMembershipMatch>> = Result.success(emailMembershipMatches)
     override suspend fun listInvites(userId: String, type: String?): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> =
         Result.success(emptyList())
     override suspend fun acceptInvite(inviteId: String): Result<Unit> = Result.success(Unit)

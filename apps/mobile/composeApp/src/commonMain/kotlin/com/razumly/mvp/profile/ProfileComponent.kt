@@ -492,6 +492,14 @@ internal fun matchingSignStepsForTemplate(
     return steps.filter { step -> step.templateId.trim() == requestedTemplateId }
 }
 
+internal fun selectProfileDocumentSigningStep(
+    requestedTemplateId: String,
+    steps: List<SignStep>,
+): SignStep? = matchingSignStepsForTemplate(
+    steps = steps,
+    templateId = requestedTemplateId,
+).singleOrNull()
+
 data class ProfileMyScheduleState(
     val isLoading: Boolean = false,
     val events: List<Event> = emptyList(),

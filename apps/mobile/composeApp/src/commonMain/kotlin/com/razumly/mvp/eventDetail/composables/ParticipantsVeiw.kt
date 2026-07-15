@@ -83,13 +83,13 @@ import com.razumly.mvp.core.network.dto.TeamCheckInDto
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
 import com.razumly.mvp.core.presentation.composables.InclusivePriceInput
-import com.razumly.mvp.core.presentation.composables.MoneyInputField
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PlayerAction
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.PlayerCardWithActions
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.composables.TeamDetailsDialog
+import com.razumly.mvp.core.presentation.util.MoneyInputUtils
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.util.LocalLoadingHandler
@@ -101,7 +101,6 @@ import com.razumly.mvp.eventDetail.findEventDivisionOption
 import com.razumly.mvp.eventDetail.matchesDivisionIdentifier
 import com.razumly.mvp.eventDetail.resolveSelectedEventDivisionId
 import com.razumly.mvp.eventDetail.visibleTeams
-import kotlin.math.round
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -684,9 +683,9 @@ fun ParticipantsView(
     var creatingBill by remember { mutableStateOf(false) }
     var createBillOwnerType by remember { mutableStateOf("TEAM") }
     var createBillOwnerId by remember { mutableStateOf<String?>(null) }
-    var createBillAmount by remember { mutableStateOf("0") }
+    var createBillAmount by remember { mutableStateOf(participantBillingMoneyDraftFromCents(0)) }
     var createBillQuoteConfirmed by remember { mutableStateOf(false) }
-    var createBillTax by remember { mutableStateOf("0") }
+    var createBillTax by remember { mutableStateOf(participantBillingMoneyDraftFromCents(0)) }
     var createBillAllowSplit by remember { mutableStateOf(false) }
     var createBillLabel by remember { mutableStateOf("Event registration") }
 
@@ -980,7 +979,7 @@ fun ParticipantsView(
                     refundAmountDraftByPaymentId = snapshot.bills
                         .flatMap { bill -> bill.payments }
                         .associate { payment ->
-                            payment.id to payment.refundableAmountCents.coerceAtLeast(0).toString()
+                            payment.id to participantBillingMoneyDraftFromCents(payment.refundableAmountCents)
                         }
                 }
                 .onFailure { throwable ->
@@ -1004,9 +1003,9 @@ fun ParticipantsView(
         creatingBill = false
         createBillOwnerType = context.defaultOwnerType
         createBillOwnerId = context.defaultOwnerId ?: context.userOptions.firstOrNull()?.id
-        createBillAmount = "0"
+        createBillAmount = participantBillingMoneyDraftFromCents(0)
         createBillQuoteConfirmed = false
-        createBillTax = "0"
+        createBillTax = participantBillingMoneyDraftFromCents(0)
         createBillAllowSplit = false
         createBillLabel = "Event registration"
     }
@@ -1457,7 +1456,7 @@ fun ParticipantsView(
 
                                     bill.payments.forEach { payment ->
                                         val draft = refundAmountDraftByPaymentId[payment.id]
-                                            ?: payment.refundableAmountCents.coerceAtLeast(0).toString()
+                                            ?: participantBillingMoneyDraftFromCents(payment.refundableAmountCents)
                                         Column(
                                             modifier = Modifier.fillMaxWidth(),
                                             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -1513,21 +1512,21 @@ fun ParticipantsView(
                                                     }
                                                     if (proofStatus == "SUBMITTED") {
                                                         val amountDraft = proofAmountDraftByProofId[proof.id]
-                                                            ?: payment.amountCents.coerceAtLeast(0).toString()
+                                                            ?: participantBillingMoneyDraftFromCents(payment.amountCents)
                                                         Row(
                                                             modifier = Modifier.fillMaxWidth(),
                                                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                                                             verticalAlignment = Alignment.CenterVertically,
                                                         ) {
-                                                            MoneyInputField(
+                                                            ParticipantBillingMoneyInputField(
                                                                 value = amountDraft,
                                                                 onValueChange = { value ->
                                                                     proofAmountDraftByProofId =
                                                                         proofAmountDraftByProofId +
-                                                                        (proof.id to value.filter(Char::isDigit))
+                                                                        (proof.id to value)
                                                                 },
                                                                 modifier = Modifier.weight(1f),
-                                                                placeholder = "0",
+                                                                label = "Accepted amount",
                                                             )
                                                             OutlinedButton(
                                                                 enabled = canStartParticipantBillingAction(reviewingProofId),
@@ -1535,9 +1534,9 @@ fun ParticipantsView(
                                                                     if (!canStartParticipantBillingAction(reviewingProofId)) {
                                                                         return@OutlinedButton
                                                                     }
-                                                                    val amountCents = parseCentsInputToCents(
+                                                                    val amountCents = participantBillingMoneyDraftToCents(
                                                                         proofAmountDraftByProofId[proof.id]
-                                                                            ?: payment.amountCents.toString(),
+                                                                            ?: participantBillingMoneyDraftFromCents(payment.amountCents),
                                                                     )
                                                                     if (amountCents == null || amountCents <= 0) {
                                                                         refundError = "Enter an accepted amount greater than $0.00"
@@ -1600,15 +1599,15 @@ fun ParticipantsView(
                                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                                     verticalAlignment = Alignment.CenterVertically,
                                                 ) {
-                                                    MoneyInputField(
+                                                    ParticipantBillingMoneyInputField(
                                                         value = draft,
                                                         onValueChange = { value ->
                                                             refundAmountDraftByPaymentId =
                                                                 refundAmountDraftByPaymentId +
-                                                                (payment.id to value.filter(Char::isDigit))
+                                                                (payment.id to value)
                                                         },
                                                         modifier = Modifier.weight(1f),
-                                                        placeholder = "0",
+                                                        label = "Refund amount",
                                                     )
                                                     OutlinedButton(
                                                         enabled = canStartParticipantBillingAction(refundingPaymentId),
@@ -1617,11 +1616,11 @@ fun ParticipantsView(
                                                                 return@OutlinedButton
                                                             }
                                                             val amountCents =
-                                                                parseCentsInputToCents(
+                                                                participantBillingMoneyDraftToCents(
                                                                     refundAmountDraftByPaymentId[payment.id]
-                                                                        ?: payment.refundableAmountCents
-                                                                            .coerceAtLeast(0)
-                                                                            .toString(),
+                                                                        ?: participantBillingMoneyDraftFromCents(
+                                                                            payment.refundableAmountCents,
+                                                                        ),
                                                                 )
                                                             if (amountCents == null || amountCents <= 0) {
                                                                 refundError = "Enter a refund amount greater than $0.00"
@@ -1675,8 +1674,10 @@ fun ParticipantsView(
     billContext?.let { context ->
         val availableUserOwners = context.userOptions
         val isUserOnlyOwner = !context.allowTeamOwner
-        val previewEventAmountCents = (parseCentsInputToCents(createBillAmount) ?: 0).coerceAtLeast(0)
-        val previewTaxAmountCents = (parseCentsInputToCents(createBillTax) ?: 0).coerceAtLeast(0)
+        val previewEventAmountCents =
+            (participantBillingMoneyDraftToCents(createBillAmount) ?: 0).coerceAtLeast(0)
+        val previewTaxAmountCents =
+            (participantBillingMoneyDraftToCents(createBillTax) ?: 0).coerceAtLeast(0)
         val previewTotalAmountCents = previewEventAmountCents + previewTaxAmountCents
         val previewLabel = createBillLabel.trim().ifBlank { "Event registration" }
 
@@ -1743,7 +1744,7 @@ fun ParticipantsView(
                     InclusivePriceInput(
                         totalPriceCents = previewEventAmountCents,
                         onConfirmedTotalPriceChange = { nextCents ->
-                            createBillAmount = nextCents.coerceAtLeast(0).toString()
+                            createBillAmount = participantBillingMoneyDraftFromCents(nextCents)
                         },
                         quoteInclusivePrice = component::quoteInclusivePrice,
                         onQuoteConfirmationChange = { createBillQuoteConfirmed = it },
@@ -1752,14 +1753,13 @@ fun ParticipantsView(
                         editorKey = "participant-bill:${context.billingTeamId}",
                         eventType = selectedEvent.event.eventType.name,
                     )
-                    MoneyInputField(
+                    ParticipantBillingMoneyInputField(
                         value = createBillTax,
                         onValueChange = { value ->
-                            createBillTax = value.filter(Char::isDigit)
+                            createBillTax = value
                         },
                         modifier = Modifier.fillMaxWidth(),
                         label = "Tax",
-                        placeholder = "0",
                     )
                     StandardTextField(
                         value = createBillLabel,
@@ -1815,12 +1815,12 @@ fun ParticipantsView(
                             createBillError = "Wait for the online price quote before creating the bill."
                             return@Button
                         }
-                        val amountCents = parseCentsInputToCents(createBillAmount)
+                        val amountCents = participantBillingMoneyDraftToCents(createBillAmount)
                         if (amountCents == null || amountCents <= 0) {
                             createBillError = "Enter an amount greater than $0.00"
                             return@Button
                         }
-                        val taxCents = parseCentsInputToCents(createBillTax) ?: 0
+                        val taxCents = participantBillingMoneyDraftToCents(createBillTax) ?: 0
                         if (taxCents < 0) {
                             createBillError = "Tax cannot be negative"
                             return@Button
@@ -2461,7 +2461,54 @@ private fun ComplianceDocumentRow(document: EventComplianceRequiredDocument) {
     }
 }
 
-private fun formatCurrency(amountCents: Int): String = "$${centsToAmountText(amountCents)}"
+internal fun participantBillingMoneyDraftFromCents(cents: Int): String =
+    MoneyInputUtils.centsToDisplayValue(cents.coerceAtLeast(0))
+
+internal fun participantBillingMoneyDraftToCents(value: String): Int? {
+    val normalized = value.trim().removePrefix("$").replace(",", "")
+    if (normalized.none(Char::isDigit) || !normalized.matches(Regex("""\d*(?:\.\d{0,2})?"""))) {
+        return null
+    }
+    val wholePart = normalized.substringBefore('.').ifBlank { "0" }.toLongOrNull() ?: return null
+    val fractionalPart = normalized.substringAfter('.', "").padEnd(2, '0').take(2).toLongOrNull() ?: 0L
+    val cents = wholePart * 100L + fractionalPart
+    return cents.takeIf { it <= Int.MAX_VALUE }?.toInt()
+}
+
+private fun participantBillingMoneyInputFilter(value: String): String {
+    val digitsAndDecimal = value.filter { character -> character.isDigit() || character == '.' }
+    val decimalIndex = digitsAndDecimal.indexOf('.')
+    if (decimalIndex < 0) return digitsAndDecimal
+
+    val wholePart = digitsAndDecimal.substring(0, decimalIndex)
+    val fractionalPart = digitsAndDecimal
+        .substring(decimalIndex + 1)
+        .filter(Char::isDigit)
+        .take(2)
+    return "$wholePart.$fractionalPart"
+}
+
+@Composable
+private fun ParticipantBillingMoneyInputField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    label: String = "Amount",
+    placeholder: String = "0.00",
+) {
+    StandardTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier,
+        label = label,
+        placeholder = placeholder,
+        leadingIcon = { Text("$") },
+        inputFilter = ::participantBillingMoneyInputFilter,
+    )
+}
+
+private fun formatCurrency(amountCents: Int): String =
+    "$${MoneyInputUtils.centsToDisplayValue(amountCents)}"
 
 private fun EventCompliancePaymentSummary.billPaidBreakdown(): String {
     if (discountAmountCents > 0) {
@@ -2504,24 +2551,6 @@ private fun discountLabel(discounts: List<BillDiscountSummary>): String {
         discounts.size > 1 -> "Discounts"
         else -> "Discount"
     }
-}
-
-private fun centsToAmountText(amountCents: Int): String {
-    val dollars = amountCents / 100.0
-    val rounded = round(dollars * 100) / 100
-    val wholePart = rounded.toInt()
-    val decimalPart = ((rounded - wholePart) * 100).toInt()
-    return if (decimalPart == 0) {
-        "$wholePart.00"
-    } else if (decimalPart < 10) {
-        "$wholePart.0$decimalPart"
-    } else {
-        "$wholePart.$decimalPart"
-    }
-}
-
-private fun parseCentsInputToCents(value: String): Int? {
-    return value.filter(Char::isDigit).toIntOrNull()
 }
 
 @Composable

@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -102,6 +103,9 @@ fun App(root: RootComponent) {
     val centerNavAction by root.centerNavAction.collectAsState()
     val accountGuideCompletionState by root.accountGuideCompletionState.collectAsState()
     val currentUserResult by root.currentUser.collectAsState()
+    val activeEventTeamCheckInPrompt by root.activeEventTeamCheckInPrompt.collectAsState()
+    val activeEventTeamCheckInSaving by root.activeEventTeamCheckInSaving.collectAsState()
+    val activeEventTeamCheckInError by root.activeEventTeamCheckInError.collectAsState()
     val currentGuideAccountId = currentUserResult
         .getOrNull()
         ?.id
@@ -241,6 +245,41 @@ fun App(root: RootComponent) {
                         prompt = prompt,
                         onUpdateNow = root::openAppUpdate,
                         onDismiss = root::dismissAppUpdatePrompt,
+                    )
+                }
+
+                activeEventTeamCheckInPrompt?.takeIf { appUpdatePrompt == null }?.let { prompt ->
+                    AlertDialog(
+                        onDismissRequest = {
+                            if (!activeEventTeamCheckInSaving) {
+                                root.dismissActiveEventTeamCheckInPrompt()
+                            }
+                        },
+                        title = { Text("Team event check-in") },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Check in ${prompt.teamName} for ${prompt.eventName}.")
+                                activeEventTeamCheckInError?.let { error ->
+                                    Text(error, color = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        },
+                        confirmButton = {
+                            Button(
+                                onClick = root::confirmActiveEventTeamCheckIn,
+                                enabled = !activeEventTeamCheckInSaving,
+                            ) {
+                                Text(if (activeEventTeamCheckInSaving) "Saving..." else "Check in")
+                            }
+                        },
+                        dismissButton = {
+                            Button(
+                                onClick = root::dismissActiveEventTeamCheckInPrompt,
+                                enabled = !activeEventTeamCheckInSaving,
+                            ) {
+                                Text("Later")
+                            }
+                        },
                     )
                 }
 

@@ -5,7 +5,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -64,8 +64,8 @@ class MatchDetailsPanelUiTest {
         composeRule.onNodeWithText("Set 2").assertIsDisplayed()
         composeRule.onAllNodesWithText("Home").assertCountEquals(2)
         composeRule.onAllNodesWithText("Away").assertCountEquals(2)
-        composeRule.onNodeWithText("Red Wolves").assertIsDisplayed()
-        composeRule.onNodeWithText("Blue Jays").assertIsDisplayed()
+        composeRule.onAllNodesWithText("Red Wolves").assertCountEquals(2)
+        composeRule.onAllNodesWithText("Blue Jays").assertCountEquals(2)
         composeRule.onNodeWithText("21").assertIsDisplayed()
         composeRule.onNodeWithText("18").assertIsDisplayed()
 
