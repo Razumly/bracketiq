@@ -1,18 +1,12 @@
 package com.razumly.mvp.di
 
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.razumly.mvp.core.data.DatabaseService
-import com.razumly.mvp.core.data.MIGRATION_1_2_NO_OP
-import com.razumly.mvp.core.data.MIGRATION_2_3_MATCH_START_NULLABLE
-import com.razumly.mvp.core.data.MIGRATION_28_29_EVENT_DATE_DISPLAY
-import com.razumly.mvp.core.data.MIGRATION_29_30_INVITES_CACHE
-import com.razumly.mvp.core.data.MIGRATION_3_4_USER_PRIVACY_FIELDS
-import com.razumly.mvp.core.db.MVP_DATABASE_VERSION
+import com.razumly.mvp.core.data.MVP_DATABASE_MIGRATIONS
 import com.razumly.mvp.core.db.MVPDatabaseService
 import io.github.aakira.napier.Napier
 import org.koin.dsl.bind
@@ -24,23 +18,13 @@ actual val roomDBModule = module {
     single {
         val context = get<Context>()
         val dbFile = context.getDatabasePath("tournament.db")
-        deleteDatabaseIfSchemaVersionChanged(
-            context = context.applicationContext,
-            dbName = dbFile.name,
-        )
         Napier.i(tag = ROOM_DB_LOG_TAG) { "Initializing Room database at ${dbFile.absolutePath}" }
         runCatching {
             Room.databaseBuilder<MVPDatabaseService>(
                 context.applicationContext,
                 dbFile.absolutePath
             ).setDriver(BundledSQLiteDriver())
-                .addMigrations(
-                    MIGRATION_1_2_NO_OP,
-                    MIGRATION_2_3_MATCH_START_NULLABLE,
-                    MIGRATION_3_4_USER_PRIVACY_FIELDS,
-                    MIGRATION_28_29_EVENT_DATE_DISPLAY,
-                    MIGRATION_29_30_INVITES_CACHE,
-                )
+                .addMigrations(*MVP_DATABASE_MIGRATIONS)
                 .addCallback(object : RoomDatabase.Callback() {
                     override fun onCreate(connection: SQLiteConnection) {
                         Napier.i(tag = ROOM_DB_LOG_TAG) { "Room database created at ${dbFile.absolutePath}" }
@@ -56,8 +40,6 @@ actual val roomDBModule = module {
                         }
                     }
                 })
-                .fallbackToDestructiveMigration(true)
-                .fallbackToDestructiveMigrationOnDowngrade(true)
                 .build()
         }.onFailure { throwable ->
             Napier.e(tag = ROOM_DB_LOG_TAG, throwable = throwable) {
@@ -66,34 +48,4 @@ actual val roomDBModule = module {
         }.getOrThrow()
 
     } bind DatabaseService::class
-}
-
-private fun deleteDatabaseIfSchemaVersionChanged(
-    context: Context,
-    dbName: String,
-) {
-    val dbFile = context.getDatabasePath(dbName)
-    if (!dbFile.exists()) return
-
-    val currentVersion = runCatching {
-        SQLiteDatabase.openDatabase(
-            dbFile.absolutePath,
-            null,
-            SQLiteDatabase.OPEN_READONLY,
-        ).use { database ->
-            database.version
-        }
-    }.getOrElse { throwable ->
-        Napier.w(tag = ROOM_DB_LOG_TAG, throwable = throwable) {
-            "Failed reading Room database version for ${dbFile.absolutePath}; deleting database."
-        }
-        Int.MIN_VALUE
-    }
-
-    if (currentVersion == MVP_DATABASE_VERSION) return
-
-    Napier.w(tag = ROOM_DB_LOG_TAG) {
-        "Deleting Room database at ${dbFile.absolutePath} because schema version $currentVersion != $MVP_DATABASE_VERSION"
-    }
-    context.deleteDatabase(dbName)
 }

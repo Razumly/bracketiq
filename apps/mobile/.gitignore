@@ -19,7 +19,9 @@ captures
 /secrets.properties
 /iosApp/iosApp/Secrets.plist
 /codealike.json
-composeApp/schemas
+composeApp/schemas/*
+!composeApp/schemas/com.razumly.mvp.core.db.MVPDatabaseService/
+!composeApp/schemas/com.razumly.mvp.core.db.MVPDatabaseService/*.json
 composeApp/debug/
 composeApp/release/
 composeApp/google-services.json

@@ -1,0 +1,2607 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 30,
+    "identityHash": "2c71e140288eb07ad0bd19df694a853d",
+    "entities": [
+      {
+        "tableName": "Event",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`doubleElimination` INTEGER NOT NULL, `winnerSetCount` INTEGER NOT NULL, `loserSetCount` INTEGER NOT NULL, `winnerBracketPointsToVictory` TEXT NOT NULL, `loserBracketPointsToVictory` TEXT NOT NULL, `prize` TEXT NOT NULL, `id` TEXT NOT NULL, `name` TEXT NOT NULL, `description` TEXT NOT NULL, `divisions` TEXT NOT NULL, `divisionDetails` TEXT NOT NULL, `location` TEXT NOT NULL, `address` TEXT, `start` INTEGER NOT NULL, `end` INTEGER NOT NULL, `timeZone` TEXT NOT NULL, `priceCents` INTEGER NOT NULL, `rating` REAL, `imageId` TEXT NOT NULL, `coordinates` TEXT NOT NULL, `hostId` TEXT NOT NULL, `assistantHostIds` TEXT NOT NULL, `noFixedEndDateTime` INTEGER NOT NULL, `teamSignup` INTEGER NOT NULL, `singleDivision` INTEGER NOT NULL, `freeAgentIds` TEXT NOT NULL, `waitListIds` TEXT NOT NULL, `userIds` TEXT NOT NULL, `teamIds` TEXT NOT NULL, `cancellationRefundHours` INTEGER, `registrationCutoffHours` INTEGER NOT NULL, `seedColor` INTEGER NOT NULL, `sportId` TEXT, `timeSlotIds` TEXT NOT NULL, `fieldIds` TEXT NOT NULL, `leagueScoringConfigId` TEXT, `organizationId` TEXT, `affiliateUrl` TEXT, `scheduleText` TEXT, `dateDisplayMode` TEXT, `dateDisplayText` TEXT, `registrationPaymentMode` TEXT NOT NULL, `manualPaymentLinks` TEXT NOT NULL, `manualPaymentInstructions` TEXT, `autoCancellation` INTEGER NOT NULL, `maxParticipants` INTEGER NOT NULL, `minAge` INTEGER, `maxAge` INTEGER, `teamSizeLimit` INTEGER NOT NULL, `registrationByDivisionType` INTEGER NOT NULL, `eventType` TEXT NOT NULL, `fieldCount` INTEGER, `gamesPerOpponent` INTEGER, `includePlayoffs` INTEGER NOT NULL, `splitLeaguePlayoffDivisions` INTEGER NOT NULL, `playoffTeamCount` INTEGER, `usesSets` INTEGER NOT NULL, `matchDurationMinutes` INTEGER, `setDurationMinutes` INTEGER, `setsPerMatch` INTEGER, `doTeamsOfficiate` INTEGER, `teamOfficialsMaySwap` INTEGER, `teamCheckInMode` TEXT NOT NULL, `teamCheckInOpenMinutesBefore` INTEGER NOT NULL, `allowMatchRosterEdits` INTEGER NOT NULL, `allowTemporaryMatchPlayers` INTEGER NOT NULL, `matchRulesOverride` TEXT, `autoCreatePointMatchIncidents` INTEGER NOT NULL, `resolvedMatchRules` TEXT, `restTimeMinutes` INTEGER, `state` TEXT NOT NULL, `pointsToVictory` TEXT NOT NULL, `officialSchedulingMode` TEXT NOT NULL, `officialPositions` TEXT NOT NULL, `eventOfficials` TEXT NOT NULL, `officialIds` TEXT NOT NULL, `allowPaymentPlans` INTEGER, `installmentCount` INTEGER, `installmentDueDates` TEXT NOT NULL, `installmentDueRelativeDays` TEXT NOT NULL, `installmentAmounts` TEXT NOT NULL, `allowTeamSplitDefault` INTEGER, `requiredTemplateIds` TEXT NOT NULL, `lastUpdated` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "doubleElimination",
+            "columnName": "doubleElimination",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "winnerSetCount",
+            "columnName": "winnerSetCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "loserSetCount",
+            "columnName": "loserSetCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "winnerBracketPointsToVictory",
+            "columnName": "winnerBracketPointsToVictory",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "loserBracketPointsToVictory",
+            "columnName": "loserBracketPointsToVictory",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "prize",
+            "columnName": "prize",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "divisions",
+            "columnName": "divisions",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "divisionDetails",
+            "columnName": "divisionDetails",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "location",
+            "columnName": "location",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "address",
+            "columnName": "address",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "start",
+            "columnName": "start",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "end",
+            "columnName": "end",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timeZone",
+            "columnName": "timeZone",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "priceCents",
+            "columnName": "priceCents",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rating",
+            "columnName": "rating",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "imageId",
+            "columnName": "imageId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "coordinates",
+            "columnName": "coordinates",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hostId",
+            "columnName": "hostId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "assistantHostIds",
+            "columnName": "assistantHostIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "noFixedEndDateTime",
+            "columnName": "noFixedEndDateTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "teamSignup",
+            "columnName": "teamSignup",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "singleDivision",
+            "columnName": "singleDivision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "freeAgentIds",
+            "columnName": "freeAgentIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "waitListIds",
+            "columnName": "waitListIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userIds",
+            "columnName": "userIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "teamIds",
+            "columnName": "teamIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cancellationRefundHours",
+            "columnName": "cancellationRefundHours",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "registrationCutoffHours",
+            "columnName": "registrationCutoffHours",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "seedColor",
+            "columnName": "seedColor",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sportId",
+            "columnName": "sportId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "timeSlotIds",
+            "columnName": "timeSlotIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fieldIds",
+            "columnName": "fieldIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "leagueScoringConfigId",
+            "columnName": "leagueScoringConfigId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "organizationId",
+            "columnName": "organizationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "affiliateUrl",
+            "columnName": "affiliateUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "scheduleText",
+            "columnName": "scheduleText",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "dateDisplayMode",
+            "columnName": "dateDisplayMode",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "dateDisplayText",
+            "columnName": "dateDisplayText",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "registrationPaymentMode",
+            "columnName": "registrationPaymentMode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "manualPaymentLinks",
+            "columnName": "manualPaymentLinks",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "manualPaymentInstructions",
+            "columnName": "manualPaymentInstructions",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "autoCancellation",
+            "columnName": "autoCancellation",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "maxParticipants",
+            "columnName": "maxParticipants",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "minAge",
+            "columnName": "minAge",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "maxAge",
+            "columnName": "maxAge",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "teamSizeLimit",
+            "columnName": "teamSizeLimit",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "registrationByDivisionType",
+            "columnName": "registrationByDivisionType",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventType",
+            "columnName": "eventType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fieldCount",
+            "columnName": "fieldCount",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "gamesPerOpponent",
+            "columnName": "gamesPerOpponent",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "includePlayoffs",
+            "columnName": "includePlayoffs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "splitLeaguePlayoffDivisions",
+            "columnName": "splitLeaguePlayoffDivisions",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "playoffTeamCount",
+            "columnName": "playoffTeamCount",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "usesSets",
+            "columnName": "usesSets",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "matchDurationMinutes",
+            "columnName": "matchDurationMinutes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "setDurationMinutes",
+            "columnName": "setDurationMinutes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "setsPerMatch",
+            "columnName": "setsPerMatch",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "doTeamsOfficiate",
+            "columnName": "doTeamsOfficiate",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "teamOfficialsMaySwap",
+            "columnName": "teamOfficialsMaySwap",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "teamCheckInMode",
+            "columnName": "teamCheckInMode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "teamCheckInOpenMinutesBefore",
+            "columnName": "teamCheckInOpenMinutesBefore",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "allowMatchRosterEdits",
+            "columnName": "allowMatchRosterEdits",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "allowTemporaryMatchPlayers",
+            "columnName": "allowTemporaryMatchPlayers",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "matchRulesOverride",
+            "columnName": "matchRulesOverride",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "autoCreatePointMatchIncidents",
+            "columnName": "autoCreatePointMatchIncidents",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "resolvedMatchRules",
+            "columnName": "resolvedMatchRules",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "restTimeMinutes",
+            "columnName": "restTimeMinutes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pointsToVictory",
+            "columnName": "pointsToVictory",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "officialSchedulingMode",
+            "columnName": "officialSchedulingMode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "officialPositions",
+            "columnName": "officialPositions",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventOfficials",
+            "columnName": "eventOfficials",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "officialIds",
+            "columnName": "officialIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "allowPaymentPlans",
+            "columnName": "allowPaymentPlans",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "installmentCount",
+            "columnName": "installmentCount",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "installmentDueDates",
+            "columnName": "installmentDueDates",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "installmentDueRelativeDays",
+            "columnName": "installmentDueRelativeDays",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "installmentAmounts",
+            "columnName": "installmentAmounts",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "allowTeamSplitDefault",
+            "columnName": "allowTeamSplitDefault",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "requiredTemplateIds",
+            "columnName": "requiredTemplateIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastUpdated",
+            "columnName": "lastUpdated",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "current_user_event_registrations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `eventId` TEXT NOT NULL, `registrantId` TEXT NOT NULL, `parentId` TEXT, `registrantType` TEXT NOT NULL, `rosterRole` TEXT, `status` TEXT, `eventTeamId` TEXT, `sourceTeamRegistrationId` TEXT, `divisionId` TEXT, `divisionTypeId` TEXT, `divisionTypeKey` TEXT, `jerseyNumber` TEXT, `position` TEXT, `isCaptain` INTEGER, `slotId` TEXT, `occurrenceDate` TEXT, `createdAt` TEXT, `updatedAt` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "registrantId",
+            "columnName": "registrantId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parentId",
+            "columnName": "parentId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "registrantType",
+            "columnName": "registrantType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rosterRole",
+            "columnName": "rosterRole",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "eventTeamId",
+            "columnName": "eventTeamId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sourceTeamRegistrationId",
+            "columnName": "sourceTeamRegistrationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "divisionId",
+            "columnName": "divisionId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "divisionTypeId",
+            "columnName": "divisionTypeId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "divisionTypeKey",
+            "columnName": "divisionTypeKey",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "jerseyNumber",
+            "columnName": "jerseyNumber",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isCaptain",
+            "columnName": "isCaptain",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "slotId",
+            "columnName": "slotId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "occurrenceDate",
+            "columnName": "occurrenceDate",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "event_participant_management_entries",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`eventId` TEXT NOT NULL, `cacheSlotId` TEXT NOT NULL, `cacheOccurrenceDate` TEXT NOT NULL, `section` TEXT NOT NULL, `registrationId` TEXT NOT NULL, `sortOrder` INTEGER NOT NULL, `registrantId` TEXT NOT NULL, `registrantType` TEXT NOT NULL, `rosterRole` TEXT, `status` TEXT, `parentId` TEXT, `divisionId` TEXT, `divisionTypeId` TEXT, `divisionTypeKey` TEXT, `consentDocumentId` TEXT, `consentStatus` TEXT, `slotId` TEXT, `occurrenceDate` TEXT, `createdAt` TEXT, `updatedAt` TEXT, PRIMARY KEY(`eventId`, `cacheSlotId`, `cacheOccurrenceDate`, `section`, `registrationId`))",
+        "fields": [
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cacheSlotId",
+            "columnName": "cacheSlotId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cacheOccurrenceDate",
+            "columnName": "cacheOccurrenceDate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "section",
+            "columnName": "section",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "registrationId",
+            "columnName": "registrationId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sortOrder",
+            "columnName": "sortOrder",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "registrantId",
+            "columnName": "registrantId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "registrantType",
+            "columnName": "registrantType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rosterRole",
+            "columnName": "rosterRole",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "parentId",
+            "columnName": "parentId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "divisionId",
+            "columnName": "divisionId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "divisionTypeId",
+            "columnName": "divisionTypeId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "divisionTypeKey",
+            "columnName": "divisionTypeKey",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "consentDocumentId",
+            "columnName": "consentDocumentId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "consentStatus",
+            "columnName": "consentStatus",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slotId",
+            "columnName": "slotId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "occurrenceDate",
+            "columnName": "occurrenceDate",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "eventId",
+            "cacheSlotId",
+            "cacheOccurrenceDate",
+            "section",
+            "registrationId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_event_participant_management_entries_eventId_cacheSlotId_cacheOccurrenceDate",
+            "unique": false,
+            "columnNames": [
+              "eventId",
+              "cacheSlotId",
+              "cacheOccurrenceDate"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_participant_management_entries_eventId_cacheSlotId_cacheOccurrenceDate` ON `${TABLE_NAME}` (`eventId`, `cacheSlotId`, `cacheOccurrenceDate`)"
+          },
+          {
+            "name": "index_event_participant_management_entries_registrantId",
+            "unique": false,
+            "columnNames": [
+              "registrantId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_participant_management_entries_registrantId` ON `${TABLE_NAME}` (`registrantId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "event_team_compliance_summaries",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`eventId` TEXT NOT NULL, `cacheSlotId` TEXT NOT NULL, `cacheOccurrenceDate` TEXT NOT NULL, `teamId` TEXT NOT NULL, `teamName` TEXT NOT NULL, `paymentHasBill` INTEGER NOT NULL, `paymentBillId` TEXT, `paymentTotalAmountCents` INTEGER NOT NULL, `paymentPaidAmountCents` INTEGER NOT NULL, `paymentStatus` TEXT, `paymentIsPaidInFull` INTEGER NOT NULL, `paymentPending` INTEGER NOT NULL, `paymentInheritedFromTeamBill` INTEGER NOT NULL, `manualPaymentProofStatus` TEXT, `manualPaymentProofCount` INTEGER NOT NULL, `documentsSignedCount` INTEGER NOT NULL, `documentsRequiredCount` INTEGER NOT NULL, `registrationAnswersJson` TEXT NOT NULL, PRIMARY KEY(`eventId`, `cacheSlotId`, `cacheOccurrenceDate`, `teamId`))",
+        "fields": [
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cacheSlotId",
+            "columnName": "cacheSlotId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cacheOccurrenceDate",
+            "columnName": "cacheOccurrenceDate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "teamId",
+            "columnName": "teamId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "teamName",
+            "columnName": "teamName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paymentHasBill",
+            "columnName": "paymentHasBill",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paymentBillId",
+            "columnName": "paymentBillId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "paymentTotalAmountCents",
+            "columnName": "paymentTotalAmountCents",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paymentPaidAmountCents",
+            "columnName": "paymentPaidAmountCents",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paymentStatus",
+            "columnName": "paymentStatus",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "paymentIsPaidInFull",
+            "columnName": "paymentIsPaidInFull",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paymentPending",
+            "columnName": "paymentPending",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paymentInheritedFromTeamBill",
+            "columnName": "paymentInheritedFromTeamBill",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "manualPaymentProofStatus",
+            "columnName": "manualPaymentProofStatus",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "manualPaymentProofCount",
+            "columnName": "manualPaymentProofCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "documentsSignedCount",
+            "columnName": "documentsSignedCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "documentsRequiredCount",
+            "columnName": "documentsRequiredCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "registrationAnswersJson",
+            "columnName": "registrationAnswersJson",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "eventId",
+            "cacheSlotId",
+            "cacheOccurrenceDate",
+            "teamId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_event_team_compliance_summaries_eventId_cacheSlotId_cacheOccurrenceDate",
+            "unique": false,
+            "columnNames": [
+              "eventId",
+              "cacheSlotId",
+              "cacheOccurrenceDate"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_team_compliance_summaries_eventId_cacheSlotId_cacheOccurrenceDate` ON `${TABLE_NAME}` (`eventId`, `cacheSlotId`, `cacheOccurrenceDate`)"
+          },
+          {
+            "name": "index_event_team_compliance_summaries_teamId",
+            "unique": false,
+            "columnNames": [
+              "teamId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_team_compliance_summaries_teamId` ON `${TABLE_NAME}` (`teamId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "event_user_compliance_summaries",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`eventId` TEXT NOT NULL, `cacheSlotId` TEXT NOT NULL, `cacheOccurrenceDate` TEXT NOT NULL, `parentTeamId` TEXT NOT NULL, `userId` TEXT NOT NULL, `fullName` TEXT NOT NULL, `userName` TEXT, `isMinorAtEvent` INTEGER NOT NULL, `registrationType` TEXT NOT NULL, `paymentHasBill` INTEGER NOT NULL, `paymentBillId` TEXT, `paymentTotalAmountCents` INTEGER NOT NULL, `paymentPaidAmountCents` INTEGER NOT NULL, `paymentStatus` TEXT, `paymentIsPaidInFull` INTEGER NOT NULL, `paymentPending` INTEGER NOT NULL, `paymentInheritedFromTeamBill` INTEGER NOT NULL, `manualPaymentProofStatus` TEXT, `manualPaymentProofCount` INTEGER NOT NULL, `documentsSignedCount` INTEGER NOT NULL, `documentsRequiredCount` INTEGER NOT NULL, `requiredDocumentsJson` TEXT NOT NULL, `registrationAnswersJson` TEXT NOT NULL, PRIMARY KEY(`eventId`, `cacheSlotId`, `cacheOccurrenceDate`, `parentTeamId`, `userId`))",
+        "fields": [
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cacheSlotId",
+            "columnName": "cacheSlotId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cacheOccurrenceDate",
+            "columnName": "cacheOccurrenceDate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parentTeamId",
+            "columnName": "parentTeamId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "userId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fullName",
+            "columnName": "fullName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userName",
+            "columnName": "userName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isMinorAtEvent",
+            "columnName": "isMinorAtEvent",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "registrationType",
+            "columnName": "registrationType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paymentHasBill",
+            "columnName": "paymentHasBill",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paymentBillId",
+            "columnName": "paymentBillId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "paymentTotalAmountCents",
+            "columnName": "paymentTotalAmountCents",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paymentPaidAmountCents",
+            "columnName": "paymentPaidAmountCents",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paymentStatus",
+            "columnName": "paymentStatus",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "paymentIsPaidInFull",
+            "columnName": "paymentIsPaidInFull",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paymentPending",
+            "columnName": "paymentPending",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paymentInheritedFromTeamBill",
+            "columnName": "paymentInheritedFromTeamBill",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "manualPaymentProofStatus",
+            "columnName": "manualPaymentProofStatus",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "manualPaymentProofCount",
+            "columnName": "manualPaymentProofCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "documentsSignedCount",
+            "columnName": "documentsSignedCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "documentsRequiredCount",
+            "columnName": "documentsRequiredCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "requiredDocumentsJson",
+            "columnName": "requiredDocumentsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "registrationAnswersJson",
+            "columnName": "registrationAnswersJson",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "eventId",
+            "cacheSlotId",
+            "cacheOccurrenceDate",
+            "parentTeamId",
+            "userId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_event_user_compliance_summaries_eventId_cacheSlotId_cacheOccurrenceDate",
+            "unique": false,
+            "columnNames": [
+              "eventId",
+              "cacheSlotId",
+              "cacheOccurrenceDate"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_user_compliance_summaries_eventId_cacheSlotId_cacheOccurrenceDate` ON `${TABLE_NAME}` (`eventId`, `cacheSlotId`, `cacheOccurrenceDate`)"
+          },
+          {
+            "name": "index_event_user_compliance_summaries_parentTeamId",
+            "unique": false,
+            "columnNames": [
+              "parentTeamId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_user_compliance_summaries_parentTeamId` ON `${TABLE_NAME}` (`parentTeamId`)"
+          },
+          {
+            "name": "index_event_user_compliance_summaries_userId",
+            "unique": false,
+            "columnNames": [
+              "userId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_user_compliance_summaries_userId` ON `${TABLE_NAME}` (`userId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "UserData",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`firstName` TEXT NOT NULL, `lastName` TEXT NOT NULL, `teamIds` TEXT NOT NULL, `friendIds` TEXT NOT NULL, `friendRequestIds` TEXT NOT NULL, `friendRequestSentIds` TEXT NOT NULL, `followingIds` TEXT NOT NULL, `blockedUserIds` TEXT NOT NULL, `hiddenEventIds` TEXT NOT NULL, `userName` TEXT NOT NULL, `hasStripeAccount` INTEGER, `uploadedImages` TEXT NOT NULL, `profileImageId` TEXT, `privacyDisplayName` TEXT, `isMinor` INTEGER NOT NULL, `isIdentityHidden` INTEGER NOT NULL, `chatTermsAcceptedAt` TEXT, `chatTermsVersion` TEXT, `notificationSettings` TEXT NOT NULL, `id` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "firstName",
+            "columnName": "firstName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastName",
+            "columnName": "lastName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "teamIds",
+            "columnName": "teamIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "friendIds",
+            "columnName": "friendIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "friendRequestIds",
+            "columnName": "friendRequestIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "friendRequestSentIds",
+            "columnName": "friendRequestSentIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "followingIds",
+            "columnName": "followingIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "blockedUserIds",
+            "columnName": "blockedUserIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hiddenEventIds",
+            "columnName": "hiddenEventIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userName",
+            "columnName": "userName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hasStripeAccount",
+            "columnName": "hasStripeAccount",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "uploadedImages",
+            "columnName": "uploadedImages",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "profileImageId",
+            "columnName": "profileImageId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "privacyDisplayName",
+            "columnName": "privacyDisplayName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isMinor",
+            "columnName": "isMinor",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isIdentityHidden",
+            "columnName": "isIdentityHidden",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "chatTermsAcceptedAt",
+            "columnName": "chatTermsAcceptedAt",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "chatTermsVersion",
+            "columnName": "chatTermsVersion",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "notificationSettings",
+            "columnName": "notificationSettings",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "MatchMVP",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`matchId` INTEGER NOT NULL, `team1Id` TEXT, `team2Id` TEXT, `team1Seed` INTEGER, `team2Seed` INTEGER, `eventId` TEXT NOT NULL, `officialId` TEXT, `fieldId` TEXT, `status` TEXT, `resultStatus` TEXT, `resultType` TEXT, `actualStart` TEXT, `actualEnd` TEXT, `statusReason` TEXT, `winnerEventTeamId` TEXT, `matchRulesSnapshot` TEXT, `resolvedMatchRules` TEXT, `segments` TEXT NOT NULL, `incidents` TEXT NOT NULL, `start` INTEGER, `end` INTEGER, `division` TEXT, `team1Points` TEXT NOT NULL, `team2Points` TEXT NOT NULL, `setResults` TEXT NOT NULL, `side` TEXT, `losersBracket` INTEGER NOT NULL, `winnerNextMatchId` TEXT, `loserNextMatchId` TEXT, `previousLeftId` TEXT, `previousRightId` TEXT, `officialCheckedIn` INTEGER, `officialIds` TEXT NOT NULL, `teamOfficialId` TEXT, `locked` INTEGER NOT NULL, `id` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "matchId",
+            "columnName": "matchId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "team1Id",
+            "columnName": "team1Id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "team2Id",
+            "columnName": "team2Id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "team1Seed",
+            "columnName": "team1Seed",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "team2Seed",
+            "columnName": "team2Seed",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "officialId",
+            "columnName": "officialId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "fieldId",
+            "columnName": "fieldId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "resultStatus",
+            "columnName": "resultStatus",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "resultType",
+            "columnName": "resultType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "actualStart",
+            "columnName": "actualStart",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "actualEnd",
+            "columnName": "actualEnd",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "statusReason",
+            "columnName": "statusReason",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "winnerEventTeamId",
+            "columnName": "winnerEventTeamId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "matchRulesSnapshot",
+            "columnName": "matchRulesSnapshot",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "resolvedMatchRules",
+            "columnName": "resolvedMatchRules",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "segments",
+            "columnName": "segments",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "incidents",
+            "columnName": "incidents",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "start",
+            "columnName": "start",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "end",
+            "columnName": "end",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "division",
+            "columnName": "division",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "team1Points",
+            "columnName": "team1Points",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "team2Points",
+            "columnName": "team2Points",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "setResults",
+            "columnName": "setResults",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "side",
+            "columnName": "side",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "losersBracket",
+            "columnName": "losersBracket",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "winnerNextMatchId",
+            "columnName": "winnerNextMatchId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "loserNextMatchId",
+            "columnName": "loserNextMatchId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "previousLeftId",
+            "columnName": "previousLeftId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "previousRightId",
+            "columnName": "previousRightId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "officialCheckedIn",
+            "columnName": "officialCheckedIn",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "officialIds",
+            "columnName": "officialIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "teamOfficialId",
+            "columnName": "teamOfficialId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "locked",
+            "columnName": "locked",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "MatchOperationOutboxEntry",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `eventId` TEXT NOT NULL, `matchId` TEXT NOT NULL, `operationKind` TEXT NOT NULL, `payloadJson` TEXT NOT NULL, `status` TEXT NOT NULL, `sourceDevice` TEXT NOT NULL, `clientDeviceId` TEXT NOT NULL, `clientSequence` INTEGER NOT NULL, `clientCreatedAt` TEXT NOT NULL, `attemptCount` INTEGER NOT NULL, `lastError` TEXT, `lastAttemptAt` TEXT, `ackedAt` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "matchId",
+            "columnName": "matchId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "operationKind",
+            "columnName": "operationKind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadJson",
+            "columnName": "payloadJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceDevice",
+            "columnName": "sourceDevice",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "clientDeviceId",
+            "columnName": "clientDeviceId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "clientSequence",
+            "columnName": "clientSequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "clientCreatedAt",
+            "columnName": "clientCreatedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attemptCount",
+            "columnName": "attemptCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "lastError",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastAttemptAt",
+            "columnName": "lastAttemptAt",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "ackedAt",
+            "columnName": "ackedAt",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_MatchOperationOutboxEntry_eventId_matchId",
+            "unique": false,
+            "columnNames": [
+              "eventId",
+              "matchId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_MatchOperationOutboxEntry_eventId_matchId` ON `${TABLE_NAME}` (`eventId`, `matchId`)"
+          },
+          {
+            "name": "index_MatchOperationOutboxEntry_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_MatchOperationOutboxEntry_status` ON `${TABLE_NAME}` (`status`)"
+          },
+          {
+            "name": "index_MatchOperationOutboxEntry_clientSequence",
+            "unique": false,
+            "columnNames": [
+              "clientSequence"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_MatchOperationOutboxEntry_clientSequence` ON `${TABLE_NAME}` (`clientSequence`)"
+          }
+        ]
+      },
+      {
+        "tableName": "Field",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`fieldNumber` INTEGER NOT NULL, `divisions` TEXT NOT NULL, `lat` REAL, `long` REAL, `heading` REAL, `inUse` INTEGER, `name` TEXT, `rentalSlotIds` TEXT NOT NULL, `location` TEXT, `organizationId` TEXT, `id` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "fieldNumber",
+            "columnName": "fieldNumber",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "divisions",
+            "columnName": "divisions",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lat",
+            "columnName": "lat",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "long",
+            "columnName": "long",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "heading",
+            "columnName": "heading",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "inUse",
+            "columnName": "inUse",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "rentalSlotIds",
+            "columnName": "rentalSlotIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "location",
+            "columnName": "location",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "organizationId",
+            "columnName": "organizationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "Team",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`division` TEXT NOT NULL, `name` TEXT NOT NULL, `kind` TEXT, `captainId` TEXT NOT NULL, `managerId` TEXT, `headCoachId` TEXT, `coachIds` TEXT NOT NULL, `parentTeamId` TEXT, `playerIds` TEXT NOT NULL, `playerRegistrationIds` TEXT NOT NULL, `pending` TEXT NOT NULL, `staffAssignmentIds` TEXT NOT NULL, `teamSize` INTEGER NOT NULL, `profileImageId` TEXT, `sport` TEXT, `divisionTypeId` TEXT, `skillDivisionTypeId` TEXT, `skillDivisionTypeName` TEXT, `ageDivisionTypeId` TEXT, `ageDivisionTypeName` TEXT, `divisionGender` TEXT, `organizationId` TEXT, `createdBy` TEXT, `joinPolicy` TEXT NOT NULL, `openRegistration` INTEGER NOT NULL, `registrationPriceCents` INTEGER NOT NULL, `affiliateUrl` TEXT, `requiredTemplateIds` TEXT NOT NULL, `playerRegistrations` TEXT NOT NULL, `staffAssignments` TEXT NOT NULL, `id` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "division",
+            "columnName": "division",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "captainId",
+            "columnName": "captainId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "managerId",
+            "columnName": "managerId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "headCoachId",
+            "columnName": "headCoachId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "coachIds",
+            "columnName": "coachIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parentTeamId",
+            "columnName": "parentTeamId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "playerIds",
+            "columnName": "playerIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "playerRegistrationIds",
+            "columnName": "playerRegistrationIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pending",
+            "columnName": "pending",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "staffAssignmentIds",
+            "columnName": "staffAssignmentIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "teamSize",
+            "columnName": "teamSize",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "profileImageId",
+            "columnName": "profileImageId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sport",
+            "columnName": "sport",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "divisionTypeId",
+            "columnName": "divisionTypeId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "skillDivisionTypeId",
+            "columnName": "skillDivisionTypeId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "skillDivisionTypeName",
+            "columnName": "skillDivisionTypeName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "ageDivisionTypeId",
+            "columnName": "ageDivisionTypeId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "ageDivisionTypeName",
+            "columnName": "ageDivisionTypeName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "divisionGender",
+            "columnName": "divisionGender",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "organizationId",
+            "columnName": "organizationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdBy",
+            "columnName": "createdBy",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "joinPolicy",
+            "columnName": "joinPolicy",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "openRegistration",
+            "columnName": "openRegistration",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "registrationPriceCents",
+            "columnName": "registrationPriceCents",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "affiliateUrl",
+            "columnName": "affiliateUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "requiredTemplateIds",
+            "columnName": "requiredTemplateIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "playerRegistrations",
+            "columnName": "playerRegistrations",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "staffAssignments",
+            "columnName": "staffAssignments",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "ChatGroup",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `userIds` TEXT NOT NULL, `hostId` TEXT NOT NULL, `imageUrl` TEXT, `displayName` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userIds",
+            "columnName": "userIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hostId",
+            "columnName": "hostId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "imageUrl",
+            "columnName": "imageUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "displayName",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "MessageMVP",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `userId` TEXT NOT NULL, `body` TEXT NOT NULL, `attachmentUrls` TEXT NOT NULL, `chatId` TEXT NOT NULL, `readByIds` TEXT NOT NULL, `sentTime` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "userId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "body",
+            "columnName": "body",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attachmentUrls",
+            "columnName": "attachmentUrls",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "chatId",
+            "columnName": "chatId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "readByIds",
+            "columnName": "readByIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sentTime",
+            "columnName": "sentTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "team_user_cross_ref",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`teamId` TEXT NOT NULL, `userId` TEXT NOT NULL, PRIMARY KEY(`teamId`, `userId`), FOREIGN KEY(`teamId`) REFERENCES `Team`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`userId`) REFERENCES `UserData`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "teamId",
+            "columnName": "teamId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "userId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "teamId",
+            "userId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_team_user_cross_ref_teamId",
+            "unique": false,
+            "columnNames": [
+              "teamId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_team_user_cross_ref_teamId` ON `${TABLE_NAME}` (`teamId`)"
+          },
+          {
+            "name": "index_team_user_cross_ref_userId",
+            "unique": false,
+            "columnNames": [
+              "userId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_team_user_cross_ref_userId` ON `${TABLE_NAME}` (`userId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "Team",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "teamId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "UserData",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "userId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "user_event_cross_ref",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`userId` TEXT NOT NULL, `eventId` TEXT NOT NULL, PRIMARY KEY(`userId`, `eventId`), FOREIGN KEY(`userId`) REFERENCES `UserData`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`eventId`) REFERENCES `Event`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "userId",
+            "columnName": "userId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "userId",
+            "eventId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_user_event_cross_ref_userId",
+            "unique": false,
+            "columnNames": [
+              "userId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_user_event_cross_ref_userId` ON `${TABLE_NAME}` (`userId`)"
+          },
+          {
+            "name": "index_user_event_cross_ref_eventId",
+            "unique": false,
+            "columnNames": [
+              "eventId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_user_event_cross_ref_eventId` ON `${TABLE_NAME}` (`eventId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "UserData",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "userId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "Event",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "eventId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "event_team_cross_ref",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`teamId` TEXT NOT NULL, `eventId` TEXT NOT NULL, PRIMARY KEY(`teamId`, `eventId`), FOREIGN KEY(`teamId`) REFERENCES `Team`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`eventId`) REFERENCES `Event`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "teamId",
+            "columnName": "teamId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "teamId",
+            "eventId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_event_team_cross_ref_teamId",
+            "unique": false,
+            "columnNames": [
+              "teamId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_team_cross_ref_teamId` ON `${TABLE_NAME}` (`teamId`)"
+          },
+          {
+            "name": "index_event_team_cross_ref_eventId",
+            "unique": false,
+            "columnNames": [
+              "eventId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_team_cross_ref_eventId` ON `${TABLE_NAME}` (`eventId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "Team",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "teamId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "Event",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "eventId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "team_pending_player_cross_ref",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`teamId` TEXT NOT NULL, `userId` TEXT NOT NULL, PRIMARY KEY(`teamId`, `userId`), FOREIGN KEY(`teamId`) REFERENCES `Team`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`userId`) REFERENCES `UserData`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "teamId",
+            "columnName": "teamId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "userId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "teamId",
+            "userId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_team_pending_player_cross_ref_teamId",
+            "unique": false,
+            "columnNames": [
+              "teamId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_team_pending_player_cross_ref_teamId` ON `${TABLE_NAME}` (`teamId`)"
+          },
+          {
+            "name": "index_team_pending_player_cross_ref_userId",
+            "unique": false,
+            "columnNames": [
+              "userId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_team_pending_player_cross_ref_userId` ON `${TABLE_NAME}` (`userId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "Team",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "teamId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "UserData",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "userId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "chat_user_cross_ref",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`chatId` TEXT NOT NULL, `userId` TEXT NOT NULL, PRIMARY KEY(`chatId`, `userId`), FOREIGN KEY(`chatId`) REFERENCES `ChatGroup`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`userId`) REFERENCES `UserData`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "chatId",
+            "columnName": "chatId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "userId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "chatId",
+            "userId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_chat_user_cross_ref_chatId",
+            "unique": false,
+            "columnNames": [
+              "chatId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_chat_user_cross_ref_chatId` ON `${TABLE_NAME}` (`chatId`)"
+          },
+          {
+            "name": "index_chat_user_cross_ref_userId",
+            "unique": false,
+            "columnNames": [
+              "userId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_chat_user_cross_ref_userId` ON `${TABLE_NAME}` (`userId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "ChatGroup",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "chatId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "UserData",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "userId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "RefundRequest",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `eventId` TEXT NOT NULL, `userId` TEXT NOT NULL, `hostId` TEXT, `reason` TEXT NOT NULL, `organizationId` TEXT, `status` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "userId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hostId",
+            "columnName": "hostId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "organizationId",
+            "columnName": "organizationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "discount_offers",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `ownerType` TEXT NOT NULL, `ownerId` TEXT NOT NULL, `name` TEXT NOT NULL, `description` TEXT, `status` TEXT NOT NULL, `targetType` TEXT NOT NULL, `targetId` TEXT NOT NULL, `originalPriceCents` INTEGER NOT NULL, `discountedPriceCents` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerType",
+            "columnName": "ownerType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerId",
+            "columnName": "ownerId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetType",
+            "columnName": "targetType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetId",
+            "columnName": "targetId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "originalPriceCents",
+            "columnName": "originalPriceCents",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "discountedPriceCents",
+            "columnName": "discountedPriceCents",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_discount_offers_ownerType_ownerId",
+            "unique": false,
+            "columnNames": [
+              "ownerType",
+              "ownerId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_discount_offers_ownerType_ownerId` ON `${TABLE_NAME}` (`ownerType`, `ownerId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "discount_codes",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `discountId` TEXT NOT NULL, `code` TEXT NOT NULL, `usageLimit` INTEGER, `usedCount` INTEGER NOT NULL, `status` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "discountId",
+            "columnName": "discountId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "code",
+            "columnName": "code",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "usageLimit",
+            "columnName": "usageLimit",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "usedCount",
+            "columnName": "usedCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_discount_codes_discountId",
+            "unique": false,
+            "columnNames": [
+              "discountId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_discount_codes_discountId` ON `${TABLE_NAME}` (`discountId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "discount_targets",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`cacheKey` TEXT NOT NULL, `ownerType` TEXT NOT NULL, `ownerIdKey` TEXT NOT NULL, `itemType` TEXT NOT NULL, `id` TEXT NOT NULL, `label` TEXT NOT NULL, `description` TEXT, `priceCents` INTEGER NOT NULL, `targetType` TEXT NOT NULL, PRIMARY KEY(`cacheKey`))",
+        "fields": [
+          {
+            "fieldPath": "cacheKey",
+            "columnName": "cacheKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerType",
+            "columnName": "ownerType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerIdKey",
+            "columnName": "ownerIdKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "itemType",
+            "columnName": "itemType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "priceCents",
+            "columnName": "priceCents",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetType",
+            "columnName": "targetType",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "cacheKey"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_discount_targets_ownerType_ownerIdKey_itemType",
+            "unique": false,
+            "columnNames": [
+              "ownerType",
+              "ownerIdKey",
+              "itemType"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_discount_targets_ownerType_ownerIdKey_itemType` ON `${TABLE_NAME}` (`ownerType`, `ownerIdKey`, `itemType`)"
+          }
+        ]
+      },
+      {
+        "tableName": "Invite",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`type` TEXT NOT NULL, `email` TEXT NOT NULL, `status` TEXT, `staffTypes` TEXT NOT NULL, `eventId` TEXT, `organizationId` TEXT, `teamId` TEXT, `userId` TEXT, `createdBy` TEXT, `firstName` TEXT, `lastName` TEXT, `childUserId` TEXT, `childFirstName` TEXT, `childLastName` TEXT, `childFullName` TEXT, `viewerCanAcceptForChild` INTEGER NOT NULL, `id` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "email",
+            "columnName": "email",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "staffTypes",
+            "columnName": "staffTypes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "organizationId",
+            "columnName": "organizationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "teamId",
+            "columnName": "teamId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "userId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdBy",
+            "columnName": "createdBy",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "firstName",
+            "columnName": "firstName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastName",
+            "columnName": "lastName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "childUserId",
+            "columnName": "childUserId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "childFirstName",
+            "columnName": "childFirstName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "childLastName",
+            "columnName": "childLastName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "childFullName",
+            "columnName": "childFullName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "viewerCanAcceptForChild",
+            "columnName": "viewerCanAcceptForChild",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '2c71e140288eb07ad0bd19df694a853d')"
+    ]
+  }
+}

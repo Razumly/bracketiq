@@ -11,6 +11,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.InviteDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchOperationOutboxDao
 import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
+import com.razumly.mvp.core.data.dataTypes.daos.PendingRentalOrderDao
 import com.razumly.mvp.core.data.dataTypes.daos.RefundRequestDao
 import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
@@ -31,6 +32,8 @@ interface DatabaseService {
     val getChatGroupDao: ChatGroupDao
     val getMessageDao: MessageDao
     val getRefundRequestDao: RefundRequestDao
+    val getPendingRentalOrderDao: PendingRentalOrderDao
+        get() = error("PendingRentalOrderDao is not configured.")
     val getDiscountDao: DiscountDao
         get() = error("DiscountDao is not configured.")
     val getInviteDao: InviteDao

@@ -39,6 +39,16 @@ kotlin {
                 implementation(libs.kotlin.test)
             }
         }
+        androidInstrumentedTest {
+            dependencies {
+                implementation(libs.kotlin.test)
+                implementation("androidx.room:room-testing:2.8.4")
+                implementation("androidx.sqlite:sqlite-framework:2.6.2")
+                implementation("androidx.test:monitor:1.8.0")
+                implementation("androidx.test.ext:junit:1.2.1")
+                implementation("androidx.test:runner:1.6.2")
+            }
+        }
     }
 }
 
@@ -48,11 +58,16 @@ android {
 
     defaultConfig {
         minSdk = libs.versions.android.minSdk.get().toInt()
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        getByName("androidTest").assets.srcDir("src/test/assets")
     }
 }
 
