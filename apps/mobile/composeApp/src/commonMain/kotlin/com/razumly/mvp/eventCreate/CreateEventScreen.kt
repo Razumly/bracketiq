@@ -210,11 +210,6 @@ fun CreateEventScreen(
         { selectedType ->
             val normalizedType = selectedType.takeIf { it in mobileCreateEventTypes() } ?: EventType.EVENT
             component.onTypeSelected(normalizedType)
-            if (normalizedType == EventType.LEAGUE || normalizedType == EventType.TOURNAMENT) {
-                component.updateEventField {
-                    copy(teamSignup = true, noFixedEndDateTime = true)
-                }
-            }
         }
     }
 
@@ -526,7 +521,8 @@ fun CreateEventScreen(
                                         organizationTemplates = organizationTemplates,
                                         organizationTemplatesLoading = organizationTemplatesLoading,
                                         organizationTemplatesError = organizationTemplatesError,
-                                        localFieldCount = localFields.size.coerceAtLeast(1),
+                                        localFields = localFields,
+                                        leagueTimeSlots = leagueSlots,
                                         leagueScoringConfig = leagueScoringConfig,
                                         suggestedUsers = suggestedUsers,
                                         useManualTimeSlots = useManualTimeSlots,
@@ -544,6 +540,15 @@ fun CreateEventScreen(
                                                     sportId = sportId.takeIf(String::isNotBlank),
                                                     matchRulesOverride = null,
                                                     resolvedMatchRules = null,
+                                                    usesSets = false,
+                                                    matchDurationMinutes = null,
+                                                    setDurationMinutes = null,
+                                                    setsPerMatch = null,
+                                                    pointsToVictory = emptyList(),
+                                                    winnerSetCount = 1,
+                                                    loserSetCount = 1,
+                                                    winnerBracketPointsToVictory = emptyList(),
+                                                    loserBracketPointsToVictory = emptyList(),
                                                 )
                                             }
                                         },
@@ -554,6 +559,15 @@ fun CreateEventScreen(
                                             mapComponent.toggleMap()
                                         },
                                         onSelectFieldCount = component::selectFieldCount,
+                                        onAddLeagueTimeSlot = { slot ->
+                                            val index = leagueSlots.size
+                                            component.addLeagueTimeSlot()
+                                            component.updateLeagueTimeSlot(index) { slot }
+                                        },
+                                        onUpdateLeagueTimeSlot = { index, slot ->
+                                            component.updateLeagueTimeSlot(index) { slot }
+                                        },
+                                        onRemoveLeagueTimeSlot = component::removeLeagueTimeSlot,
                                         onLeagueScoringConfigChange = { updated ->
                                             component.updateLeagueScoringConfig { updated }
                                         },
@@ -621,6 +635,15 @@ fun CreateEventScreen(
                                                 sportId = sportId.takeIf(String::isNotBlank),
                                                 matchRulesOverride = null,
                                                 resolvedMatchRules = null,
+                                                usesSets = false,
+                                                matchDurationMinutes = null,
+                                                setDurationMinutes = null,
+                                                setsPerMatch = null,
+                                                pointsToVictory = emptyList(),
+                                                winnerSetCount = 1,
+                                                loserSetCount = 1,
+                                                winnerBracketPointsToVictory = emptyList(),
+                                                loserBracketPointsToVictory = emptyList(),
                                             )
                                         }
                                     },

@@ -2,6 +2,11 @@ package com.razumly.mvp.eventCreate
 
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
+import com.razumly.mvp.core.data.dataTypes.MatchTimekeepingConfigMVP
+import com.razumly.mvp.core.data.dataTypes.TournamentConfig
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeName
@@ -9,6 +14,14 @@ import com.razumly.mvp.core.data.util.buildGenderSkillAgeDivisionToken
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
+import com.razumly.mvp.core.util.newId
+import com.razumly.mvp.core.util.resolvedTimeZone
+import kotlinx.datetime.isoDayNumber
+import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Clock
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 enum class EventCreateSetupMode {
     SIMPLE,
@@ -20,9 +33,7 @@ enum class EventCreateSetupPageId(val label: String) {
     BASICS("Basics"),
     PARTICIPATION_PLAN("Participation Plan"),
     DIVISIONS("Divisions"),
-    SCHEDULE_PLAN("Schedule Plan"),
     SCHEDULE_LOCATION("Schedule & Location"),
-    COMPETITION_PLAN("Competition Plan"),
     COMPETITION_RULES("Competition Rules"),
     REGISTRATION_PLAN("Registration Plan"),
     PRICING_REGISTRATION("Pricing & Registration"),
@@ -44,8 +55,6 @@ data class EventCreateSetupChoices(
     val paidRegistration: Boolean = false,
     val useRequiredDocuments: Boolean = false,
     val useRegistrationQuestions: Boolean = false,
-    val customizeMatchRules: Boolean = false,
-    val customizeScoring: Boolean = false,
     val useStaffAssignments: Boolean = false,
     val useDedicatedOfficials: Boolean = false,
 )
@@ -67,10 +76,39 @@ data class SimpleSetupDivisionSelection(
     val ageDivisionTypeName: String,
 )
 
+@OptIn(ExperimentalTime::class)
+fun createSimpleSetupEventRangeSlot(
+    event: Event,
+    fields: List<Field>,
+    slotId: String = newId(),
+    now: Instant = Clock.System.now(),
+): TimeSlot {
+    val start = event.start.takeUnless { value -> value == Instant.DISTANT_PAST } ?: now
+    val end = event.end.takeIf { value -> value > start } ?: start + 1.hours
+    val timeZone = event.resolvedTimeZone()
+    val startLocal = start.toLocalDateTime(timeZone)
+    val endLocal = end.toLocalDateTime(timeZone)
+    val dayOfWeek = (startLocal.date.dayOfWeek.isoDayNumber - 1).mod(7)
+    val fieldIds = fields.map(Field::id).map(String::trim).filter(String::isNotBlank).distinct()
+    return TimeSlot(
+        id = slotId,
+        dayOfWeek = dayOfWeek,
+        daysOfWeek = listOf(dayOfWeek),
+        divisions = event.divisions.normalizeDivisionIdentifiers(),
+        startTimeMinutes = startLocal.time.hour * 60 + startLocal.time.minute,
+        endTimeMinutes = endLocal.time.hour * 60 + endLocal.time.minute,
+        startDate = start,
+        timeZone = event.timeZone,
+        repeating = false,
+        endDate = end,
+        scheduledFieldId = fieldIds.firstOrNull(),
+        scheduledFieldIds = fieldIds,
+        price = null,
+    )
+}
+
 private val pageControllers = mapOf(
     EventCreateSetupPageId.DIVISIONS to EventCreateSetupPageId.PARTICIPATION_PLAN,
-    EventCreateSetupPageId.SCHEDULE_LOCATION to EventCreateSetupPageId.SCHEDULE_PLAN,
-    EventCreateSetupPageId.COMPETITION_RULES to EventCreateSetupPageId.COMPETITION_PLAN,
     EventCreateSetupPageId.PRICING_REGISTRATION to EventCreateSetupPageId.REGISTRATION_PLAN,
     EventCreateSetupPageId.DOCUMENTS_QUESTIONS to EventCreateSetupPageId.REGISTRATION_PLAN,
     EventCreateSetupPageId.STAFF_OPERATIONS to EventCreateSetupPageId.OPERATIONS_PLAN,
@@ -131,7 +169,6 @@ private fun resolvePageUsage(
     event: Event,
     choices: EventCreateSetupChoices,
 ): Pair<Boolean, String?> = when (pageId) {
-    EventCreateSetupPageId.COMPETITION_PLAN,
     EventCreateSetupPageId.COMPETITION_RULES -> {
         val used = event.eventType == EventType.LEAGUE || event.eventType == EventType.TOURNAMENT
         used to if (used) null else "Competition configuration is used by leagues and tournaments."
@@ -171,8 +208,6 @@ fun previousUsedSetupPage(
 fun isPlanningSetupPage(pageId: EventCreateSetupPageId): Boolean = pageId in setOf(
     EventCreateSetupPageId.FORMAT,
     EventCreateSetupPageId.PARTICIPATION_PLAN,
-    EventCreateSetupPageId.SCHEDULE_PLAN,
-    EventCreateSetupPageId.COMPETITION_PLAN,
     EventCreateSetupPageId.REGISTRATION_PLAN,
     EventCreateSetupPageId.OPERATIONS_PLAN,
 )
@@ -206,7 +241,10 @@ fun isSimpleSetupPageComplete(
     else -> true
 }
 
-fun Event.upsertSimpleSetupDivision(selection: SimpleSetupDivisionSelection): Event {
+fun Event.upsertSimpleSetupDivision(
+    selection: SimpleSetupDivisionSelection,
+    replacingDivisionId: String? = null,
+): Event {
     val normalizedGender = selection.gender.trim().uppercase()
     val normalizedSkillId = selection.skillDivisionTypeId.normalizeDivisionIdentifier()
     val normalizedAgeId = selection.ageDivisionTypeId.normalizeDivisionIdentifier()
@@ -219,9 +257,12 @@ fun Event.upsertSimpleSetupDivision(selection: SimpleSetupDivisionSelection): Ev
         skillDivisionTypeId = normalizedSkillId,
         ageDivisionTypeId = normalizedAgeId,
     )
-    val existingDetail = divisionDetails.firstOrNull { detail ->
+    val selectedDetail = divisionDetails.firstOrNull { detail ->
         detail.key.normalizeDivisionIdentifier() == token.normalizeDivisionIdentifier()
     }
+    val replacementDetail = replacingDivisionId
+        ?.let { divisionId -> divisionDetails.firstOrNull { detail -> detail.id == divisionId } }
+    val existingDetail = replacementDetail ?: selectedDetail
     val divisionId = existingDetail?.id ?: "${id}__division__$token"
     val skillName = selection.skillDivisionTypeName.trim().ifBlank { normalizedSkillId }
     val ageName = selection.ageDivisionTypeName.trim().ifBlank { normalizedAgeId }
@@ -252,11 +293,22 @@ fun Event.upsertSimpleSetupDivision(selection: SimpleSetupDivisionSelection): Ev
             existingDetail?.maxParticipants?.coerceAtLeast(2) ?: 2
         },
     )
-    val nextDetails = if (existingDetail == null) {
-        divisionDetails + detail
-    } else {
-        divisionDetails.map { candidate -> if (candidate.id == existingDetail.id) detail else candidate }
-    }
+    val nextDetails = divisionDetails
+        .filterNot { candidate ->
+            candidate.id == replacingDivisionId ||
+                (
+                    candidate.id != divisionId &&
+                        candidate.key.normalizeDivisionIdentifier() == token.normalizeDivisionIdentifier()
+                    )
+        }
+        .let { retained ->
+            val replacementIndex = retained.indexOfFirst { candidate -> candidate.id == divisionId }
+            if (replacementIndex < 0) {
+                retained + detail
+            } else {
+                retained.mapIndexed { index, candidate -> if (index == replacementIndex) detail else candidate }
+            }
+        }
     val nextDivisionIds = nextDetails.map(DivisionDetail::id).normalizeDivisionIdentifiers()
     return copy(
         divisions = nextDivisionIds,
@@ -281,6 +333,116 @@ fun Event.withSimpleSetupRegistrationValues(
             detail.copy(
                 price = normalizedPrice,
                 maxParticipants = normalizedCapacity.takeIf { value -> value >= 2 },
+            )
+        },
+    )
+}
+
+fun Event.withSimpleTimedMatchDuration(
+    totalMinutes: Int?,
+    segmentCount: Int,
+): Event {
+    val normalizedDuration = totalMinutes?.takeIf { value -> value > 0 }
+    val normalizedSegmentCount = segmentCount.coerceAtLeast(1)
+    val currentOverride = matchRulesOverride ?: MatchRulesConfigMVP()
+    val currentTimekeeping = currentOverride.timekeeping ?: MatchTimekeepingConfigMVP()
+    val segmentDuration = normalizedDuration?.let { duration ->
+        ((duration + normalizedSegmentCount - 1) / normalizedSegmentCount).coerceAtLeast(1)
+    }
+    val nextTimekeeping = currentTimekeeping.copy(segmentDurationMinutes = segmentDuration)
+    val nextOverride = currentOverride.copy(
+        scoringModel = null,
+        segmentCount = null,
+        setPointTargets = emptyList(),
+        timekeeping = nextTimekeeping.takeIf { timekeeping ->
+            timekeeping.timerMode != null ||
+                timekeeping.segmentDurationMinutes != null ||
+                !timekeeping.segmentDurationMinutesBySequence.isNullOrEmpty() ||
+                timekeeping.canUseAddedTime != null ||
+                timekeeping.addedTimeEnabled != null ||
+                timekeeping.stopAtRegulationEnd != null
+        },
+    )
+    return copy(
+        usesSets = false,
+        matchDurationMinutes = normalizedDuration,
+        setDurationMinutes = null,
+        setsPerMatch = null,
+        pointsToVictory = emptyList(),
+        matchRulesOverride = nextOverride,
+        divisionDetails = divisionDetails.map { detail ->
+            detail.copy(
+                usesSets = false,
+                matchDurationMinutes = normalizedDuration,
+                setDurationMinutes = null,
+                setsPerMatch = null,
+                pointsToVictory = emptyList(),
+            )
+        },
+    )
+}
+
+fun Event.withSimplePlayoffMatchDuration(totalMinutes: Int?): Event {
+    val normalizedDuration = totalMinutes?.takeIf { value -> value > 0 }
+    return copy(
+        divisionDetails = divisionDetails.map { detail ->
+            val playoff = detail.playoffConfig ?: TournamentConfig(
+                doubleElimination = doubleElimination,
+                winnerSetCount = winnerSetCount.coerceAtLeast(1),
+                loserSetCount = loserSetCount.coerceAtLeast(1),
+                winnerBracketPointsToVictory = winnerBracketPointsToVictory.ifEmpty { listOf(21) },
+                loserBracketPointsToVictory = loserBracketPointsToVictory.ifEmpty { listOf(21) },
+                restTimeMinutes = restTimeMinutes ?: 0,
+            )
+            detail.copy(
+                playoffConfig = playoff.copy(
+                    usesSets = false,
+                    matchDurationMinutes = normalizedDuration,
+                    setDurationMinutes = null,
+                ),
+            )
+        },
+    )
+}
+
+fun Event.withSimpleSetPointTargets(targets: List<Int>): Event {
+    val normalizedTargets = targets.map { value -> value.coerceAtLeast(1) }.ifEmpty { listOf(21) }
+    val setCount = normalizedTargets.size
+    fun TournamentConfig.withTargets(): TournamentConfig = copy(
+        usesSets = true,
+        matchDurationMinutes = null,
+        winnerSetCount = setCount,
+        loserSetCount = setCount,
+        winnerBracketPointsToVictory = normalizedTargets,
+        loserBracketPointsToVictory = normalizedTargets,
+    )
+
+    return copy(
+        usesSets = true,
+        matchDurationMinutes = null,
+        setsPerMatch = setCount,
+        pointsToVictory = normalizedTargets,
+        winnerSetCount = setCount,
+        loserSetCount = setCount,
+        winnerBracketPointsToVictory = normalizedTargets,
+        loserBracketPointsToVictory = normalizedTargets,
+        matchRulesOverride = matchRulesOverride?.copy(
+            scoringModel = null,
+            segmentCount = null,
+            setPointTargets = emptyList(),
+            timekeeping = null,
+        ),
+        divisionDetails = divisionDetails.map { detail ->
+            val playoff = detail.playoffConfig ?: TournamentConfig(
+                doubleElimination = doubleElimination,
+                restTimeMinutes = restTimeMinutes ?: 0,
+            )
+            detail.copy(
+                usesSets = true,
+                matchDurationMinutes = null,
+                setsPerMatch = setCount,
+                pointsToVictory = normalizedTargets,
+                playoffConfig = playoff.withTargets(),
             )
         },
     )

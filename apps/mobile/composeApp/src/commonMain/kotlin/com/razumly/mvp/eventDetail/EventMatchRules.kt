@@ -177,10 +177,16 @@ private fun addedTimeTimer(minutes: Int): MatchTimekeepingConfigMVP =
 private fun incidentCodes(definitions: List<MatchIncidentTypeDefinitionMVP>): List<String> =
     definitions.map(MatchIncidentTypeDefinitionMVP::code)
 
-private fun setBasedMatchRulesTemplate(segmentLabel: String = "Set"): MatchRulesConfigMVP =
+private fun setBasedMatchRulesTemplate(
+    segmentLabel: String = "Set",
+    segmentCount: Int? = null,
+    setPointTargets: List<Int> = emptyList(),
+): MatchRulesConfigMVP =
     MatchRulesConfigMVP(
         scoringModel = "SETS",
+        segmentCount = segmentCount,
         segmentLabel = segmentLabel,
+        setPointTargets = setPointTargets,
         supportsDraw = false,
         supportsOvertime = false,
         supportsShootout = false,
@@ -225,7 +231,10 @@ private fun periodMatchRulesTemplate(
 private fun defaultSportMatchRulesTemplate(sport: Sport): MatchRulesConfigMVP? {
     val key = "${sport.id} ${sport.name}".trim().lowercase()
     return when {
-        "volleyball" in key -> setBasedMatchRulesTemplate()
+        "volleyball" in key -> setBasedMatchRulesTemplate(
+            segmentCount = 3,
+            setPointTargets = listOf(21, 21, 15),
+        )
         "basketball" in key -> periodMatchRulesTemplate(
             segmentCount = 4,
             segmentLabel = "Quarter",
@@ -333,6 +342,7 @@ private fun mergeMatchRulesTemplate(
         scoringModel = override.scoringModel ?: defaults.scoringModel,
         segmentCount = override.segmentCount ?: defaults.segmentCount,
         segmentLabel = override.segmentLabel ?: defaults.segmentLabel,
+        setPointTargets = override.setPointTargets.takeIf { it.isNotEmpty() } ?: defaults.setPointTargets,
         supportsDraw = override.supportsDraw ?: defaults.supportsDraw,
         supportsOvertime = override.supportsOvertime ?: defaults.supportsOvertime,
         supportsShootout = override.supportsShootout ?: defaults.supportsShootout,
@@ -677,6 +687,23 @@ internal fun resolveEventMatchRules(
         ?: segmentCountFallbackForModel(scoringModel, event)
     val segmentCount = sportTemplate?.segmentCount?.takeIf { it > 0 }
         ?: fallbackSegmentCount
+    val legacySetTargets = when (event.eventType) {
+        EventType.LEAGUE -> event.pointsToVictory
+        EventType.TOURNAMENT -> event.winnerBracketPointsToVictory
+        EventType.EVENT, EventType.TRYOUT, EventType.WEEKLY_EVENT -> emptyList()
+    }
+    val setPointTargets = if (scoringModel == "SETS") {
+        listOf(
+            legacySetTargets,
+            eventOverride?.setPointTargets.orEmpty(),
+            sportTemplate?.setPointTargets.orEmpty(),
+            resolvedRulesFallback?.setPointTargets.orEmpty(),
+        ).firstOrNull { targets ->
+            targets.size >= segmentCount && targets.take(segmentCount).all { target -> target > 0 }
+        }?.take(segmentCount) ?: List(segmentCount) { 21 }
+    } else {
+        emptyList()
+    }
     val defaultIncidentTypes = resolvedRulesFallback?.supportedIncidentTypes
         ?.takeIf { it.isNotEmpty() }
         ?: defaultPointIncidentTypes()
@@ -740,6 +767,7 @@ internal fun resolveEventMatchRules(
                 ?.takeIf(String::isNotBlank)
             ?: resolvedRulesFallback?.segmentLabel
             ?: matchSegmentLabelForModel(scoringModel),
+        setPointTargets = setPointTargets,
         supportsDraw = supportsDraw,
         supportsOvertime = supportsOvertime,
         supportsShootout = supportsShootout,

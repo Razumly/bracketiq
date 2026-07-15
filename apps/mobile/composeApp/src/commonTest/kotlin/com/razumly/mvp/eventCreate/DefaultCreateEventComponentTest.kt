@@ -571,6 +571,27 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun selecting_result_points_sport_applies_conventional_standings_defaults() = runTest(testDispatcher) {
+        val soccer = createSport(
+            id = "Indoor Soccer",
+            usePointsPerSetWin = false,
+        ).copy(
+            usePointsForWin = true,
+            usePointsForDraw = true,
+            usePointsForLoss = true,
+        )
+        val harness = CreateEventHarness(sports = listOf(soccer))
+        advance()
+
+        harness.component.updateEventField { copy(sportId = soccer.id) }
+        advance()
+
+        assertEquals(3, harness.component.leagueScoringConfig.value.pointsForWin)
+        assertEquals(1, harness.component.leagueScoringConfig.value.pointsForDraw)
+        assertEquals(0, harness.component.leagueScoringConfig.value.pointsForLoss)
+    }
+
+    @Test
     fun updating_fields_without_sport_change_keeps_league_scoring_config() = runTest(testDispatcher) {
         val timedSport = createSport(
             id = "sport-timed",
@@ -603,13 +624,18 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun selecting_league_or_tournament_enables_open_ended_end_flag() = runTest(testDispatcher) {
+    fun selecting_competition_types_uses_finite_end_by_default() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
         harness.component.onTypeSelected(EventType.LEAGUE)
         advance()
-        assertTrue(harness.component.newEventState.value.noFixedEndDateTime)
+        assertFalse(harness.component.newEventState.value.noFixedEndDateTime)
+        assertFalse(harness.component.useManualTimeSlots.value)
+
+        harness.component.onTypeSelected(EventType.TOURNAMENT)
+        advance()
+        assertFalse(harness.component.newEventState.value.noFixedEndDateTime)
         assertFalse(harness.component.useManualTimeSlots.value)
 
         harness.component.onTypeSelected(EventType.EVENT)

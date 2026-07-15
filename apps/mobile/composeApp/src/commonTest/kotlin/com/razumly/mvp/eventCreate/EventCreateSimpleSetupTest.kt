@@ -2,7 +2,11 @@ package com.razumly.mvp.eventCreate
 
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
@@ -11,6 +15,13 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class EventCreateSimpleSetupTest {
+
+    @Test
+    fun redundant_schedule_and_competition_planning_pages_are_not_part_of_simple_setup() {
+        assertEquals(12, EventCreateSetupPageId.entries.size)
+        assertFalse(EventCreateSetupPageId.entries.any { page -> page.label == "Schedule Plan" })
+        assertFalse(EventCreateSetupPageId.entries.any { page -> page.label == "Competition Plan" })
+    }
 
     @Test
     fun mobile_creation_types_exclude_tryouts() {
@@ -129,6 +140,83 @@ class EventCreateSimpleSetupTest {
         assertEquals("Coed Competitive Adult", secondUpdate.divisionDetails.single().name)
         assertEquals(2_500, secondUpdate.divisionDetails.single().price)
         assertEquals(12, secondUpdate.divisionDetails.single().maxParticipants)
+    }
+
+    @Test
+    fun editing_a_division_replaces_the_selected_card_instead_of_adding_another() {
+        val original = SimpleSetupDivisionSelection(
+            gender = "M",
+            skillDivisionTypeId = "recreational",
+            skillDivisionTypeName = "Recreational",
+            ageDivisionTypeId = "u10",
+            ageDivisionTypeName = "U10",
+        )
+        val replacement = original.copy(
+            skillDivisionTypeId = "competitive",
+            skillDivisionTypeName = "Competitive",
+        )
+        val event = Event(id = "event-1").upsertSimpleSetupDivision(original)
+        val divisionId = event.divisionDetails.single().id
+
+        val updated = event.upsertSimpleSetupDivision(replacement, replacingDivisionId = divisionId)
+
+        assertEquals(1, updated.divisionDetails.size)
+        assertEquals(divisionId, updated.divisionDetails.single().id)
+        assertEquals("Men's Competitive U10", updated.divisionDetails.single().name)
+    }
+
+    @OptIn(ExperimentalTime::class)
+    @Test
+    fun default_competition_timeslot_uses_the_event_window_and_all_resources_and_divisions() {
+        val start = Instant.parse("2026-07-20T18:00:00Z")
+        val end = Instant.parse("2026-07-20T20:00:00Z")
+        val slot = createSimpleSetupEventRangeSlot(
+            event = Event(
+                start = start,
+                end = end,
+                timeZone = "UTC",
+                divisions = listOf("open", "competitive"),
+            ),
+            fields = listOf(
+                Field(id = "field-1", fieldNumber = 1),
+                Field(id = "field-2", fieldNumber = 2),
+            ),
+            slotId = "slot-1",
+        )
+
+        assertFalse(slot.repeating)
+        assertEquals(start, slot.startDate)
+        assertEquals(end, slot.endDate)
+        assertEquals(listOf("field-1", "field-2"), slot.scheduledFieldIds)
+        assertEquals(listOf("open", "competitive"), slot.divisions)
+        assertEquals(18 * 60, slot.startTimeMinutes)
+        assertEquals(20 * 60, slot.endTimeMinutes)
+    }
+
+    @Test
+    fun timed_and_set_rule_edits_only_write_values_for_the_selected_sport_structure() {
+        val division = DivisionDetail(
+            id = "open",
+            playoffConfig = TournamentConfig(),
+        )
+        val timed = Event(divisionDetails = listOf(division), usesSets = true)
+            .withSimpleTimedMatchDuration(totalMinutes = 50, segmentCount = 2)
+
+        assertFalse(timed.usesSets)
+        assertEquals(50, timed.matchDurationMinutes)
+        assertEquals(25, timed.matchRulesOverride?.timekeeping?.segmentDurationMinutes)
+        assertEquals(emptyList(), timed.pointsToVictory)
+
+        val setBased = timed.withSimpleSetPointTargets(listOf(21, 21, 15))
+
+        assertTrue(setBased.usesSets)
+        assertEquals(3, setBased.setsPerMatch)
+        assertEquals(listOf(21, 21, 15), setBased.pointsToVictory)
+        assertEquals(listOf(21, 21, 15), setBased.winnerBracketPointsToVictory)
+        assertEquals(
+            listOf(21, 21, 15),
+            setBased.divisionDetails.single().playoffConfig?.winnerBracketPointsToVictory,
+        )
     }
 
     @Test

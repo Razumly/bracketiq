@@ -20,6 +20,7 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
+import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -68,6 +69,7 @@ import com.razumly.mvp.eventDetail.mergePendingStaffInviteDraft
 import com.razumly.mvp.eventDetail.normalizeStaffInviteEmail
 import com.razumly.mvp.eventDetail.reconcileEventStaffState
 import com.razumly.mvp.eventDetail.resolveEffectiveLeagueSlotDivisionIds
+import com.razumly.mvp.eventDetail.resolveEventMatchRules
 import com.razumly.mvp.eventDetail.validatePendingStaffInviteDrafts
 import com.razumly.mvp.eventDetail.eventImageFailureMessage
 import com.razumly.mvp.eventDetail.eventImageRetryError
@@ -394,10 +396,13 @@ class DefaultCreateEventComponent(
     override fun updateEventField(update: Event.() -> Event) {
         scope.launch {
             val previous = _newEventState.value
-            val updated = previous
+            val candidate = previous
                 .update()
                 .applyCreateSelectionRules()
-                .withSportRules()
+            val updated = candidate.withSportRules(
+                applySportDefaults = previous.sportId != candidate.sportId ||
+                    previous.eventType != candidate.eventType,
+            )
             val normalized = syncOfficialStaffingForSportTransition(
                 previous = previous,
                 updated = updated,
@@ -417,9 +422,12 @@ class DefaultCreateEventComponent(
     private fun updateEventFieldWithoutSelectionRules(update: Event.() -> Event) {
         scope.launch {
             val previous = _newEventState.value
-            val updated = previous
+            val candidate = previous
                 .update()
-                .withSportRules()
+            val updated = candidate.withSportRules(
+                applySportDefaults = previous.sportId != candidate.sportId ||
+                    previous.eventType != candidate.eventType,
+            )
             val normalized = syncOfficialStaffingForSportTransition(
                 previous = previous,
                 updated = updated,
@@ -467,10 +475,13 @@ class DefaultCreateEventComponent(
     override fun updateTournamentField(update: Event.() -> Event) {
         scope.launch {
             val previous = _newEventState.value
-            val updated = previous
+            val candidate = previous
                 .update()
                 .applyCreateSelectionRules()
-                .withSportRules()
+            val updated = candidate.withSportRules(
+                applySportDefaults = previous.sportId != candidate.sportId ||
+                    previous.eventType != candidate.eventType,
+            )
             val normalized = syncOfficialStaffingForSportTransition(
                 previous = previous,
                 updated = updated,
@@ -782,7 +793,8 @@ class DefaultCreateEventComponent(
                 EventType.LEAGUE, EventType.TOURNAMENT -> copy(
                     eventType = type,
                     teamSignup = true,
-                    noFixedEndDateTime = true,
+                    noFixedEndDateTime = false,
+                    end = end.takeIf { it > start } ?: defaultEventEnd(start),
                 )
 
                 EventType.WEEKLY_EVENT -> copy(
@@ -968,7 +980,14 @@ class DefaultCreateEventComponent(
             if (slot.isRentalBacked()) {
                 return@map normalizeRentalSlotResourceSelection(slot, validFieldIds)
             }
-            val remainingFieldIds = slot.normalizedScheduledFieldIds().filter(validFieldIds::contains)
+            val remainingFieldIds = if (
+                !_useManualTimeSlots.value &&
+                (currentEvent.eventType == EventType.LEAGUE || currentEvent.eventType == EventType.TOURNAMENT)
+            ) {
+                resized.map { field -> field.id }
+            } else {
+                slot.normalizedScheduledFieldIds().filter(validFieldIds::contains)
+            }
             slot.copy(
                 scheduledFieldId = remainingFieldIds.firstOrNull(),
                 scheduledFieldIds = remainingFieldIds,
@@ -1762,6 +1781,18 @@ class DefaultCreateEventComponent(
     }
 
     private fun syncLeagueSlotDefaultStartDates(previousEvent: Event, updatedEvent: Event) {
+        if (
+            !_useManualTimeSlots.value &&
+            (updatedEvent.eventType == EventType.LEAGUE || updatedEvent.eventType == EventType.TOURNAMENT)
+        ) {
+            val existingId = _leagueSlots.value.singleOrNull()?.id
+            _leagueSlots.value = listOf(
+                createDefaultLeagueSlot().let { slot ->
+                    existingId?.let { slot.copy(id = it) } ?: slot
+                },
+            )
+            return
+        }
         if (previousEvent.start == updatedEvent.start) {
             return
         }
@@ -1819,7 +1850,7 @@ class DefaultCreateEventComponent(
                     _sports.value = loadedSports
                     _newEventState.value = syncOfficialStaffingForSportTransition(
                         previous = _newEventState.value,
-                        updated = _newEventState.value.withSportRules(),
+                        updated = _newEventState.value.withSportRules(applySportDefaults = true),
                     )
                 }
                 .onFailure { error ->
@@ -1868,10 +1899,13 @@ class DefaultCreateEventComponent(
         _organizationTemplatesLoading.value = false
     }
 
-    private fun usesSetScoringForSport(sportId: String?): Boolean = sportId
-        ?.let { selectedSportId -> _sports.value.firstOrNull { it.id == selectedSportId } }
-        ?.usePointsPerSetWin
-        ?: false
+    private fun usesSetScoringForSport(sportId: String?): Boolean {
+        val sport = resolveSport(sportId) ?: return false
+        return resolveEventMatchRules(
+            event = Event(eventType = EventType.LEAGUE, sportId = sport.id),
+            sport = sport,
+        ).scoringModel == "SETS"
+    }
 
     private fun resolveSport(sportId: String?): Sport? = sportId
         ?.let { selectedSportId -> _sports.value.firstOrNull { it.id == selectedSportId } }
@@ -1899,32 +1933,39 @@ class DefaultCreateEventComponent(
                 pointsForLoss = null,
             )
         } else {
+            val sport = resolveSport(sportId)
             defaults.copy(
+                pointsForWin = 3.takeIf { sport?.usePointsForWin == true },
+                pointsForDraw = 1.takeIf { sport?.usePointsForDraw == true },
+                pointsForLoss = 0.takeIf { sport?.usePointsForLoss == true },
                 pointsPerSetWin = null,
                 pointsPerSetLoss = null,
             )
         }
     }
 
-    private fun Event.withSportRules(): Event {
-        val requiresSets = usesSetScoringForSport(sportId)
+    private fun Event.withSportRules(applySportDefaults: Boolean = false): Event {
+        val rules = resolveEventMatchRules(this, resolveSport(sportId))
+        val requiresSets = rules.scoringModel == "SETS"
         return when (eventType) {
             EventType.EVENT, EventType.TRYOUT, EventType.WEEKLY_EVENT -> this
-            EventType.LEAGUE -> applyLeagueSportRules(requiresSets)
-            EventType.TOURNAMENT -> applyTournamentSportRules(requiresSets)
+            EventType.LEAGUE -> applyLeagueSportRules(requiresSets, rules, applySportDefaults)
+            EventType.TOURNAMENT -> applyTournamentSportRules(requiresSets, rules, applySportDefaults)
         }
     }
 
-    private fun Event.applyLeagueSportRules(requiresSets: Boolean): Event {
+    private fun Event.applyLeagueSportRules(
+        requiresSets: Boolean,
+        rules: ResolvedMatchRulesMVP,
+        applySportDefaults: Boolean,
+    ): Event {
         return if (requiresSets) {
             val allowedSetCounts = setOf(1, 3, 5)
-            val normalizedSets = setsPerMatch?.takeIf { allowedSetCounts.contains(it) } ?: 1
-            val normalizedPoints = pointsToVictory
-                .take(normalizedSets)
-                .toMutableList()
-                .apply {
-                    while (size < normalizedSets) add(21)
-                }
+            val normalizedSets = rules.segmentCount.takeIf(allowedSetCounts::contains) ?: 1
+            val sportTargets = rules.setPointTargets.take(normalizedSets)
+            val normalizedPoints = pointsToVictory.takeIf { values ->
+                values.size >= normalizedSets && values.take(normalizedSets).all { value -> value > 0 }
+            }?.take(normalizedSets) ?: List(normalizedSets) { index -> sportTargets.getOrNull(index) ?: 21 }
             copy(
                 usesSets = true,
                 setsPerMatch = normalizedSets,
@@ -1933,12 +1974,17 @@ class DefaultCreateEventComponent(
                 matchDurationMinutes = null,
             )
         } else {
+            val defaultDuration = rules.timekeeping.segmentDurationMinutesBySequence
+                .takeIf { durations -> durations.size >= rules.segmentCount }
+                ?.take(rules.segmentCount)
+                ?.sum()
+                ?: rules.timekeeping.segmentDurationMinutes?.times(rules.segmentCount.coerceAtLeast(1))
             copy(
                 usesSets = false,
                 setsPerMatch = null,
                 setDurationMinutes = null,
                 pointsToVictory = emptyList(),
-                matchDurationMinutes = matchDurationMinutes,
+                matchDurationMinutes = matchDurationMinutes ?: defaultDuration.takeIf { applySportDefaults },
                 winnerSetCount = 1,
                 loserSetCount = 1,
                 winnerBracketPointsToVictory = winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
@@ -1947,12 +1993,21 @@ class DefaultCreateEventComponent(
         }
     }
 
-    private fun Event.applyTournamentSportRules(requiresSets: Boolean): Event {
+    private fun Event.applyTournamentSportRules(
+        requiresSets: Boolean,
+        rules: ResolvedMatchRulesMVP,
+        applySportDefaults: Boolean,
+    ): Event {
         return if (!requiresSets) {
+            val defaultDuration = rules.timekeeping.segmentDurationMinutesBySequence
+                .takeIf { durations -> durations.size >= rules.segmentCount }
+                ?.take(rules.segmentCount)
+                ?.sum()
+                ?: rules.timekeeping.segmentDurationMinutes?.times(rules.segmentCount.coerceAtLeast(1))
             copy(
                 usesSets = false,
                 setDurationMinutes = null,
-                matchDurationMinutes = matchDurationMinutes,
+                matchDurationMinutes = matchDurationMinutes ?: defaultDuration.takeIf { applySportDefaults },
                 winnerSetCount = 1,
                 loserSetCount = 1,
                 winnerBracketPointsToVictory = winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
@@ -1960,48 +2015,29 @@ class DefaultCreateEventComponent(
             )
         } else {
             val allowedSetCounts = setOf(1, 3, 5)
-            val winnerSets = winnerSetCount.takeIf { allowedSetCounts.contains(it) } ?: 1
-            val loserSets = loserSetCount.takeIf { allowedSetCounts.contains(it) } ?: 1
+            val winnerSets = rules.segmentCount.takeIf(allowedSetCounts::contains) ?: 1
+            val loserSets = winnerSets
+            val sportTargets = rules.setPointTargets.take(winnerSets)
             copy(
                 usesSets = true,
                 setDurationMinutes = setDurationMinutes ?: 20,
                 matchDurationMinutes = null,
                 winnerSetCount = winnerSets,
                 loserSetCount = loserSets,
-                winnerBracketPointsToVictory = winnerBracketPointsToVictory
-                    .take(winnerSets)
-                    .toMutableList()
-                    .apply {
-                        while (size < winnerSets) add(21)
-                    },
-                loserBracketPointsToVictory = loserBracketPointsToVictory
-                    .take(loserSets)
-                    .toMutableList()
-                    .apply {
-                        while (size < loserSets) add(21)
-                    },
+                winnerBracketPointsToVictory = winnerBracketPointsToVictory.takeIf { values ->
+                    values.size >= winnerSets && values.take(winnerSets).all { value -> value > 0 }
+                }?.take(winnerSets) ?: List(winnerSets) { index -> sportTargets.getOrNull(index) ?: 21 },
+                loserBracketPointsToVictory = loserBracketPointsToVictory.takeIf { values ->
+                    values.size >= loserSets && values.take(loserSets).all { value -> value > 0 }
+                }?.take(loserSets) ?: List(loserSets) { index -> sportTargets.getOrNull(index) ?: 21 },
             )
         }
     }
 
     private fun createDefaultLeagueSlot(): TimeSlot {
-        val event = newEventState.value
-        val startDate = if (event.start == Instant.DISTANT_PAST) Clock.System.now() else event.start
-        val endDate = event.defaultLeagueSlotEndDate()
-        return TimeSlot(
-            id = newId(),
-            dayOfWeek = null,
-            daysOfWeek = emptyList(),
-            divisions = defaultFieldDivisions(event),
-            startTimeMinutes = null,
-            endTimeMinutes = null,
-            startDate = startDate,
-            timeZone = event.timeZone,
-            repeating = true,
-            endDate = endDate,
-            scheduledFieldId = null,
-            scheduledFieldIds = emptyList(),
-            price = null,
+        return createSimpleSetupEventRangeSlot(
+            event = newEventState.value,
+            fields = _localFields.value,
         )
     }
 

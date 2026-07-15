@@ -175,6 +175,29 @@ class EventDetailsMatchRulesTest {
     }
 
     @Test
+    fun given_set_based_sport_when_resolving_rules_then_per_set_score_defaults_are_retained() {
+        val event = Event(
+            sportId = "Indoor Volleyball",
+            eventType = EventType.LEAGUE,
+        )
+        val sport = sport(
+            id = "Indoor Volleyball",
+            template = MatchRulesConfigMVP(
+                scoringModel = "SETS",
+                segmentCount = 3,
+                segmentLabel = "Set",
+                setPointTargets = listOf(25, 25, 15),
+            ),
+        )
+
+        val rules = resolveEventMatchRules(event = event, sport = sport)
+
+        assertEquals("SETS", rules.scoringModel)
+        assertEquals(3, rules.segmentCount)
+        assertEquals(listOf(25, 25, 15), rules.setPointTargets)
+    }
+
+    @Test
     fun given_match_rules_override_when_removing_segment_count_then_other_overrides_are_preserved() {
         val sanitized = matchRulesOverrideWithoutSegmentCount(
             MatchRulesConfigMVP(
