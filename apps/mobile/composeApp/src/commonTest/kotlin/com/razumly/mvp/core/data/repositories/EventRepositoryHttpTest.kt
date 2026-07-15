@@ -64,6 +64,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.JsonNull
 import kotlin.test.Test
@@ -1328,6 +1329,68 @@ class EventRepositoryHttpTest {
         assertEquals(listOf("event_1"), cachedUser?.hiddenEventIds)
         assertEquals(listOf(listOf("event_1")), eventDao.deleteEventsWithCrossRefsCalls)
         assertTrue(eventDao.deleteEventsByIdCalls.isEmpty())
+    }
+
+    @Test
+    fun saveRegistrationQuestions_uses_shared_event_scope_put_contract() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            EventRepositoryHttp_FakeEventDao(),
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        var capturedRequestBody = ""
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Put, request.method)
+            assertEquals("/api/registration-questions", request.url.encodedPath)
+            capturedRequestBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+            respond(
+                content = """
+                    {
+                      "questions": [{
+                        "id": "question-1",
+                        "prompt": "What position do you play?",
+                        "answerType": "LONG_TEXT",
+                        "required": true,
+                        "sortOrder": 0
+                      }]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val repo = EventRepository(
+            db,
+            MvpApiClient(http, "http://example.test", tokenStore),
+            EventRepositoryHttp_UnusedTeamRepository,
+            userRepo,
+        )
+
+        val saved = repo.saveRegistrationQuestions(
+            scopeType = " event ",
+            scopeId = " event-1 ",
+            questions = listOf(
+                RegistrationQuestionDraft(
+                    prompt = "  What position do you play?  ",
+                    answerType = "long_text",
+                    required = true,
+                ),
+            ),
+        ).getOrThrow()
+
+        val payload = jsonMVP.parseToJsonElement(capturedRequestBody).jsonObject
+        assertEquals("EVENT", payload["scopeType"]?.jsonPrimitive?.content)
+        assertEquals("event-1", payload["scopeId"]?.jsonPrimitive?.content)
+        val question = payload.getValue("questions").jsonArray.single().jsonObject
+        assertEquals("What position do you play?", question["prompt"]?.jsonPrimitive?.content)
+        assertEquals("LONG_TEXT", question["answerType"]?.jsonPrimitive?.content)
+        assertEquals("question-1", saved.single().id)
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.RegistrationQuestionDraft
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 import kotlin.test.Test
@@ -18,7 +19,7 @@ class EventCreateSimpleSetupTest {
 
     @Test
     fun redundant_schedule_and_competition_planning_pages_are_not_part_of_simple_setup() {
-        assertEquals(12, EventCreateSetupPageId.entries.size)
+        assertEquals(14, EventCreateSetupPageId.entries.size)
         assertFalse(EventCreateSetupPageId.entries.any { page -> page.label == "Schedule Plan" })
         assertFalse(EventCreateSetupPageId.entries.any { page -> page.label == "Competition Plan" })
     }
@@ -42,7 +43,9 @@ class EventCreateSimpleSetupTest {
         )
 
         assertFalse(pages.first { it.id == EventCreateSetupPageId.COMPETITION_RULES }.used)
-        assertFalse(pages.first { it.id == EventCreateSetupPageId.DOCUMENTS_QUESTIONS }.used)
+        assertFalse(pages.first { it.id == EventCreateSetupPageId.RESOURCES }.used)
+        assertFalse(pages.first { it.id == EventCreateSetupPageId.TIMESLOTS }.used)
+        assertFalse(pages.first { it.id == EventCreateSetupPageId.QUESTIONS }.used)
         assertFalse(pages.first { it.id == EventCreateSetupPageId.STAFF_OPERATIONS }.used)
     }
 
@@ -56,6 +59,8 @@ class EventCreateSimpleSetupTest {
         )
 
         assertTrue(pages.first { it.id == EventCreateSetupPageId.COMPETITION_RULES }.used)
+        assertTrue(pages.first { it.id == EventCreateSetupPageId.RESOURCES }.used)
+        assertTrue(pages.first { it.id == EventCreateSetupPageId.TIMESLOTS }.used)
         assertTrue(pages.first { it.id == EventCreateSetupPageId.STAFF_OPERATIONS }.used)
         assertEquals(
             EventCreateSetupPageStatus.AVAILABLE,
@@ -66,7 +71,7 @@ class EventCreateSimpleSetupTest {
     @Test
     fun optional_choices_enable_dependent_pages() {
         val choices = EventCreateSetupChoices(
-            useRequiredDocuments = true,
+            useRegistrationQuestions = true,
             useDedicatedOfficials = true,
         )
         val pages = resolveEventCreateSetupPages(
@@ -76,7 +81,7 @@ class EventCreateSimpleSetupTest {
             completedPageIds = EventCreateSetupPageId.entries.toSet(),
         )
 
-        assertTrue(pages.first { it.id == EventCreateSetupPageId.DOCUMENTS_QUESTIONS }.used)
+        assertTrue(pages.first { it.id == EventCreateSetupPageId.QUESTIONS }.used)
         assertTrue(pages.first { it.id == EventCreateSetupPageId.STAFF_OPERATIONS }.used)
     }
 
@@ -299,7 +304,7 @@ class EventCreateSimpleSetupTest {
     fun review_validation_covers_compact_flow_requirements() {
         val choices = EventCreateSetupChoices(
             paidRegistration = true,
-            useRequiredDocuments = true,
+            useRegistrationQuestions = true,
         )
         val validDraft = Event(
             name = "Summer League",
@@ -311,13 +316,19 @@ class EventCreateSimpleSetupTest {
             noFixedEndDateTime = true,
             maxParticipants = 12,
             priceCents = 2_500,
-            requiredTemplateIds = listOf("waiver"),
+        )
+        val questions = listOf(
+            RegistrationQuestionDraft(
+                prompt = "What position do you play?",
+                required = true,
+            ),
         )
 
         val awaitingQuoteErrors = simpleSetupValidationErrors(
             event = validDraft,
             choices = choices,
             priceQuoteConfirmed = false,
+            registrationQuestions = questions,
         )
 
         assertContains(awaitingQuoteErrors, "Wait for the online price quote.")
@@ -327,6 +338,7 @@ class EventCreateSimpleSetupTest {
                 validDraft,
                 choices,
                 priceQuoteConfirmed = false,
+                registrationQuestions = questions,
             ),
         )
         assertTrue(
@@ -335,6 +347,39 @@ class EventCreateSimpleSetupTest {
                 validDraft,
                 choices,
                 priceQuoteConfirmed = true,
+                registrationQuestions = questions,
+            ),
+        )
+    }
+
+    @Test
+    fun registration_questions_require_at_least_one_nonblank_mobile_draft() {
+        val choices = EventCreateSetupChoices(useRegistrationQuestions = true)
+        val blankDraft = RegistrationQuestionDraft(prompt = "   ")
+
+        assertFalse(
+            isSimpleSetupPageComplete(
+                pageId = EventCreateSetupPageId.QUESTIONS,
+                event = Event(),
+                choices = choices,
+                registrationQuestions = emptyList(),
+            ),
+        )
+        assertContains(
+            simpleSetupValidationErrors(
+                event = Event(),
+                choices = choices,
+                priceQuoteConfirmed = true,
+                registrationQuestions = listOf(blankDraft),
+            ),
+            "Registration questions cannot be blank.",
+        )
+        assertTrue(
+            isSimpleSetupPageComplete(
+                pageId = EventCreateSetupPageId.QUESTIONS,
+                event = Event(),
+                choices = choices,
+                registrationQuestions = listOf(RegistrationQuestionDraft(prompt = "Jersey size?")),
             ),
         )
     }

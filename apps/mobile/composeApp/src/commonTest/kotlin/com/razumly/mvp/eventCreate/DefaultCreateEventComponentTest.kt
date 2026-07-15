@@ -12,6 +12,7 @@ import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
+import com.razumly.mvp.core.data.repositories.RegistrationQuestionDraft
 import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
 import com.razumly.mvp.core.presentation.RentalBookingItemManifest
 import com.razumly.mvp.eventDetail.EventStaffRole
@@ -399,6 +400,35 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals("staff-revision-created", reconcile.expectedRevision)
         assertTrue(reconcile.pendingInvites.isEmpty())
         assertTrue(harness.userRepository.createInviteCalls.isEmpty())
+    }
+
+    @Test
+    fun create_event_saves_mobile_registration_questions_after_the_event_exists() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+        harness.component.updateEventField { copy(divisions = listOf("Open")) }
+        harness.component.setRegistrationQuestionDrafts(
+            listOf(
+                RegistrationQuestionDraft(
+                    prompt = "What position do you play?",
+                    answerType = "LONG_TEXT",
+                    required = true,
+                ),
+            ),
+        )
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        val createdEvent = harness.eventRepository.createEventCalls.single().event
+        val saveCall = harness.eventRepository.saveRegistrationQuestionsCalls.single()
+        assertEquals("EVENT", saveCall.scopeType)
+        assertEquals(createdEvent.id, saveCall.scopeId)
+        assertEquals("What position do you play?", saveCall.questions.single().prompt)
+        assertEquals("LONG_TEXT", saveCall.questions.single().answerType)
+        assertTrue(saveCall.questions.single().required)
+        assertEquals(1, harness.onEventCreatedCount)
     }
 
     @Test

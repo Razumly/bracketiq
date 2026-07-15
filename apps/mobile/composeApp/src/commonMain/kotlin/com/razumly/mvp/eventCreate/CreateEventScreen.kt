@@ -36,6 +36,7 @@ import com.razumly.mvp.core.data.dataTypes.updateOfficialUserPositions
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.withOfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.RegistrationQuestionDraft
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
@@ -96,6 +97,7 @@ fun CreateEventScreen(
     val availableRentalResources by component.availableRentalResources.collectAsState()
     val selectedRentalResourceIds by component.selectedRentalResourceIds.collectAsState()
     val leagueScoringConfig by component.leagueScoringConfig.collectAsState()
+    val registrationQuestionDrafts by component.registrationQuestionDrafts.collectAsState()
     val suggestedUsers by component.suggestedUsers.collectAsState()
     val pendingStaffInvites by component.pendingStaffInvites.collectAsState()
     val termsConsentState by component.termsConsentState.collectAsState()
@@ -374,6 +376,7 @@ fun CreateEventScreen(
             event = newEventState,
             choices = setupChoices,
             priceQuoteConfirmed = simplePriceQuoteConfirmed,
+            registrationQuestions = registrationQuestionDrafts,
         )
         if (!isComplete) {
             errorHandler.showPopup(
@@ -382,6 +385,7 @@ fun CreateEventScreen(
                     event = newEventState,
                     choices = setupChoices,
                     priceQuoteConfirmed = simplePriceQuoteConfirmed,
+                    registrationQuestions = registrationQuestionDrafts,
                 ),
             )
             return
@@ -518,11 +522,9 @@ fun CreateEventScreen(
                                         choices = setupChoices,
                                         sports = sports,
                                         divisionTypeParameters = divisionTypeParameters,
-                                        organizationTemplates = organizationTemplates,
-                                        organizationTemplatesLoading = organizationTemplatesLoading,
-                                        organizationTemplatesError = organizationTemplatesError,
                                         localFields = localFields,
                                         leagueTimeSlots = leagueSlots,
+                                        registrationQuestions = registrationQuestionDrafts,
                                         leagueScoringConfig = leagueScoringConfig,
                                         suggestedUsers = suggestedUsers,
                                         useManualTimeSlots = useManualTimeSlots,
@@ -552,13 +554,19 @@ fun CreateEventScreen(
                                                 )
                                             }
                                         },
-                                        onChoicesChange = { choices -> setupChoices = choices },
+                                        onChoicesChange = { choices ->
+                                            if (setupChoices.useRegistrationQuestions && !choices.useRegistrationQuestions) {
+                                                component.setRegistrationQuestionDrafts(emptyList())
+                                            }
+                                            setupChoices = choices
+                                        },
                                         onUseManualTimeSlotsChange = component::setUseManualTimeSlots,
                                         onOpenLocationMap = {
                                             pendingMapPlace = null
                                             mapComponent.toggleMap()
                                         },
                                         onSelectFieldCount = component::selectFieldCount,
+                                        onUpdateLocalFieldName = component::updateLocalFieldName,
                                         onAddLeagueTimeSlot = { slot ->
                                             val index = leagueSlots.size
                                             component.addLeagueTimeSlot()
@@ -571,6 +579,7 @@ fun CreateEventScreen(
                                         onLeagueScoringConfigChange = { updated ->
                                             component.updateLeagueScoringConfig { updated }
                                         },
+                                        onRegistrationQuestionsChange = component::setRegistrationQuestionDrafts,
                                         onSearchUsers = onSearchUsers,
                                         onUpdateAssistantHostIds = onUpdateAssistantHostIds,
                                         onUpdateOfficialIds = { updatedIds ->
@@ -724,6 +733,7 @@ private fun simpleSetupPageError(
     event: Event,
     choices: EventCreateSetupChoices,
     priceQuoteConfirmed: Boolean,
+    registrationQuestions: List<RegistrationQuestionDraft>,
 ): String = when (pageId) {
     EventCreateSetupPageId.BASICS -> "Add an event name and select a sport before continuing."
     EventCreateSetupPageId.DIVISIONS -> "Add at least one division before continuing."
@@ -741,9 +751,9 @@ private fun simpleSetupPageError(
         choices.paidRegistration && !priceQuoteConfirmed -> "Wait for the online price quote."
         else -> "Complete the registration settings before continuing."
     }
-    EventCreateSetupPageId.DOCUMENTS_QUESTIONS -> "Select at least one required document."
+    EventCreateSetupPageId.QUESTIONS -> "Add at least one registration question before continuing."
     EventCreateSetupPageId.REVIEW_PUBLISH -> buildValidationPopupMessage(
-        simpleSetupValidationErrors(event, choices, priceQuoteConfirmed),
+        simpleSetupValidationErrors(event, choices, priceQuoteConfirmed, registrationQuestions),
     )
     else -> "Complete the required fields on this page before continuing."
 }

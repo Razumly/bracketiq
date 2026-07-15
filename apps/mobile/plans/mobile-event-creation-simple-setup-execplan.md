@@ -23,6 +23,9 @@ Mobile event creation currently opens one long advanced event-details form. Afte
 - [x] (2026-07-15) Replaced the generic timed/set selector with sport-structured duration, per-set score, playoff, and explained standings controls.
 - [x] (2026-07-15) Verified division reopening, finite competition defaults, timeslot save/reopen, soccer durations, and volleyball set targets in the Android emulator; ran 27 focused regression tests and assembled the final debug APK.
 - [x] (2026-07-15) Added compact 1/3/5 set-count customization that preserves regulation scores and keeps the deciding-set target last.
+- [x] (2026-07-15) Split schedule setup into event timing/location, resource labels, and a scrollable timeslot page.
+- [x] (2026-07-15) Removed organization document templates from Simple Setup and added direct event registration-question authoring through the shared API.
+- [x] (2026-07-15) Replaced the official scheduling dropdown with explained single-select priority cards.
 
 ## Surprises & Discoveries
 
@@ -64,6 +67,12 @@ Mobile event creation currently opens one long advanced event-details form. Afte
 
 - Observation: Result-points sports had enabled Win, Draw, and Loss inputs but no initial values.
   Evidence: Indoor Soccer rendered three empty standings fields until the sport transition supplied the conventional 3/1/0 defaults.
+
+- Observation: Registration questions already have a shared web API, but mobile only implements the read path used during registration.
+  Evidence: `mvp-site` saves question drafts after the event exists with `PUT /api/registration-questions`; `IEventRepository` currently exposes only `getRegistrationQuestions`.
+
+- Observation: Official scheduling persists as one `OfficialSchedulingMode`, not a combinable set of priorities.
+  Evidence: The shared event model stores exactly one of `STAFFING`, `TEAM_STAFFING`, `SCHEDULE`, or `OFF`.
 
 ## Decision Log
 
@@ -115,19 +124,35 @@ Mobile event creation currently opens one long advanced event-details form. Afte
   Rationale: Set-based sports need an editable best-of structure, while restricting the choices to valid odd counts prevents tied matches and keeps the control compact enough for the fixed mobile viewport.
   Date/Author: 2026-07-15 / Codex
 
+- Decision: Give timing/location, resources, and timeslots separate Simple Setup pages for leagues and tournaments.
+  Rationale: Resource count and labels are one organizer decision, while a variable number of timeslots needs its own vertical scroll region. Event and Weekly Event continue to skip competition resources and timeslots.
+  Date/Author: 2026-07-15 / Codex
+
+- Decision: Describe an open event end as an end date that match generation will set.
+  Rationale: “Ongoing” implied that the event never ends; the persisted flag actually allows the generated match schedule to establish the end.
+  Date/Author: 2026-07-15 / Codex
+
+- Decision: Keep organization document templates out of mobile creation and author event registration questions directly in the app.
+  Rationale: Templates are organization-only configuration, while registration questions already have a shared event-scoped API and are a valid event input on either client.
+  Date/Author: 2026-07-15 / Codex
+
+- Decision: Render the four scheduling priorities as explained radio-style cards.
+  Rationale: The persisted model allows one mode, so the cards improve comparison and clarity without implying that contradictory priorities can be selected together.
+  Date/Author: 2026-07-15 / Codex
+
 ## Outcomes & Retrospective
 
-The mobile create screen now starts in a purpose-built Simple Setup instead of embedding the advanced editor. Each used page presents only the controls needed for that decision, has no collapsible container or scrollable form, and writes into the same `Event` draft used by Advanced Setup and final creation. The compact title, step count, and progress indicator retain orientation while the inset-aware Back/Continue bar remains above the app navigation and system gesture area.
+The mobile create screen now starts in a purpose-built Simple Setup instead of embedding the advanced editor. Each used page presents only the controls needed for that decision, has no collapsible container, and writes into the same `Event` draft used by Advanced Setup and final creation. Fixed-content pages fit the standard viewport; resource, timeslot, question, and staff collections use a single vertical scroll region while the inset-aware Back/Continue bar remains fixed above the app navigation and system gesture area.
 
-The complete base path and the tallest conditional paths were inspected on an Android emulator at 360 x 800 dp: manual scheduling, competition rules with all custom fields, paid pricing, documents/questions, staff plus officials, and review all fit without vertical scrolling. The screenshot pass directly led to compact date formatting, narrower header typography, full-width pricing cutoff fields, an explicit no-cutoff value, and non-squeezing helper-card actions. A follow-up pass removed two implementation-oriented planning pages, moved no-fixed-end and compact timeslot editing onto Schedule & Location, made division and timeslot summary cards editable, and made competition values follow the sport's resolved scoring model. Indoor Soccer now exposes two 50-minute duration fields and 3/1/0 result points; Indoor Volleyball exposes only 21/21/15 set targets plus the explicit playoff-team count.
+The complete base path and the tallest conditional paths were inspected on an Android emulator at 360 x 800 dp. The latest pass verified separate Schedule & Location, Resources, and Timeslots pages; five saved timeslots scrolling beneath a fixed action bar; direct short/long and required/optional question authoring; and four explained scheduling-priority cards. The screenshot pass directly led to compact date formatting, narrower header typography, full-width pricing cutoff fields, an explicit no-cutoff value, plural-aware resource/division summaries, and non-squeezing helper-card actions. Competition values continue to follow the sport's resolved scoring model: Indoor Soccer exposes duration and conventional 3/1/0 result points, while Indoor Volleyball exposes per-set targets and an explicit 1/3/5 set count.
 
-Android debug Kotlin compilation and debug APK assembly pass. The final focused run passed 27 tests across `EventCreateSimpleSetupTest`, the two affected `DefaultCreateEventComponentTest` regressions, and `EventDetailsMatchRulesTest`. The iOS simulator compile is blocked by the unrelated existing `PaymentProcessor.ios.kt` expect/actual mismatch described above.
+Android debug Kotlin compilation and debug APK assembly pass. The earlier scoring/layout pass ran 27 focused tests; the latest scheduling/question pass ran 18 focused tests across `EventCreateSimpleSetupTest`, the post-create question persistence regression, and the registration-question HTTP contract. The iOS simulator compile remains blocked by the unrelated existing `PaymentProcessor.ios.kt` expect/actual mismatch described above.
 
 ## Context and Orientation
 
 `composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/CreateEventScreen.kt` renders the creation screen and owns transient UI state. `DefaultCreateEventComponent.kt` owns the mutable event draft and persistence. `composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetails.kt` renders the existing advanced form by composing modular section functions. The new resolver and Simple Setup UI belong under the `eventCreate` package. No database or API changes are needed.
 
-The twelve pages are Format, Basics, Participation Plan, Divisions, Schedule & Location, Competition Rules, Registration Plan, Pricing & Registration, Documents & Questions, Operations Plan, Staff & Operations, and Review & Publish. Planning pages remain only where they gate a genuinely optional later page. A page can be current, complete, available, locked, or not used.
+The current pages are Format, Basics, Participation Plan, Divisions, Schedule & Location, Resources, Timeslots, Competition Rules, Registration Plan, Pricing & Registration, Registration Questions, Operations Plan, Staff & Operations, and Review & Publish. Resources and Timeslots are used only by leagues and tournaments. Registration Questions is controlled by Registration Plan. Planning pages remain only where they gate a genuinely optional later page. A page can be current, complete, available, locked, or not used.
 
 ## Plan of Work
 
@@ -137,7 +162,7 @@ Next add a stable Simple/Advanced mode action and compact title, step count, and
 
 Then add planning-page controls for participation, schedule, competition, registration, and operations. These controls update the existing event draft where a persisted field already exists and keep transient choices only for layout decisions that are not event fields.
 
-Finally build page-specific Simple Setup composables that update the established draft callbacks. Advanced continues to render the complete `EventDetails` editor unchanged. Review summarizes the draft and publishes through the same component validation and create method.
+Finally build page-specific Simple Setup composables that update the established draft callbacks. Schedule & Location owns only the mapped location and event timing. Resources owns count and editable labels. Timeslots owns the automatic-window summary plus a single vertically scrollable list/editor for custom slots. Registration Questions holds mobile drafts and saves them through the shared API immediately after event creation. Advanced continues to render the complete `EventDetails` editor unchanged. Review summarizes the draft and publishes through the same component validation and create method.
 
 ## Concrete Steps
 
@@ -151,7 +176,7 @@ If the full multiplatform test task is blocked by an unrelated native environmen
 
 ## Validation and Acceptance
 
-Creating a new event must open Simple Setup on Format. Event, Weekly Event, League, and Tournament must be selectable; Tryout must not appear. The title, step count, and linear indicator must reflect only used pages. Every Simple page must fit at 360 x 800 dp without a scroll container or collapsible section. Switching to Advanced and back must preserve name, sport, event type, division, schedule, pricing, and staffing values. Review must submit through the existing create action. Existing event detail and edit screens must render all sections unchanged.
+Creating a new event must open Simple Setup on Format. Event, Weekly Event, League, and Tournament must be selectable; Tryout must not appear. The title, step count, and linear indicator must reflect only used pages. Fixed-content pages must fit at 360 x 800 dp without collapsible sections. Variable resource, timeslot, and question collections may use one vertical scroll region per page and must keep the bottom action bar visible. Switching to Advanced and back must preserve name, sport, event type, division, schedule, pricing, questions, and staffing values. Review must submit through the existing create action and save question drafts after the event exists. Existing event detail and edit screens must render all sections unchanged.
 
 ## Idempotence and Recovery
 
@@ -173,6 +198,9 @@ Validation transcripts:
     JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventCreate.EventCreateSimpleSetupTest' --tests 'com.razumly.mvp.eventCreate.DefaultCreateEventComponentTest.selecting_competition_types_uses_finite_end_by_default' --tests 'com.razumly.mvp.eventCreate.DefaultCreateEventComponentTest.selecting_result_points_sport_applies_conventional_standings_defaults' --tests 'com.razumly.mvp.eventDetail.EventDetailsMatchRulesTest' :composeApp:assembleDebug
     BUILD SUCCESSFUL; 27 focused tests passed and the debug APK assembled.
 
+    JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventCreate.EventCreateSimpleSetupTest' --tests 'com.razumly.mvp.eventCreate.DefaultCreateEventComponentTest.create_event_saves_mobile_registration_questions_after_the_event_exists' --tests 'com.razumly.mvp.core.data.repositories.EventRepositoryHttpTest.saveRegistrationQuestions_uses_shared_event_scope_put_contract' :composeApp:assembleDebug
+    BUILD SUCCESSFUL; 18 focused tests passed and the debug APK assembled.
+
 Emulator screenshots:
 
     artifacts/event-create-qa/01-format.png
@@ -182,9 +210,16 @@ Emulator screenshots:
     artifacts/event-create-qa/11-soccer-competition-final.png
     artifacts/event-create-qa/12-volleyball-competition.png
 
+    artifacts/event-create-qa-restructure/03-schedule-open-end.png
+    artifacts/event-create-qa-restructure/05-resources-four.png
+    artifacts/event-create-qa-restructure/10-timeslots-many-scrolled.png
+    artifacts/event-create-qa-restructure/12-registration-question-added.png
+    artifacts/event-create-qa-restructure/14-staff-top.png
+    artifacts/event-create-qa-restructure/15-staff-scrolled.png
+
     JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :composeApp:compileKotlinIosSimulatorArm64
     BLOCKED by pre-existing PaymentProcessor.ios.kt expect/actual mismatch for emitPaymentResult.
 
 ## Interfaces and Dependencies
 
-`EventCreateSetupMode`, `EventCreateSetupPageId`, `EventCreateSetupChoices`, `EventCreateSetupPage`, resolver functions, page composables, and draft-mapping helpers live in the `eventCreate` package. Advanced Setup continues to use `EventDetails`. No persistence model or endpoint was added.
+`EventCreateSetupMode`, `EventCreateSetupPageId`, `EventCreateSetupChoices`, `EventCreateSetupPage`, resolver functions, page composables, and draft-mapping helpers live in the `eventCreate` package. `IEventRepository` exposes the existing registration-question PUT contract for create finalization; no persistence model or backend endpoint is added. Advanced Setup continues to use `EventDetails`.

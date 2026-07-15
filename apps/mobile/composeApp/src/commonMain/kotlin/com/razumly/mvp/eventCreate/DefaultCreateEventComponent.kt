@@ -46,6 +46,7 @@ import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
+import com.razumly.mvp.core.data.repositories.RegistrationQuestionDraft
 import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
@@ -116,6 +117,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val selectedRentalResourceIds: StateFlow<Set<String>>
     val isRentalResourceSelectionLocked: Boolean
     val leagueScoringConfig: StateFlow<LeagueScoringConfigDTO>
+    val registrationQuestionDrafts: StateFlow<List<RegistrationQuestionDraft>>
     val suggestedUsers: StateFlow<List<UserData>>
     val pendingStaffInvites: StateFlow<List<PendingStaffInviteDraft>>
     val termsConsentState: StateFlow<ChatTermsConsentState>
@@ -163,6 +165,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun updateLeagueTimeSlot(index: Int, update: TimeSlot.() -> TimeSlot)
     fun removeLeagueTimeSlot(index: Int)
     fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO)
+    fun setRegistrationQuestionDrafts(questions: List<RegistrationQuestionDraft>)
     fun createAccount()
     fun acceptTermsConsent()
     fun onUploadSelected(photo: GalleryPhotoResult, onRetry: () -> Unit = {})
@@ -282,6 +285,8 @@ class DefaultCreateEventComponent(
     override val isRentalResourceSelectionLocked: Boolean = rentalBookingId != null
     private val _leagueScoringConfig = MutableStateFlow(initialSeed?.leagueScoringConfig ?: LeagueScoringConfigDTO())
     override val leagueScoringConfig = _leagueScoringConfig.asStateFlow()
+    private val _registrationQuestionDrafts = MutableStateFlow<List<RegistrationQuestionDraft>>(emptyList())
+    override val registrationQuestionDrafts = _registrationQuestionDrafts.asStateFlow()
     private val _fieldCount = MutableStateFlow(initialSeed?.fields?.size ?: 0)
     private lateinit var loadingHandler: LoadingHandler
 
@@ -1261,6 +1266,12 @@ class DefaultCreateEventComponent(
         _leagueScoringConfig.value = _leagueScoringConfig.value.update()
     }
 
+    override fun setRegistrationQuestionDrafts(questions: List<RegistrationQuestionDraft>) {
+        _registrationQuestionDrafts.value = questions
+            .take(20)
+            .mapIndexed { index, question -> question.copy(sortOrder = index) }
+    }
+
     private suspend fun createEventAfterPayment(eventDraft: Event) {
         val loadingOperation = loadingHandler.newOperation()
         loadingOperation.showLoading("Creating event...")
@@ -1294,17 +1305,26 @@ class DefaultCreateEventComponent(
                 timeSlots = preparedEvent.timeSlots,
             )
                 .onSuccess { createdEvent ->
-                    syncEventStaffAssignments(
-                        createdEvent = createdEvent,
-                        desiredStaffEvent = desiredStaffEvent,
-                    )
-                        .onSuccess { syncedEvent ->
-                            onEventCreated(syncedEvent)
+                    saveRegistrationQuestions(createdEvent)
+                        .onSuccess {
+                            syncEventStaffAssignments(
+                                createdEvent = createdEvent,
+                                desiredStaffEvent = desiredStaffEvent,
+                            )
+                                .onSuccess { syncedEvent ->
+                                    onEventCreated(syncedEvent)
+                                }
+                                .onFailure { error ->
+                                    _errorState.value = ErrorMessage(
+                                        "Event was created without the requested staff changes. " +
+                                            "Staff sync failed: ${error.userMessage()}",
+                                    )
+                                }
                         }
                         .onFailure { error ->
                             _errorState.value = ErrorMessage(
-                                "Event was created without the requested staff changes. " +
-                                    "Staff sync failed: ${error.userMessage()}",
+                                "Event was created, but its registration questions were not saved. " +
+                                    error.userMessage(),
                             )
                         }
                 }
@@ -1314,6 +1334,16 @@ class DefaultCreateEventComponent(
         } finally {
             loadingOperation.hideLoading()
         }
+    }
+
+    private suspend fun saveRegistrationQuestions(createdEvent: Event): Result<Unit> {
+        val questions = _registrationQuestionDrafts.value
+        if (questions.isEmpty()) return Result.success(Unit)
+        return eventRepository.saveRegistrationQuestions(
+            scopeType = "EVENT",
+            scopeId = createdEvent.id,
+            questions = questions,
+        ).map { }
     }
 
     private suspend fun syncEventStaffAssignments(

@@ -54,6 +54,11 @@ interface IEventRepository : IMVPRepository {
     }
     suspend fun getRegistrationQuestions(scopeType: String, scopeId: String): Result<List<TeamJoinQuestion>> =
         Result.success(emptyList())
+    suspend fun saveRegistrationQuestions(
+        scopeType: String,
+        scopeId: String,
+        questions: List<RegistrationQuestionDraft>,
+    ): Result<List<TeamJoinQuestion>> = Result.success(emptyList())
     suspend fun createEvent(
         newEvent: Event,
         requiredTemplateIds: List<String> = emptyList(),

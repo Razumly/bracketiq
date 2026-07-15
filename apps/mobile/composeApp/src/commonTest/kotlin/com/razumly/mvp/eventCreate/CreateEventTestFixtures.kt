@@ -53,7 +53,9 @@ import com.razumly.mvp.core.data.repositories.PurchaseIntentTimeSlotContext
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.RecordSignatureResult
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
+import com.razumly.mvp.core.data.repositories.RegistrationQuestionDraft
 import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
+import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.repositories.DiscountCode
@@ -368,6 +370,12 @@ internal data class ReconcileEventStaffCall(
     val expectedRevision: String,
 )
 
+internal data class SaveRegistrationQuestionsCall(
+    val scopeType: String,
+    val scopeId: String,
+    val questions: List<RegistrationQuestionDraft>,
+)
+
 internal class CreateEvent_FakeEventRepository(
     private val organizationEvents: List<Event> = emptyList(),
 ) : IEventRepository {
@@ -375,6 +383,7 @@ internal class CreateEvent_FakeEventRepository(
     val updateEventCalls = mutableListOf<Event>()
     val getEventStaffStateCalls = mutableListOf<Event>()
     val reconcileEventStaffCalls = mutableListOf<ReconcileEventStaffCall>()
+    val saveRegistrationQuestionsCalls = mutableListOf<SaveRegistrationQuestionsCall>()
     var reconcileEventStaffFailure: Throwable? = null
 
     override fun getCachedEventsFlow(): Flow<Result<List<Event>>> =
@@ -413,6 +422,15 @@ internal class CreateEvent_FakeEventRepository(
         )
     }
     override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> = Result.success(emptyList())
+
+    override suspend fun saveRegistrationQuestions(
+        scopeType: String,
+        scopeId: String,
+        questions: List<RegistrationQuestionDraft>,
+    ): Result<List<TeamJoinQuestion>> {
+        saveRegistrationQuestionsCalls += SaveRegistrationQuestionsCall(scopeType, scopeId, questions)
+        return Result.success(emptyList())
+    }
 
     override suspend fun getEventsByOrganization(
         organizationId: String,

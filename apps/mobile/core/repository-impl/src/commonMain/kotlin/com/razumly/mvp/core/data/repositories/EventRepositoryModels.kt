@@ -168,6 +168,15 @@ data class RegistrationQuestionAnswerSummary(
     val answer: String = "",
 )
 
+@Serializable
+data class RegistrationQuestionDraft(
+    val id: String? = null,
+    val prompt: String = "",
+    val answerType: String = "TEXT",
+    val required: Boolean = false,
+    val sortOrder: Int = 0,
+)
+
 data class EventComplianceUserSummary(
     val userId: String,
     val fullName: String,

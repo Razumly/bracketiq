@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchTimekeepingConfigMVP
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.RegistrationQuestionDraft
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeName
 import com.razumly.mvp.core.data.util.buildGenderSkillAgeDivisionToken
@@ -34,10 +35,12 @@ enum class EventCreateSetupPageId(val label: String) {
     PARTICIPATION_PLAN("Participation Plan"),
     DIVISIONS("Divisions"),
     SCHEDULE_LOCATION("Schedule & Location"),
+    RESOURCES("Resources"),
+    TIMESLOTS("Timeslots"),
     COMPETITION_RULES("Competition Rules"),
     REGISTRATION_PLAN("Registration Plan"),
     PRICING_REGISTRATION("Pricing & Registration"),
-    DOCUMENTS_QUESTIONS("Documents & Questions"),
+    QUESTIONS("Registration Questions"),
     OPERATIONS_PLAN("Operations Plan"),
     STAFF_OPERATIONS("Staff & Operations"),
     REVIEW_PUBLISH("Review & Publish"),
@@ -53,7 +56,6 @@ enum class EventCreateSetupPageStatus {
 
 data class EventCreateSetupChoices(
     val paidRegistration: Boolean = false,
-    val useRequiredDocuments: Boolean = false,
     val useRegistrationQuestions: Boolean = false,
     val useStaffAssignments: Boolean = false,
     val useDedicatedOfficials: Boolean = false,
@@ -110,7 +112,7 @@ fun createSimpleSetupEventRangeSlot(
 private val pageControllers = mapOf(
     EventCreateSetupPageId.DIVISIONS to EventCreateSetupPageId.PARTICIPATION_PLAN,
     EventCreateSetupPageId.PRICING_REGISTRATION to EventCreateSetupPageId.REGISTRATION_PLAN,
-    EventCreateSetupPageId.DOCUMENTS_QUESTIONS to EventCreateSetupPageId.REGISTRATION_PLAN,
+    EventCreateSetupPageId.QUESTIONS to EventCreateSetupPageId.REGISTRATION_PLAN,
     EventCreateSetupPageId.STAFF_OPERATIONS to EventCreateSetupPageId.OPERATIONS_PLAN,
 )
 
@@ -169,14 +171,16 @@ private fun resolvePageUsage(
     event: Event,
     choices: EventCreateSetupChoices,
 ): Pair<Boolean, String?> = when (pageId) {
+    EventCreateSetupPageId.RESOURCES,
+    EventCreateSetupPageId.TIMESLOTS,
     EventCreateSetupPageId.COMPETITION_RULES -> {
         val used = event.eventType == EventType.LEAGUE || event.eventType == EventType.TOURNAMENT
-        used to if (used) null else "Competition configuration is used by leagues and tournaments."
+        used to if (used) null else "Competition scheduling is used by leagues and tournaments."
     }
 
-    EventCreateSetupPageId.DOCUMENTS_QUESTIONS -> {
-        val used = choices.useRequiredDocuments || choices.useRegistrationQuestions
-        used to if (used) null else "Enable documents or questions on Registration Plan."
+    EventCreateSetupPageId.QUESTIONS -> {
+        val used = choices.useRegistrationQuestions
+        used to if (used) null else "Enable registration questions on Registration Plan."
     }
 
     EventCreateSetupPageId.STAFF_OPERATIONS -> {
@@ -217,6 +221,7 @@ fun isSimpleSetupPageComplete(
     event: Event,
     choices: EventCreateSetupChoices = EventCreateSetupChoices(),
     priceQuoteConfirmed: Boolean = true,
+    registrationQuestions: List<RegistrationQuestionDraft> = emptyList(),
 ): Boolean = when (pageId) {
     EventCreateSetupPageId.FORMAT -> event.eventType in mobileCreateEventTypes()
     EventCreateSetupPageId.BASICS -> event.name.isNotBlank() && !event.sportId.isNullOrBlank()
@@ -231,12 +236,16 @@ fun isSimpleSetupPageComplete(
         (event.playoffTeamCount ?: 0) >= 2
     EventCreateSetupPageId.PRICING_REGISTRATION -> event.maxParticipants >= 2 &&
         (!choices.paidRegistration || (event.priceCents > 0 && priceQuoteConfirmed))
-    EventCreateSetupPageId.DOCUMENTS_QUESTIONS -> !choices.useRequiredDocuments ||
-        event.requiredTemplateIds.isNotEmpty()
+    EventCreateSetupPageId.QUESTIONS -> !choices.useRegistrationQuestions ||
+        (
+            registrationQuestions.isNotEmpty() &&
+                registrationQuestions.all { question -> question.prompt.isNotBlank() }
+            )
     EventCreateSetupPageId.REVIEW_PUBLISH -> simpleSetupValidationErrors(
         event = event,
         choices = choices,
         priceQuoteConfirmed = priceQuoteConfirmed,
+        registrationQuestions = registrationQuestions,
     ).isEmpty()
     else -> true
 }
@@ -500,6 +509,7 @@ fun simpleSetupValidationErrors(
     event: Event,
     choices: EventCreateSetupChoices,
     priceQuoteConfirmed: Boolean,
+    registrationQuestions: List<RegistrationQuestionDraft> = emptyList(),
 ): List<String> = buildList {
     if (event.name.isBlank()) add("Add an event name.")
     if (event.sportId.isNullOrBlank()) add("Select a sport.")
@@ -516,7 +526,9 @@ fun simpleSetupValidationErrors(
     if (event.maxParticipants < 2) add("Capacity must be at least 2.")
     if (choices.paidRegistration && event.priceCents <= 0) add("Enter a registration price.")
     if (choices.paidRegistration && !priceQuoteConfirmed) add("Wait for the online price quote.")
-    if (choices.useRequiredDocuments && event.requiredTemplateIds.isEmpty()) {
-        add("Select at least one required document.")
+    if (choices.useRegistrationQuestions && registrationQuestions.isEmpty()) {
+        add("Add at least one registration question.")
+    } else if (choices.useRegistrationQuestions && registrationQuestions.any { question -> question.prompt.isBlank() }) {
+        add("Registration questions cannot be blank.")
     }
 }

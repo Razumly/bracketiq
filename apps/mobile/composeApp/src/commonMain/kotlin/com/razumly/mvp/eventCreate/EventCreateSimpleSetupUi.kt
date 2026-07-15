@@ -4,6 +4,8 @@ package com.razumly.mvp.eventCreate
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,7 +24,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -54,7 +55,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
-import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
+import com.razumly.mvp.core.data.dataTypes.label
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -64,6 +65,7 @@ import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.dataTypes.skillsForSport
 import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
 import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
+import com.razumly.mvp.core.data.repositories.RegistrationQuestionDraft
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.InclusivePriceInput
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
@@ -83,11 +85,9 @@ data class EventCreateSimpleSetupUiState(
     val choices: EventCreateSetupChoices,
     val sports: List<Sport>,
     val divisionTypeParameters: DivisionTypeParameters,
-    val organizationTemplates: List<OrganizationTemplateDocument>,
-    val organizationTemplatesLoading: Boolean,
-    val organizationTemplatesError: String?,
     val localFields: List<Field>,
     val leagueTimeSlots: List<TimeSlot>,
+    val registrationQuestions: List<RegistrationQuestionDraft>,
     val leagueScoringConfig: LeagueScoringConfigDTO,
     val suggestedUsers: List<UserData>,
     val useManualTimeSlots: Boolean,
@@ -102,10 +102,12 @@ data class EventCreateSimpleSetupUiActions(
     val onUseManualTimeSlotsChange: (Boolean) -> Unit,
     val onOpenLocationMap: () -> Unit,
     val onSelectFieldCount: (Int) -> Unit,
+    val onUpdateLocalFieldName: (Int, String) -> Unit,
     val onAddLeagueTimeSlot: (TimeSlot) -> Unit,
     val onUpdateLeagueTimeSlot: (Int, TimeSlot) -> Unit,
     val onRemoveLeagueTimeSlot: (Int) -> Unit,
     val onLeagueScoringConfigChange: (LeagueScoringConfigDTO) -> Unit,
+    val onRegistrationQuestionsChange: (List<RegistrationQuestionDraft>) -> Unit,
     val onSearchUsers: (String) -> Unit,
     val onUpdateAssistantHostIds: (List<String>) -> Unit,
     val onUpdateOfficialIds: (List<String>) -> Unit,
@@ -254,10 +256,12 @@ fun EventCreateSimpleSetupPage(
             EventCreateSetupPageId.PARTICIPATION_PLAN -> SimpleParticipationPage(state, actions)
             EventCreateSetupPageId.DIVISIONS -> SimpleDivisionsPage(state, actions)
             EventCreateSetupPageId.SCHEDULE_LOCATION -> SimpleScheduleLocationPage(state, actions)
+            EventCreateSetupPageId.RESOURCES -> SimpleResourcesPage(state, actions)
+            EventCreateSetupPageId.TIMESLOTS -> SimpleTimeslotsPage(state, actions)
             EventCreateSetupPageId.COMPETITION_RULES -> SimpleCompetitionRulesPage(state, actions)
             EventCreateSetupPageId.REGISTRATION_PLAN -> SimpleRegistrationPlanPage(state, actions)
             EventCreateSetupPageId.PRICING_REGISTRATION -> SimplePricingPage(state, actions)
-            EventCreateSetupPageId.DOCUMENTS_QUESTIONS -> SimpleDocumentsPage(state, actions)
+            EventCreateSetupPageId.QUESTIONS -> SimpleQuestionsPage(state, actions)
             EventCreateSetupPageId.OPERATIONS_PLAN -> SimpleOperationsPlanPage(state, actions)
             EventCreateSetupPageId.STAFF_OPERATIONS -> SimpleStaffOperationsPage(state, actions)
             EventCreateSetupPageId.REVIEW_PUBLISH -> SimpleReviewPage(state)
@@ -573,237 +577,66 @@ private fun SimpleScheduleLocationPage(
 ) {
     var showStartPicker by rememberSaveable { mutableStateOf(false) }
     var showEndPicker by rememberSaveable { mutableStateOf(false) }
-    var showSlotStartPicker by rememberSaveable { mutableStateOf(false) }
-    var showSlotEndPicker by rememberSaveable { mutableStateOf(false) }
-    var editingSlotIndex by remember(state.event.id) { mutableStateOf<Int?>(null) }
-    var slotDraft by remember(state.event.id) { mutableStateOf<TimeSlot?>(null) }
     val timeZone = remember(state.event.timeZone) {
         runCatching { TimeZone.of(state.event.timeZone) }.getOrDefault(TimeZone.currentSystemDefault())
     }
     val supportsOpenEnd = state.event.eventType != EventType.EVENT
-    val supportsFields = state.event.eventType == EventType.LEAGUE ||
-        state.event.eventType == EventType.TOURNAMENT
-    val resourceOptions = state.localFields.map { field ->
-        DropdownOption(field.id, field.name?.takeIf(String::isNotBlank) ?: "Field ${field.fieldNumber}")
-    }
-    val divisionOptions = state.event.divisionDetails.map { detail -> DropdownOption(detail.id, detail.name) }
 
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (slotDraft == null) {
-            OutlinedButton(
-                onClick = actions.onOpenLocationMap,
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-            ) {
-                Text(
-                    text = state.event.location.ifBlank { "Choose location on map" },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                StandardTextField(
-                    value = simpleSetupDateLabel(state.event.start, timeZone),
-                    onValueChange = {},
-                    label = "Starts",
-                    readOnly = true,
-                    onTap = { showStartPicker = true },
-                    modifier = Modifier.weight(1f),
-                )
-                StandardTextField(
-                    value = if (state.event.noFixedEndDateTime) "Ongoing" else simpleSetupDateLabel(state.event.end, timeZone),
-                    onValueChange = {},
-                    label = "Ends",
-                    readOnly = true,
-                    enabled = !state.event.noFixedEndDateTime,
-                    onTap = { showEndPicker = true },
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            if (supportsOpenEnd) {
-                SetupChoiceSwitch(
-                    title = "No fixed end date",
-                    description = "Use when the competition continues until its generated schedule is complete.",
-                    checked = state.event.noFixedEndDateTime,
-                    onCheckedChange = { enabled -> actions.onEditEvent { copy(noFixedEndDateTime = enabled) } },
-                )
-            }
+        OutlinedButton(
+            onClick = actions.onOpenLocationMap,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+        ) {
+            Text(
+                text = state.event.location.ifBlank { "Choose location on map" },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
-        if (supportsFields) {
-            if (slotDraft == null) {
-                PlatformDropdown(
-                    selectedValue = state.localFields.size.coerceAtLeast(1).toString(),
-                    onSelectionChange = { value -> actions.onSelectFieldCount(value.toIntOrNull() ?: 1) },
-                    options = (1..12).map { count -> DropdownOption(count.toString(), count.toString()) },
-                    label = "Courts or fields",
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedButton(
-                    onClick = {
-                        val existingDefault = state.leagueTimeSlots.firstOrNull()
-                            ?.takeIf { !state.useManualTimeSlots }
-                        editingSlotIndex = existingDefault?.let { 0 }
-                        slotDraft = existingDefault ?: createSimpleSetupEventRangeSlot(
-                            event = state.event,
-                            fields = state.localFields,
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                ) {
-                    Text("Add custom timeslot")
-                }
-            }
-            slotDraft?.let { draft ->
-                val selectedResourceIds = draft.normalizedScheduledFieldIds()
-                val selectedDivisionIds = draft.normalizedDivisionIds()
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                    shape = RoundedCornerShape(12.dp),
-                ) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Text(
-                            text = if (editingSlotIndex == null) "New custom timeslot" else "Edit custom timeslot",
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            StandardTextField(
-                                value = simpleSetupDateLabel(draft.startDate, timeZone),
-                                onValueChange = {},
-                                label = "Starts",
-                                readOnly = true,
-                                onTap = { showSlotStartPicker = true },
-                                modifier = Modifier.weight(1f),
-                            )
-                            StandardTextField(
-                                value = draft.endDate?.let { simpleSetupDateLabel(it, timeZone) }.orEmpty(),
-                                onValueChange = {},
-                                label = "Ends",
-                                readOnly = true,
-                                onTap = { showSlotEndPicker = true },
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                        PlatformDropdown(
-                            selectedValue = "",
-                            onSelectionChange = {},
-                            options = resourceOptions,
-                            label = "Resources",
-                            placeholder = "Select resources",
-                            multiSelect = true,
-                            selectedValues = selectedResourceIds,
-                            onMultiSelectionChange = { selected ->
-                                slotDraft = draft.copy(
-                                    scheduledFieldId = selected.firstOrNull(),
-                                    scheduledFieldIds = selected,
-                                )
-                            },
-                            isError = selectedResourceIds.isEmpty(),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        PlatformDropdown(
-                            selectedValue = "",
-                            onSelectionChange = {},
-                            options = divisionOptions,
-                            label = "Divisions",
-                            placeholder = "Select divisions",
-                            multiSelect = true,
-                            selectedValues = selectedDivisionIds,
-                            onMultiSelectionChange = { selected -> slotDraft = draft.copy(divisions = selected) },
-                            enabled = !state.event.singleDivision,
-                            supportingText = if (state.event.singleDivision) {
-                                "All event divisions are included."
-                            } else {
-                                ""
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            OutlinedButton(
-                                onClick = {
-                                    editingSlotIndex?.let { index ->
-                                        if (state.leagueTimeSlots.size > 1) {
-                                            actions.onRemoveLeagueTimeSlot(index)
-                                        } else {
-                                            actions.onUseManualTimeSlotsChange(false)
-                                        }
-                                    }
-                                    editingSlotIndex = null
-                                    slotDraft = null
-                                },
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(if (editingSlotIndex == null) "Cancel" else if (state.leagueTimeSlots.size > 1) "Delete" else "Use event window")
-                            }
-                            val slotIsValid = selectedResourceIds.isNotEmpty() &&
-                                draft.endDate?.let { end -> end > draft.startDate } == true
-                            Button(
-                                onClick = {
-                                    val index = editingSlotIndex
-                                    if (index == null) {
-                                        actions.onAddLeagueTimeSlot(draft)
-                                    } else {
-                                        actions.onUpdateLeagueTimeSlot(index, draft)
-                                    }
-                                    actions.onUseManualTimeSlotsChange(true)
-                                    editingSlotIndex = null
-                                    slotDraft = null
-                                },
-                                enabled = slotIsValid,
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text("Save timeslot")
-                            }
-                        }
-                    }
-                }
-            }
-            if (state.useManualTimeSlots && slotDraft == null) {
-                state.leagueTimeSlots.take(3).forEachIndexed { index, slot ->
-                    val resourceCount = slot.normalizedScheduledFieldIds().size
-                    val divisionCount = slot.normalizedDivisionIds().size
-                    EditableSummaryCard(
-                        title = "Timeslot ${index + 1}",
-                        body = buildString {
-                            val resourceLabel = if (resourceCount == 1) "resource" else "resources"
-                            val divisionLabel = if (divisionCount == 1) "division" else "divisions"
-                            append(simpleSetupDateLabel(slot.startDate, timeZone))
-                            append(" – ")
-                            append(slot.endDate?.let { simpleSetupDateLabel(it, timeZone) } ?: "No end")
-                            append(" • $resourceCount $resourceLabel • $divisionCount $divisionLabel")
-                        },
-                        onClick = {
-                            editingSlotIndex = index
-                            slotDraft = slot
-                        },
-                    )
-                }
-            }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            StandardTextField(
+                value = simpleSetupDateLabel(state.event.start, timeZone),
+                onValueChange = {},
+                label = "Starts",
+                readOnly = true,
+                onTap = { showStartPicker = true },
+                modifier = Modifier.weight(1f),
+            )
+            StandardTextField(
+                value = if (state.event.noFixedEndDateTime) {
+                    "Set when generated"
+                } else {
+                    simpleSetupDateLabel(state.event.end, timeZone)
+                },
+                onValueChange = {},
+                label = "Ends",
+                readOnly = true,
+                onTap = if (state.event.noFixedEndDateTime) null else ({ showEndPicker = true }),
+                modifier = Modifier.weight(1f),
+            )
         }
-        if (slotDraft == null) {
-            state.event.address?.takeIf(String::isNotBlank)?.let { address ->
-                Text(
-                    text = address,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+        if (supportsOpenEnd) {
+            SetupChoiceSwitch(
+                title = "Set end during match generation",
+                description = "Leave the end open now. Generated matches will set the event end date and time.",
+                checked = state.event.noFixedEndDateTime,
+                onCheckedChange = { enabled -> actions.onEditEvent { copy(noFixedEndDateTime = enabled) } },
+            )
+        }
+        state.event.address?.takeIf(String::isNotBlank)?.let { address ->
+            Text(
+                text = address,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 
@@ -832,6 +665,233 @@ private fun SimpleScheduleLocationPage(
         canSelectPast = false,
         initialDate = state.event.end.takeUnless { it == Instant.DISTANT_PAST },
     )
+}
+
+@Composable
+private fun SimpleResourcesPage(
+    state: EventCreateSimpleSetupUiState,
+    actions: EventCreateSimpleSetupUiActions,
+) {
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        PlatformDropdown(
+            selectedValue = state.localFields.size.coerceAtLeast(1).toString(),
+            onSelectionChange = { value -> actions.onSelectFieldCount(value.toIntOrNull() ?: 1) },
+            options = (1..12).map { count -> DropdownOption(count.toString(), count.toString()) },
+            label = "Resource count",
+            supportingText = "Add every court, field, rink, or playing area used by this event.",
+            modifier = Modifier.fillMaxWidth(),
+        )
+        state.localFields.forEachIndexed { index, field ->
+            StandardTextField(
+                value = field.name?.takeIf(String::isNotBlank) ?: "Field ${field.fieldNumber}",
+                onValueChange = { label -> actions.onUpdateLocalFieldName(index, label) },
+                label = "Resource ${index + 1} label",
+                placeholder = "Court ${index + 1}",
+                imeAction = if (index == state.localFields.lastIndex) ImeAction.Done else ImeAction.Next,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SimpleTimeslotsPage(
+    state: EventCreateSimpleSetupUiState,
+    actions: EventCreateSimpleSetupUiActions,
+) {
+    var showSlotStartPicker by rememberSaveable { mutableStateOf(false) }
+    var showSlotEndPicker by rememberSaveable { mutableStateOf(false) }
+    var editingSlotIndex by remember(state.event.id) { mutableStateOf<Int?>(null) }
+    var slotDraft by remember(state.event.id) { mutableStateOf<TimeSlot?>(null) }
+    val timeZone = remember(state.event.timeZone) {
+        runCatching { TimeZone.of(state.event.timeZone) }.getOrDefault(TimeZone.currentSystemDefault())
+    }
+    val resourceOptions = state.localFields.map { field ->
+        DropdownOption(field.id, field.name?.takeIf(String::isNotBlank) ?: "Field ${field.fieldNumber}")
+    }
+    val divisionOptions = state.event.divisionDetails.map { detail -> DropdownOption(detail.id, detail.name) }
+
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (slotDraft == null && !state.useManualTimeSlots) {
+            SimpleInfoCard(
+                title = "Default event timeslot",
+                body = buildString {
+                    append(simpleSetupDateLabel(state.event.start, timeZone))
+                    append(" – ")
+                    append(
+                        if (state.event.noFixedEndDateTime) {
+                            "end set during match generation"
+                        } else {
+                            simpleSetupDateLabel(state.event.end, timeZone)
+                        },
+                    )
+                    append(" • all ${simpleSetupCountLabel(state.localFields.size, "resource")}")
+                    append(" and ${simpleSetupCountLabel(state.event.divisions.size, "division")}")
+                },
+            )
+        }
+        if (slotDraft == null) {
+            OutlinedButton(
+                onClick = {
+                    val existingDefault = state.leagueTimeSlots.firstOrNull()
+                        ?.takeIf { !state.useManualTimeSlots }
+                    editingSlotIndex = existingDefault?.let { 0 }
+                    slotDraft = existingDefault ?: createSimpleSetupEventRangeSlot(
+                        event = state.event,
+                        fields = state.localFields,
+                    )
+                },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+            ) {
+                Text(if (state.useManualTimeSlots) "Add another timeslot" else "Add custom timeslot")
+            }
+        }
+        slotDraft?.let { draft ->
+            val selectedResourceIds = draft.normalizedScheduledFieldIds()
+            val selectedDivisionIds = draft.normalizedDivisionIds()
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = if (editingSlotIndex == null) "New custom timeslot" else "Edit custom timeslot",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        StandardTextField(
+                            value = simpleSetupDateLabel(draft.startDate, timeZone),
+                            onValueChange = {},
+                            label = "Starts",
+                            readOnly = true,
+                            onTap = { showSlotStartPicker = true },
+                            modifier = Modifier.weight(1f),
+                        )
+                        StandardTextField(
+                            value = draft.endDate?.let { simpleSetupDateLabel(it, timeZone) }.orEmpty(),
+                            onValueChange = {},
+                            label = "Ends",
+                            readOnly = true,
+                            onTap = { showSlotEndPicker = true },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    PlatformDropdown(
+                        selectedValue = "",
+                        onSelectionChange = {},
+                        options = resourceOptions,
+                        label = "Resources",
+                        placeholder = "Select resources",
+                        multiSelect = true,
+                        selectedValues = selectedResourceIds,
+                        onMultiSelectionChange = { selected ->
+                            slotDraft = draft.copy(
+                                scheduledFieldId = selected.firstOrNull(),
+                                scheduledFieldIds = selected,
+                            )
+                        },
+                        isError = selectedResourceIds.isEmpty(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    PlatformDropdown(
+                        selectedValue = "",
+                        onSelectionChange = {},
+                        options = divisionOptions,
+                        label = "Divisions",
+                        placeholder = "Select divisions",
+                        multiSelect = true,
+                        selectedValues = selectedDivisionIds,
+                        onMultiSelectionChange = { selected -> slotDraft = draft.copy(divisions = selected) },
+                        enabled = !state.event.singleDivision,
+                        supportingText = if (state.event.singleDivision) "All event divisions are included." else "",
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                editingSlotIndex?.let { index ->
+                                    if (state.leagueTimeSlots.size > 1) {
+                                        actions.onRemoveLeagueTimeSlot(index)
+                                    } else {
+                                        actions.onUseManualTimeSlotsChange(false)
+                                    }
+                                }
+                                editingSlotIndex = null
+                                slotDraft = null
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(
+                                if (editingSlotIndex == null) {
+                                    "Cancel"
+                                } else if (state.leagueTimeSlots.size > 1) {
+                                    "Delete"
+                                } else {
+                                    "Use default"
+                                },
+                            )
+                        }
+                        val slotIsValid = selectedResourceIds.isNotEmpty() &&
+                            draft.endDate?.let { end -> end > draft.startDate } == true
+                        Button(
+                            onClick = {
+                                val index = editingSlotIndex
+                                if (index == null) {
+                                    actions.onAddLeagueTimeSlot(draft)
+                                } else {
+                                    actions.onUpdateLeagueTimeSlot(index, draft)
+                                }
+                                actions.onUseManualTimeSlotsChange(true)
+                                editingSlotIndex = null
+                                slotDraft = null
+                            },
+                            enabled = slotIsValid,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("Save timeslot")
+                        }
+                    }
+                }
+            }
+        }
+        if (state.useManualTimeSlots && slotDraft == null) {
+            state.leagueTimeSlots.forEachIndexed { index, slot ->
+                val resourceCount = slot.normalizedScheduledFieldIds().size
+                val divisionCount = slot.normalizedDivisionIds().size
+                EditableSummaryCard(
+                    title = "Timeslot ${index + 1}",
+                    body = buildString {
+                        append(simpleSetupDateLabel(slot.startDate, timeZone))
+                        append(" – ")
+                        append(slot.endDate?.let { simpleSetupDateLabel(it, timeZone) } ?: "No end")
+                        append(" • ${simpleSetupCountLabel(resourceCount, "resource")}")
+                        append(" • ${simpleSetupCountLabel(divisionCount, "division")}")
+                    },
+                    onClick = {
+                        editingSlotIndex = index
+                        slotDraft = slot
+                    },
+                )
+            }
+        }
+    }
+
     PlatformDateTimePicker(
         onDateSelected = { selected ->
             selected?.let { start ->
@@ -1111,17 +1171,8 @@ private fun SimpleRegistrationPlanPage(
             },
         )
         SetupChoiceSwitch(
-            title = "Required documents",
-            description = "Require organization templates during registration.",
-            checked = state.choices.useRequiredDocuments,
-            onCheckedChange = { enabled ->
-                actions.onChoicesChange(state.choices.copy(useRequiredDocuments = enabled))
-                if (!enabled) actions.onEditEvent { copy(requiredTemplateIds = emptyList()) }
-            },
-        )
-        SetupChoiceSwitch(
             title = "Registration questions",
-            description = "Mark the event for question setup on the web.",
+            description = "Ask players for information before they register.",
             checked = state.choices.useRegistrationQuestions,
             onCheckedChange = { enabled ->
                 actions.onChoicesChange(state.choices.copy(useRegistrationQuestions = enabled))
@@ -1213,49 +1264,115 @@ private fun SimplePricingPage(
 }
 
 @Composable
-private fun SimpleDocumentsPage(
+private fun SimpleQuestionsPage(
     state: EventCreateSimpleSetupUiState,
     actions: EventCreateSimpleSetupUiActions,
 ) {
+    var editingQuestionIndex by remember(state.event.id) { mutableStateOf<Int?>(null) }
+    var prompt by rememberSaveable(state.event.id) { mutableStateOf("") }
+    var answerType by rememberSaveable(state.event.id) { mutableStateOf("TEXT") }
+    var required by rememberSaveable(state.event.id) { mutableStateOf(false) }
+
+    fun clearEditor() {
+        editingQuestionIndex = null
+        prompt = ""
+        answerType = "TEXT"
+        required = false
+    }
+
     Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (state.organizationTemplatesLoading) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CircularProgressIndicator(modifier = Modifier.width(18.dp), strokeWidth = 2.dp)
-                Text("Loading document templates…")
-            }
-        } else if (state.choices.useRequiredDocuments) {
-            PlatformDropdown(
-                selectedValue = "",
-                onSelectionChange = {},
-                options = state.organizationTemplates.map { template ->
-                    DropdownOption(template.id, template.title)
+        StandardTextField(
+            value = prompt,
+            onValueChange = { value -> prompt = value.take(500) },
+            label = "Question",
+            placeholder = "What position do you play?",
+            imeAction = ImeAction.Done,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilterChip(
+                selected = answerType == "TEXT",
+                onClick = { answerType = "TEXT" },
+                label = { Text("Short answer") },
+                modifier = Modifier.weight(1f),
+            )
+            FilterChip(
+                selected = answerType == "LONG_TEXT",
+                onClick = { answerType = "LONG_TEXT" },
+                label = { Text("Long answer") },
+                modifier = Modifier.weight(1f),
+            )
+        }
+        SetupChoiceSwitch(
+            title = "Required question",
+            description = "Registration cannot finish until this question is answered.",
+            checked = required,
+            onCheckedChange = { required = it },
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = {
+                    val index = editingQuestionIndex
+                    if (index != null) {
+                        actions.onRegistrationQuestionsChange(
+                            state.registrationQuestions.filterIndexed { candidateIndex, _ -> candidateIndex != index },
+                        )
+                    }
+                    clearEditor()
                 },
-                label = "Required documents",
-                placeholder = if (state.organizationTemplates.isEmpty()) "No templates available" else "Select documents",
-                enabled = state.organizationTemplates.isNotEmpty(),
-                multiSelect = true,
-                selectedValues = state.event.requiredTemplateIds,
-                onMultiSelectionChange = { ids -> actions.onEditEvent { copy(requiredTemplateIds = ids) } },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.weight(1f).height(48.dp),
+            ) {
+                Text(if (editingQuestionIndex == null) "Clear" else "Delete")
+            }
+            Button(
+                onClick = {
+                    val normalizedPrompt = prompt.trim()
+                    val existing = editingQuestionIndex?.let(state.registrationQuestions::getOrNull)
+                    val question = RegistrationQuestionDraft(
+                        id = existing?.id,
+                        prompt = normalizedPrompt,
+                        answerType = answerType,
+                        required = required,
+                    )
+                    val updated = editingQuestionIndex?.let { index ->
+                        state.registrationQuestions.mapIndexed { candidateIndex, current ->
+                            if (candidateIndex == index) question else current
+                        }
+                    } ?: (state.registrationQuestions + question)
+                    actions.onRegistrationQuestionsChange(updated)
+                    clearEditor()
+                },
+                enabled = prompt.isNotBlank() &&
+                    (editingQuestionIndex != null || state.registrationQuestions.size < 20),
+                modifier = Modifier.weight(1f).height(48.dp),
+            ) {
+                Text(if (editingQuestionIndex == null) "Add question" else "Save question")
+            }
+        }
+        state.registrationQuestions.forEachIndexed { index, question ->
+            EditableSummaryCard(
+                title = question.prompt,
+                body = buildString {
+                    append(if (question.answerType == "LONG_TEXT") "Long answer" else "Short answer")
+                    append(if (question.required) " • Required" else " • Optional")
+                },
+                onClick = {
+                    editingQuestionIndex = index
+                    prompt = question.prompt
+                    answerType = question.answerType
+                    required = question.required
+                },
+                selected = editingQuestionIndex == index,
             )
-        }
-        state.organizationTemplatesError?.let { error ->
-            Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-        }
-        if (state.choices.useRegistrationQuestions) {
-            SimpleInfoCard(
-                title = "Questions are added after creation",
-                body = "Open this event on the web to author registration questions.",
-            )
-        }
-        if (!state.choices.useRequiredDocuments && !state.choices.useRegistrationQuestions) {
-            SimpleInfoCard("Nothing required", "Registration will not ask for documents or custom questions.")
         }
     }
 }
@@ -1311,7 +1428,7 @@ private fun SimpleStaffOperationsPage(
     }.distinctBy(DropdownOption::value)
 
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (state.choices.useStaffAssignments || state.choices.useDedicatedOfficials) {
@@ -1340,33 +1457,36 @@ private fun SimpleStaffOperationsPage(
             )
         }
         if (state.choices.useDedicatedOfficials) {
-            Row(
+            PlatformDropdown(
+                selectedValue = "",
+                onSelectionChange = {},
+                options = userOptions,
+                label = "Officials",
+                placeholder = "Select officials",
+                multiSelect = true,
+                selectedValues = currentOfficialIds,
+                onMultiSelectionChange = actions.onUpdateOfficialIds,
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                PlatformDropdown(
-                    selectedValue = "",
-                    onSelectionChange = {},
-                    options = userOptions,
-                    label = "Officials",
-                    placeholder = "Select",
-                    multiSelect = true,
-                    selectedValues = currentOfficialIds,
-                    onMultiSelectionChange = actions.onUpdateOfficialIds,
-                    modifier = Modifier.weight(1f),
-                )
-                PlatformDropdown(
-                    selectedValue = state.event.officialSchedulingMode.name,
-                    onSelectionChange = { value ->
-                        OfficialSchedulingMode.entries.firstOrNull { mode -> mode.name == value }
-                            ?.let(actions.onUpdateOfficialSchedulingMode)
-                    },
-                    options = OfficialSchedulingMode.entries.map { mode ->
-                        DropdownOption(mode.name, mode.name.toEnumTitleCase())
-                    },
-                    label = "Scheduling",
-                    modifier = Modifier.weight(1f),
-                )
+            )
+            Text(
+                text = "Scheduling priority",
+                style = MaterialTheme.typography.titleSmall,
+            )
+            OfficialSchedulingMode.entries.chunked(2).forEach { rowModes ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    rowModes.forEach { mode ->
+                        SchedulingPriorityCard(
+                            mode = mode,
+                            selected = state.event.officialSchedulingMode == mode,
+                            onClick = { actions.onUpdateOfficialSchedulingMode(mode) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    if (rowModes.size == 1) Spacer(Modifier.weight(1f))
+                }
             }
         }
         if (state.event.teamSignup) {
@@ -1387,6 +1507,51 @@ private fun SimpleStaffOperationsPage(
 }
 
 @Composable
+private fun SchedulingPriorityCard(
+    mode: OfficialSchedulingMode,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier
+            .heightIn(min = 84.dp)
+            .semantics { this.selected = selected }
+            .clickable(role = Role.RadioButton, onClick = onClick),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerLow
+            },
+        ),
+        border = BorderStroke(
+            width = if (selected) 2.dp else 1.dp,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+        ),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = mode.label(),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = officialSchedulingModeDescription(mode),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
 private fun SimpleReviewPage(state: EventCreateSimpleSetupUiState) {
     val sportName = state.sports.firstOrNull { sport -> sport.id == state.event.sportId }?.name ?: "Not selected"
     val timeZone = remember(state.event.timeZone) {
@@ -1396,6 +1561,7 @@ private fun SimpleReviewPage(state: EventCreateSimpleSetupUiState) {
         event = state.event,
         choices = state.choices,
         priceQuoteConfirmed = state.priceQuoteConfirmed,
+        registrationQuestions = state.registrationQuestions,
     )
     Column(
         modifier = Modifier.fillMaxSize(),
@@ -1626,6 +1792,9 @@ private fun simpleSetupDateLabel(instant: Instant, timeZone: TimeZone): String {
     return "$month ${local.day} · $time"
 }
 
+private fun simpleSetupCountLabel(count: Int, singular: String): String =
+    "$count ${if (count == 1) singular else "${singular}s"}"
+
 private fun formatDescription(type: EventType): String = when (type) {
     EventType.EVENT -> "One-time activity or gathering"
     EventType.WEEKLY_EVENT -> "Repeating weekly sessions"
@@ -1639,12 +1808,21 @@ private fun simpleSetupPageDescription(pageId: EventCreateSetupPageId): String =
     EventCreateSetupPageId.BASICS -> "Give players the essential identity of the event."
     EventCreateSetupPageId.PARTICIPATION_PLAN -> "Decide who registers and how divisions share settings."
     EventCreateSetupPageId.DIVISIONS -> "Add the gender, age, and skill groups that can register."
-    EventCreateSetupPageId.SCHEDULE_LOCATION -> "Set the event window, mapped location, and resource count."
+    EventCreateSetupPageId.SCHEDULE_LOCATION -> "Set the event timing and mapped location."
+    EventCreateSetupPageId.RESOURCES -> "Choose how many playing areas are available and give each one a clear label."
+    EventCreateSetupPageId.TIMESLOTS -> "Use the default event window or add custom windows for resources and divisions."
     EventCreateSetupPageId.COMPETITION_RULES -> "Review the selected sport structure and set the competition values it supports."
     EventCreateSetupPageId.REGISTRATION_PLAN -> "Choose payments and registration requirements."
     EventCreateSetupPageId.PRICING_REGISTRATION -> "Set capacity, price, and registration cutoffs."
-    EventCreateSetupPageId.DOCUMENTS_QUESTIONS -> "Select any documents and note question requirements."
+    EventCreateSetupPageId.QUESTIONS -> "Add the questions players answer before registration is complete."
     EventCreateSetupPageId.OPERATIONS_PLAN -> "Choose who helps manage and officiate the event."
     EventCreateSetupPageId.STAFF_OPERATIONS -> "Assign staff and set the essential team controls."
     EventCreateSetupPageId.REVIEW_PUBLISH -> "Confirm the essential setup before creating the event."
+}
+
+private fun officialSchedulingModeDescription(mode: OfficialSchedulingMode): String = when (mode) {
+    OfficialSchedulingMode.STAFFING -> "Assign available officials first, then build matches around them."
+    OfficialSchedulingMode.TEAM_STAFFING -> "Prioritize participant-team officiating assignments."
+    OfficialSchedulingMode.SCHEDULE -> "Build the match schedule first, then fill official assignments."
+    OfficialSchedulingMode.OFF -> "Build matches without blocking on official availability conflicts."
 }

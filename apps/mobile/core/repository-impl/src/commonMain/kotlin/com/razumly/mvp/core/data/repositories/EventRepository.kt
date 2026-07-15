@@ -133,6 +133,40 @@ class EventRepository(
         scopeId: String,
     ): Result<List<TeamJoinQuestion>> = catalogCoordinator.getRegistrationQuestions(scopeType, scopeId)
 
+    override suspend fun saveRegistrationQuestions(
+        scopeType: String,
+        scopeId: String,
+        questions: List<RegistrationQuestionDraft>,
+    ): Result<List<TeamJoinQuestion>> = runCatching {
+        val normalizedScopeType = scopeType.trim().uppercase().takeIf(String::isNotBlank)
+            ?: error("Question scope type is required.")
+        val normalizedScopeId = scopeId.trim().takeIf(String::isNotBlank)
+            ?: error("Question scope id is required.")
+        val normalizedQuestions = questions.mapIndexed { index, question ->
+            question.copy(
+                id = question.id?.trim()?.takeIf(String::isNotBlank),
+                prompt = question.prompt.trim(),
+                answerType = question.answerType.trim().uppercase().takeIf { it == "LONG_TEXT" } ?: "TEXT",
+                sortOrder = index,
+            )
+        }
+        require(normalizedQuestions.all { question -> question.prompt.isNotBlank() }) {
+            "Question prompts cannot be blank."
+        }
+        val response = api.put<SaveRegistrationQuestionsRequestDto, RegistrationQuestionsResponseDto>(
+            path = "api/registration-questions",
+            body = SaveRegistrationQuestionsRequestDto(
+                scopeType = normalizedScopeType,
+                scopeId = normalizedScopeId,
+                questions = normalizedQuestions,
+            ),
+        )
+        if (!response.error.isNullOrBlank()) error(response.error)
+        response.questions
+            .mapNotNull(RegistrationQuestionDto::toTeamJoinQuestionOrNull)
+            .sortedWith(compareBy<TeamJoinQuestion> { it.sortOrder }.thenBy { it.prompt })
+    }
+
     override fun getCachedEventsFlow(): Flow<Result<List<Event>>> =
         sessionCacheCoordinator.observeCachedEvents()
 
