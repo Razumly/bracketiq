@@ -80,6 +80,7 @@ import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -119,6 +120,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val leagueScoringConfig: StateFlow<LeagueScoringConfigDTO>
     val registrationQuestionDrafts: StateFlow<List<RegistrationQuestionDraft>>
     val suggestedUsers: StateFlow<List<UserData>>
+    val userSearchLoading: StateFlow<Boolean>
     val pendingStaffInvites: StateFlow<List<PendingStaffInviteDraft>>
     val termsConsentState: StateFlow<ChatTermsConsentState>
     val termsConsentLoading: StateFlow<Boolean>
@@ -249,6 +251,10 @@ class DefaultCreateEventComponent(
         .stateIn(scope, SharingStarted.Eagerly, null)
     private val _suggestedUsers = MutableStateFlow<List<UserData>>(emptyList())
     override val suggestedUsers = _suggestedUsers.asStateFlow()
+    private val _userSearchLoading = MutableStateFlow(false)
+    override val userSearchLoading = _userSearchLoading.asStateFlow()
+    private var userSearchJob: Job? = null
+    private var userSearchRequestId = 0
     private val _pendingStaffInvites = MutableStateFlow<List<PendingStaffInviteDraft>>(emptyList())
     override val pendingStaffInvites = _pendingStaffInvites.asStateFlow()
     override val termsConsentState = userRepository.chatTermsConsentState
@@ -708,17 +714,23 @@ class DefaultCreateEventComponent(
 
     override fun searchUsers(query: String) {
         val normalizedQuery = query.trim()
+        val requestId = ++userSearchRequestId
+        userSearchJob?.cancel()
         if (normalizedQuery.isEmpty()) {
             _suggestedUsers.value = emptyList()
+            _userSearchLoading.value = false
             return
         }
 
-        scope.launch {
-            _suggestedUsers.value = userRepository.searchPlayers(normalizedQuery)
-                .getOrElse { error ->
-                    _errorState.value = ErrorMessage(error.userMessage("Unable to search users."))
-                    emptyList()
-                }
+        _userSearchLoading.value = true
+        userSearchJob = scope.launch {
+            val result = userRepository.searchPlayers(normalizedQuery)
+            if (requestId != userSearchRequestId) return@launch
+            _suggestedUsers.value = result.getOrElse { error ->
+                _errorState.value = ErrorMessage(error.userMessage("Unable to search users."))
+                emptyList()
+            }
+            _userSearchLoading.value = false
         }
     }
 

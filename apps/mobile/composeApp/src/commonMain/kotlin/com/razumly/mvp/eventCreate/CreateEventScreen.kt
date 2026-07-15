@@ -99,6 +99,7 @@ fun CreateEventScreen(
     val leagueScoringConfig by component.leagueScoringConfig.collectAsState()
     val registrationQuestionDrafts by component.registrationQuestionDrafts.collectAsState()
     val suggestedUsers by component.suggestedUsers.collectAsState()
+    val userSearchLoading by component.userSearchLoading.collectAsState()
     val pendingStaffInvites by component.pendingStaffInvites.collectAsState()
     val termsConsentState by component.termsConsentState.collectAsState()
     val termsConsentLoading by component.termsConsentLoading.collectAsState()
@@ -527,6 +528,7 @@ fun CreateEventScreen(
                                         registrationQuestions = registrationQuestionDrafts,
                                         leagueScoringConfig = leagueScoringConfig,
                                         suggestedUsers = suggestedUsers,
+                                        userSearchLoading = userSearchLoading,
                                         useManualTimeSlots = useManualTimeSlots,
                                         priceQuoteConfirmed = simplePriceQuoteConfirmed,
                                     ),

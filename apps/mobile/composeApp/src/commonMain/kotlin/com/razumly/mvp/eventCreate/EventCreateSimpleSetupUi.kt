@@ -90,6 +90,7 @@ data class EventCreateSimpleSetupUiState(
     val registrationQuestions: List<RegistrationQuestionDraft>,
     val leagueScoringConfig: LeagueScoringConfigDTO,
     val suggestedUsers: List<UserData>,
+    val userSearchLoading: Boolean,
     val useManualTimeSlots: Boolean,
     val priceQuoteConfirmed: Boolean,
 )
@@ -1426,6 +1427,13 @@ private fun SimpleStaffOperationsPage(
             add(DropdownOption(id, "Selected staff"))
         }
     }.distinctBy(DropdownOption::value)
+    val visibleUserSuggestions = state.suggestedUsers
+        .distinctBy(UserData::id)
+        .filter { user ->
+            state.choices.useDedicatedOfficials ||
+                (state.choices.useStaffAssignments && user.id != state.event.hostId)
+        }
+        .take(6)
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
@@ -1442,6 +1450,41 @@ private fun SimpleStaffOperationsPage(
                 placeholder = "Name or email",
                 modifier = Modifier.fillMaxWidth(),
             )
+            when {
+                state.userSearchLoading -> Text(
+                    text = "Searching…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                search.isNotBlank() && visibleUserSuggestions.isEmpty() -> Text(
+                    text = "No matching people.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                search.isNotBlank() -> visibleUserSuggestions.forEach { user ->
+                        SimpleStaffSuggestionCard(
+                            user = user,
+                            allowAssistantHost = state.choices.useStaffAssignments && user.id != state.event.hostId,
+                            assistantHostSelected = user.id in state.event.assistantHostIds,
+                            onAssistantHostChange = { selected ->
+                                actions.onUpdateAssistantHostIds(
+                                    if (selected) {
+                                        state.event.assistantHostIds + user.id
+                                    } else {
+                                        state.event.assistantHostIds - user.id
+                                    },
+                                )
+                            },
+                            allowOfficial = state.choices.useDedicatedOfficials,
+                            officialSelected = user.id in currentOfficialIds,
+                            onOfficialChange = { selected ->
+                                actions.onUpdateOfficialIds(
+                                    if (selected) currentOfficialIds + user.id else currentOfficialIds - user.id,
+                                )
+                            },
+                        )
+                    }
+            }
         }
         if (state.choices.useStaffAssignments) {
             PlatformDropdown(
@@ -1502,6 +1545,66 @@ private fun SimpleStaffOperationsPage(
                 checked = state.event.allowMatchRosterEdits,
                 onCheckedChange = actions.onUpdateAllowMatchRosterEdits,
             )
+        }
+    }
+}
+
+@Composable
+internal fun SimpleStaffSuggestionCard(
+    user: UserData,
+    allowAssistantHost: Boolean,
+    assistantHostSelected: Boolean,
+    onAssistantHostChange: (Boolean) -> Unit,
+    allowOfficial: Boolean,
+    officialSelected: Boolean,
+    onOfficialChange: (Boolean) -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = user.fullName,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            user.userName.takeIf(String::isNotBlank)?.let { userName ->
+                Text(
+                    text = "@$userName",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (allowAssistantHost) {
+                    FilterChip(
+                        selected = assistantHostSelected,
+                        onClick = { onAssistantHostChange(!assistantHostSelected) },
+                        label = { Text("Assistant host") },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (allowOfficial) {
+                    FilterChip(
+                        selected = officialSelected,
+                        onClick = { onOfficialChange(!officialSelected) },
+                        label = { Text("Official") },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
         }
     }
 }

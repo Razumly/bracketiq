@@ -151,6 +151,23 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun searching_staff_exposes_matching_people_to_simple_setup() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        harness.userRepository.searchResults = listOf(createUser(id = "staff-1"))
+
+        harness.component.searchUsers("Test")
+        advance()
+
+        assertFalse(harness.component.userSearchLoading.value)
+        assertEquals(listOf("staff-1"), harness.component.suggestedUsers.value.map { user -> user.id })
+
+        harness.component.searchUsers("")
+
+        assertFalse(harness.component.userSearchLoading.value)
+        assertTrue(harness.component.suggestedUsers.value.isEmpty())
+    }
+
+    @Test
     fun updating_host_and_assistant_hosts_normalizes_ids_and_prevents_host_duplication() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
