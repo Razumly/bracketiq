@@ -63,7 +63,6 @@ import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
-import com.razumly.mvp.core.presentation.util.ShareServiceProvider
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.LoadingOperation
@@ -726,7 +725,17 @@ class DefaultEventDetailComponent(
     override val textSignaturePrompt = registrationFlowCoordinator.textSignaturePrompt
     override val webSignaturePrompt = registrationFlowCoordinator.webSignaturePrompt
 
-    private val shareServiceProvider = ShareServiceProvider()
+    private val externalActionHandler = EventExternalActionHandler(
+        scope = scope,
+        eventRepository = eventRepository,
+        billingRepository = billingRepository,
+        apiClient = apiClient,
+        loadingHandler = { loadingHandler },
+        urlHandler = { urlHandler },
+        selectedEvent = { selectedEvent.value },
+        navigateBack = backCallback::onBack,
+        setMessage = { message -> _errorState.value = ErrorMessage(message) },
+    )
     private val registrationLifecycleHandler = EventRegistrationLifecycleHandler(
         userRepository = userRepository,
         teamRepository = teamRepository,
@@ -1533,114 +1542,15 @@ class DefaultEventDetailComponent(
     override fun checkIsUserWaitListed(event: Event): Boolean =
         registrationLifecycleHandler.checkIsUserWaitListed(event)
 
-    override fun deleteEvent() {
-        scope.launch {
-            val currentEvent = selectedEvent.value
-            val deletePlan = eventDeletePlan(currentEvent)
-            var deleted = false
-            val loadingOperation = loadingHandler.newOperation()
-            loadingOperation.showLoading(deletePlan.loadingMessage)
-            try {
-                if (!deletePlan.shouldRefund) {
-                    eventRepository.deleteEvent(selectedEvent.value.id)
-                        .onSuccess {
-                            deleted = true
-                        }.onFailure {
-                            _errorState.value = ErrorMessage(it.userMessage())
-                        }
-                } else {
-                    billingRepository.deleteAndRefundEvent(selectedEvent.value)
-                        .onSuccess {
-                            deleted = true
-                        }.onFailure {
-                            _errorState.value = ErrorMessage(it.userMessage())
-                        }
-                }
-                if (deleted) {
-                    backCallback.onBack()
-                }
-            } finally {
-                loadingOperation.hideLoading()
-            }
-        }
-    }
+    override fun deleteEvent() = externalActionHandler.deleteEvent()
 
-    override fun reportEvent(notes: String?) {
-        val currentEvent = selectedEvent.value
-        scope.launch {
-            eventRepository.reportEvent(currentEvent.id, notes)
-                .onSuccess {
-                    _errorState.value = ErrorMessage("Event reported. It will be hidden from your searches.")
-                    backCallback.onBack()
-                }
-                .onFailure {
-                    _errorState.value = ErrorMessage(it.userMessage("Failed to report event."))
-                }
-        }
-    }
+    override fun reportEvent(notes: String?) = externalActionHandler.reportEvent(notes)
 
-    override fun shareEvent() {
-        val payload = eventSharePayload(selectedEvent.value)
-        shareServiceProvider.getShareService().share(payload.title, payload.url)
-    }
+    override fun shareEvent() = externalActionHandler.shareEvent()
 
-    override fun shareEventQrCode() {
-        val targetEvent = selectedEvent.value
-        val payload = eventQrCodeSharePayload(targetEvent)
-        val client = apiClient ?: run {
-            _errorState.value = ErrorMessage("Failed to share QR code.")
-            return
-        }
-        scope.launch {
-            runCatching {
-                client.getBytes(payload.path)
-            }.onSuccess { imageBytes ->
-                shareServiceProvider.getShareService().shareImage(
-                    title = payload.title,
-                    imageBytes = imageBytes,
-                    fileName = payload.fileName,
-                    mimeType = payload.mimeType,
-                )
-            }.onFailure { throwable ->
-                _errorState.value = ErrorMessage(
-                    throwable.userMessage("Failed to share QR code.")
-                )
-            }
-        }
-    }
+    override fun shareEventQrCode() = externalActionHandler.shareEventQrCode()
 
-    override fun openEventDirections() {
-        val directionsPlan = eventDirectionsPlan(selectedEvent.value)
-        if (directionsPlan is EventDirectionsPlan.Unavailable) {
-            _errorState.value = ErrorMessage(directionsPlan.message)
-            return
-        }
-        val directionsUrls = (directionsPlan as EventDirectionsPlan.OpenUrl).let { plan ->
-            listOf(plan.url) + plan.fallbackUrls
-        }
-
-        scope.launch {
-            val handler = urlHandler
-            if (handler == null) {
-                _errorState.value = ErrorMessage("Unable to open directions.")
-                return@launch
-            }
-
-            var lastFailure: Throwable? = null
-            for (directionsUrl in directionsUrls) {
-                val result = handler.openDirectionsUrl(directionsUrl)
-                if (result.isSuccess) {
-                    return@launch
-                }
-                lastFailure = result.exceptionOrNull()
-            }
-
-            _errorState.value = ErrorMessage(
-                lastFailure?.userMessage("Unable to open directions.")
-                    ?: "Unable to open directions.",
-            )
-        }
-    }
+    override fun openEventDirections() = externalActionHandler.openEventDirections()
 
     override fun checkIsUserFreeAgent(event: Event): Boolean =
         registrationLifecycleHandler.checkIsUserFreeAgent(event)
