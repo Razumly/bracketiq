@@ -72,7 +72,6 @@ import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -314,7 +313,6 @@ class DefaultEventDetailComponent(
     override val leagueDivisionStandings = leagueStandingsCoordinator.divisionStandings
     override val leagueDivisionStandingsLoading = leagueStandingsCoordinator.divisionStandingsLoading
     override val leagueStandingsConfirming = leagueStandingsCoordinator.standingsConfirming
-    private var sportsLoadJob: Job? = null
     private val sportsCatalogCoordinator = EventSportsCatalogCoordinator()
     private val _eventTags = MutableStateFlow<List<EventTag>>(emptyList())
 
@@ -583,6 +581,25 @@ class DefaultEventDetailComponent(
         },
         setError = { error -> _errorState.value = error },
     )
+    private val resourceLifecycleHandler = EventResourceLifecycleHandler(
+        scope = scope,
+        sportsRepository = sportsRepository,
+        eventRepository = eventRepository,
+        billingRepository = billingRepository,
+        matchRepository = matchRepository,
+        editDraftCoordinator = editDraftCoordinator,
+        divisionContentCoordinator = divisionContentCoordinator,
+        sportsCatalogCoordinator = sportsCatalogCoordinator,
+        organizationTemplatesCoordinator = organizationTemplatesCoordinator,
+        leagueStandingsCoordinator = leagueStandingsCoordinator,
+        loadingHandler = { loadingHandler },
+        selectedEvent = { selectedEvent.value },
+        selectedDivisionId = { selectedDivision.value },
+        selectDivision = ::selectDivision,
+        refreshSelectedDivisionContent = ::refreshSelectedDivisionContent,
+        setEventTags = { tags -> _eventTags.value = tags },
+        setError = { error -> _errorState.value = error },
+    )
     private val eventEditActionHandler = EventEditActionHandler(
         scope = scope,
         editActionCoordinator = editActionCoordinator,
@@ -602,8 +619,8 @@ class DefaultEventDetailComponent(
             _eventStaffInvites.value = invites
             _eventStaffRevision.value = revision
         },
-        loadSports = ::loadSports,
-        refreshLeagueStandingsAfterSchedule = ::refreshLeagueStandingsAfterSchedule,
+        loadSports = resourceLifecycleHandler::loadSports,
+        refreshLeagueStandingsAfterSchedule = resourceLifecycleHandler::refreshLeagueStandingsAfterSchedule,
         setError = { message -> _errorState.value = ErrorMessage(message) },
     )
 
@@ -841,10 +858,13 @@ class DefaultEventDetailComponent(
         backHandler.register(backCallback)
         lifecycle.doOnDestroy(::finishRegistrationPaymentLoading)
         if (editDraftCoordinator.isEditing.value) {
-            loadSports(reportErrors = true)
+            resourceLifecycleHandler.loadSports(reportErrors = true)
         }
-        loadEventTags()
-        lifecycleBindings.bindOrganizationTemplates(selectedEvent, ::loadOrganizationTemplates)
+        resourceLifecycleHandler.loadEventTags()
+        lifecycleBindings.bindOrganizationTemplates(
+            selectedEvent,
+            resourceLifecycleHandler::loadOrganizationTemplates,
+        )
         lifecycleBindings.bindSelectedEventResources(selectedEvent) { eventId ->
             participantBootstrapCoordinator.hydrateMobileEventDetail(
                 showDetailsOnSuccess = false,
@@ -925,9 +945,15 @@ class DefaultEventDetailComponent(
             },
             unsubscribe = { matchRepository.unsubscribeFromRealtime() },
         )
-        lifecycleBindings.bindEventRelations(eventWithRelations, ::handleEventRelationsChanged)
+        lifecycleBindings.bindEventRelations(
+            eventWithRelations,
+            resourceLifecycleHandler::handleEventRelationsChanged,
+        )
         lifecycleBindings.bindSelectedEventMembership(selectedEvent, ::refreshCurrentUserMembershipState)
-        lifecycleBindings.bindDefaultDivision(selectedEvent, ::handleDefaultDivisionChanged)
+        lifecycleBindings.bindDefaultDivision(
+            selectedEvent,
+            resourceLifecycleHandler::handleDefaultDivisionChanged,
+        )
         lifecycleBindings.bindWithdrawTargets(
             selectedEvent,
             selectedWeeklyOccurrence,
@@ -937,159 +963,22 @@ class DefaultEventDetailComponent(
             eventWithRelations,
             eventFields,
             editDraftCoordinator.isEditing,
-            ::handleReadOnlyDraftStateChanged,
+            resourceLifecycleHandler::handleReadOnlyDraftStateChanged,
         )
-        lifecycleBindings.bindSelectedDivision(selectedDivision, ::handleSelectedDivisionChanged)
+        lifecycleBindings.bindSelectedDivision(
+            selectedDivision,
+            resourceLifecycleHandler::handleSelectedDivisionChanged,
+        )
         lifecycleBindings.bindLeagueStandings(
             selectedEvent,
             selectedDivision,
-            ::resolveLeagueStandingsLifecycleTarget,
-            ::loadLeagueStandingsLifecycleTarget,
+            resourceLifecycleHandler::resolveLeagueStandingsLifecycleTarget,
+            resourceLifecycleHandler::loadLeagueStandingsLifecycleTarget,
         )
         lifecycleBindings.bindDivisionMatches(
             divisionContentCoordinator.divisionMatches,
             ::generateRounds,
         )
-    }
-
-    private fun handleEventRelationsChanged(relations: EventWithFullRelations) {
-        if (!canEditEventDetails(relations.event) && editDraftCoordinator.isEditing.value) {
-            editDraftCoordinator.forceExitEditing(relations.event)
-        }
-        editDraftCoordinator.replaceReadOnlyTimeSlots(
-            event = relations.event,
-            timeSlots = relations.timeSlots,
-        )
-        val activeDivision = divisionContentCoordinator.currentSelectedDivision()
-            ?: relations.event.resolveDefaultSelectedDivisionId()
-        if (!activeDivision.isNullOrBlank()) {
-            selectDivision(activeDivision)
-        } else {
-            refreshSelectedDivisionContent()
-        }
-    }
-
-    private fun handleDefaultDivisionChanged(divisionId: String?) {
-        val resolvedDivisionId = divisionId
-            ?.normalizeDivisionIdentifier()
-            ?.takeIf(String::isNotBlank)
-            ?: return
-        val availableDivisionIds = selectedEvent.value.divisions
-            .map(String::normalizeDivisionIdentifier)
-            .filter(String::isNotBlank)
-            .toSet()
-        val currentDivisionId = divisionContentCoordinator.currentSelectedDivision()
-            ?.normalizeDivisionIdentifier()
-            ?.takeIf(String::isNotBlank)
-        if (currentDivisionId == null || (availableDivisionIds.isNotEmpty() && currentDivisionId !in availableDivisionIds)) {
-            selectDivision(resolvedDivisionId)
-        }
-    }
-
-    private fun handleReadOnlyDraftStateChanged(state: EventDetailReadOnlyDraftBindingState) {
-        if (state.editing) return
-        editDraftCoordinator.refreshReadOnlyDraft(
-            event = state.relations.event,
-            sourceFields = state.fields,
-            leagueScoringConfig = state.relations.leagueScoringConfig?.toDto()
-                ?: LeagueScoringConfigDTO(),
-        )
-    }
-
-    private fun handleSelectedDivisionChanged(@Suppress("UNUSED_PARAMETER") divisionId: String?) {
-        divisionContentCoordinator.currentSelectedDivision()?.let(::selectDivision)
-    }
-
-    private fun resolveLeagueStandingsLifecycleTarget(
-        event: Event,
-        divisionId: String?,
-    ): LeagueStandingsLoadTarget? = leagueStandingsCoordinator.resolveLoadTarget(
-        event = event,
-        selectedDivisionId = divisionId,
-        isPlayoffPlacementDivision = event::isPlayoffPlacementDivision,
-    )
-
-    private suspend fun loadLeagueStandingsLifecycleTarget(target: LeagueStandingsLoadTarget?) {
-        leagueStandingsCoordinator.loadStandingsForSelection(
-            target = target,
-            showLoading = true,
-            reportErrors = false,
-            getStandings = eventRepository::getLeagueDivisionStandings,
-        )?.let { errorMessage -> _errorState.value = errorMessage }
-    }
-
-    private fun loadSports(reportErrors: Boolean) {
-        val loadInProgress = sportsLoadJob?.isActive == true
-        if (!sportsCatalogCoordinator.prepareLoad(reportErrors, loadInProgress)) {
-            return
-        }
-        sportsLoadJob = scope.launch {
-            var loadedSports = false
-            var loadedDivisionTypes = false
-            sportsRepository.getSports()
-                .onSuccess { sports ->
-                    loadedSports = true
-                    sportsCatalogCoordinator.applySportsSuccess(sports)
-                    if (editDraftCoordinator.isEditing.value) {
-                        editDraftCoordinator.updateEditedEvent { previous ->
-                            sportsCatalogCoordinator.syncOfficialStaffingForSportTransition(
-                                previous = previous,
-                                updated = previous,
-                            )
-                        }
-                    }
-                }
-                .onFailure {
-                    Napier.w("Failed to load sports.", it)
-                    if (sportsCatalogCoordinator.shouldReportLoadErrors(editDraftCoordinator.isEditing.value)) {
-                        _errorState.value = ErrorMessage("Failed to load sports: ${it.userMessage()}")
-                    }
-                }
-            sportsRepository.getDivisionTypeParameters()
-                .onSuccess { parameters ->
-                    loadedDivisionTypes = true
-                    sportsCatalogCoordinator.applyDivisionTypeParametersSuccess(parameters)
-                }
-                .onFailure {
-                    Napier.w("Failed to load division options.", it)
-                    if (sportsCatalogCoordinator.shouldReportLoadErrors(editDraftCoordinator.isEditing.value)) {
-                        _errorState.value = ErrorMessage("Failed to load division options: ${it.userMessage()}")
-                    }
-                }
-            sportsCatalogCoordinator.finishLoad(loadedSports, loadedDivisionTypes)
-        }
-    }
-
-    private fun loadEventTags() {
-        scope.launch {
-            eventRepository.getEventTags()
-                .onSuccess { tags ->
-                    _eventTags.value = tags
-                }
-                .onFailure { error ->
-                    _errorState.value = ErrorMessage("Failed to load event tags: ${error.userMessage()}")
-                }
-        }
-    }
-
-    private suspend fun loadOrganizationTemplates(organizationId: String) {
-        if (organizationId.isBlank()) {
-            organizationTemplatesCoordinator.clear()
-            return
-        }
-
-        organizationTemplatesCoordinator.beginLoad()
-        billingRepository.listOrganizationTemplates(organizationId)
-            .onSuccess { templates ->
-                organizationTemplatesCoordinator.applyLoadSuccess(templates)
-            }
-            .onFailure { throwable ->
-                Napier.w("Failed to load templates for organization $organizationId.", throwable)
-                organizationTemplatesCoordinator.applyLoadFailure(
-                    throwable.userMessage("Failed to load templates."),
-                )
-            }
-        organizationTemplatesCoordinator.finishLoad()
     }
 
     override fun onNavigateToChat(user: UserData) {
@@ -1124,65 +1013,10 @@ class DefaultEventDetailComponent(
         }
     }
 
-    private suspend fun refreshLeagueStandingsAfterSchedule(event: Event) {
-        val target = leagueStandingsCoordinator.resolveScheduleRefreshTarget(
-            event = event,
-            divisionId = resolveLeagueStandingsDivisionId(),
-        ) ?: return
-        leagueStandingsCoordinator.loadDivisionStandings(
-            target = target,
-            showLoading = false,
-            reportErrors = false,
-            getStandings = eventRepository::getLeagueDivisionStandings,
-        )
-    }
+    override fun refreshLeagueStandings() = resourceLifecycleHandler.refreshLeagueStandings()
 
-    private fun resolveLeagueStandingsDivisionId(): String? =
-        leagueStandingsCoordinator.resolveCurrentDivisionId(
-            selectedDivisionId = selectedDivision.value,
-            isSelectedDivisionEligible = { divisionId ->
-                !selectedEvent.value.isPlayoffPlacementDivision(divisionId)
-            },
-        )
-
-    override fun refreshLeagueStandings() {
-        val target = leagueStandingsCoordinator.resolveCurrentLoadTarget(
-            eventId = selectedEvent.value.id,
-            divisionId = resolveLeagueStandingsDivisionId(),
-        ) ?: return
-        scope.launch {
-            leagueStandingsCoordinator.loadDivisionStandings(
-                target = target,
-                showLoading = true,
-                reportErrors = true,
-                getStandings = eventRepository::getLeagueDivisionStandings,
-            )?.let { errorMessage -> _errorState.value = errorMessage }
-        }
-    }
-
-    override fun confirmLeagueStandings(applyReassignment: Boolean) {
-        val event = selectedEvent.value
-        val target = leagueStandingsCoordinator.resolveScheduleRefreshTarget(
-            event = event,
-            divisionId = resolveLeagueStandingsDivisionId(),
-        )
-
-        if (target == null) {
-            _errorState.value = ErrorMessage("Select a standings division before confirming standings.")
-            return
-        }
-
-        scope.launch {
-            _errorState.value = leagueStandingsCoordinator.confirmStandings(
-                target = target,
-                applyReassignment = applyReassignment,
-                loadingHandler = loadingHandler,
-                confirmStandings = eventRepository::confirmLeagueDivisionStandings,
-                refreshMatches = { eventId -> matchRepository.getMatchesOfTournament(eventId) },
-                refreshEvent = { eventId -> eventRepository.getEvent(eventId) },
-            )
-        }
-    }
+    override fun confirmLeagueStandings(applyReassignment: Boolean) =
+        resourceLifecycleHandler.confirmLeagueStandings(applyReassignment)
 
     override fun onHostCreateAccount() {
         scope.launch {
