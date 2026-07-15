@@ -311,8 +311,6 @@ fun CreateEventScreen(
     val onAddInstallmentRow: () -> Unit = remember(component) { component::addInstallmentRow }
     val onRemoveInstallmentRow: (Int) -> Unit = remember(component) { component::removeInstallmentRow }
     val onSearchUsers: (String) -> Unit = remember(component) { component::searchUsers }
-    val onEnsureUserByEmail: suspend (String) -> Result<UserData> =
-        remember(component) { { email -> component.ensureUserByEmail(email) } }
     val onAddPendingStaffInvite:
         suspend (String, String, String, Set<com.razumly.mvp.eventDetail.EventStaffRole>) -> Result<Unit> =
         remember(component) { { firstName, lastName, email, roles ->
@@ -493,7 +491,6 @@ fun CreateEventScreen(
                             pendingStaffInvites = pendingStaffInvites,
                             userSuggestions = suggestedUsers,
                             onSearchUsers = onSearchUsers,
-                            onEnsureUserByEmail = onEnsureUserByEmail,
                             onAddPendingStaffInvite = onAddPendingStaffInvite,
                             onRemovePendingStaffInvite = onRemovePendingStaffInvite,
                             onUpdateHostId = onUpdateHostId,

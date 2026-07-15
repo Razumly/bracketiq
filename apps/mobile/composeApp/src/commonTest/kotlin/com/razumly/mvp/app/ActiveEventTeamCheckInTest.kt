@@ -30,7 +30,7 @@ class ActiveEventTeamCheckInTest {
 
         val candidates = resolveActiveEventTeamCheckInCandidates(
             snapshot = UserScheduleSnapshot(events = listOf(event), teams = listOf(team)),
-            user = UserData().copy(id = "manager-1"),
+            user = createUser("manager-1"),
             now = Instant.parse("2026-07-12T11:30:00Z"),
         )
 
@@ -58,13 +58,27 @@ class ActiveEventTeamCheckInTest {
 
         assertTrue(resolveActiveEventTeamCheckInCandidates(
             snapshot = snapshot,
-            user = UserData().copy(id = "player-1"),
+            user = createUser("player-1"),
             now = Instant.parse("2026-07-12T11:45:00Z"),
         ).isEmpty())
         assertTrue(resolveActiveEventTeamCheckInCandidates(
             snapshot = snapshot,
-            user = UserData().copy(id = "captain-1"),
+            user = createUser("captain-1"),
             now = Instant.parse("2026-07-12T11:00:00Z"),
         ).isEmpty())
     }
+
+    private fun createUser(id: String): UserData = UserData(
+        firstName = "Test",
+        lastName = "User",
+        teamIds = emptyList(),
+        friendIds = emptyList(),
+        friendRequestIds = emptyList(),
+        friendRequestSentIds = emptyList(),
+        followingIds = emptyList(),
+        userName = id,
+        hasStripeAccount = false,
+        uploadedImages = emptyList(),
+        id = id,
+    )
 }

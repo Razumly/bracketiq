@@ -184,4 +184,31 @@ class EventStaffPersistenceTest {
 
         assertEquals(listOf("invite_removed_1"), userRepository.deleteInviteCalls)
     }
+
+    @Test
+    fun pending_staff_membership_validation_uses_the_persisted_event_scope() = runTest {
+        val userRepository = CreateEvent_FakeUserRepository()
+        val event = Event(
+            id = "event_1",
+            hostId = "host_1",
+            officialIds = listOf("official_1"),
+        )
+
+        reconcileEventStaffInvites(
+            userRepository = userRepository,
+            event = event,
+            pendingStaffInvites = listOf(
+                PendingStaffInviteDraft(
+                    firstName = "Sam",
+                    lastName = "Official",
+                    email = "official@example.com",
+                    roles = setOf(EventStaffRole.OFFICIAL),
+                ),
+            ),
+            existingStaffInvites = emptyList(),
+            createdByUserId = "host_1",
+        ).getOrThrow()
+
+        assertEquals(listOf<String?>("event_1"), userRepository.emailMembershipEventIds)
+    }
 }

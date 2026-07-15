@@ -12,7 +12,7 @@ import kotlin.time.Instant
 class CreateEventSelectionRulesTest {
 
     @Test
-    fun league_selection_enforces_team_signup_and_mobile_defaults() {
+    fun league_selection_enforces_team_signup_and_preserves_payment_plan() {
         val start = Instant.fromEpochMilliseconds(1_000L)
         val end = Instant.fromEpochMilliseconds(2_000L)
         val draft = Event(
@@ -20,6 +20,7 @@ class CreateEventSelectionRulesTest {
             teamSignup = false,
             singleDivision = false,
             noFixedEndDateTime = true,
+            priceCents = 2000,
             allowPaymentPlans = true,
             installmentCount = 2,
             installmentDueDates = listOf("2026-02-24", "2026-03-24"),
@@ -34,10 +35,10 @@ class CreateEventSelectionRulesTest {
         assertTrue(updated.teamSignup)
         assertFalse(updated.singleDivision)
         assertTrue(updated.noFixedEndDateTime)
-        assertFalse(updated.allowPaymentPlans == true)
-        assertEquals(null, updated.installmentCount)
-        assertTrue(updated.installmentDueDates.isEmpty())
-        assertTrue(updated.installmentAmounts.isEmpty())
+        assertTrue(updated.allowPaymentPlans == true)
+        assertEquals(2, updated.installmentCount)
+        assertEquals(listOf("2026-02-24", "2026-03-24"), updated.installmentDueDates)
+        assertEquals(listOf(1000, 1000), updated.installmentAmounts)
         assertEquals(end, updated.end)
     }
 
@@ -87,7 +88,7 @@ class CreateEventSelectionRulesTest {
     }
 
     @Test
-    fun weekly_selection_preserves_team_signup_choice() {
+    fun weekly_selection_preserves_team_signup_choice_and_relative_payment_plan() {
         val start = Instant.fromEpochMilliseconds(13_000L)
         val end = Instant.fromEpochMilliseconds(15_000L)
         val draft = Event(
@@ -95,6 +96,11 @@ class CreateEventSelectionRulesTest {
             teamSignup = false,
             singleDivision = false,
             noFixedEndDateTime = false,
+            priceCents = 2000,
+            allowPaymentPlans = true,
+            installmentCount = 2,
+            installmentDueRelativeDays = listOf(-1, 0),
+            installmentAmounts = listOf(1000, 1000),
             start = start,
             end = end,
         )
@@ -104,18 +110,23 @@ class CreateEventSelectionRulesTest {
         assertEquals(EventType.WEEKLY_EVENT, updated.eventType)
         assertFalse(updated.teamSignup)
         assertFalse(updated.singleDivision)
-        assertFalse(updated.allowPaymentPlans == true)
+        assertTrue(updated.allowPaymentPlans == true)
+        assertEquals(2, updated.installmentCount)
+        assertEquals(listOf(-1, 0), updated.installmentDueRelativeDays)
+        assertEquals(listOf(1000, 1000), updated.installmentAmounts)
         assertEquals(end, updated.end)
     }
 
     @Test
-    fun apply_create_selection_rules_clears_division_payment_plan_data() {
+    fun apply_create_selection_rules_preserves_division_payment_plan_data() {
         val draft = Event(
             eventType = EventType.EVENT,
             singleDivision = false,
+            priceCents = 3000,
             divisionDetails = listOf(
                 DivisionDetail(
                     id = "division-1",
+                    price = 3000,
                     allowPaymentPlans = true,
                     installmentCount = 3,
                     installmentDueDates = listOf("2026-03-01", "2026-04-01", "2026-05-01"),
@@ -129,9 +140,9 @@ class CreateEventSelectionRulesTest {
         assertFalse(updated.singleDivision)
         assertEquals(1, updated.divisionDetails.size)
         val detail = updated.divisionDetails.first()
-        assertFalse(detail.allowPaymentPlans == true)
-        assertEquals(null, detail.installmentCount)
-        assertTrue(detail.installmentDueDates.isEmpty())
-        assertTrue(detail.installmentAmounts.isEmpty())
+        assertTrue(detail.allowPaymentPlans == true)
+        assertEquals(3, detail.installmentCount)
+        assertEquals(listOf("2026-03-01", "2026-04-01", "2026-05-01"), detail.installmentDueDates)
+        assertEquals(listOf(1000, 1000, 1000), detail.installmentAmounts)
     }
 }

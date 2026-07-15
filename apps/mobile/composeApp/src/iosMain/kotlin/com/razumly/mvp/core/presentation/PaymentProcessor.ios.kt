@@ -38,12 +38,12 @@ actual open class PaymentProcessor : IPaymentProcessor {
             billingEmail = email,
             billingAddress = billingAddress?.normalized(),
             onPaymentResult = { result ->
-                handlePaymentResult(result)
+                emitPaymentResult(result)
             }
         )
     }
 
-    private fun handlePaymentResult(result: PaymentResult) {
+    internal actual fun emitPaymentResult(result: PaymentResult) {
         when (result) {
             is PaymentResult.Completed -> {
                 Napier.d("Completed Purchase", tag = "Stripe")

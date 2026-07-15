@@ -222,9 +222,6 @@ fun EventDetails(
     onLeagueScoringConfigChange: (LeagueScoringConfigDTO) -> Unit = {},
     userSuggestions: List<UserData> = emptyList(),
     onSearchUsers: (String) -> Unit = {},
-    onEnsureUserByEmail: suspend (String) -> Result<UserData> = {
-        Result.failure(IllegalStateException("Invite by email is not supported."))
-    },
     onAddPendingStaffInvite: suspend (
         firstName: String,
         lastName: String,

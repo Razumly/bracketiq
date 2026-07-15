@@ -146,7 +146,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
         }
 
     @Test
-    fun league_mobile_flow_loads_playoffs_staff_invites_schedule_and_periphery_then_keeps_them_after_join() =
+    fun league_mobile_join_flow_loads_playoffs_schedule_and_periphery_without_exposing_staff_invites() =
         runTest(testDispatcher) {
             val host = mobileUser(id = "host_1", firstName = "Host", lastName = "User")
             val currentUser = mobileUser(id = "mobile_joiner", firstName = "Mobile", lastName = "Joiner")
@@ -286,7 +286,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             assertEquals(UPLOADED_DB_IMAGE_ID, component.selectedEvent.value.imageId)
             assertTrue(component.selectedEvent.value.includePlayoffs)
             assertEquals(4, component.selectedEvent.value.playoffTeamCount)
-            assertEquals(staffInvites.map(Invite::email), component.eventWithRelations.value.staffInvites.map(Invite::email))
+            assertEquals(emptyList(), component.eventWithRelations.value.staffInvites)
             assertEquals(listOf(slot.id), component.eventWithRelations.value.timeSlots.map(TimeSlot::id))
             assertEquals(listOf(field.id), component.eventFields.value.map { it.field.id })
             assertEquals(matches.map(MatchMVP::id), component.eventWithRelations.value.matches.map { it.match.id })
@@ -307,7 +307,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             assertEquals(matches.map(MatchMVP::id), component.eventWithRelations.value.matches.map { it.match.id })
             assertEquals(listOf(slot.id), component.eventWithRelations.value.timeSlots.map(TimeSlot::id))
             assertEquals(listOf(field.id), component.eventFields.value.map { it.field.id })
-            assertEquals(staffInvites.map(Invite::id), component.eventWithRelations.value.staffInvites.map(Invite::id))
+            assertEquals(emptyList(), component.eventWithRelations.value.staffInvites)
             assertTrue(eventRepository.staffInviteRequests.isEmpty())
         }
 
@@ -2523,8 +2523,6 @@ private class EventDetailFakeUserRepository(
     )
 
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = Result.success(emptyList())
-    override suspend fun ensureUserByEmail(email: String): Result<UserData> =
-        Result.success(mobileUser(id = email.substringBefore('@'), firstName = "Email", lastName = "User"))
     override suspend fun createInvites(invites: List<InviteCreateDto>): Result<List<Invite>> {
         createdInviteRequests += invites
         return Result.success(emptyList())
@@ -2533,6 +2531,7 @@ private class EventDetailFakeUserRepository(
     override suspend fun findEmailMembership(
         emails: List<String>,
         userIds: List<String>,
+        eventId: String?,
     ): Result<List<UserEmailMembershipMatch>> = Result.success(emptyList())
     override suspend fun listInvites(userId: String, type: String?): Result<List<Invite>> = Result.success(emptyList())
     override suspend fun acceptInvite(inviteId: String): Result<Unit> = Result.success(Unit)

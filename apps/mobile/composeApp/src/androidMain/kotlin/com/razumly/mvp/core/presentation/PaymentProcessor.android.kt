@@ -83,24 +83,28 @@ actual open class PaymentProcessor : IPaymentProcessor {
         _paymentResult.value = null
     }
 
+    internal actual fun emitPaymentResult(result: PaymentResult) {
+        _paymentResult.value = result
+    }
+
     fun onPaymentSheetResult(paymentSheetResult: PaymentSheetResult) {
         when (paymentSheetResult) {
             is PaymentSheetResult.Canceled -> {
                 Napier.d("Cancelled Purchase", tag = "Stripe")
-                _paymentResult.value = PaymentResult.Canceled
+                emitPaymentResult(PaymentResult.Canceled)
             }
 
             is PaymentSheetResult.Failed -> {
                 val message = paymentSheetResult.error.toUserFacingPaymentMessage()
                 Napier.w("Failed Purchase: $message", tag = "Stripe")
-                _paymentResult.value = PaymentResult.Failed(
+                emitPaymentResult(PaymentResult.Failed(
                     message
-                )
+                ))
             }
 
             is PaymentSheetResult.Completed -> {
                 Napier.d("Completed Purchase", tag = "Stripe")
-                _paymentResult.value = PaymentResult.Completed
+                emitPaymentResult(PaymentResult.Completed)
             }
         }
     }

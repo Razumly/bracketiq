@@ -42,6 +42,7 @@ private suspend fun validatePendingStaffEmailMembership(
     val matches = userRepository.findEmailMembership(
         emails = drafts.map(PendingStaffInviteDraft::email),
         userIds = assignedUserIds,
+        eventId = event.id,
     ).getOrThrow()
     val matchedUserIdsByEmail = matches.groupBy(
         keySelector = { match -> normalizeStaffInviteEmail(match.email) },

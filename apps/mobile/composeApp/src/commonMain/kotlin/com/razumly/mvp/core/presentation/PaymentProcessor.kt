@@ -19,6 +19,7 @@ expect open class PaymentProcessor(): IPaymentProcessor {
     override fun presentPaymentSheet(email: String, name: String, billingAddress: BillingAddressDraft?)
     override suspend fun setPaymentIntent(intent: PurchaseIntent)
     override fun clearPaymentResult()
+    internal fun emitPaymentResult(result: PaymentResult)
 }
 
 sealed class PaymentResult {

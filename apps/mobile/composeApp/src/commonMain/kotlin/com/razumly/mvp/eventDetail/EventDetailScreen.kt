@@ -3991,14 +3991,11 @@ fun EventDetailScreen(
             }
 
             if (showNotifyDialog) {
-                SendNotificationDialog(onSend = {
-                    component.sendNotification(
-                        title = "Event Notification", message = "Event Notification"
-                    )
-                    showNotifyDialog = false
-                }, onDismiss = {
-                    showNotifyDialog = false
-                })
+                SendNotificationDialog(
+                    onSend = component::sendNotification,
+                    onSent = { showNotifyDialog = false },
+                    onDismiss = { showNotifyDialog = false },
+                )
             }
 
             if (showInviteTeamDialog) {

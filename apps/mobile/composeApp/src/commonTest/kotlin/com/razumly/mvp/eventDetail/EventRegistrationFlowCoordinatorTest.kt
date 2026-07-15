@@ -9,7 +9,6 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.DiscountPreview
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
-import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.data.repositories.SignStep
@@ -1246,68 +1245,19 @@ class EventRegistrationFlowCoordinatorTest {
     }
 
     @Test
-    fun fee_breakdown_confirm_returns_continuation_and_clears_state() {
+    fun payment_sheet_intent_uses_the_latest_checkout_and_can_be_consumed_once_or_cleared() {
         val coordinator = EventRegistrationFlowCoordinator()
-        val feeBreakdown = feeBreakdown()
-        val purchaseIntent = purchaseIntent("registration-1")
-        var continued = false
+        val firstPurchaseIntent = purchaseIntent("registration-1")
+        val latestPurchaseIntent = purchaseIntent("registration-2")
 
-        coordinator.setPendingPaymentSheetIntent(purchaseIntent)
-        coordinator.showFeeBreakdown(feeBreakdown) {
-            continued = coordinator.consumePendingPaymentSheetIntent() == purchaseIntent
-        }
+        coordinator.setPendingPaymentSheetIntent(firstPurchaseIntent)
+        coordinator.setPendingPaymentSheetIntent(latestPurchaseIntent)
 
-        assertTrue(coordinator.showFeeBreakdown.value)
-        assertEquals(feeBreakdown, coordinator.currentFeeBreakdown.value)
-
-        val continuation = coordinator.confirmFeeBreakdown()
-
-        assertFalse(coordinator.showFeeBreakdown.value)
-        assertNull(coordinator.currentFeeBreakdown.value)
-        assertFalse(continued)
-
-        continuation?.invoke()
-
-        assertTrue(continued)
-        assertNull(coordinator.consumePendingPaymentSheetIntent())
-        assertNull(coordinator.confirmFeeBreakdown())
-    }
-
-    @Test
-    fun fee_breakdown_dismiss_clears_state_and_pending_continuation() {
-        val coordinator = EventRegistrationFlowCoordinator()
-        coordinator.showFeeBreakdown(feeBreakdown()) {}
-
-        coordinator.dismissFeeBreakdown()
-
-        assertFalse(coordinator.showFeeBreakdown.value)
-        assertNull(coordinator.currentFeeBreakdown.value)
-        assertNull(coordinator.confirmFeeBreakdown())
-    }
-
-    @Test
-    fun payment_sheet_intent_can_be_consumed_once_or_cleared() {
-        val coordinator = EventRegistrationFlowCoordinator()
-        val purchaseIntent = purchaseIntent("registration-1")
-
-        coordinator.setPendingPaymentSheetIntent(purchaseIntent)
-
-        assertEquals(purchaseIntent, coordinator.consumePendingPaymentSheetIntent())
+        assertEquals(latestPurchaseIntent, coordinator.consumePendingPaymentSheetIntent())
         assertNull(coordinator.consumePendingPaymentSheetIntent())
 
-        coordinator.setPendingPaymentSheetIntent(purchaseIntent)
+        coordinator.setPendingPaymentSheetIntent(firstPurchaseIntent)
         coordinator.clearPendingPaymentSheetIntent()
-
-        assertNull(coordinator.consumePendingPaymentSheetIntent())
-    }
-
-    @Test
-    fun fee_breakdown_dismiss_clears_pending_payment_sheet_intent() {
-        val coordinator = EventRegistrationFlowCoordinator()
-        coordinator.setPendingPaymentSheetIntent(purchaseIntent("registration-1"))
-        coordinator.showFeeBreakdown(feeBreakdown()) {}
-
-        coordinator.dismissFeeBreakdown()
 
         assertNull(coordinator.consumePendingPaymentSheetIntent())
     }
@@ -1569,17 +1519,6 @@ class EventRegistrationFlowCoordinatorTest {
             totalAmountCents = 10000,
             installmentAmounts = listOf(5000, 5000),
             installmentDueDates = listOf("2026-07-01", "2026-08-01"),
-        )
-    }
-
-    private fun feeBreakdown(): FeeBreakdown {
-        return FeeBreakdown(
-            eventPrice = 10000,
-            stripeFee = 300,
-            processingFee = 500,
-            totalCharge = 10800,
-            hostReceives = 9500,
-            feePercentage = 5f,
         )
     }
 

@@ -10,6 +10,33 @@ internal enum class PurchaseIntentProcessingAction {
     LAUNCHING_PAYMENT_SHEET,
 }
 
+private const val BOLDSIGN_SIGNING_HOST = "app.boldsign.com"
+
+/**
+ * The purchase endpoint can require an embedded signing step. Do not hand an
+ * arbitrary response URL to the embedded browser: only HTTPS BoldSign links
+ * with a real path are accepted.
+ */
+internal fun trustedPurchaseSigningUrlOrNull(rawUrl: String?): String? {
+    val url = rawUrl?.trim()?.takeIf(String::isNotBlank) ?: return null
+    if (url.any { it.isWhitespace() || it.code < 0x20 || it.code == 0x7f } ||
+        !url.startsWith("https://", ignoreCase = true)
+    ) {
+        return null
+    }
+
+    val authorityAndPath = url.substring("https://".length)
+    val authorityEnd = authorityAndPath.indexOfFirst { it == '/' || it == '?' || it == '#' }
+        .let { if (it == -1) authorityAndPath.length else it }
+    val authority = authorityAndPath.substring(0, authorityEnd)
+    if (!authority.equals(BOLDSIGN_SIGNING_HOST, ignoreCase = true)) return null
+
+    val pathAndQuery = authorityAndPath.substring(authorityEnd)
+    if (!pathAndQuery.startsWith('/') || pathAndQuery.length == 1 || pathAndQuery.contains('#')) return null
+
+    return url
+}
+
 internal class EventPurchaseIntentCoordinator(
     private val registrationFlowCoordinator: EventRegistrationFlowCoordinator,
 ) {
@@ -99,10 +126,17 @@ internal class EventPurchaseIntentCoordinator(
             return true
         }
 
-        val signingUrl = intent.resolvedSigningUrl()
-        if (signingUrl.isNullOrBlank()) {
-            logWarning("Purchase intent requires signature but did not include a signing URL.")
-            return true
+        val rawSigningUrl = intent.resolvedSigningUrl()
+        val signingUrl = trustedPurchaseSigningUrlOrNull(rawSigningUrl)
+        if (signingUrl == null) {
+            val warning = if (rawSigningUrl.isNullOrBlank()) {
+                "Purchase intent requires signature but did not include a signing URL."
+            } else {
+                "Purchase intent requires signature but included an untrusted signing URL."
+            }
+            logWarning(warning)
+            setError("This registration requires a signed document, but the signing link is unavailable or invalid. Please retry before paying.")
+            return false
         }
 
         registrationFlowCoordinator.showWebSignaturePrompt(

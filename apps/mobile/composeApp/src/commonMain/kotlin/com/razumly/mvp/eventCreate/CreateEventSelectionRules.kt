@@ -20,20 +20,5 @@ internal fun Event.applyCreateSelectionRules(): Event {
             noFixedEndDateTime = false,
         )
     }
-    return typeNormalizedEvent.copy(
-        allowPaymentPlans = false,
-        installmentCount = null,
-        installmentDueDates = emptyList(),
-        installmentDueRelativeDays = emptyList(),
-        installmentAmounts = emptyList(),
-        divisionDetails = typeNormalizedEvent.divisionDetails.map { detail ->
-            detail.copy(
-                allowPaymentPlans = false,
-                installmentCount = null,
-                installmentDueDates = emptyList(),
-                installmentDueRelativeDays = emptyList(),
-                installmentAmounts = emptyList(),
-            )
-        },
-    ).syncEventTypeTagsForEventType()
+    return typeNormalizedEvent.syncEventTypeTagsForEventType()
 }

@@ -126,7 +126,6 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun addInstallmentRow()
     fun removeInstallmentRow(index: Int)
     fun searchUsers(query: String)
-    suspend fun ensureUserByEmail(email: String): Result<UserData>
     suspend fun addPendingStaffInvite(
         firstName: String,
         lastName: String,
@@ -668,18 +667,6 @@ class DefaultCreateEventComponent(
         }
     }
 
-    override suspend fun ensureUserByEmail(email: String): Result<UserData> {
-        val normalizedEmail = email.trim()
-        if (normalizedEmail.isEmpty()) {
-            return Result.failure(IllegalArgumentException("Email is required."))
-        }
-
-        return userRepository.ensureUserByEmail(normalizedEmail)
-            .onFailure { error ->
-                _errorState.value = ErrorMessage(error.userMessage("Unable to invite by email."))
-            }
-    }
-
     override suspend fun addPendingStaffInvite(
         firstName: String,
         lastName: String,
@@ -710,6 +697,7 @@ class DefaultCreateEventComponent(
             val matches = userRepository.findEmailMembership(
                 emails = listOf(normalizedDraft.email),
                 userIds = assignedUserIds,
+                eventId = null,
             ).getOrThrow()
             normalizedDraft.roles.forEach { role ->
                 val roleUserIds = event.assignedUserIdsForRole(role)
@@ -1351,13 +1339,17 @@ class DefaultCreateEventComponent(
         fieldIdReplacements: Map<String, String>,
     ): List<TimeSlot> {
         val selectedDivisionIds = event.divisions.normalizeDivisionIdentifiers()
-        return _leagueSlots.value.mapNotNull { rawSlot ->
+        // A visible configured slot must be persisted or explicitly block submission.
+        return _leagueSlots.value.mapIndexed { index, rawSlot ->
             val slot = normalizeRentalSlotResourceSelection(rawSlot)
             val mappedFieldIds = slot.normalizedScheduledFieldIds()
-                .mapNotNull { fieldId ->
-                    (fieldIdReplacements[fieldId] ?: fieldId).takeIf { it.isNotBlank() }
+                .map { fieldId ->
+                    (fieldIdReplacements[fieldId] ?: fieldId).trim()
                 }
-                .distinct()
+            if (mappedFieldIds.any(String::isBlank)) {
+                invalidConfiguredScheduleSlot(index, "contains a field that cannot be saved.")
+            }
+            val distinctMappedFieldIds = mappedFieldIds.distinct()
             val effectiveDivisionIds = resolveEffectiveLeagueSlotDivisionIds(
                 singleDivision = event.singleDivision,
                 selectedDivisionIds = selectedDivisionIds,
@@ -1367,25 +1359,26 @@ class DefaultCreateEventComponent(
             val startMinutes = slot.startTimeMinutes
             val endMinutes = slot.endTimeMinutes
 
-            if (mappedFieldIds.isEmpty()) {
-                return@mapNotNull null
+            if (distinctMappedFieldIds.isEmpty()) {
+                invalidConfiguredScheduleSlot(index, "select at least one field.")
             }
 
             if (!slot.repeating) {
                 val slotTimeZone = slot.timeZone.toTimeZoneOrUtc(event.resolvedTimeZone())
                 val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
-                val slotEndDate = slot.endDate ?: return@mapNotNull null
+                val slotEndDate = slot.endDate
+                    ?: invalidConfiguredScheduleSlot(index, "select an end date and time.")
                 if (slotEndDate <= slotStartDate) {
-                    return@mapNotNull null
+                    invalidConfiguredScheduleSlot(index, "end date and time must be after its start.")
                 }
                 val slotDayOfWeek = slotStartDate.toMondayFirstDay(slotTimeZone)
-                return@mapNotNull slot.copy(
+                return@mapIndexed slot.copy(
                     id = slot.id.ifBlank { newId() },
                     dayOfWeek = slotDayOfWeek,
                     daysOfWeek = listOf(slotDayOfWeek),
                     divisions = effectiveDivisionIds,
-                    scheduledFieldId = mappedFieldIds.first(),
-                    scheduledFieldIds = mappedFieldIds,
+                    scheduledFieldId = distinctMappedFieldIds.first(),
+                    scheduledFieldIds = distinctMappedFieldIds,
                     startDate = slotStartDate,
                     endDate = slotEndDate,
                     startTimeMinutes = slotStartDate.toMinutesOfDay(slotTimeZone),
@@ -1394,11 +1387,17 @@ class DefaultCreateEventComponent(
                 )
             }
 
-            if (normalizedDays.isEmpty() || startMinutes == null || endMinutes == null) {
-                return@mapNotNull null
+            if (normalizedDays.isEmpty()) {
+                invalidConfiguredScheduleSlot(index, "select at least one day.")
+            }
+            if (startMinutes == null) {
+                invalidConfiguredScheduleSlot(index, "select a start time.")
+            }
+            if (endMinutes == null) {
+                invalidConfiguredScheduleSlot(index, "select an end time.")
             }
             if (endMinutes <= startMinutes) {
-                return@mapNotNull null
+                invalidConfiguredScheduleSlot(index, "end time must be after its start time.")
             }
             val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
             val repeatingEndDate = if (event.eventType == EventType.WEEKLY_EVENT) {
@@ -1413,13 +1412,17 @@ class DefaultCreateEventComponent(
                 dayOfWeek = normalizedDays.first(),
                 daysOfWeek = normalizedDays,
                 divisions = effectiveDivisionIds,
-                scheduledFieldId = mappedFieldIds.first(),
-                scheduledFieldIds = mappedFieldIds,
+                scheduledFieldId = distinctMappedFieldIds.first(),
+                scheduledFieldIds = distinctMappedFieldIds,
                 startDate = slotStartDate,
                 endDate = repeatingEndDate,
                 repeating = true,
             )
         }
+    }
+
+    private fun invalidConfiguredScheduleSlot(index: Int, reason: String): Nothing {
+        throw IllegalArgumentException("Schedule slot ${index + 1}: $reason")
     }
 
     private fun shouldUseConfiguredLeagueSlots(event: Event): Boolean {

@@ -7,29 +7,39 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.presentation.composables.StandardTextField
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 @Composable
 fun SendNotificationDialog(
-    onSend: () -> Unit, onDismiss: () -> Unit
+    onSend: suspend (title: String, message: String) -> Result<Unit>,
+    onSent: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
     val maxMessageLength = 500
+    val scope = rememberCoroutineScope()
     var title by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
+    var isSending by remember { mutableStateOf(false) }
+    var sendError by remember { mutableStateOf<String?>(null) }
     val isMessageValid = message.length <= maxMessageLength
     val remainingChars = maxMessageLength - message.length
 
-    AlertDialog(onDismissRequest = onDismiss, title = {
+    AlertDialog(onDismissRequest = { if (!isSending) onDismiss() }, title = {
         Text("Send Notification")
     }, text = {
         Column(
@@ -87,16 +97,52 @@ fun SendNotificationDialog(
                     )
                 }
             }
+
+            if (isSending) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CircularProgressIndicator(modifier = Modifier.padding(top = 2.dp))
+                    Text("Sending notification...", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+
+            sendError?.let { error ->
+                Text(
+                    text = error,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
         }
     }, confirmButton = {
         Button(
-            onClick = onSend,
-            enabled = title.isNotBlank() && message.isNotBlank() && isMessageValid
+            onClick = {
+                if (!isSending) {
+                    isSending = true
+                    sendError = null
+                    scope.launch {
+                        val result = try {
+                            onSend(title.trim(), message.trim())
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (error: Throwable) {
+                            Result.failure(error)
+                        }
+                        isSending = false
+                        result.fold(
+                            onSuccess = { onSent() },
+                            onFailure = { error ->
+                                sendError = error.userMessage("Unable to send the notification. Please try again.")
+                            },
+                        )
+                    }
+                }
+            },
+            enabled = !isSending && title.isNotBlank() && message.isNotBlank() && isMessageValid,
         ) {
-            Text("Send Notification")
+            Text(if (isSending) "Sending..." else "Send Notification")
         }
     }, dismissButton = {
-        Button(onClick = onDismiss) {
+        Button(onClick = onDismiss, enabled = !isSending) {
             Text("Cancel")
         }
     })

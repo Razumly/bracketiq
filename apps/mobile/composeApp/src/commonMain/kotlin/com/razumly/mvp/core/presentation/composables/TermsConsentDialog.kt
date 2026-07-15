@@ -1,57 +1,55 @@
 package com.razumly.mvp.core.presentation.composables
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.repositories.ChatTermsConsentState
+import com.razumly.mvp.core.network.apiBaseUrl
 
-private val defaultSummaryLines = listOf(
-    "There is no tolerance for objectionable content or abusive users.",
-    "Users can report chats, events, and abusive users.",
-    "Moderation acts on reports within 24 hours.",
+internal data class TermsAgreementPresentation(
+    val url: String?,
+    val versionLabel: String?,
 )
 
-private data class TermsAgreementSection(
-    val title: String,
-    val body: String,
-)
+/**
+ * The consent API owns both the terms revision and its canonical location. The app must not
+ * replace those terms with a local approximation: a revision can change without a mobile
+ * release.
+ */
+internal fun termsAgreementPresentation(
+    state: ChatTermsConsentState,
+    baseUrl: String = apiBaseUrl,
+): TermsAgreementPresentation {
+    val version = state.version.trim().takeIf(String::isNotBlank)
+    return TermsAgreementPresentation(
+        url = resolveTermsAgreementUrl(state.url, baseUrl),
+        versionLabel = version?.let { "Terms and EULA version $it" },
+    )
+}
 
-private val fullAgreementSections = listOf(
-    TermsAgreementSection(
-        title = "Content Creation Access",
-        body = "Sending chat messages, creating events, or other user-generated content in Bracket IQ requires agreement to the Terms and EULA. If you do not agree, those flows remain unavailable until you accept.",
-    ),
-    TermsAgreementSection(
-        title = "No Tolerance Policy",
-        body = "Bracket IQ does not tolerate objectionable content, abusive users, harassment, threats, hate speech, sexual exploitation, graphic abuse, or other harmful conduct.",
-    ),
-    TermsAgreementSection(
-        title = "Reports And Blocks",
-        body = "Users can report chat groups, report events, and block abusive users. Blocking can immediately hide shared chats from the blocker and can remove the blocker from shared chats when that option is chosen.",
-    ),
-    TermsAgreementSection(
-        title = "Moderation Timeline",
-        body = "Moderation reports are reviewed within 24 hours. When objectionable content is confirmed, the content is removed and the offending user is ejected or suspended.",
-    ),
-    TermsAgreementSection(
-        title = "Enforcement And Visibility",
-        body = "Reported events are hidden from the reporting user's event results. Chat groups and messages remain preserved for moderator review even when they are hidden from end users. Unblocking removes the block relationship but does not restore friendships, follows, or chat memberships.",
-    ),
-)
+internal fun resolveTermsAgreementUrl(rawUrl: String, baseUrl: String): String? {
+    val url = rawUrl.trim()
+    if (url.isBlank()) return null
+    if (url.startsWith("https://", ignoreCase = true) || url.startsWith("http://", ignoreCase = true)) {
+        return url
+    }
+    if (!url.startsWith('/') || url.startsWith("//")) return null
+
+    val origin = baseUrl.trim().trimEnd('/')
+    if (!origin.startsWith("https://", ignoreCase = true) &&
+        !origin.startsWith("http://", ignoreCase = true)
+    ) {
+        return null
+    }
+    return "$origin/${url.trimStart('/')}"
+}
 
 @Composable
 fun TermsConsentDialog(
@@ -64,9 +62,10 @@ fun TermsConsentDialog(
     confirmLabel: String = "Agree",
     dismissLabel: String = "Not now",
 ) {
-    val summaryLines = state.summary.ifEmpty { defaultSummaryLines }
-    var showFullAgreement by remember { mutableStateOf(false) }
-    val fullAgreementScrollState = rememberScrollState()
+    val agreement = remember(state.url, state.version) { termsAgreementPresentation(state) }
+    val agreementUrl = agreement.url
+    val agreementVersion = agreement.versionLabel
+    val showAgreement = remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = { onDismiss?.invoke() },
@@ -80,37 +79,15 @@ fun TermsConsentDialog(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                summaryLines.forEach { summaryLine ->
+                state.summary.forEach { summaryLine ->
                     Text(summaryLine, style = MaterialTheme.typography.bodySmall)
                 }
-                Text(
-                    "Moderation reports are reviewed within 24 hours. Confirmed objectionable content is removed and abusive users are ejected or suspended.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                TextButton(onClick = { showFullAgreement = !showFullAgreement }) {
-                    Text(if (showFullAgreement) "Hide full agreement" else "View full agreement")
+                agreementVersion?.let { version ->
+                    Text(version, style = MaterialTheme.typography.bodySmall)
                 }
-                if (showFullAgreement) {
-                    Box(
-                        modifier = androidx.compose.ui.Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 280.dp)
-                            .verticalScroll(fullAgreementScrollState),
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            fullAgreementSections.forEach { section ->
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(
-                                        text = section.title,
-                                        style = MaterialTheme.typography.titleSmall,
-                                    )
-                                    Text(
-                                        text = section.body,
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
-                            }
-                        }
+                if (agreementUrl != null) {
+                    TextButton(onClick = { showAgreement.value = true }) {
+                        Text("Review the current Terms and EULA")
                     }
                 }
             }
@@ -128,4 +105,13 @@ fun TermsConsentDialog(
             }
         },
     )
+
+    if (showAgreement.value && agreementUrl != null) {
+        EmbeddedWebModal(
+            title = agreementVersion ?: "Terms and EULA",
+            url = agreementUrl,
+            description = "Review the current agreement before accepting.",
+            onDismiss = { showAgreement.value = false },
+        )
+    }
 }

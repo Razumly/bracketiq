@@ -649,11 +649,10 @@ class DefaultEventDetailComponent(
     override val eventFields: StateFlow<List<FieldWithMatches>> = combine(
         selectedEventId,
         eventFieldIds,
-        bootstrapResourcesCoordinator.bootstrappedEventIds,
-    ) { eventId, fieldIds, bootstrappedEventIds ->
-        Triple(eventId, fieldIds, bootstrappedEventIds.contains(eventId))
-    }.flatMapLatest { (eventId, fieldIds, bootstrapped) ->
-        if (fieldIds.isEmpty() || !bootstrapped) {
+    ) { eventId, fieldIds ->
+        eventId to fieldIds
+    }.flatMapLatest { (_, fieldIds) ->
+        if (fieldIds.isEmpty()) {
             flowOf(emptyList())
         } else {
             fieldRepository.getFieldsWithMatchesFlow(fieldIds)
@@ -2121,6 +2120,14 @@ class DefaultEventDetailComponent(
             showDetails = { _showDetails.value = true },
         ) ?: return
 
+        // Mobile hydration refreshes the management data directly. Mark that work before
+        // launching it so the managed-detail observer does not start a second identical
+        // bootstrap for the same event and occurrence.
+        markManagedBootstrapRequested(
+            event = event,
+            occurrence = currentWeeklyOccurrenceSelection(),
+            manage = canManageParticipantData(event),
+        )
         eventDetailHydrationJob?.cancel()
         eventDetailHydrationJob = scope.launch {
             detailHydrationCoordinator.hydrateMobileEventDetail(
@@ -2394,6 +2401,7 @@ class DefaultEventDetailComponent(
             val matches = userRepository.findEmailMembership(
                 emails = listOf(normalizedDraft.email),
                 userIds = assignedUserIds,
+                eventId = event.id,
             ).getOrThrow()
             normalizedDraft.roles.forEach { role ->
                 val roleUserIds = event.assignedUserIdsForRole(role)
@@ -3319,13 +3327,13 @@ class DefaultEventDetailComponent(
         )
     }
 
-    override fun sendNotification(title: String, message: String) {
-        scope.launch {
-            notificationCoordinator
-                .sendEventNotification(eventWithRelations.value.event.id, title, message)
-                ?.let { errorMessage -> _errorState.value = errorMessage }
-        }
-    }
+    override suspend fun sendNotification(title: String, message: String): Result<Unit> =
+        notificationCoordinator.sendEventNotification(
+            eventWithRelations.value.event.id,
+            eventWithRelations.value.event.eventType,
+            title,
+            message,
+        )
 
     override fun dismissMatchEditDialog() {
         matchEditingCoordinator.dismissMatchEditDialog(
