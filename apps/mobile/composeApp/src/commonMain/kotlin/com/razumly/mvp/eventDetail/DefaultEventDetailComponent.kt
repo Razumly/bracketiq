@@ -34,11 +34,9 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
-import com.razumly.mvp.core.data.dataTypes.isPaymentPending
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
 import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
@@ -47,7 +45,6 @@ import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.ISportsRepository
-import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.ITeamRepository
@@ -55,7 +52,6 @@ import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
-import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
@@ -67,7 +63,6 @@ import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
-import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.util.ShareServiceProvider
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
@@ -97,22 +92,6 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
-
-private fun FamilyChild.toJoinChildOption(): JoinChildOption {
-    val normalizedFirstName = firstName.trim()
-    val normalizedLastName = lastName.trim()
-    val fullName = listOf(normalizedFirstName, normalizedLastName)
-        .filter { it.isNotBlank() }
-        .joinToString(" ")
-        .ifBlank { "Child" }
-    val normalizedEmail = email?.trim()?.takeIf(String::isNotBlank)
-    return JoinChildOption(
-        userId = userId,
-        fullName = fullName,
-        email = normalizedEmail,
-        hasEmail = hasEmail ?: (normalizedEmail != null),
-    )
-}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DefaultEventDetailComponent(
@@ -263,7 +242,7 @@ class DefaultEventDetailComponent(
     override fun updateEventRegistrationQuestionAnswer(questionId: String, answer: String) {
         if (!registrationFlowCoordinator.updateQuestionAnswer(questionId, answer)) return
         scope.launch {
-            saveCurrentRegistrationProgress(step = "questions")
+            registrationLifecycleHandler.saveCurrentRegistrationProgress(step = "questions")
         }
     }
 
@@ -283,14 +262,14 @@ class DefaultEventDetailComponent(
         }
 
         scope.launch {
-            saveCurrentRegistrationProgress(step = "questions")
+            registrationLifecycleHandler.saveCurrentRegistrationProgress(step = "questions")
             result.continuation?.invoke()
         }
     }
 
     override fun registrationHoldExpired() {
         scope.launch {
-            clearCurrentRegistrationProgress()
+            registrationLifecycleHandler.clearCurrentRegistrationProgress()
             registrationFlowCoordinator.clearPendingJoinConfirmationTarget()
             registrationFlowCoordinator.clearTeamRegistrationState()
             registrationFlowCoordinator.clearAfterRegistrationHoldExpired()
@@ -538,7 +517,7 @@ class DefaultEventDetailComponent(
     private val _eventMatchesLoading = MutableStateFlow(false)
     override val eventMatchesLoading = _eventMatchesLoading.asStateFlow()
 
-    private val participantBootstrapCoordinator = EventParticipantBootstrapCoordinator(
+    private val participantBootstrapCoordinator: EventParticipantBootstrapCoordinator = EventParticipantBootstrapCoordinator(
         selectedEvent = selectedEvent,
         participantManagementCoordinator = participantManagementCoordinator,
         weeklyOccurrenceCoordinator = weeklyOccurrenceCoordinator,
@@ -748,6 +727,31 @@ class DefaultEventDetailComponent(
     override val webSignaturePrompt = registrationFlowCoordinator.webSignaturePrompt
 
     private val shareServiceProvider = ShareServiceProvider()
+    private val registrationLifecycleHandler = EventRegistrationLifecycleHandler(
+        userRepository = userRepository,
+        teamRepository = teamRepository,
+        eventRepository = eventRepository,
+        billingRepository = billingRepository,
+        currentUserDataSource = currentUserDataSource,
+        registrationFlowCoordinator = registrationFlowCoordinator,
+        divisionContentCoordinator = divisionContentCoordinator,
+        membershipCoordinator = membershipCoordinator,
+        joinConfirmationCoordinator = joinConfirmationCoordinator,
+        participantBootstrapCoordinator = participantBootstrapCoordinator,
+        weeklyOccurrenceCoordinator = weeklyOccurrenceCoordinator,
+        selectedEvent = { selectedEvent.value },
+        selectedDivisionId = { selectedDivision.value },
+        currentUser = { currentUser.value },
+        cachedCurrentUserRegistrations = { cachedCurrentUserRegistrations.value },
+        profileTeamIds = { relationStateCoordinator.currentUserTeamIds.value.toList() },
+        currentWeeklyOccurrenceSelection = ::currentWeeklyOccurrenceSelection,
+        showPaymentLoading = ::showRegistrationPaymentLoading,
+        finishPaymentLoading = ::finishRegistrationPaymentLoading,
+        refreshEventDetails = ::refreshEventDetails,
+        clearPaymentResult = ::clearPaymentResult,
+        setScheduleTrackedUserIds = { ids -> _scheduleTrackedUserIds.value = ids },
+        setMessage = { message -> _errorState.value = ErrorMessage(message) },
+    )
     private val registrationActionHandler = EventRegistrationActionHandler(
         scope = scope,
         userRepository = userRepository,
@@ -779,146 +783,30 @@ class DefaultEventDetailComponent(
         isEventFull = { isEventFull.value },
         currentWeeklyOccurrenceSelection = ::currentWeeklyOccurrenceSelection,
         requireSelectedWeeklyOccurrence = ::requireSelectedWeeklyOccurrence,
-        loadJoinableChildren = ::loadJoinableChildren,
-        saveCurrentRegistrationProgress = { step, registrationId, holdExpiresAt ->
-            saveCurrentRegistrationProgress(
-                step = step,
-                registrationId = registrationId,
-                holdExpiresAt = holdExpiresAt,
-            )
-        },
-        clearCurrentRegistrationProgress = ::clearCurrentRegistrationProgress,
-        addCurrentUserToEventWithRegistrationAnswers = ::addCurrentUserToEventWithRegistrationAnswers,
-        addTeamToEventWithRegistrationAnswers = ::addTeamToEventWithRegistrationAnswers,
-        createPurchaseIntentWithRegistrationAnswers = ::createPurchaseIntentWithRegistrationAnswers,
+        loadJoinableChildren = registrationLifecycleHandler::loadJoinableChildren,
+        saveCurrentRegistrationProgress = registrationLifecycleHandler::saveCurrentRegistrationProgress,
+        clearCurrentRegistrationProgress = registrationLifecycleHandler::clearCurrentRegistrationProgress,
+        addCurrentUserToEventWithRegistrationAnswers =
+            registrationLifecycleHandler::addCurrentUserToEventWithRegistrationAnswers,
+        addTeamToEventWithRegistrationAnswers =
+            registrationLifecycleHandler::addTeamToEventWithRegistrationAnswers,
+        createPurchaseIntentWithRegistrationAnswers =
+            registrationLifecycleHandler::createPurchaseIntentWithRegistrationAnswers,
         refreshEventAfterParticipantMutation = participantBootstrapCoordinator::refreshEventAfterParticipantMutation,
         refreshCurrentUserMembershipState = ::refreshCurrentUserMembershipState,
         refreshEventDetails = ::refreshEventDetails,
-        checkIsUserFreeAgent = ::checkIsUserFreeAgent,
-        resolveWithdrawTargetMembership = ::resolveWithdrawTargetMembership,
+        checkIsUserFreeAgent = registrationLifecycleHandler::checkIsUserFreeAgent,
+        resolveWithdrawTargetMembership = registrationLifecycleHandler::resolveWithdrawTargetMembership,
         setPaymentIntent = { intent -> setPaymentIntent(intent) },
         clearPaymentResult = ::clearPaymentResult,
         presentPaymentSheet = ::presentPaymentSheet,
         setError = { message -> _errorState.value = ErrorMessage(message) },
     )
 
-    private fun currentRegistrationProgressScope(): EventRegistrationProgressScope =
-        EventRegistrationProgressScope(
-            userId = currentUser.value.id,
-            eventId = selectedEvent.value.id,
-            occurrence = currentWeeklyOccurrenceSelection(),
-        )
-
-    private suspend fun saveCurrentRegistrationProgress(
-        step: String? = null,
-        registrationId: String? = null,
-        holdExpiresAt: String? = registrationFlowCoordinator.holdExpiresAt.value,
-    ) {
-        registrationFlowCoordinator.saveRegistrationProgress(
-            scope = currentRegistrationProgressScope(),
-            selectedDivisionId = selectedDivision.value,
-            step = step,
-            registrationId = registrationId,
-            holdExpiresAt = holdExpiresAt,
-        ) { key, draft ->
-            currentUserDataSource?.saveRegistrationProgress(
-                key = key,
-                draft = draft,
-            )
-        }
-    }
-
-    private suspend fun loadCurrentRegistrationProgress() {
-        registrationFlowCoordinator.loadRegistrationProgress(
-            scope = currentRegistrationProgressScope(),
-        ) { key ->
-            currentUserDataSource?.loadRegistrationProgress(key)
-        }
-            ?.let { restoredDivisionId ->
-                divisionContentCoordinator.restoreSelectedDivision(restoredDivisionId)
-            }
-    }
-
-    private suspend fun clearCurrentRegistrationProgress() {
-        registrationFlowCoordinator.clearRegistrationProgress(
-            scope = currentRegistrationProgressScope(),
-        ) { key ->
-            currentUserDataSource?.clearRegistrationProgress(key)
-        }
-    }
-
     private fun ensureEventRegistrationQuestionsAnswered(onReady: () -> Unit): Boolean {
         return registrationFlowCoordinator.ensureQuestionsAnswered(
             eventName = selectedEvent.value.name,
             onReady = onReady,
-        )
-    }
-
-    private suspend fun addCurrentUserToEventWithRegistrationAnswers(
-        event: Event,
-        preferredDivisionId: String?,
-        occurrence: EventOccurrenceSelection?,
-    ): Result<SelfRegistrationResult> {
-        return registrationFlowCoordinator.addCurrentUserToEventWithRegistrationAnswers(
-            event = event,
-            preferredDivisionId = preferredDivisionId,
-            occurrence = occurrence,
-            addWithoutAnswers = eventRepository::addCurrentUserToEvent,
-            addWithAnswers = eventRepository::addCurrentUserToEvent,
-        )
-    }
-
-    private suspend fun addTeamToEventWithRegistrationAnswers(
-        event: Event,
-        team: Team,
-        preferredDivisionId: String?,
-        occurrence: EventOccurrenceSelection?,
-    ): Result<Unit> {
-        return registrationFlowCoordinator.addTeamToEventWithRegistrationAnswers(
-            event = event,
-            team = team,
-            preferredDivisionId = preferredDivisionId,
-            occurrence = occurrence,
-            addWithoutAnswers = eventRepository::addTeamToEvent,
-            addWithAnswers = eventRepository::addTeamToEvent,
-        )
-    }
-
-    private suspend fun createPurchaseIntentWithRegistrationAnswers(
-        event: Event,
-        teamId: String? = null,
-        priceCents: Int,
-        occurrence: EventOccurrenceSelection?,
-        divisionId: String?,
-        discountCode: String? = null,
-    ): Result<PurchaseIntent> {
-        return registrationFlowCoordinator.createPurchaseIntentWithRegistrationAnswers(
-            event = event,
-            teamId = teamId,
-            priceCents = priceCents,
-            occurrence = occurrence,
-            divisionId = divisionId,
-            createWithoutAnswers = { targetEvent, targetTeamId, targetPriceCents, selectedOccurrence, targetDivisionId ->
-                billingRepository.createPurchaseIntent(
-                    event = targetEvent,
-                    teamId = targetTeamId,
-                    priceCents = targetPriceCents,
-                    occurrence = selectedOccurrence,
-                    divisionId = targetDivisionId,
-                    discountCode = discountCode,
-                )
-            },
-            createWithAnswers = { targetEvent, targetTeamId, targetPriceCents, selectedOccurrence, targetDivisionId, answers ->
-                billingRepository.createPurchaseIntent(
-                    event = targetEvent,
-                    teamId = targetTeamId,
-                    priceCents = targetPriceCents,
-                    occurrence = selectedOccurrence,
-                    divisionId = targetDivisionId,
-                    answers = answers,
-                    discountCode = discountCode,
-                )
-            },
         )
     }
 
@@ -956,13 +844,16 @@ class DefaultEventDetailComponent(
             )
             eventEditActionHandler.loadAvailableRentalResources(eventId)
         }
-        lifecycleBindings.bindScheduleTrackedUser(currentUser, ::refreshScheduleTrackedUserIds)
+        lifecycleBindings.bindScheduleTrackedUser(
+            currentUser,
+            registrationLifecycleHandler::refreshScheduleTrackedUserIds,
+        )
         lifecycleBindings.bindRegistrationScope(
             selectedEvent = selectedEvent,
             currentUser = currentUser,
             selectedWeeklyOccurrence = weeklyOccurrenceCoordinator.selectedWeeklyOccurrence,
             onMissingScope = registrationFlowCoordinator::clearForMissingRegistrationScope,
-            onScopeChanged = ::loadRegistrationLifecycleScope,
+            onScopeChanged = registrationLifecycleHandler::loadRegistrationLifecycleScope,
         )
         lifecycleBindings.bindSelectedEventMode(
             selectedEvent,
@@ -1010,7 +901,10 @@ class DefaultEventDetailComponent(
         lifecycleBindings.bindDetailsBackCallback(_showDetails) { showDetails ->
             backCallback.isEnabled = showDetails
         }
-        lifecycleBindings.bindPaymentResults(paymentResult, ::handleRegistrationPaymentResult)
+        lifecycleBindings.bindPaymentResults(
+            paymentResult,
+            registrationLifecycleHandler::handleRegistrationPaymentResult,
+        )
         lifecycleBindings.bindMatchRealtime(
             selectedEventId = selectedEventId,
             isEditing = editDraftCoordinator.isEditing,
@@ -1028,7 +922,7 @@ class DefaultEventDetailComponent(
         lifecycleBindings.bindWithdrawTargets(
             selectedEvent,
             selectedWeeklyOccurrence,
-            ::refreshWithdrawTargets,
+            registrationLifecycleHandler::refreshWithdrawTargets,
         )
         lifecycleBindings.bindReadOnlyDraft(
             eventWithRelations,
@@ -1047,119 +941,6 @@ class DefaultEventDetailComponent(
             divisionContentCoordinator.divisionMatches,
             ::generateRounds,
         )
-    }
-
-    private suspend fun loadRegistrationLifecycleScope(eventId: String) {
-        eventRepository.getRegistrationQuestions("EVENT", eventId)
-            .onSuccess(registrationFlowCoordinator::replaceRegistrationQuestions)
-            .onFailure { throwable ->
-                Napier.w("Failed to load event registration questions.", throwable)
-                registrationFlowCoordinator.clearRegistrationQuestionsAfterLoadFailure()
-            }
-        loadCurrentRegistrationProgress()
-    }
-
-    private suspend fun handleRegistrationPaymentResult(result: PaymentResult) {
-        try {
-            val pendingTeam = registrationFlowCoordinator.currentPendingTeamRegistration()
-            val confirmationTarget = registrationFlowCoordinator.currentJoinConfirmationTarget()
-            when (result) {
-                PaymentResult.Canceled -> {
-                    _errorState.value = ErrorMessage("Payment canceled.")
-                    registrationFlowCoordinator.clearTeamRegistrationState()
-                }
-
-                is PaymentResult.Failed -> {
-                    _errorState.value = ErrorMessage(result.error)
-                    registrationFlowCoordinator.clearTeamRegistrationState()
-                }
-
-                PaymentResult.Completed -> {
-                    if (pendingTeam != null) {
-                        showRegistrationPaymentLoading("Refreshing Team")
-                        registrationFlowCoordinator.clearStartingTeamRegistrationId()
-                        val teamRegisteredSuccessfully = joinConfirmationCoordinator.waitForTeamRegistrationWithTimeout(
-                            teamId = pendingTeam.team.id,
-                            currentUserId = currentUser.value.id,
-                            getTeamWithPlayers = teamRepository::getTeamWithPlayers,
-                        )
-                        registrationFlowCoordinator.clearPendingTeamRegistration()
-                        if (teamRegisteredSuccessfully) {
-                            val refreshedTeam = teamRepository.getTeamWithPlayers(pendingTeam.team.id)
-                                .getOrNull()
-                            val paymentPending = refreshedTeam
-                                ?.team
-                                ?.playerRegistrations
-                                ?.any { registration ->
-                                    registration.userId == currentUser.value.id && registration.isPaymentPending()
-                                } == true
-                            membershipCoordinator.setUsersTeam(
-                                refreshedTeam ?: pendingTeam,
-                                currentUser.value.id,
-                            )
-                            refreshCurrentUserMembershipState(selectedEvent.value)
-                            _errorState.value = ErrorMessage(
-                                if (paymentPending) {
-                                    "Payment submitted for ${pendingTeam.team.name}. Registration is pending until the bank payment clears."
-                                } else {
-                                    "Registration completed for ${pendingTeam.team.name}."
-                                }
-                            )
-                            refreshEventDetails()
-                        } else {
-                            _errorState.value = ErrorMessage(
-                                "Payment submitted, but team registration confirmation is still pending. Please reload the event."
-                            )
-                        }
-                    } else {
-                        showRegistrationPaymentLoading("Reloading Event")
-                        val userJoinedSuccessfully = joinConfirmationCoordinator.waitForUserInEventWithTimeout(
-                            confirmationTarget = confirmationTarget,
-                            isUserInEvent = { membershipCoordinator.isUserInEvent.value },
-                            refreshAfterParticipantMutation = {
-                                participantBootstrapCoordinator.refreshEventAfterParticipantMutation(
-                                    eventId = selectedEvent.value.id,
-                                    warningMessage = "Failed to refresh event while waiting for join confirmation.",
-                                )
-                            },
-                            isJoinConfirmationSatisfied = { target ->
-                                joinConfirmationCoordinator.isJoinConfirmationSatisfied(
-                                    confirmationTarget = target,
-                                    cachedCurrentUserRegistrations = { cachedCurrentUserRegistrations.value },
-                                    selectedEvent = { selectedEvent.value },
-                                    currentWeeklyOccurrenceSelection = ::currentWeeklyOccurrenceSelection,
-                                    syncCurrentUserRegistrationCache = eventRepository::syncCurrentUserRegistrationCache,
-                                    getEvent = eventRepository::getEvent,
-                                    syncEventParticipants = { event, occurrence ->
-                                        eventRepository.syncEventParticipants(
-                                            event = event,
-                                            occurrence = occurrence,
-                                        )
-                                    },
-                                    getTeams = teamRepository::getTeams,
-                                    applyParticipantSyncResult = participantBootstrapCoordinator::applyParticipantSyncResult,
-                                    refreshCurrentUserMembershipState = ::refreshCurrentUserMembershipState,
-                                    rememberWeeklyOccurrenceSummary = weeklyOccurrenceCoordinator::rememberWeeklyOccurrenceSummary,
-                                )
-                            },
-                        )
-                        if (!userJoinedSuccessfully) {
-                            _errorState.value =
-                                ErrorMessage("Payment submitted, but event registration confirmation is still pending. Please reload event.")
-                        } else if (membershipCoordinator.isRegistrationPaymentPending.value) {
-                            _errorState.value = ErrorMessage(
-                                "Payment submitted. Registration is pending until the bank payment clears."
-                            )
-                        }
-                    }
-                    clearCurrentRegistrationProgress()
-                }
-            }
-        } finally {
-            finishRegistrationPaymentLoading()
-            registrationFlowCoordinator.clearPendingJoinConfirmationTarget()
-            clearPaymentResult()
-        }
     }
 
     private fun handleEventRelationsChanged(relations: EventWithFullRelations) {
@@ -1579,36 +1360,6 @@ class DefaultEventDetailComponent(
         registrationActionHandler.dismissChildJoinSelectionDialog()
     }
 
-    private suspend fun loadJoinableChildren(
-        warningMessage: String = "Failed to load linked children before join flow.",
-    ): List<JoinChildOption> {
-        return userRepository.listChildren()
-            .onFailure { throwable ->
-                Napier.w(warningMessage, throwable)
-            }
-            .getOrElse { emptyList() }
-            .asSequence()
-            .filter { child ->
-                child.userId.isNotBlank() &&
-                    (child.linkStatus?.equals("active", ignoreCase = true) != false)
-            }
-            .map { child -> child.toJoinChildOption() }
-            .toList()
-    }
-
-    private suspend fun refreshScheduleTrackedUserIds() {
-        val ids = linkedSetOf<String>()
-        val currentUserId = currentUser.value.id.trim()
-        if (currentUserId.isNotEmpty()) {
-            ids += currentUserId
-        }
-        loadJoinableChildren()
-            .map { child -> child.userId.trim() }
-            .filter { childId -> childId.isNotEmpty() }
-            .forEach { childId -> ids += childId }
-        _scheduleTrackedUserIds.value = ids
-    }
-
     override fun requestRefund(reason: String, targetUserId: String?) {
         registrationActionHandler.requestRefund(reason, targetUserId)
     }
@@ -1779,15 +1530,8 @@ class DefaultEventDetailComponent(
 
     override fun removeLeagueTimeSlot(index: Int) = eventEditActionHandler.removeLeagueTimeSlot(index)
 
-    override fun checkIsUserWaitListed(event: Event): Boolean {
-        return membershipCoordinator.checkIsUserWaitListed(
-            event = event,
-            currentUserId = currentUser.value.id,
-            currentUserTeamIds = currentUserTeamIds(),
-            cachedMembership = resolveCachedCurrentUserRegistrationMembership(event),
-            weeklyParentWithoutSelection = isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null,
-        )
-    }
+    override fun checkIsUserWaitListed(event: Event): Boolean =
+        registrationLifecycleHandler.checkIsUserWaitListed(event)
 
     override fun deleteEvent() {
         scope.launch {
@@ -1898,88 +1642,11 @@ class DefaultEventDetailComponent(
         }
     }
 
-    override fun checkIsUserFreeAgent(event: Event): Boolean {
-        return membershipCoordinator.checkIsUserFreeAgent(
-            event = event,
-            currentUserId = currentUser.value.id,
-            currentUserTeamIds = currentUserTeamIds(),
-            cachedMembership = resolveCachedCurrentUserRegistrationMembership(event),
-            weeklyParentWithoutSelection = isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null,
-        )
-    }
+    override fun checkIsUserFreeAgent(event: Event): Boolean =
+        registrationLifecycleHandler.checkIsUserFreeAgent(event)
 
-    private suspend fun refreshCurrentUserMembershipState(event: Event) {
-        val current = currentUser.value
-        val selectedOccurrence = currentWeeklyOccurrenceSelection()
-        val eventIsWeeklyParent = isWeeklyParentEvent(event)
-        val missingWeeklySelection = membershipCoordinator.refreshCurrentUserMembershipState(
-            event = event,
-            currentUserId = current.id,
-            profileTeamIds = canonicalCurrentUserTeamIds(),
-            registrations = cachedCurrentUserRegistrations.value,
-            selectedOccurrence = selectedOccurrence,
-            isWeeklyParentEvent = eventIsWeeklyParent,
-            weeklyParentWithoutSelection = eventIsWeeklyParent && selectedOccurrence == null,
-            getTeamWithPlayers = { teamId ->
-                teamRepository.getTeamWithPlayers(teamId).getOrNull()
-            },
-        )
-        if (missingWeeklySelection) {
-            registrationFlowCoordinator.clearWithdrawTargets()
-        }
-    }
-
-    private fun resolveCachedCurrentUserRegistrationMembership(
-        event: Event,
-    ): CurrentUserRegistrationMembershipState? {
-        return membershipCoordinator.resolveCachedMembership(
-            registrations = cachedCurrentUserRegistrations.value,
-            selectedOccurrence = currentWeeklyOccurrenceSelection(),
-            currentUserId = currentUser.value.id,
-            profileTeamIds = canonicalCurrentUserTeamIds(),
-            isWeeklyParentEvent = isWeeklyParentEvent(event),
-        )
-    }
-
-    private suspend fun refreshWithdrawTargets(event: Event) {
-        val current = currentUser.value
-        registrationFlowCoordinator.replaceWithdrawTargets(
-            registrationFlowCoordinator.buildWithdrawTargets(
-                currentUserId = current.id,
-                currentUserFullName = current.fullName,
-                children = loadJoinableChildren(
-                    warningMessage = "Failed to load linked children for withdraw targets.",
-                ),
-            ) { userId ->
-                resolveWithdrawTargetMembership(event, userId)
-            },
-        )
-    }
-
-    private fun resolveWithdrawTargetMembership(
-        event: Event,
-        userId: String,
-    ): WithdrawTargetMembership? {
-        return membershipCoordinator.resolveWithdrawTargetMembership(
-            event = event,
-            userId = userId,
-            currentUserId = currentUser.value.id,
-            profileTeamIds = canonicalCurrentUserTeamIds(),
-            cachedCurrentUserMembership = if (userId == currentUser.value.id) {
-                resolveCachedCurrentUserRegistrationMembership(event)
-            } else {
-                null
-            },
-            weeklyParentWithoutSelection = isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null,
-        )
-    }
-
-    private fun currentUserTeamIds(): Set<String> {
-        return membershipCoordinator.currentUserTeamIds(canonicalCurrentUserTeamIds())
-    }
-
-    private fun canonicalCurrentUserTeamIds(): List<String> =
-        relationStateCoordinator.currentUserTeamIds.value.toList()
+    private suspend fun refreshCurrentUserMembershipState(event: Event) =
+        registrationLifecycleHandler.refreshCurrentUserMembershipState(event)
 
     override fun dismissPaymentPlanPreviewDialog() {
         registrationActionHandler.dismissPaymentPlanPreviewDialog()
