@@ -15,6 +15,13 @@ internal fun Event.applyCreateSelectionRules(): Event {
             eventType = eventType,
         )
 
+        EventType.TRYOUT -> copy(
+            eventType = eventType,
+            teamSignup = false,
+            singleDivision = false,
+            noFixedEndDateTime = false,
+        )
+
         EventType.EVENT -> copy(
             eventType = eventType,
             noFixedEndDateTime = false,

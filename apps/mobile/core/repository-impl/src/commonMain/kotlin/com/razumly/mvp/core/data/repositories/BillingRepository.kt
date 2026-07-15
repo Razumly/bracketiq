@@ -524,6 +524,26 @@ class BillingRepository(
     ): Result<RepositoryPage<Organization>> =
         organizationCoordinator.listOrganizationsPage(limit, offset, includeAffiliateRentals, tagSlugs)
 
+    override suspend fun listOrganizationsPage(
+        limit: Int,
+        offset: Int,
+        includeAffiliateRentals: Boolean,
+        tagSlugs: Set<String>,
+        price: Pair<Double, Double>?,
+        divisionGenders: Set<String>,
+        skillDivisionTypeIds: Set<String>,
+        ageDivisionTypeIds: Set<String>,
+    ): Result<RepositoryPage<Organization>> = organizationCoordinator.listOrganizationsPage(
+        limit = limit,
+        offset = offset,
+        includeAffiliateRentals = includeAffiliateRentals,
+        tagSlugs = tagSlugs,
+        price = price,
+        divisionGenders = divisionGenders,
+        skillDivisionTypeIds = skillDivisionTypeIds,
+        ageDivisionTypeIds = ageDivisionTypeIds,
+    )
+
     override suspend fun searchOrganizations(
         query: String,
         limit: Int,

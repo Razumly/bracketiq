@@ -9,6 +9,7 @@ import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.analytics.AnalyticsEvent
 import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.data.dataTypes.Bounds
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.Facility
@@ -60,6 +61,7 @@ interface EventSearchComponent {
     val currentLocation: StateFlow<LatLng?>
     val selectedSearchLocationLabel: StateFlow<String?>
     val sports: StateFlow<List<Sport>>
+    val divisionTypeParameters: StateFlow<DivisionTypeParameters>
     val eventTags: StateFlow<List<EventTag>>
     val organizationTags: StateFlow<List<EventTag>>
     val organizationFilter: StateFlow<EventFilter>
@@ -178,6 +180,9 @@ class DefaultEventSearchComponent(
     override val suggestedTeams: StateFlow<List<Team>> = _suggestedTeams.asStateFlow()
     private val _sports = MutableStateFlow<List<Sport>>(emptyList())
     override val sports: StateFlow<List<Sport>> = _sports.asStateFlow()
+    private val _divisionTypeParameters = MutableStateFlow(DivisionTypeParameters())
+    override val divisionTypeParameters: StateFlow<DivisionTypeParameters> =
+        _divisionTypeParameters.asStateFlow()
     private val _eventTags = MutableStateFlow<List<EventTag>>(emptyList())
     override val eventTags: StateFlow<List<EventTag>> = _eventTags.asStateFlow()
     private val _organizationTags = MutableStateFlow<List<EventTag>>(emptyList())
@@ -305,6 +310,7 @@ class DefaultEventSearchComponent(
 
         observeCachedEvents()
         loadSports()
+        loadDivisionTypeParameters()
         loadEventTags()
         loadOrganizationTags()
         refreshEvents(
@@ -731,6 +737,18 @@ class DefaultEventSearchComponent(
                 }
                 .onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to load sports: ${e.userMessage()}")
+                }
+        }
+    }
+
+    private fun loadDivisionTypeParameters() {
+        scope.launch {
+            sportsRepository.getDivisionTypeParameters()
+                .onSuccess { parameters ->
+                    _divisionTypeParameters.value = parameters
+                }
+                .onFailure { e ->
+                    _errorState.value = ErrorMessage("Failed to load division filters: ${e.userMessage()}")
                 }
         }
     }

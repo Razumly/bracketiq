@@ -15,13 +15,10 @@ import org.koin.dsl.module
 
 val networkModule = module {
     single { createSecureAuthTokenStore() } bind AuthTokenStore::class
+    single { createMvpHttpClient() }
     single {
         Napier.i("NetworkModule: resolved apiBaseUrl=$apiBaseUrl")
-        MvpApiClient(
-            httpFactory = ::createMvpHttpClient,
-            baseUrl = apiBaseUrl,
-            tokenStore = get(),
-        )
+        MvpApiClient(get(), apiBaseUrl, get())
     }
     single { createWatchAuthSync(get()) } bind WatchAuthSync::class
     single { createWatchMatchOperationSync() } bind WatchMatchOperationSync::class

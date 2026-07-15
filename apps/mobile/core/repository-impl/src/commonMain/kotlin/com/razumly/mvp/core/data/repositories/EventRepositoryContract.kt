@@ -97,6 +97,29 @@ interface IEventRepository : IMVPRepository {
         offset: Int = 0,
         includeDistanceFilter: Boolean = true,
     ): Result<Pair<List<Event>, Boolean>>
+    suspend fun getEventsInBounds(
+        bounds: Bounds,
+        dateFrom: Instant? = null,
+        dateTo: Instant? = null,
+        sports: List<String> = emptyList(),
+        tags: List<String> = emptyList(),
+        price: Pair<Double, Double>? = null,
+        divisionGenders: List<String> = emptyList(),
+        skillDivisionTypeIds: List<String> = emptyList(),
+        ageDivisionTypeIds: List<String> = emptyList(),
+        limit: Int = 50,
+        offset: Int = 0,
+        includeDistanceFilter: Boolean = true,
+    ): Result<Pair<List<Event>, Boolean>> = getEventsInBounds(
+        bounds = bounds,
+        dateFrom = dateFrom,
+        dateTo = dateTo,
+        sports = sports,
+        tags = tags,
+        limit = limit,
+        offset = offset,
+        includeDistanceFilter = includeDistanceFilter,
+    )
     suspend fun searchEvents(
         searchQuery: String,
         userLocation: LatLng?,

@@ -665,6 +665,34 @@ class EventRepository(
         includeDistanceFilter = includeDistanceFilter,
     )
 
+    override suspend fun getEventsInBounds(
+        bounds: Bounds,
+        dateFrom: Instant?,
+        dateTo: Instant?,
+        sports: List<String>,
+        tags: List<String>,
+        price: Pair<Double, Double>?,
+        divisionGenders: List<String>,
+        skillDivisionTypeIds: List<String>,
+        ageDivisionTypeIds: List<String>,
+        limit: Int,
+        offset: Int,
+        includeDistanceFilter: Boolean,
+    ): Result<Pair<List<Event>, Boolean>> = catalogCoordinator.getEventsInBounds(
+        bounds = bounds,
+        dateFrom = dateFrom,
+        dateTo = dateTo,
+        sports = sports,
+        tags = tags,
+        price = price,
+        divisionGenders = divisionGenders,
+        skillDivisionTypeIds = skillDivisionTypeIds,
+        ageDivisionTypeIds = ageDivisionTypeIds,
+        limit = limit,
+        offset = offset,
+        includeDistanceFilter = includeDistanceFilter,
+    )
+
     override suspend fun searchEvents(
         searchQuery: String,
         userLocation: LatLng?,

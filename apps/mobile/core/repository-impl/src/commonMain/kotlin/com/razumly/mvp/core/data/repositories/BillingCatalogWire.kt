@@ -37,6 +37,15 @@ internal fun Set<String>.toOrganizationTagsQueryParam(): String {
     }
 }
 
+internal fun Set<String>.toOrganizationListQueryParam(name: String): String {
+    val normalizedValues = map(String::trim)
+        .filter(String::isNotBlank)
+        .distinct()
+    return normalizedValues.joinToString(separator = "") { value ->
+        "&$name=${value.encodeURLQueryComponent()}"
+    }
+}
+
 internal fun List<OrganizationApiDto>.toOrganizationsStrict(context: String): List<Organization> =
     mapIndexed { index, dto ->
         dto.toOrganizationOrNull()

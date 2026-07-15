@@ -4,6 +4,7 @@ package com.razumly.mvp.eventSearch.util
 
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventTag
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlin.test.Test
 import kotlin.test.assertFalse
@@ -106,6 +107,50 @@ class EventFilterTest {
         val event = eventAt(now + 1.days, tags = listOf(EventTag(name = "Tournament", slug = "tournament")))
 
         assertFalse(filter.filter(event))
+    }
+
+    @Test
+    fun divisionFiltersMustMatchTheSameDivision() {
+        val filter = EventFilter(
+            date = now to null,
+            price = 50.0 to 100.0,
+            divisionGenders = setOf("WOMENS"),
+            skillDivisionTypeIds = setOf("advanced"),
+            ageDivisionTypeIds = setOf("u18"),
+        )
+        val splitAcrossRows = eventAt(now + 1.days).copy(
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "women-rec",
+                    gender = "WOMENS",
+                    skillDivisionTypeId = "recreational",
+                    ageDivisionTypeId = "u18",
+                    price = 7500,
+                ),
+                DivisionDetail(
+                    id = "men-advanced",
+                    gender = "MENS",
+                    skillDivisionTypeId = "advanced",
+                    ageDivisionTypeId = "u18",
+                    price = 7500,
+                ),
+            ),
+        )
+
+        assertFalse(filter.filter(splitAcrossRows))
+        assertTrue(
+            filter.filter(
+                splitAcrossRows.copy(
+                    divisionDetails = splitAcrossRows.divisionDetails + DivisionDetail(
+                        id = "women-advanced",
+                        gender = "WOMENS",
+                        skillDivisionTypeId = "advanced",
+                        ageDivisionTypeId = "u18",
+                        price = 7500,
+                    ),
+                ),
+            ),
+        )
     }
 
     private fun eventAt(

@@ -736,7 +736,6 @@ class DefaultCreateEventComponent(
             val matches = userRepository.findEmailMembership(
                 emails = listOf(normalizedDraft.email),
                 userIds = assignedUserIds,
-                eventId = null,
             ).getOrThrow()
             normalizedDraft.roles.forEach { role ->
                 val roleUserIds = event.assignedUserIdsForRole(role)
@@ -791,6 +790,14 @@ class DefaultCreateEventComponent(
                     noFixedEndDateTime = true,
                 )
 
+                EventType.TRYOUT -> copy(
+                    eventType = type,
+                    teamSignup = false,
+                    singleDivision = false,
+                    noFixedEndDateTime = false,
+                    end = end.takeIf { it > start } ?: defaultEventEnd(start),
+                )
+
                 EventType.EVENT -> copy(
                     eventType = type,
                     noFixedEndDateTime = false,
@@ -805,10 +812,15 @@ class DefaultCreateEventComponent(
                 }
             }
 
-            EventType.WEEKLY_EVENT -> _useManualTimeSlots.value = true
+            EventType.WEEKLY_EVENT, EventType.TRYOUT -> _useManualTimeSlots.value = true
             EventType.EVENT -> _useManualTimeSlots.value = false
         }
-        if (type == EventType.LEAGUE || type == EventType.TOURNAMENT || type == EventType.WEEKLY_EVENT) {
+        if (
+            type == EventType.LEAGUE ||
+            type == EventType.TOURNAMENT ||
+            type == EventType.WEEKLY_EVENT ||
+            type == EventType.TRYOUT
+        ) {
             if (_fieldCount.value <= 0) {
                 val selectedCount = when {
                     _localFields.value.isNotEmpty() -> _localFields.value.size
@@ -818,7 +830,13 @@ class DefaultCreateEventComponent(
                 selectFieldCount(selectedCount)
             }
         }
-        if ((type == EventType.LEAGUE || type == EventType.TOURNAMENT || type == EventType.WEEKLY_EVENT) && _leagueSlots.value.isEmpty()) {
+        if (
+            (type == EventType.LEAGUE ||
+                type == EventType.TOURNAMENT ||
+                type == EventType.WEEKLY_EVENT ||
+                type == EventType.TRYOUT) &&
+            _leagueSlots.value.isEmpty()
+        ) {
             _leagueSlots.value = listOf(createDefaultLeagueSlot())
         }
     }
@@ -1664,6 +1682,9 @@ class DefaultCreateEventComponent(
         if (event.eventType == EventType.WEEKLY_EVENT) {
             return true
         }
+        if (event.eventType == EventType.TRYOUT) {
+            return true
+        }
         if (event.eventType != EventType.LEAGUE && event.eventType != EventType.TOURNAMENT) {
             return false
         }
@@ -1888,7 +1909,7 @@ class DefaultCreateEventComponent(
     private fun Event.withSportRules(): Event {
         val requiresSets = usesSetScoringForSport(sportId)
         return when (eventType) {
-            EventType.EVENT, EventType.WEEKLY_EVENT -> this
+            EventType.EVENT, EventType.TRYOUT, EventType.WEEKLY_EVENT -> this
             EventType.LEAGUE -> applyLeagueSportRules(requiresSets)
             EventType.TOURNAMENT -> applyTournamentSportRules(requiresSets)
         }

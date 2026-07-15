@@ -179,10 +179,11 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
                             .find { eventType -> eventType.name == selectedValue }
                             ?.let(actions.onEventTypeSelected)
                     },
-                    options = EventType.entries
-                        .filterNot { eventType ->
-                            state.isNewEvent && state.rentalTimeLocked && eventType == EventType.WEEKLY_EVENT
-                        }
+                    options = selectableMobileEventTypes(
+                        isNewEvent = state.isNewEvent,
+                        rentalTimeLocked = state.rentalTimeLocked,
+                        currentEventType = state.editEvent.eventType,
+                    )
                         .map { eventType ->
                             DropdownOption(
                                 value = eventType.name,

@@ -2,7 +2,10 @@ package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.Facility
 import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.OrganizationDivisionSummary
+import com.razumly.mvp.core.data.dataTypes.OrganizationFeature
 import com.razumly.mvp.core.data.dataTypes.OrganizationStaffMember
 import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationReviewStatus
 import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationStatus
@@ -36,6 +39,8 @@ data class OrganizationApiDto(
     val ownerId: String? = null,
     val website: String? = null,
     val sports: List<String>? = null,
+    val enabledFeatures: List<OrganizationFeature>? = null,
+    val divisions: List<DivisionDetail>? = null,
     val hasStripeAccount: Boolean? = null,
     val verificationStatus: String? = null,
     val verifiedAt: String? = null,
@@ -51,6 +56,7 @@ data class OrganizationApiDto(
     val staffEmailsByUserId: Map<String, String>? = null,
     val viewerPermissions: List<String>? = null,
     val facilities: List<OrganizationFacilityApiDto>? = null,
+    val divisionSummary: OrganizationDivisionSummary? = null,
 ) {
     fun toOrganizationOrNull(): Organization? {
         val resolvedId = id?.trim()?.takeIf(String::isNotBlank) ?: return null
@@ -67,6 +73,8 @@ data class OrganizationApiDto(
             ownerId = ownerId?.trim().orEmpty(),
             website = website,
             sports = sports.orEmpty().map(String::trim).filter(String::isNotBlank).distinct(),
+            enabledFeatures = enabledFeatures.orEmpty(),
+            divisions = divisions.orEmpty(),
             hasStripeAccount = hasStripeAccount ?: false,
             verificationStatus = resolveOrganizationVerificationStatus(
                 verificationStatus = verificationStatus,
@@ -90,6 +98,7 @@ data class OrganizationApiDto(
                 .filter(String::isNotBlank)
                 .distinct(),
             facilities = facilities.orEmpty().mapNotNull(OrganizationFacilityApiDto::toFacilityOrNull),
+            divisionSummary = divisionSummary ?: OrganizationDivisionSummary(),
         )
     }
 }

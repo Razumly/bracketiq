@@ -10,6 +10,31 @@ internal enum class EventDetailsMode {
     EDIT,
 }
 
+data class EventDetailsSectionVisibility(
+    val hero: Boolean = true,
+    val basics: Boolean = true,
+    val registration: Boolean = true,
+    val matchRules: Boolean = true,
+    val staff: Boolean = true,
+    val divisions: Boolean = true,
+    val leagueScoring: Boolean = true,
+    val schedule: Boolean = true,
+) {
+    companion object {
+        val All = EventDetailsSectionVisibility()
+        val None = EventDetailsSectionVisibility(
+            hero = false,
+            basics = false,
+            registration = false,
+            matchRules = false,
+            staff = false,
+            divisions = false,
+            leagueScoring = false,
+            schedule = false,
+        )
+    }
+}
+
 internal data class EventDetailsReadOnlyUiModel(
     val eventId: String,
     val basics: ReadOnlySectionModel,
@@ -48,7 +73,16 @@ internal data class EditSectionModel(
 )
 
 internal fun shouldShowMatchRulesSection(eventType: EventType): Boolean =
-    eventType != EventType.EVENT && eventType != EventType.WEEKLY_EVENT
+    eventType != EventType.EVENT && eventType != EventType.TRYOUT && eventType != EventType.WEEKLY_EVENT
+
+internal fun selectableMobileEventTypes(
+    isNewEvent: Boolean,
+    rentalTimeLocked: Boolean,
+    currentEventType: EventType,
+): List<EventType> = EventType.entries.filterNot { eventType ->
+    (isNewEvent && rentalTimeLocked && eventType == EventType.WEEKLY_EVENT) ||
+        (eventType == EventType.TRYOUT && currentEventType != EventType.TRYOUT)
+}
 
 internal data class EventDetailsReadOnlyActions(
     val onOpenLocationMap: () -> Unit = {},

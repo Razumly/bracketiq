@@ -289,6 +289,21 @@ interface IBillingRepository : IMVPRepository {
                     ),
                 )
             }
+    suspend fun listOrganizationsPage(
+        limit: Int,
+        offset: Int,
+        includeAffiliateRentals: Boolean,
+        tagSlugs: Set<String>,
+        price: Pair<Double, Double>?,
+        divisionGenders: Set<String>,
+        skillDivisionTypeIds: Set<String>,
+        ageDivisionTypeIds: Set<String>,
+    ): Result<RepositoryPage<Organization>> = listOrganizationsPage(
+        limit = limit,
+        offset = offset,
+        includeAffiliateRentals = includeAffiliateRentals,
+        tagSlugs = tagSlugs,
+    )
     suspend fun searchOrganizations(
         query: String,
         limit: Int = 10,

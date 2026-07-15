@@ -135,10 +135,12 @@ internal fun DiscoverOrganizationCard(
 
 internal fun formatOrganizationDivisionSummary(summary: OrganizationDivisionSummary): String {
     val divisionLabel = if (summary.count == 1) "1 division" else "${summary.count} divisions"
+    val minPrice = summary.minPrice
+    val maxPrice = summary.maxPrice
     val priceLabel = when {
-        summary.minPrice == null || summary.maxPrice == null -> "Price not specified"
-        summary.minPrice == summary.maxPrice -> formatOrganizationPrice(summary.minPrice)
-        else -> "${formatOrganizationPrice(summary.minPrice)}–${formatOrganizationPrice(summary.maxPrice)}"
+        minPrice == null || maxPrice == null -> "Price not specified"
+        minPrice == maxPrice -> formatOrganizationPrice(minPrice)
+        else -> "${formatOrganizationPrice(minPrice)}–${formatOrganizationPrice(maxPrice)}"
     }
     return "$divisionLabel · $priceLabel"
 }

@@ -413,7 +413,7 @@ private fun segmentCountFallbackForModel(scoringModel: String, event: Event): In
         "SETS" -> when (event.eventType) {
             EventType.LEAGUE -> (event.setsPerMatch ?: event.winnerSetCount).coerceAtLeast(1)
             EventType.TOURNAMENT -> event.winnerSetCount.coerceAtLeast(1)
-            EventType.EVENT, EventType.WEEKLY_EVENT -> 1
+            EventType.EVENT, EventType.TRYOUT, EventType.WEEKLY_EVENT -> 1
         }
         "INNINGS" -> 9
         "PERIODS" -> 4

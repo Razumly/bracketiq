@@ -159,7 +159,7 @@ internal fun buildScheduleDetailsRows(
                 }
             }
 
-            EventType.EVENT, EventType.WEEKLY_EVENT -> Unit
+            EventType.EVENT, EventType.TRYOUT, EventType.WEEKLY_EVENT -> Unit
         }
     }
 }

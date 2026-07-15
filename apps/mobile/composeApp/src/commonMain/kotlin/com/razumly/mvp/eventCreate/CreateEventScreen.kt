@@ -2,6 +2,8 @@ package com.razumly.mvp.eventCreate
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.FloatingActionButton
@@ -22,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -53,6 +57,7 @@ import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventCreate.steps.Preview
 import com.razumly.mvp.eventDetail.EventDetails
+import com.razumly.mvp.eventDetail.EventDetailsSectionVisibility
 import com.razumly.mvp.eventDetail.toEventWithFullRelations
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
@@ -74,6 +79,10 @@ fun CreateEventScreen(
     var hasAttemptedEventSubmit by remember { mutableStateOf(false) }
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
     var pendingMapPlace by remember { mutableStateOf<MVPPlace?>(null) }
+    var setupMode by rememberSaveable { mutableStateOf(EventCreateSetupMode.SIMPLE) }
+    var currentSetupPageId by rememberSaveable { mutableStateOf(EventCreateSetupPageId.FORMAT) }
+    var completedSetupPageIds by remember { mutableStateOf(emptySet<EventCreateSetupPageId>()) }
+    var setupChoices by remember { mutableStateOf(EventCreateSetupChoices()) }
     val defaultEvent by component.defaultEvent.collectAsState()
     val newEventState by component.newEventState.collectAsState()
     fun originalLocationPlace(): MVPPlace? {
@@ -174,6 +183,22 @@ fun CreateEventScreen(
     val selectedSport = remember(sports, newEventState.sportId) {
         sports.firstOrNull { it.id == newEventState.sportId }
     }
+    val setupPages = remember(
+        newEventState,
+        setupChoices,
+        currentSetupPageId,
+        completedSetupPageIds,
+    ) {
+        resolveEventCreateSetupPages(
+            event = newEventState,
+            choices = setupChoices,
+            currentPageId = currentSetupPageId,
+            completedPageIds = completedSetupPageIds,
+        )
+    }
+    val currentSetupPage = remember(setupPages, currentSetupPageId) {
+        setupPages.first { page -> page.id == currentSetupPageId }
+    }
 
     val onEditEvent: (Event.() -> Event) -> Unit = remember(component) {
         { update ->
@@ -193,13 +218,19 @@ fun CreateEventScreen(
 
     val onEventTypeSelected: (EventType) -> Unit = remember(component) {
         { selectedType ->
-            val normalizedType = selectedType
+            val normalizedType = selectedType.takeIf { it in mobileCreateEventTypes() } ?: EventType.EVENT
             component.onTypeSelected(normalizedType)
             if (normalizedType == EventType.LEAGUE || normalizedType == EventType.TOURNAMENT) {
                 component.updateEventField {
                     copy(teamSignup = true, noFixedEndDateTime = true)
                 }
             }
+        }
+    }
+
+    LaunchedEffect(newEventState.eventType) {
+        if (newEventState.eventType !in mobileCreateEventTypes()) {
+            onEventTypeSelected(EventType.EVENT)
         }
     }
     val onUpdateHostId: (String) -> Unit = remember(component) { component::updateHostId }
@@ -383,19 +414,71 @@ fun CreateEventScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     if (childStack.active.instance == CreateEventComponent.Child.EventInfo) {
-                        Spacer(Modifier.width(48.dp))
+                        val previousPageId = if (setupMode == EventCreateSetupMode.SIMPLE) {
+                            previousUsedSetupPage(setupPages, currentSetupPageId)
+                        } else {
+                            null
+                        }
+                        if (previousPageId != null) {
+                            FloatingActionButton(onClick = { currentSetupPageId = previousPageId }) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = stringResource(Res.string.previous),
+                                )
+                            }
+                        } else {
+                            Spacer(Modifier.width(48.dp))
+                        }
                         FloatingActionButton(
                             onClick = {
-                                if (canProceed) {
-                                    component.nextStep()
-                                } else {
-                                    hasAttemptedEventSubmit = true
-                                    errorHandler.showPopup(buildValidationPopupMessage(validationErrors))
+                                if (setupMode == EventCreateSetupMode.ADVANCED) {
+                                    if (canProceed) {
+                                        component.nextStep()
+                                    } else {
+                                        hasAttemptedEventSubmit = true
+                                        errorHandler.showPopup(buildValidationPopupMessage(validationErrors))
+                                    }
+                                    return@FloatingActionButton
+                                }
+
+                                if (currentSetupPageId == EventCreateSetupPageId.REVIEW_PUBLISH) {
+                                    if (canProceed) {
+                                        component.createEvent()
+                                    } else {
+                                        errorHandler.showPopup(buildValidationPopupMessage(validationErrors))
+                                    }
+                                    return@FloatingActionButton
+                                }
+
+                                if (!currentSetupPage.used) {
+                                    currentSetupPage.controlledByPageId?.let { controllerPageId ->
+                                        currentSetupPageId = controllerPageId
+                                    } ?: nextUsedSetupPage(setupPages, currentSetupPageId)?.let { nextPageId ->
+                                        currentSetupPageId = nextPageId
+                                    }
+                                    return@FloatingActionButton
+                                }
+
+                                if (!isSimpleSetupPageComplete(currentSetupPageId, newEventState)) {
+                                    errorHandler.showPopup(simpleSetupPageError(currentSetupPageId))
+                                    return@FloatingActionButton
+                                }
+
+                                completedSetupPageIds = completedSetupPageIds + currentSetupPageId
+                                nextUsedSetupPage(setupPages, currentSetupPageId)?.let { nextPageId ->
+                                    currentSetupPageId = nextPageId
                                 }
                             }
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Check,
+                                imageVector = if (
+                                    setupMode == EventCreateSetupMode.SIMPLE &&
+                                    currentSetupPageId != EventCreateSetupPageId.REVIEW_PUBLISH
+                                ) {
+                                    Icons.AutoMirrored.Filled.ArrowForward
+                                } else {
+                                    Icons.Default.Check
+                                },
                                 contentDescription = stringResource(Res.string.next)
                             )
                         }
@@ -430,12 +513,65 @@ fun CreateEventScreen(
             },
             floatingActionButtonPosition = FabPosition.Center,
             content = {
-                ChildStack(childStack, animation = backAnimation(
-                    backHandler = component.backHandler,
-                    onBack = component::onBackClicked,
-                )) { child ->
-                    when (child.instance) {
-                        is CreateEventComponent.Child.EventInfo -> EventDetails(
+                Column(modifier = Modifier.fillMaxSize()) {
+                    if (childStack.active.instance == CreateEventComponent.Child.EventInfo) {
+                        EventCreateSetupHeader(
+                            mode = setupMode,
+                            pages = setupPages,
+                            onModeChange = { setupMode = it },
+                            onPageSelected = { page ->
+                                currentSetupPageId = when (page.status) {
+                                    EventCreateSetupPageStatus.LOCKED -> page.prerequisitePageId ?: page.id
+                                    else -> page.id
+                                }
+                            },
+                        )
+                    }
+                    Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                        ChildStack(childStack, animation = backAnimation(
+                            backHandler = component.backHandler,
+                            onBack = component::onBackClicked,
+                        )) { child ->
+                            when (child.instance) {
+                                is CreateEventComponent.Child.EventInfo -> when {
+                                    setupMode == EventCreateSetupMode.SIMPLE && !currentSetupPage.used -> {
+                                        EventCreateUnavailablePage(
+                                            page = currentSetupPage,
+                                            onOpenController = {
+                                                currentSetupPage.controlledByPageId?.let { currentSetupPageId = it }
+                                            },
+                                        )
+                                    }
+
+                                    setupMode == EventCreateSetupMode.SIMPLE && isPlanningSetupPage(currentSetupPageId) -> {
+                                        EventCreatePlanningPage(
+                                            pageId = currentSetupPageId,
+                                            event = newEventState,
+                                            choices = setupChoices,
+                                            useManualTimeSlots = useManualTimeSlots,
+                                            onEventTypeSelected = { selectedType ->
+                                                completedSetupPageIds = completedSetupPageIds.filterTo(mutableSetOf()) {
+                                                    pageId -> pageId == EventCreateSetupPageId.FORMAT
+                                                }
+                                                onEventTypeSelected(selectedType)
+                                            },
+                                            onEditEvent = onEditEvent,
+                                            onChoicesChange = { updatedChoices ->
+                                                setupChoices = updatedChoices
+                                            },
+                                            onUseManualTimeSlotsChange = component::setUseManualTimeSlots,
+                                        )
+                                    }
+
+                                    setupMode == EventCreateSetupMode.SIMPLE &&
+                                        currentSetupPageId == EventCreateSetupPageId.REVIEW_PUBLISH -> {
+                                        Preview(
+                                            modifier = Modifier.fillMaxSize(),
+                                            component = component,
+                                        )
+                                    }
+
+                                    else -> EventDetails(
                             paymentProcessor = component,
                             mapComponent = mapComponent,
                             hostHasAccount = currentUser?.hasStripeAccount ?: false,
@@ -538,19 +674,33 @@ fun CreateEventScreen(
                                 validationErrors = errors
                             },
                             quoteInclusivePrice = component::quoteInclusivePrice,
+                            sectionVisibility = if (setupMode == EventCreateSetupMode.ADVANCED) {
+                                EventDetailsSectionVisibility.All
+                            } else {
+                                simpleSetupSectionVisibility(currentSetupPageId)
+                            },
                             joinButton = {}
                         )
+                                }
 
-                        is CreateEventComponent.Child.Preview -> Preview(
-                            modifier = Modifier.fillMaxSize(),
-                            component = component
-                        )
+                                is CreateEventComponent.Child.Preview -> Preview(
+                                    modifier = Modifier.fillMaxSize(),
+                                    component = component
+                                )
+                            }
+                        }
                     }
                 }
-
             }
         )
     }
+}
+
+private fun simpleSetupPageError(pageId: EventCreateSetupPageId): String = when (pageId) {
+    EventCreateSetupPageId.BASICS -> "Add an event name and select a sport before continuing."
+    EventCreateSetupPageId.DIVISIONS -> "Add at least one division before continuing."
+    EventCreateSetupPageId.SCHEDULE_LOCATION -> "Select a mapped location before continuing."
+    else -> "Complete the required fields on this page before continuing."
 }
 
 private fun buildValidationPopupMessage(errors: List<String>): String {

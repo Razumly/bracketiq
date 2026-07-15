@@ -127,11 +127,38 @@ internal class BillingOrganizationCoordinator(
         offset: Int,
         includeAffiliateRentals: Boolean,
         tagSlugs: Set<String>,
+    ): Result<RepositoryPage<Organization>> = listOrganizationsPage(
+        limit = limit,
+        offset = offset,
+        includeAffiliateRentals = includeAffiliateRentals,
+        tagSlugs = tagSlugs,
+        price = null,
+        divisionGenders = emptySet(),
+        skillDivisionTypeIds = emptySet(),
+        ageDivisionTypeIds = emptySet(),
+    )
+
+    suspend fun listOrganizationsPage(
+        limit: Int,
+        offset: Int,
+        includeAffiliateRentals: Boolean,
+        tagSlugs: Set<String>,
+        price: Pair<Double, Double>?,
+        divisionGenders: Set<String>,
+        skillDivisionTypeIds: Set<String>,
+        ageDivisionTypeIds: Set<String>,
     ): Result<RepositoryPage<Organization>> = runCatching {
         val normalizedLimit = limit.coerceIn(1, 200)
         val normalizedOffset = offset.coerceAtLeast(0)
         val affiliateParam = if (includeAffiliateRentals) "&includeAffiliateRentals=true" else ""
         val tagsParam = tagSlugs.toOrganizationTagsQueryParam()
+        val divisionParams = buildString {
+            price?.first?.times(100.0)?.toInt()?.let { append("&divisionPriceMin=$it") }
+            price?.second?.times(100.0)?.toInt()?.let { append("&divisionPriceMax=$it") }
+            append(divisionGenders.toOrganizationListQueryParam("divisionGenders"))
+            append(skillDivisionTypeIds.toOrganizationListQueryParam("skillDivisionTypeIds"))
+            append(ageDivisionTypeIds.toOrganizationListQueryParam("ageDivisionTypeIds"))
+        }
         val dao = databaseService.getCatalogCacheDao
         val scope = api.activateCatalogCache(dao)
         val cacheKey = catalogCacheKey(
@@ -142,12 +169,17 @@ internal class BillingOrganizationCoordinator(
             normalizedLimit.toString(),
             normalizedOffset.toString(),
             includeAffiliateRentals.toString(),
+            price?.first?.toString().orEmpty(),
+            price?.second?.toString().orEmpty(),
+            *divisionGenders.map(String::trim).filter(String::isNotBlank).sorted().toTypedArray(),
+            *skillDivisionTypeIds.map(String::trim).filter(String::isNotBlank).sorted().toTypedArray(),
+            *ageDivisionTypeIds.map(String::trim).filter(String::isNotBlank).sorted().toTypedArray(),
             *tagSlugs.map(String::trim).filter(String::isNotBlank).sorted().toTypedArray(),
         )
         val previousIds = dao.getCatalogQuery(cacheKey, scope.viewerKey).orderedCatalogIdsOrEmpty()
         val refreshedPage = try {
             val response = scope.api.get<OrganizationsResponseDto>(
-                path = "api/organizations?limit=$normalizedLimit&offset=$normalizedOffset$affiliateParam$tagsParam",
+                path = "api/organizations?limit=$normalizedLimit&offset=$normalizedOffset$affiliateParam$tagsParam$divisionParams",
             )
             val organizations = response.organizations.toOrganizationsStrict("Organization list")
             RepositoryPage(
