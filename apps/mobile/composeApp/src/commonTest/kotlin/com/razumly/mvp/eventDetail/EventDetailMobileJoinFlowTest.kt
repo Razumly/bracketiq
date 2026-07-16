@@ -187,6 +187,68 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
         }
 
     @Test
+    fun editing_refetches_event_before_seeding_division_draft() = runTest(testDispatcher) {
+        val host = mobileUser(id = "edit_host", firstName = "Edit", lastName = "Host")
+        val divisionId = "edit_event__division__open"
+        val partialEvent = Event(
+            id = "edit_event",
+            name = "Edit Tournament",
+            hostId = host.id,
+            state = "PUBLISHED",
+            eventType = EventType.TOURNAMENT,
+            singleDivision = false,
+            divisions = emptyList(),
+            divisionDetails = emptyList(),
+        )
+        val refreshedEvent = partialEvent.copy(
+            divisions = listOf(divisionId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = divisionId,
+                    key = "open",
+                    name = "Open",
+                    maxParticipants = 16,
+                    playoffTeamCount = 8,
+                    poolCount = 4,
+                ),
+            ),
+        )
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = partialEvent,
+            host = host,
+            currentUser = host,
+            players = emptyList(),
+            teams = emptyList(),
+            staffInvites = emptyList(),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(host),
+            fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
+            eventId = partialEvent.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(emptyList(), emptyMap(), emptyMap()),
+            teamRepository = EventDetailFakeTeamRepository(emptyList(), listOf(host)),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+        advance()
+        eventRepository.refreshedEvent = refreshedEvent
+
+        component.startEditingEvent()
+        advance()
+
+        assertTrue(component.isEditing.value)
+        assertEquals(listOf(divisionId), component.editedEvent.value.divisions)
+        assertEquals(listOf(divisionId), component.editedEvent.value.divisionDetails.map(DivisionDetail::id))
+        assertEquals(4, component.editedEvent.value.divisionDetails.single().poolCount)
+    }
+
+    @Test
     fun league_mobile_join_flow_loads_playoffs_schedule_and_periphery_without_exposing_staff_invites() =
         runTest(testDispatcher) {
             val host = mobileUser(id = "host_1", firstName = "Host", lastName = "User")
@@ -2150,6 +2212,8 @@ private class EventDetailFakeEventRepository(
     private val eventFlow = MutableStateFlow(Result.success(initialEvent.toRelations(host, players, teams)))
     private val cachedRegistrationsFlow = MutableStateFlow(initialCachedRegistrations)
 
+    var refreshedEvent: Event? = null
+
     val staffInviteRequests = mutableListOf<String>()
     val refreshRequests = mutableListOf<String>()
     val eventWithRelationsFlowRequests = mutableListOf<String>()
@@ -2176,7 +2240,7 @@ private class EventDetailFakeEventRepository(
 
     override suspend fun getEvent(eventId: String): Result<Event> {
         refreshRequests += eventId
-        return Result.success(eventFlow.value.getOrThrow().event)
+        return Result.success(refreshedEvent ?: eventFlow.value.getOrThrow().event)
     }
 
     override suspend fun getEventStaffInvites(eventId: String): Result<List<Invite>> {

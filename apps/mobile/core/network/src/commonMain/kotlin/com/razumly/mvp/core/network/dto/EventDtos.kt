@@ -226,8 +226,9 @@ data class EventApiDto(
                 }
                 acc
             }
+        val explicitDivisionIds = divisions.orEmpty().normalizeDivisionIdentifiers()
         val normalizedDivisions = when {
-            divisions != null -> divisions.normalizeDivisionIdentifiers()
+            explicitDivisionIds.isNotEmpty() -> explicitDivisionIds
             normalizedRegularDetails.isNotEmpty() -> normalizedRegularDetails
                 .map { detail -> detail.id }
                 .normalizeDivisionIdentifiers()

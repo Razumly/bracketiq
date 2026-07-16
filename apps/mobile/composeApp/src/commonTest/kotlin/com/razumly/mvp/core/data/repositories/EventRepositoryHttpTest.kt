@@ -683,6 +683,79 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun getMySchedule_preserves_cached_divisions_from_partial_schedule_rows() = runTest {
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val divisionId = "event_1__division__open"
+        val cachedEvent = makeEvent(id = "event_1", hostId = "host_1").copy(
+            eventType = EventType.TOURNAMENT,
+            divisions = listOf(divisionId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = divisionId,
+                    key = "open",
+                    name = "Open",
+                    maxParticipants = 16,
+                    playoffTeamCount = 8,
+                    poolCount = 4,
+                ),
+            ),
+        )
+        eventDao.upsertEvent(cachedEvent)
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        val engine = MockEngine { request ->
+            assertEquals("/api/profile/schedule", request.url.encodedPath)
+            respond(
+                content = """
+                    {
+                      "events": [
+                        {
+                          "id": "event_1",
+                          "name": "First Event",
+                          "hostId": "host_1",
+                          "coordinates": [-80.0, 25.0],
+                          "start": "2026-07-13T12:00:00Z",
+                          "end": "2026-07-13T13:00:00Z",
+                          "eventType": "TOURNAMENT",
+                          "divisions": [],
+                          "divisionDetails": []
+                        }
+                      ],
+                      "pagination": {
+                        "limit": 200,
+                        "hasMore": false,
+                        "nextCursor": null,
+                        "isComplete": true,
+                        "windowFrom": "${request.url.parameters["from"]}",
+                        "windowTo": "${request.url.parameters["to"]}"
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val snapshot = repo.getMySchedule().getOrThrow()
+
+        val scheduledEvent = snapshot.events.single()
+        assertEquals(listOf(divisionId), scheduledEvent.divisions)
+        assertEquals(listOf(divisionId), scheduledEvent.divisionDetails.map(DivisionDetail::id))
+        assertEquals(4, scheduledEvent.divisionDetails.single().poolCount)
+        assertEquals(listOf(divisionId), eventDao.getEventById("event_1")?.divisions)
+    }
+
+    @Test
     fun getMySchedule_fails_closed_when_an_incomplete_page_has_no_cursor() = runTest {
         val db = EventRepositoryHttp_FakeDatabaseService(
             EventRepositoryHttp_FakeEventDao(),
@@ -2741,6 +2814,75 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun syncEventParticipants_preserves_newly_cached_divisions_when_started_with_placeholder_event() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val divisionId = "e1__division__m_skill_open_age_18plus"
+        val cachedEvent = makeEvent(id = "e1", hostId = "h1").copy(
+            eventType = EventType.TOURNAMENT,
+            teamSignup = true,
+            singleDivision = false,
+            divisions = listOf(divisionId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = divisionId,
+                    key = "m_skill_open_age_18plus",
+                    name = "Mens Open 18+",
+                    maxParticipants = 16,
+                    playoffTeamCount = 8,
+                    poolCount = 4,
+                ),
+            ),
+        )
+        eventDao.upsertEvent(cachedEvent)
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/events/e1/participants", request.url.encodedPath)
+            respond(
+                content = """
+                    {
+                      "event": {
+                        "id": "e1",
+                        "name": "Example Tournament",
+                        "hostId": "h1",
+                        "eventType": "TOURNAMENT",
+                        "teamSignup": true,
+                        "singleDivision": false
+                      },
+                      "participants": {
+                        "teamIds": [],
+                        "userIds": [],
+                        "waitListIds": [],
+                        "freeAgentIds": []
+                      },
+                      "participantCount": 0,
+                      "participantCapacity": 16
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { configureMvpHttpClient() }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+        val placeholderEvent = Event(id = "e1")
+
+        repo.syncEventParticipants(placeholderEvent, occurrence = null).getOrThrow()
+
+        val storedEvent = eventDao.getEventById("e1")
+        assertEquals(listOf(divisionId), storedEvent?.divisions)
+        assertEquals(listOf(divisionId), storedEvent?.divisionDetails?.map(DivisionDetail::id))
+        assertEquals(4, storedEvent?.divisionDetails?.single()?.poolCount)
+    }
+
+    @Test
     fun getLeagueScoringConfig_fetches_embedded_config_for_event() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()
@@ -3116,6 +3258,74 @@ class EventRepositoryHttpTest {
         assertEquals(1, result.first.size)
         assertFalse(result.second)
         assertEquals("e1", eventDao.getEventById("e1")?.id)
+    }
+
+    @Test
+    fun getEventsInBounds_does_not_erase_cached_divisions_from_partial_catalog_rows() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val divisionId = "e1__division__open"
+        val cachedEvent = makeEvent(id = "e1", hostId = "h1").copy(
+            eventType = EventType.TOURNAMENT,
+            divisions = listOf(divisionId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = divisionId,
+                    key = "open",
+                    name = "Open",
+                    maxParticipants = 16,
+                ),
+            ),
+        )
+        eventDao.upsertEvent(cachedEvent)
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/search", request.url.encodedPath)
+            respond(
+                content = """
+                    {
+                      "events": [
+                        {
+                          "id": "e1",
+                          "name": "Event One",
+                          "hostId": "h1",
+                          "start": "2026-02-10T00:00:00Z",
+                          "end": "2026-02-10T01:00:00Z",
+                          "coordinates": [-80.0, 25.0],
+                          "location": "Miami",
+                          "eventType": "TOURNAMENT",
+                          "divisions": [],
+                          "divisionDetails": []
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+        val bounds = Bounds(
+            north = 0.0,
+            east = 0.0,
+            south = 0.0,
+            west = 0.0,
+            center = LatLng(25.0, -80.0),
+            radiusMiles = 100.0,
+        )
+
+        repo.getEventsInBounds(bounds).getOrThrow()
+
+        val storedEvent = eventDao.getEventById("e1")
+        assertEquals(listOf(divisionId), storedEvent?.divisions)
+        assertEquals(listOf(divisionId), storedEvent?.divisionDetails?.map(DivisionDetail::id))
     }
 
     @Test

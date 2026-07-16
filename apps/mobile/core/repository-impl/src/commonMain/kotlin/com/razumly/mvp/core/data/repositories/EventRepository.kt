@@ -1029,14 +1029,11 @@ class EventRepository(
             }
         } while (cursor != null)
 
-        val events = eventsById.values.toList()
+        val events = databaseService.cachePartialEventsPreservingDivisionState(eventsById.values.toList())
         val matches = matchesById.values.toList()
         val teams = teamsById.values.toList()
         val fields = fieldsById.values.toList()
 
-        if (events.isNotEmpty()) {
-            databaseService.getEventDao.upsertEvents(events)
-        }
         if (matches.isNotEmpty()) {
             databaseService.getMatchDao.upsertMatches(matches)
         }

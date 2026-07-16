@@ -37,20 +37,46 @@ internal class EventEditActionHandler(
     private val refreshLeagueStandingsAfterSchedule: suspend (Event) -> Unit,
     private val setError: (String) -> Unit,
 ) {
+    private var editStartRequestId = 0L
+
     fun toggleEdit() {
-        setEventEditMode(enabled = !editDraftCoordinator.isEditing.value)
+        if (editDraftCoordinator.isEditing.value) {
+            cancelEditingEvent()
+        } else {
+            startEditingEvent()
+        }
     }
 
     fun startEditingEvent() {
-        setEventEditMode(enabled = true)
+        if (editDraftCoordinator.isEditing.value) return
+        val requestId = ++editStartRequestId
+        val currentEvent = selectedEvent()
+        scope.launch {
+            val refreshedEvent = eventRepository.getEvent(currentEvent.id)
+                .getOrElse { throwable ->
+                    if (requestId == editStartRequestId) {
+                        setError(throwable.userMessage("Failed to refresh event for editing."))
+                    }
+                    return@launch
+                }
+            if (requestId != editStartRequestId || editDraftCoordinator.isEditing.value) {
+                return@launch
+            }
+            setEventEditMode(enabled = true, seedEvent = refreshedEvent)
+        }
     }
 
     fun cancelEditingEvent() {
+        editStartRequestId += 1
         setEventEditMode(enabled = false)
     }
 
-    private fun setEventEditMode(enabled: Boolean) {
-        val unsupportedFeatures = mobileEventEditUnsupportedFeatures(selectedEvent())
+    private fun setEventEditMode(
+        enabled: Boolean,
+        seedEvent: Event? = null,
+    ) {
+        val selected = seedEvent ?: selectedEvent()
+        val unsupportedFeatures = mobileEventEditUnsupportedFeatures(selected)
         if (enabled && unsupportedFeatures.isNotEmpty()) {
             setError(mobileEventEditUnsupportedMessage(unsupportedFeatures))
             return
@@ -60,7 +86,6 @@ internal class EventEditActionHandler(
             loadSports(true)
         }
 
-        val selected = selectedEvent()
         val seededEvent = if (enabled && sportsCatalogCoordinator.currentSports().isNotEmpty()) {
             sportsCatalogCoordinator.syncOfficialStaffingForSportTransition(
                 previous = selected,

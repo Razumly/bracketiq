@@ -50,6 +50,7 @@ The next simplification adds a first-page Options step. Organizers choose one of
 - [x] (2026-07-15) Added regression coverage for image, age-range, payment-link, official-position, and page-gate validation and reran the focused Android JVM suite.
 - [x] (2026-07-15) Matched the tag search control to the adjacent sport field, accepted provider usernames for Cash App/Venmo/PayPal while retaining HTTPS-only link providers, and stabilized bracket cards and pills under enlarged Android font/display settings.
 - [x] (2026-07-15) Pinned provider-specific username prefixes in both payment editors: Cash App always presents `$` and Venmo always presents `@`, while saved values still normalize to backend HTTPS URLs.
+- [x] (2026-07-15) Recovered canonical division ids from relational division details when a newly created event response contains an empty legacy `divisions` array, preventing false division and pool-configuration errors when the event is reopened for editing.
 
 ## Surprises & Discoveries
 
@@ -136,6 +137,15 @@ The next simplification adds a first-page Options step. Organizers choose one of
 
 - Observation: Image readiness and image presence were represented by separate state but only readiness participated in the aggregate validity result.
   Evidence: a blank `imageId` produced a validation message while `isValid` could remain true whenever dominant-color loading had completed.
+
+- Observation: A newly created event can return populated relational `divisionDetails` alongside an explicitly empty legacy `divisions` array.
+  Evidence: both the server response serializer and `EventApiDto.toEventOrNull()` previously treated any array, including an empty one, as authoritative, so the editor rendered division detail controls while validation evaluated zero canonical division ids.
+
+- Observation: Event detail startup can fetch the full event and participant snapshot concurrently, and a participant sync that started from the placeholder `Event(id)` could overwrite the newly cached division state after the full response arrived.
+  Evidence: the affected tournament's API response contained four pool division ids plus a playoff division detail, while the stopped emulator Room row contained `divisions = []` and `divisionDetails = []` after startup completed.
+
+- Observation: Catalog and search responses share the Room event cache with the authoritative event-detail response, so a partial catalog row can erase richer configuration even after the detail race is fixed.
+  Evidence: the affected event reached four cached division ids and five details after detail refresh, then returned to empty arrays after the Discover catalog refreshed and was reopened.
 
 ## Decision Log
 
@@ -267,6 +277,8 @@ Required inputs now use explicit `*` labels and field-level error styling. Basic
 
 The Basic Information tag search now uses the same 56 dp control height as the sport picker with a smaller body-sized placeholder. Manual payment validation follows the existing persistence normalizer: Cash App, Venmo, and PayPal accept provider usernames that are converted into secure provider URLs before save, while Stripe, Zelle, and custom providers remain HTTPS-link inputs. Cash App and Venmo inputs pin their expected `$` and `@` prefixes and translate existing stored provider URLs back into readable usernames when editing. Bracket date/official pills are fixed at 40 dp with one-line text, and match-card typography compensates for Android font scale so card proportions and connector alignment remain stable when font and display size are increased.
 
+Active relational `Divisions` rows are now the event-division source of truth. Create, detail, search, schedule, participant, weekly-occurrence, and registration snapshot reads no longer consult removed event-level JSON division fields. Lightweight API snapshots project relational IDs, while full event responses include the relational detail records. Participant synchronization re-reads the latest cached event before merging a partial snapshot, and catalog/schedule caching preserves richer division state when a later lightweight row arrives. Entering edit mode now refetches the full event before seeding the draft, so a schedule or catalog placeholder cannot lock the editor into an empty division list.
+
 ## Context and Orientation
 
 `composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/CreateEventScreen.kt` renders the creation screen and owns transient UI state. `DefaultCreateEventComponent.kt` owns the mutable event draft and persistence. `composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDetails.kt` renders the existing advanced form by composing modular section functions. The new resolver and Simple Setup UI belong under the `eventCreate` package. No database or API changes are needed.
@@ -345,8 +357,19 @@ Emulator screenshots:
     JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :composeApp:assembleDebug --console=plain
     BUILD SUCCESSFUL.
 
+    JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :composeApp:compileDebugKotlinAndroid :composeApp:assembleDebug --console=plain --quiet
+    BUILD SUCCESSFUL; canonical division-id fallback compiles and the debug APK assembles.
+
+    JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :core:network:testDebugUnitTest --tests 'com.razumly.mvp.core.network.dto.EventDtosTest'
+    BLOCKED by a pre-existing stale `TeamApiDto` constructor call in `ExplicitNullPatchTest.kt`; production compilation succeeds independently.
+
     JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :core:model:testDebugUnitTest --tests 'com.razumly.mvp.core.data.dataTypes.ManualRegistrationPaymentTest' :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventDetail.EventDetailsValidationTest' --tests 'com.razumly.mvp.eventDetail.composables.MatchCardTypographyTest' :composeApp:compileDebugKotlinAndroid --console=plain
     BUILD SUCCESSFUL; provider-prefix formatting, URL normalization, validation, and bracket typography regressions passed.
+
+    ./gradlew :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventDetail.EventDetailMobileJoinFlowTest.editing_refetches_event_before_seeding_division_draft' --tests 'com.razumly.mvp.core.data.repositories.EventRepositoryHttpTest.getMySchedule_preserves_cached_divisions_from_partial_schedule_rows' --tests 'com.razumly.mvp.core.data.repositories.EventRepositoryHttpTest.getEventsInBounds_does_not_erase_cached_divisions_from_partial_catalog_rows' --tests 'com.razumly.mvp.core.data.repositories.EventRepositoryHttpTest.syncEventParticipants_preserves_newly_cached_divisions_when_started_with_placeholder_event' :composeApp:assembleDebug
+    BUILD SUCCESSFUL; edit-time hydration and partial-cache regressions passed and the debug APK assembled.
+
+    Production server cold-start emulator verification: Room cached 4 relational division IDs for event f7810c51-edaf-4c9a-b21d-f787bb48171b. Opening Edit rendered the configured Men's 4.0 U19 division with 4 pools, 4 teams per pool, and 8 bracket teams; neither empty-division validation message appeared and logcat contained no request or fatal errors.
 
 Additional emulator screenshots:
 

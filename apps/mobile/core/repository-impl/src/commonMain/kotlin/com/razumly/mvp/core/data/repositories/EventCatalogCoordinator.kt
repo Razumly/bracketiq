@@ -40,6 +40,10 @@ internal class EventCatalogCoordinator(
     private val userRepository: IUserRepository,
     private val sessionCacheCoordinator: EventSessionCacheCoordinator,
 ) {
+    private suspend fun cacheCatalogEvents(events: List<Event>): List<Event> {
+        return databaseService.cachePartialEventsPreservingDivisionState(events)
+    }
+
     suspend fun getRegistrationQuestions(
         scopeType: String,
         scopeId: String,
@@ -63,7 +67,7 @@ internal class EventCatalogCoordinator(
 
         val events = fetchRemoteEventsByIds(ids)
         if (events.isNotEmpty()) {
-            databaseService.getEventDao.upsertEvents(events)
+            cacheCatalogEvents(events)
         }
         val staleIds = ids.toSet() - events.map(Event::id).toSet()
         if (staleIds.isNotEmpty()) {
@@ -84,7 +88,7 @@ internal class EventCatalogCoordinator(
         return runCatching {
             val events = fetchRemoteEventsByOrganization(normalizedOrganizationId, limit)
             if (events.isNotEmpty()) {
-                databaseService.getEventDao.upsertEvents(events)
+                cacheCatalogEvents(events)
             }
             events
         }
@@ -113,7 +117,7 @@ internal class EventCatalogCoordinator(
                 offset = offset,
             )
             if (page.events.isNotEmpty()) {
-                databaseService.getEventDao.upsertEvents(page.events)
+                cacheCatalogEvents(page.events)
             }
             page
         }
@@ -228,7 +232,7 @@ internal class EventCatalogCoordinator(
             response.events.toEventsOrThrow("Event bounds search response"),
             userRepository.currentUser.value.getOrNull(),
         )
-        databaseService.getEventDao.upsertEvents(events)
+        cacheCatalogEvents(events)
         val orderedEvents = if (includeDistanceFilter) {
             events.sortedBy { event ->
                 event.usableLatitudeLongitude()
@@ -263,7 +267,7 @@ internal class EventCatalogCoordinator(
             response.events.toEventsOrThrow("Event search response"),
             userRepository.currentUser.value.getOrNull(),
         )
-        databaseService.getEventDao.upsertEvents(events)
+        cacheCatalogEvents(events)
 
         val orderedEvents = userLocation?.let { location ->
             events.sortedBy { event ->
@@ -315,7 +319,7 @@ internal class EventCatalogCoordinator(
                 if (staleIds.isNotEmpty()) {
                     databaseService.getEventDao.deleteEventsWithCrossRefs(staleIds.toList())
                 }
-                databaseService.getEventDao.upsertEvents(remote)
+                cacheCatalogEvents(remote)
             }.onFailure { error -> trySend(Result.failure(error)) }
         }
 
@@ -348,7 +352,7 @@ internal class EventCatalogCoordinator(
                 offset = offset,
             )
             if (page.events.isNotEmpty()) {
-                databaseService.getEventDao.upsertEvents(page.events)
+                cacheCatalogEvents(page.events)
             }
             page
         }

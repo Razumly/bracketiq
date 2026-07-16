@@ -176,6 +176,36 @@ class EventDtosTest {
     }
 
     @Test
+    fun event_api_dto_recovers_division_ids_from_relational_details_when_projection_is_empty() {
+        val divisionId = "event-relational__division__c_skill_open_age_adult"
+        val event = EventApiDto(
+            id = "event-relational",
+            name = "Relational Tournament",
+            hostId = "host-1",
+            eventType = EventType.TOURNAMENT.name,
+            start = "2026-06-01T08:00:00Z",
+            end = "2026-06-01T09:00:00Z",
+            singleDivision = false,
+            divisions = emptyList(),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = divisionId,
+                    key = "c_skill_open_age_adult",
+                    name = "Coed Open Adult",
+                    divisionTypeId = "skill_open_age_adult",
+                    gender = "C",
+                    ratingType = "SKILL",
+                    maxParticipants = 8,
+                ),
+            ),
+        ).toEventOrNull()
+
+        assertNotNull(event)
+        assertEquals(listOf(divisionId), event.divisions)
+        assertEquals(listOf(divisionId), event.divisionDetails.map(DivisionDetail::id))
+    }
+
+    @Test
     fun to_update_dto_trims_and_deduplicates_required_template_ids() {
         val event = Event(
             name = "League Event",
