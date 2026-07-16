@@ -6,12 +6,22 @@ This ExecPlan is a living document. Maintain it per `PLANS.md` at repository roo
 
 The mobile app needs backend-backed E2E coverage that proves native repositories can create, schedule, join, load, and update matches across the real event shapes organizers use. After this work, an Android integration suite will create one weekly event, four tournaments, four leagues, and one normal event against the local `mvp-site` backend, varying single vs split divisions, playoffs/pools vs none, named officials, no officials, team officiating, set-based sports, timed sports, multi-field scheduling, and match updates with and without incidents.
 
+This plan now also owns a second milestone: proving those contracts through the installed Android UI with a cold cache and two user accounts. The second milestone removes active reliance on legacy event participant arrays and other legacy wire projections. Historical Room migrations remain upgrade-only code; current repositories, UI state, schedule membership, check-ins, scoring, and confirmations must use canonical registration, relation, segment, and official-assignment data.
+
 ## Progress
 
 - [x] (2026-05-13 17:20Z) Audited current mobile tests and confirmed existing coverage has create DTO/unit tests plus one backend league playoff integration, but not the requested lifecycle matrix.
 - [x] (2026-05-13 17:20Z) Mapped mobile repository calls to the `mvp-site` source of truth for event create, schedule, join, match score, and match incident endpoints.
 - [x] (2026-05-13 18:06Z) Added `EventLifecycleMobileApiIntegrationTest` under `composeApp/src/androidUnitTest/kotlin/com/razumly/mvp/eventDetail/`.
 - [x] (2026-05-13 18:12Z) Ran the targeted Android integration test against local `mvp-site`; it passes with backend fixtures and cleanup.
+- [x] (2026-07-16 15:36Z) Re-audited both canonical worktrees, worktree inventory, branch ancestry, dirty files, runtime availability, the existing lifecycle integration suite, and the durable cross-repository issue tracker before making changes.
+- [x] (2026-07-16 15:36Z) Confirmed the backend `Events` table no longer stores participant `teamIds`/`userIds`, while the mobile `Event` model and active UI/repository paths still consume server-derived compatibility arrays.
+- [ ] Replace active event participant-array consumption with canonical event registrations and Room relations; remove the legacy fields from the current mobile event wire/domain contract after callers migrate.
+- [ ] Replace active match official and legacy score fallbacks with canonical official assignments and persisted match segments; retain only explicit database migration code for historical installed schemas.
+- [ ] Run focused contract and repository regressions plus the existing ten-event backend lifecycle matrix against the local test database.
+- [ ] Build and install the current app on `Pixel_9_Pro_API_35`, create multiple events through the UI, and capture UI trees, screenshots, Room state, API state, and logcat.
+- [ ] Clear application data, sign in as a second user, join the created events, and prove Discover, Schedule, score updates, set confirmation, event team check-in, and match official check-in.
+- [ ] Move event and match times backward through supported edit paths to trigger the lifecycle prompts, then repeat after another cold start and record every result in the issue tracker.
 
 ## Surprises & Discoveries
 
@@ -27,6 +37,11 @@ The mobile app needs backend-backed E2E coverage that proves native repositories
 - Pool-play tournaments need fields/time slots assigned to the generated pool division ids (`event__division__open_pool_a`, etc.), not only the parent bracket division id, because the scheduler schedules the pool divisions.
 - For mobile-created pool-play tournaments, the event `divisions` also need to reference generated pool ids so `singleDivision` slot canonicalization does not rewrite slots back to the bracket id before the scheduler runs.
 - The match incident route depends on hydrated event teams while validating point incidents. `mvp-site`'s match mutation loader had to keep event-team registration hydration enabled while still skipping user/player detail, otherwise current DB rows with no persisted `Events.teamIds` leave `team1`/`team2` unresolved.
+- The current backend schema has no `Events.teamIds` or `Events.userIds` columns. The profile schedule and event read paths derive those arrays from `EventRegistrations` only for compatibility, while Android persists and reads them as if they were event-owned state.
+- Android already has canonical participant snapshot DTOs, current-user registration caching, and Room event/team/user junctions. The remaining migration is therefore an ownership problem rather than a missing backend capability: callers must consume those canonical stores directly.
+- `EventParticipantSyncCoordinator` currently converts a canonical participant snapshot back into legacy `Event.teamIds`/`Event.userIds`, then uses those arrays to rebuild Room cross references. That round trip can make a malformed or omitted compatibility projection look like an empty authoritative roster.
+- Schedule membership and the event check-in prompt still inspect `Event.teamIds`, even though `/api/profile/schedule` selects events through canonical `EventRegistrations`. This is a concrete way an event can appear in the schedule query but fail downstream membership/check-in recognition.
+- Match official assignment helpers still fall back to `officialId`/`officialCheckedIn`, and match presentation still falls back to legacy point arrays when canonical segments are absent. These paths must be classified as either one-time migration or removed current behavior before emulator acceptance.
 
 ## Decision Log
 
@@ -34,6 +49,9 @@ The mobile app needs backend-backed E2E coverage that proves native repositories
 - Use the existing `MobileApiTestSession` integration harness so the suite exercises real repositories, auth, route payloads, Room persistence, and the local backend.
 - Treat the user's requested count as ten events total: one weekly, four tournaments, four leagues, and one normal event. The "six events" phrase conflicts with the explicit breakdown, and the explicit breakdown is the acceptance target.
 - Distribute unrelated variables across the ten events instead of creating every Cartesian combination. The acceptance condition is that each requested axis is represented in a meaningful create/schedule/join path, not that every possible combination exists.
+- Extend this plan rather than creating a competing runtime plan because the requested emulator work is the acceptance layer for the same event lifecycle contract.
+- Treat "fully migrate from legacy parameters" as: current network/domain/repository/UI logic may not use legacy participant, official, or score projections as alternate truth. Historical Room migration readers may remain only to transform installed data into the canonical schema.
+- Preserve unrelated dirty UI work in the canonical mobile checkout. Migration edits will be scoped to contract, repository, relation, schedule, and lifecycle files, with explicit staging and periodic commits.
 
 ## Outcomes & Retrospective
 
@@ -93,6 +111,11 @@ Backend source of truth:
 - The test asserts participant join succeeds for weekly and normal events, and exercises the mobile team/free-agent join code path for team-signup events.
 - The test asserts match score updates persist for a non-incident scoring event.
 - The test asserts match incident updates persist for an incident-enabled event, or records why true point incidents require a separate roster fixture.
+- Current event DTOs and domain state do not expose top-level participant `teamIds`/`userIds`; participant state comes from canonical registration snapshots and Room relations.
+- Schedule and event/match prompt decisions remain correct when compatibility participant arrays are absent.
+- Current match operations use narrow canonical operation payloads and canonical assignments/segments, with no host-only match policy snapshots sent during official check-in or set confirmation.
+- The installed Android flow passes after `adb shell pm clear com.razumly.mvp`: second-user joins appear in Schedule, score updates persist, sets can be confirmed, and both event and match check-in prompts appear after supported time edits.
+- Every emulator scenario records UI-tree evidence, screenshot paths, relevant logcat/API/Room evidence, and a tracker status.
 
 ## Idempotence and Recovery
 
