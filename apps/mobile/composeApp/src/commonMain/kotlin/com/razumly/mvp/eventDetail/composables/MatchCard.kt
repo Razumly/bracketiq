@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -35,8 +36,11 @@ import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
@@ -92,6 +96,11 @@ internal const val MATCH_CARD_BASE_HEIGHT_DP = 90
 private const val MATCH_CARD_MANAGE_SECTION_BASE_HEIGHT_DP = 12
 private const val MATCH_CARD_MANAGE_LINE_HEIGHT_DP = 17
 private const val MATCH_CARD_INFO_MAX_WIDTH_FRACTION = 0.5f
+private const val MATCH_CARD_PILL_HEIGHT_DP = 40
+private const val MATCH_CARD_COMPACT_FONT_SIZE_SP = 14f
+private const val MATCH_CARD_COMPACT_LINE_HEIGHT_SP = 20f
+private const val MATCH_CARD_MANAGE_FONT_SIZE_SP = 16f
+private const val MATCH_CARD_MANAGE_LINE_HEIGHT_SP = 22f
 private val tournamentPoolDivisionSuffixRegex = Regex(
     pattern = "_pool_[a-z0-9]+$",
     option = RegexOption.IGNORE_CASE,
@@ -212,24 +221,41 @@ fun MatchCard(
                     null -> null
                 }
                 val officialGlowOnDarkSurface = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+                val pillTextStyle = fixedBracketTextStyle(
+                    base = MaterialTheme.typography.labelLarge,
+                    fontSizeSp = MATCH_CARD_COMPACT_FONT_SIZE_SP,
+                    lineHeightSp = MATCH_CARD_COMPACT_LINE_HEIGHT_SP,
+                )
                 FloatingBox(
-                    modifier = Modifier.align(Alignment.TopCenter).offset(y = (-20).dp).zIndex(1f),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .offset(y = (-20).dp)
+                        .height(MATCH_CARD_PILL_HEIGHT_DP.dp)
+                        .zIndex(1f),
                     color = if (useDelayedTimeStyle) {
                         DelayedMatchTimeContainerColor
                     } else {
                         localColors.current.primaryContainer
                     }
                 ) {
-                    Text(
-                        text = matchDateTimeLabel,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = if (useDelayedTimeStyle) {
-                            DelayedMatchTimeContentColor
-                        } else {
-                            localColors.current.onPrimaryContainer
-                        }
-                    )
+                    Box(
+                        modifier = Modifier
+                            .height(MATCH_CARD_PILL_HEIGHT_DP.dp)
+                            .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = matchDateTimeLabel,
+                            style = pillTextStyle,
+                            color = if (useDelayedTimeStyle) {
+                                DelayedMatchTimeContentColor
+                            } else {
+                                localColors.current.onPrimaryContainer
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 Box(modifier = Modifier.fillMaxWidth()) {
                     if (currentUserGlowColor != null) {
@@ -314,17 +340,19 @@ fun MatchCard(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .offset(y = 20.dp)
+                            .height(MATCH_CARD_PILL_HEIGHT_DP.dp)
                             .zIndex(1f),
                         color = localColors.current.primaryContainer
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                        Box(
+                            modifier = Modifier
+                                .height(MATCH_CARD_PILL_HEIGHT_DP.dp)
+                                .padding(horizontal = 16.dp),
+                            contentAlignment = Alignment.Center,
                         ) {
                             Text(
                                 officialSummary,
-                                style = MaterialTheme.typography.labelLarge,
+                                style = pillTextStyle,
                                 color = localColors.current.onPrimaryContainer,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -423,9 +451,17 @@ private fun MatchInfoSection(
 ) {
     val fieldLabel = resolveFieldLabel(match, fields)
     val rowTextStyle = if (showManageOfficials) {
-        MaterialTheme.typography.bodyLarge
+        fixedBracketTextStyle(
+            base = MaterialTheme.typography.bodyLarge,
+            fontSizeSp = MATCH_CARD_MANAGE_FONT_SIZE_SP,
+            lineHeightSp = MATCH_CARD_MANAGE_LINE_HEIGHT_SP,
+        )
     } else {
-        MaterialTheme.typography.bodyMedium
+        fixedBracketTextStyle(
+            base = MaterialTheme.typography.bodyMedium,
+            fontSizeSp = MATCH_CARD_COMPACT_FONT_SIZE_SP,
+            lineHeightSp = MATCH_CARD_COMPACT_LINE_HEIGHT_SP,
+        )
     }
     Column(
         modifier = modifier
@@ -442,6 +478,8 @@ private fun MatchInfoSection(
             text = "M: ${match.match.matchId}",
             style = rowTextStyle,
             color = localColors.current.onPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         HorizontalDivider(color = localColors.current.onPrimary)
         Text(
@@ -504,9 +542,17 @@ private fun TeamsSection(
     manageOfficialRows: List<ManageOfficialRow>,
 ) {
     val rowTextStyle = if (showManageOfficials) {
-        MaterialTheme.typography.bodyLarge
+        fixedBracketTextStyle(
+            base = MaterialTheme.typography.bodyLarge,
+            fontSizeSp = MATCH_CARD_MANAGE_FONT_SIZE_SP,
+            lineHeightSp = MATCH_CARD_MANAGE_LINE_HEIGHT_SP,
+        )
     } else {
-        MaterialTheme.typography.bodyMedium
+        fixedBracketTextStyle(
+            base = MaterialTheme.typography.bodyMedium,
+            fontSizeSp = MATCH_CARD_COMPACT_FONT_SIZE_SP,
+            lineHeightSp = MATCH_CARD_COMPACT_LINE_HEIGHT_SP,
+        )
     }
     Column(
         modifier = Modifier
@@ -585,6 +631,16 @@ private fun TeamRow(
     playoffPlaceholder: String?,
     forceUniformStyle: Boolean = false,
 ) {
+    val compactBodyStyle = fixedBracketTextStyle(
+        base = MaterialTheme.typography.bodyMedium,
+        fontSizeSp = MATCH_CARD_COMPACT_FONT_SIZE_SP,
+        lineHeightSp = MATCH_CARD_COMPACT_LINE_HEIGHT_SP,
+    )
+    val emphasizedBodyStyle = fixedBracketTextStyle(
+        base = MaterialTheme.typography.bodyLarge,
+        fontSizeSp = MATCH_CARD_COMPACT_FONT_SIZE_SP,
+        lineHeightSp = MATCH_CARD_COMPACT_LINE_HEIGHT_SP,
+    )
     val usesReferenceLabel = team == null
     val label = when {
         team != null -> resolveTeamLabel(team)
@@ -604,12 +660,12 @@ private fun TeamRow(
             text = label,
             modifier = Modifier.weight(1f),
             style = if (forceUniformStyle) {
-                MaterialTheme.typography.bodyLarge
+                emphasizedBodyStyle
             } else {
                 if (usesReferenceLabel) {
-                    MaterialTheme.typography.bodyMedium
+                    compactBodyStyle
                 } else {
-                    MaterialTheme.typography.bodyLarge
+                    emphasizedBodyStyle
                 }
             },
             overflow = TextOverflow.Ellipsis,
@@ -619,10 +675,30 @@ private fun TeamRow(
         if (points.isNotEmpty()) {
             Text(
                 " ${points.joinToString(separator = ", ")}",
-                color = localColors.current.onPrimary
+                style = compactBodyStyle,
+                color = localColors.current.onPrimary,
+                maxLines = 1,
             )
         }
     }
+}
+
+@Composable
+private fun fixedBracketTextStyle(
+    base: TextStyle,
+    fontSizeSp: Float,
+    lineHeightSp: Float,
+): TextStyle {
+    val fontScale = LocalDensity.current.fontScale
+    return base.copy(
+        fontSize = fixedBracketFontSizeSp(fontSizeSp, fontScale).sp,
+        lineHeight = fixedBracketFontSizeSp(lineHeightSp, fontScale).sp,
+    )
+}
+
+internal fun fixedBracketFontSizeSp(baseSizeSp: Float, fontScale: Float): Float {
+    val safeFontScale = fontScale.takeIf { it > 0f } ?: 1f
+    return baseSizeSp / safeFontScale
 }
 
 internal fun displayPointsForTeam(

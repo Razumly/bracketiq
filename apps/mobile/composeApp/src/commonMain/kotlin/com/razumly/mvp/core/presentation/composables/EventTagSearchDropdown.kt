@@ -32,8 +32,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
 import com.razumly.mvp.core.data.dataTypes.EventTag
@@ -67,6 +69,9 @@ fun EventTagSearchDropdown(
     collapseOnSelect: Boolean = false,
     excludedTagSlugs: Set<String> = emptySet(),
     maxVisibleTags: Int = 5,
+    fieldHeight: Dp? = null,
+    fieldTextStyle: TextStyle? = null,
+    placeholderTextStyle: TextStyle? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     var suppressFocusedExpansion by remember { mutableStateOf(false) }
@@ -169,6 +174,9 @@ fun EventTagSearchDropdown(
             label = label,
             placeholder = placeholder,
             enabled = enabled,
+            height = fieldHeight,
+            textStyle = fieldTextStyle,
+            placeholderTextStyle = placeholderTextStyle,
             leadingIcon = {
                 Icon(
                     imageVector = Icons.Default.Search,

@@ -347,8 +347,11 @@ private fun EventTagsEditor(
             onTagSelected = { option ->
                 onTagsChange((normalizedTags + option).syncEventTypeTagsForEventType(eventType))
             },
-            label = "Tags",
-            placeholder = "Enter tag",
+            label = "",
+            placeholder = "Tags",
+            fieldHeight = 56.dp,
+            fieldTextStyle = MaterialTheme.typography.bodyMedium,
+            placeholderTextStyle = MaterialTheme.typography.bodyMedium,
             hideSelectedOptions = true,
             allowCustomTag = true,
             onCustomTagAdded = { tag ->

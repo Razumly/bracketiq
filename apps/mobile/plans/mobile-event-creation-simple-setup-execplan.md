@@ -48,6 +48,8 @@ The next simplification adds a first-page Options step. Organizers choose one of
 - [x] (2026-07-15) Compiled, installed, and verified the independent Simple flow and the preserved Advanced flow in the Android emulator.
 - [x] (2026-07-15) Made image selection a Basic Information navigation requirement and added semantic inline errors plus required markers for every conditional required/ranged field in the shared create contract.
 - [x] (2026-07-15) Added regression coverage for image, age-range, payment-link, official-position, and page-gate validation and reran the focused Android JVM suite.
+- [x] (2026-07-15) Matched the tag search control to the adjacent sport field, accepted provider usernames for Cash App/Venmo/PayPal while retaining HTTPS-only link providers, and stabilized bracket cards and pills under enlarged Android font/display settings.
+- [x] (2026-07-15) Pinned provider-specific username prefixes in both payment editors: Cash App always presents `$` and Venmo always presents `@`, while saved values still normalize to backend HTTPS URLs.
 
 ## Surprises & Discoveries
 
@@ -249,6 +251,10 @@ The next simplification adds a first-page Options step. Organizers choose one of
   Rationale: Organizers can see requirements before submitting, errors stay adjacent to the responsible control, and navigation cannot race ahead of a failed or unfinished image upload.
   Date/Author: 2026-07-15 / Codex
 
+- Decision: Keep the dense bracket visualization at fixed dp geometry and compensate only its card/pill typography for Android font scaling.
+  Rationale: The bracket must preserve connector alignment and the compact match-card proportions shown in the product reference. Full match details remain available from each card, while other app typography continues to honor accessibility scaling normally.
+  Date/Author: 2026-07-15 / Codex
+
 ## Outcomes & Retrospective
 
 Simple Setup now has an independent presentation surface. Every page dispatches to a Simple-specific section function stored under `eventDetail/simple`; those files began as close copies of the corresponding Advanced implementations but can now be simplified without changing Advanced. The two modes still share the `Event` draft, typed section state and actions, normalization functions, validation, persistence, and Preview step, so the UI is separate without creating a second backend contract.
@@ -258,6 +264,8 @@ Options is the first Simple page. Its four event types use a compact two-by-two 
 Android production compilation, focused JVM tests, installation, and emulator QA pass. The emulator confirmed Options as step 1, persisted an individual-event choice into later pages, showed no team-size or moved parent controls on Simple Event Details, switched to the original Advanced setup without a crash, and recorded no fatal Android runtime exception during the exercised flow.
 
 Required inputs now use explicit `*` labels and field-level error styling. Basic Information cannot advance without a successfully uploaded image, and aggregate publish validation now checks image presence and readiness together. Conditional ranges and inputs—including dates, team size, ages, registration/refund cutoffs, manual payment URLs, division identity/capacity/price, match structure, official positions, league scoring, resources, and timeslots—surface their own actionable messages instead of relying only on the final error summary.
+
+The Basic Information tag search now uses the same 56 dp control height as the sport picker with a smaller body-sized placeholder. Manual payment validation follows the existing persistence normalizer: Cash App, Venmo, and PayPal accept provider usernames that are converted into secure provider URLs before save, while Stripe, Zelle, and custom providers remain HTTPS-link inputs. Cash App and Venmo inputs pin their expected `$` and `@` prefixes and translate existing stored provider URLs back into readable usernames when editing. Bracket date/official pills are fixed at 40 dp with one-line text, and match-card typography compensates for Android font scale so card proportions and connector alignment remain stable when font and display size are increased.
 
 ## Context and Orientation
 
@@ -330,6 +338,21 @@ Emulator screenshots:
 
     JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :composeApp:compileKotlinIosSimulatorArm64
     BLOCKED by pre-existing PaymentProcessor.ios.kt expect/actual mismatch for emitPaymentResult.
+
+    JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventDetail.EventDetailsValidationTest' --tests 'com.razumly.mvp.eventDetail.composables.MatchCardTypographyTest' :composeApp:compileDebugKotlinAndroid --console=plain
+    BUILD SUCCESSFUL; provider-specific payment validation and bracket font-scale regressions passed.
+
+    JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :composeApp:assembleDebug --console=plain
+    BUILD SUCCESSFUL.
+
+    JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew :core:model:testDebugUnitTest --tests 'com.razumly.mvp.core.data.dataTypes.ManualRegistrationPaymentTest' :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventDetail.EventDetailsValidationTest' --tests 'com.razumly.mvp.eventDetail.composables.MatchCardTypographyTest' :composeApp:compileDebugKotlinAndroid --console=plain
+    BUILD SUCCESSFUL; provider-prefix formatting, URL normalization, validation, and bracket typography regressions passed.
+
+Additional emulator screenshots:
+
+    artifacts/event-form-bracket-qa/tag-field.png
+    artifacts/event-form-bracket-qa/bracket-normal.png
+    artifacts/event-form-bracket-qa/bracket-large.png
 
 ## Interfaces and Dependencies
 

@@ -48,9 +48,12 @@ import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_VENMO
 import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_ZELLE
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.formatManualPaymentProviderInput
 import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderInputLabel
 import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderInputPlaceholder
 import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderLabel
+import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderRequiredPrefix
+import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderUsesUsername
 import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentProvider
 import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
@@ -338,7 +341,11 @@ private fun ManualPaymentLinkEditor(
                         link.copy(
                             provider = normalizedProvider,
                             label = nextLabel,
-                            url = if (providerChanged) "" else link.url,
+                            url = if (providerChanged) {
+                                manualPaymentProviderRequiredPrefix(normalizedProvider).orEmpty()
+                            } else {
+                                link.url
+                            },
                         )
                     )
                 },
@@ -364,11 +371,13 @@ private fun ManualPaymentLinkEditor(
                 placeholder = "Payment link ${index + 1}",
             )
             StandardTextField(
-                value = link.url,
+                value = formatManualPaymentProviderInput(link.provider, link.url),
                 onValueChange = { value -> onChange(link.copy(url = value)) },
                 modifier = Modifier.weight(1f),
                 label = "${manualPaymentProviderInputLabel(link.provider)} *",
                 placeholder = manualPaymentProviderInputPlaceholder(link.provider),
+                keyboardType = if (manualPaymentProviderUsesUsername(link.provider)) "default" else "url",
+                inputFilter = { value -> formatManualPaymentProviderInput(link.provider, value) },
                 isError = showValidationErrors && linkError != null,
                 supportingText = if (showValidationErrors) linkError.orEmpty() else "",
             )

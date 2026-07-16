@@ -7,11 +7,13 @@ import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderInputLabel
+import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderUsesUsername
+import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentUrl
 import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.eventDetail.composables.leagueScoringValidationErrors
-import io.ktor.http.Url
 import kotlinx.datetime.LocalDate
 
 internal fun eventAgeRangeErrors(event: Event): Pair<String?, String?> {
@@ -33,20 +35,14 @@ internal fun eventAgeRangeErrors(event: Event): Pair<String?, String?> {
 }
 
 internal fun manualPaymentLinkError(link: ManualPaymentLink): String? {
-    val rawUrl = link.url.trim()
-    if (rawUrl.isBlank()) return "Enter a payment link."
-    val hasHttpScheme = rawUrl.startsWith("http://", ignoreCase = true) ||
-        rawUrl.startsWith("https://", ignoreCase = true)
-    val parsedUrl = runCatching { Url(rawUrl) }.getOrNull()
-    return if (
-        !hasHttpScheme ||
-        parsedUrl == null ||
-        parsedUrl.host.isBlank() ||
-        parsedUrl.protocol.name !in setOf("http", "https")
-    ) {
-        "Enter a valid http:// or https:// payment link."
+    val rawValue = link.url.trim()
+    val inputLabel = manualPaymentProviderInputLabel(link.provider)
+    if (rawValue.isBlank()) return "Enter ${inputLabel.lowercase()}."
+    if (normalizeManualPaymentUrl(link.provider, rawValue) != null) return null
+    return if (manualPaymentProviderUsesUsername(link.provider)) {
+        "Enter a valid ${inputLabel.lowercase()} or HTTPS link."
     } else {
-        null
+        "Enter a valid https:// payment link."
     }
 }
 internal fun validatePaymentPlans(

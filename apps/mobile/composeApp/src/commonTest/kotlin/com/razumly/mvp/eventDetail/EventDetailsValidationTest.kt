@@ -81,15 +81,35 @@ class EventDetailsValidationTest {
     }
 
     @Test
-    fun given_manual_payments_with_an_invalid_link_then_validation_fails() {
+    fun given_manual_payments_with_a_provider_username_then_validation_passes() {
         val result = validateEvent(
             baseLeagueEvent(maxParticipants = 2).copy(
                 registrationPaymentMode = REGISTRATION_PAYMENT_MODE_MANUAL,
                 manualPaymentLinks = listOf(
                     ManualPaymentLink(
                         id = "payment-1",
-                        provider = "VENMO",
-                        label = "Venmo",
+                        provider = "CASH_APP",
+                        label = "Cash App",
+                        url = "camka14",
+                    ),
+                ),
+            ),
+        )
+
+        assertTrue(result.isManualPaymentLinksValid)
+        assertTrue(result.validationErrors.none { error -> error.contains("payment", ignoreCase = true) })
+    }
+
+    @Test
+    fun given_manual_payments_with_an_invalid_https_link_then_validation_fails() {
+        val result = validateEvent(
+            baseLeagueEvent(maxParticipants = 2).copy(
+                registrationPaymentMode = REGISTRATION_PAYMENT_MODE_MANUAL,
+                manualPaymentLinks = listOf(
+                    ManualPaymentLink(
+                        id = "payment-1",
+                        provider = "STRIPE",
+                        label = "Stripe",
                         url = "not-a-url",
                     ),
                 ),
@@ -98,7 +118,7 @@ class EventDetailsValidationTest {
 
         assertFalse(result.isManualPaymentLinksValid)
         assertFalse(result.isValid)
-        assertTrue(result.validationErrors.any { error -> error.contains("valid http") })
+        assertTrue(result.validationErrors.any { error -> error.contains("valid https") })
     }
 
     @Test

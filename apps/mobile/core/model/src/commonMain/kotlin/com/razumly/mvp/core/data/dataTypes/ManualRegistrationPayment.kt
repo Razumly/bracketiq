@@ -75,6 +75,42 @@ fun manualPaymentProviderInputPlaceholder(provider: String?): String {
     }
 }
 
+fun manualPaymentProviderUsesUsername(provider: String?): Boolean {
+    return normalizeManualPaymentProvider(provider) in setOf(
+        MANUAL_PAYMENT_PROVIDER_CASH_APP,
+        MANUAL_PAYMENT_PROVIDER_VENMO,
+        MANUAL_PAYMENT_PROVIDER_PAYPAL,
+    )
+}
+
+fun manualPaymentProviderRequiredPrefix(provider: String?): String? {
+    return when (normalizeManualPaymentProvider(provider)) {
+        MANUAL_PAYMENT_PROVIDER_CASH_APP -> "$"
+        MANUAL_PAYMENT_PROVIDER_VENMO -> "@"
+        else -> null
+    }
+}
+
+fun formatManualPaymentProviderInput(provider: String?, value: String): String {
+    val normalizedProvider = normalizeManualPaymentProvider(provider)
+    val requiredPrefix = manualPaymentProviderRequiredPrefix(normalizedProvider)
+        ?: return value
+    val trimmedValue = value.trim()
+    val storedHandle = when (normalizedProvider) {
+        MANUAL_PAYMENT_PROVIDER_CASH_APP -> trimmedValue
+            .takeIf { it.startsWith("https://cash.app/", ignoreCase = true) }
+            ?.substringAfterLast('/')
+        MANUAL_PAYMENT_PROVIDER_VENMO -> trimmedValue
+            .takeIf { it.startsWith("https://venmo.com/u/", ignoreCase = true) }
+            ?.substringAfterLast('/')
+        else -> null
+    }
+    val handle = (storedHandle ?: trimmedValue)
+        .filterNot { character -> character == '$' || character == '@' }
+
+    return requiredPrefix + handle
+}
+
 private fun normalizeIdPart(value: String): String =
     value.trim()
         .lowercase()
@@ -83,8 +119,7 @@ private fun normalizeIdPart(value: String): String =
 
 private fun normalizeHandlePart(value: String): String =
     value.trim()
-        .removePrefix("@")
-        .removePrefix("$")
+        .dropWhile { character -> character == '@' || character == '$' }
         .trim()
         .trim('/')
 
