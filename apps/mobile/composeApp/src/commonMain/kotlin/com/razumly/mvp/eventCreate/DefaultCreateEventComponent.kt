@@ -291,6 +291,7 @@ class DefaultCreateEventComponent(
     override val isRentalResourceSelectionLocked: Boolean = rentalBookingId != null
     private val _leagueScoringConfig = MutableStateFlow(initialSeed?.leagueScoringConfig ?: LeagueScoringConfigDTO())
     override val leagueScoringConfig = _leagueScoringConfig.asStateFlow()
+    private var leagueScoringConfigInitialized = initialSeed?.leagueScoringConfig != null
     private val _registrationQuestionDrafts = MutableStateFlow<List<RegistrationQuestionDraft>>(emptyList())
     override val registrationQuestionDrafts = _registrationQuestionDrafts.asStateFlow()
     private val _fieldCount = MutableStateFlow(initialSeed?.fields?.size ?: 0)
@@ -422,7 +423,9 @@ class DefaultCreateEventComponent(
 
             _newEventState.value = normalized
             if (sportChanged) {
-                _leagueScoringConfig.value = defaultLeagueScoringConfigForSport(normalized.sportId)
+                initializeLeagueScoringConfig(normalized.sportId)
+            } else if (!leagueScoringConfigInitialized && normalized.eventType == EventType.LEAGUE) {
+                initializeLeagueScoringConfig(normalized.sportId)
             }
             syncLeagueSlotDefaultStartDates(previousEvent = previous, updatedEvent = normalized)
             syncLeagueSlotDefaultEndDates(previousEvent = previous, updatedEvent = normalized)
@@ -447,7 +450,9 @@ class DefaultCreateEventComponent(
 
             _newEventState.value = normalized
             if (sportChanged) {
-                _leagueScoringConfig.value = defaultLeagueScoringConfigForSport(normalized.sportId)
+                initializeLeagueScoringConfig(normalized.sportId)
+            } else if (!leagueScoringConfigInitialized && normalized.eventType == EventType.LEAGUE) {
+                initializeLeagueScoringConfig(normalized.sportId)
             }
             syncLeagueSlotDefaultStartDates(previousEvent = previous, updatedEvent = normalized)
             syncLeagueSlotDefaultEndDates(previousEvent = previous, updatedEvent = normalized)
@@ -1276,6 +1281,7 @@ class DefaultCreateEventComponent(
 
     override fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO) {
         _leagueScoringConfig.value = _leagueScoringConfig.value.update()
+        leagueScoringConfigInitialized = true
     }
 
     override fun setRegistrationQuestionDrafts(questions: List<RegistrationQuestionDraft>) {
@@ -1286,14 +1292,15 @@ class DefaultCreateEventComponent(
 
     private suspend fun createEventAfterPayment(eventDraft: Event) {
         val loadingOperation = loadingHandler.newOperation()
+        var deferredError: ErrorMessage? = null
         loadingOperation.showLoading("Creating event...")
         try {
             val preparedEvent = prepareEventForCreation(eventDraft).getOrElse { error ->
-                _errorState.value = ErrorMessage(error.userMessage("Failed to prepare event setup."))
+                deferredError = ErrorMessage(error.userMessage("Failed to prepare event setup."))
                 return
             }
             validatePendingStaffInviteDrafts(_pendingStaffInvites.value).getOrElse { error ->
-                _errorState.value = ErrorMessage(error.userMessage("Fix the pending staff invites before creating the event."))
+                deferredError = ErrorMessage(error.userMessage("Fix the pending staff invites before creating the event."))
                 return
             }
 
@@ -1327,24 +1334,25 @@ class DefaultCreateEventComponent(
                                     onEventCreated(syncedEvent)
                                 }
                                 .onFailure { error ->
-                                    _errorState.value = ErrorMessage(
+                                    deferredError = ErrorMessage(
                                         "Event was created without the requested staff changes. " +
                                             "Staff sync failed: ${error.userMessage()}",
                                     )
                                 }
                         }
                         .onFailure { error ->
-                            _errorState.value = ErrorMessage(
+                            deferredError = ErrorMessage(
                                 "Event was created, but its registration questions were not saved. " +
                                     error.userMessage(),
                             )
                         }
                 }
                 .onFailure {
-                    _errorState.value = ErrorMessage(it.userMessage())
+                    deferredError = ErrorMessage(it.userMessage())
                 }
         } finally {
             loadingOperation.hideLoading()
+            deferredError?.let { error -> _errorState.value = error }
         }
     }
 
@@ -1894,6 +1902,9 @@ class DefaultCreateEventComponent(
                         previous = _newEventState.value,
                         updated = _newEventState.value.withSportRules(applySportDefaults = true),
                     )
+                    if (!leagueScoringConfigInitialized && _newEventState.value.eventType == EventType.LEAGUE) {
+                        initializeLeagueScoringConfig(_newEventState.value.sportId)
+                    }
                 }
                 .onFailure { error ->
                     _errorState.value = ErrorMessage(error.userMessage("Failed to load sports."))
@@ -1984,6 +1995,11 @@ class DefaultCreateEventComponent(
                 pointsPerSetLoss = null,
             )
         }
+    }
+
+    private fun initializeLeagueScoringConfig(sportId: String?) {
+        _leagueScoringConfig.value = defaultLeagueScoringConfigForSport(sportId)
+        leagueScoringConfigInitialized = true
     }
 
     private fun Event.withSportRules(applySportDefaults: Boolean = false): Event {

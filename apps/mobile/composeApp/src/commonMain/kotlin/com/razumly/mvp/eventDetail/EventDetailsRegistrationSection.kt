@@ -199,26 +199,28 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
                     label = "Event Type",
                     modifier = Modifier.weight(1f),
                 )
-                NumberInputField(
-                    modifier = Modifier.weight(1f),
-                    value = state.editEvent.teamSizeLimit.toString(),
-                    label = "Team Size Limit",
-                    onValueChange = { newValue ->
-                        if (newValue.all { it.isDigit() }) {
-                            if (newValue.isBlank()) {
-                                actions.onEditEvent { copy(teamSizeLimit = 0) }
-                            } else {
-                                actions.onEditEvent { copy(teamSizeLimit = newValue.toInt()) }
+                if (state.editEvent.teamSignup) {
+                    NumberInputField(
+                        modifier = Modifier.weight(1f),
+                        value = state.editEvent.teamSizeLimit.toString(),
+                        label = "Team Size Limit",
+                        onValueChange = { newValue ->
+                            if (newValue.all { it.isDigit() }) {
+                                if (newValue.isBlank()) {
+                                    actions.onEditEvent { copy(teamSizeLimit = 0) }
+                                } else {
+                                    actions.onEditEvent { copy(teamSizeLimit = newValue.toInt()) }
+                                }
                             }
-                        }
-                    },
-                    isError = state.showValidationErrors && !state.isTeamSizeValid,
-                    supportingText = if (state.showValidationErrors && !state.isTeamSizeValid) {
-                        "Team size must be at least 1."
-                    } else {
-                        ""
-                    },
-                )
+                        },
+                        isError = state.showValidationErrors && !state.isTeamSizeValid,
+                        supportingText = if (state.showValidationErrors && !state.isTeamSizeValid) {
+                            "Team size must be at least 1."
+                        } else {
+                            ""
+                        },
+                    )
+                }
             }
 
             val playoffsOrPoolsInput: @Composable () -> Unit = {

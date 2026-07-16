@@ -47,6 +47,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -1399,6 +1400,49 @@ class DefaultMatchContentComponent(
         _currentSet.value = resolveCurrentSegmentIndex(match)
     }
 
+    private fun clearConfirmedMatchWhenRepositoryCatchesUp(expectedMatch: MatchMVP) {
+        scope.launch {
+            matchRepository.getMatchFlow(expectedMatch.id).first { result ->
+                result.getOrNull()?.match?.reflectsConfirmedState(expectedMatch) == true
+            }
+            val optimisticMatch = _optimisticMatch.value ?: return@launch
+            if (optimisticMatch.match.reflectsConfirmedState(expectedMatch)) {
+                _optimisticMatch.value = null
+            }
+        }
+    }
+
+    private fun MatchMVP.reflectsConfirmedState(expectedMatch: MatchMVP): Boolean {
+        if (
+            id != expectedMatch.id ||
+            team1Points != expectedMatch.team1Points ||
+            team2Points != expectedMatch.team2Points ||
+            setResults != expectedMatch.setResults
+        ) {
+            return false
+        }
+
+        val confirmedSegmentsArePresent = expectedMatch.segments.all { expectedSegment ->
+            val currentSegment = segments.firstOrNull {
+                it.matchId == expectedSegment.matchId && it.sequence == expectedSegment.sequence
+            } ?: return@all false
+
+            currentSegment.status == expectedSegment.status &&
+                currentSegment.scores == expectedSegment.scores &&
+                currentSegment.winnerEventTeamId == expectedSegment.winnerEventTeamId
+        }
+        if (!confirmedSegmentsArePresent) {
+            return false
+        }
+
+        return expectedMatch.actualEnd.isNullOrBlank() || (
+            !actualEnd.isNullOrBlank() &&
+                winnerEventTeamId == expectedMatch.winnerEventTeamId &&
+                resultStatus == expectedMatch.resultStatus &&
+                resultType == expectedMatch.resultType
+            )
+    }
+
     override fun updateScore(isTeam1: Boolean, increment: Boolean) {
         if (!isOfficial.value || officialCheckedIn.value != true || matchFinished.value) {
             return
@@ -1681,8 +1725,9 @@ class DefaultMatchContentComponent(
                 if (persistedMatch == null) return@launch
                 applyConfirmedMatchState(persistedMatch)
                 if (!isMatchOver(updatedScoringMatch)) {
-                    persistMatchLocally(persistedMatch, clearOptimisticOnSuccess = true)
+                    persistMatchLocally(persistedMatch, clearOptimisticOnSuccess = false)
                 }
+                clearConfirmedMatchWhenRepositoryCatchesUp(persistedMatch)
             } finally {
                 _segmentConfirmSaving.value = false
             }

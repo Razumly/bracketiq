@@ -384,6 +384,7 @@ internal class CreateEvent_FakeEventRepository(
     val getEventStaffStateCalls = mutableListOf<Event>()
     val reconcileEventStaffCalls = mutableListOf<ReconcileEventStaffCall>()
     val saveRegistrationQuestionsCalls = mutableListOf<SaveRegistrationQuestionsCall>()
+    var createEventFailure: Throwable? = null
     var reconcileEventStaffFailure: Throwable? = null
 
     override fun getCachedEventsFlow(): Flow<Result<List<Event>>> =
@@ -443,7 +444,7 @@ internal class CreateEvent_FakeEventRepository(
         leagueScoringConfig: LeagueScoringConfigDTO?,
         fields: List<Field>?,
         timeSlots: List<TimeSlot>?,
-    ): Result<Event> = runCatching {
+    ): Result<Event> {
         createEventCalls += CreateEventCall(
             event = newEvent,
             requiredTemplateIds = requiredTemplateIds,
@@ -451,7 +452,8 @@ internal class CreateEvent_FakeEventRepository(
             fields = fields,
             timeSlots = timeSlots,
         )
-        newEvent
+        createEventFailure?.let { failure -> return Result.failure(failure) }
+        return Result.success(newEvent)
     }
 
     override suspend fun scheduleEvent(

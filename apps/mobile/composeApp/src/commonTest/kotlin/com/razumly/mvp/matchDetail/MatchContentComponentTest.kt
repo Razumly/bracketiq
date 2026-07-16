@@ -1482,6 +1482,80 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun confirmed_set_remains_visible_until_the_repository_snapshot_catches_up() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
+            eventType = EventType.LEAGUE,
+            usesSets = true,
+            setsPerMatch = 3,
+            pointsToVictory = listOf(21, 21, 21),
+        )
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = true,
+        ).copy(
+            team1Points = listOf(21, 0, 0),
+            team2Points = listOf(18, 0, 0),
+            setResults = listOf(0, 0, 0),
+            segments = listOf(
+                createSegment(sequence = 1, team1Score = 21, team2Score = 18),
+                createSegment(sequence = 2, team1Score = 0, team2Score = 0),
+                createSegment(sequence = 3, team1Score = 0, team2Score = 0),
+            ),
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+            publishUpdatesToFlow = false,
+            publishLocalSavesToFlow = false,
+        )
+
+        advance()
+
+        harness.component.completeCurrentSet()
+        advance()
+
+        assertEquals(1, harness.component.currentSet.value)
+        assertEquals("COMPLETE", harness.component.matchWithTeams.value.match.segments.first().status)
+
+        val confirmedMatch = harness.matchRepository.updatedMatches.single()
+        val canonicalConfirmedMatch = confirmedMatch.copy(
+            segments = confirmedMatch.segments.mapIndexed { index, segment ->
+                if (index == 0) {
+                    segment.copy(endedAt = "2026-06-08T08:15:00.000Z")
+                } else {
+                    segment
+                }
+            },
+        )
+        harness.matchRepository.emitRemoteMatch(canonicalConfirmedMatch)
+        advance()
+        val serverAdvancedMatch = canonicalConfirmedMatch.copy(
+            team1Points = listOf(21, 1, 0),
+            segments = canonicalConfirmedMatch.segments.mapIndexed { index, segment ->
+                if (index == 1) {
+                    segment.copy(scores = segment.scores + ("team-a" to 1))
+                } else {
+                    segment
+                }
+            },
+        )
+        harness.matchRepository.emitRemoteMatch(serverAdvancedMatch)
+        advance()
+
+        assertEquals(1, harness.component.matchWithTeams.value.match.team1Points[1])
+    }
+
+    @Test
     fun given_playoff_match_with_single_score_shape_when_loading_detail_then_match_score_count_wins() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
         val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
@@ -2455,6 +2529,8 @@ private class MatchDetailHarness(
     updateFailure: Throwable? = null,
     matchTeamCheckInFailure: Throwable? = null,
     matchTeamCheckInsResponse: TeamCheckInsResponseDto = TeamCheckInsResponseDto(),
+    publishUpdatesToFlow: Boolean = true,
+    publishLocalSavesToFlow: Boolean = true,
 ) {
     val matchRepository = MatchDetailFakeMatchRepository(
         initialMatch = repositoryMatch,
@@ -2465,6 +2541,8 @@ private class MatchDetailHarness(
         updateFailure = updateFailure,
         matchTeamCheckInFailure = matchTeamCheckInFailure,
         matchTeamCheckInsResponse = matchTeamCheckInsResponse,
+        publishUpdatesToFlow = publishUpdatesToFlow,
+        publishLocalSavesToFlow = publishLocalSavesToFlow,
     )
 
     val component = DefaultMatchContentComponent(
@@ -2502,6 +2580,8 @@ private class MatchDetailFakeMatchRepository(
     updateFailure: Throwable? = null,
     matchTeamCheckInFailure: Throwable? = null,
     matchTeamCheckInsResponse: TeamCheckInsResponseDto = TeamCheckInsResponseDto(),
+    private val publishUpdatesToFlow: Boolean = true,
+    private val publishLocalSavesToFlow: Boolean = true,
 ) : IMatchRepository by CreateEvent_FakeMatchRepository() {
     private val matchFlow = MutableStateFlow(Result.success(initialMatch.toMatchWithRelations()))
     private val scoreSetDelaySequence = scoreSetDelaySequence.toMutableList()
@@ -2536,7 +2616,9 @@ private class MatchDetailFakeMatchRepository(
 
     override suspend fun saveMatchLocally(match: MatchMVP): Result<Unit> {
         savedMatches += match
-        matchFlow.value = Result.success(match.toMatchWithRelations())
+        if (publishLocalSavesToFlow) {
+            matchFlow.value = Result.success(match.toMatchWithRelations())
+        }
         return Result.success(Unit)
     }
 
@@ -2546,7 +2628,9 @@ private class MatchDetailFakeMatchRepository(
         }
         updatedMatches += match
         updateFailure?.let { return Result.failure(it) }
-        matchFlow.value = Result.success(match.toMatchWithRelations())
+        if (publishUpdatesToFlow) {
+            matchFlow.value = Result.success(match.toMatchWithRelations())
+        }
         return Result.success(Unit)
     }
 
@@ -2582,7 +2666,9 @@ private class MatchDetailFakeMatchRepository(
                 time = time?.toString(),
             ),
         )
-        matchFlow.value = Result.success(locallyApplied.toMatchWithRelations())
+        if (publishUpdatesToFlow) {
+            matchFlow.value = Result.success(locallyApplied.toMatchWithRelations())
+        }
         return Result.success(locallyApplied)
     }
 

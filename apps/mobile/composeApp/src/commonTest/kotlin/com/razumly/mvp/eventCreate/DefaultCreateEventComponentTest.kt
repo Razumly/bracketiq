@@ -473,6 +473,27 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun create_event_reports_repository_failure_after_the_loading_overlay_closes() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        harness.eventRepository.createEventFailure = IllegalStateException(
+            "Add more slot availability, extend slot windows, or reduce teams.",
+        )
+        advance()
+        harness.component.updateEventField { copy(divisions = listOf("Open")) }
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        assertFalse(harness.loadingHandler.loadingState.value.isLoading)
+        assertEquals(
+            "Add more slot availability, extend slot windows, or reduce teams.",
+            harness.component.errorState.value?.message,
+        )
+        assertEquals(0, harness.onEventCreatedCount)
+    }
+
+    @Test
     fun create_event_staff_failure_leaves_the_created_event_assignment_free() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
@@ -657,6 +678,44 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(1, harness.component.leagueScoringConfig.value.pointsForDraw)
         assertEquals(0, harness.component.leagueScoringConfig.value.pointsForLoss)
     }
+
+    @Test
+    fun entering_league_with_a_preselected_result_points_sport_initializes_standings_defaults_once() =
+        runTest(testDispatcher) {
+            val soccer = createSport(
+                id = "Indoor Soccer",
+                usePointsPerSetWin = false,
+            ).copy(
+                usePointsForWin = true,
+                usePointsForDraw = true,
+                usePointsForLoss = true,
+            )
+            val harness = CreateEventHarness(
+                sports = listOf(soccer),
+                initialSeed = SeededEventTemplateDraft(
+                    event = com.razumly.mvp.core.data.dataTypes.Event(
+                        eventType = EventType.EVENT,
+                        sportId = soccer.id,
+                    ),
+                ),
+            )
+            advance()
+
+            assertEquals(LeagueScoringConfigDTO(), harness.component.leagueScoringConfig.value)
+
+            harness.component.onTypeSelected(EventType.LEAGUE)
+            advance()
+
+            assertEquals(3, harness.component.leagueScoringConfig.value.pointsForWin)
+            assertEquals(1, harness.component.leagueScoringConfig.value.pointsForDraw)
+            assertEquals(0, harness.component.leagueScoringConfig.value.pointsForLoss)
+
+            harness.component.updateLeagueScoringConfig { copy(pointsForWin = null) }
+            harness.component.updateEventField { copy(name = "Keep cleared value") }
+            advance()
+
+            assertNull(harness.component.leagueScoringConfig.value.pointsForWin)
+        }
 
     @Test
     fun updating_fields_without_sport_change_keeps_league_scoring_config() = runTest(testDispatcher) {
