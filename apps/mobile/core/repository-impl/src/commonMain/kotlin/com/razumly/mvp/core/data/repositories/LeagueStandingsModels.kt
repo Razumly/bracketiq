@@ -27,6 +27,11 @@ data class LeagueDivisionStandings(
     val validationMessages: List<String> = emptyList(),
 )
 
+data class LeagueStandingsPointUpdate(
+    val teamId: String,
+    val points: Double?,
+)
+
 data class LeagueStandingsConfirmResult(
     val division: LeagueDivisionStandings,
     val applyReassignment: Boolean,

@@ -16,6 +16,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
@@ -32,9 +37,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -67,6 +74,8 @@ fun StandardTextField(
     height: Dp? = null,
     contentPadding: PaddingValues? = null,
     inputFilter: ((String) -> String)? = null,
+    selectionAwareInputFilter: Boolean = false,
+    inputVisualTransformation: VisualTransformation? = null,
     onTap: (() -> Unit)? = null,
     imeAction: ImeAction = ImeAction.Next,
     style: PlatformTextFieldStyle = PlatformTextFieldStyle.Default,
@@ -162,6 +171,7 @@ fun StandardTextField(
     val visualTransformation = when {
         isPassword -> PasswordVisualTransformation()
         keyboardType == "money" -> CurrencyAmountInputVisualTransformation()
+        inputVisualTransformation != null -> inputVisualTransformation
         else -> VisualTransformation.None
     }
     val keyboardOptionsValue = KeyboardOptions(
@@ -354,37 +364,98 @@ fun StandardTextField(
         return
     }
 
-    OutlinedTextField(
-        value = value,
-        onValueChange = { newValue ->
-            val filteredValue = inputFilter?.invoke(newValue) ?: newValue
-            onValueChange(filteredValue)
-        },
-        modifier = finalModifier,
-        label = if (label.isNotEmpty()) ({ Text(label) }) else null,
-        placeholder = if (placeholder.isNotEmpty()) {
-            { Text(placeholder, style = placeholderTextStyle ?: TextStyle.Default) }
-        } else {
-            null
-        },
-        enabled = enabled,
-        readOnly = readOnly,
-        textStyle = finalTextStyle,
-        visualTransformation = visualTransformation,
-        keyboardOptions = keyboardOptionsValue,
-        keyboardActions = KeyboardActions(
-            onNext = { runNextAction() },
-            onDone = { runDoneAction() },
-            onGo = { runDoneAction() },
-            onSearch = { runDoneAction() },
-            onSend = { runDoneAction() },
+    val labelContent: (@Composable () -> Unit)? = if (label.isNotEmpty()) ({ Text(label) }) else null
+    val placeholderContent: (@Composable () -> Unit)? = if (placeholder.isNotEmpty()) {
+        { Text(placeholder, style = placeholderTextStyle ?: TextStyle.Default) }
+    } else {
+        null
+    }
+    val keyboardActionsValue = KeyboardActions(
+        onNext = { runNextAction() },
+        onDone = { runDoneAction() },
+        onGo = { runDoneAction() },
+        onSearch = { runDoneAction() },
+        onSend = { runDoneAction() },
+    )
+
+    if (selectionAwareInputFilter && inputFilter != null) {
+        var editingValue by remember {
+            mutableStateOf(TextFieldValue(value, selection = TextRange(value.length)))
+        }
+        var lastEmittedValue by remember { mutableStateOf(value) }
+        LaunchedEffect(value) {
+            if (value != lastEmittedValue) {
+                editingValue = TextFieldValue(value, selection = TextRange(value.length))
+                lastEmittedValue = value
+            }
+        }
+
+        OutlinedTextField(
+            value = editingValue,
+            onValueChange = { newValue: TextFieldValue ->
+                val filteredValue = applyInputFilterWithSelection(newValue, inputFilter)
+                editingValue = filteredValue
+                lastEmittedValue = filteredValue.text
+                onValueChange(filteredValue.text)
+            },
+            modifier = finalModifier,
+            label = labelContent,
+            placeholder = placeholderContent,
+            enabled = enabled,
+            readOnly = readOnly,
+            textStyle = finalTextStyle,
+            visualTransformation = visualTransformation,
+            keyboardOptions = keyboardOptionsValue,
+            keyboardActions = keyboardActionsValue,
+            isError = isError,
+            supportingText = supportingTextContent,
+            trailingIcon = trailingIcon,
+            leadingIcon = leadingIcon,
+            singleLine = true,
+            shape = fieldShape,
+            colors = colors,
+        )
+    } else {
+        OutlinedTextField(
+            value = value,
+            onValueChange = { newValue: String ->
+                val filteredValue = inputFilter?.invoke(newValue) ?: newValue
+                onValueChange(filteredValue)
+            },
+            modifier = finalModifier,
+            label = labelContent,
+            placeholder = placeholderContent,
+            enabled = enabled,
+            readOnly = readOnly,
+            textStyle = finalTextStyle,
+            visualTransformation = visualTransformation,
+            keyboardOptions = keyboardOptionsValue,
+            keyboardActions = keyboardActionsValue,
+            isError = isError,
+            supportingText = supportingTextContent,
+            trailingIcon = trailingIcon,
+            leadingIcon = leadingIcon,
+            singleLine = true,
+            shape = fieldShape,
+            colors = colors,
+        )
+    }
+}
+
+internal fun applyInputFilterWithSelection(
+    value: TextFieldValue,
+    inputFilter: (String) -> String,
+): TextFieldValue {
+    val filteredText = inputFilter(value.text)
+    fun filteredOffset(offset: Int): Int = inputFilter(value.text.take(offset.coerceIn(0, value.text.length)))
+        .length
+        .coerceAtMost(filteredText.length)
+
+    return TextFieldValue(
+        text = filteredText,
+        selection = TextRange(
+            start = filteredOffset(value.selection.start),
+            end = filteredOffset(value.selection.end),
         ),
-        isError = isError,
-        supportingText = supportingTextContent,
-        trailingIcon = trailingIcon,
-        leadingIcon = leadingIcon,
-        singleLine = true,
-        shape = fieldShape,
-        colors = colors,
     )
 }

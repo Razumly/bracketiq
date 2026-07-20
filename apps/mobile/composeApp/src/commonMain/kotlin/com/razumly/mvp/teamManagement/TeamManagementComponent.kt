@@ -46,6 +46,17 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+data class TeamMemberInviteDraft(
+    val userId: String? = null,
+    val roleInviteType: String,
+    val displayName: String,
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val email: String? = null,
+    val phone: String? = null,
+    val shareOnly: Boolean = false,
+)
+
 interface TeamManagementComponent {
     val selectedEvent: StateFlow<Event?>
     val currentUser: UserData
@@ -71,6 +82,12 @@ interface TeamManagementComponent {
     fun clearError()
     fun selectTeam(team: TeamWithPlayers?)
     fun createTeam(team: Team, onResult: (Result<Unit>) -> Unit = {})
+    fun createTeamFromBuilder(
+        team: Team,
+        personInvites: List<TeamBuilderPersonInvite>,
+        staffInvites: List<TeamBuilderStaffInvite>,
+        onResult: (Result<List<TeamBuilderCreatedInviteLink>>) -> Unit = {},
+    ) = createTeam(team) { result -> onResult(result.map { emptyList() }) }
     fun joinTeam(team: Team)
     fun updateTeam(team: Team, onResult: (Result<Unit>) -> Unit = {})
     fun leaveTeam(team: Team)
@@ -80,11 +97,12 @@ interface TeamManagementComponent {
     fun deselectTeam()
     fun deleteTeam(team: TeamWithPlayers)
     fun searchPlayers(query: String)
+    suspend fun matchSelectedContact(email: String?, phone: String?): Result<UserData?> =
+        Result.success(null)
     fun inviteUserToRole(
         teamId: String,
-        userId: String?,
-        roleInviteType: String,
-        email: String? = null,
+        invite: TeamMemberInviteDraft,
+        onResult: (Result<TeamBuilderCreatedInviteLink?>) -> Unit = {},
     )
     suspend fun ensureUserByEmail(email: String): Result<UserData>
     suspend fun quoteInclusivePrice(
@@ -104,7 +122,6 @@ class DefaultTeamManagementComponent(
     private val sportsRepository: ISportsRepository,
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
-    @Suppress("UNUSED_PARAMETER")
     _legacyFreeAgents: List<String>,
     eventId: String?,
     override val selectedFreeAgentId: String?,
@@ -135,6 +152,7 @@ class DefaultTeamManagementComponent(
     private val _divisionTypeParameters = MutableStateFlow(DivisionTypeParameters())
     override val divisionTypeParameters = _divisionTypeParameters.asStateFlow()
     private val normalizedEventId = eventId?.trim()?.takeIf(String::isNotBlank)
+    private val legacyFreeAgentIds = _legacyFreeAgents.map(String::trim).filter(String::isNotBlank).distinct()
     override val selectedEvent: StateFlow<Event?> = normalizedEventId
         ?.let { selectedEventId ->
             eventRepository.getEventWithRelationsFlow(selectedEventId)
@@ -203,7 +221,7 @@ class DefaultTeamManagementComponent(
 
     private val _selectedTeam = MutableStateFlow<TeamWithPlayers?>(null)
     override val selectedTeam = _selectedTeam.asStateFlow()
-    private var isSelectedTeamDraft = false
+    private val isSelectedTeamDraft = MutableStateFlow(false)
 
     private val _staffUsersById = MutableStateFlow<Map<String, UserData>>(emptyMap())
     override val staffUsersById = _staffUsersById.asStateFlow()
@@ -226,7 +244,7 @@ class DefaultTeamManagementComponent(
         .flatMapLatest { team ->
             val teamId = team?.team?.id?.trim()?.takeIf(String::isNotBlank)
             flow {
-                if (teamId == null) {
+                if (teamId == null || isSelectedTeamDraft.value) {
                     emit(TeamInviteFreeAgentContext())
                     return@flow
                 }
@@ -239,14 +257,43 @@ class DefaultTeamManagementComponent(
         }
         .stateIn(scope, SharingStarted.Eagerly, TeamInviteFreeAgentContext())
 
-    override val freeAgentsFiltered = combine(inviteFreeAgentContext, selectedTeam, currentUserState) { context, team, user ->
-        Triple(context, team, user)
-    }.map { (context, team, currentUserValue) ->
+    private val eventFreeAgentUsers = selectedEvent
+        .flatMapLatest { event ->
+            val ids = ((event?.freeAgentIds ?: emptyList()) + legacyFreeAgentIds)
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .distinct()
+            if (ids.isEmpty()) {
+                flowOf(emptyList())
+            } else {
+                flow {
+                    emit(
+                        userRepository.getUsers(
+                            ids,
+                            UserVisibilityContext(eventId = event?.id),
+                        ).getOrElse {
+                            _errorState.value = it.userMessage("Failed to load event free agents")
+                            emptyList()
+                        },
+                    )
+                }
+            }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    override val freeAgentsFiltered = combine(
+        inviteFreeAgentContext,
+        eventFreeAgentUsers,
+        selectedTeam,
+        currentUserState,
+    ) { context, eventUsers, team, user ->
         val playerIdsToExclude = buildSet {
-            currentUserValue.id.takeIf(String::isNotBlank)?.let(::add)
+            user.id.takeIf(String::isNotBlank)?.let(::add)
             team?.players?.forEach { add(it.id) }
         }
-        val filteredFreeAgents = context.users.filterNot { it.id in playerIdsToExclude }
+        val filteredFreeAgents = (context.users + eventUsers)
+            .distinctBy(UserData::id)
+            .filterNot { it.id in playerIdsToExclude }
         normalizedSelectedFreeAgentId?.let { selectedId ->
             if (filteredFreeAgents.any { it.id == selectedId }) {
                 val prioritized = filteredFreeAgents.firstOrNull { it.id == selectedId }
@@ -328,7 +375,7 @@ class DefaultTeamManagementComponent(
                     val updatedSelectedTeam = resolveSelectedTeamAfterRefresh(
                         selectedTeam = selectedTeam,
                         refreshedTeams = teams,
-                        isDraft = isSelectedTeamDraft,
+                        isDraft = isSelectedTeamDraft.value,
                     )
                     if (updatedSelectedTeam != null) {
                         _selectedTeam.value = updatedSelectedTeam
@@ -351,7 +398,7 @@ class DefaultTeamManagementComponent(
 
     override fun selectTeam(team: TeamWithPlayers?) {
         playerInviteSearch.invalidate()
-        isSelectedTeamDraft = team == null
+        isSelectedTeamDraft.value = team == null
         val resolvedTeam = team ?: TeamWithPlayers(
             Team(currentUser.id), currentUser, listOf(currentUser), listOf()
         )
@@ -361,13 +408,21 @@ class DefaultTeamManagementComponent(
     }
 
     override fun createTeam(team: Team, onResult: (Result<Unit>) -> Unit) {
+        createTeamFromBuilder(team, emptyList(), emptyList()) { result -> onResult(result.map { Unit }) }
+    }
+
+    override fun createTeamFromBuilder(
+        team: Team,
+        personInvites: List<TeamBuilderPersonInvite>,
+        staffInvites: List<TeamBuilderStaffInvite>,
+        onResult: (Result<List<TeamBuilderCreatedInviteLink>>) -> Unit,
+    ) {
         scope.launch {
             val loadingOperation = loadingHandler?.newOperation()
             try {
                 loadingOperation?.showLoading("Creating team...")
                 val createResult = teamRepository.createTeam(
                     team.copy(
-                        captainId = currentUser.id,
                         managerId = currentUser.id,
                     )
                 )
@@ -379,6 +434,60 @@ class DefaultTeamManagementComponent(
                 }
 
                 val createdTeam = createResult.getOrThrow()
+                val createdInviteLinks = mutableListOf<TeamBuilderCreatedInviteLink>()
+
+                createdTeam.pending
+                    .map(String::trim)
+                    .filter(String::isNotBlank)
+                    .distinct()
+                    .forEach { userId ->
+                        teamRepository.createTeamMemberInvite(
+                            teamId = createdTeam.id,
+                            userId = userId,
+                            roleInviteType = "player",
+                        ).getOrThrow()
+                    }
+
+                staffInvites.forEach { invite ->
+                    val result = teamRepository.createTeamMemberInvite(
+                        teamId = createdTeam.id,
+                        userId = invite.user?.id,
+                        roleInviteType = invite.role.inviteType,
+                        firstName = invite.firstName,
+                        lastName = invite.lastName,
+                        email = invite.email.trim().takeIf(String::isNotBlank),
+                        phone = invite.phone.trim().takeIf(String::isNotBlank),
+                        shareOnly = invite.user == null && invite.email.isBlank(),
+                    ).getOrThrow()
+                    result.shareUrl?.let { url ->
+                        createdInviteLinks += TeamBuilderCreatedInviteLink(
+                            name = invite.displayName,
+                            role = invite.role.label,
+                            url = url,
+                            emailSent = invite.email.trim().matches(Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")),
+                        )
+                    }
+                }
+
+                personInvites.forEach { invite ->
+                    val result = teamRepository.createTeamMemberInvite(
+                        teamId = createdTeam.id,
+                        email = invite.email.trim().takeIf(String::isNotBlank),
+                        roleInviteType = "player",
+                        firstName = invite.firstName,
+                        lastName = invite.lastName,
+                        phone = invite.phone.trim().takeIf(String::isNotBlank),
+                        shareOnly = invite.email.isBlank(),
+                    ).getOrThrow()
+                    result.shareUrl?.let { url ->
+                        createdInviteLinks += TeamBuilderCreatedInviteLink(
+                            name = "${invite.firstName} ${invite.lastName}".trim(),
+                            role = "Player",
+                            url = url,
+                            emailSent = invite.email.trim().matches(Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")),
+                        )
+                    }
+                }
 
                 loadingOperation?.showLoading("Fetching teams...")
                 val teamIdsToRefresh = (currentTeams.value.map { teamWithPlayers ->
@@ -392,7 +501,7 @@ class DefaultTeamManagementComponent(
                         _errorState.value = it.userMessage()
                     }
                 }
-                onResult(Result.success(Unit))
+                onResult(Result.success(createdInviteLinks))
             } catch (throwable: Throwable) {
                 if (throwable is CancellationException) throw throwable
                 _errorState.value = throwable.userMessage()
@@ -503,7 +612,7 @@ class DefaultTeamManagementComponent(
 
     override fun deselectTeam() {
         playerInviteSearch.invalidate()
-        isSelectedTeamDraft = false
+        isSelectedTeamDraft.value = false
         _selectedTeam.value = null
         teamEditorBackCallback.isEnabled = false
         _staffUsersById.value = emptyMap()
@@ -521,22 +630,43 @@ class DefaultTeamManagementComponent(
         playerInviteSearch.submit(query)
     }
 
+    override suspend fun matchSelectedContact(
+        email: String?,
+        phone: String?,
+    ): Result<UserData?> = userRepository.matchSelectedContact(email, phone)
+
     override fun inviteUserToRole(
         teamId: String,
-        userId: String?,
-        roleInviteType: String,
-        email: String?,
+        invite: TeamMemberInviteDraft,
+        onResult: (Result<TeamBuilderCreatedInviteLink?>) -> Unit,
     ) {
         scope.launch {
             teamRepository.createTeamMemberInvite(
                 teamId = teamId,
-                userId = userId,
-                email = email,
-                roleInviteType = roleInviteType,
-            ).onFailure {
+                userId = invite.userId,
+                email = invite.email,
+                roleInviteType = invite.roleInviteType,
+                firstName = invite.firstName,
+                lastName = invite.lastName,
+                phone = invite.phone,
+                shareOnly = invite.shareOnly,
+            ).map { result ->
+                result.shareUrl?.let { url ->
+                    TeamBuilderCreatedInviteLink(
+                        name = invite.displayName,
+                        role = when (invite.roleInviteType) {
+                            "team_manager" -> "Manager"
+                            "team_head_coach" -> "Head Coach"
+                            "team_assistant_coach" -> "Assistant Coach"
+                            else -> "Player"
+                        },
+                        url = url,
+                        emailSent = !invite.email.isNullOrBlank(),
+                    )
+                }
+            }.onFailure {
                 _errorState.value = it.userMessage()
-                return@launch
-            }
+            }.also(onResult)
         }
     }
 

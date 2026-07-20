@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
 import com.razumly.mvp.core.data.repositories.LeagueStandingsConfirmResult
+import com.razumly.mvp.core.data.repositories.LeagueStandingsPointUpdate
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.util.ErrorMessage
@@ -25,6 +26,15 @@ internal class EventLeagueStandingsCoordinator {
 
     private val _standingsConfirming = MutableStateFlow(false)
     val standingsConfirming = _standingsConfirming.asStateFlow()
+
+    private val _isEditingPoints = MutableStateFlow(false)
+    val isEditingPoints = _isEditingPoints.asStateFlow()
+
+    private val _draftPoints = MutableStateFlow<Map<String, Double>>(emptyMap())
+    val draftPoints = _draftPoints.asStateFlow()
+
+    private val _pointsSaving = MutableStateFlow(false)
+    val pointsSaving = _pointsSaving.asStateFlow()
 
     fun resolveLoadTarget(
         event: Event,
@@ -84,11 +94,13 @@ internal class EventLeagueStandingsCoordinator {
                 }
 
     fun clearUnavailableSelection() {
+        cancelPointsEditing()
         _divisionStandings.value = null
         _divisionStandingsLoading.value = false
     }
 
     fun clearStandingsForSelectionLoad() {
+        cancelPointsEditing()
         _divisionStandings.value = null
     }
 
@@ -105,6 +117,77 @@ internal class EventLeagueStandingsCoordinator {
     fun finishLoad(showLoading: Boolean) {
         if (showLoading) {
             _divisionStandingsLoading.value = false
+        }
+    }
+
+    fun beginPointsEditing(): Boolean {
+        val standings = _divisionStandings.value ?: return false
+        if (standings.rows.isEmpty()) return false
+        _draftPoints.value = standings.rows.associate { row -> row.teamId to row.finalPoints }
+        _isEditingPoints.value = true
+        return true
+    }
+
+    fun adjustDraftPoints(teamId: String, delta: Double): Boolean {
+        val normalizedTeamId = teamId.trim()
+        if (!_isEditingPoints.value || normalizedTeamId.isBlank() || !delta.isFinite()) return false
+        val standingsRow = _divisionStandings.value?.rows?.firstOrNull { row ->
+            row.teamId == normalizedTeamId
+        } ?: return false
+        val currentPoints = _draftPoints.value[normalizedTeamId] ?: standingsRow.finalPoints
+        val nextPoints = (currentPoints + delta).coerceIn(-9999.0, 9999.0)
+        _draftPoints.value = _draftPoints.value + (normalizedTeamId to nextPoints)
+        return true
+    }
+
+    fun cancelPointsEditing() {
+        _isEditingPoints.value = false
+        _draftPoints.value = emptyMap()
+        _pointsSaving.value = false
+    }
+
+    suspend fun savePointsEdits(
+        target: LeagueStandingsLoadTarget,
+        updateStandings: suspend (
+            eventId: String,
+            divisionId: String,
+            pointsOverrides: List<LeagueStandingsPointUpdate>,
+        ) -> Result<LeagueDivisionStandings>,
+    ): ErrorMessage {
+        val standings = _divisionStandings.value
+        if (!_isEditingPoints.value || standings == null) {
+            return ErrorMessage("Start managing standings before saving point adjustments.")
+        }
+        val updates = standings.rows.mapNotNull { row ->
+            val draft = _draftPoints.value[row.teamId] ?: row.finalPoints
+            if (!draft.isFinite() || draft == row.finalPoints) {
+                return@mapNotNull null
+            }
+            LeagueStandingsPointUpdate(
+                teamId = row.teamId,
+                points = draft.takeUnless { value -> value == row.basePoints },
+            )
+        }
+        if (updates.isEmpty()) {
+            cancelPointsEditing()
+            return ErrorMessage("No standings adjustments to save.")
+        }
+
+        _pointsSaving.value = true
+        return try {
+            updateStandings(target.eventId, target.divisionId, updates).fold(
+                onSuccess = { updatedStandings ->
+                    _divisionStandings.value = updatedStandings
+                    _isEditingPoints.value = false
+                    _draftPoints.value = emptyMap()
+                    ErrorMessage("Standings adjustments saved.")
+                },
+                onFailure = { throwable ->
+                    ErrorMessage(throwable.userMessage("Failed to save standings adjustments."))
+                },
+            )
+        } finally {
+            _pointsSaving.value = false
         }
     }
 
@@ -155,6 +238,7 @@ internal class EventLeagueStandingsCoordinator {
     }
 
     fun beginConfirming() {
+        cancelPointsEditing()
         _standingsConfirming.value = true
     }
 

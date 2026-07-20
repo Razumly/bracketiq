@@ -256,6 +256,11 @@ interface IUserRepository : IMVPRepository {
 
     suspend fun searchPlayers(search: String): Result<List<UserData>>
 
+    suspend fun matchSelectedContact(
+        email: String?,
+        phone: String?,
+    ): Result<UserData?> = Result.success(null)
+
     /**
      * Server-side only behavior: ensures a public user profile exists for the given email.
      * Used for invite flows where we only have an email address.
@@ -1003,6 +1008,25 @@ class UserRepository(
         res.users.mapNotNull { it.toUserDataOrNull() }
     }
 
+    override suspend fun matchSelectedContact(
+        email: String?,
+        phone: String?,
+    ): Result<UserData?> = runCatching {
+        val normalizedEmail = email?.trim()?.lowercase()?.takeIf(String::isNotBlank)
+        val normalizedPhone = phone?.trim()?.takeIf(String::isNotBlank)
+        if (normalizedEmail == null && normalizedPhone == null) return@runCatching null
+
+        val response = api.post<ContactMatchRequestDto, ContactMatchResponseDto>(
+            path = "api/users/contact-match",
+            body = ContactMatchRequestDto(
+                email = normalizedEmail,
+                phone = normalizedPhone,
+            ),
+        )
+        if (!response.matched) return@runCatching null
+        response.user?.toUserDataOrNull()
+    }
+
     override suspend fun ensureUserByEmail(email: String): Result<UserData> = runCatching {
         val normalized = email.trim().lowercase()
         if (normalized.isBlank()) error("Email is required")
@@ -1732,6 +1756,18 @@ class UserRepository(
 
 private fun Invite.withFallbackInviteUserId(userId: String): Invite =
     if (this.userId.isNullOrBlank()) copy(userId = userId) else this
+
+@Serializable
+private data class ContactMatchRequestDto(
+    val email: String? = null,
+    val phone: String? = null,
+)
+
+@Serializable
+private data class ContactMatchResponseDto(
+    val matched: Boolean = false,
+    val user: UserProfileDto? = null,
+)
 
 @Serializable
 private data class SocialEmptyRequestDto(

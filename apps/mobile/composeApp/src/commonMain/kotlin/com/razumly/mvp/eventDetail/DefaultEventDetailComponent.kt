@@ -313,6 +313,9 @@ class DefaultEventDetailComponent(
     override val leagueDivisionStandings = leagueStandingsCoordinator.divisionStandings
     override val leagueDivisionStandingsLoading = leagueStandingsCoordinator.divisionStandingsLoading
     override val leagueStandingsConfirming = leagueStandingsCoordinator.standingsConfirming
+    override val leagueStandingsPointsEditing = leagueStandingsCoordinator.isEditingPoints
+    override val leagueStandingsDraftPoints = leagueStandingsCoordinator.draftPoints
+    override val leagueStandingsPointsSaving = leagueStandingsCoordinator.pointsSaving
     private val sportsCatalogCoordinator = EventSportsCatalogCoordinator()
     private val _eventTags = MutableStateFlow<List<EventTag>>(emptyList())
 
@@ -1014,6 +1017,18 @@ class DefaultEventDetailComponent(
     }
 
     override fun refreshLeagueStandings() = resourceLifecycleHandler.refreshLeagueStandings()
+
+    override fun startEditingLeagueStandingsPoints() =
+        resourceLifecycleHandler.startEditingLeagueStandingsPoints()
+
+    override fun adjustLeagueStandingsPoints(teamId: String, delta: Double) =
+        resourceLifecycleHandler.adjustLeagueStandingsPoints(teamId, delta)
+
+    override fun cancelEditingLeagueStandingsPoints() =
+        resourceLifecycleHandler.cancelEditingLeagueStandingsPoints()
+
+    override fun saveLeagueStandingsPoints() =
+        resourceLifecycleHandler.saveLeagueStandingsPoints()
 
     override fun confirmLeagueStandings(applyReassignment: Boolean) =
         resourceLifecycleHandler.confirmLeagueStandings(applyReassignment)

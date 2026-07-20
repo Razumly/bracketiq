@@ -75,6 +75,9 @@ internal data class EventDetailTabsHostState(
     val leagueStandings: List<TeamStanding>,
     val showStandingsDrawColumn: Boolean,
     val leagueStandingsConfirming: Boolean,
+    val leagueStandingsPointsEditing: Boolean = false,
+    val leagueStandingsDraftPoints: Map<String, Double> = emptyMap(),
+    val leagueStandingsPointsSaving: Boolean = false,
     val canManageLeagueStandings: Boolean,
     val eventTeamsAndParticipantsLoading: Boolean,
     val selectedParticipantsSection: ParticipantsSection,
@@ -114,6 +117,10 @@ internal data class EventDetailTabsHostActions(
     val onAddBracketMatch: () -> Unit,
     val onAddScheduleMatch: () -> Unit,
     val onRequestStandingsConfirmation: () -> Unit,
+    val onStartEditingStandingsPoints: () -> Unit = {},
+    val onAdjustStandingsPoints: (teamId: String, delta: Double) -> Unit = { _, _ -> },
+    val onCancelEditingStandingsPoints: () -> Unit = {},
+    val onSaveStandingsPoints: () -> Unit = {},
     val onParticipantsSectionSelected: (ParticipantsSection) -> Unit,
     val onManagingParticipantsChanged: (Boolean) -> Unit,
     val onInviteTeam: () -> Unit,
@@ -427,9 +434,13 @@ private fun EventDetailStandingsTabHost(
                 isLoading = false,
                 isConfirming = state.leagueStandingsConfirming,
                 canConfirmStandings = state.canManageLeagueStandings,
+                isEditingPoints = state.leagueStandingsPointsEditing,
+                draftPoints = state.leagueStandingsDraftPoints,
+                isSavingPoints = state.leagueStandingsPointsSaving,
             ),
             actions = EventDetailStandingsActions(
                 showFab = actions.onShowFabChanged,
+                adjustPoints = actions.onAdjustStandingsPoints,
             ),
         )
     }
@@ -493,7 +504,8 @@ private fun EventDetailDivisionSelectorOverlay(
     modifier: Modifier = Modifier,
 ) {
     AnimatedVisibility(
-        visible = state.selectedDivisionSelectorState != null,
+        visible = state.selectedDivisionSelectorState != null ||
+            (state.selectedTab == DetailTab.BRACKET && state.showLosersBracketSelector),
         modifier = modifier
             .padding(top = 4.dp)
             .guideTarget(EventGuideTargets.DetailDivisionSelector)
@@ -501,18 +513,21 @@ private fun EventDetailDivisionSelectorOverlay(
         enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
         exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
     ) {
-        state.selectedDivisionSelectorState?.let { selectorState ->
-            EventDetailDivisionSelectorBar(
-                divisionState = selectorState.divisionState,
-                poolState = selectorState.poolState,
-                onDivisionSelected = { divisionId ->
-                    actions.onDivisionSelected(state.selectedTab, divisionId)
-                },
-                onPoolSelected = { poolDivisionId ->
-                    actions.onPoolSelected(state.selectedTab, poolDivisionId)
-                },
-            )
-        }
+        val selectorState = state.selectedDivisionSelectorState
+        EventDetailDivisionSelectorBar(
+            divisionState = selectorState?.divisionState,
+            poolState = selectorState?.poolState,
+            showBracketToggle = state.selectedTab == DetailTab.BRACKET &&
+                state.showLosersBracketSelector,
+            isLosersBracket = state.losersBracket,
+            onDivisionSelected = { divisionId ->
+                actions.onDivisionSelected(state.selectedTab, divisionId)
+            },
+            onPoolSelected = { poolDivisionId ->
+                actions.onPoolSelected(state.selectedTab, poolDivisionId)
+            },
+            onBracketToggle = actions.onToggleLosersBracket,
+        )
     }
 }
 
@@ -537,9 +552,6 @@ private fun EventDetailTabFloatingDock(
                 onCollapseClick = { actions.onDetailDockExpandedChanged(false) },
             ) { dockModifier, onCloseClick ->
                 BracketFloatingBar(
-                    showBracketToggle = state.showLosersBracketSelector,
-                    isLosersBracket = state.losersBracket,
-                    onBracketToggle = actions.onToggleLosersBracket,
                     showMatchEditAction = state.canManageMatchEditingFromDock,
                     isEditingMatches = state.canEditMatches,
                     onStartMatchEdit = actions.onStartEditingMatches,
@@ -623,15 +635,17 @@ private fun EventDetailTabFloatingDock(
                 onCollapseClick = { actions.onDetailDockExpandedChanged(false) },
             ) { dockModifier, onCloseClick ->
                 BracketFloatingBar(
-                    showMatchEditAction = state.canManageMatchEditingFromDock,
-                    isEditingMatches = state.canEditMatches,
-                    onStartMatchEdit = actions.onStartEditingMatches,
-                    onCancelMatchEdit = actions.onCancelEditingMatches,
-                    onCommitMatchEdit = actions.onCommitMatchChanges,
+                    showMatchEditAction = state.canManageLeagueStandings,
+                    isEditingMatches = state.leagueStandingsPointsEditing,
+                    onStartMatchEdit = actions.onStartEditingStandingsPoints,
+                    onCancelMatchEdit = actions.onCancelEditingStandingsPoints,
+                    onCommitMatchEdit = actions.onSaveStandingsPoints,
                     showConfirmResultsAction = state.canConfirmLeagueResultsFromDock,
                     confirmResultsEnabled = state.canConfirmLeagueResultsFromDock &&
                         !state.leagueDivisionStandingsLoading &&
                         !state.leagueStandingsConfirming &&
+                        !state.leagueStandingsPointsEditing &&
+                        !state.leagueStandingsPointsSaving &&
                         state.leagueStandings.isNotEmpty(),
                     confirmResultsInProgress = state.leagueStandingsConfirming,
                     onConfirmResultsClick = actions.onRequestStandingsConfirmation,

@@ -264,6 +264,12 @@ interface IEventRepository : IMVPRepository {
         occurrence: EventOccurrenceSelection? = null,
     ): Flow<List<EventComplianceUserSummary>> = flowOf(emptyList())
     suspend fun getLeagueDivisionStandings(eventId: String, divisionId: String): Result<LeagueDivisionStandings>
+    suspend fun updateLeagueDivisionStandings(
+        eventId: String,
+        divisionId: String,
+        pointsOverrides: List<LeagueStandingsPointUpdate>,
+    ): Result<LeagueDivisionStandings> =
+        Result.failure(NotImplementedError("League standings updates are not implemented."))
     suspend fun confirmLeagueDivisionStandings(
         eventId: String,
         divisionId: String,

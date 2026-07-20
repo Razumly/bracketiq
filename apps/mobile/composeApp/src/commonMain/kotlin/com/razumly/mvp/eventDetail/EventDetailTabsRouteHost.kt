@@ -70,6 +70,9 @@ internal data class EventDetailTabsRouteState(
     val leagueStandings: List<TeamStanding>,
     val showStandingsDrawColumn: Boolean,
     val leagueStandingsConfirming: Boolean,
+    val leagueStandingsPointsEditing: Boolean = false,
+    val leagueStandingsDraftPoints: Map<String, Double> = emptyMap(),
+    val leagueStandingsPointsSaving: Boolean = false,
     val canManageLeagueStandings: Boolean,
     val eventTeamsAndParticipantsLoading: Boolean,
     val canManageParticipantsFromDock: Boolean,
@@ -100,6 +103,10 @@ internal data class EventDetailTabsRouteActions(
     val onAddBracketMatch: () -> Unit,
     val onAddScheduleMatch: () -> Unit,
     val onRequestStandingsConfirmation: () -> Unit,
+    val onStartEditingStandingsPoints: () -> Unit = {},
+    val onAdjustStandingsPoints: (teamId: String, delta: Double) -> Unit = { _, _ -> },
+    val onCancelEditingStandingsPoints: () -> Unit = {},
+    val onSaveStandingsPoints: () -> Unit = {},
     val onManagingParticipantsChanged: (Boolean) -> Unit,
     val onInviteTeam: () -> Unit,
     val onInvitePlayer: () -> Unit,
@@ -344,7 +351,8 @@ internal fun EventDetailTabsRouteHost(
             )
         }
     }
-    val tabContentTopOffset = if (selectedDivisionSelectorState != null) {
+    val showBracketToggle = selectedTab == DetailTab.BRACKET && showLosersBracketSelector
+    val tabContentTopOffset = if (selectedDivisionSelectorState != null || showBracketToggle) {
         DivisionPillContentTopOffset
     } else {
         0.dp
@@ -434,6 +442,9 @@ internal fun EventDetailTabsRouteHost(
             leagueStandings = state.leagueStandings,
             showStandingsDrawColumn = state.showStandingsDrawColumn,
             leagueStandingsConfirming = state.leagueStandingsConfirming,
+            leagueStandingsPointsEditing = state.leagueStandingsPointsEditing,
+            leagueStandingsDraftPoints = state.leagueStandingsDraftPoints,
+            leagueStandingsPointsSaving = state.leagueStandingsPointsSaving,
             canManageLeagueStandings = state.canManageLeagueStandings,
             eventTeamsAndParticipantsLoading = state.eventTeamsAndParticipantsLoading,
             selectedParticipantsSection = selectedParticipantsSection,
@@ -507,6 +518,10 @@ internal fun EventDetailTabsRouteHost(
             onAddBracketMatch = actions.onAddBracketMatch,
             onAddScheduleMatch = actions.onAddScheduleMatch,
             onRequestStandingsConfirmation = actions.onRequestStandingsConfirmation,
+            onStartEditingStandingsPoints = actions.onStartEditingStandingsPoints,
+            onAdjustStandingsPoints = actions.onAdjustStandingsPoints,
+            onCancelEditingStandingsPoints = actions.onCancelEditingStandingsPoints,
+            onSaveStandingsPoints = actions.onSaveStandingsPoints,
             onParticipantsSectionSelected = { selectedParticipantsSection = it },
             onManagingParticipantsChanged = { isManaging ->
                 isManagingParticipants = isManaging

@@ -257,6 +257,54 @@ private fun logoutRegistrationDraft(userId: String, answer: String): Registratio
 class UserRepositoryHttpTest {
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
+    fun matchSelectedContact_postsOnlyTheSelectionAndReturnsThePublicProfile() = runTest {
+        var requestBody = ""
+        val engine = MockEngine { request ->
+            assertEquals("/api/users/contact-match", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            requestBody = outgoingBodyText(request.body)
+            respond(
+                content = """
+                    {
+                      "matched": true,
+                      "user": {
+                        "id": "player_1",
+                        "firstName": "Taylor",
+                        "lastName": "Player",
+                        "userName": "taylor_player"
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val client = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val tokenStore = UserRepositoryHttp_InMemoryAuthTokenStore()
+        val repository = UserRepository(
+            databaseService = UserRepositoryHttp_FakeDatabaseService(),
+            api = MvpApiClient(client, "http://localhost", tokenStore),
+            tokenStore = tokenStore,
+            currentUserDataSource = CurrentUserDataSource(UserRepositoryHttp_InMemoryPreferencesDataStore()),
+            startupDispatcher = StandardTestDispatcher(testScheduler),
+        )
+        advanceUntilIdle()
+
+        val match = repository.matchSelectedContact(
+            email = " Taylor@Example.com ",
+            phone = "(503) 555-0142",
+        ).getOrThrow()
+
+        assertEquals("player_1", match?.id)
+        assertEquals("Taylor Player", match?.fullName)
+        assertTrue(requestBody.contains(""""email":"taylor@example.com""""))
+        assertTrue(requestBody.contains(""""phone":"(503) 555-0142""""))
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
     fun logout_removes_device_target_while_authenticated_before_clearing_local_state() = runTest {
         var logoutAuthorization: String? = null
         var logoutBody = ""

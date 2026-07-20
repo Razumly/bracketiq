@@ -4,6 +4,8 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
 import com.razumly.mvp.core.data.repositories.LeagueStandingsConfirmResult
+import com.razumly.mvp.core.data.repositories.LeagueStandingsPointUpdate
+import com.razumly.mvp.core.data.repositories.LeagueStandingsRow
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.LoadingHandlerImpl
 import com.razumly.mvp.core.util.LoadingOperation
@@ -233,6 +235,88 @@ class EventLeagueStandingsCoordinatorTest {
     }
 
     @Test
+    fun point_editing_increments_one_team_and_saves_absolute_points() = runTest {
+        val coordinator = EventLeagueStandingsCoordinator()
+        coordinator.applyLoadSuccess(standingsWithRows("division-a"))
+
+        assertTrue(coordinator.beginPointsEditing())
+        assertTrue(coordinator.adjustDraftPoints("team-1", 1.0))
+        assertEquals(4.0, coordinator.draftPoints.value["team-1"])
+        assertEquals(1.0, coordinator.draftPoints.value["team-2"])
+
+        var submittedUpdates = emptyList<LeagueStandingsPointUpdate>()
+        val message = coordinator.savePointsEdits(
+            target = LeagueStandingsLoadTarget("event-1", "division-a"),
+            updateStandings = { eventId, divisionId, updates ->
+                assertEquals("event-1", eventId)
+                assertEquals("division-a", divisionId)
+                submittedUpdates = updates
+                Result.success(
+                    standingsWithRows("division-a").copy(
+                        rows = standingsWithRows("division-a").rows.map { row ->
+                            if (row.teamId == "team-1") {
+                                row.copy(finalPoints = 4.0, pointsDelta = 1.0)
+                            } else {
+                                row
+                            }
+                        },
+                    ),
+                )
+            },
+        )
+
+        assertEquals(
+            listOf(LeagueStandingsPointUpdate(teamId = "team-1", points = 4.0)),
+            submittedUpdates,
+        )
+        assertEquals("Standings adjustments saved.", message.message)
+        assertEquals(4.0, coordinator.divisionStandings.value?.rows?.first()?.finalPoints)
+        assertFalse(coordinator.isEditingPoints.value)
+        assertTrue(coordinator.draftPoints.value.isEmpty())
+        assertFalse(coordinator.pointsSaving.value)
+    }
+
+    @Test
+    fun point_editing_clears_an_override_at_base_and_preserves_draft_after_failure() = runTest {
+        val coordinator = EventLeagueStandingsCoordinator()
+        coordinator.applyLoadSuccess(
+            standingsWithRows("division-a").copy(
+                rows = standingsWithRows("division-a").rows.map { row ->
+                    if (row.teamId == "team-1") {
+                        row.copy(finalPoints = 4.0, pointsDelta = 1.0)
+                    } else {
+                        row
+                    }
+                },
+            ),
+        )
+        coordinator.beginPointsEditing()
+        coordinator.adjustDraftPoints("team-1", -1.0)
+
+        var submittedUpdates = emptyList<LeagueStandingsPointUpdate>()
+        val message = coordinator.savePointsEdits(
+            target = LeagueStandingsLoadTarget("event-1", "division-a"),
+            updateStandings = { _, _, updates ->
+                submittedUpdates = updates
+                Result.failure(IllegalStateException("Save failed"))
+            },
+        )
+
+        assertEquals(
+            listOf(LeagueStandingsPointUpdate(teamId = "team-1", points = null)),
+            submittedUpdates,
+        )
+        assertEquals("Save failed", message.message)
+        assertTrue(coordinator.isEditingPoints.value)
+        assertEquals(3.0, coordinator.draftPoints.value["team-1"])
+        assertFalse(coordinator.pointsSaving.value)
+
+        coordinator.cancelPointsEditing()
+        assertFalse(coordinator.isEditingPoints.value)
+        assertTrue(coordinator.draftPoints.value.isEmpty())
+    }
+
+    @Test
     fun confirm_standings_updates_state_refreshes_event_data_and_wraps_loading() = runTest {
         val coordinator = EventLeagueStandingsCoordinator()
         val loadingHandler = RecordingLoadingHandler()
@@ -305,6 +389,46 @@ class EventLeagueStandingsCoordinatorTest {
             standingsConfirmedAt = null,
             standingsConfirmedBy = null,
             rows = emptyList(),
+        )
+
+    private fun standingsWithRows(divisionId: String): LeagueDivisionStandings =
+        LeagueDivisionStandings(
+            divisionId = divisionId,
+            divisionName = divisionId,
+            standingsConfirmedAt = null,
+            standingsConfirmedBy = null,
+            rows = listOf(
+                LeagueStandingsRow(
+                    position = 1,
+                    teamId = "team-1",
+                    teamName = "Team One",
+                    wins = 1,
+                    losses = 0,
+                    draws = 0,
+                    goalsFor = 3,
+                    goalsAgainst = 1,
+                    goalDifference = 2,
+                    matchesPlayed = 1,
+                    basePoints = 3.0,
+                    finalPoints = 3.0,
+                    pointsDelta = 0.0,
+                ),
+                LeagueStandingsRow(
+                    position = 2,
+                    teamId = "team-2",
+                    teamName = "Team Two",
+                    wins = 0,
+                    losses = 1,
+                    draws = 0,
+                    goalsFor = 1,
+                    goalsAgainst = 3,
+                    goalDifference = -2,
+                    matchesPlayed = 1,
+                    basePoints = 1.0,
+                    finalPoints = 1.0,
+                    pointsDelta = 0.0,
+                ),
+            ),
         )
 
     private class RecordingLoadingHandler : LoadingHandler {

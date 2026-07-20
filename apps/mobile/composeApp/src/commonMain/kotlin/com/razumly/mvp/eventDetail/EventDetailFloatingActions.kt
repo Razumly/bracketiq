@@ -175,9 +175,6 @@ internal fun BracketFloatingBar(
     poolOptions: List<BracketDivisionOption> = emptyList(),
     onPoolSelected: ((String?) -> Unit)? = null,
     includeAllPoolsOption: Boolean = true,
-    showBracketToggle: Boolean = false,
-    isLosersBracket: Boolean = false,
-    onBracketToggle: () -> Unit = {},
     showMatchEditAction: Boolean = false,
     isEditingMatches: Boolean = false,
     onStartMatchEdit: (() -> Unit)? = null,
@@ -291,18 +288,6 @@ internal fun BracketFloatingBar(
                             )
                         }
                     }
-                }
-            }
-            if (showBracketToggle) {
-                Button(
-                    onClick = onBracketToggle,
-                    modifier = Modifier.floatingDockActionWidth(),
-                ) {
-                    Text(
-                        text = if (isLosersBracket) "Losers Bracket" else "Winners Bracket",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
                 }
             }
             if (showMatchEditAction) {

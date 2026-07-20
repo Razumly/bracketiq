@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -1277,6 +1278,7 @@ fun MatchDetailScreen(
                 ScoreCard(
                     title = team1Text,
                     score = team1Score.toString(),
+                    isWinner = match.match.winnerEventTeamId == match.match.team1Id,
                 onTap = {
                     if (promptScoringIncident) {
                         openIncidentDialog(match.match.team1Id)
@@ -1498,6 +1500,7 @@ fun MatchDetailScreen(
             ScoreCard(
                 title = team2Text,
                 score = team2Score.toString(),
+                isWinner = match.match.winnerEventTeamId == match.match.team2Id,
                 modifier = Modifier
                     .weight(1f),
                 onTap = {
@@ -1829,6 +1832,7 @@ fun ScoreCard(
     tapEnabled: Boolean = enabled,
     swipeEnabled: Boolean = enabled,
     showControls: Boolean,
+    isWinner: Boolean = false,
     addIncidentLabel: String? = null,
     onAddIncident: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
@@ -1858,6 +1862,15 @@ fun ScoreCard(
         Column(
             modifier = modifier
                 .fillMaxWidth()
+                .then(
+                    if (isWinner) {
+                        Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(matchWinnerContainerColor())
+                    } else {
+                        Modifier
+                    },
+                )
                 .padding(horizontal = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
@@ -1865,13 +1878,13 @@ fun ScoreCard(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
+                color = if (isWinner) matchWinnerContentColor() else MaterialTheme.colorScheme.onSurface,
             )
 
             Text(
                 text = score,
                 style = MaterialTheme.typography.displayLarge,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = if (isWinner) matchWinnerContentColor() else MaterialTheme.colorScheme.onSurface,
                 fontSize = 64.sp
             )
         }
@@ -1881,6 +1894,15 @@ fun ScoreCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .then(
+                if (isWinner) {
+                    Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(matchWinnerContainerColor())
+                } else {
+                    Modifier
+                },
+            )
             .padding(horizontal = 16.dp)
             .then(interactionModifier),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1889,7 +1911,7 @@ fun ScoreCard(
         Text(
             text = title,
             style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = if (isWinner) matchWinnerContentColor() else MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
@@ -1897,7 +1919,7 @@ fun ScoreCard(
         Text(
             text = score,
             style = MaterialTheme.typography.displayLarge,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = if (isWinner) matchWinnerContentColor() else MaterialTheme.colorScheme.onSurface,
             fontSize = 64.sp,
         )
         if (addIncidentLabel != null && onAddIncident != null) {

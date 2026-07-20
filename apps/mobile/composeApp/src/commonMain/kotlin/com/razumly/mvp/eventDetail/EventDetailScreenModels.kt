@@ -53,8 +53,12 @@ internal data class EventDetailStandingsState(
     val isLoading: Boolean,
     val isConfirming: Boolean,
     val canConfirmStandings: Boolean,
+    val isEditingPoints: Boolean = false,
+    val draftPoints: Map<String, Double> = emptyMap(),
+    val isSavingPoints: Boolean = false,
 )
 
 internal data class EventDetailStandingsActions(
     val showFab: (Boolean) -> Unit,
+    val adjustPoints: (teamId: String, delta: Double) -> Unit = { _, _ -> },
 )

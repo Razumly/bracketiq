@@ -27,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -165,6 +166,7 @@ internal fun ExpandedMatchDetailsPanel(
                         team2Scores = match.team2Points,
                         team1Name = team1Name,
                         team2Name = team2Name,
+                        matchWinnerEventTeamId = match.winnerEventTeamId,
                         onSegmentSelected = onSegmentSelected,
                     )
                 }
@@ -554,6 +556,7 @@ internal fun MatchSegmentTable(
     team2Scores: List<Int>,
     team1Name: String,
     team2Name: String,
+    matchWinnerEventTeamId: String? = null,
     onSegmentSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -566,6 +569,25 @@ internal fun MatchSegmentTable(
         segments.forEachIndexed { index, segment ->
             val isActive = segment.isStarted
             val isComplete = segment.status.equals("COMPLETE", ignoreCase = true)
+            val team1Score = segmentScore(
+                segment = segment,
+                teamId = team1Id,
+                fallbackScores = team1Scores,
+                index = index,
+            )
+            val team2Score = segmentScore(
+                segment = segment,
+                teamId = team2Id,
+                fallbackScores = team2Scores,
+                index = index,
+            )
+            val segmentWinnerEventTeamId = resolveSegmentWinnerEventTeamId(
+                segment = segment,
+                team1Id = team1Id,
+                team2Id = team2Id,
+                team1Score = team1Score,
+                team2Score = team2Score,
+            )
             val containerColor = when {
                 isActive -> MaterialTheme.colorScheme.primaryContainer
                 isComplete -> MaterialTheme.colorScheme.secondaryContainer
@@ -614,22 +636,16 @@ internal fun MatchSegmentTable(
                     MatchSegmentTeamScoreRow(
                         roleLabel = "Home",
                         teamName = team1Name,
-                        score = segmentScore(
-                            segment = segment,
-                            teamId = team1Id,
-                            fallbackScores = team1Scores,
-                            index = index,
-                        ),
+                        score = team1Score,
+                        isSetWinner = segmentWinnerEventTeamId == team1Id,
+                        isMatchWinner = matchWinnerEventTeamId == team1Id,
                     )
                     MatchSegmentTeamScoreRow(
                         roleLabel = "Away",
                         teamName = team2Name,
-                        score = segmentScore(
-                            segment = segment,
-                            teamId = team2Id,
-                            fallbackScores = team2Scores,
-                            index = index,
-                        ),
+                        score = team2Score,
+                        isSetWinner = segmentWinnerEventTeamId == team2Id,
+                        isMatchWinner = matchWinnerEventTeamId == team2Id,
                     )
                 }
             }
@@ -642,32 +658,71 @@ private fun MatchSegmentTeamScoreRow(
     roleLabel: String,
     teamName: String,
     score: Int,
+    isSetWinner: Boolean = false,
+    isMatchWinner: Boolean = false,
 ) {
-    Row(
+    val rowContentColor = if (isMatchWinner) {
+        matchWinnerContentColor()
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        shape = RoundedCornerShape(10.dp),
+        color = if (isMatchWinner) matchWinnerContainerColor() else Color.Transparent,
+        contentColor = rowContentColor,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = roleLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = rowContentColor,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    text = teamName,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = rowContentColor,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Text(
-                text = roleLabel,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Medium,
-            )
-            Text(
-                text = teamName,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                text = score.toString(),
+                style = MaterialTheme.typography.headlineSmall,
+                color = if (isSetWinner) matchWinnerTextColor() else rowContentColor,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.End,
             )
         }
-        Text(
-            text = score.toString(),
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.End,
-        )
+    }
+}
+
+internal fun resolveSegmentWinnerEventTeamId(
+    segment: MatchSegmentMVP,
+    team1Id: String?,
+    team2Id: String?,
+    team1Score: Int,
+    team2Score: Int,
+): String? {
+    segment.winnerEventTeamId
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?.let { winnerId -> return winnerId }
+
+    if (!segment.status.equals("COMPLETE", ignoreCase = true)) return null
+    return when {
+        team1Score > team2Score -> team1Id
+        team2Score > team1Score -> team2Id
+        else -> null
     }
 }
 

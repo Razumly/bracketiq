@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.network.dto
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 @Serializable
 data class StandingsRowDto(
@@ -54,7 +55,7 @@ data class StandingsResponseDto(
 @Serializable
 data class StandingsPointOverrideDto(
     val teamId: String,
-    val points: Double? = null,
+    val points: JsonElement,
 )
 
 @Serializable

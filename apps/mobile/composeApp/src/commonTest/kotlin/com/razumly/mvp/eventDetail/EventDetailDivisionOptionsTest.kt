@@ -306,6 +306,26 @@ class EventDetailDivisionOptionsTest {
             ).map { option -> option.id },
         )
         assertEquals(
+            listOf(bracketId),
+            event.detailBracketDivisionOptions(
+                tournamentPoolPlayEnabled = true,
+                tournamentBracketDivisionOptions = joinOptions,
+                joinDivisionOptions = joinOptions,
+                leagueDivisionOptions = emptyList(),
+                playoffDivisionOptions = emptyList(),
+            ).map { option -> option.id },
+        )
+        assertEquals(
+            listOf(bracketId),
+            event.detailBracketDivisionOptions(
+                tournamentPoolPlayEnabled = true,
+                tournamentBracketDivisionOptions = emptyList(),
+                joinDivisionOptions = joinOptions,
+                leagueDivisionOptions = emptyList(),
+                playoffDivisionOptions = emptyList(),
+            ).map { option -> option.id },
+        )
+        assertEquals(
             bracketId,
             event.preferredBracketStageDivisionId(
                 tournamentPoolPlayEnabled = true,

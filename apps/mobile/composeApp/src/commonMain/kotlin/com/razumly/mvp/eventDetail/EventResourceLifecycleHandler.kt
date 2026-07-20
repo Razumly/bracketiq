@@ -226,6 +226,41 @@ internal class EventResourceLifecycleHandler(
         }
     }
 
+    fun startEditingLeagueStandingsPoints() {
+        if (!leagueStandingsCoordinator.beginPointsEditing()) {
+            setError(ErrorMessage("Load a standings division with teams before managing points."))
+        }
+    }
+
+    fun adjustLeagueStandingsPoints(teamId: String, delta: Double) {
+        if (!leagueStandingsCoordinator.adjustDraftPoints(teamId, delta)) {
+            setError(ErrorMessage("Unable to adjust standings points for that team."))
+        }
+    }
+
+    fun cancelEditingLeagueStandingsPoints() {
+        leagueStandingsCoordinator.cancelPointsEditing()
+    }
+
+    fun saveLeagueStandingsPoints() {
+        val target = leagueStandingsCoordinator.resolveCurrentLoadTarget(
+            eventId = selectedEvent().id,
+            divisionId = resolveLeagueStandingsDivisionId(),
+        )
+        if (target == null) {
+            setError(ErrorMessage("Select a standings division before saving point adjustments."))
+            return
+        }
+        scope.launch {
+            setError(
+                leagueStandingsCoordinator.savePointsEdits(
+                    target = target,
+                    updateStandings = eventRepository::updateLeagueDivisionStandings,
+                )
+            )
+        }
+    }
+
     private fun resolveLeagueStandingsDivisionId(): String? =
         leagueStandingsCoordinator.resolveCurrentDivisionId(
             selectedDivisionId = selectedDivisionId(),
