@@ -11,9 +11,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -25,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -224,6 +227,7 @@ private fun EventDetailSelectedDivisionPill(
     selectedDivisionId: String?,
     divisionOptions: List<BracketDivisionOption>,
     onDivisionSelected: (String) -> Unit,
+    fillSurfaceMaxWidth: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -236,10 +240,13 @@ private fun EventDetailSelectedDivisionPill(
 
     Box(modifier = modifier) {
         Surface(
-            modifier = Modifier.clickable(
-                enabled = canOpen,
-                onClick = { expanded = !expanded },
-            ),
+            modifier = Modifier
+                .then(if (fillSurfaceMaxWidth) Modifier.fillMaxWidth() else Modifier)
+                .heightIn(min = 48.dp)
+                .clickable(
+                    enabled = canOpen,
+                    onClick = { expanded = !expanded },
+                ),
             shape = CircleShape,
             color = MaterialTheme.colorScheme.primaryContainer,
             contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -315,16 +322,30 @@ private fun EventDetailSelectedDivisionPill(
 internal fun EventDetailDivisionSelectorBar(
     divisionState: SelectedDivisionPillState?,
     poolState: SelectedDivisionPillState?,
+    showBracketToggle: Boolean = false,
+    isLosersBracket: Boolean = false,
     onDivisionSelected: (String) -> Unit,
     onPoolSelected: (String) -> Unit,
+    onBracketToggle: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val usesBracketControlRow = showBracketToggle
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
+            .then(
+                if (usesBracketControlRow) {
+                    Modifier
+                } else {
+                    Modifier.horizontalScroll(rememberScrollState())
+                },
+            )
             .padding(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.Center,
+        horizontalArrangement = if (usesBracketControlRow) {
+            Arrangement.spacedBy(8.dp)
+        } else {
+            Arrangement.Center
+        },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         divisionState?.let { state ->
@@ -334,7 +355,12 @@ internal fun EventDetailDivisionSelectorBar(
                 selectedDivisionId = state.selectedDivisionId,
                 divisionOptions = state.options,
                 onDivisionSelected = onDivisionSelected,
-                modifier = Modifier.widthIn(max = if (poolState == null) 280.dp else 240.dp),
+                fillSurfaceMaxWidth = usesBracketControlRow,
+                modifier = if (usesBracketControlRow) {
+                    Modifier.weight(1f)
+                } else {
+                    Modifier.widthIn(max = if (poolState == null) 280.dp else 240.dp)
+                },
             )
         }
         if (divisionState != null && poolState != null) {
@@ -349,6 +375,23 @@ internal fun EventDetailDivisionSelectorBar(
                 onDivisionSelected = onPoolSelected,
                 modifier = Modifier.widthIn(max = 180.dp),
             )
+        }
+        if (showBracketToggle) {
+            Button(
+                onClick = onBracketToggle,
+                modifier = if (divisionState == null) {
+                    Modifier.widthIn(min = 112.dp)
+                } else {
+                    Modifier.weight(0.34f)
+                },
+                contentPadding = PaddingValues(horizontal = 8.dp),
+            ) {
+                Text(
+                    text = if (isLosersBracket) "Losers" else "Winners",
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

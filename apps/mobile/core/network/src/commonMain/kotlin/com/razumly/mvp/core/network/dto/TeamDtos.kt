@@ -187,12 +187,18 @@ data class TeamMemberInviteRequestDto(
     val userId: String? = null,
     val email: String? = null,
     val role: String = "player",
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val phone: String? = null,
+    val shareOnly: Boolean? = null,
 )
 
 @Serializable
 data class TeamMemberInviteResponseDto(
     val ok: Boolean = false,
     val team: TeamApiDto? = null,
+    val invite: Invite? = null,
+    val shareUrl: String? = null,
 )
 
 @Serializable

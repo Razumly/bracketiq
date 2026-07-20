@@ -504,7 +504,8 @@ private fun EventDetailDivisionSelectorOverlay(
     modifier: Modifier = Modifier,
 ) {
     AnimatedVisibility(
-        visible = state.selectedDivisionSelectorState != null,
+        visible = state.selectedDivisionSelectorState != null ||
+            (state.selectedTab == DetailTab.BRACKET && state.showLosersBracketSelector),
         modifier = modifier
             .padding(top = 4.dp)
             .guideTarget(EventGuideTargets.DetailDivisionSelector)
@@ -512,18 +513,21 @@ private fun EventDetailDivisionSelectorOverlay(
         enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
         exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
     ) {
-        state.selectedDivisionSelectorState?.let { selectorState ->
-            EventDetailDivisionSelectorBar(
-                divisionState = selectorState.divisionState,
-                poolState = selectorState.poolState,
-                onDivisionSelected = { divisionId ->
-                    actions.onDivisionSelected(state.selectedTab, divisionId)
-                },
-                onPoolSelected = { poolDivisionId ->
-                    actions.onPoolSelected(state.selectedTab, poolDivisionId)
-                },
-            )
-        }
+        val selectorState = state.selectedDivisionSelectorState
+        EventDetailDivisionSelectorBar(
+            divisionState = selectorState?.divisionState,
+            poolState = selectorState?.poolState,
+            showBracketToggle = state.selectedTab == DetailTab.BRACKET &&
+                state.showLosersBracketSelector,
+            isLosersBracket = state.losersBracket,
+            onDivisionSelected = { divisionId ->
+                actions.onDivisionSelected(state.selectedTab, divisionId)
+            },
+            onPoolSelected = { poolDivisionId ->
+                actions.onPoolSelected(state.selectedTab, poolDivisionId)
+            },
+            onBracketToggle = actions.onToggleLosersBracket,
+        )
     }
 }
 
@@ -548,9 +552,6 @@ private fun EventDetailTabFloatingDock(
                 onCollapseClick = { actions.onDetailDockExpandedChanged(false) },
             ) { dockModifier, onCloseClick ->
                 BracketFloatingBar(
-                    showBracketToggle = state.showLosersBracketSelector,
-                    isLosersBracket = state.losersBracket,
-                    onBracketToggle = actions.onToggleLosersBracket,
                     showMatchEditAction = state.canManageMatchEditingFromDock,
                     isEditingMatches = state.canEditMatches,
                     onStartMatchEdit = actions.onStartEditingMatches,

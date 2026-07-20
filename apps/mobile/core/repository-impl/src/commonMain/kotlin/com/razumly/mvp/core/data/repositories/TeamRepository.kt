@@ -66,6 +66,11 @@ data class OrganizationTeamPage(
     val hasMore: Boolean,
 )
 
+data class TeamMemberInviteResult(
+    val invite: Invite? = null,
+    val shareUrl: String? = null,
+)
+
 interface ITeamRepository : IMVPRepository {
     fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>>
     fun getCachedTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> = getTeamsFlow(ids)
@@ -159,9 +164,16 @@ interface ITeamRepository : IMVPRepository {
         userId: String? = null,
         email: String? = null,
         roleInviteType: String = "player",
-    ): Result<Unit> = userId
+        firstName: String? = null,
+        lastName: String? = null,
+        phone: String? = null,
+        shareOnly: Boolean = false,
+    ): Result<TeamMemberInviteResult> = userId
         ?.takeIf(String::isNotBlank)
-        ?.let { createTeamInvite(teamId = teamId, userId = it, createdBy = "", inviteType = roleInviteType) }
+        ?.let {
+            createTeamInvite(teamId = teamId, userId = it, createdBy = "", inviteType = roleInviteType)
+                .map { TeamMemberInviteResult() }
+        }
         ?: Result.failure(IllegalArgumentException("A user id is required for this repository implementation."))
     suspend fun createTeamInvite(
         teamId: String,
@@ -1126,13 +1138,20 @@ class TeamRepository(
         userId: String?,
         email: String?,
         roleInviteType: String,
-    ): Result<Unit> = runCatching {
+        firstName: String?,
+        lastName: String?,
+        phone: String?,
+        shareOnly: Boolean,
+    ): Result<TeamMemberInviteResult> = runCatching {
         val normalizedTeamId = teamId.trim().takeIf(String::isNotBlank)
             ?: error("Team id is required.")
         val normalizedUserId = userId?.trim()?.takeIf(String::isNotBlank)
         val normalizedEmail = email?.trim()?.lowercase()?.takeIf(String::isNotBlank)
-        if (normalizedUserId == null && normalizedEmail == null) {
-            error("A user or email is required.")
+        val normalizedFirstName = firstName?.trim()?.takeIf(String::isNotBlank)
+        val normalizedLastName = lastName?.trim()?.takeIf(String::isNotBlank)
+        val normalizedPhone = phone?.trim()?.takeIf(String::isNotBlank)
+        if (normalizedUserId == null && normalizedEmail == null && normalizedPhone == null && !shareOnly) {
+            error("A user, email, phone, or share-only invite is required.")
         }
         val encodedTeamId = normalizedTeamId.encodeURLQueryComponent()
         val response = api.post<TeamMemberInviteRequestDto, TeamMemberInviteResponseDto>(
@@ -1141,12 +1160,20 @@ class TeamRepository(
                 userId = normalizedUserId,
                 email = normalizedEmail,
                 role = roleInviteType.trim().ifBlank { "player" },
+                firstName = normalizedFirstName,
+                lastName = normalizedLastName,
+                phone = normalizedPhone,
+                shareOnly = shareOnly,
             ),
         )
         response.team?.toTeamOrNull()?.let { updatedTeam ->
             ensureUsersCachedForTeam(updatedTeam)
             databaseService.getTeamDao.upsertTeamWithRelations(updatedTeam)
         }
+        TeamMemberInviteResult(
+            invite = response.invite,
+            shareUrl = response.shareUrl?.trim()?.takeIf(String::isNotBlank),
+        )
     }
 
     override suspend fun createTeamInvite(

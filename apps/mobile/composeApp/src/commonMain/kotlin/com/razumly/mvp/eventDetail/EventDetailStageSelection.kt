@@ -194,12 +194,23 @@ internal fun Event.detailBracketDivisionOptions(
     joinDivisionOptions: List<BracketDivisionOption>,
     leagueDivisionOptions: List<BracketDivisionOption>,
     playoffDivisionOptions: List<BracketDivisionOption>,
-): List<BracketDivisionOption> =
-    when {
-        tournamentPoolPlayEnabled && tournamentBracketDivisionOptions.isNotEmpty() -> {
-            tournamentBracketDivisionOptions
-        }
+): List<BracketDivisionOption> {
+    if (tournamentPoolPlayEnabled) {
+        val tournamentPoolDivisionIds = tournamentPoolDivisionOptions(bracketDivisionId = null)
+            .map { option -> option.id.normalizeDivisionIdentifier() }
+            .toSet()
+        val bracketOptions = tournamentBracketDivisionOptions
+            .filterNot { option ->
+                option.id.normalizeDivisionIdentifier() in tournamentPoolDivisionIds
+            }
+        return bracketOptions.ifEmpty {
+            joinDivisionOptions.filterNot { option ->
+                option.id.normalizeDivisionIdentifier() in tournamentPoolDivisionIds
+            }
+        }.distinctById()
+    }
 
+    return when {
         eventType == EventType.LEAGUE &&
             splitLeaguePlayoffDivisions &&
             playoffDivisionOptions.isNotEmpty() -> {
@@ -214,6 +225,7 @@ internal fun Event.detailBracketDivisionOptions(
             joinDivisionOptions
         }
     }
+}
 
 internal fun Event.preferredStandingsStageDivisionId(
     tournamentPoolPlayEnabled: Boolean,

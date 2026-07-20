@@ -52,9 +52,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.BillDiscountSummary
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
@@ -100,6 +103,7 @@ import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.StandardTextField
+import com.razumly.mvp.core.presentation.composables.formatPhoneInput
 import com.razumly.mvp.core.presentation.util.MoneyInputUtils
 import kotlinx.coroutines.launch
 
@@ -318,9 +322,8 @@ fun CreateOrEditTeamScreen(
     staffUsersById: Map<String, UserData> = emptyMap(),
     onInviteTeamRole: ((
         teamId: String,
-        userId: String?,
-        inviteType: String,
-        email: String?,
+        invite: TeamMemberInviteDraft,
+        onResult: (Result<TeamBuilderCreatedInviteLink?>) -> Unit,
     ) -> Unit)? = null,
     quoteInclusivePrice: suspend (
         InclusivePriceQuoteDirection,
@@ -1433,9 +1436,8 @@ fun CreateOrEditTeamScreen(
             playerCapacityMessage = playerCapacityMessage,
             onSearch = onSearch,
             onDismiss = { showSearchDialog = false },
-            onInvite = { selectedUser, email ->
+            onInvite = { invite ->
                 inviteError = null
-                val inviteType = inviteTarget.inviteType ?: return@TeamInviteDialog
                 if (inviteTarget == TeamInviteTarget.PLAYER && !canInvitePlayer) {
                     inviteError = playerCapacityMessage
                     return@TeamInviteDialog
@@ -1444,10 +1446,11 @@ fun CreateOrEditTeamScreen(
                     inviteError = "Save the team before inviting staff."
                     return@TeamInviteDialog
                 }
-                if (isNewTeam && selectedUser == null) {
-                    inviteError = "Save the team before inviting by email."
+                if (isNewTeam && invite.userId == null) {
+                    inviteError = "Save the team before inviting a new person."
                     return@TeamInviteDialog
                 }
+                val selectedUser = (friends + suggestions + freeAgents).firstOrNull { it.id == invite.userId }
                 if (inviteTarget == TeamInviteTarget.PLAYER && selectedUser != null) {
                     val alreadySelected = playersInTeam.any { it.id == selectedUser.id } ||
                         invitedPlayers.any { it.id == selectedUser.id }
@@ -1461,10 +1464,10 @@ fun CreateOrEditTeamScreen(
                 if (!isNewTeam) {
                     onInviteTeamRole?.invoke(
                         team.team.id,
-                        selectedUser?.id,
-                        inviteType,
-                        email,
-                    )
+                        invite,
+                    ) { result ->
+                        result.onFailure { inviteError = it.userMessage("Failed to create invite") }
+                    }
                 }
                 onSearch("")
                 showSearchDialog = false
@@ -1476,7 +1479,7 @@ fun CreateOrEditTeamScreen(
 private enum class TeamInviteDialogMode(val label: String) {
     FreeAgents("Free Agents"),
     InviteUser("Invite User"),
-    InviteByEmail("Invite by Email"),
+    NewPerson("New Person"),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1492,7 +1495,7 @@ internal fun TeamInviteDialog(
     playerCapacityMessage: String = "",
     onSearch: (String) -> Unit,
     onDismiss: () -> Unit,
-    onInvite: (selectedUser: UserData?, email: String?) -> Unit,
+    onInvite: (TeamMemberInviteDraft) -> Unit,
 ) {
     var mode by remember(inviteTarget) {
         mutableStateOf(
@@ -1502,6 +1505,10 @@ internal fun TeamInviteDialog(
     }
     var query by remember { mutableStateOf("") }
     var selectedUser by remember { mutableStateOf<UserData?>(null) }
+    var firstName by remember { mutableStateOf("") }
+    var lastName by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
 
     LaunchedEffect(mode, query) {
         onSearch(if (mode == TeamInviteDialogMode.InviteUser) query else "")
@@ -1528,7 +1535,9 @@ internal fun TeamInviteDialog(
     val initialInviteUsers = remember(friends, suggestions, normalizedQuery) {
         if (normalizedQuery.length >= 2) suggestions else friends
     }
-    val canSendEmail = normalizedQuery.isProbablyEmail()
+    val normalizedEmail = email.trim().lowercase()
+    val emailValid = normalizedEmail.isBlank() || normalizedEmail.isProbablyEmail()
+    val newPersonValid = firstName.isNotBlank() && lastName.isNotBlank() && emailValid
     val playerInviteBlocked = inviteTarget == TeamInviteTarget.PLAYER && !canInvitePlayer
 
     fun chooseUser(user: UserData) {
@@ -1553,32 +1562,78 @@ internal fun TeamInviteDialog(
                                 mode = tab
                                 query = ""
                                 selectedUser = null
+                                firstName = ""
+                                lastName = ""
+                                email = ""
+                                phone = ""
                             },
                             enabled = tab != TeamInviteDialogMode.FreeAgents || inviteTarget == TeamInviteTarget.PLAYER,
-                            text = { Text(tab.label) },
+                            text = {
+                                Text(
+                                    text = tab.label,
+                                    fontSize = 13.sp,
+                                    lineHeight = 16.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    textAlign = TextAlign.Center,
+                                )
+                            },
                         )
                     }
                 }
 
-                StandardTextField(
-                    value = query,
-                    onValueChange = {
-                        query = it
-                        selectedUser = null
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = when (mode) {
-                        TeamInviteDialogMode.FreeAgents -> "Search free agents"
-                        TeamInviteDialogMode.InviteUser -> "Search ${inviteTarget.label}"
-                        TeamInviteDialogMode.InviteByEmail -> "Email"
-                    },
-                    keyboardType = if (mode == TeamInviteDialogMode.InviteByEmail) "email" else "text",
-                    supportingText = if (mode == TeamInviteDialogMode.InviteByEmail && query.isNotBlank() && !canSendEmail) {
-                        "Enter a valid email address."
-                    } else {
-                        ""
-                    },
-                )
+                if (mode != TeamInviteDialogMode.NewPerson) {
+                    StandardTextField(
+                        value = query,
+                        onValueChange = {
+                            query = it
+                            selectedUser = null
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = when (mode) {
+                            TeamInviteDialogMode.FreeAgents -> "Search free agents"
+                            TeamInviteDialogMode.InviteUser -> "Search ${inviteTarget.label}"
+                            TeamInviteDialogMode.NewPerson -> ""
+                        },
+                        keyboardType = "text",
+                    )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        StandardTextField(
+                            value = firstName,
+                            onValueChange = { firstName = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = "First name",
+                        )
+                        StandardTextField(
+                            value = lastName,
+                            onValueChange = { lastName = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = "Last name",
+                        )
+                        StandardTextField(
+                            value = email,
+                            onValueChange = { email = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = "Email (optional)",
+                            keyboardType = "email",
+                            supportingText = if (email.isNotBlank() && !emailValid) "Enter a valid email address." else "",
+                        )
+                        StandardTextField(
+                            value = phone,
+                            onValueChange = { phone = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = "Phone (optional)",
+                            keyboardType = "phone",
+                            inputFilter = ::formatPhoneInput,
+                        )
+                        Text(
+                            text = "Add an email to send automatically, or save and share the private registration link.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
 
                 if (playerInviteBlocked && playerCapacityMessage.isNotBlank()) {
                     Text(
@@ -1628,7 +1683,7 @@ internal fun TeamInviteDialog(
                         }
                     }
 
-                    TeamInviteDialogMode.InviteByEmail -> Unit
+                    TeamInviteDialogMode.NewPerson -> Unit
                 }
 
                 selectedUser?.let { user ->
@@ -1644,16 +1699,40 @@ internal fun TeamInviteDialog(
             Button(
                 onClick = {
                     when (mode) {
-                        TeamInviteDialogMode.InviteByEmail -> onInvite(null, normalizedQuery.lowercase())
-                        else -> selectedUser?.let { user -> onInvite(user, null) }
+                        TeamInviteDialogMode.NewPerson -> onInvite(
+                            TeamMemberInviteDraft(
+                                roleInviteType = inviteTarget.inviteType ?: "player",
+                                displayName = "${firstName.trim()} ${lastName.trim()}".trim(),
+                                firstName = firstName.trim(),
+                                lastName = lastName.trim(),
+                                email = normalizedEmail.takeIf(String::isNotBlank),
+                                phone = phone.trim().takeIf(String::isNotBlank),
+                                shareOnly = normalizedEmail.isBlank(),
+                            )
+                        )
+                        else -> selectedUser?.let { user ->
+                            onInvite(
+                                TeamMemberInviteDraft(
+                                    userId = user.id,
+                                    roleInviteType = inviteTarget.inviteType ?: "player",
+                                    displayName = user.fullName,
+                                )
+                            )
+                        }
                     }
                 },
                 enabled = when (mode) {
-                    TeamInviteDialogMode.InviteByEmail -> canSendEmail && !playerInviteBlocked
+                    TeamInviteDialogMode.NewPerson -> newPersonValid && !playerInviteBlocked
                     else -> selectedUser != null && !playerInviteBlocked
                 },
             ) {
-                Text("Send ${inviteTarget.label} Invite")
+                Text(
+                    if (mode == TeamInviteDialogMode.NewPerson && normalizedEmail.isBlank()) {
+                        "Save ${inviteTarget.label} Invite"
+                    } else {
+                        "Send ${inviteTarget.label} Invite"
+                    }
+                )
             }
         },
         dismissButton = {

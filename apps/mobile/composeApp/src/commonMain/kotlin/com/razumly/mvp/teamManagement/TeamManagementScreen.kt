@@ -1,11 +1,14 @@
 package com.razumly.mvp.teamManagement
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -13,6 +16,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -35,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -46,6 +52,7 @@ import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.TeamCard
+import com.razumly.mvp.core.presentation.util.ShareServiceProvider
 import com.razumly.mvp.core.util.LocalLoadingHandler
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -75,6 +82,9 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     var isSavingTeam by remember(selectedTeam?.team?.id, createTeam) { mutableStateOf(false) }
     var isRequestingRefund by remember(selectedTeam?.team?.id, createTeam) { mutableStateOf(false) }
     var saveError by remember(selectedTeam?.team?.id, createTeam) { mutableStateOf<String?>(null) }
+    var createdInviteLinks by remember { mutableStateOf<List<TeamBuilderCreatedInviteLink>>(emptyList()) }
+    var inviteLinkDialogTitle by remember { mutableStateOf("Invite ready") }
+    val shareService = remember { ShareServiceProvider().getShareService() }
     val deleteEnabled by component.enableDeleteTeam.collectAsState()
 
     LaunchedEffect(component, loadingHandler) {
@@ -89,8 +99,45 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
         component.deselectTeam()
     }
 
+    LaunchedEffect(selectedEvent?.id, selectedFreeAgent?.id) {
+        if (selectedEvent != null && selectedFreeAgent == null && selectedTeam == null) {
+            onCreateTeamClick()
+        }
+    }
+
     selectedTeam?.let { team ->
         val selectedTeamId = team.team.id.trim()
+        if (createTeam) {
+            CreateTeamBuilderScreen(
+                draft = team,
+                sports = sports,
+                freeAgents = freeAgents,
+                suggestions = suggestions,
+                onSearch = component::searchPlayers,
+                onFinish = { newTeam, personInvites, staffInvites ->
+                    if (!isSavingTeam) {
+                        isSavingTeam = true
+                        saveError = null
+                        component.createTeamFromBuilder(newTeam, personInvites, staffInvites) { result ->
+                            isSavingTeam = false
+                            result
+                                .onSuccess { links ->
+                                    inviteLinkDialogTitle = "Team created"
+                                    createdInviteLinks = links
+                                    onCloseTeamEditor()
+                                }
+                                .onFailure { saveError = it.userMessage("Save failed") }
+                        }
+                    }
+                },
+                onDismiss = onCloseTeamEditor,
+                currentUser = currentUser,
+                selectedEvent = selectedEvent,
+                isSaving = isSavingTeam,
+                saveError = saveError ?: componentError,
+            )
+            return
+        }
         LaunchedEffect(team.team.id, createTeam, isCaptain) {
             if (!createTeam && isCaptain) {
                 component.loadTeamMemberCompliance(selectedTeamId)
@@ -115,11 +162,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                             .onSuccess { onCloseTeamEditor() }
                             .onFailure { saveError = it.userMessage("Save failed") }
                     }
-                    if (createTeam) {
-                        component.createTeam(newTeam, onResult)
-                    } else {
-                        component.updateTeam(newTeam, onResult)
-                    }
+                    component.updateTeam(newTeam, onResult)
                 }
             },
             onLeaveTeam = { teamToLeave ->
@@ -154,10 +197,24 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
             memberCompliance = teamMemberCompliance[selectedTeamId],
             memberComplianceLoading = loadingTeamMemberComplianceId == selectedTeamId,
             staffUsersById = staffUsersById,
-            onInviteTeamRole = { teamId, userId, inviteType, email ->
-                component.inviteUserToRole(teamId, userId, inviteType, email)
+            onInviteTeamRole = { teamId, invite, onResult ->
+                component.inviteUserToRole(teamId, invite) { result ->
+                    result.onSuccess { link ->
+                        if (link != null) {
+                            inviteLinkDialogTitle = "Invite ready"
+                            createdInviteLinks = listOf(link)
+                        }
+                    }
+                    onResult(result)
+                }
             },
             quoteInclusivePrice = component::quoteInclusivePrice,
+        )
+        TeamInviteLinksDialog(
+            title = inviteLinkDialogTitle,
+            inviteLinks = createdInviteLinks,
+            onDismiss = { createdInviteLinks = emptyList() },
+            onShare = { invite -> shareService.share("Join my BracketIQ team", invite.url) },
         )
         return
     }
@@ -274,6 +331,58 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
             }
         }
     }
+
+    TeamInviteLinksDialog(
+        title = inviteLinkDialogTitle,
+        inviteLinks = createdInviteLinks,
+        onDismiss = { createdInviteLinks = emptyList() },
+        onShare = { invite -> shareService.share("Join my BracketIQ team", invite.url) },
+    )
+}
+
+@Composable
+private fun TeamInviteLinksDialog(
+    title: String,
+    inviteLinks: List<TeamBuilderCreatedInviteLink>,
+    onDismiss: () -> Unit,
+    onShare: (TeamBuilderCreatedInviteLink) -> Unit,
+) {
+    if (inviteLinks.isEmpty()) return
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Share each registration link with the intended player, manager, or coach.")
+                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
+                    items(inviteLinks, key = { it.url }) { invite ->
+                        Card(border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(invite.name, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        "${invite.role} · ${if (invite.emailSent) "Email sent" else "Link ready"}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Button(onClick = { onShare(invite) }) {
+                                    Text("Share")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) { Text("Done") }
+        },
+    )
 }
 
 @Composable

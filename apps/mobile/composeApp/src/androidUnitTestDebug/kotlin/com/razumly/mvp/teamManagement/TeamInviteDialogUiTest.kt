@@ -46,8 +46,7 @@ class TeamInviteDialogUiTest {
 
     @Test
     fun free_agent_tab_sends_selected_user() {
-        var invitedUserId: String? = null
-        var invitedEmail: String? = "unset"
+        var invitedDraft: TeamMemberInviteDraft? = null
 
         composeRule.setContent {
             MaterialTheme {
@@ -60,29 +59,25 @@ class TeamInviteDialogUiTest {
                     inviteFreeAgentContext = inviteContext(),
                     onSearch = {},
                     onDismiss = {},
-                    onInvite = { selectedUser, email ->
-                        invitedUserId = selectedUser?.id
-                        invitedEmail = email
-                    },
+                    onInvite = { invitedDraft = it },
                 )
             }
         }
 
         composeRule.onNodeWithText("Free Agents").assertIsDisplayed()
         composeRule.onNodeWithText("Invite User").assertIsDisplayed()
-        composeRule.onNodeWithText("Invite by Email").assertIsDisplayed()
+        composeRule.onNodeWithText("New Person").assertIsDisplayed()
 
         composeRule.onNodeWithContentDescription("Invite Jane Free").performClick()
         composeRule.onNodeWithText("Send Player Invite").performClick()
 
-        assertEquals("user-free-agent", invitedUserId)
-        assertNull(invitedEmail)
+        assertEquals("user-free-agent", invitedDraft?.userId)
+        assertNull(invitedDraft?.email)
     }
 
     @Test
-    fun invite_by_email_tab_sends_email() {
-        var invitedUserId: String? = "unset"
-        var invitedEmail: String? = null
+    fun new_person_tab_sends_optional_contact_fields() {
+        var invitedDraft: TeamMemberInviteDraft? = null
 
         composeRule.setContent {
             MaterialTheme {
@@ -95,20 +90,57 @@ class TeamInviteDialogUiTest {
                     inviteFreeAgentContext = inviteContext(),
                     onSearch = {},
                     onDismiss = {},
-                    onInvite = { selectedUser, email ->
-                        invitedUserId = selectedUser?.id
-                        invitedEmail = email
-                    },
+                    onInvite = { invitedDraft = it },
                 )
             }
         }
 
-        composeRule.onNodeWithText("Invite by Email").performClick()
-        composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("new.player@example.com")
+        composeRule.onNodeWithText("New Person").performClick()
+        composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("New")
+        composeRule.onAllNodes(hasSetTextAction())[1].performTextInput("Player")
+        composeRule.onAllNodes(hasSetTextAction())[2].performTextInput("new.player@example.com")
+        composeRule.onAllNodes(hasSetTextAction())[3].performTextInput("5035550111")
         composeRule.onNodeWithText("Send Player Invite").performClick()
 
-        assertNull(invitedUserId)
-        assertEquals("new.player@example.com", invitedEmail)
+        assertNull(invitedDraft?.userId)
+        assertEquals("New", invitedDraft?.firstName)
+        assertEquals("Player", invitedDraft?.lastName)
+        assertEquals("new.player@example.com", invitedDraft?.email)
+        assertEquals("(503) 555-0111", invitedDraft?.phone)
+        assertEquals(false, invitedDraft?.shareOnly)
+    }
+
+    @Test
+    fun staff_invite_without_email_saves_phone_and_requests_share_link() {
+        var invitedDraft: TeamMemberInviteDraft? = null
+
+        composeRule.setContent {
+            MaterialTheme {
+                TeamInviteDialog(
+                    teamName = "Test team",
+                    inviteTarget = TeamInviteTarget.ASSISTANT_COACH,
+                    freeAgents = emptyList(),
+                    friends = emptyList(),
+                    suggestions = emptyList(),
+                    inviteFreeAgentContext = TeamInviteFreeAgentContext(),
+                    onSearch = {},
+                    onDismiss = {},
+                    onInvite = { invitedDraft = it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("New Person").performClick()
+        composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("Taylor")
+        composeRule.onAllNodes(hasSetTextAction())[1].performTextInput("Stone")
+        composeRule.onAllNodes(hasSetTextAction())[3].performTextInput("5035550142")
+        composeRule.onNodeWithText("Save Assistant Coach Invite").performClick()
+
+        assertEquals("team_assistant_coach", invitedDraft?.roleInviteType)
+        assertEquals("Taylor Stone", invitedDraft?.displayName)
+        assertEquals("(503) 555-0142", invitedDraft?.phone)
+        assertNull(invitedDraft?.email)
+        assertEquals(true, invitedDraft?.shareOnly)
     }
 
     @Test
@@ -129,7 +161,7 @@ class TeamInviteDialogUiTest {
                     playerCapacityMessage = capacityMessage,
                     onSearch = {},
                     onDismiss = {},
-                    onInvite = { _, _ -> inviteSubmitted = true },
+                    onInvite = { inviteSubmitted = true },
                 )
             }
         }
@@ -156,7 +188,7 @@ class TeamInviteDialogUiTest {
                     inviteFreeAgentContext = inviteContext(),
                     onSearch = searchQueries::add,
                     onDismiss = {},
-                    onInvite = { _, _ -> },
+                    onInvite = {},
                 )
             }
         }

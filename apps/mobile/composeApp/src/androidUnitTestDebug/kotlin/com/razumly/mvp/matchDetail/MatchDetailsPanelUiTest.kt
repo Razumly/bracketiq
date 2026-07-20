@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
 import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -38,7 +39,9 @@ class MatchDetailsPanelUiTest {
                             eventId = "event-1",
                             matchId = "match-1",
                             sequence = 1,
+                            status = "COMPLETE",
                             scores = mapOf("team-a" to 21, "team-b" to 18),
+                            winnerEventTeamId = "team-a",
                         ),
                         MatchSegmentMVP(
                             id = "segment-2",
@@ -55,6 +58,7 @@ class MatchDetailsPanelUiTest {
                     team2Scores = listOf(18, 11),
                     team1Name = "Red Wolves",
                     team2Name = "Blue Jays",
+                    matchWinnerEventTeamId = "team-a",
                     onSegmentSelected = { selectedSegment = it },
                 )
             }
@@ -75,5 +79,35 @@ class MatchDetailsPanelUiTest {
 
         composeRule.onNodeWithText("Set 2").performTouchInput { click() }
         assertEquals(1, selectedSegment)
+    }
+
+    @Test
+    fun given_completed_legacy_segment_when_scores_are_uneven_then_higher_score_is_the_winner() {
+        val segment = MatchSegmentMVP(
+            id = "segment-1",
+            matchId = "match-1",
+            sequence = 1,
+            status = "COMPLETE",
+        )
+
+        assertEquals(
+            "team-a",
+            resolveSegmentWinnerEventTeamId(
+                segment = segment,
+                team1Id = "team-a",
+                team2Id = "team-b",
+                team1Score = 21,
+                team2Score = 18,
+            ),
+        )
+        assertNull(
+            resolveSegmentWinnerEventTeamId(
+                segment = segment.copy(status = "IN_PROGRESS"),
+                team1Id = "team-a",
+                team2Id = "team-b",
+                team1Score = 21,
+                team2Score = 18,
+            ),
+        )
     }
 }

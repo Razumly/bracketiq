@@ -351,7 +351,8 @@ internal fun EventDetailTabsRouteHost(
             )
         }
     }
-    val tabContentTopOffset = if (selectedDivisionSelectorState != null) {
+    val showBracketToggle = selectedTab == DetailTab.BRACKET && showLosersBracketSelector
+    val tabContentTopOffset = if (selectedDivisionSelectorState != null || showBracketToggle) {
         DivisionPillContentTopOffset
     } else {
         0.dp
