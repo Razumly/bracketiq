@@ -97,6 +97,8 @@ interface TeamManagementComponent {
     fun deselectTeam()
     fun deleteTeam(team: TeamWithPlayers)
     fun searchPlayers(query: String)
+    suspend fun matchSelectedContact(email: String?, phone: String?): Result<UserData?> =
+        Result.success(null)
     fun inviteUserToRole(
         teamId: String,
         invite: TeamMemberInviteDraft,
@@ -627,6 +629,11 @@ class DefaultTeamManagementComponent(
     override fun searchPlayers(query: String) {
         playerInviteSearch.submit(query)
     }
+
+    override suspend fun matchSelectedContact(
+        email: String?,
+        phone: String?,
+    ): Result<UserData?> = userRepository.matchSelectedContact(email, phone)
 
     override fun inviteUserToRole(
         teamId: String,

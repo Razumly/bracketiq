@@ -62,7 +62,7 @@
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>This app may save images to your photo library when you choose to export or share content.</string>
 	<key>NSContactsUsageDescription</key>
-	<string>This app does not access your contacts, but a third-party library may require this permission for compatibility.</string>
+	<string>BracketIQ uses your contacts only when you choose Add from contacts, so you can find an existing account or prefill one team invitation. Your full address book is not uploaded.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>BracketIQ uses your location to center the map on your area, show nearby events and sports venues, and help you find facilities near you, such as soccer fields or gyms in your city. BracketIQ does not track your location in the background.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

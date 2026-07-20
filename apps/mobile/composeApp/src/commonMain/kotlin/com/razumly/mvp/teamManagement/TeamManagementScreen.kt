@@ -114,6 +114,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 freeAgents = freeAgents,
                 suggestions = suggestions,
                 onSearch = component::searchPlayers,
+                onMatchContact = component::matchSelectedContact,
                 onFinish = { newTeam, personInvites, staffInvites ->
                     if (!isSavingTeam) {
                         isSavingTeam = true
@@ -151,6 +152,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
             freeAgents = freeAgents,
             inviteFreeAgentContext = inviteFreeAgentContext,
             onSearch = { query -> component.searchPlayers(query) },
+            onMatchContact = component::matchSelectedContact,
             suggestions = suggestions,
             onFinish = { newTeam ->
                 if (!isSavingTeam) {

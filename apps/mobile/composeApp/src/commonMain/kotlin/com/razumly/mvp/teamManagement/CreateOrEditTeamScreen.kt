@@ -103,7 +103,8 @@ import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.StandardTextField
-import com.razumly.mvp.core.presentation.composables.formatPhoneInput
+import com.razumly.mvp.core.presentation.composables.PhoneInputVisualTransformation
+import com.razumly.mvp.core.presentation.composables.sanitizePhoneInput
 import com.razumly.mvp.core.presentation.util.MoneyInputUtils
 import kotlinx.coroutines.launch
 
@@ -320,6 +321,9 @@ fun CreateOrEditTeamScreen(
     memberCompliance: EventTeamComplianceSummary? = null,
     memberComplianceLoading: Boolean = false,
     staffUsersById: Map<String, UserData> = emptyMap(),
+    onMatchContact: suspend (String?, String?) -> Result<UserData?> = { _, _ ->
+        Result.success(null)
+    },
     onInviteTeamRole: ((
         teamId: String,
         invite: TeamMemberInviteDraft,
@@ -1435,6 +1439,7 @@ fun CreateOrEditTeamScreen(
             canInvitePlayer = inviteTarget != TeamInviteTarget.PLAYER || canInvitePlayer,
             playerCapacityMessage = playerCapacityMessage,
             onSearch = onSearch,
+            onMatchContact = onMatchContact,
             onDismiss = { showSearchDialog = false },
             onInvite = { invite ->
                 inviteError = null
@@ -1494,9 +1499,13 @@ internal fun TeamInviteDialog(
     canInvitePlayer: Boolean = true,
     playerCapacityMessage: String = "",
     onSearch: (String) -> Unit,
+    onMatchContact: suspend (String?, String?) -> Result<UserData?> = { _, _ ->
+        Result.success(null)
+    },
     onDismiss: () -> Unit,
     onInvite: (TeamMemberInviteDraft) -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
     var mode by remember(inviteTarget) {
         mutableStateOf(
             if (inviteTarget == TeamInviteTarget.PLAYER) TeamInviteDialogMode.FreeAgents
@@ -1509,6 +1518,9 @@ internal fun TeamInviteDialog(
     var lastName by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
+    var showContactsDialog by remember { mutableStateOf(false) }
+    var isMatchingContact by remember { mutableStateOf(false) }
+    var contactMatchError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(mode, query) {
         onSearch(if (mode == TeamInviteDialogMode.InviteUser) query else "")
@@ -1547,6 +1559,48 @@ internal fun TeamInviteDialog(
     val dismissInviteDialog = {
         onSearch("")
         onDismiss()
+    }
+
+    if (showContactsDialog) {
+        AddFromContactsDialog(
+            onDismiss = { showContactsDialog = false },
+            onUseManualEntry = {
+                showContactsDialog = false
+                mode = TeamInviteDialogMode.NewPerson
+            },
+            onContactSelected = { contact ->
+                showContactsDialog = false
+                isMatchingContact = true
+                contactMatchError = null
+                val manualInvite = contact.toTeamBuilderPersonInvite()
+                scope.launch {
+                    onMatchContact(contact.email, contact.phone)
+                        .onSuccess { matchedUser ->
+                            if (matchedUser != null) {
+                                mode = TeamInviteDialogMode.InviteUser
+                                query = matchedUser.fullName
+                                selectedUser = matchedUser
+                            } else {
+                                mode = TeamInviteDialogMode.NewPerson
+                                firstName = manualInvite.firstName
+                                lastName = manualInvite.lastName
+                                email = manualInvite.email
+                                phone = manualInvite.phone
+                            }
+                        }
+                        .onFailure {
+                            mode = TeamInviteDialogMode.NewPerson
+                            firstName = manualInvite.firstName
+                            lastName = manualInvite.lastName
+                            email = manualInvite.email
+                            phone = manualInvite.phone
+                            contactMatchError = "The account check could not be completed. Review the contact details before saving."
+                        }
+                    isMatchingContact = false
+                }
+            },
+        )
+        return
     }
 
     AlertDialog(
@@ -1599,6 +1653,23 @@ internal fun TeamInviteDialog(
                     )
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { showContactsDialog = true },
+                            enabled = !isMatchingContact && !playerInviteBlocked,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Add from contacts")
+                        }
+                        if (isMatchingContact) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CircularProgressIndicator()
+                                Text("Checking for an existing BracketIQ account")
+                            }
+                        }
                         StandardTextField(
                             value = firstName,
                             onValueChange = { firstName = it },
@@ -1625,13 +1696,21 @@ internal fun TeamInviteDialog(
                             modifier = Modifier.fillMaxWidth(),
                             label = "Phone (optional)",
                             keyboardType = "phone",
-                            inputFilter = ::formatPhoneInput,
+                            inputFilter = ::sanitizePhoneInput,
+                            inputVisualTransformation = PhoneInputVisualTransformation,
                         )
                         Text(
                             text = "Add an email to send automatically, or save and share the private registration link.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        contactMatchError?.let { message ->
+                            Text(
+                                text = message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
                 }
 
@@ -1722,7 +1801,7 @@ internal fun TeamInviteDialog(
                     }
                 },
                 enabled = when (mode) {
-                    TeamInviteDialogMode.NewPerson -> newPersonValid && !playerInviteBlocked
+                    TeamInviteDialogMode.NewPerson -> newPersonValid && !playerInviteBlocked && !isMatchingContact
                     else -> selectedUser != null && !playerInviteBlocked
                 },
             ) {

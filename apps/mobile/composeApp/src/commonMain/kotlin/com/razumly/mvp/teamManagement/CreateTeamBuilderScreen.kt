@@ -45,6 +45,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,8 +66,10 @@ import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.StandardTextField
-import com.razumly.mvp.core.presentation.composables.formatPhoneInput
+import com.razumly.mvp.core.presentation.composables.PhoneInputVisualTransformation
+import com.razumly.mvp.core.presentation.composables.sanitizePhoneInput
 import com.razumly.mvp.core.util.newId
+import kotlinx.coroutines.launch
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
@@ -129,8 +132,12 @@ fun CreateTeamBuilderScreen(
     selectedEvent: Event?,
     isSaving: Boolean = false,
     saveError: String? = null,
+    onMatchContact: suspend (String?, String?) -> Result<UserData?> = { _, _ ->
+        Result.success(null)
+    },
 ) {
     val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
+    val scope = rememberCoroutineScope()
     var step by remember(draft.team.id) { mutableStateOf(0) }
     var teamName by remember(draft.team.id) { mutableStateOf(draft.team.name) }
     var teamSizeInput by remember(draft.team.id, selectedEvent?.id) {
@@ -155,6 +162,7 @@ fun CreateTeamBuilderScreen(
     var personEditor by remember(draft.team.id) { mutableStateOf<TeamBuilderPersonInvite?>(null) }
     var error by remember(draft.team.id) { mutableStateOf<String?>(null) }
     var showContactsPrompt by remember(draft.team.id) { mutableStateOf(false) }
+    var isMatchingContact by remember(draft.team.id) { mutableStateOf(false) }
 
     val showFreeAgents = selectedEvent?.start?.let { it > Clock.System.now() } == true &&
         (selectedEvent.freeAgentIds.isNotEmpty() || freeAgents.isNotEmpty())
@@ -506,7 +514,7 @@ fun CreateTeamBuilderScreen(
                                         StandardTextField(value = editor.lastName, onValueChange = { staffPersonEditor = editor.copy(lastName = it) }, label = "Last name", modifier = Modifier.weight(1f).testTag("team-builder-staff-last"))
                                     }
                                     StandardTextField(value = editor.email, onValueChange = { staffPersonEditor = editor.copy(email = it) }, label = "Email (optional)", keyboardType = "email", modifier = Modifier.fillMaxWidth().testTag("team-builder-staff-email"))
-                                    StandardTextField(value = editor.phone, onValueChange = { staffPersonEditor = editor.copy(phone = it) }, label = "Phone (optional)", keyboardType = "phone", inputFilter = ::formatPhoneInput, modifier = Modifier.fillMaxWidth().testTag("team-builder-staff-phone"))
+                                    StandardTextField(value = editor.phone, onValueChange = { staffPersonEditor = editor.copy(phone = it) }, label = "Phone (optional)", keyboardType = "phone", inputFilter = ::sanitizePhoneInput, inputVisualTransformation = PhoneInputVisualTransformation, modifier = Modifier.fillMaxWidth().testTag("team-builder-staff-phone"))
                                     Button(onClick = ::addStaffPerson, modifier = Modifier.fillMaxWidth().height(48.dp)) {
                                         Text(if (TeamBuilderEmailRegex.matches(editor.email.trim())) "Send email invite" else "Save invite")
                                     }
@@ -543,11 +551,20 @@ fun CreateTeamBuilderScreen(
                                 Spacer(Modifier.width(6.dp))
                                 Text("New person")
                             }
-                            OutlinedButton(onClick = { showContactsPrompt = true }, enabled = !isAtCapacity, modifier = Modifier.weight(1f).height(48.dp)) {
+                            OutlinedButton(
+                                onClick = { showContactsPrompt = true },
+                                enabled = !isAtCapacity && !isMatchingContact,
+                                modifier = Modifier.weight(1f).height(48.dp),
+                            ) {
                                 Icon(Icons.Default.Add, contentDescription = null)
                                 Spacer(Modifier.width(6.dp))
                                 Text("Contacts")
                             }
+                        }
+                        if (isMatchingContact) {
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth().testTag("team-builder-contact-match-loading"),
+                            )
                         }
                         StandardTextField(
                             value = searchQuery,
@@ -590,7 +607,7 @@ fun CreateTeamBuilderScreen(
                                         StandardTextField(value = editor.lastName, onValueChange = { personEditor = editor.copy(lastName = it) }, label = "Last name", modifier = Modifier.weight(1f).testTag("team-builder-person-last"))
                                     }
                                     StandardTextField(value = editor.email, onValueChange = { personEditor = editor.copy(email = it) }, label = "Email (optional)", keyboardType = "email", modifier = Modifier.fillMaxWidth())
-                                    StandardTextField(value = editor.phone, onValueChange = { personEditor = editor.copy(phone = it) }, label = "Phone (optional)", keyboardType = "phone", inputFilter = ::formatPhoneInput, modifier = Modifier.fillMaxWidth())
+                                    StandardTextField(value = editor.phone, onValueChange = { personEditor = editor.copy(phone = it) }, label = "Phone (optional)", keyboardType = "phone", inputFilter = ::sanitizePhoneInput, inputVisualTransformation = PhoneInputVisualTransformation, modifier = Modifier.fillMaxWidth())
                                     Button(onClick = ::addPerson, modifier = Modifier.fillMaxWidth().height(48.dp)) {
                                         Text(if (TeamBuilderEmailRegex.matches(editor.email.trim())) "Send email invite" else "Save invite")
                                     }
@@ -639,19 +656,61 @@ fun CreateTeamBuilderScreen(
     }
 
     if (showContactsPrompt) {
-        AlertDialog(
-            onDismissRequest = { showContactsPrompt = false },
-            title = { Text("Add from contacts") },
-            text = { Text("Continue to enter a contact's name, email, or phone. BracketIQ only saves the details you add to this invite.") },
-            confirmButton = {
-                Button(onClick = {
-                    showContactsPrompt = false
-                    personEditor = TeamBuilderPersonInvite()
-                }) { Text("Continue") }
+        AddFromContactsDialog(
+            onDismiss = { showContactsPrompt = false },
+            onUseManualEntry = {
+                showContactsPrompt = false
+                personEditor = TeamBuilderPersonInvite()
             },
-            dismissButton = { TextButton(onClick = { showContactsPrompt = false }) { Text("Not now") } },
+            onContactSelected = { contact ->
+                showContactsPrompt = false
+                isMatchingContact = true
+                val manualInvite = contact.toTeamBuilderPersonInvite()
+                scope.launch {
+                    onMatchContact(contact.email, contact.phone)
+                        .onSuccess { matchedUser ->
+                            when {
+                                matchedUser == null -> personEditor = manualInvite
+                                matchedUser.id in excludedIds -> {
+                                    error = matchedUser.fullName + " is already on this roster."
+                                }
+                                else -> {
+                                    selectedAccountInvites = selectedAccountInvites + matchedUser
+                                    error = null
+                                }
+                            }
+                        }
+                        .onFailure {
+                            personEditor = manualInvite
+                            error = "The account check could not be completed. Review the contact details before saving."
+                        }
+                    isMatchingContact = false
+                }
+            },
         )
     }
+}
+
+internal fun SelectedDeviceContact.toTeamBuilderPersonInvite(): TeamBuilderPersonInvite {
+    val displayParts = displayName.trim().split(Regex("\\s+"), limit = 2)
+    val resolvedFirstName = firstName.trim().ifBlank { displayParts.firstOrNull().orEmpty() }
+    val resolvedLastName = lastName.trim().ifBlank { displayParts.getOrNull(1).orEmpty() }
+    val rawPhone = phone.orEmpty().trim()
+    val phoneDigits = rawPhone.filter(Char::isDigit)
+    val resolvedPhone = if (
+        phoneDigits.length == 10 ||
+        (phoneDigits.length == 11 && phoneDigits.startsWith('1'))
+    ) {
+        sanitizePhoneInput(rawPhone)
+    } else {
+        rawPhone
+    }
+    return TeamBuilderPersonInvite(
+        firstName = resolvedFirstName,
+        lastName = resolvedLastName,
+        email = email.orEmpty().trim().lowercase(),
+        phone = resolvedPhone,
+    )
 }
 
 @Composable
