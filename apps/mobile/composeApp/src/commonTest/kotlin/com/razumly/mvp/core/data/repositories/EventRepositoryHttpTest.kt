@@ -5033,6 +5033,84 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun updateLeagueDivisionStandings_patches_absolute_points_and_maps_authoritative_response() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/e1/standings", request.url.encodedPath)
+            assertEquals(HttpMethod.Patch, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "division": {
+                        "divisionId": "e1__division__advanced",
+                        "divisionName": "Advanced",
+                        "standingsConfirmedAt": null,
+                        "standingsConfirmedBy": null,
+                        "standings": [
+                          {
+                            "position": 1,
+                            "teamId": "team_1",
+                            "teamName": "Team One",
+                            "wins": 1,
+                            "losses": 0,
+                            "draws": 0,
+                            "goalsFor": 3,
+                            "goalsAgainst": 1,
+                            "goalDifference": 2,
+                            "matchesPlayed": 1,
+                            "basePoints": 3,
+                            "finalPoints": 4,
+                            "pointsDelta": 1
+                          }
+                        ],
+                        "validation": {
+                          "mappingErrors": [],
+                          "capacityErrors": []
+                        }
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val result = repo.updateLeagueDivisionStandings(
+            eventId = "e1",
+            divisionId = "e1__division__advanced",
+            pointsOverrides = listOf(
+                LeagueStandingsPointUpdate(teamId = "team_1", points = 4.0),
+                LeagueStandingsPointUpdate(teamId = "team_2", points = null),
+            ),
+        ).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"divisionId\":\"e1__division__advanced\""))
+        assertTrue(capturedBody.contains("\"teamId\":\"team_1\",\"points\":4.0"))
+        assertTrue(capturedBody.contains("\"teamId\":\"team_2\",\"points\":null"))
+        assertEquals(4.0, result.rows.single().finalPoints)
+        assertEquals(1.0, result.rows.single().pointsDelta)
+    }
+
+    @Test
     fun getEventTeamCompliance_fetches_team_payment_and_document_status() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()

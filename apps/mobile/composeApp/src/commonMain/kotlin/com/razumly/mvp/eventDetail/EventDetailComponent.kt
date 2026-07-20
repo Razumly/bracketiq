@@ -126,6 +126,9 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val leagueDivisionStandings: StateFlow<LeagueDivisionStandings?>
     val leagueDivisionStandingsLoading: StateFlow<Boolean>
     val leagueStandingsConfirming: StateFlow<Boolean>
+    val leagueStandingsPointsEditing: StateFlow<Boolean>
+    val leagueStandingsDraftPoints: StateFlow<Map<String, Double>>
+    val leagueStandingsPointsSaving: StateFlow<Boolean>
     val suggestedUsers: StateFlow<List<UserData>>
     val inviteTeamSuggestions: StateFlow<List<Team>>
     val inviteTeamsLoading: StateFlow<Boolean>
@@ -262,6 +265,10 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun updateMatchFromDialog(updatedMatch: MatchWithRelations)
     fun refreshEventDetails()
     fun refreshLeagueStandings()
+    fun startEditingLeagueStandingsPoints()
+    fun adjustLeagueStandingsPoints(teamId: String, delta: Double)
+    fun cancelEditingLeagueStandingsPoints()
+    fun saveLeagueStandingsPoints()
     fun confirmLeagueStandings(applyReassignment: Boolean = true)
     fun confirmTextSignature()
     fun dismissTextSignature()

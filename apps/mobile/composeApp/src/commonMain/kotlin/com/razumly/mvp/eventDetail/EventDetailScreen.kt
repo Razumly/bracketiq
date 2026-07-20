@@ -121,6 +121,9 @@ fun EventDetailScreen(
     val leagueDivisionStandings by component.leagueDivisionStandings.collectAsState()
     val leagueDivisionStandingsLoading by component.leagueDivisionStandingsLoading.collectAsState()
     val leagueStandingsConfirming by component.leagueStandingsConfirming.collectAsState()
+    val leagueStandingsPointsEditing by component.leagueStandingsPointsEditing.collectAsState()
+    val leagueStandingsDraftPoints by component.leagueStandingsDraftPoints.collectAsState()
+    val leagueStandingsPointsSaving by component.leagueStandingsPointsSaving.collectAsState()
     val suggestedUsers by component.suggestedUsers.collectAsState()
     val inviteTeamSuggestions by component.inviteTeamSuggestions.collectAsState()
     val inviteTeamsLoading by component.inviteTeamsLoading.collectAsState()
@@ -881,6 +884,9 @@ fun EventDetailScreen(
                                 leagueStandings = leagueStandings,
                                 showStandingsDrawColumn = showStandingsDrawColumn,
                                 leagueStandingsConfirming = leagueStandingsConfirming,
+                                leagueStandingsPointsEditing = leagueStandingsPointsEditing,
+                                leagueStandingsDraftPoints = leagueStandingsDraftPoints,
+                                leagueStandingsPointsSaving = leagueStandingsPointsSaving,
                                 canManageLeagueStandings = canManageLeagueStandings,
                                 eventTeamsAndParticipantsLoading = eventTeamsAndParticipantsLoading,
                                 canManageParticipantsFromDock = canManageParticipantsFromDock,
@@ -923,6 +929,10 @@ fun EventDetailScreen(
                                 onAddBracketMatch = component::addBracketMatch,
                                 onAddScheduleMatch = component::addScheduleMatch,
                                 onRequestStandingsConfirmation = { showStandingsConfirmDialog = true },
+                                onStartEditingStandingsPoints = component::startEditingLeagueStandingsPoints,
+                                onAdjustStandingsPoints = component::adjustLeagueStandingsPoints,
+                                onCancelEditingStandingsPoints = component::cancelEditingLeagueStandingsPoints,
+                                onSaveStandingsPoints = component::saveLeagueStandingsPoints,
                                 onManagingParticipantsChanged = { isManaging ->
                                     if (isManaging) {
                                         component.startManagingParticipants()

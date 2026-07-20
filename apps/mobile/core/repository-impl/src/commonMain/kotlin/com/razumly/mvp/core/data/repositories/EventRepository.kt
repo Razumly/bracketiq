@@ -39,6 +39,8 @@ import com.razumly.mvp.core.network.dto.ScheduleEventResponseDto
 import com.razumly.mvp.core.network.dto.SeedEventTemplateRequestDto
 import com.razumly.mvp.core.network.dto.StandingsConfirmRequestDto
 import com.razumly.mvp.core.network.dto.StandingsConfirmResponseDto
+import com.razumly.mvp.core.network.dto.StandingsPatchRequestDto
+import com.razumly.mvp.core.network.dto.StandingsPointOverrideDto
 import com.razumly.mvp.core.network.dto.StandingsResponseDto
 import com.razumly.mvp.core.network.dto.UpdateEventRequestDto
 import com.razumly.mvp.core.network.dto.toEventsOrThrow
@@ -893,6 +895,41 @@ class EventRepository(
             "api/events/$normalizedEventId/standings?divisionId=$encodedDivisionId",
         )
         val division = response.division ?: error("Standings response missing division.")
+        division.toLeagueDivisionStandings()
+    }
+
+    override suspend fun updateLeagueDivisionStandings(
+        eventId: String,
+        divisionId: String,
+        pointsOverrides: List<LeagueStandingsPointUpdate>,
+    ): Result<LeagueDivisionStandings> = runCatching {
+        val normalizedEventId = eventId.trim()
+        val normalizedDivisionId = divisionId.trim()
+        if (normalizedEventId.isBlank() || normalizedDivisionId.isBlank()) {
+            error("Event id and division id are required.")
+        }
+        val normalizedUpdates = pointsOverrides.map { update ->
+            val teamId = update.teamId.trim()
+            if (teamId.isBlank()) {
+                error("Team id is required for every standings update.")
+            }
+            val points = update.points
+            if (points != null && !points.isFinite()) {
+                error("Standings points must be a finite number.")
+            }
+            StandingsPointOverrideDto(
+                teamId = teamId,
+                points = points?.let(::JsonPrimitive) ?: JsonNull,
+            )
+        }
+        val response = api.patch<StandingsPatchRequestDto, StandingsResponseDto>(
+            path = "api/events/$normalizedEventId/standings",
+            body = StandingsPatchRequestDto(
+                divisionId = normalizedDivisionId,
+                pointsOverrides = normalizedUpdates,
+            ),
+        )
+        val division = response.division ?: error("Standings update response missing division.")
         division.toLeagueDivisionStandings()
     }
 

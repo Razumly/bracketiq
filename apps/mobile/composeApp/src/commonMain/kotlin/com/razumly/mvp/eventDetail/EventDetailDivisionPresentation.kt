@@ -23,6 +23,34 @@ internal data class EventDetailDivisionPresentation(
     val leagueStandings: List<TeamStanding>,
 )
 
+private fun EventWithFullRelations.parentTournamentTeamIdsForUnassignedPool(
+    poolDivisionId: String?,
+): Set<String> {
+    val normalizedPoolId = poolDivisionId
+        ?.normalizeDivisionIdentifier()
+        .orEmpty()
+    if (normalizedPoolId.isBlank() || !event.isTournamentPoolPlayEnabled()) return emptySet()
+
+    val parentDivisionId = event.resolveBracketDivisionForPool(normalizedPoolId)
+        ?.normalizeDivisionIdentifier()
+        .orEmpty()
+    if (parentDivisionId.isBlank()) return emptySet()
+
+    val siblingHasExplicitMembership = event.divisionDetails.any { detail ->
+        detail.id.normalizeDivisionIdentifier() != normalizedPoolId &&
+            detail.teamIds.isNotEmpty() &&
+            detail.tournamentBracketDivisionId()
+                ?.normalizeDivisionIdentifier() == parentDivisionId
+    }
+    if (siblingHasExplicitMembership) return emptySet()
+
+    return teams
+        .filter { team -> team.team.division.normalizeDivisionIdentifier() == parentDivisionId }
+        .map { team -> team.team.id.trim() }
+        .filter(String::isNotBlank)
+        .toSet()
+}
+
 internal fun buildEventDetailDivisionPresentation(
     selectedEvent: EventWithFullRelations,
     selectedDivision: String?,
@@ -154,7 +182,14 @@ internal fun buildEventDetailDivisionPresentation(
     } else {
         emptySet()
     }
-    val standingsTeamIds = divisionTeamIds.ifEmpty { matchTeamIds }
+    val parentTournamentTeamIds = if (tournamentPoolPlayEnabled) {
+        selectedEvent.parentTournamentTeamIdsForUnassignedPool(selectedStandingsDataDivisionId)
+    } else {
+        emptySet()
+    }
+    val standingsTeamIds = divisionTeamIds
+        .ifEmpty { matchTeamIds }
+        .ifEmpty { parentTournamentTeamIds }
     val standingsTeams = if (!shouldFilterStandings || selectedStandingsDataDivisionId.isNullOrBlank()) {
         selectedEvent.teams
     } else {

@@ -25,8 +25,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -189,6 +192,12 @@ internal fun LeagueStandingsTab(
                             LeagueStandingRow(
                                 standing = standing,
                                 columns = standingsColumns,
+                                isEditingPoints = state.isEditingPoints,
+                                draftPoints = state.draftPoints[standing.teamId],
+                                isSavingPoints = state.isSavingPoints,
+                                onAdjustPoints = { delta ->
+                                    actions.adjustPoints(standing.teamId, delta)
+                                },
                             )
                         } ?: Spacer(modifier = Modifier.height(0.dp))
                     }
@@ -294,6 +303,10 @@ private fun LeagueStandingsHeader(
 private fun LeagueStandingRow(
     standing: TeamStanding,
     columns: List<LeagueStandingsColumn>,
+    isEditingPoints: Boolean,
+    draftPoints: Double?,
+    isSavingPoints: Boolean,
+    onAdjustPoints: (Double) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -314,10 +327,57 @@ private fun LeagueStandingRow(
             )
         }
         columns.forEach { column ->
-            StandingsValueCell(
-                value = column.valueFor(standing),
-                modifier = Modifier.weight(column.weight),
-            )
+            if (column == LeagueStandingsColumn.POINTS && isEditingPoints) {
+                StandingsPointsEditor(
+                    value = (draftPoints ?: standing.finalPoints).formatStandingsPoints(),
+                    enabled = !isSavingPoints,
+                    onDecrement = { onAdjustPoints(-1.0) },
+                    onIncrement = { onAdjustPoints(1.0) },
+                    modifier = Modifier.weight(column.weight),
+                )
+            } else {
+                StandingsValueCell(
+                    value = column.valueFor(standing),
+                    modifier = Modifier.weight(column.weight),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StandingsPointsEditor(
+    value: String,
+    enabled: Boolean,
+    onDecrement: () -> Unit,
+    onIncrement: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        IconButton(
+            onClick = onDecrement,
+            enabled = enabled,
+            modifier = Modifier.size(32.dp),
+        ) {
+            Icon(Icons.Default.Remove, contentDescription = "Decrease standings points")
+        }
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center,
+        )
+        IconButton(
+            onClick = onIncrement,
+            enabled = enabled,
+            modifier = Modifier.size(32.dp),
+        ) {
+            Icon(Icons.Default.Add, contentDescription = "Increase standings points")
         }
     }
 }
