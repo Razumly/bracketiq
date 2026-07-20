@@ -12,9 +12,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -43,6 +41,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
@@ -60,7 +61,19 @@ import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.util.toTeamDisplayLabel
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
+import com.razumly.mvp.eventDetail.HostMatchScoreDraft
+import com.razumly.mvp.eventDetail.HostMatchScoreTeam
 import com.razumly.mvp.eventDetail.MatchCreateContext
+import com.razumly.mvp.eventDetail.applyHostMatchConfirmation
+import com.razumly.mvp.eventDetail.buildHostMatchPolicySnapshot
+import com.razumly.mvp.eventDetail.buildHostMatchScoreDrafts
+import com.razumly.mvp.eventDetail.buildHostMatchScorePayload
+import com.razumly.mvp.eventDetail.canToggleHostMatchConfirmation
+import com.razumly.mvp.eventDetail.editHostMatchScoreDraft
+import com.razumly.mvp.eventDetail.hostMatchStatusLabel
+import com.razumly.mvp.eventDetail.normalizeHostMatchSegmentLabel
+import com.razumly.mvp.eventDetail.resizeHostMatchScoreDrafts
+import com.razumly.mvp.eventDetail.resizeHostMatchTargetInputs
 import com.razumly.mvp.eventDetail.data.BracketLane
 import com.razumly.mvp.eventDetail.data.BracketNode
 import com.razumly.mvp.eventDetail.data.filterValidNextMatchCandidates
@@ -68,6 +81,7 @@ import com.razumly.mvp.eventDetail.data.validateAndNormalizeBracketGraph
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -169,24 +183,107 @@ private fun MatchEditDialogContent(
             null
         }
     }
-    val initialPolicyRules = match.match.matchRulesSnapshot ?: match.match.resolvedMatchRules
-    val policyScoringModel = initialPolicyRules?.scoringModel
-        ?.trim()
-        ?.uppercase()
-        ?.takeIf { it in setOf("SETS", "PERIODS", "INNINGS", "POINTS_ONLY") }
+    val initialPolicyRules = remember(match.match.id, match.match.matchRulesSnapshot, match.match.resolvedMatchRules) {
+        match.match.matchRulesSnapshot
+            ?: match.match.resolvedMatchRules
+            ?: ResolvedMatchRulesMVP(scoringModel = "SETS", segmentCount = 1, segmentLabel = "Set")
+    }
+    val policyScoringModel = initialPolicyRules.scoringModel
+        .trim()
+        .uppercase()
+        .takeIf { it in setOf("SETS", "PERIODS", "INNINGS", "POINTS_ONLY") }
         ?: "SETS"
     val isSetBasedPolicy = policyScoringModel == "SETS"
-    val isTimedPolicy = !isSetBasedPolicy &&
-        initialPolicyRules?.timekeeping?.timerMode
-            ?.trim()
-            ?.uppercase()
-            ?.takeIf { it != "NONE" } != null
-    var policyTargetsText by remember(match.match.id, initialPolicyRules) {
-        mutableStateOf(initialPolicyRules?.setPointTargets?.joinToString(", ") ?: "")
+    val isTimedPolicy = !isSetBasedPolicy && (
+        initialPolicyRules.timekeeping.timerMode.trim().uppercase() != "NONE" ||
+            initialPolicyRules.timekeeping.segmentDurationMinutes != null
+    )
+    val initialSegmentCount = remember(match.match.id, initialPolicyRules) {
+        if (policyScoringModel == "POINTS_ONLY") {
+            1
+        } else {
+            maxOf(
+                initialPolicyRules.segmentCount,
+                match.match.segments.size,
+                match.match.team1Points.size,
+                match.match.team2Points.size,
+                match.match.setResults.size,
+                1,
+            )
+        }
     }
-    var policyMatchMinutesText by remember(match.match.id, initialDuration) {
-        mutableStateOf(initialDuration?.inWholeMinutes?.takeIf { it > 0 }?.toString() ?: "")
+    var policySegmentLabel by remember(match.match.id, initialPolicyRules) {
+        mutableStateOf(
+            normalizeHostMatchSegmentLabel(
+                value = initialPolicyRules.segmentLabel,
+                fallback = when (policyScoringModel) {
+                    "SETS" -> "Set"
+                    "INNINGS" -> "Inning"
+                    "POINTS_ONLY" -> "Total"
+                    else -> "Period"
+                },
+            ),
+        )
     }
+    var policySegmentCount by remember(match.match.id, initialSegmentCount) {
+        mutableStateOf(initialSegmentCount)
+    }
+    val initialPolicyTarget = initialPolicyRules.setPointTargets.firstOrNull { target -> target > 0 } ?: 21
+    var policyTargetInputs by remember(match.match.id, initialPolicyRules, initialSegmentCount) {
+        mutableStateOf(
+            resizeHostMatchTargetInputs(
+                targets = initialPolicyRules.setPointTargets.map(Int::toString),
+                count = initialSegmentCount,
+                fallback = initialPolicyTarget,
+            ),
+        )
+    }
+    var policySegmentMinutesText by remember(match.match.id, initialPolicyRules, initialDuration) {
+        mutableStateOf(
+            initialPolicyRules.timekeeping.segmentDurationMinutes
+                ?.takeIf { minutes -> minutes > 0 }
+                ?.toString()
+                ?: initialDuration?.inWholeMinutes?.takeIf { minutes -> minutes > 0 }?.let { minutes ->
+                    (minutes / initialSegmentCount.coerceAtLeast(1)).coerceAtLeast(1).toString()
+                }
+                .orEmpty(),
+        )
+    }
+    var policySegmentMinutesTouched by remember(match.match.id) { mutableStateOf(false) }
+    var scoreDrafts by remember(match.match.id, initialSegmentCount) {
+        mutableStateOf(buildHostMatchScoreDrafts(match.match, initialSegmentCount))
+    }
+    var matchStarted by remember(match.match.id) {
+        mutableStateOf(
+            match.match.status?.trim()?.uppercase() in setOf("IN_PROGRESS", "COMPLETE") ||
+                match.match.segments.any { segment -> segment.status.trim().uppercase() != "NOT_STARTED" } ||
+                match.match.team1Points.any { score -> score > 0 } ||
+                match.match.team2Points.any { score -> score > 0 },
+        )
+    }
+    var resultType by remember(match.match.id) {
+        mutableStateOf(
+            when {
+                match.match.resultType?.trim()?.uppercase() == "FORFEIT" -> "FORFEIT"
+                match.match.resultType?.trim()?.uppercase() == "NO_CONTEST" ||
+                    match.match.status?.trim()?.uppercase() == "CANCELLED" -> "NO_CONTEST"
+                match.match.status?.trim()?.uppercase() == "SUSPENDED" -> "SUSPENDED"
+                else -> "REGULATION"
+            },
+        )
+    }
+    var statusReasonText by remember(match.match.id) { mutableStateOf(match.match.statusReason.orEmpty()) }
+    var forfeitingEventTeamId by remember(match.match.id) {
+        mutableStateOf(
+            when (match.match.winnerEventTeamId) {
+                match.match.team1Id -> match.match.team2Id
+                match.match.team2Id -> match.match.team1Id
+                else -> null
+            },
+        )
+    }
+    var showResultTypeDropdown by remember { mutableStateOf(false) }
+    var showForfeitingTeamDropdown by remember { mutableStateOf(false) }
     var policyTouched by remember(match.match.id) { mutableStateOf(false) }
     val allMatchLabels = remember(allMatches, match) {
         val options = linkedMapOf<String, String>()
@@ -256,6 +353,22 @@ private fun MatchEditDialogContent(
         buildMatchOfficialSlots(officialPositions, editedMatch.match.officialIds)
     }
 
+    fun updateSegmentCount(nextCount: Int) {
+        val normalizedCount = if (policyScoringModel == "POINTS_ONLY") {
+            1
+        } else {
+            nextCount.coerceAtLeast(1)
+        }
+        policySegmentCount = normalizedCount
+        policyTargetInputs = resizeHostMatchTargetInputs(
+            targets = policyTargetInputs,
+            count = normalizedCount,
+            fallback = initialPolicyTarget,
+        )
+        scoreDrafts = resizeHostMatchScoreDrafts(scoreDrafts, normalizedCount)
+        policyTouched = true
+    }
+
     fun updateOfficialAssignment(
         slot: MatchOfficialSlot,
         selectedOption: EventOfficialSelectionOption?,
@@ -294,11 +407,31 @@ private fun MatchEditDialogContent(
             match = editedMatch.match.copy(
                 officialIds = cleanedAssignments,
                 officialId = primaryOfficial?.userId,
-                officialCheckedIn = if (primaryOfficial != null) {
-                    primaryOfficial.checkedIn
+            ),
+        )
+    }
+
+    fun updateOfficialCheckIn(slot: MatchOfficialSlot, checkedIn: Boolean) {
+        val updatedAssignments = editedMatch.match.officialIds
+            .normalizedMatchOfficialAssignments()
+            .map { assignment ->
+                if (
+                    assignment.positionId == slot.positionId &&
+                    assignment.slotIndex == slot.slotIndex &&
+                    assignment.holderType == OfficialAssignmentHolderType.OFFICIAL
+                ) {
+                    assignment.copy(checkedIn = checkedIn)
                 } else {
-                    editedMatch.match.officialCheckedIn
-                },
+                    assignment
+                }
+            }
+            .normalizedMatchOfficialAssignments()
+        val primaryOfficial = updatedAssignments
+            .firstOrNull { assignment -> assignment.holderType == OfficialAssignmentHolderType.OFFICIAL }
+        editedMatch = editedMatch.copy(
+            match = editedMatch.match.copy(
+                officialIds = updatedAssignments,
+                officialId = primaryOfficial?.userId,
             ),
         )
     }
@@ -314,6 +447,15 @@ private fun MatchEditDialogContent(
         winnerNextMatchId,
         loserNextMatchId,
         losersBracket,
+        policySegmentLabel,
+        policySegmentCount,
+        policyTargetInputs,
+        policySegmentMinutesText,
+        scoreDrafts,
+        matchStarted,
+        resultType,
+        forfeitingEventTeamId,
+        statusReasonText,
     ) {
         validationError = null
     }
@@ -343,7 +485,8 @@ private fun MatchEditDialogContent(
 
         // Scrollable content
         LazyColumn(
-            modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)
+            modifier = Modifier.weight(1f).testTag("match-edit-content"),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
 
@@ -419,105 +562,285 @@ private fun MatchEditDialogContent(
                     val selectedOption = currentAssignment?.eventOfficialId?.let { selectedId ->
                         options.firstOrNull { option -> option.eventOfficialId == selectedId }
                     }
-                    EventOfficialSelectionField(
-                        label = slot.label,
-                        selectedOption = selectedOption,
-                        options = options,
-                        onOptionSelected = { selected ->
-                            updateOfficialAssignment(
-                                slot = slot,
-                                selectedOption = selected,
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        EventOfficialSelectionField(
+                            label = slot.label,
+                            selectedOption = selectedOption,
+                            options = options,
+                            onOptionSelected = { selected ->
+                                updateOfficialAssignment(
+                                    slot = slot,
+                                    selectedOption = selected,
+                                )
+                            },
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = currentAssignment?.checkedIn == true,
+                                enabled = currentAssignment != null,
+                                onCheckedChange = { checkedIn ->
+                                    updateOfficialCheckIn(slot, checkedIn)
+                                },
                             )
-                        },
-                    )
+                            Text(
+                                text = "Checked in",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (currentAssignment == null) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                            )
+                        }
+                    }
                 }
             }
 
             item {
-                TeamSelectionField(
-                    label = "Team Official",
-                    selectedTeam = teams.find { it.team.id == editedMatch.match.teamOfficialId },
-                    expanded = showRefDropdown,
-                    onExpandedChange = { showRefDropdown = it },
-                    teams = teams,
-                    onTeamSelected = { team ->
-                        editedMatch = editedMatch.copy(
-                            match = editedMatch.match.copy(teamOfficialId = team?.team?.id)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TeamSelectionField(
+                        label = "Officiating team",
+                        selectedTeam = teams.find { it.team.id == editedMatch.match.teamOfficialId },
+                        expanded = showRefDropdown,
+                        onExpandedChange = { showRefDropdown = it },
+                        teams = teams,
+                        onTeamSelected = { team ->
+                            editedMatch = editedMatch.copy(
+                                match = editedMatch.match.copy(
+                                    teamOfficialId = team?.team?.id,
+                                    officialCheckedIn = if (team == null) false else editedMatch.match.officialCheckedIn,
+                                ),
+                            )
+                            showRefDropdown = false
+                        },
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = editedMatch.match.officialCheckedIn == true,
+                            enabled = !editedMatch.match.teamOfficialId.isNullOrBlank(),
+                            onCheckedChange = { checkedIn ->
+                                editedMatch = editedMatch.copy(
+                                    match = editedMatch.match.copy(officialCheckedIn = checkedIn),
+                                )
+                            },
                         )
-                        showRefDropdown = false
-                    })
+                        Text(
+                            text = "Officiating team checked in",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
             }
 
-            // Scores Section
             item {
                 Text(
-                    text = "Scores",
+                    text = "Match Rules",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Medium
                 )
             }
 
             item {
-                IndividualScoreInputSection(
-                    team1Name = teams.find { it.team.id == editedMatch.match.team1Id }
-                        ?.toTeamDisplayLabel()
-                        ?: "Team 1",
-                    team2Name = teams.find { it.team.id == editedMatch.match.team2Id }
-                        ?.toTeamDisplayLabel()
-                        ?: "Team 2",
-                    team1Scores = editedMatch.match.team1Points,
-                    team2Scores = editedMatch.match.team2Points,
-                    onTeam1ScoreChange = { newScores ->
-                        editedMatch = editedMatch.copy(
-                            match = editedMatch.match.copy(team1Points = newScores)
-                        )
-                    },
-                    onTeam2ScoreChange = { newScores ->
-                        editedMatch = editedMatch.copy(
-                            match = editedMatch.match.copy(team2Points = newScores)
-                        )
-                    })
-            }
-
-            if (isSetBasedPolicy || isTimedPolicy) {
-                item {
-                    Text(
-                        text = "Match Rules",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Medium
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    StandardTextField(
+                        value = policySegmentLabel,
+                        onValueChange = { value ->
+                            policySegmentLabel = value
+                            policyTouched = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = "Segment label",
+                        placeholder = "Set, half, quarter, inning...",
                     )
-                }
-
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (isSetBasedPolicy) {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Text("Score limits", style = MaterialTheme.typography.bodySmall)
-                                StandardTextField(
-                                    value = policyTargetsText,
-                                    onValueChange = { value ->
-                                        policyTargetsText = value.filter { char -> char.isDigit() || char == ',' || char == ' ' }
-                                        policyTouched = true
-                                    },
-                                    placeholder = "25, 25, 15",
-                                )
-                            }
-                        }
-                        if (isTimedPolicy) {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Text("Match minutes", style = MaterialTheme.typography.bodySmall)
-                                StandardTextField(
-                                    value = policyMatchMinutesText,
-                                    onValueChange = { value ->
-                                        policyMatchMinutesText = value.filter(Char::isDigit)
-                                        policyTouched = true
-                                    },
-                                    placeholder = "60",
-                                )
-                            }
+                    NumericStepperField(
+                        label = "${normalizeHostMatchSegmentLabel(policySegmentLabel, "Segment")} count",
+                        value = policySegmentCount,
+                        minimum = 1,
+                        enabled = policyScoringModel != "POINTS_ONLY",
+                        onValueChange = ::updateSegmentCount,
+                    )
+                    if (isSetBasedPolicy) {
+                        Text(
+                            text = "Score limits",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        policyTargetInputs.forEachIndexed { index, targetInput ->
+                            StandardTextField(
+                                value = targetInput,
+                                onValueChange = { value ->
+                                    val nextInputs = policyTargetInputs.toMutableList()
+                                    nextInputs[index] = value.filter(Char::isDigit)
+                                    policyTargetInputs = nextInputs
+                                    policyTouched = true
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = "${normalizeHostMatchSegmentLabel(policySegmentLabel, "Set")} ${index + 1} score limit",
+                                keyboardType = "number",
+                                placeholder = initialPolicyTarget.toString(),
+                            )
                         }
                     }
+                    if (isTimedPolicy) {
+                        NumericStepperField(
+                            label = "Segment length (min)",
+                            value = policySegmentMinutesText.toIntOrNull() ?: 0,
+                            minimum = 1,
+                            onValueChange = { minutes ->
+                                policySegmentMinutesText = minutes.toString()
+                                policySegmentMinutesTouched = true
+                                policyTouched = true
+                            },
+                            onTextValueChange = { value ->
+                                policySegmentMinutesText = value.filter(Char::isDigit)
+                                policySegmentMinutesTouched = true
+                                policyTouched = true
+                            },
+                        )
+                    }
                 }
+            }
+
+            item {
+                Text(
+                    text = "Match State",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+
+            item {
+                val activeRules = initialPolicyRules.copy(
+                    segmentCount = policySegmentCount,
+                    segmentLabel = normalizeHostMatchSegmentLabel(policySegmentLabel, "Segment"),
+                    setPointTargets = policyTargetInputs.mapNotNull { target -> target.toIntOrNull() },
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Status: ${hostMatchStatusLabel(scoreDrafts, activeRules, matchStarted, resultType)}",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    MatchResultTypeSelectionField(
+                        selectedResultType = resultType,
+                        expanded = showResultTypeDropdown,
+                        onExpandedChange = { showResultTypeDropdown = it },
+                        onResultTypeSelected = { selectedResultType ->
+                            resultType = selectedResultType
+                            if (selectedResultType != "FORFEIT") forfeitingEventTeamId = null
+                            if (selectedResultType != "REGULATION") matchStarted = false
+                            showResultTypeDropdown = false
+                        },
+                    )
+                    if (resultType == "FORFEIT") {
+                        ForfeitingTeamSelectionField(
+                            selectedTeamId = forfeitingEventTeamId,
+                            team1Id = editedMatch.match.team1Id,
+                            team1Name = teams.find { it.team.id == editedMatch.match.team1Id }
+                                ?.toTeamDisplayLabel() ?: "Team 1",
+                            team2Id = editedMatch.match.team2Id,
+                            team2Name = teams.find { it.team.id == editedMatch.match.team2Id }
+                                ?.toTeamDisplayLabel() ?: "Team 2",
+                            expanded = showForfeitingTeamDropdown,
+                            onExpandedChange = { showForfeitingTeamDropdown = it },
+                            onTeamSelected = { teamId ->
+                                forfeitingEventTeamId = teamId
+                                showForfeitingTeamDropdown = false
+                            },
+                        )
+                    }
+                    if (resultType != "REGULATION") {
+                        StandardTextField(
+                            value = statusReasonText,
+                            onValueChange = { statusReasonText = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = "Reason",
+                            placeholder = "Optional note",
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = matchStarted,
+                            enabled = resultType == "REGULATION",
+                            onCheckedChange = { started ->
+                                matchStarted = started
+                                if (!started) {
+                                    scoreDrafts = scoreDrafts.map { draft -> draft.copy(confirmed = false) }
+                                }
+                            },
+                        )
+                        Text("Match started")
+                    }
+                }
+            }
+
+            item {
+                Text(
+                    text = if (isSetBasedPolicy) {
+                        "Scores & ${normalizeHostMatchSegmentLabel(policySegmentLabel, "Segment").lowercase()} confirmation"
+                    } else {
+                        "Scores & ${normalizeHostMatchSegmentLabel(policySegmentLabel, "Segment").lowercase()} state"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+
+            items(scoreDrafts.size, key = { index -> scoreDrafts[index].sequence }) { index ->
+                val draft = scoreDrafts[index]
+                val pointTargets = policyTargetInputs.mapNotNull { target -> target.toIntOrNull() }
+                HostMatchScoreEditor(
+                    segmentLabel = normalizeHostMatchSegmentLabel(policySegmentLabel, "Segment"),
+                    draft = draft,
+                    team1Name = teams.find { it.team.id == editedMatch.match.team1Id }
+                        ?.toTeamDisplayLabel() ?: "Team 1",
+                    team2Name = teams.find { it.team.id == editedMatch.match.team2Id }
+                        ?.toTeamDisplayLabel() ?: "Team 2",
+                    scoresEnabled = resultType == "REGULATION",
+                    confirmationEnabled = resultType == "REGULATION" &&
+                        (draft.confirmed || canToggleHostMatchConfirmation(scoreDrafts, index, matchStarted)),
+                    confirmationLabel = if (isSetBasedPolicy) "Confirmed" else "Complete",
+                    onTeam1ScoreChange = { score ->
+                        scoreDrafts = editHostMatchScoreDraft(
+                            drafts = scoreDrafts,
+                            index = index,
+                            team = HostMatchScoreTeam.TEAM1,
+                            score = score,
+                        )
+                    },
+                    onTeam2ScoreChange = { score ->
+                        scoreDrafts = editHostMatchScoreDraft(
+                            drafts = scoreDrafts,
+                            index = index,
+                            team = HostMatchScoreTeam.TEAM2,
+                            score = score,
+                        )
+                    },
+                    onConfirmationChange = { confirmed ->
+                        val confirmation = applyHostMatchConfirmation(
+                            drafts = scoreDrafts,
+                            index = index,
+                            checked = confirmed,
+                            scoringModel = policyScoringModel,
+                            pointTargets = pointTargets,
+                            supportsDraw = initialPolicyRules.supportsDraw,
+                        )
+                        if (confirmation.errorMessage != null) {
+                            validationError = confirmation.errorMessage
+                        } else {
+                            scoreDrafts = confirmation.drafts
+                        }
+                    },
+                )
             }
 
             // Timing Section
@@ -704,6 +1027,34 @@ private fun MatchEditDialogContent(
                     },
                 )
             }
+
+            item {
+                Text(
+                    text = "Match details preview",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+
+            item {
+                val activeRules = initialPolicyRules.copy(
+                    segmentCount = policySegmentCount,
+                    segmentLabel = normalizeHostMatchSegmentLabel(policySegmentLabel, "Segment"),
+                    setPointTargets = policyTargetInputs.mapNotNull { target -> target.toIntOrNull() },
+                )
+                HostMatchDetailsPreview(
+                    team1Name = teams.find { it.team.id == editedMatch.match.team1Id }
+                        ?.toTeamDisplayLabel() ?: "Team 1",
+                    team2Name = teams.find { it.team.id == editedMatch.match.team2Id }
+                        ?.toTeamDisplayLabel() ?: "Team 2",
+                    segmentLabel = normalizeHostMatchSegmentLabel(policySegmentLabel, "Segment"),
+                    drafts = scoreDrafts,
+                    status = hostMatchStatusLabel(scoreDrafts, activeRules, matchStarted, resultType),
+                    scoringModel = policyScoringModel,
+                    fieldLabel = fields.find { field -> field.field.id == editedMatch.match.fieldId }
+                        ?.field?.fieldNumber?.let { fieldNumber -> "Field $fieldNumber" },
+                )
+            }
         }
 
         Row(
@@ -786,54 +1137,25 @@ private fun MatchEditDialogContent(
                         }
                     }
 
-                    val basePolicyRules = editedMatch.match.matchRulesSnapshot
-                        ?: editedMatch.match.resolvedMatchRules
-                        ?: ResolvedMatchRulesMVP(scoringModel = "SETS", segmentLabel = "Set")
-                    val policySnapshot = if (policyTouched || editedMatch.match.matchRulesSnapshot != null) {
-                        val scoringModel = basePolicyRules.scoringModel
-                            .trim()
-                            .uppercase()
-                            .takeIf { it in setOf("SETS", "PERIODS", "INNINGS", "POINTS_ONLY") }
-                            ?: "SETS"
-                        val segmentCount = when (scoringModel) {
-                            "SETS" -> actualSetCount(
-                                editedMatch.match.team1Points,
-                                editedMatch.match.team2Points,
-                                editedMatch.match.setResults,
-                                editedMatch.match.segments.size,
-                            )
-                            "POINTS_ONLY" -> 1
-                            else -> basePolicyRules.segmentCount.coerceAtLeast(1)
-                        }
-                        val targets = resizePolicyTargets(
-                            targets = parsePositiveIntList(policyTargetsText),
-                            count = segmentCount,
-                            fallback = basePolicyRules.setPointTargets.firstOrNull { it > 0 } ?: 21,
-                        )
-                        val matchMinutes = policyMatchMinutesText.toIntOrNull()?.takeIf { it > 0 }
-                        val segmentMinutes = if (scoringModel == "SETS") {
-                            null
-                        } else {
-                            matchMinutes?.let { minutes ->
-                                (minutes / segmentCount.coerceAtLeast(1)).coerceAtLeast(1)
-                            } ?: basePolicyRules.timekeeping.segmentDurationMinutes
-                        }
-                        basePolicyRules.copy(
-                            scoringModel = scoringModel,
-                            segmentCount = segmentCount,
-                            segmentLabel = basePolicyRules.segmentLabel.ifBlank {
-                                if (scoringModel == "SETS") "Set" else "Total"
-                            },
-                            setPointTargets = if (scoringModel == "SETS") targets else emptyList(),
-                            timekeeping = basePolicyRules.timekeeping.copy(
-                                segmentDurationMinutes = segmentMinutes,
-                            ),
-                        )
-                    } else {
-                        null
+                    if (resultType == "FORFEIT" && forfeitingEventTeamId.isNullOrBlank()) {
+                        validationError = "Select the forfeiting team."
+                        return@Button
                     }
 
-                    val nextMatch = editedMatch.match.copy(
+                    val policyBuild = buildHostMatchPolicySnapshot(
+                        baseRules = initialPolicyRules,
+                        segmentLabel = policySegmentLabel,
+                        segmentCount = policySegmentCount,
+                        targetInputs = policyTargetInputs,
+                        segmentDurationMinutes = policySegmentMinutesText.toIntOrNull(),
+                        segmentDurationTouched = policySegmentMinutesTouched,
+                    )
+                    if (policyBuild.errorMessage != null || policyBuild.snapshot == null) {
+                        validationError = policyBuild.errorMessage ?: "Match rules are invalid."
+                        return@Button
+                    }
+                    val activePolicyRules = policyBuild.snapshot
+                    val scheduledMatch = editedMatch.match.copy(
                         start = startTime,
                         end = endTime,
                         actualStart = actualStartTime?.toString(),
@@ -841,8 +1163,26 @@ private fun MatchEditDialogContent(
                         losersBracket = losersBracket,
                         winnerNextMatchId = resolvedWinnerNext,
                         loserNextMatchId = resolvedLoserNext,
-                        matchRulesSnapshot = policySnapshot ?: editedMatch.match.matchRulesSnapshot,
-                        resolvedMatchRules = policySnapshot ?: editedMatch.match.resolvedMatchRules,
+                    )
+                    val scoredMatch = buildHostMatchScorePayload(
+                        match = scheduledMatch,
+                        drafts = scoreDrafts,
+                        rules = activePolicyRules,
+                        matchStarted = matchStarted,
+                        resultType = resultType,
+                        forfeitingEventTeamId = forfeitingEventTeamId,
+                        statusReason = statusReasonText,
+                        exceptionalActualEnd = Clock.System.now().toString(),
+                    )
+                    val shouldPersistPolicySnapshot = policyTouched ||
+                        editedMatch.match.matchRulesSnapshot != null
+                    val nextMatch = scoredMatch.copy(
+                        matchRulesSnapshot = if (shouldPersistPolicySnapshot) {
+                            activePolicyRules
+                        } else {
+                            editedMatch.match.matchRulesSnapshot
+                        },
+                        resolvedMatchRules = activePolicyRules,
                     )
                     onConfirm(editedMatch.copy(match = nextMatch))
                     onDismissRequest()
@@ -855,122 +1195,260 @@ private fun MatchEditDialogContent(
 }
 
 @Composable
-fun IndividualScoreInputSection(
+private fun NumericStepperField(
+    label: String,
+    value: Int,
+    minimum: Int,
+    enabled: Boolean = true,
+    onValueChange: (Int) -> Unit,
+    onTextValueChange: ((String) -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(
+            onClick = { onValueChange((value - 1).coerceAtLeast(minimum)) },
+            enabled = enabled && value > minimum,
+        ) {
+            Icon(Icons.Default.Remove, contentDescription = "Decrease $label")
+        }
+        StandardTextField(
+            value = if (value <= 0) "" else value.toString(),
+            onValueChange = { nextValue ->
+                val filtered = nextValue.filter(Char::isDigit)
+                if (onTextValueChange != null) {
+                    onTextValueChange(filtered)
+                } else {
+                    filtered.toIntOrNull()?.takeIf { next -> next >= minimum }?.let(onValueChange)
+                }
+            },
+            modifier = Modifier.weight(1f),
+            label = label,
+            keyboardType = "number",
+            enabled = enabled,
+        )
+        IconButton(
+            onClick = { onValueChange(value.coerceAtLeast(minimum - 1) + 1) },
+            enabled = enabled,
+        ) {
+            Icon(Icons.Default.Add, contentDescription = "Increase $label")
+        }
+    }
+}
+
+@Composable
+private fun HostMatchScoreEditor(
+    segmentLabel: String,
+    draft: HostMatchScoreDraft,
     team1Name: String,
     team2Name: String,
-    team1Scores: List<Int>,
-    team2Scores: List<Int>,
-    onTeam1ScoreChange: (List<Int>) -> Unit,
-    onTeam2ScoreChange: (List<Int>) -> Unit
+    scoresEnabled: Boolean,
+    confirmationEnabled: Boolean,
+    confirmationLabel: String,
+    onTeam1ScoreChange: (Int) -> Unit,
+    onTeam2ScoreChange: (Int) -> Unit,
+    onConfirmationChange: (Boolean) -> Unit,
 ) {
-    Column(
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
     ) {
-        // Team 1 Scores
-        Text(
-            text = team1Name,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium
-        )
-
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.weight(1f)
+            Text(
+                text = "$segmentLabel ${draft.sequence}",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(team1Scores.size) { index ->
-                    var scoreText by remember(team1Scores[index]) {
-                        mutableStateOf(team1Scores[index].toString())
-                    }
-
-                    StandardTextField(
-                        value = scoreText,
-                        onValueChange = { newText ->
-                            scoreText = newText
-                            val newScore = newText.toIntOrNull() ?: 0
-                            val newScores = team1Scores.toMutableList()
-                            newScores[index] = newScore
-                            onTeam1ScoreChange(newScores)
-                        },
-                        modifier = Modifier.width(60.dp),
-                        placeholder = "0",
-                        textStyle = MaterialTheme.typography.bodyMedium
-                    )
-                }
+                StandardTextField(
+                    value = draft.team1Score.toString(),
+                    onValueChange = { value ->
+                        onTeam1ScoreChange(value.filter(Char::isDigit).toIntOrNull() ?: 0)
+                    },
+                    modifier = Modifier.weight(1f),
+                    label = team1Name,
+                    keyboardType = "number",
+                    enabled = scoresEnabled,
+                )
+                StandardTextField(
+                    value = draft.team2Score.toString(),
+                    onValueChange = { value ->
+                        onTeam2ScoreChange(value.filter(Char::isDigit).toIntOrNull() ?: 0)
+                    },
+                    modifier = Modifier.weight(1f),
+                    label = team2Name,
+                    keyboardType = "number",
+                    enabled = scoresEnabled,
+                )
             }
-
-            // Add set button
-            IconButton(
-                onClick = {
-                    onTeam1ScoreChange(team1Scores + 0)
-                }) {
-                Icon(Icons.Default.Add, contentDescription = "Add set")
-            }
-
-            // Remove set button
-            if (team1Scores.size > 1) {
-                IconButton(
-                    onClick = {
-                        onTeam1ScoreChange(team1Scores.dropLast(1))
-                    }) {
-                    Icon(Icons.Default.Remove, contentDescription = "Remove set")
-                }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = draft.confirmed,
+                    enabled = confirmationEnabled,
+                    onCheckedChange = onConfirmationChange,
+                    modifier = Modifier.semantics {
+                        contentDescription = "$segmentLabel ${draft.sequence} confirmation"
+                    },
+                )
+                Text(
+                    text = confirmationLabel,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
             }
         }
+    }
+}
 
-        // Team 2 Scores
-        Text(
-            text = team2Name,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MatchResultTypeSelectionField(
+    selectedResultType: String,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    onResultTypeSelected: (String) -> Unit,
+) {
+    val options = listOf(
+        "REGULATION" to "Regulation result",
+        "FORFEIT" to "Forfeit",
+        "NO_CONTEST" to "No contest / cancelled",
+        "SUSPENDED" to "Suspended",
+    )
+    val selectedLabel = options.firstOrNull { option -> option.first == selectedResultType }?.second
+        ?: options.first().second
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = onExpandedChange,
+    ) {
+        StandardTextField(
+            value = selectedLabel,
+            onValueChange = {},
+            modifier = Modifier
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
+                .fillMaxWidth(),
+            label = "Result type",
+            readOnly = true,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
         )
-
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { onExpandedChange(false) },
         ) {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.weight(1f)
+            options.forEach { (value, label) ->
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = { onResultTypeSelected(value) },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ForfeitingTeamSelectionField(
+    selectedTeamId: String?,
+    team1Id: String?,
+    team1Name: String,
+    team2Id: String?,
+    team2Name: String,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    onTeamSelected: (String?) -> Unit,
+) {
+    val options = listOfNotNull(
+        team1Id?.takeIf(String::isNotBlank)?.let { teamId -> teamId to team1Name },
+        team2Id?.takeIf(String::isNotBlank)?.let { teamId -> teamId to team2Name },
+    )
+    val selectedLabel = options.firstOrNull { option -> option.first == selectedTeamId }?.second
+        ?: "Select team"
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = onExpandedChange,
+    ) {
+        StandardTextField(
+            value = selectedLabel,
+            onValueChange = {},
+            modifier = Modifier
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
+                .fillMaxWidth(),
+            label = "Forfeiting team",
+            readOnly = true,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { onExpandedChange(false) },
+        ) {
+            options.forEach { (teamId, teamName) ->
+                DropdownMenuItem(
+                    text = { Text(teamName) },
+                    onClick = { onTeamSelected(teamId) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HostMatchDetailsPreview(
+    team1Name: String,
+    team2Name: String,
+    segmentLabel: String,
+    drafts: List<HostMatchScoreDraft>,
+    status: String,
+    scoringModel: String,
+    fieldLabel: String?,
+) {
+    val team1Total: Int
+    val team2Total: Int
+    if (scoringModel == "SETS") {
+        team1Total = drafts.count { draft -> draft.confirmed && draft.team1Score > draft.team2Score }
+        team2Total = drafts.count { draft -> draft.confirmed && draft.team2Score > draft.team1Score }
+    } else {
+        team1Total = drafts.sumOf(HostMatchScoreDraft::team1Score)
+        team2Total = drafts.sumOf(HostMatchScoreDraft::team2Score)
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                items(team2Scores.size) { index ->
-                    var scoreText by remember(team2Scores[index]) {
-                        mutableStateOf(team2Scores[index].toString())
-                    }
-
-                    StandardTextField(
-                        value = scoreText,
-                        onValueChange = { newText ->
-                            scoreText = newText
-                            val newScore = newText.toIntOrNull() ?: 0
-                            val newScores = team2Scores.toMutableList()
-                            newScores[index] = newScore
-                            onTeam2ScoreChange(newScores)
-                        },
-                        modifier = Modifier.width(60.dp),
-                        placeholder = "0",
-                        textStyle = MaterialTheme.typography.bodyMedium
-                    )
-                }
+                Text(status, style = MaterialTheme.typography.labelLarge)
+                fieldLabel?.let { Text(it, style = MaterialTheme.typography.labelMedium) }
             }
-
-            // Add set button
-            IconButton(
-                onClick = {
-                    onTeam2ScoreChange(team2Scores + 0)
-                }) {
-                Icon(Icons.Default.Add, contentDescription = "Add set")
-            }
-
-            // Remove set button
-            if (team2Scores.size > 1) {
-                IconButton(
-                    onClick = {
-                        onTeam2ScoreChange(team2Scores.dropLast(1))
-                    }) {
-                    Icon(Icons.Default.Remove, contentDescription = "Remove set")
-                }
+            Text(
+                text = "$team1Name  $team1Total – $team2Total  $team2Name",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            drafts.forEach { draft ->
+                Text(
+                    text = "$segmentLabel ${draft.sequence}: ${draft.team1Score} – ${draft.team2Score}" +
+                        if (draft.confirmed) "  • Confirmed" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
@@ -1106,27 +1584,6 @@ private fun EventOfficialSelectionField(
 }
 
 private fun normalizeToken(value: String?): String? = value?.trim()?.takeIf(String::isNotBlank)
-
-private fun parsePositiveIntList(value: String): List<Int> =
-    value.split(',')
-        .mapNotNull { entry -> entry.trim().toIntOrNull()?.takeIf { it > 0 } }
-
-private fun resizePolicyTargets(targets: List<Int>, count: Int, fallback: Int): List<Int> {
-    val normalizedCount = count.coerceAtLeast(1)
-    val next = targets.take(normalizedCount).toMutableList()
-    val fill = next.lastOrNull()?.takeIf { it > 0 } ?: fallback.coerceAtLeast(1)
-    while (next.size < normalizedCount) {
-        next += fill
-    }
-    return next
-}
-
-private fun actualSetCount(
-    team1Points: List<Int>,
-    team2Points: List<Int>,
-    setResults: List<Int>,
-    segmentCount: Int,
-): Int = maxOf(team1Points.size, team2Points.size, setResults.size, segmentCount, 1)
 
 private fun parseInstantToken(value: String?): Instant? =
     normalizeToken(value)?.let { token -> runCatching { Instant.parse(token) }.getOrNull() }
