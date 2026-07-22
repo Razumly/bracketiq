@@ -16,6 +16,36 @@ import StripePaymentSheet
 class IOSNativeViewFactory: NativeViewFactory {
     static var shared = IOSNativeViewFactory()
 
+    func createNativeDiscoverViewController(
+        component: EventSearchComponent,
+        mapComponent: MapComponent,
+        bottomPadding: Float,
+        shouldShowOnboarding: Bool,
+        onOnboardingCompleted: @escaping () -> Void
+    ) -> UIViewController {
+        NativeDiscoverViewController(
+            component: component,
+            mapComponent: mapComponent,
+            bottomPadding: CGFloat(bottomPadding),
+            shouldShowOnboarding: shouldShowOnboarding,
+            onOnboardingCompleted: onOnboardingCompleted
+        )
+    }
+
+    func updateNativeDiscoverViewController(
+        viewController: UIViewController,
+        bottomPadding: Float,
+        shouldShowOnboarding: Bool
+    ) {
+        guard let discoverController = viewController as? NativeDiscoverViewController else {
+            return
+        }
+        discoverController.update(
+            bottomPadding: CGFloat(bottomPadding),
+            shouldShowOnboarding: shouldShowOnboarding
+        )
+    }
+
     func createNativeEventCard(
         data: NativeEventCardData,
         bottomPadding: Float,

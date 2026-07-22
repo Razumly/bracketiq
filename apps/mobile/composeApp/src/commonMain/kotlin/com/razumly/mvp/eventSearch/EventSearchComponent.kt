@@ -15,10 +15,13 @@ import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.Facility
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.activeAffiliateRentalFacilities
+import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateRentalUrl
+import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateUrl
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
@@ -32,6 +35,7 @@ import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.eventSearch.util.EventFilter
+import com.razumly.mvp.eventSearch.tabs.organizations.toMvpPlaceOrNull
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
 import dev.icerock.moko.permissions.DeniedAlwaysException
@@ -100,6 +104,7 @@ interface EventSearchComponent {
     fun suggestEvents(searchQuery: String)
     fun suggestOrganizations(searchQuery: String, rentalsOnly: Boolean = false)
     fun suggestTeams(searchQuery: String)
+    fun nativeDiscoverSearchSnapshot(query: String): NativeDiscoverSearchSnapshot
     fun updateFilter(update: EventFilter.() -> EventFilter)
     fun updateOrganizationFilter(update: EventFilter.() -> EventFilter)
     fun updateOrganizationTagSlugs(tagSlugs: Set<String>)
@@ -114,6 +119,33 @@ interface EventSearchComponent {
     fun loadRentalAvailability(organizationId: String, rangeStart: Instant, rangeEnd: Instant)
     fun clearRentalFieldOptions()
     fun clearRentalBusyBlocks()
+    fun eventFilterSnapshot(): NativeDiscoverFilterSnapshot
+    fun organizationFilterSnapshot(): NativeDiscoverFilterSnapshot
+    fun applyNativeEventFilters(
+        priceEnabled: Boolean,
+        priceMin: Double,
+        priceMax: Double,
+        startDate: Instant,
+        endDate: Instant?,
+        sportIds: List<String>,
+        tagSlugs: List<String>,
+    )
+    fun applyNativeOrganizationFilters(
+        sportIds: List<String>,
+        tagSlugs: List<String>,
+        divisionGenders: List<String>,
+        skillDivisionTypeIds: List<String>,
+        ageDivisionTypeIds: List<String>,
+        divisionPriceMinEnabled: Boolean,
+        divisionPriceMin: Double,
+        divisionPriceMaxEnabled: Boolean,
+        divisionPriceMax: Double,
+    )
+    fun clearNativeEventFilters()
+    fun clearNativeOrganizationFilters()
+    fun selectTeamFromDiscover(team: Team): String?
+    fun selectRentalFromDiscover(organization: Organization): String?
+    fun discoverOrganizationMapPlaces(rentalsOnly: Boolean): List<MVPPlace>
 }
 
 data class RentalFieldOption(
@@ -128,6 +160,9 @@ data class RentalBusyBlock(
     val start: kotlin.time.Instant,
     val end: kotlin.time.Instant,
 )
+
+internal fun shouldReportDiscoverFailure(error: Throwable?): Boolean =
+    error != null && error !is CancellationException
 
 class DefaultEventSearchComponent(
     componentContext: ComponentContext,
@@ -360,6 +395,121 @@ class DefaultEventSearchComponent(
         navigationHandler.navigateToCreate()
     }
 
+    override fun eventFilterSnapshot(): NativeDiscoverFilterSnapshot =
+        _filter.value.toNativeDiscoverFilterSnapshot()
+
+    override fun organizationFilterSnapshot(): NativeDiscoverFilterSnapshot =
+        _organizationFilter.value.toNativeDiscoverFilterSnapshot()
+
+    override fun applyNativeEventFilters(
+        priceEnabled: Boolean,
+        priceMin: Double,
+        priceMax: Double,
+        startDate: Instant,
+        endDate: Instant?,
+        sportIds: List<String>,
+        tagSlugs: List<String>,
+    ) {
+        val priceRange = if (priceEnabled && priceMin.isFinite() && priceMax.isFinite() &&
+            priceMin >= 0.0 && priceMin <= priceMax
+        ) {
+            priceMin to priceMax
+        } else {
+            null
+        }
+        updateFilter {
+            copy(
+                price = priceRange,
+                date = startDate to endDate,
+                sportIds = normalizedDiscoverFilterValues(sportIds),
+                tagSlugs = normalizedDiscoverFilterValues(tagSlugs),
+            )
+        }
+    }
+
+    override fun applyNativeOrganizationFilters(
+        sportIds: List<String>,
+        tagSlugs: List<String>,
+        divisionGenders: List<String>,
+        skillDivisionTypeIds: List<String>,
+        ageDivisionTypeIds: List<String>,
+        divisionPriceMinEnabled: Boolean,
+        divisionPriceMin: Double,
+        divisionPriceMaxEnabled: Boolean,
+        divisionPriceMax: Double,
+    ) {
+        updateOrganizationFilter {
+            copy(
+                sportIds = normalizedDiscoverFilterValues(sportIds),
+                tagSlugs = normalizedDiscoverFilterValues(tagSlugs),
+                divisionGenders = normalizedDiscoverFilterValues(divisionGenders),
+                skillDivisionTypeIds = normalizedDiscoverFilterValues(skillDivisionTypeIds),
+                ageDivisionTypeIds = normalizedDiscoverFilterValues(ageDivisionTypeIds),
+                divisionPriceMin = divisionPriceMin
+                    .takeIf { divisionPriceMinEnabled && it.isFinite() && it >= 0.0 },
+                divisionPriceMax = divisionPriceMax
+                    .takeIf { divisionPriceMaxEnabled && it.isFinite() && it >= 0.0 },
+            )
+        }
+    }
+
+    override fun clearNativeEventFilters() {
+        updateFilter { EventFilter() }
+        selectRadius(0.0)
+    }
+
+    override fun clearNativeOrganizationFilters() {
+        updateOrganizationFilter { EventFilter() }
+        selectRadius(0.0)
+    }
+
+    override fun selectTeamFromDiscover(team: Team): String? {
+        val externalUrl = team.normalizedAffiliateUrl()
+        if (externalUrl == null) {
+            viewTeam(team)
+        }
+        return externalUrl
+    }
+
+    override fun selectRentalFromDiscover(organization: Organization): String? {
+        val externalUrl = organization.normalizedAffiliateRentalUrl()
+        AnalyticsTracker.capture(
+            AnalyticsEvent.RentalClicked,
+            buildMap {
+                put("organization_id", organization.id)
+                put("organization_name", organization.name)
+                put("source", "discover_rentals")
+                put("field_count", organization.fieldIds.size.toString())
+            },
+        )
+
+        if (externalUrl == null) {
+            viewOrganization(organization, OrganizationDetailTab.RENTALS)
+            return null
+        }
+
+        AnalyticsTracker.capture(
+            AnalyticsEvent.RentalOutboundClicked,
+            buildMap {
+                put("organization_id", organization.id)
+                put("organization_name", organization.name)
+                put("source", "discover_rentals")
+                putAll(AnalyticsTracker.destinationProperties(externalUrl))
+            },
+        )
+        return externalUrl
+    }
+
+    override fun discoverOrganizationMapPlaces(rentalsOnly: Boolean): List<MVPPlace> {
+        val source = if (rentalsOnly) _rentals.value else _organizations.value
+        val markerKind = if (rentalsOnly) {
+            MVPPlace.MARKER_KIND_RENTAL
+        } else {
+            MVPPlace.MARKER_KIND_ORGANIZATION
+        }
+        return source.mapNotNull { organization -> organization.toMvpPlaceOrNull(markerKind) }
+    }
+
     override fun suggestEvents(searchQuery: String) {
         val normalizedQuery = searchQuery.trim()
         if (normalizedQuery.length < SEARCH_MIN_QUERY_LENGTH) {
@@ -380,7 +530,9 @@ class DefaultEventSearchComponent(
                 .onSuccess { (events, _) ->
                     _suggestedEvents.value = events
                 }.onFailure { e ->
-                    _errorState.value = ErrorMessage("Failed to fetch events: ${e.userMessage()}")
+                    if (shouldReportDiscoverFailure(e)) {
+                        _errorState.value = ErrorMessage("Failed to fetch events: ${e.userMessage()}")
+                    }
                 }
         }
     }
@@ -402,7 +554,9 @@ class DefaultEventSearchComponent(
             )
             if (organizationsResult.isFailure) {
                 val e = organizationsResult.exceptionOrNull()
-                _errorState.value = ErrorMessage("Failed to fetch organizations: ${e?.userMessage() ?: "Unknown error"}")
+                if (shouldReportDiscoverFailure(e)) {
+                    _errorState.value = ErrorMessage("Failed to fetch organizations: ${e?.userMessage() ?: "Unknown error"}")
+                }
                 return@launch
             }
             val organizations = organizationsResult.getOrNull().orEmpty()
@@ -440,10 +594,21 @@ class DefaultEventSearchComponent(
                     _suggestedTeams.value = teams
                 }
                 .onFailure { e ->
-                    _errorState.value = ErrorMessage("Failed to fetch teams: ${e.userMessage()}")
+                    if (shouldReportDiscoverFailure(e)) {
+                        _errorState.value = ErrorMessage("Failed to fetch teams: ${e.userMessage()}")
+                    }
                 }
         }
     }
+
+    override fun nativeDiscoverSearchSnapshot(query: String): NativeDiscoverSearchSnapshot =
+        buildNativeDiscoverSearchSnapshot(
+            query = query,
+            events = _events.value,
+            organizations = _organizations.value,
+            teams = _teams.value,
+            rentals = _rentals.value,
+        )
 
     override fun loadMoreEvents() {
         loadMoreEvents(showLoading = true, reportErrors = true)

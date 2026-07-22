@@ -128,14 +128,24 @@ class GuideController(
         finishActiveGuide()
     }
 
+    fun completeGuide(guideId: String) {
+        val normalizedGuideId = guideId.trim().takeIf(String::isNotBlank) ?: return
+        if (normalizedGuideId in completedGuideIds) return
+
+        completedGuideIds = completedGuideIds + normalizedGuideId
+        if (activeGuide?.id == normalizedGuideId) {
+            clearActiveGuide()
+        }
+        onGuideCompleted(normalizedGuideId)
+    }
+
     fun cancel() {
         clearActiveGuide()
     }
 
     private fun finishActiveGuide() {
         val guideId = activeGuide?.id ?: return
-        onGuideCompleted(guideId)
-        clearActiveGuide()
+        completeGuide(guideId)
     }
 
     private fun clearActiveGuide() {

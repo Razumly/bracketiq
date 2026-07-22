@@ -82,9 +82,9 @@ fun Organization.activeAffiliateRentalFacilities(): List<Facility> =
     facilities.filter { facility -> facility.isActiveAffiliateRental() }
 
 fun Organization.resolvedLogoRef(): String? =
-    logoUrl?.trim()?.takeIf { it.isNotBlank() }
+    logoId?.trim()?.takeIf { it.isNotBlank() }
+        ?: logoUrl?.trim()?.takeIf { it.isNotBlank() }
         ?: imageUrl?.trim()?.takeIf { it.isNotBlank() }
-        ?: logoId?.trim()?.takeIf { it.isNotBlank() }
 
 fun Organization.normalizedAffiliateRentalUrl(): String? =
     activeAffiliateRentalFacilities().firstNotNullOfOrNull { facility -> facility.normalizedAffiliateUrl() }

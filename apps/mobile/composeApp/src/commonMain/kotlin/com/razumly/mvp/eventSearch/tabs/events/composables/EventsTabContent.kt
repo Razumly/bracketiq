@@ -16,10 +16,12 @@ fun EventsTabContent(
     lazyListState: LazyListState,
     isLoadingMore: Boolean,
     hasMoreEvents: Boolean,
+    showPagingStatus: Boolean = true,
+    emptyMessage: String = "No events found.",
     onLoadMore: () -> Unit,
     onMapClick: (Offset, Event) -> Unit,
     onEventClick: (Event) -> Unit,
-    onCreateEventClick: () -> Unit,
+    onCreateEventClick: (() -> Unit)?,
     firstItemGuideTargetId: String? = null,
 ) {
     EventList(
@@ -30,6 +32,8 @@ fun EventsTabContent(
         lazyListState = lazyListState,
         isLoadingMore = isLoadingMore,
         hasMoreEvents = hasMoreEvents,
+        showPagingStatus = showPagingStatus,
+        emptyMessage = emptyMessage,
         onLoadMore = onLoadMore,
         onMapClick = onMapClick,
         onEventClick = onEventClick,

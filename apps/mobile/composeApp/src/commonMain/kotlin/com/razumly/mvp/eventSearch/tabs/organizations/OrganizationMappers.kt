@@ -17,7 +17,7 @@ private fun resolveDisplayImageUrl(value: String?): String? {
     }
 }
 
-internal fun Organization.toMvpPlaceOrNull(
+fun Organization.toMvpPlaceOrNull(
     markerKind: String = MVPPlace.MARKER_KIND_ORGANIZATION,
 ): MVPPlace? {
     val coords = coordinates ?: return null

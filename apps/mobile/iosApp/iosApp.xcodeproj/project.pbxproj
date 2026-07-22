@@ -17,6 +17,15 @@
 		1EBA84712D27457000059C7F /* location.gpx in Resources */ = {isa = PBXBuildFile; fileRef = 1EBA84702D27456400059C7F /* location.gpx */; };
 		1ECBBF622DD6BBAB0048A444 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 1ECBBF612DD6BBAB0048A444 /* GoogleService-Info.plist */; };
 		1ECBBF652DD83E680048A444 /* GoogleMaps in Frameworks */ = {isa = PBXBuildFile; productRef = 1ECBBF642DD83E680048A444 /* GoogleMaps */; };
+		3F1000010000000000000001 /* NativeDiscoverViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F0000010000000000000001 /* NativeDiscoverViewController.swift */; };
+		3F1000020000000000000002 /* NativeDiscoverScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F0000020000000000000002 /* NativeDiscoverScreen.swift */; };
+		3F1000030000000000000003 /* DiscoverSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F0000030000000000000003 /* DiscoverSearch.swift */; };
+		3F1000040000000000000004 /* DiscoverCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F0000040000000000000004 /* DiscoverCards.swift */; };
+		3F1000050000000000000005 /* DiscoverResults.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F0000050000000000000005 /* DiscoverResults.swift */; };
+		3F1000060000000000000006 /* DiscoverMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F0000060000000000000006 /* DiscoverMap.swift */; };
+		3F1000070000000000000007 /* DiscoverFilterSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F0000070000000000000007 /* DiscoverFilterSheet.swift */; };
+		3F1000080000000000000008 /* DiscoverFilterControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F0000080000000000000008 /* DiscoverFilterControls.swift */; };
+		3F1000090000000000000009 /* DiscoverOnboarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F0000090000000000000009 /* DiscoverOnboarding.swift */; };
 		1ECBBF6B2DD8409D0048A444 /* Secrets.plist in Resources */ = {isa = PBXBuildFile; fileRef = 1ECBBF6A2DD8409D0048A444 /* Secrets.plist */; };
 		2152FB042600AC8F00CF470E /* iOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2152FB032600AC8F00CF470E /* iOSApp.swift */; };
 		27A4C74EAF1211B7339ED786 /* WatchMatchRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37D84E230F9B282FA9736E6C /* WatchMatchRepository.swift */; };
@@ -51,6 +60,15 @@
 		1ECBBF6A2DD8409D0048A444 /* Secrets.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Secrets.plist; sourceTree = "<group>"; };
 		2152FB032600AC8F00CF470E /* iOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp.swift; sourceTree = "<group>"; };
 		2FA52BF72F30D57600A1D4E1 /* BIQ.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = BIQ.icon; sourceTree = "<group>"; };
+		3F0000010000000000000001 /* NativeDiscoverViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDiscoverViewController.swift; sourceTree = "<group>"; };
+		3F0000020000000000000002 /* NativeDiscoverScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDiscoverScreen.swift; sourceTree = "<group>"; };
+		3F0000030000000000000003 /* DiscoverSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverSearch.swift; sourceTree = "<group>"; };
+		3F0000040000000000000004 /* DiscoverCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverCards.swift; sourceTree = "<group>"; };
+		3F0000050000000000000005 /* DiscoverResults.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverResults.swift; sourceTree = "<group>"; };
+		3F0000060000000000000006 /* DiscoverMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverMap.swift; sourceTree = "<group>"; };
+		3F0000070000000000000007 /* DiscoverFilterSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverFilterSheet.swift; sourceTree = "<group>"; };
+		3F0000080000000000000008 /* DiscoverFilterControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverFilterControls.swift; sourceTree = "<group>"; };
+		3F0000090000000000000009 /* DiscoverOnboarding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverOnboarding.swift; sourceTree = "<group>"; };
 		2C9A7B002EFD701000C0DE01 /* WatchMatchOperationStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchMatchOperationStore.swift; sourceTree = "<group>"; };
 		2C9A7B022EFD711000C0DE01 /* WatchAuthConnectivity.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchAuthConnectivity.swift; sourceTree = "<group>"; };
 		2C9A7B052EFD721000C0DE01 /* WatchOfficialDemo.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchOfficialDemo.swift; sourceTree = "<group>"; };
@@ -124,6 +142,22 @@
 			name = watchOS;
 			sourceTree = "<group>";
 		};
+		3F2000010000000000000001 /* Discover */ = {
+			isa = PBXGroup;
+			children = (
+				3F0000010000000000000001 /* NativeDiscoverViewController.swift */,
+				3F0000020000000000000002 /* NativeDiscoverScreen.swift */,
+				3F0000030000000000000003 /* DiscoverSearch.swift */,
+				3F0000040000000000000004 /* DiscoverCards.swift */,
+				3F0000050000000000000005 /* DiscoverResults.swift */,
+				3F0000060000000000000006 /* DiscoverMap.swift */,
+				3F0000070000000000000007 /* DiscoverFilterSheet.swift */,
+				3F0000080000000000000008 /* DiscoverFilterControls.swift */,
+				3F0000090000000000000009 /* DiscoverOnboarding.swift */,
+			);
+			path = Discover;
+			sourceTree = "<group>";
+		};
 		7555FF72242A565900829871 = {
 			isa = PBXGroup;
 			children = (
@@ -151,6 +185,7 @@
 		7555FF7D242A565900829871 /* iosApp */ = {
 			isa = PBXGroup;
 			children = (
+				3F2000010000000000000001 /* Discover */,
 				1E7DB9532DF0AC89006E07CF /* iosAppRelease.entitlements */,
 				1EB972772DE38D750009F818 /* iosApp.entitlements */,
 				1EBA84702D27456400059C7F /* location.gpx */,
@@ -390,6 +425,15 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3F1000010000000000000001 /* NativeDiscoverViewController.swift in Sources */,
+				3F1000020000000000000002 /* NativeDiscoverScreen.swift in Sources */,
+				3F1000030000000000000003 /* DiscoverSearch.swift in Sources */,
+				3F1000040000000000000004 /* DiscoverCards.swift in Sources */,
+				3F1000050000000000000005 /* DiscoverResults.swift in Sources */,
+				3F1000060000000000000006 /* DiscoverMap.swift in Sources */,
+				3F1000070000000000000007 /* DiscoverFilterSheet.swift in Sources */,
+				3F1000080000000000000008 /* DiscoverFilterControls.swift in Sources */,
+				3F1000090000000000000009 /* DiscoverOnboarding.swift in Sources */,
 				1E7DB9522DEF5D83006E07CF /* IOSNativeViewFactory.swift in Sources */,
 				1E7DB94E2DEF5BC8006E07CF /* NativeDatePicker.swift in Sources */,
 				1EB972762DDE59850009F818 /* EventMap.swift in Sources */,

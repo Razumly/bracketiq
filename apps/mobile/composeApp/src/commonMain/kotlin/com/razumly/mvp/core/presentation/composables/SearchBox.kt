@@ -132,8 +132,8 @@ fun SearchBox(
             showFilterDropdown = false
         }
     }
-    LaunchedEffect(isSearchFieldFocused, query) {
-        onFocusChange(isSearchFieldFocused || query.isNotEmpty())
+    LaunchedEffect(isSearchFieldFocused) {
+        onFocusChange(isSearchFieldFocused)
     }
 
     Column(modifier = modifier.fillMaxWidth().onGloballyPositioned { coordinates ->
@@ -150,10 +150,15 @@ fun SearchBox(
                 onValueChange = onChange,
                 placeholder = placeholder,
                 leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Search"
-                    )
+                    IconButton(onClick = {
+                        onSearch(query)
+                        focusManager.clearFocus()
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search"
+                        )
+                    }
                 },
                 trailingIcon = trailingAction ?: {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -205,7 +210,10 @@ fun SearchBox(
                         isSearchFieldFocused = focusState.isFocused
                     },
                 imeAction = ImeAction.Search,
-                onImeAction = { onSearch(query) },
+                onImeAction = {
+                    onSearch(query)
+                    focusManager.clearFocus()
+                },
             )
 
             if (rowAction != null) {

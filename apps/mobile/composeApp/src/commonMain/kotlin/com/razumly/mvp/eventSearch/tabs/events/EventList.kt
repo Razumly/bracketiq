@@ -38,6 +38,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.presentation.composables.EventCard
 import com.razumly.mvp.core.presentation.composables.EventCardPlaceholder
 import com.razumly.mvp.core.presentation.guides.guideTarget
+import com.razumly.mvp.eventSearch.composables.EmptyDiscoverListItem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 
@@ -53,6 +54,8 @@ fun EventList(
     lazyListState: LazyListState = rememberLazyListState(),
     isLoadingMore: Boolean = false,
     hasMoreEvents: Boolean = true,
+    showPagingStatus: Boolean = true,
+    emptyMessage: String = "No events found.",
     onLoadMore: () -> Unit,
     onMapClick: (Offset, Event) -> Unit,
     onCreateEventClick: (() -> Unit)? = null,
@@ -61,7 +64,7 @@ fun EventList(
 ) {
     var lastLoadRequestKey by remember { mutableStateOf<String?>(null) }
     var suppressEventClicksAfterScroll by remember { mutableStateOf(false) }
-    val hasTrailingStatusItem = events.isNotEmpty() && (isLoadingMore || !hasMoreEvents)
+    val hasTrailingStatusItem = events.isNotEmpty() && showPagingStatus && (isLoadingMore || !hasMoreEvents)
 
     LaunchedEffect(lazyListState) {
         snapshotFlow { lazyListState.isScrollInProgress }
@@ -75,13 +78,13 @@ fun EventList(
             }
     }
 
-    LaunchedEffect(lazyListState, events.size, hasMoreEvents, isLoadingMore) {
+    LaunchedEffect(lazyListState, events.size, hasMoreEvents, isLoadingMore, showPagingStatus) {
         snapshotFlow { lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
             .collect { lastVisibleIndex ->
                 val nearListEnd = events.isNotEmpty() && lastVisibleIndex >= events.lastIndex - 2
                 val currentRequestKey = "${events.size}:${events.lastOrNull()?.id.orEmpty()}"
                 val canRequestMore =
-                    hasMoreEvents && !isLoadingMore && nearListEnd &&
+                    showPagingStatus && hasMoreEvents && !isLoadingMore && nearListEnd &&
                         lastLoadRequestKey != currentRequestKey
 
                 if (canRequestMore) {
@@ -126,6 +129,15 @@ fun EventList(
                     EmptyEventsCallToAction(onClick = onCreateEventClick)
                 }
             }
+        } else if (events.isEmpty()) {
+            item {
+                EmptyDiscoverListItem(
+                    message = emptyMessage,
+                    modifier = Modifier
+                        .padding(firstElementPadding)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
         } else {
             itemsIndexed(items = events, key = { _, item -> item.id }) { index, event ->
                 val padding = when (index) {
@@ -151,7 +163,7 @@ fun EventList(
                 ) {
                     EventCard(
                         event,
-                        navPadding = PaddingValues(bottom = 16.dp),
+                        navPadding = PaddingValues(),
                         showLoadingPlaceholder = true,
                         fallbackImageId = event.organizationId
                             ?.trim()
@@ -170,7 +182,7 @@ fun EventList(
             }
         }
 
-        if (isLoadingMore && events.isNotEmpty()) {
+        if (showPagingStatus && isLoadingMore && events.isNotEmpty()) {
             item {
                 Box(
                     modifier = Modifier
@@ -184,7 +196,7 @@ fun EventList(
             }
         }
 
-        if (!hasMoreEvents && events.isNotEmpty()) {
+        if (showPagingStatus && !hasMoreEvents && events.isNotEmpty()) {
             item {
                 Box(
                     modifier = Modifier

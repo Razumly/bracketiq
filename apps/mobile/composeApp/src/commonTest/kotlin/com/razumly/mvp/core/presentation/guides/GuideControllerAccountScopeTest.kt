@@ -64,5 +64,9 @@ class GuideControllerAccountScopeTest {
         assertTrue(controller.hasActiveGuide)
         controller.dismiss()
         assertEquals(listOf(guide.id), completedCallbacks)
+        assertEquals(setOf(guide.id), controller.completedGuideIds)
+
+        controller.completeGuide(guide.id)
+        assertEquals(listOf(guide.id), completedCallbacks)
     }
 }

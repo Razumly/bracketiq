@@ -26,6 +26,10 @@ actual open class PaymentProcessor : IPaymentProcessor {
         _paymentResult.value = null
     }
 
+    internal actual fun emitPaymentResult(result: PaymentResult) {
+        handlePaymentResult(result)
+    }
+
     actual override fun presentPaymentSheet(email: String, name: String, billingAddress: BillingAddressDraft?) {
         val intent = purchaseIntent
         val launchError = paymentSheetLaunchError(intent)

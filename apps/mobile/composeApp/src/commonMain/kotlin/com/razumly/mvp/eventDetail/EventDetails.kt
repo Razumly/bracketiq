@@ -2930,14 +2930,17 @@ fun EventDetails(
                     ),
                     showContainer = showSectionContainers,
                 )
-
             }
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .zIndex(2f),
-            ) {
-                heroTopControls()
+            if (sectionVisibility.hero) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(heroHeight)
+                        .graphicsLayer(translationY = -heroParallaxOffset)
+                        .zIndex(2f),
+                ) {
+                    heroTopControls()
+                }
             }
         }
     }

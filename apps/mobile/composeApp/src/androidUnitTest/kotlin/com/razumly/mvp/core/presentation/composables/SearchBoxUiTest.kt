@@ -98,6 +98,33 @@ class SearchBoxUiTest {
     }
 
     @Test
+    fun search_icon_submits_the_current_controlled_query() {
+        composeRule.setContent {
+            var query by mutableStateOf("")
+            var submittedQuery by mutableStateOf("")
+            MaterialTheme {
+                SearchBox(
+                    placeholder = "Search",
+                    query = query,
+                    filter = false,
+                    onFilterChange = {},
+                    onChange = { query = it },
+                    onSearch = { submittedQuery = it },
+                    onFocusChange = {},
+                    onPositionChange = { _, _ -> },
+                    onToggleFilter = {},
+                )
+                Text("Submitted: $submittedQuery")
+            }
+        }
+
+        composeRule.onNode(hasSetTextAction()).performTextInput("icon query")
+        composeRule.onNodeWithContentDescription("Search").performClick()
+
+        composeRule.onNodeWithText("Submitted: icon query").assertExists()
+    }
+
+    @Test
     fun invalid_price_draft_is_explained_and_cannot_be_applied() {
         var currentFilter by mutableStateOf(EventFilter(price = 10.0 to 20.0))
         composeRule.setContent {

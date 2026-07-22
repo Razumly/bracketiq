@@ -82,6 +82,7 @@ import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -225,7 +226,7 @@ private val DISCOVER_PULL_INDICATOR_TOP_OFFSET = 64.dp
 private val DISCOVER_TAB_ROW_HEIGHT = 40.dp
 private const val DISCOVER_SEARCH_THIS_AREA_THRESHOLD_MILES = 0.25
 private const val DISCOVER_MAP_REVEAL_DURATION_MILLIS = 700
-private const val DISCOVER_GUIDE_ID = "discover_onboarding_v1"
+internal const val DISCOVER_GUIDE_ID = "discover_onboarding_v1"
 private const val DISCOVER_GUIDE_TARGET_TABS = "discover.tabs"
 private const val DISCOVER_GUIDE_TARGET_SEARCH = "discover.search"
 private const val DISCOVER_GUIDE_TARGET_FILTERS = "discover.filters"
@@ -746,7 +747,7 @@ private fun LocationChoiceRow(
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
-fun EventSearchScreen(
+internal fun ComposeEventSearchScreen(
     component: EventSearchComponent,
     mapComponent: MapComponent,
 ) {
@@ -795,6 +796,7 @@ fun EventSearchScreen(
 
     var selectedTab by rememberSaveable { mutableStateOf(DiscoverTab.EVENTS) }
     var searchQuery by remember { mutableStateOf("") }
+    var submittedSearchQuery by rememberSaveable { mutableStateOf("") }
     var showSearchOverlay by remember { mutableStateOf(false) }
     var searchBoxPosition by remember { mutableStateOf(Offset.Zero) }
     var searchBoxSize by remember { mutableStateOf(IntSize.Zero) }
@@ -813,6 +815,17 @@ fun EventSearchScreen(
     var lastMapSearchCenter by remember { mutableStateOf<LatLng?>(null) }
     var lastMapSearchRadiusMiles by remember { mutableStateOf<Double?>(null) }
     var loadedInitialMapArea by remember { mutableStateOf(false) }
+    val normalizedSubmittedSearchQuery = submittedSearchQuery.trim()
+    val hasSubmittedSearch = normalizedSubmittedSearchQuery.isNotEmpty()
+    val submittedSearchResults = remember(
+        normalizedSubmittedSearchQuery,
+        events,
+        organizations,
+        teams,
+        rentals,
+    ) {
+        component.nativeDiscoverSearchSnapshot(normalizedSubmittedSearchQuery)
+    }
     val guideController = LocalGuideController.current
     val discoverGuide = remember {
         AppGuide(
@@ -866,6 +879,7 @@ fun EventSearchScreen(
     val coroutineScope = rememberCoroutineScope()
 
     val density = LocalDensity.current
+    val focusManager = LocalFocusManager.current
     val fixedTabFontSize = (13f / density.fontScale).sp
     var overlayTopOffset by remember { mutableStateOf(0.dp) }
     var overlayStartOffset by remember { mutableStateOf(0.dp) }
@@ -1285,35 +1299,49 @@ fun EventSearchScreen(
                             when (selectedTab) {
                                 DiscoverTab.EVENTS -> {
                                     EventsTabContent(
-                                        events = events,
+                                        events = submittedSearchResults.events,
                                         organizationLogoIdsById = organizationLogoIdsById,
                                         firstElementPadding = firstElementPadding,
                                         lastElementPadding = offsetNavPadding,
                                         lazyListState = eventsListState,
-                                        isLoadingMore = isLoadingMore,
-                                        hasMoreEvents = hasMoreEvents,
-                                        onLoadMore = { component.loadMoreEvents() },
+                                        isLoadingMore = isLoadingMore && !hasSubmittedSearch,
+                                        hasMoreEvents = hasMoreEvents && !hasSubmittedSearch,
+                                        showPagingStatus = !hasSubmittedSearch,
+                                        emptyMessage = "No events match \"$normalizedSubmittedSearchQuery\".",
+                                        onLoadMore = {
+                                            if (!hasSubmittedSearch) component.loadMoreEvents()
+                                        },
                                         onMapClick = { offset, event ->
                                             openDiscoverMap(offset, event)
                                         },
                                         onEventClick = { event ->
                                             component.viewEvent(event)
                                         },
-                                        onCreateEventClick = component::startEventCreate,
+                                        onCreateEventClick = if (hasSubmittedSearch) {
+                                            null
+                                        } else {
+                                            component::startEventCreate
+                                        },
                                         firstItemGuideTargetId = DISCOVER_GUIDE_TARGET_FIRST_RESULT,
                                     )
                                 }
 
                                 DiscoverTab.ORGANIZATIONS -> {
                                     DiscoverOrganizationList(
-                                        organizations = organizations,
-                                        isLoading = isLoadingOrganizations,
-                                        hasMore = hasMoreOrganizations,
-                                        onLoadMore = { component.loadMoreOrganizations() },
+                                        organizations = submittedSearchResults.organizations,
+                                        isLoading = isLoadingOrganizations && !hasSubmittedSearch,
+                                        hasMore = hasMoreOrganizations && !hasSubmittedSearch,
+                                        onLoadMore = {
+                                            if (!hasSubmittedSearch) component.loadMoreOrganizations()
+                                        },
                                         listState = organizationsListState,
                                         firstElementPadding = firstElementPadding,
                                         lastElementPadding = offsetNavPadding,
-                                        emptyMessage = "No organizations discovered yet.",
+                                        emptyMessage = if (hasSubmittedSearch) {
+                                            "No organizations match \"$normalizedSubmittedSearchQuery\"."
+                                        } else {
+                                            "No organizations discovered yet."
+                                        },
                                         firstItemGuideTargetId = DISCOVER_GUIDE_TARGET_FIRST_RESULT,
                                         onOrganizationClick = { organization ->
                                             component.viewOrganization(organization)
@@ -1323,14 +1351,20 @@ fun EventSearchScreen(
 
                                 DiscoverTab.TEAMS -> {
                                     DiscoverTeamList(
-                                        teams = teams,
-                                        isLoading = isLoadingTeams,
-                                        hasMore = hasMoreTeams,
-                                        onLoadMore = { component.loadMoreTeams() },
+                                        teams = submittedSearchResults.teams,
+                                        isLoading = isLoadingTeams && !hasSubmittedSearch,
+                                        hasMore = hasMoreTeams && !hasSubmittedSearch,
+                                        onLoadMore = {
+                                            if (!hasSubmittedSearch) component.loadMoreTeams()
+                                        },
                                         listState = teamsListState,
                                         firstElementPadding = firstElementPadding,
                                         lastElementPadding = offsetNavPadding,
-                                        emptyMessage = "No teams open for registration yet.",
+                                        emptyMessage = if (hasSubmittedSearch) {
+                                            "No teams match \"$normalizedSubmittedSearchQuery\"."
+                                        } else {
+                                            "No teams open for registration yet."
+                                        },
                                         firstItemGuideTargetId = DISCOVER_GUIDE_TARGET_FIRST_RESULT,
                                         onTeamClick = openTeam,
                                     )
@@ -1338,14 +1372,20 @@ fun EventSearchScreen(
 
                                 DiscoverTab.RENTALS -> {
                                     DiscoverRentalList(
-                                        organizations = rentals,
-                                        isLoading = isLoadingRentals,
-                                        hasMore = hasMoreRentals,
-                                        onLoadMore = { component.loadMoreRentals() },
+                                        organizations = submittedSearchResults.rentals,
+                                        isLoading = isLoadingRentals && !hasSubmittedSearch,
+                                        hasMore = hasMoreRentals && !hasSubmittedSearch,
+                                        onLoadMore = {
+                                            if (!hasSubmittedSearch) component.loadMoreRentals()
+                                        },
                                         listState = rentalsListState,
                                         firstElementPadding = firstElementPadding,
                                         lastElementPadding = offsetNavPadding,
-                                        emptyMessage = "No rentals discovered nearby yet.",
+                                        emptyMessage = if (hasSubmittedSearch) {
+                                            "No rentals match \"$normalizedSubmittedSearchQuery\"."
+                                        } else {
+                                            "No rentals discovered nearby yet."
+                                        },
                                         firstItemGuideTargetId = DISCOVER_GUIDE_TARGET_FIRST_RESULT,
                                         onOrganizationClick = { organization ->
                                             openRental(organization)
@@ -1625,9 +1665,17 @@ fun EventSearchScreen(
                     },
                     onChange = { query ->
                         searchQuery = query
+                        if (query.isBlank()) {
+                            submittedSearchQuery = ""
+                        }
                         showSearchOverlay = query.isNotEmpty()
                     },
-                    onSearch = { /* no-op */ },
+                    onSearch = { query ->
+                        val normalized = query.trim()
+                        searchQuery = normalized
+                        submittedSearchQuery = normalized
+                        showSearchOverlay = false
+                    },
                     onFocusChange = { isFocused ->
                         if (isFocused) {
                             showSearchOverlay = true
@@ -1706,6 +1754,7 @@ fun EventSearchScreen(
             searchQuery = searchQuery,
             onDismiss = {
                 showSearchOverlay = false
+                focusManager.clearFocus()
             },
             suggestions = {
                 val isQueryReady = searchQuery.trim().length >= 2

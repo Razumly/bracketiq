@@ -7,12 +7,27 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.eventMap.MapComponent
+import com.razumly.mvp.eventSearch.EventSearchComponent
 import dev.icerock.moko.geo.LatLng
 import kotlin.time.Instant
 import platform.UIKit.UIViewController
 import kotlin.time.ExperimentalTime
 
 interface NativeViewFactory {
+    fun createNativeDiscoverViewController(
+        component: EventSearchComponent,
+        mapComponent: MapComponent,
+        bottomPadding: Float,
+        shouldShowOnboarding: Boolean,
+        onOnboardingCompleted: () -> Unit,
+    ): UIViewController
+
+    fun updateNativeDiscoverViewController(
+        viewController: UIViewController,
+        bottomPadding: Float,
+        shouldShowOnboarding: Boolean,
+    )
+
     fun createNativeEventCard(
         data: NativeEventCardData,
         bottomPadding: Float,
