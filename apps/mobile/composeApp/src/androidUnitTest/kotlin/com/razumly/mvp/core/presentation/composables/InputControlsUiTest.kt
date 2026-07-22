@@ -97,22 +97,14 @@ class InputControlsUiTest {
     fun givenFilterDateField_whenRendered_thenItIsEnabledAndClickable() {
         composeRule.setContent {
             MaterialTheme {
-                SearchBox(
-                    placeholder = "Search",
-                    query = "",
-                    filter = true,
+                EventFilterSheet(
                     currentFilter = EventFilter(),
                     onFilterChange = {},
-                    onChange = {},
-                    onSearch = {},
-                    onFocusChange = {},
-                    onPositionChange = { _, _ -> },
-                    onToggleFilter = {},
+                    onDismiss = {},
                 )
             }
         }
 
-        composeRule.onNodeWithContentDescription("Filter").performClick()
         val startDateField = composeRule
             .onNodeWithTag(START_DATE_FILTER_FIELD_TEST_TAG)
             .assertIsEnabled()

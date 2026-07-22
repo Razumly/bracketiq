@@ -52,12 +52,11 @@ class SearchBoxUiTest {
                     placeholder = "Search",
                     query = query,
                     filter = false,
-                    onFilterChange = {},
                     onChange = { query = it },
                     onSearch = {},
                     onFocusChange = {},
                     onPositionChange = { _, _ -> },
-                    onToggleFilter = {},
+                    onFilterClick = {},
                 )
                 Button(onClick = { query = "" }) {
                     Text("Reset query")
@@ -80,12 +79,11 @@ class SearchBoxUiTest {
                     placeholder = "Search",
                     query = query,
                     filter = false,
-                    onFilterChange = {},
                     onChange = { query = it },
                     onSearch = { submittedQuery = it },
                     onFocusChange = {},
                     onPositionChange = { _, _ -> },
-                    onToggleFilter = {},
+                    onFilterClick = {},
                 )
                 Text("Submitted: $submittedQuery")
             }
@@ -107,12 +105,11 @@ class SearchBoxUiTest {
                     placeholder = "Search",
                     query = query,
                     filter = false,
-                    onFilterChange = {},
                     onChange = { query = it },
                     onSearch = { submittedQuery = it },
                     onFocusChange = {},
                     onPositionChange = { _, _ -> },
-                    onToggleFilter = {},
+                    onFilterClick = {},
                 )
                 Text("Submitted: $submittedQuery")
             }
@@ -125,26 +122,66 @@ class SearchBoxUiTest {
     }
 
     @Test
-    fun invalid_price_draft_is_explained_and_cannot_be_applied() {
-        var currentFilter by mutableStateOf(EventFilter(price = 10.0 to 20.0))
+    fun given_filter_button_when_tapped_then_it_requests_the_external_sheet() {
+        var filterClicks = 0
         composeRule.setContent {
             MaterialTheme {
                 SearchBox(
                     placeholder = "Search",
                     query = "",
                     filter = true,
-                    currentFilter = currentFilter,
-                    onFilterChange = { update -> currentFilter = currentFilter.update() },
+                    currentFilter = EventFilter(),
                     onChange = {},
                     onSearch = {},
                     onFocusChange = {},
                     onPositionChange = { _, _ -> },
-                    onToggleFilter = {},
+                    onFilterClick = { filterClicks += 1 },
                 )
             }
         }
 
+        composeRule.onNodeWithTag(FILTER_SHEET_TEST_TAG).assertDoesNotExist()
         composeRule.onNodeWithContentDescription("Filter").performClick()
+        composeRule.onNodeWithTag(FILTER_SHEET_TEST_TAG).assertDoesNotExist()
+        composeRule.runOnIdle {
+            assertEquals(1, filterClicks)
+        }
+    }
+
+    @Test
+    fun given_event_filter_sheet_when_apply_is_tapped_then_it_closes() {
+        composeRule.setContent {
+            var showingFilter by mutableStateOf(true)
+            MaterialTheme {
+                if (showingFilter) {
+                    EventFilterSheet(
+                        currentFilter = EventFilter(),
+                        onFilterChange = {},
+                        onDismiss = { showingFilter = false },
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag(FILTER_SHEET_TEST_TAG).assertExists()
+        composeRule.onNodeWithText("Filter Events").assertExists()
+        composeRule.onNodeWithTag(APPLY_FILTERS_TEST_TAG).performClick()
+        composeRule.onNodeWithTag(FILTER_SHEET_TEST_TAG).assertDoesNotExist()
+    }
+
+    @Test
+    fun invalid_price_draft_is_explained_and_cannot_be_applied() {
+        var currentFilter by mutableStateOf(EventFilter(price = 10.0 to 20.0))
+        composeRule.setContent {
+            MaterialTheme {
+                EventFilterSheet(
+                    currentFilter = currentFilter,
+                    onFilterChange = { update -> currentFilter = currentFilter.update() },
+                    onDismiss = {},
+                )
+            }
+        }
+
         composeRule.onNodeWithTag(MIN_PRICE_INPUT_TEST_TAG).performTextReplacement("30")
 
         composeRule.onNodeWithText("Minimum price cannot exceed maximum price.").assertExists()
@@ -167,12 +204,11 @@ class SearchBoxUiTest {
                     query = "",
                     filter = true,
                     currentFilter = currentFilter,
-                    onFilterChange = { update -> currentFilter = currentFilter.update() },
                     onChange = {},
                     onSearch = {},
                     onFocusChange = {},
                     onPositionChange = { _, _ -> },
-                    onToggleFilter = {},
+                    onFilterClick = {},
                 )
             }
         }
@@ -190,22 +226,14 @@ class SearchBoxUiTest {
         var currentFilter by mutableStateOf(EventFilter(price = 10.0 to 20.0))
         composeRule.setContent {
             MaterialTheme {
-                SearchBox(
-                    placeholder = "Search",
-                    query = "",
-                    filter = true,
+                EventFilterSheet(
                     currentFilter = currentFilter,
                     onFilterChange = { update -> currentFilter = currentFilter.update() },
-                    onChange = {},
-                    onSearch = {},
-                    onFocusChange = {},
-                    onPositionChange = { _, _ -> },
-                    onToggleFilter = {},
+                    onDismiss = {},
                 )
             }
         }
 
-        composeRule.onNodeWithContentDescription("Filter").performClick()
         composeRule.onNodeWithTag(MIN_PRICE_INPUT_TEST_TAG).performTextReplacement("30")
         composeRule.onNodeWithText("Minimum price cannot exceed maximum price.").assertExists()
 

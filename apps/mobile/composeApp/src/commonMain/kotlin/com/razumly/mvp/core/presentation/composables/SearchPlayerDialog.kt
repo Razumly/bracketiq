@@ -121,8 +121,7 @@ fun SearchPlayerDialog(
                             },
                             onPositionChange = { _, _ ->
                             },
-                            onFilterChange = { },
-                            onToggleFilter = { },
+                            onFilterClick = { },
                             trailingAction = {
                                 IconButton(onClick = dismissSearchDialog) {
                                     Icon(

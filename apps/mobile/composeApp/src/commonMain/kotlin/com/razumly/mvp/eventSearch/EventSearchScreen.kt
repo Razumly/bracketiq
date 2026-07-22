@@ -18,7 +18,6 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -77,9 +76,6 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -87,7 +83,6 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -110,8 +105,9 @@ import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateRentalUrl
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.eventTagIdentity
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
-import com.razumly.mvp.core.presentation.composables.EventTagSearchDropdown
 import com.razumly.mvp.core.presentation.composables.DropdownOption
+import com.razumly.mvp.core.presentation.composables.EventFilterSheet
+import com.razumly.mvp.core.presentation.composables.EventTagSearchDropdown
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.SearchBox
@@ -807,7 +803,6 @@ internal fun ComposeEventSearchScreen(
     var showFab by remember { mutableStateOf(true) }
     var showFloatingSearch by remember { mutableStateOf(true) }
     var showingFilter by remember { mutableStateOf(false) }
-    var filterDismissRequest by remember { mutableStateOf(0) }
     var showLocationPicker by remember { mutableStateOf(false) }
     var locationQuery by remember { mutableStateOf("") }
     var locationSuggestions by remember { mutableStateOf<List<MVPPlace>>(emptyList()) }
@@ -1071,9 +1066,7 @@ internal fun ComposeEventSearchScreen(
     }
 
     LaunchedEffect(selectedTab) {
-        if (selectedTab != DiscoverTab.EVENTS) {
-            showingFilter = false
-        }
+        showingFilter = false
     }
 
     LaunchedEffect(showingFilter, showLocationPicker, locationQuery) {
@@ -1153,18 +1146,7 @@ internal fun ComposeEventSearchScreen(
         mapComponent.openMap()
     }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val filterDropdownMaxHeight = if (searchBoxSize.height > 0) {
-            with(density) {
-                val screenHeightPx = maxHeight.toPx()
-                val dropdownTopPx = searchBoxPosition.y + searchBoxSize.height
-                val navBottomPx = offsetNavPadding.calculateBottomPadding().toPx()
-                val availablePx = screenHeightPx - dropdownTopPx - navBottomPx - 32.dp.toPx()
-                resolveDiscoverFilterMaxHeight(availablePx.toDp())
-            }
-        } else {
-            null
-        }
+    Box(modifier = Modifier.fillMaxSize()) {
         val discoverMapContent: @Composable BoxScope.() -> Unit = {
             EventMap(
                 component = mapComponent,
@@ -1280,22 +1262,7 @@ internal fun ComposeEventSearchScreen(
                         indicatorTopPadding = paddingValues.calculateTopPadding()
                             .plus(DISCOVER_PULL_INDICATOR_TOP_OFFSET),
                     ) {
-                        Box(
-                            Modifier
-                                .fillMaxSize()
-                                .pointerInput(showingFilter) {
-                                    if (!showingFilter) return@pointerInput
-
-                                    awaitPointerEventScope {
-                                        while (true) {
-                                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                                            if (event.changes.any { it.changedToDownIgnoreConsumed() }) {
-                                                filterDismissRequest += 1
-                                            }
-                                        }
-                                    }
-                                }
-                        ) {
+                        Box(Modifier.fillMaxSize()) {
                             when (selectedTab) {
                                 DiscoverTab.EVENTS -> {
                                     EventsTabContent(
@@ -1656,13 +1623,6 @@ internal fun ComposeEventSearchScreen(
                     } else {
                         null
                     },
-                    onRadiusChange = if (
-                        selectedTab == DiscoverTab.EVENTS || selectedTab == DiscoverTab.ORGANIZATIONS
-                    ) {
-                        component::selectRadius
-                    } else {
-                        null
-                    },
                     onChange = { query ->
                         searchQuery = query
                         if (query.isBlank()) {
@@ -1687,21 +1647,10 @@ internal fun ComposeEventSearchScreen(
                         searchBoxPosition = position
                         searchBoxSize = size
                     },
-                    onFilterChange = { update ->
-                        when (selectedTab) {
-                            DiscoverTab.EVENTS -> component.updateFilter(update)
-                            DiscoverTab.ORGANIZATIONS -> component.updateOrganizationFilter(update)
-                            else -> Unit
-                        }
+                    onFilterClick = {
+                        showSearchOverlay = false
+                        showingFilter = true
                     },
-                    onToggleFilter = { showFilter ->
-                        showingFilter = showFilter
-                    },
-                    filterMaxHeight = filterDropdownMaxHeight,
-                    filterDismissSignal = filterDismissRequest,
-                    filterTitle = if (selectedTab == DiscoverTab.ORGANIZATIONS) "Filter Organizations" else "Filter Events",
-                    showDefaultFilterContent = selectedTab == DiscoverTab.EVENTS,
-                    filterExtraContent = discoverFilterExtraContent,
                 )
             }
         }
@@ -1873,14 +1822,40 @@ internal fun ComposeEventSearchScreen(
             }
         )
 
+        if (showingFilter) {
+            val activeFilter = when (selectedTab) {
+                DiscoverTab.EVENTS -> currentFilter
+                DiscoverTab.ORGANIZATIONS -> organizationFilter
+                else -> null
+            }
+            if (activeFilter != null) {
+                EventFilterSheet(
+                    currentFilter = activeFilter,
+                    currentRadiusMiles = currentRadius,
+                    onRadiusChange = component::selectRadius,
+                    extraContent = discoverFilterExtraContent,
+                    title = if (selectedTab == DiscoverTab.ORGANIZATIONS) {
+                        "Filter Organizations"
+                    } else {
+                        "Filter Events"
+                    },
+                    showPriceFilter = selectedTab == DiscoverTab.EVENTS,
+                    showDateFilter = selectedTab == DiscoverTab.EVENTS,
+                    onFilterChange = { update ->
+                        when (selectedTab) {
+                            DiscoverTab.EVENTS -> component.updateFilter(update)
+                            DiscoverTab.ORGANIZATIONS -> component.updateOrganizationFilter(update)
+                            else -> Unit
+                        }
+                    },
+                    onDismiss = { showingFilter = false },
+                )
+            }
+        }
+
     }
 
 }
-
-internal val DISCOVER_FILTER_MAX_HEIGHT = 640.dp
-
-internal fun resolveDiscoverFilterMaxHeight(availableHeight: Dp): Dp =
-    availableHeight.coerceIn(0.dp, DISCOVER_FILTER_MAX_HEIGHT)
 
 private fun distanceMilesBetween(start: LatLng, end: LatLng): Double {
     val earthRadiusMiles = 3958.8

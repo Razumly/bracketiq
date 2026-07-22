@@ -1,11 +1,5 @@
 package com.razumly.mvp.core.presentation.composables
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -14,15 +8,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
@@ -33,14 +26,15 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,7 +60,6 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.presentation.util.dateFormat
@@ -92,26 +85,16 @@ fun SearchBox(
     filter: Boolean,
     currentFilter: EventFilter? = null,
     currentRadiusMiles: Double? = null,
-    onRadiusChange: ((Double) -> Unit)? = null,
-    onFilterChange: (EventFilter.() -> EventFilter) -> Unit,
     onChange: (String) -> Unit,
     onSearch: (String) -> Unit,
     onFocusChange: (Boolean) -> Unit,
     onPositionChange: (Offset, IntSize) -> Unit,
-    onToggleFilter: (Boolean) -> Unit,
+    onFilterClick: () -> Unit,
     trailingAction: (@Composable (() -> Unit))? = null,
     rowAction: (@Composable RowScope.() -> Unit)? = null,
-    filterExtraContent: (@Composable (() -> Unit))? = null,
-    filterTitle: String = "Filter Events",
-    showDefaultFilterContent: Boolean = true,
-    showPriceFilter: Boolean = showDefaultFilterContent,
-    showDateFilter: Boolean = showDefaultFilterContent,
-    filterMaxHeight: Dp? = null,
-    filterDismissSignal: Int = 0,
 ) {
     var isSearchFieldFocused by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
-    var showFilterDropdown by remember { mutableStateOf(false) }
     val isCurrentFilterActive = currentFilter?.let { activeFilter ->
         isFilterActive(
             filter = activeFilter,
@@ -119,21 +102,8 @@ fun SearchBox(
         )
     } ?: false
 
-    LaunchedEffect(showFilterDropdown) {
-        onToggleFilter(showFilterDropdown)
-    }
-    LaunchedEffect(filterDismissSignal) {
-        if (filterDismissSignal > 0) {
-            showFilterDropdown = false
-        }
-    }
-    LaunchedEffect(filter, currentFilter) {
-        if (!filter || currentFilter == null) {
-            showFilterDropdown = false
-        }
-    }
-    LaunchedEffect(isSearchFieldFocused) {
-        onFocusChange(isSearchFieldFocused)
+    LaunchedEffect(isSearchFieldFocused, query) {
+        onFocusChange(isSearchFieldFocused || query.isNotEmpty())
     }
 
     Column(modifier = modifier.fillMaxWidth().onGloballyPositioned { coordinates ->
@@ -177,7 +147,7 @@ fun SearchBox(
                         if (filter && currentFilter != null) {
                             Box {
                                 IconButton(
-                                    onClick = { showFilterDropdown = !showFilterDropdown },
+                                    onClick = onFilterClick,
                                     modifier = Modifier.semantics {
                                         stateDescription = if (isCurrentFilterActive) "Active" else "Inactive"
                                     },
@@ -221,21 +191,6 @@ fun SearchBox(
                 rowAction()
             }
         }
-
-        // Filter Dropdown
-        if (filter && currentFilter != null) {
-            FilterDropdown(visible = showFilterDropdown,
-                currentFilter = currentFilter,
-                currentRadiusMiles = currentRadiusMiles,
-                onRadiusChange = onRadiusChange,
-                maxHeight = filterMaxHeight,
-                extraContent = filterExtraContent,
-                title = filterTitle,
-                showPriceFilter = showPriceFilter,
-                showDateFilter = showDateFilter,
-                onFilterChange = onFilterChange,
-                onDismiss = { showFilterDropdown = false })
-        }
     }
 }
 
@@ -261,13 +216,11 @@ internal fun isFilterActive(
 }
 
 @Composable
-@OptIn(ExperimentalTime::class)
-private fun FilterDropdown(
-    visible: Boolean,
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalTime::class)
+internal fun EventFilterSheet(
     currentFilter: EventFilter,
     currentRadiusMiles: Double? = null,
     onRadiusChange: ((Double) -> Unit)? = null,
-    maxHeight: Dp? = null,
     extraContent: (@Composable (() -> Unit))? = null,
     title: String = "Filter Events",
     showPriceFilter: Boolean = true,
@@ -275,51 +228,53 @@ private fun FilterDropdown(
     onFilterChange: (EventFilter.() -> EventFilter) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
     var isPriceInputValid by remember { mutableStateOf(true) }
-    AnimatedVisibility(
-        modifier = Modifier.padding(bottom = 8.dp),
-        visible = visible,
-        enter = expandVertically(animationSpec = tween(300)) + fadeIn(),
-        exit = shrinkVertically(animationSpec = tween(300)) + fadeOut()
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        modifier = Modifier.testTag(FILTER_SHEET_TEST_TAG),
     ) {
-        Surface(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .then(if (maxHeight != null) Modifier.heightIn(max = maxHeight) else Modifier),
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 0.dp,
-            shape = RoundedCornerShape(20.dp)
+                .fillMaxHeight(0.92f),
         ) {
-            Box {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+
+                    TextButton(onClick = {
+                        onFilterChange { EventFilter() }
+                        onRadiusChange?.invoke(0.0)
+                        onDismiss()
+                    }) {
+                        Text("Clear All")
+                    }
+                }
+
                 Column(
                     modifier = Modifier
-                        .then(if (maxHeight != null) Modifier.verticalScroll(rememberScrollState()) else Modifier)
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = title,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        TextButton(onClick = {
-                            onFilterChange { EventFilter() }
-                            onRadiusChange?.invoke(0.0)
-                            onDismiss()
-                        }) {
-                            Text("Clear All")
-                        }
-                    }
-
                     if (showPriceFilter) {
                         PriceFilterSection(
                             currentFilter = currentFilter,
@@ -343,51 +298,56 @@ private fun FilterDropdown(
                             onRadiusChange = onRadiusChange,
                         )
                     }
+                }
 
-                    Button(
-                        onClick = onDismiss,
-                        enabled = !showPriceFilter || isPriceInputValid,
-                        modifier = Modifier.fillMaxWidth().testTag(APPLY_FILTERS_TEST_TAG),
-                    ) {
-                        Text("Apply Filters")
-                    }
+                Button(
+                    onClick = onDismiss,
+                    enabled = !showPriceFilter || isPriceInputValid,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(top = 8.dp, bottom = 24.dp)
+                        .testTag(APPLY_FILTERS_TEST_TAG),
+                ) {
+                    Text("Apply Filters")
                 }
-                if (showDateFilter) {
-                    PlatformDateTimePicker(
-                        onDateSelected = { selectedInstant ->
-                            selectedInstant?.let {
-                                val selectedDate = normalizeFilterStartDate(it)
-                                onFilterChange {
-                                    copy(date = updateFilterStartDate(date, selectedDate))
-                                }
-                            }
-                            showStartPicker = false
-                        },
-                        onDismissRequest = { showStartPicker = false },
-                        showPicker = showStartPicker,
-                        getTime = false,
-                        canSelectPast = true,
-                        initialDate = currentFilter.date.first,
-                    )
-                    PlatformDateTimePicker(
-                        onDateSelected = { selectedInstant ->
+            }
+
+            if (showDateFilter) {
+                PlatformDateTimePicker(
+                    onDateSelected = { selectedInstant ->
+                        selectedInstant?.let {
+                            val selectedDate = normalizeFilterStartDate(it)
                             onFilterChange {
-                                copy(
-                                    date = updateFilterEndDate(
-                                        currentRange = date,
-                                        selectedEnd = selectedInstant?.let { normalizeFilterEndDate(it) },
-                                    )
-                                )
+                                copy(date = updateFilterStartDate(date, selectedDate))
                             }
-                            showEndPicker = false
-                        },
-                        onDismissRequest = { showEndPicker = false },
-                        showPicker = showEndPicker,
-                        getTime = false,
-                        canSelectPast = true,
-                        initialDate = currentFilter.date.second ?: currentFilter.date.first,
-                    )
-                }
+                        }
+                        showStartPicker = false
+                    },
+                    onDismissRequest = { showStartPicker = false },
+                    showPicker = showStartPicker,
+                    getTime = false,
+                    canSelectPast = true,
+                    initialDate = currentFilter.date.first,
+                )
+                PlatformDateTimePicker(
+                    onDateSelected = { selectedInstant ->
+                        onFilterChange {
+                            copy(
+                                date = updateFilterEndDate(
+                                    currentRange = date,
+                                    selectedEnd = selectedInstant?.let { normalizeFilterEndDate(it) },
+                                )
+                            )
+                        }
+                        showEndPicker = false
+                    },
+                    onDismissRequest = { showEndPicker = false },
+                    showPicker = showEndPicker,
+                    getTime = false,
+                    canSelectPast = true,
+                    initialDate = currentFilter.date.second ?: currentFilter.date.first,
+                )
             }
         }
     }
@@ -654,6 +614,7 @@ private const val DEFAULT_MAX_PRICE = 100.0
 internal const val PRICE_FILTER_SWITCH_TEST_TAG = "event-filter-price-switch"
 internal const val MIN_PRICE_INPUT_TEST_TAG = "event-filter-min-price"
 internal const val MAX_PRICE_INPUT_TEST_TAG = "event-filter-max-price"
+internal const val FILTER_SHEET_TEST_TAG = "event-filter-sheet"
 internal const val APPLY_FILTERS_TEST_TAG = "event-filter-apply"
 internal const val START_DATE_FILTER_FIELD_TEST_TAG = "event-filter-start-date"
 internal const val END_DATE_FILTER_FIELD_TEST_TAG = "event-filter-end-date"
