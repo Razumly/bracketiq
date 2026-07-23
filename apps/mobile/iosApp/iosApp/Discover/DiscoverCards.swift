@@ -9,70 +9,9 @@ struct NativeDiscoverEventCard: View {
     let onMapSelected: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ZStack(alignment: .bottomLeading) {
-                LinearGradient(
-                    colors: [.clear, .black.opacity(0.64)],
-                    startPoint: .center,
-                    endPoint: .bottom
-                )
+        let cardMetadata = EventCardMetadataKt.buildNativeEventCardMetadata(event: event)
 
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(discoverTitleCase(event.eventType.name))
-                            .font(.caption.weight(.semibold))
-                        Text(event.displayPriceRangeLabel())
-                            .font(.headline.weight(.bold))
-                    }
-                    .foregroundStyle(.white)
-
-                    Spacer()
-
-                    Button(action: onMapSelected) {
-                        Image(systemName: "map.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .frame(width: 40, height: 40)
-                            .background(.regularMaterial, in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Show \(event.name) on map")
-                }
-                .padding(12)
-            }
-            .frame(height: 170)
-
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(event.name.isEmpty ? "Event" : event.name)
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                    Spacer(minLength: 8)
-                    NativeLifecycleBadge(state: event.state)
-                }
-
-                if !event.location.isEmpty {
-                    Label(event.location, systemImage: "mappin.and.ellipse")
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.82))
-                        .lineLimit(1)
-                }
-
-                HStack {
-                    Label(discoverEventDateLabel(event), systemImage: "calendar")
-                    Spacer()
-                    Text(event.teamSignup ? "Team registration" : "Individual registration")
-                }
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.white.opacity(0.82))
-            }
-            .padding(12)
-            .background {
-                DiscoverGradientGlassBackground()
-            }
-        }
-        .background {
+        ZStack {
             DiscoverRemoteImage(
                 url: discoverImageURL(
                     reference: event.imageId.isEmpty ? organizationLogoId : event.imageId,
@@ -86,37 +25,106 @@ struct NativeDiscoverEventCard: View {
                 fallbackName: event.name,
                 systemImage: "calendar"
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            DiscoverProgressiveGlassBackground()
+                .allowsHitTesting(false)
+
+            VStack(alignment: .leading, spacing: 0) {
+                ZStack(alignment: .bottomLeading) {
+                    HStack(alignment: .bottom) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(discoverTitleCase(event.eventType.name))
+                                .font(.caption.weight(.semibold))
+                            Text(event.displayPriceRangeLabel())
+                                .font(.headline.weight(.bold))
+                        }
+                        .foregroundStyle(.white)
+
+                        Spacer()
+
+                        Button(action: onMapSelected) {
+                            Image(systemName: "map.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .frame(width: 40, height: 40)
+                                .background(.regularMaterial, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Show \(event.name) on map")
+                    }
+                    .padding(12)
+                }
+                .frame(height: 170)
+
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(event.name.isEmpty ? "Event" : event.name)
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .lineLimit(2)
+                        Spacer(minLength: 8)
+                        NativeLifecycleBadge(state: event.state)
+                    }
+
+                    if !event.location.isEmpty {
+                        Label(event.location, systemImage: "mappin.and.ellipse")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.82))
+                            .lineLimit(1)
+                    }
+
+                    Text(
+                        [cardMetadata.divisionLabel, cardMetadata.skillLevelLabel]
+                            .compactMap { value in
+                                guard let value, !value.isEmpty else { return nil }
+                                return value
+                            }
+                            .joined(separator: "  ·  ")
+                    )
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                    HStack {
+                        Label(discoverEventDateLabel(event), systemImage: "calendar")
+                        Spacer()
+                        Text(event.teamSignup ? "Team registration" : "Individual registration")
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.82))
+                }
+                .padding(12)
+            }
         }
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
         }
-        .compositingGroup()
-        .shadow(color: .black.opacity(0.12), radius: 14, y: 7)
-        .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onTapGesture(perform: onSelected)
         .accessibilityAddTraits(.isButton)
     }
 }
 
-private struct DiscoverGradientGlassBackground: View {
+private struct DiscoverProgressiveGlassBackground: View {
     var body: some View {
-        ZStack {
-            glassMaterial
-
-            LinearGradient(
-                stops: [
-                    .init(color: .black.opacity(0.48), location: 0),
-                    .init(color: .black.opacity(0.54), location: 0.45),
-                    .init(color: .black.opacity(0.62), location: 1),
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        }
-        .accessibilityHidden(true)
+        glassMaterial
+            .mask {
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0.18),
+                        .init(color: .black.opacity(0.2), location: 0.34),
+                        .init(color: .black.opacity(0.72), location: 0.64),
+                        .init(color: .black, location: 0.82),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+            .accessibilityHidden(true)
     }
 
     @ViewBuilder
@@ -124,12 +132,13 @@ private struct DiscoverGradientGlassBackground: View {
         if #available(iOS 26.0, *) {
             Color.clear
                 .glassEffect(
-                    .regular.tint(.black.opacity(0.28)),
-                    in: .rect(cornerRadius: 0)
+                    .regular.tint(.black.opacity(0.5)),
+                    in: .rect(cornerRadius: 16)
                 )
         } else {
             Rectangle()
                 .fill(.ultraThinMaterial)
+                .environment(\.colorScheme, .dark)
         }
     }
 }

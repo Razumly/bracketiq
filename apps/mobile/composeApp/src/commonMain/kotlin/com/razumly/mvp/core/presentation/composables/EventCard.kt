@@ -2,6 +2,7 @@
 
 package com.razumly.mvp.core.presentation.composables
 
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -33,12 +34,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,7 +54,6 @@ import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
 import com.razumly.mvp.core.data.dataTypes.isDraftLikeState
 import com.razumly.mvp.core.data.dataTypes.isPrivateState
 import com.razumly.mvp.core.data.dataTypes.lifecycleStateLabel
-import com.razumly.mvp.core.data.util.divisionDisplayLabels
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.eventTypeWithSportLabel
 import com.razumly.mvp.core.presentation.util.getImageUrl
@@ -61,10 +61,11 @@ import com.razumly.mvp.core.presentation.util.getInitialsAvatarUrl
 import com.razumly.mvp.core.util.resolvedTimeZone
 import dev.chrisbanes.haze.ExperimentalHazeApi
 import dev.chrisbanes.haze.HazeInputScale
+import dev.chrisbanes.haze.HazeProgressive
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
-import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
-import dev.chrisbanes.haze.materials.HazeMaterials
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
@@ -136,6 +137,7 @@ data class NativeEventCardData(
     val eventTypeLabel: String,
     val registrationLabel: String,
     val divisionLabel: String,
+    val skillLevelLabel: String?,
     val dateLabel: String,
     val priceLabel: String,
     val prizeLabel: String?,
@@ -143,9 +145,7 @@ data class NativeEventCardData(
     val lifecycleTone: String?,
 )
 
-@OptIn(
-    ExperimentalHazeMaterialsApi::class, ExperimentalHazeApi::class
-)
+@OptIn(ExperimentalHazeApi::class)
 @Composable
 fun EventCard(
     event: Event,
@@ -189,16 +189,13 @@ fun EventCard(
     val prizeText = remember(event.prize) {
         event.prize.trim().takeIf { it.isNotEmpty() }
     }
-    val divisionSummaryText = remember(event.divisions, event.divisionDetails, event.eventType, event.includePlayoffs) {
-        val divisionLabels = event
-            .divisionDisplayLabels()
-            .map { label -> label.removeStandaloneSkillWord() }
-            .filter { label -> label.isNotBlank() }
-        when {
-            divisionLabels.size > 1 -> "Divisions: Multiple"
-            divisionLabels.size == 1 -> "Division: ${divisionLabels.first()}"
-            else -> "Division: TBD"
-        }
+    val cardMetadata = remember(
+        event.divisions,
+        event.divisionDetails,
+        event.eventType,
+        event.includePlayoffs,
+    ) {
+        buildNativeEventCardMetadata(event)
     }
     val lifecycleBadge = remember(event.state) {
         when {
@@ -226,7 +223,8 @@ fun EventCard(
             event.teamSignup -> "Team registration"
             else -> "Individual registration"
         },
-        divisionLabel = divisionSummaryText,
+        divisionLabel = cardMetadata.divisionLabel,
+        skillLevelLabel = cardMetadata.skillLevelLabel,
         dateLabel = dateRangeText,
         priceLabel = event.displayPriceRangeLabel(),
         prizeLabel = prizeText?.let { value -> "Prize: $value" },
@@ -252,9 +250,7 @@ internal expect fun PlatformEventCard(
     onMapClick: (Offset) -> Unit,
 )
 
-@OptIn(
-    ExperimentalHazeMaterialsApi::class, ExperimentalHazeApi::class
-)
+@OptIn(ExperimentalHazeApi::class)
 @Composable
 internal fun ComposeEventCard(
     data: NativeEventCardData,
@@ -312,11 +308,30 @@ internal fun ComposeEventCard(
                     modifier = Modifier.fillMaxWidth()
                 )
             } else {
-                val detailsModifier = Modifier.hazeEffect(
-                    hazeState, HazeMaterials.ultraThin(MaterialTheme.colorScheme.onBackground)
-                ) {
-                    inputScale = HazeInputScale.Fixed(0.5f)
-                }
+                val progressiveHazeStartY = with(LocalDensity.current) { 64.dp.toPx() }
+
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .hazeEffect(
+                            state = hazeState,
+                            style = HazeStyle(
+                                backgroundColor = Color.Black,
+                                tint = HazeTint(Color.Black.copy(alpha = 0.72f)),
+                                blurRadius = 28.dp,
+                                noiseFactor = 0.04f,
+                                fallbackTint = HazeTint(Color.Black.copy(alpha = 0.72f)),
+                            ),
+                        ) {
+                            inputScale = HazeInputScale.Fixed(0.5f)
+                            progressive = HazeProgressive.verticalGradient(
+                                easing = LinearEasing,
+                                startY = progressiveHazeStartY,
+                                startIntensity = 0f,
+                                endIntensity = 1f,
+                            )
+                        },
+                )
 
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -326,19 +341,6 @@ internal fun ComposeEventCard(
                             .fillMaxWidth()
                             .height(170.dp),
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .matchParentSize()
-                                .background(
-                                    Brush.verticalGradient(
-                                        colorStops = arrayOf(
-                                            0.40f to Color.Transparent,
-                                            1f to Color.Black.copy(alpha = 0.68f),
-                                        ),
-                                    ),
-                                ),
-                        )
-
                         Row(
                             modifier = Modifier
                                 .align(Alignment.BottomStart)
@@ -387,16 +389,8 @@ internal fun ComposeEventCard(
                     }
 
                     Column(
-                        modifier = detailsModifier
+                        modifier = Modifier
                             .fillMaxWidth()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(
-                                        Color.Black.copy(alpha = 0.34f),
-                                        Color.Black.copy(alpha = 0.52f),
-                                    ),
-                                ),
-                            )
                             .padding(navPadding)
                             .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalArrangement = Arrangement.spacedBy(5.dp),
@@ -454,6 +448,17 @@ internal fun ComposeEventCard(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
+
+                        Text(
+                            text = listOfNotNull(
+                                data.divisionLabel.takeIf(String::isNotBlank),
+                                data.skillLevelLabel?.takeIf(String::isNotBlank),
+                            ).joinToString(separator = "  ·  "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.9f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -547,13 +552,4 @@ private fun PlaceholderLine(
             .height(height)
             .background(color = color, shape = shape)
     )
-}
-
-private val standaloneSkillWordRegex = Regex("\\bskill\\b", RegexOption.IGNORE_CASE)
-private val whitespaceRegex = Regex("\\s+")
-
-private fun String.removeStandaloneSkillWord(): String {
-    return replace(standaloneSkillWordRegex, " ")
-        .replace(whitespaceRegex, " ")
-        .trim()
 }

@@ -110,7 +110,7 @@ fun EventList(
                         .padding(padding)
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                         .fillMaxWidth(),
-                    elevation = CardDefaults.cardElevation(4.dp),
+                    elevation = CardDefaults.cardElevation(0.dp),
                     shape = RoundedCornerShape(12.dp),
                 ) {
                     EventCardPlaceholder(navPadding = PaddingValues(bottom = 16.dp))
@@ -158,7 +158,7 @@ fun EventList(
                                 Modifier
                             }
                         ),
-                    elevation = CardDefaults.cardElevation(4.dp),
+                    elevation = CardDefaults.cardElevation(0.dp),
                     shape = RoundedCornerShape(12.dp),
                 ) {
                     EventCard(

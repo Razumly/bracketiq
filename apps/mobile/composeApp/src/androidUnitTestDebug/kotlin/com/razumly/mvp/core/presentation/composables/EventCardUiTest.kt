@@ -9,7 +9,6 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.dp
-import kotlin.test.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -28,7 +27,7 @@ class EventCardUiTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun lifecycle_badge_is_laid_out_below_date_and_price_row() {
+    fun compact_card_displays_lifecycle_division_and_skill_metadata() {
         composeRule.setContent {
             MaterialTheme {
                 Box(modifier = Modifier.width(360.dp)) {
@@ -42,6 +41,7 @@ class EventCardUiTest {
                             eventTypeLabel = "Tournament",
                             registrationLabel = "Team registration",
                             divisionLabel = "Division: Open",
+                            skillLevelLabel = "Skill: Advanced",
                             dateLabel = "Jul 18, 2030",
                             priceLabel = "\$120",
                             prizeLabel = null,
@@ -54,13 +54,10 @@ class EventCardUiTest {
             }
         }
 
-        val date = composeRule.onNodeWithText("Jul 18, 2030").assertIsDisplayed()
+        composeRule.onNodeWithText("Jul 18, 2030").assertIsDisplayed()
         composeRule.onNodeWithText("\$120").assertIsDisplayed()
-        val badge = composeRule.onNodeWithText("Draft").assertIsDisplayed()
-
-        assertTrue(
-            date.fetchSemanticsNode().boundsInRoot.bottom <=
-                badge.fetchSemanticsNode().boundsInRoot.top,
-        )
+        composeRule.onNodeWithText("Division: Open", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Skill: Advanced", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Draft").assertIsDisplayed()
     }
 }
