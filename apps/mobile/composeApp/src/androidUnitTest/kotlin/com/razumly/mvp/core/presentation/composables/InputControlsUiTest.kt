@@ -14,6 +14,8 @@ import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -24,6 +26,7 @@ import androidx.compose.ui.test.performTouchInput
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.eventSearch.util.EventFilter
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -94,12 +97,13 @@ class InputControlsUiTest {
     }
 
     @Test
-    fun givenFilterDateField_whenRendered_thenItIsEnabledAndClickable() {
+    fun givenFilterDateControls_whenRendered_thenTheyAreCompactAndEndDateIsExplicit() {
+        var currentFilter by mutableStateOf(EventFilter())
         composeRule.setContent {
             MaterialTheme {
                 EventFilterSheet(
-                    currentFilter = EventFilter(),
-                    onFilterChange = {},
+                    currentFilter = currentFilter,
+                    onFilterChange = { update -> currentFilter = currentFilter.update() },
                     onDismiss = {},
                 )
             }
@@ -109,7 +113,25 @@ class InputControlsUiTest {
             .onNodeWithTag(START_DATE_FILTER_FIELD_TEST_TAG)
             .assertIsEnabled()
             .assertHasClickAction()
-            .assertContentDescriptionEquals("Start Date")
+            .assertContentDescriptionEquals("Starts on or after")
+        val endDateSwitch = composeRule
+            .onNodeWithTag(END_DATE_FILTER_SWITCH_TEST_TAG)
+            .assertIsOff()
+
+        composeRule.onNodeWithTag(END_DATE_FILTER_FIELD_TEST_TAG).assertDoesNotExist()
+        endDateSwitch.performClick()
+        endDateSwitch.assertIsOn()
+
+        val endDateField = composeRule
+            .onNodeWithTag(END_DATE_FILTER_FIELD_TEST_TAG)
+            .assertIsEnabled()
+            .assertHasClickAction()
+            .assertContentDescriptionEquals("Starts on or before")
+
+        val startBounds = startDateField.fetchSemanticsNode().boundsInRoot
+        val endBounds = endDateField.fetchSemanticsNode().boundsInRoot
+        assertTrue(endBounds.top >= startBounds.bottom)
+        assertEquals(startBounds.width, endBounds.width, 0.5f)
 
         startDateField.performTouchInput { click() }
         composeRule.onNodeWithText("OK").assertExists()

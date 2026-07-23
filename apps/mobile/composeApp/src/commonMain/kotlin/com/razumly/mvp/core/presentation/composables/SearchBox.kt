@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -44,7 +46,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -52,7 +53,6 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -62,12 +62,15 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.eventSearch.util.EventFilter
 import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.format
+import kotlinx.datetime.format.MonthNames
+import kotlinx.datetime.format.Padding
+import kotlinx.datetime.format.char
 import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
 import kotlin.math.roundToInt
@@ -236,6 +239,7 @@ internal fun EventFilterSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.testTag(FILTER_SHEET_TEST_TAG),
     ) {
         Box(
@@ -285,8 +289,9 @@ internal fun EventFilterSheet(
                     if (showDateFilter) {
                         DateFilterSection(
                             currentFilter = currentFilter,
-                            { showStartPicker = true },
-                            { showEndPicker = true }
+                            onFilterChange = onFilterChange,
+                            onStartDateClicked = { showStartPicker = true },
+                            onEndDateClicked = { showEndPicker = true },
                         )
                     }
 
@@ -548,9 +553,14 @@ private fun PriceTextField(
         isError = isError,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-            focusedLabelColor = MaterialTheme.colorScheme.primary,
+            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            errorContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            focusedBorderColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedBorderColor = MaterialTheme.colorScheme.onSurface,
+            focusedLabelColor = MaterialTheme.colorScheme.onSurface,
             unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ),
     )
@@ -618,6 +628,7 @@ internal const val FILTER_SHEET_TEST_TAG = "event-filter-sheet"
 internal const val APPLY_FILTERS_TEST_TAG = "event-filter-apply"
 internal const val START_DATE_FILTER_FIELD_TEST_TAG = "event-filter-start-date"
 internal const val END_DATE_FILTER_FIELD_TEST_TAG = "event-filter-end-date"
+internal const val END_DATE_FILTER_SWITCH_TEST_TAG = "event-filter-end-date-switch"
 
 @OptIn(ExperimentalTime::class)
 internal fun normalizeFilterStartDate(
@@ -665,40 +676,62 @@ internal fun updateFilterEndDate(
 @Composable
 @OptIn(ExperimentalTime::class)
 private fun DateFilterSection(
-    currentFilter: EventFilter, onStartDateClicked: () -> Unit, onEndDateClicked: () -> Unit
+    currentFilter: EventFilter,
+    onFilterChange: (EventFilter.() -> EventFilter) -> Unit,
+    onStartDateClicked: () -> Unit,
+    onEndDateClicked: () -> Unit,
 ) {
-    Column {
+    val startDate = currentFilter.date.first.toLocalDateTime(
+        TimeZone.currentSystemDefault()
+    ).date
+    val endDate = currentFilter.date.second?.toLocalDateTime(
+        TimeZone.currentSystemDefault()
+    )?.date
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "Date",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        CompactFilterDateRow(
+            label = "Starts on or after",
+            value = startDate.format(compactFilterDateFormat),
+            testTag = START_DATE_FILTER_FIELD_TEST_TAG,
+            onClick = onStartDateClicked,
+        )
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .defaultMinSize(minHeight = 44.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "Date Range",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                text = "Set an end date",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Switch(
+                checked = endDate != null,
+                onCheckedChange = { enabled ->
+                    onFilterChange {
+                        copy(
+                            date = date.first to if (enabled) {
+                                date.second ?: normalizeFilterEndDate(date.first)
+                            } else {
+                                null
+                            }
+                        )
+                    }
+                },
+                modifier = Modifier.testTag(END_DATE_FILTER_SWITCH_TEST_TAG),
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            FilterDateField(
-                value = currentFilter.date.first.toLocalDateTime(
-                    TimeZone.currentSystemDefault()
-                ).date.format(dateFormat),
-                modifier = Modifier.weight(1f),
-                label = "Start Date",
-                testTag = START_DATE_FILTER_FIELD_TEST_TAG,
-                onClick = onStartDateClicked,
-            )
-            FilterDateField(
-                value = currentFilter.date.second?.toLocalDateTime(
-                    TimeZone.currentSystemDefault()
-                )?.date?.format(dateFormat) ?: "Select an End Date",
-                modifier = Modifier.weight(1f),
-                label = "End Date",
+        if (endDate != null) {
+            CompactFilterDateRow(
+                label = "Starts on or before",
+                value = endDate.format(compactFilterDateFormat),
                 testTag = END_DATE_FILTER_FIELD_TEST_TAG,
                 onClick = onEndDateClicked,
             )
@@ -707,14 +740,14 @@ private fun DateFilterSection(
 }
 
 @Composable
-private fun FilterDateField(
+private fun CompactFilterDateRow(
     value: String,
     label: String,
     testTag: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(
+    Row(
         modifier = modifier
             .testTag(testTag)
             .semantics {
@@ -724,36 +757,40 @@ private fun FilterDateField(
             .clickable(
                 role = Role.Button,
                 onClick = onClick,
-            ),
+            )
+            .defaultMinSize(minHeight = 44.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = {},
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text(label) },
-            enabled = true,
-            readOnly = true,
-            singleLine = true,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                focusedLabelColor = MaterialTheme.colorScheme.primary,
-                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            ),
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
         )
         Box(
             modifier = Modifier
-                .matchParentSize()
-                .clip(OutlinedTextFieldDefaults.shape)
-                .clickable(
-                    role = Role.Button,
-                    onClick = onClick,
+                .background(
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                    shape = RoundedCornerShape(10.dp),
                 )
-                .clearAndSetSemantics {},
-        )
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
+        }
     }
+}
+
+private val compactFilterDateFormat = LocalDate.Format {
+    monthName(MonthNames.ENGLISH_ABBREVIATED)
+    char(' ')
+    day(padding = Padding.NONE)
+    char(',')
+    char(' ')
+    year()
 }
