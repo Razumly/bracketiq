@@ -103,6 +103,10 @@ private struct NativeEventResults: View {
                         NativeDiscoverEventCard(
                             event: event,
                             organizationLogoId: organizationLogoId(for: event),
+                            showsPublishedBadge: event.canShowPublishedBadgeForViewer(
+                                viewerUserId: state.currentUserId,
+                                organization: organization(for: event)
+                            ),
                             onSelected: { onSelected(event) },
                             onMapSelected: { onMapSelected(event) }
                         )
@@ -133,8 +137,12 @@ private struct NativeEventResults: View {
 
 private extension NativeEventResults {
     func organizationLogoId(for event: Event) -> String? {
+        organization(for: event)?.logoId
+    }
+
+    func organization(for event: Event) -> Organization? {
         guard let organizationId = discoverNonEmpty(event.organizationId) else { return nil }
-        return state.allOrganizations.first(where: { $0.id == organizationId })?.logoId
+        return state.allOrganizations.first(where: { $0.id == organizationId })
     }
 
     func requestMoreIfNeeded(index: Int, event: Event) {

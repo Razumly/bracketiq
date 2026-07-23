@@ -41,6 +41,7 @@ class EventAffiliatePricingTest {
         )
 
         assertEquals("Price not specified", event.displayPriceRangeLabel())
+        assertEquals("\$N/A", event.discoverPriceRangeLabel())
     }
 
     @Test
@@ -71,5 +72,43 @@ class EventAffiliatePricingTest {
         )
 
         assertEquals("Free", event.displayPriceRangeLabel())
+        assertEquals("Free", event.discoverPriceRangeLabel())
+    }
+
+    @Test
+    fun discoverPriceRangeLabel_keepsAffiliateDivisionPriceRange() {
+        val event = Event(
+            id = "affiliate-event-range",
+            affiliateUrl = "https://example.com/register",
+            divisions = listOf("open", "premier"),
+            divisionDetails = listOf(
+                DivisionDetail(id = "open", key = "open", name = "Open", price = 50000),
+                DivisionDetail(id = "premier", key = "premier", name = "Premier", price = 70000),
+            ),
+        )
+
+        assertEquals("$500.00 - $700.00", event.discoverPriceRangeLabel())
+    }
+
+    @Test
+    fun canShowPublishedBadgeForViewer_acceptsHosts_and_rejectsOtherViewers() {
+        val event = Event(
+            id = "hosted-event",
+            hostId = "primary-host",
+            assistantHostIds = listOf("assistant-host"),
+        )
+
+        assertEquals(
+            true,
+            event.canShowPublishedBadgeForViewer("primary-host", organization = null),
+        )
+        assertEquals(
+            true,
+            event.canShowPublishedBadgeForViewer("assistant-host", organization = null),
+        )
+        assertEquals(
+            false,
+            event.canShowPublishedBadgeForViewer("other-viewer", organization = null),
+        )
     }
 }

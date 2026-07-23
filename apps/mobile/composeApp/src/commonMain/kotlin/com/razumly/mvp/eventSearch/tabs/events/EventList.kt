@@ -49,6 +49,7 @@ private const val EVENT_CLICK_SCROLL_SETTLE_DELAY_MILLIS = 150L
 fun EventList(
     events: List<Event>,
     organizationLogoIdsById: Map<String, String> = emptyMap(),
+    publishedBadgeEventIds: Set<String> = emptySet(),
     firstElementPadding: PaddingValues,
     lastElementPadding: PaddingValues,
     lazyListState: LazyListState = rememberLazyListState(),
@@ -111,7 +112,7 @@ fun EventList(
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                         .fillMaxWidth(),
                     elevation = CardDefaults.cardElevation(0.dp),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(16.dp),
                 ) {
                     EventCardPlaceholder(navPadding = PaddingValues(bottom = 16.dp))
                 }
@@ -159,7 +160,7 @@ fun EventList(
                             }
                         ),
                     elevation = CardDefaults.cardElevation(0.dp),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(16.dp),
                 ) {
                     EventCard(
                         event,
@@ -169,6 +170,7 @@ fun EventList(
                             ?.trim()
                             ?.takeIf(String::isNotBlank)
                             ?.let(organizationLogoIdsById::get),
+                        showPublishedLifecycleBadge = event.id in publishedBadgeEventIds,
                         onClick = {
                             if (!suppressEventClicksAfterScroll) {
                                 onEventClick(event)

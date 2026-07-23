@@ -100,6 +100,7 @@ import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.canShowPublishedBadgeForViewer
 import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateUrl
 import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateRentalUrl
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
@@ -789,6 +790,7 @@ internal fun ComposeEventSearchScreen(
     val organizationTagOptions by component.organizationTags.collectAsState()
     val organizationFilter by component.organizationFilter.collectAsState()
     val selectedOrganizationTagSlugs by component.selectedOrganizationTagSlugs.collectAsState()
+    val currentUserId by component.currentUserId.collectAsState()
 
     var selectedTab by rememberSaveable { mutableStateOf(DiscoverTab.EVENTS) }
     var searchQuery by remember { mutableStateOf("") }
@@ -820,6 +822,24 @@ internal fun ComposeEventSearchScreen(
         rentals,
     ) {
         component.nativeDiscoverSearchSnapshot(normalizedSubmittedSearchQuery)
+    }
+    val publishedBadgeEventIds = remember(
+        submittedSearchResults.events,
+        allOrganizations,
+        currentUserId,
+    ) {
+        val organizationsById = allOrganizations.associateBy(Organization::id)
+        submittedSearchResults.events
+            .filter { event ->
+                event.canShowPublishedBadgeForViewer(
+                    viewerUserId = currentUserId,
+                    organization = event.organizationId
+                        ?.trim()
+                        ?.takeIf(String::isNotBlank)
+                        ?.let(organizationsById::get),
+                )
+            }
+            .mapTo(mutableSetOf()) { event -> event.id }
     }
     val guideController = LocalGuideController.current
     val discoverGuide = remember {
@@ -1268,6 +1288,7 @@ internal fun ComposeEventSearchScreen(
                                     EventsTabContent(
                                         events = submittedSearchResults.events,
                                         organizationLogoIdsById = organizationLogoIdsById,
+                                        publishedBadgeEventIds = publishedBadgeEventIds,
                                         firstElementPadding = firstElementPadding,
                                         lastElementPadding = offsetNavPadding,
                                         lazyListState = eventsListState,

@@ -283,6 +283,24 @@ fun Event.displayPriceRangeLabel(): String {
     }
 }
 
+fun Event.discoverPriceRangeLabel(): String =
+    displayPriceRangeLabel().takeUnless { label -> label == "Price not specified" } ?: "\$N/A"
+
+fun Event.canShowPublishedBadgeForViewer(
+    viewerUserId: String,
+    organization: Organization?,
+): Boolean {
+    val normalizedViewerUserId = viewerUserId.trim()
+    if (normalizedViewerUserId.isBlank()) {
+        return false
+    }
+    return hostId.trim() == normalizedViewerUserId ||
+        assistantHostIds.any { assistantHostId ->
+            assistantHostId.trim() == normalizedViewerUserId
+        } ||
+        organization?.canManageEventsForViewer(normalizedViewerUserId) == true
+}
+
 fun Event.isDraftLikeState(): Boolean {
     return when (state.trim().uppercase()) {
         "UNPUBLISHED", "DRAFT" -> true

@@ -11,6 +11,7 @@ import com.razumly.mvp.eventSearch.tabs.events.EventList
 fun EventsTabContent(
     events: List<Event>,
     organizationLogoIdsById: Map<String, String> = emptyMap(),
+    publishedBadgeEventIds: Set<String> = emptySet(),
     firstElementPadding: PaddingValues,
     lastElementPadding: PaddingValues,
     lazyListState: LazyListState,
@@ -27,6 +28,7 @@ fun EventsTabContent(
     EventList(
         events = events,
         organizationLogoIdsById = organizationLogoIdsById,
+        publishedBadgeEventIds = publishedBadgeEventIds,
         firstElementPadding = firstElementPadding,
         lastElementPadding = lastElementPadding,
         lazyListState = lazyListState,

@@ -102,7 +102,7 @@ fun StandardTextField(
         textStyle != null && fontSize != null -> textStyle.copy(fontSize = fontSize)
         textStyle != null -> textStyle
         fontSize != null -> TextStyle(fontSize = fontSize)
-        else -> TextStyle.Default
+        else -> MaterialTheme.typography.bodyLarge
     }
 
     fun runNextAction() {
@@ -323,7 +323,7 @@ fun StandardTextField(
                 modifier = Modifier.fillMaxWidth(),
                 label = if (label.isNotEmpty()) ({ Text(label) }) else null,
                 placeholder = if (placeholder.isNotEmpty()) {
-                    { Text(placeholder, style = placeholderTextStyle ?: TextStyle.Default) }
+                    { Text(placeholder, style = placeholderTextStyle ?: finalTextStyle) }
                 } else {
                     null
                 },
@@ -366,7 +366,7 @@ fun StandardTextField(
 
     val labelContent: (@Composable () -> Unit)? = if (label.isNotEmpty()) ({ Text(label) }) else null
     val placeholderContent: (@Composable () -> Unit)? = if (placeholder.isNotEmpty()) {
-        { Text(placeholder, style = placeholderTextStyle ?: TextStyle.Default) }
+        { Text(placeholder, style = placeholderTextStyle ?: finalTextStyle) }
     } else {
         null
     }

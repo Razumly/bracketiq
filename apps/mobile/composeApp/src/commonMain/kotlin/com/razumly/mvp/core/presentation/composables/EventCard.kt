@@ -7,21 +7,23 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,21 +36,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.displayPriceRangeLabel
+import com.razumly.mvp.core.data.dataTypes.discoverPriceRangeLabel
 import com.razumly.mvp.core.data.dataTypes.evergreenDateDisplayLabel
 import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
 import com.razumly.mvp.core.data.dataTypes.isDraftLikeState
@@ -78,6 +84,35 @@ private data class EventLifecycleBadge(
 
 private const val EVENT_CARD_IMAGE_WIDTH_PX = 1080
 private const val EVENT_CARD_IMAGE_HEIGHT_PX = 1350
+private const val EVENT_CARD_ASPECT_RATIO = 1f
+private const val EVENT_CARD_HAZE_RAMP_START_FRACTION = 0.12f
+internal const val EVENT_CARD_TEST_TAG = "event-card"
+internal const val EVENT_CARD_TYPE_PRICE_TEST_TAG = "event-card-type-price"
+internal const val EVENT_CARD_DATE_REGISTRATION_TEST_TAG = "event-card-date-registration"
+internal const val EVENT_CARD_MAP_TEST_TAG = "event-card-map"
+
+private val EventCardTitleStyle = TextStyle(
+    fontSize = 17.sp,
+    lineHeight = 22.sp,
+    fontWeight = FontWeight.SemiBold,
+)
+
+private val EventCardLocationStyle = TextStyle(
+    fontSize = 15.sp,
+    lineHeight = 20.sp,
+)
+
+private val EventCardMetadataStyle = TextStyle(
+    fontSize = 12.sp,
+    lineHeight = 16.sp,
+    fontWeight = FontWeight.Medium,
+)
+
+private val EventCardBadgeStyle = TextStyle(
+    fontSize = 11.sp,
+    lineHeight = 14.sp,
+    fontWeight = FontWeight.Bold,
+)
 
 internal data class EventCardImageSource(
     val imageUrl: String,
@@ -152,6 +187,7 @@ fun EventCard(
     navPadding: PaddingValues = PaddingValues(),
     showLoadingPlaceholder: Boolean = false,
     fallbackImageId: String? = null,
+    showPublishedLifecycleBadge: Boolean = false,
     onClick: (() -> Unit)? = null,
     onMapClick: (Offset) -> Unit,
 ) {
@@ -197,7 +233,7 @@ fun EventCard(
     ) {
         buildNativeEventCardMetadata(event)
     }
-    val lifecycleBadge = remember(event.state) {
+    val lifecycleBadge = remember(event.state, showPublishedLifecycleBadge) {
         when {
             event.isPrivateState() -> EventLifecycleBadge(
                 label = event.lifecycleStateLabel(),
@@ -206,6 +242,10 @@ fun EventCard(
             event.isDraftLikeState() -> EventLifecycleBadge(
                 label = event.lifecycleStateLabel(),
                 tone = "draft",
+            )
+            showPublishedLifecycleBadge && event.lifecycleStateLabel() == "Published" -> EventLifecycleBadge(
+                label = event.lifecycleStateLabel(),
+                tone = "published",
             )
             else -> null
         }
@@ -226,7 +266,7 @@ fun EventCard(
         divisionLabel = cardMetadata.divisionLabel,
         skillLevelLabel = cardMetadata.skillLevelLabel,
         dateLabel = dateRangeText,
-        priceLabel = event.displayPriceRangeLabel(),
+        priceLabel = event.discoverPriceRangeLabel(),
         prizeLabel = prizeText?.let { value -> "Prize: $value" },
         lifecycleLabel = lifecycleBadge?.label,
         lifecycleTone = lifecycleBadge?.tone,
@@ -267,9 +307,11 @@ internal fun ComposeEventCard(
         val hazeState = rememberHazeState()
         var mapButtonOffset by remember { mutableStateOf(Offset.Zero) }
 
-        Box(
+        BoxWithConstraints(
             Modifier
                 .fillMaxWidth()
+                .aspectRatio(EVENT_CARD_ASPECT_RATIO)
+                .testTag(EVENT_CARD_TEST_TAG)
                 .clipToBounds()
                 .background(Color.Black)
                 .then(
@@ -308,7 +350,21 @@ internal fun ComposeEventCard(
                     modifier = Modifier.fillMaxWidth()
                 )
             } else {
-                val progressiveHazeStartY = with(LocalDensity.current) { 64.dp.toPx() }
+                val progressiveHazeStartY = with(LocalDensity.current) {
+                    maxWidth.toPx() * EVENT_CARD_HAZE_RAMP_START_FRACTION
+                }
+                val progressiveGlassTint = Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0f to Color.Transparent,
+                        0.12f to Color.Transparent,
+                        0.18f to Color.Black.copy(alpha = 0.16f),
+                        0.24f to Color.Black.copy(alpha = 0.46f),
+                        0.36f to Color.Black.copy(alpha = 0.66f),
+                        0.52f to Color.Black.copy(alpha = 0.82f),
+                        0.70f to Color.Black.copy(alpha = 0.93f),
+                        1f to Color.Black.copy(alpha = 0.98f),
+                    ),
+                )
 
                 Box(
                     modifier = Modifier
@@ -317,82 +373,32 @@ internal fun ComposeEventCard(
                             state = hazeState,
                             style = HazeStyle(
                                 backgroundColor = Color.Black,
-                                tint = HazeTint(Color.Black.copy(alpha = 0.72f)),
-                                blurRadius = 28.dp,
+                                tint = HazeTint(progressiveGlassTint),
+                                blurRadius = 26.dp,
                                 noiseFactor = 0.04f,
-                                fallbackTint = HazeTint(Color.Black.copy(alpha = 0.72f)),
+                                fallbackTint = HazeTint(Color.Black.copy(alpha = 0.84f)),
                             ),
                         ) {
                             inputScale = HazeInputScale.Fixed(0.5f)
                             progressive = HazeProgressive.verticalGradient(
                                 easing = LinearEasing,
                                 startY = progressiveHazeStartY,
-                                startIntensity = 0f,
+                                startIntensity = 0.12f,
                                 endIntensity = 1f,
                             )
                         },
                 )
 
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxSize(),
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(170.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .align(Alignment.BottomStart)
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.Bottom,
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(
-                                    text = data.eventTypeLabel,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    text = data.priceLabel,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    maxLines = 1,
-                                )
-                            }
-
-                            IconButton(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .background(
-                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.86f),
-                                        shape = CircleShape,
-                                    )
-                                    .onGloballyPositioned { layoutCoordinates ->
-                                        mapButtonOffset = layoutCoordinates.boundsInWindow().center
-                                    },
-                                onClick = { onMapClick(mapButtonOffset) },
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Place,
-                                    contentDescription = "View on Map",
-                                    tint = MaterialTheme.colorScheme.onSurface,
-                                )
-                            }
-                        }
-                    }
+                    Spacer(modifier = Modifier.weight(1f))
 
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(navPadding)
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
                         Row(
@@ -402,8 +408,7 @@ internal fun ComposeEventCard(
                         ) {
                             Text(
                                 text = data.title,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
+                                style = EventCardTitleStyle,
                                 color = Color.White,
                                 modifier = Modifier.weight(1f),
                                 maxLines = 2,
@@ -421,8 +426,7 @@ internal fun ComposeEventCard(
                                 ) {
                                     Text(
                                         text = label,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.SemiBold,
+                                        style = EventCardBadgeStyle,
                                         color = Color.White,
                                     )
                                 }
@@ -431,22 +435,56 @@ internal fun ComposeEventCard(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(
-                                modifier = Modifier.size(16.dp),
-                                painter = rememberVectorPainter(Icons.Default.LocationOn),
-                                contentDescription = "Location",
-                                tint = Color.White.copy(alpha = 0.82f),
-                            )
-                            Text(
-                                text = data.location,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.82f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    modifier = Modifier.size(16.dp),
+                                    painter = rememberVectorPainter(Icons.Default.LocationOn),
+                                    contentDescription = "Location",
+                                    tint = Color.White.copy(alpha = 0.82f),
+                                )
+                                Text(
+                                    text = data.location,
+                                    style = EventCardLocationStyle,
+                                    color = Color.White.copy(alpha = 0.82f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .testTag(EVENT_CARD_MAP_TEST_TAG)
+                                    .onGloballyPositioned { layoutCoordinates ->
+                                        mapButtonOffset = layoutCoordinates.boundsInWindow().center
+                                    }
+                                    .background(
+                                        color = Color.White.copy(alpha = 0.14f),
+                                        shape = RoundedCornerShape(999.dp),
+                                    )
+                                    .clickable { onMapClick(mapButtonOffset) }
+                                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Map,
+                                    contentDescription = "View on Map",
+                                    modifier = Modifier.size(14.dp),
+                                    tint = Color.White,
+                                )
+                                Text(
+                                    text = "Map",
+                                    style = EventCardMetadataStyle,
+                                    color = Color.White,
+                                )
+                            }
                         }
 
                         Text(
@@ -454,33 +492,83 @@ internal fun ComposeEventCard(
                                 data.divisionLabel.takeIf(String::isNotBlank),
                                 data.skillLevelLabel?.takeIf(String::isNotBlank),
                             ).joinToString(separator = "  ·  "),
-                            style = MaterialTheme.typography.labelSmall,
+                            style = EventCardMetadataStyle,
                             color = Color.White.copy(alpha = 0.9f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
 
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag(EVENT_CARD_DATE_REGISTRATION_TEST_TAG),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(
-                                text = data.dateLabel,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.White.copy(alpha = 0.82f),
+                            Row(
                                 modifier = Modifier.weight(1f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DateRange,
+                                    contentDescription = "Date",
+                                    modifier = Modifier
+                                        .padding(top = 1.dp)
+                                        .size(14.dp),
+                                    tint = Color.White.copy(alpha = 0.82f),
+                                )
+                                Text(
+                                    text = data.dateLabel,
+                                    style = EventCardMetadataStyle,
+                                    color = Color.White.copy(alpha = 0.82f),
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 4,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                             Text(
                                 text = data.registrationLabel,
-                                style = MaterialTheme.typography.labelSmall,
+                                style = EventCardMetadataStyle,
                                 color = Color.White.copy(alpha = 0.82f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 textAlign = TextAlign.End,
                             )
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag(EVENT_CARD_TYPE_PRICE_TEST_TAG),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = data.eventTypeLabel,
+                                style = EventCardMetadataStyle,
+                                color = Color.White.copy(alpha = 0.82f),
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        color = Color(0xFF16A34A),
+                                        shape = RoundedCornerShape(999.dp),
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                            ) {
+                                Text(
+                                    text = data.priceLabel,
+                                    style = EventCardMetadataStyle,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    textAlign = TextAlign.End,
+                                )
+                            }
                         }
                     }
                 }
@@ -493,6 +581,7 @@ private fun eventLifecycleColor(tone: String?): Color =
     when (tone) {
         "private" -> Color(0xFF1565C0)
         "draft" -> Color(0xFFD32F2F)
+        "published" -> Color(0xFF16A34A)
         else -> Color(0xFF1565C0)
     }
 
@@ -505,12 +594,13 @@ fun EventCardPlaceholder(
 
     Column(
         modifier = modifier
+            .fillMaxWidth()
+            .aspectRatio(EVENT_CARD_ASPECT_RATIO)
             .padding(navPadding)
-            .padding(horizontal = 16.dp)
-            .fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp, alignment = Alignment.Bottom)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Spacer(modifier = Modifier.height(170.dp))
+        Spacer(modifier = Modifier.weight(1f))
         PlaceholderLine(
             widthFraction = 0.56f,
             height = 22.dp,

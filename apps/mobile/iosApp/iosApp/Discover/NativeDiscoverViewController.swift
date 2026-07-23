@@ -106,6 +106,7 @@ final class DiscoverObservableState: ObservableObject {
     @Published private(set) var selectedSearchLocationLabel: String?
     @Published private(set) var currentLocation: LatLng?
     @Published private(set) var selectedEvent: Event?
+    @Published private(set) var currentUserId = ""
 
     @Published private(set) var isMapVisible = false
     @Published private(set) var isMapLoading = false
@@ -138,6 +139,12 @@ private extension DiscoverObservableState {
                 for await value in component.events {
                     guard let self else { return }
                     events = value
+                }
+            },
+            Task { [weak self] in
+                for await value in component.currentUserId {
+                    guard let self else { return }
+                    currentUserId = value
                 }
             },
             Task { [weak self] in

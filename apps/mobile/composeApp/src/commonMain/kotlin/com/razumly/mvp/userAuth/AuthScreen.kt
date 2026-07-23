@@ -71,16 +71,19 @@ fun AuthScreenBase(
     var lastName by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf("") }
     var dateOfBirth by remember { mutableStateOf("") }
+    var mfaCode by remember { mutableStateOf("") }
     var showBirthdayPicker by remember { mutableStateOf(false) }
 
     val passwordError by component.passwordError.collectAsState()
     val loginState by component.loginState.collectAsState()
     val isSignup by component.isSignup.collectAsState()
     val signupConflict by component.signupConflict.collectAsState()
+    val loginMfaChallenge by component.loginMfaChallenge.collectAsState()
     val popupHandler = LocalPopupHandler.current
 
     val isPasswordValid = password.length in 8..256
     val isConfirmPasswordValid = confirmPassword.length in 8..256
+    val isMfaCodeValid = mfaCode.length in 6..16
 
     var firstNameConflictSource by remember(signupConflict) { mutableStateOf(ProfileConflictValueSource.EXISTING) }
     var lastNameConflictSource by remember(signupConflict) { mutableStateOf(ProfileConflictValueSource.EXISTING) }
@@ -127,6 +130,10 @@ fun AuthScreenBase(
         }
     }
 
+    LaunchedEffect(loginMfaChallenge?.challengeId) {
+        mfaCode = ""
+    }
+
     LaunchedEffect(loginState, popupHandler) {
         val errorState = loginState as? LoginState.Error ?: return@LaunchedEffect
         Napier.e("AuthScreen error state: ${errorState.message}")
@@ -157,6 +164,48 @@ fun AuthScreenBase(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    if (loginMfaChallenge != null) {
+                        Text(
+                            text = "Verify your identity",
+                            style = MaterialTheme.typography.headlineSmall,
+                            textAlign = TextAlign.Center,
+                        )
+                        Text(
+                            text = "Enter the 6-digit code from your authenticator app.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                        StandardTextField(
+                            value = mfaCode,
+                            onValueChange = { mfaCode = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = "Authenticator code",
+                            placeholder = "Enter 6-digit code",
+                            keyboardType = "number",
+                            inputFilter = { input -> input.filter(Char::isDigit).take(16) },
+                            imeAction = ImeAction.Done,
+                            onImeAction = {
+                                if (isMfaCodeValid && loginState !is LoginState.Loading) {
+                                    component.onConfirmLoginMfa(mfaCode)
+                                }
+                            },
+                        )
+                        Button(
+                            onClick = { component.onConfirmLoginMfa(mfaCode) },
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            enabled = isMfaCodeValid && loginState !is LoginState.Loading,
+                        ) {
+                            Text("Verify code")
+                        }
+                        OutlinedButton(
+                            onClick = { component.dismissLoginMfa() },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = loginState !is LoginState.Loading,
+                        ) {
+                            Text("Back to sign in")
+                        }
+                    } else {
                     if (isSignup) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -353,6 +402,7 @@ fun AuthScreenBase(
                         Spacer(modifier = Modifier.height(8.dp))
                     }
                     GoogleSignInButton(onClick = { onGoogleOauth2() })
+                    }
                 }
             }
         }

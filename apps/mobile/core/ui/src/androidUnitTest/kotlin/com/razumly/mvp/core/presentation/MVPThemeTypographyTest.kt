@@ -11,7 +11,7 @@ class MVPThemeTypographyTest {
         assertEquals(28.sp, MVPAppTypography.headlineLarge.fontSize)
         assertEquals(18.sp, MVPAppTypography.titleLarge.fontSize)
         assertEquals(13.sp, MVPAppTypography.titleSmall.fontSize)
-        assertEquals(15.sp, MVPAppTypography.bodyLarge.fontSize)
+        assertEquals(16.sp, MVPAppTypography.bodyLarge.fontSize)
         assertEquals(13.sp, MVPAppTypography.bodyMedium.fontSize)
         assertEquals(10.sp, MVPAppTypography.labelSmall.fontSize)
     }

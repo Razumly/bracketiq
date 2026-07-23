@@ -17,6 +17,7 @@ The Android app currently uses the unmodified Material 3 type scale, which makes
 - [x] (2026-07-22 21:31Z) Updated the existing date-control Compose test for the new layout, picker action, and end-date behavior.
 - [x] (2026-07-22 21:41Z) Ran the targeted core typography and Compose filter suites, compiled the iOS simulator core UI source set, and installed the debug app on `emulator-5554`.
 - [x] (2026-07-22 21:41Z) Inspected the live filter sheet with price and end date disabled, end date enabled, and both price and end date enabled; also verified the lower controls remain reachable by scrolling while Apply stays fixed.
+- [x] (2026-07-23) Restored Android's stock `bodyLarge` size and made `StandardTextField` explicitly inherit it for entered values and placeholders, returning fields to the standard 16sp while compact heading, label, and supporting typography remains in place.
 
 ## Surprises & Discoveries
 
@@ -44,6 +45,10 @@ The Android app currently uses the unmodified Material 3 type scale, which makes
 - Decision: Keep the iOS Compose typography at the Material default and make only the Android actual value compact.
   Rationale: The request is to bring Android/Compose closer to native iOS. Shrinking Compose content hosted on iOS would move the reference platform too and make comparison unstable.
   Date/Author: 2026-07-22 / Codex
+
+- Decision: Preserve the stock Android `bodyLarge` role inside the otherwise compact scale.
+  Rationale: Material text fields derive their entered-value style from `bodyLarge`; restoring that single role reverses the field-text reduction without bringing back oversized headings and labels.
+  Date/Author: 2026-07-23 / Codex
 
 - Decision: Model the end date explicitly with a switch and reveal its date row only when enabled.
   Rationale: This matches the native iOS interaction, reduces the default sheet height, and makes “no end date” an explicit state rather than a placeholder inside a large field.

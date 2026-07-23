@@ -5,13 +5,14 @@ import UIKit
 struct NativeDiscoverEventCard: View {
     let event: Event
     let organizationLogoId: String?
+    let showsPublishedBadge: Bool
     let onSelected: () -> Void
     let onMapSelected: () -> Void
 
     var body: some View {
         let cardMetadata = EventCardMetadataKt.buildNativeEventCardMetadata(event: event)
 
-        ZStack {
+        ZStack(alignment: .bottomLeading) {
             DiscoverRemoteImage(
                 url: discoverImageURL(
                     reference: event.imageId.isEmpty ? organizationLogoId : event.imageId,
@@ -31,47 +32,40 @@ struct NativeDiscoverEventCard: View {
                 .allowsHitTesting(false)
 
             VStack(alignment: .leading, spacing: 0) {
-                ZStack(alignment: .bottomLeading) {
-                    HStack(alignment: .bottom) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(discoverTitleCase(event.eventType.name))
-                                .font(.caption.weight(.semibold))
-                            Text(event.displayPriceRangeLabel())
-                                .font(.headline.weight(.bold))
-                        }
-                        .foregroundStyle(.white)
+                Spacer(minLength: 0)
 
-                        Spacer()
-
-                        Button(action: onMapSelected) {
-                            Image(systemName: "map.fill")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.primary)
-                                .frame(width: 40, height: 40)
-                                .background(.regularMaterial, in: Circle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Show \(event.name) on map")
-                    }
-                    .padding(12)
-                }
-                .frame(height: 170)
-
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 5) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(event.name.isEmpty ? "Event" : event.name)
                             .font(.headline)
                             .foregroundStyle(.white)
                             .lineLimit(2)
                         Spacer(minLength: 8)
-                        NativeLifecycleBadge(state: event.state)
+                        if event.lifecycleStateLabel() != "Published" || showsPublishedBadge {
+                            NativeLifecycleBadge(state: event.state)
+                        }
                     }
 
-                    if !event.location.isEmpty {
-                        Label(event.location, systemImage: "mappin.and.ellipse")
-                            .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.82))
-                            .lineLimit(1)
+                    HStack(spacing: 8) {
+                        if !event.location.isEmpty {
+                            Label(event.location, systemImage: "mappin.and.ellipse")
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.82))
+                                .lineLimit(1)
+                        }
+
+                        Spacer(minLength: 4)
+
+                        Button(action: onMapSelected) {
+                            Label("Map", systemImage: "map.fill")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(.regularMaterial, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Show \(event.name) on map")
                     }
 
                     Text(
@@ -94,10 +88,33 @@ struct NativeDiscoverEventCard: View {
                     }
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.white.opacity(0.82))
+
+                    HStack(spacing: 8) {
+                        Text(discoverTitleCase(event.eventType.name))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Spacer(minLength: 8)
+                        Text(event.discoverPriceRangeLabel())
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .layoutPriority(1)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color(red: 0.086, green: 0.639, blue: 0.29), in: Capsule())
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("discover-event-type-price")
                 }
-                .padding(12)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
+        .aspectRatio(1, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -115,10 +132,11 @@ private struct DiscoverProgressiveGlassBackground: View {
             .mask {
                 LinearGradient(
                     stops: [
-                        .init(color: .clear, location: 0.18),
-                        .init(color: .black.opacity(0.2), location: 0.34),
-                        .init(color: .black.opacity(0.72), location: 0.64),
-                        .init(color: .black, location: 0.82),
+                        .init(color: .clear, location: 0.24),
+                        .init(color: .black.opacity(0.22), location: 0.32),
+                        .init(color: .black.opacity(0.68), location: 0.52),
+                        .init(color: .black.opacity(0.94), location: 0.70),
+                        .init(color: .black, location: 0.80),
                     ],
                     startPoint: .top,
                     endPoint: .bottom
@@ -132,7 +150,7 @@ private struct DiscoverProgressiveGlassBackground: View {
         if #available(iOS 26.0, *) {
             Color.clear
                 .glassEffect(
-                    .regular.tint(.black.opacity(0.5)),
+                    .clear.tint(.black.opacity(0.58)),
                     in: .rect(cornerRadius: 16)
                 )
         } else {

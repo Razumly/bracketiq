@@ -27,6 +27,7 @@ import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
+import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
 import com.razumly.mvp.core.util.ErrorMessage
@@ -47,8 +48,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.time.ExperimentalTime
@@ -89,6 +93,7 @@ interface EventSearchComponent {
 
     val events: StateFlow<List<Event>>
     val selectedEvent: StateFlow<Event?>
+    val currentUserId: StateFlow<String>
 
     fun setLoadingHandler(handler: LoadingHandler)
     fun loadMoreEvents()
@@ -172,6 +177,7 @@ class DefaultEventSearchComponent(
     private val fieldRepository: IFieldRepository,
     private val teamRepository: ITeamRepository,
     private val sportsRepository: ISportsRepository,
+    private val userRepository: IUserRepository,
     eventId: String?,
     override val locationTracker: LocationTracker,
     private val navigationHandler: INavigationHandler
@@ -189,6 +195,15 @@ class DefaultEventSearchComponent(
     }
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob() + scopeExceptionHandler)
     private val rentalAvailabilityLoader = RentalAvailabilityLoader(fieldRepository)
+    override val currentUserId: StateFlow<String> = userRepository.currentUser
+        .map { currentUserResult ->
+            currentUserResult.getOrNull()?.id?.trim().orEmpty()
+        }
+        .stateIn(
+            scope = scope,
+            started = SharingStarted.Eagerly,
+            initialValue = userRepository.currentUser.value.getOrNull()?.id?.trim().orEmpty(),
+        )
 
     private val _currentRadius = MutableStateFlow(0.0)
     override val currentRadius: StateFlow<Double> = _currentRadius.asStateFlow()

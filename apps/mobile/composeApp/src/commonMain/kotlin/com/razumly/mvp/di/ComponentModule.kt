@@ -126,6 +126,7 @@ val componentModule = module {
             fieldRepository = get(),
             teamRepository = get(),
             sportsRepository = get(),
+            userRepository = get(),
             eventId = eventId,
             navigationHandler = navHandler
         )
