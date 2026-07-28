@@ -1724,7 +1724,8 @@ class DefaultCreateEventComponent(
             } else if (event.noFixedEndDateTime) {
                 null
             } else {
-                slot.endDate?.toDateOnlyInstant(slot.timeZone.toTimeZoneOrUtc(event.resolvedTimeZone()))
+                (slot.endDate ?: event.defaultLeagueSlotEndDate())
+                    ?.toDateOnlyInstant(slot.timeZone.toTimeZoneOrUtc(event.resolvedTimeZone()))
             }
             slot.copy(
                 id = slot.id.ifBlank { newId() },
@@ -2113,9 +2114,22 @@ class DefaultCreateEventComponent(
     }
 
     private fun createDefaultLeagueSlot(): TimeSlot {
-        return createSimpleSetupEventRangeSlot(
-            event = newEventState.value,
-            fields = _localFields.value,
+        val event = newEventState.value
+        val startDate = if (event.start == Instant.DISTANT_PAST) Clock.System.now() else event.start
+        return TimeSlot(
+            id = newId(),
+            dayOfWeek = null,
+            daysOfWeek = emptyList(),
+            divisions = defaultFieldDivisions(event),
+            startTimeMinutes = null,
+            endTimeMinutes = null,
+            startDate = startDate,
+            timeZone = event.timeZone,
+            repeating = true,
+            endDate = event.defaultLeagueSlotEndDate(),
+            scheduledFieldId = null,
+            scheduledFieldIds = emptyList(),
+            price = null,
         )
     }
 

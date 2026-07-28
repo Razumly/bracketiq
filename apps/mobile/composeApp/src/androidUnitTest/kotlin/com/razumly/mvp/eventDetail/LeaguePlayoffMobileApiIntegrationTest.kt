@@ -5,14 +5,17 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.network.ApiException
+import com.razumly.mvp.core.network.dto.EventParticipantsRequestDto
+import com.razumly.mvp.core.network.dto.EventParticipantsResponseDto
 import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.testing.MOBILE_TEST_HOST_EMAIL
 import com.razumly.mvp.testing.MOBILE_TEST_HOST_PASSWORD
 import com.razumly.mvp.testing.MOBILE_TEST_PARTICIPANT_EMAIL
 import com.razumly.mvp.testing.MOBILE_TEST_PARTICIPANT_PASSWORD
-import com.razumly.mvp.testing.MOBILE_TEST_PARTICIPANT_USER_ID
 import com.razumly.mvp.testing.MobileApiTestSession
 import com.razumly.mvp.testing.mobileApiLoginFixturesReady
 import com.razumly.mvp.testing.runTargetedBackendSeed
@@ -30,12 +33,18 @@ import org.robolectric.annotation.Config
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.Clock
+import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Instant
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class LeaguePlayoffMobileApiIntegrationTest {
+    private val testRunId = Clock.System.now().toEpochMilliseconds()
+    private val testEventId = "mobile_api_league_playoff_$testRunId"
+    private val testFieldId = "${testEventId}_field"
+    private val testSlotId = "${testEventId}_slot"
     private var hostSession: MobileApiTestSession? = null
     private var participantSession: MobileApiTestSession? = null
 
@@ -61,7 +70,7 @@ class LeaguePlayoffMobileApiIntegrationTest {
 
     @After
     fun tearDown() {
-        runCatching { runBlocking { hostSession?.deleteEvent(TEST_EVENT_ID) } }
+        runCatching { runBlocking { hostSession?.deleteEvent(testEventId) } }
         hostSession?.close()
         participantSession?.close()
         hostSession = null
@@ -77,7 +86,7 @@ class LeaguePlayoffMobileApiIntegrationTest {
         val participant = participantSession!!
 
         val hostUser = host.userRepository.login(HOST_EMAIL, HOST_PASSWORD).getOrThrow()
-        host.deleteEvent(TEST_EVENT_ID)
+        host.deleteEvent(testEventId)
 
         val createdEvent = host.eventRepository.createEvent(
             newEvent = buildLeagueEvent(hostUser.id),
@@ -89,11 +98,19 @@ class LeaguePlayoffMobileApiIntegrationTest {
         assertTrue(createdEvent.includePlayoffs)
         assertEquals(TEST_PLAYOFF_TEAM_COUNT, createdEvent.playoffTeamCount)
 
+        registerSeededTeams(host = host, event = createdEvent)
+
         host.userRepository.createInvites(
             invites = staffInvitePayloads(eventId = createdEvent.id, createdBy = hostUser.id),
         ).getOrThrow()
 
-        val scheduledEvent = host.eventRepository.scheduleEvent(createdEvent.id).getOrThrow()
+        val scheduledEvent = host.eventRepository.scheduleEvent(createdEvent.id).getOrElse { error ->
+            val responseBody = (error as? ApiException)?.responseBody
+            throw AssertionError(
+                "Scheduling ${createdEvent.id} failed: ${responseBody ?: error.message}",
+                error,
+            )
+        }
         val scheduledMatches = host.matchRepository.getMatchesOfTournament(createdEvent.id).getOrThrow()
 
         assertTrue(scheduledEvent.includePlayoffs)
@@ -103,8 +120,16 @@ class LeaguePlayoffMobileApiIntegrationTest {
             "Expected playoff scheduling to add matches beyond the 4-team round robin baseline.",
         )
 
-        val participantUser = participant.userRepository.login(PARTICIPANT_EMAIL, PARTICIPANT_PASSWORD).getOrThrow()
+        participant.userRepository.login(PARTICIPANT_EMAIL, PARTICIPANT_PASSWORD).getOrThrow()
         val loadedEvent = participant.eventRepository.getEvent(createdEvent.id).getOrThrow()
+        val joinResult = participant.eventRepository.addCurrentUserToEvent(
+            event = loadedEvent,
+            preferredDivisionId = SEEDED_DIVISION_ID,
+        ).getOrThrow()
+
+        assertFalse(joinResult.requiresParentApproval)
+        assertFalse(joinResult.joinedWaitlist)
+
         val loadedInvites = participant.eventRepository.getEventStaffInvites(createdEvent.id).getOrThrow()
         val loadedFields = participant.fieldRepository.getFields(loadedEvent.fieldIds).getOrThrow()
         val loadedTimeSlots = participant.fieldRepository.getTimeSlots(loadedEvent.timeSlotIds).getOrThrow()
@@ -127,29 +152,16 @@ class LeaguePlayoffMobileApiIntegrationTest {
         assertTrue(loadedEvent.includePlayoffs)
         assertEquals(TEST_PLAYOFF_TEAM_COUNT, loadedEvent.playoffTeamCount)
         assertTrue(
-            loadedMatches.any { match ->
-                match.previousLeftId != null ||
-                    match.previousRightId != null ||
-                    match.winnerNextMatchId != null ||
-                    match.loserNextMatchId != null
-            },
-            "Expected the scheduled league payload to include bracket-linked playoff matches.",
+            scheduledMatches.any { match -> match.hasBracketLink() },
+            "Expected the schedule response to include bracket-linked playoff matches.",
         )
-        assertEquals(setOf(TEST_FIELD_ID), loadedFields.map(Field::id).toSet())
-        assertEquals(setOf(TEST_SLOT_ID), loadedTimeSlots.map(TimeSlot::id).toSet())
+        assertEquals(setOf(testFieldId), loadedFields.map(Field::id).toSet())
+        assertEquals(setOf(testSlotId), loadedTimeSlots.map(TimeSlot::id).toSet())
         assertEquals(SEEDED_TEAM_IDS.size, loadedTeamIds.size)
         assertTrue(loadedTeamIds.all(String::isNotBlank))
         assertEquals(scheduledMatches.map { it.id }.toSet(), loadedMatches.map { it.id }.toSet())
         assertEquals(STAFF_INVITE_EMAILS, loadedInvites.mapNotNull { it.email }.toSet())
         assertTrue(loadedSports.isNotEmpty(), "Expected sports catalog API to return at least one sport.")
-
-        val joinResult = participant.eventRepository.addCurrentUserToEvent(
-            event = loadedEvent,
-            preferredDivisionId = SEEDED_DIVISION_ID,
-        ).getOrThrow()
-
-        assertFalse(joinResult.requiresParentApproval)
-        assertFalse(joinResult.joinedWaitlist)
 
         val refreshedEvent = participant.eventRepository.getEvent(createdEvent.id).getOrThrow()
         val batchEvents = participant.eventRepository.getEventsByIds(listOf(createdEvent.id)).getOrThrow()
@@ -162,12 +174,44 @@ class LeaguePlayoffMobileApiIntegrationTest {
         assertEquals(listOf(createdEvent.id), batchEvents.map { it.id })
         assertEquals(loadedMatches.map { it.id }.toSet(), batchMatches.map { it.id }.toSet())
         assertTrue(mySchedule.events.any { it.id == createdEvent.id })
-        assertTrue(mySchedule.fields.any { it.id == TEST_FIELD_ID })
+        assertTrue(mySchedule.fields.any { it.id == testFieldId })
+    }
+
+    private fun MatchMVP.hasBracketLink(): Boolean =
+        previousLeftId != null ||
+            previousRightId != null ||
+            winnerNextMatchId != null ||
+            loserNextMatchId != null
+
+    private suspend fun registerSeededTeams(
+        host: MobileApiTestSession,
+        event: Event,
+    ) {
+        SEEDED_TEAM_IDS.forEach { teamId ->
+            val response = runCatching {
+                host.api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
+                    path = "api/events/${event.id}/participants",
+                    body = EventParticipantsRequestDto(
+                        teamId = teamId,
+                        divisionId = SEEDED_DIVISION_ID,
+                    ),
+                )
+            }.getOrElse { error ->
+                throw AssertionError(
+                    "Registering $teamId for ${event.id} failed: " +
+                        ((error as? ApiException)?.responseBody ?: error.message),
+                    error,
+                )
+            }
+            response.error?.takeIf(String::isNotBlank)?.let { message ->
+                error("Registering $teamId for ${event.id} failed: $message")
+            }
+        }
     }
 
     private fun buildLeagueEvent(hostUserId: String): Event {
         return Event(
-            id = TEST_EVENT_ID,
+            id = testEventId,
             name = "Mobile API League Playoff Regression",
             description = "Native mobile repository coverage for playoff league load and join flows.",
             divisions = listOf(SEEDED_DIVISION_ID),
@@ -178,7 +222,7 @@ class LeaguePlayoffMobileApiIntegrationTest {
                     name = "Open",
                     playoffTeamCount = TEST_PLAYOFF_TEAM_COUNT,
                     teamIds = SEEDED_TEAM_IDS,
-                    fieldIds = listOf(TEST_FIELD_ID),
+                    fieldIds = listOf(testFieldId),
                 ),
             ),
             location = "Local Sports Complex",
@@ -191,8 +235,8 @@ class LeaguePlayoffMobileApiIntegrationTest {
             teamSignup = true,
             singleDivision = true,
             teamIds = SEEDED_TEAM_IDS,
-            fieldIds = listOf(TEST_FIELD_ID),
-            timeSlotIds = listOf(TEST_SLOT_ID),
+            fieldIds = listOf(testFieldId),
+            timeSlotIds = listOf(testSlotId),
             sportId = SEEDED_SPORT_ID,
             maxParticipants = SEEDED_TEAM_IDS.size,
             eventType = EventType.LEAGUE,
@@ -208,18 +252,18 @@ class LeaguePlayoffMobileApiIntegrationTest {
 
     private fun buildLeagueField(): Field {
         return Field(
-            id = TEST_FIELD_ID,
+            id = testFieldId,
             fieldNumber = 1,
             name = "Integration Court",
             divisions = listOf(SEEDED_DIVISION_ID),
-            rentalSlotIds = listOf(TEST_SLOT_ID),
+            rentalSlotIds = listOf(testSlotId),
             location = "Local Sports Complex",
         )
     }
 
     private fun buildLeagueTimeSlot(): TimeSlot {
         return TimeSlot(
-            id = TEST_SLOT_ID,
+            id = testSlotId,
             dayOfWeek = 0,
             daysOfWeek = listOf(0),
             divisions = listOf(SEEDED_DIVISION_ID),
@@ -228,8 +272,8 @@ class LeaguePlayoffMobileApiIntegrationTest {
             startDate = TEST_EVENT_START,
             repeating = true,
             endDate = TEST_EVENT_END,
-            scheduledFieldId = TEST_FIELD_ID,
-            scheduledFieldIds = listOf(TEST_FIELD_ID),
+            scheduledFieldId = testFieldId,
+            scheduledFieldIds = listOf(testFieldId),
             price = 0,
         )
     }
@@ -280,18 +324,14 @@ private const val HOST_EMAIL = MOBILE_TEST_HOST_EMAIL
 private const val HOST_PASSWORD = MOBILE_TEST_HOST_PASSWORD
 private const val PARTICIPANT_EMAIL = MOBILE_TEST_PARTICIPANT_EMAIL
 private const val PARTICIPANT_PASSWORD = MOBILE_TEST_PARTICIPANT_PASSWORD
-private const val PARTICIPANT_USER_ID = MOBILE_TEST_PARTICIPANT_USER_ID
 private const val SEEDED_DIVISION_ID = "division_open"
 private const val SEEDED_SPORT_ID = "Indoor Volleyball"
 private const val UPLOADED_DOCUMENT_IMAGE_ID = "camka_upload_upscaled_cc_indoor_sports_024be2e8d5cdead5_jpg"
-private const val TEST_EVENT_ID = "mobile_api_league_playoff_regression"
-private const val TEST_FIELD_ID = "mobile_api_league_playoff_field"
-private const val TEST_SLOT_ID = "mobile_api_league_playoff_slot"
 private const val TEST_PLAYOFF_TEAM_COUNT = 4
 private const val TEST_HOST_STAFF_EMAIL = "mobile-api-host-invite@example.test"
 private const val TEST_OFFICIAL_STAFF_EMAIL = "mobile-api-official-invite@example.test"
 
 private val SEEDED_TEAM_IDS = listOf("team_1", "team_2", "team_3", "team_4")
 private val STAFF_INVITE_EMAILS = setOf(TEST_HOST_STAFF_EMAIL, TEST_OFFICIAL_STAFF_EMAIL)
-private val TEST_EVENT_START: Instant = Instant.parse("2026-06-01T08:00:00Z")
-private val TEST_EVENT_END: Instant = Instant.parse("2026-07-27T23:00:00Z")
+private val TEST_EVENT_START: Instant = Clock.System.now() + 14.days
+private val TEST_EVENT_END: Instant = TEST_EVENT_START + 56.days

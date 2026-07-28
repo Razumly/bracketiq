@@ -126,6 +126,18 @@ class EventLifecycleMobileApiIntegrationTest {
             createdEvents += createdEvent
             assertCreatedEventShape(variant = variant, event = createdEvent)
 
+            if (
+                variant.event.eventType.isSchedulable() &&
+                !variant.event.autoCreatePointMatchIncidents
+            ) {
+                registerSeededTeamsForVariant(
+                    host = host,
+                    variant = variant,
+                    event = createdEvent,
+                    hostUserId = hostUser.id,
+                )
+            }
+
             val participantLoadedEvent = participant.eventRepository.getEvent(createdEvent.id).getOrThrow()
             assertEventResourcesPersisted(
                 participant = participant,
@@ -180,6 +192,47 @@ class EventLifecycleMobileApiIntegrationTest {
         assertEquals(createdEvents.map(Event::id).toSet(), batchEvents.map(Event::id).toSet())
     }
 
+    private suspend fun registerSeededTeamsForVariant(
+        host: MobileApiTestSession,
+        variant: LifecycleVariant,
+        event: Event,
+        hostUserId: String,
+    ) {
+        val divisionIdByTeamId = variant.event.divisionDetails
+            .flatMap { detail -> detail.teamIds.map { teamId -> teamId to detail.id } }
+            .toMap()
+
+        variant.event.teamIds.forEachIndexed { index, fixtureTeamId ->
+            val divisionId = divisionIdByTeamId[fixtureTeamId] ?: variant.primaryDivisionId
+            val team = host.teamRepository.createTeam(
+                Team(hostUserId).copy(
+                    name = "Mobile ${variant.key} Team ${index + 1}",
+                    division = divisionId,
+                    sport = variant.event.sportId,
+                    teamSize = 2,
+                ).withSynchronizedMembership(),
+            ).getOrElse { error ->
+                error("Failed to create team ${index + 1} for ${variant.key}: ${error.backendSummary()}")
+            }
+            createdTeamIds += team.id
+
+            val response = runCatching {
+                host.api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
+                    path = "api/events/${event.id}/participants",
+                    body = EventParticipantsRequestDto(
+                        teamId = team.id,
+                        divisionId = divisionId,
+                    ),
+                )
+            }.getOrElse { error ->
+                error("Failed to register ${team.id} for ${variant.key}: ${error.backendSummary()}")
+            }
+            response.error?.takeIf(String::isNotBlank)?.let { message ->
+                error("Failed to register ${team.id} for ${variant.key}: $message")
+            }
+        }
+    }
+
     private suspend fun updateMatchWithoutPointIncident(
         host: MobileApiTestSession,
         matches: List<MatchMVP>,
@@ -217,7 +270,9 @@ class EventLifecycleMobileApiIntegrationTest {
         hostUserId: String,
     ) {
         val divisionIds = variant.event.divisions.ifEmpty { listOf(variant.primaryDivisionId) }
-        val registrationDivisionIds = divisionIds.flatMap { divisionId -> listOf(divisionId, divisionId) }
+        val registrationDivisionIds = divisionIds.flatMap { divisionId ->
+            listOf(divisionId, divisionId, divisionId)
+        }
         registrationDivisionIds.forEachIndexed { index, divisionId ->
             val team = host.teamRepository.createTeam(
                 Team(hostUserId).copy(
@@ -698,7 +753,11 @@ private fun buildVariant(
         fieldIds = fields.map(Field::id),
         timeSlotIds = timeSlots.map(TimeSlot::id),
         sportId = sportId,
-        organizationId = SEEDED_ORGANIZATION_ID,
+        organizationId = if (officialCase == OfficialCase.NAMED_OFFICIALS) {
+            null
+        } else {
+            SEEDED_ORGANIZATION_ID
+        },
         maxParticipants = if (eventType.isSchedulable()) teamIds.size else 24,
         teamSizeLimit = 2,
         eventType = eventType,

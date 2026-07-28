@@ -1375,7 +1375,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_league_slots_when_field_count_reduced_then_invalid_scheduled_field_ids_are_cleared() = runTest(testDispatcher) {
+    fun given_automatic_league_slot_when_field_count_reduced_then_remaining_field_is_retained() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
@@ -1399,8 +1399,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         advance()
 
         assertEquals(1, harness.component.localFields.value.size)
-        assertNull(harness.component.leagueSlots.value.first().scheduledFieldId)
-        assertEquals(emptyList(), harness.component.leagueSlots.value.first().scheduledFieldIds)
+        assertEquals(fieldIds.first(), harness.component.leagueSlots.value.first().scheduledFieldId)
+        assertEquals(listOf(fieldIds.first()), harness.component.leagueSlots.value.first().scheduledFieldIds)
     }
 
     @Test
@@ -1730,7 +1730,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun switching_to_tournament_clears_repeating_slot_end_dates() = runTest(testDispatcher) {
+    fun switching_to_fixed_end_tournament_retains_event_end_for_repeating_slots() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
@@ -1758,7 +1758,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.onTypeSelected(EventType.TOURNAMENT)
         advance()
 
-        assertTrue(harness.component.leagueSlots.value.all { slot -> slot.endDate == null })
+        assertTrue(harness.component.leagueSlots.value.all { slot -> slot.endDate == expectedDateOnlyEnd })
     }
 
     @Test

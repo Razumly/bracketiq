@@ -99,11 +99,12 @@ import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.InclusivePriceInput
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
+import com.razumly.mvp.core.presentation.composables.PhoneInputVisualTransformation
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.StandardTextField
-import com.razumly.mvp.core.presentation.composables.PhoneInputVisualTransformation
+import com.razumly.mvp.core.presentation.composables.formatPhoneInput
 import com.razumly.mvp.core.presentation.composables.sanitizePhoneInput
 import com.razumly.mvp.core.presentation.util.MoneyInputUtils
 import kotlinx.coroutines.launch
@@ -1785,7 +1786,7 @@ internal fun TeamInviteDialog(
                                 firstName = firstName.trim(),
                                 lastName = lastName.trim(),
                                 email = normalizedEmail.takeIf(String::isNotBlank),
-                                phone = phone.trim().takeIf(String::isNotBlank),
+                                phone = formatPhoneInput(phone).takeIf(String::isNotBlank),
                                 shareOnly = normalizedEmail.isBlank(),
                             )
                         )
