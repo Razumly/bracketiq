@@ -505,28 +505,6 @@ private fun AppContent(
 }
 
 @Composable
-private fun StartupSplashScreen() {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text(
-                text = "BracketIQ",
-                style = MaterialTheme.typography.headlineMedium,
-            )
-            CircularProgressIndicator(modifier = Modifier.size(40.dp))
-        }
-    }
-}
-
-
-@Composable
 fun LoadingOverlay(
     message: String, progress: Float? = null, modifier: Modifier = Modifier
 ) {

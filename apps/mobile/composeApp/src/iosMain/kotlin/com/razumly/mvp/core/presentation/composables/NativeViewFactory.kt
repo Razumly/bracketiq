@@ -14,6 +14,8 @@ import platform.UIKit.UIViewController
 import kotlin.time.ExperimentalTime
 
 interface NativeViewFactory {
+    fun createNativeStartupSplashViewController(): UIViewController
+
     fun createNativeDiscoverViewController(
         component: EventSearchComponent,
         mapComponent: MapComponent,

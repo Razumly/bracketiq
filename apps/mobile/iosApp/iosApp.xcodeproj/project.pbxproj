@@ -26,6 +26,7 @@
 		3F1000070000000000000007 /* DiscoverFilterSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F0000070000000000000007 /* DiscoverFilterSheet.swift */; };
 		3F1000080000000000000008 /* DiscoverFilterControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F0000080000000000000008 /* DiscoverFilterControls.swift */; };
 		3F1000090000000000000009 /* DiscoverOnboarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F0000090000000000000009 /* DiscoverOnboarding.swift */; };
+		3F10000A000000000000000A /* NativeStartupSplashScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F00000A000000000000000A /* NativeStartupSplashScreen.swift */; };
 		1ECBBF6B2DD8409D0048A444 /* Secrets.plist in Resources */ = {isa = PBXBuildFile; fileRef = 1ECBBF6A2DD8409D0048A444 /* Secrets.plist */; };
 		2152FB042600AC8F00CF470E /* iOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2152FB032600AC8F00CF470E /* iOSApp.swift */; };
 		27A4C74EAF1211B7339ED786 /* WatchMatchRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37D84E230F9B282FA9736E6C /* WatchMatchRepository.swift */; };
@@ -69,6 +70,7 @@
 		3F0000070000000000000007 /* DiscoverFilterSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverFilterSheet.swift; sourceTree = "<group>"; };
 		3F0000080000000000000008 /* DiscoverFilterControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverFilterControls.swift; sourceTree = "<group>"; };
 		3F0000090000000000000009 /* DiscoverOnboarding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverOnboarding.swift; sourceTree = "<group>"; };
+		3F00000A000000000000000A /* NativeStartupSplashScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeStartupSplashScreen.swift; sourceTree = "<group>"; };
 		2C9A7B002EFD701000C0DE01 /* WatchMatchOperationStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchMatchOperationStore.swift; sourceTree = "<group>"; };
 		2C9A7B022EFD711000C0DE01 /* WatchAuthConnectivity.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchAuthConnectivity.swift; sourceTree = "<group>"; };
 		2C9A7B052EFD721000C0DE01 /* WatchOfficialDemo.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchOfficialDemo.swift; sourceTree = "<group>"; };
@@ -158,6 +160,14 @@
 			path = Discover;
 			sourceTree = "<group>";
 		};
+		3F2000020000000000000002 /* Splash */ = {
+			isa = PBXGroup;
+			children = (
+				3F00000A000000000000000A /* NativeStartupSplashScreen.swift */,
+			);
+			path = Screens/Splash;
+			sourceTree = "<group>";
+		};
 		7555FF72242A565900829871 = {
 			isa = PBXGroup;
 			children = (
@@ -186,6 +196,7 @@
 			isa = PBXGroup;
 			children = (
 				3F2000010000000000000001 /* Discover */,
+				3F2000020000000000000002 /* Splash */,
 				1E7DB9532DF0AC89006E07CF /* iosAppRelease.entitlements */,
 				1EB972772DE38D750009F818 /* iosApp.entitlements */,
 				1EBA84702D27456400059C7F /* location.gpx */,
@@ -434,6 +445,7 @@
 				3F1000070000000000000007 /* DiscoverFilterSheet.swift in Sources */,
 				3F1000080000000000000008 /* DiscoverFilterControls.swift in Sources */,
 				3F1000090000000000000009 /* DiscoverOnboarding.swift in Sources */,
+				3F10000A000000000000000A /* NativeStartupSplashScreen.swift in Sources */,
 				1E7DB9522DEF5D83006E07CF /* IOSNativeViewFactory.swift in Sources */,
 				1E7DB94E2DEF5BC8006E07CF /* NativeDatePicker.swift in Sources */,
 				1EB972762DDE59850009F818 /* EventMap.swift in Sources */,

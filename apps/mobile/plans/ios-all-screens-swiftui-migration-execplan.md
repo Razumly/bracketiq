@@ -18,6 +18,7 @@ The final behavior is visible by launching the iOS app, navigating through every
 - [x] (2026-07-23 01:21Z) Inventoried the nested Profile, Event Detail, Organization Detail, Create Event, and Team Management surfaces that must be tracked separately from their parent routes.
 - [x] (2026-07-23 01:21Z) Inspected the existing Discover SwiftUI bridge, `NativeViewFactory`, `UIHostingController` ownership, Kotlin `StateFlow` observation, and current Xcode target structure.
 - [x] (2026-07-23 01:21Z) Defined the status vocabulary, durable evidence convention, state-coverage requirements, migration batches, and rollback rules in this plan.
+- [x] (2026-07-23 02:15Z) Migrated S-01 Startup Splash to SwiftUI, retained the Android and iOS Compose fallback path, passed the focused Android UI test and debug assembly, compiled/linked/signed the iOS target, and cold-launched the result on the baseline simulator.
 - [ ] Milestone 0: add migration infrastructure, per-screen feature flags, a repeatable iOS build/UI-test harness, and baseline evidence storage.
 - [ ] Milestone 1: migrate Splash, Login, and Profile Completion as the first end-to-end bridge examples.
 - [ ] Milestone 2: migrate the visible app shell and primary-tab surfaces, and formally revalidate the existing Discover implementation.
@@ -52,6 +53,9 @@ The final behavior is visible by launching the iOS app, navigating through every
 
 - Observation: the local backend can return a successful HTTP response containing an MFA challenge rather than an authentication token, and the existing mobile login contract does not represent that state.
   Evidence: `/api/auth/login` returned `MFA_REQUIRED` for the simulator account until the explicit local MFA bypass was enabled. Authentication visual approval must cover this response rather than silently leaving the user on the form.
+
+- Observation: XcodeBuildMCP's five-minute RPC limit can expire while this repository's mandatory CocoaPods `syncFramework` phase continues successfully in the background. Multiple Codex worktrees may also build against the same booted simulator at the same time, so process checks must be scoped by checkout and DerivedData path rather than simulator id alone.
+  Evidence: the S-01 main-worktree build continued after the RPC timeout, compiled `NativeStartupSplashScreen.swift`, linked, signed, and validated `BracketIQ.app`; a separate build from `.codex/worktrees/e09f` was simultaneously visible and was left untouched.
 
 ## Decision Log
 
@@ -89,7 +93,9 @@ The final behavior is visible by launching the iOS app, navigating through every
 
 ## Outcomes & Retrospective
 
-This document currently records planning and repository inventory only. No additional screen was converted while authoring it. The existing Discover SwiftUI implementation remains the reference bridge, but its rows stay open until durable, route-specific evidence is captured under this plan and visually approved.
+S-01 Startup Splash is the first newly converted screen. `RootComponent.Child.Splash` remains the route and lifetime authority, Android delegates to the extracted Compose implementation, and iOS uses `NativeViewFactory` to host `NativeStartupSplashScreen` in SwiftUI. The screen has no feature state or actions to mirror; only the route lifetime is stateful. A compile-time iOS flag retains the Compose rollback path until final cleanup.
+
+The focused Android UI test and debug APK assembly passed. The iOS framework and app target compiled, linked, signed, installed, and cold-launched on the baseline iPhone 16 Pro / iOS 18.6 simulator. The saved launch recording shows the SwiftUI splash transition to login, and the extracted screenshot has been visually inspected. Human approval is still pending, so the visual ledger remains `Captured`, not `Approved`. The existing Discover SwiftUI implementation remains the reference bridge, but its rows stay open until durable, route-specific evidence is captured under this plan and visually approved.
 
 At the end of each milestone, update this section with the completed rows, remaining blockers, regressions found on Android or iOS, and any architectural lessons that alter later batches. At final completion, state the number of approved migration units, confirm that no visible iOS Compose fallback remains, and link the final simulator evidence index.
 
@@ -140,7 +146,7 @@ The ledger is deliberately detailed because it is the source of truth for “eve
 
 | ID | Migration unit | Kotlin owner or source | Contract / state | Swift UI | Compile | Simulator | Visual | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| S-01 | Startup splash | `RootComponent.Child.Splash` | Not audited | Compose | Not run | Not run | Not captured | — |
+| S-01 | Startup splash | `RootComponent.Child.Splash` | Ready | Swift | Pass 2026-07-23 | Pass 2026-07-23 | Captured | `artifacts/ios-swift-screen-migration/S-01/` (approval pending) |
 | S-02 | Login, registration, email verification, Apple, Google, errors, and MFA response | `DefaultAuthComponent` | Not audited | Compose | Not run | Not run | Not captured | — |
 | S-03 | Required profile completion | `ProfileCompletionComponent` | Not audited | Compose | Not run | Not run | Not captured | — |
 | D-01 | Discover Events tab and event cards | `EventSearchComponent`, `MapComponent` | Ready | Existing Swift | Pass 2026-07-22 | Pass 2026-07-22 | Not captured | — |
