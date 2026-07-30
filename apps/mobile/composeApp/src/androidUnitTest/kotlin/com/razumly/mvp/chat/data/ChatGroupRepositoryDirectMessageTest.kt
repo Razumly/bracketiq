@@ -95,12 +95,14 @@ class ChatGroupRepositoryDirectMessageTest {
 
         val firstPostRequest = CompletableDeferred<CreateChatGroupRequestDto>()
         val secondPostObserved = CompletableDeferred<Unit>()
+        val remoteRefreshGate = CompletableDeferred<Unit>()
         var postCount = 0
         var failCanonicalPost = false
         val engine = MockEngine { request ->
             when (request.method) {
                 HttpMethod.Get -> {
                     assertEquals("/api/chat/groups", request.url.encodedPath)
+                    remoteRefreshGate.await()
                     respondJson("""{"groups": []}""")
                 }
 
@@ -228,6 +230,7 @@ class ChatGroupRepositoryDirectMessageTest {
                 offlineResults.mapNotNull { it.getOrNull()?.chatGroup?.id }.toSet(),
             )
             offlineCollection.cancel()
+            remoteRefreshGate.complete(Unit)
         } finally {
             http.close()
         }

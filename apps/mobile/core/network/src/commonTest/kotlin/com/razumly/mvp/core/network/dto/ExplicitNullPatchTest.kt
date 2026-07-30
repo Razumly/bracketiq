@@ -38,7 +38,7 @@ class ExplicitNullPatchTest {
     fun team_and_bulk_match_patch_payloads_preserve_requested_null_clears() {
         val previousTeam = encodeExplicitNullPatchObject(
             serializer = TeamUpdateDto.serializer(),
-            value = TeamUpdateDto(headCoachId = "coach_1", affiliateUrl = "https://example.test/register"),
+            value = TeamUpdateDto(headCoachId = "coach_1", divisionTypeId = "division_open"),
         )
         val updatedTeam = encodeExplicitNullPatchObject(
             serializer = TeamUpdateDto.serializer(),
@@ -47,7 +47,7 @@ class ExplicitNullPatchTest {
         val teamClearFields = explicitNullFieldsForPatch(
             previous = previousTeam,
             updated = updatedTeam,
-            clearableFields = setOf("headCoachId", "affiliateUrl"),
+            clearableFields = setOf("headCoachId", "divisionTypeId"),
         )
         val teamPayload = encodeExplicitNullPatchObject(
             serializer = TeamUpdateDto.serializer(),
@@ -75,7 +75,7 @@ class ExplicitNullPatchTest {
         )
 
         assertEquals(JsonNull, teamPayload["headCoachId"])
-        assertEquals(JsonNull, teamPayload["affiliateUrl"])
+        assertEquals(JsonNull, teamPayload["divisionTypeId"])
         assertEquals(JsonNull, matchPayload["fieldId"])
     }
 }

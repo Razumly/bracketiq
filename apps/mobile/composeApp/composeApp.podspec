@@ -12,7 +12,7 @@ Pod::Spec.new do |spec|
     spec.dependency 'FirebaseAnalytics'
     spec.dependency 'FirebaseCore'
     spec.dependency 'FirebaseMessaging'
-    spec.dependency 'GooglePlaces'
+    spec.dependency 'GooglePlaces', '9.4.1'
     spec.dependency 'GoogleSignIn'
     spec.dependency 'IQKeyboardManagerSwift'
     if !Dir.exist?('build/cocoapods/framework/ComposeApp.framework') || Dir.empty?('build/cocoapods/framework/ComposeApp.framework')

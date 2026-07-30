@@ -213,7 +213,9 @@ kotlin {
         podfile = project.file("../iosApp/Podfile")
 
         pod("GoogleSignIn")
-        pod("GooglePlaces")
+        pod("GooglePlaces") {
+            version = "9.4.1"
+        }
         pod("FirebaseCore")
         pod("FirebaseMessaging")
         pod("FirebaseAnalytics")

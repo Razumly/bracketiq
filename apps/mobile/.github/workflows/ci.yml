@@ -78,4 +78,10 @@ jobs:
           xcrun simctl bootstatus "$simulator_udid" -b
 
       - name: Run iOS simulator tests
-        run: ./gradlew iosSimulatorArm64Test -PiosDevice="$IOS_SIMULATOR_UDID" --continue --stacktrace
+        run: >-
+          ./gradlew
+          :composeApp:iosSimulatorArm64Test
+          :core:database:iosSimulatorArm64Test
+          -PiosDevice="$IOS_SIMULATOR_UDID"
+          --continue
+          --stacktrace
