@@ -227,7 +227,6 @@ kotlin {
             export(projects.core.model)
             export(libs.decompose.decompose)
             export(libs.lifecycle)
-            export(libs.kmpnotifier)
             export(libs.geo)
         }
     }

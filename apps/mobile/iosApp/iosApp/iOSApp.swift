@@ -40,11 +40,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // so the root app view is not shifted when the keyboard appears.
         IQKeyboardManager.shared.isEnabled = false
 
-        NotifierManager.shared.initialize(configuration: NotificationPlatformConfigurationIos(
-            showPushNotification: false,
-            askNotificationPermissionOnStart: false,
-            notificationSoundName: nil
-        ))
+        IosNotificationBridgeKt.initializeIosNotificationManager()
         evaluateNotificationAuthorization(application: application)
         
         UserDefaults.standard.set(true, forKey: AppDelegate.appForegroundKey)
