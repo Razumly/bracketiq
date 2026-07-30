@@ -1,0 +1,75 @@
+name: Mobile CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-tests:
+    name: Android unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Run Android unit tests
+        run: ./gradlew testDebugUnitTest --continue --stacktrace
+
+  ios-tests:
+    name: iOS simulator tests
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Select and boot an iOS simulator
+        shell: bash
+        run: |
+          simulator_udid="$(
+            xcrun simctl list devices available |
+              sed -nE '/iPhone/ {
+                s/.*\(([0-9A-Fa-f-]{36})\).*/\1/p
+                q
+              }'
+          )"
+          if [[ -z "$simulator_udid" ]]; then
+            echo "No available iPhone simulator was found." >&2
+            exit 1
+          fi
+          echo "IOS_SIMULATOR_UDID=$simulator_udid" >> "$GITHUB_ENV"
+          xcrun simctl boot "$simulator_udid"
+          xcrun simctl bootstatus "$simulator_udid" -b
+
+      - name: Run iOS simulator tests
+        run: ./gradlew iosSimulatorArm64Test -PiosDevice="$IOS_SIMULATOR_UDID" --continue --stacktrace
