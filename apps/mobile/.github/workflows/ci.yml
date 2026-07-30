@@ -30,7 +30,10 @@ jobs:
           cache: gradle
 
       - name: Install Android SDK packages
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+        run: >-
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "platforms;android-36"
+          "build-tools;36.0.0"
 
       - name: Run Android unit tests
         run: ./gradlew testDebugUnitTest --continue --stacktrace
@@ -51,7 +54,10 @@ jobs:
           cache: gradle
 
       - name: Install Android SDK packages
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+        run: >-
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "platforms;android-36"
+          "build-tools;36.0.0"
 
       - name: Select and boot an iOS simulator
         shell: bash
