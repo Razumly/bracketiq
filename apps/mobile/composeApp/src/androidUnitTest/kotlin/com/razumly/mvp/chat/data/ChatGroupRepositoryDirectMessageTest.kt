@@ -24,13 +24,15 @@ import io.ktor.http.headersOf
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.decodeFromString
 import org.junit.Test
@@ -95,29 +97,26 @@ class ChatGroupRepositoryDirectMessageTest {
 
         val firstPostRequest = CompletableDeferred<CreateChatGroupRequestDto>()
         val secondPostObserved = CompletableDeferred<Unit>()
-        val remoteRefreshGate = CompletableDeferred<Unit>()
-        var postCount = 0
-        var failCanonicalPost = false
+        val postCount = AtomicInteger()
         val engine = MockEngine { request ->
             when (request.method) {
                 HttpMethod.Get -> {
                     assertEquals("/api/chat/groups", request.url.encodedPath)
-                    remoteRefreshGate.await()
                     respondJson("""{"groups": []}""")
                 }
 
                 HttpMethod.Post -> {
-                    postCount += 1
+                    val requestNumber = postCount.incrementAndGet()
                     assertEquals("/api/chat/groups", request.url.encodedPath)
                     val postedRequest = jsonMVP.decodeFromString<CreateChatGroupRequestDto>(
                         (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString(),
                     )
-                    if (postCount == 1) {
+                    if (requestNumber == 1) {
                         firstPostRequest.complete(postedRequest)
                     } else {
                         secondPostObserved.complete(Unit)
                     }
-                    if (failCanonicalPost) {
+                    if (requestNumber > 1) {
                         respondJson(
                             """{"error":"offline"}""",
                             status = HttpStatusCode.ServiceUnavailable,
@@ -164,21 +163,32 @@ class ChatGroupRepositoryDirectMessageTest {
                     result.getOrNull()?.let { resolvedIds += it.chatGroup.id }
                 }
             }
-            advanceUntilIdle()
             val posted = firstPostRequest.await()
             canonicalPersisted.await()
-            advanceUntilIdle()
+            runCurrent()
 
-            assertEquals(listOf(CURRENT_USER_ID, OTHER_USER_ID), posted.userIds)
+            assertEquals(
+                listOf(CURRENT_USER_ID, OTHER_USER_ID),
+                posted.userIds,
+                "The create request should contain the direct-message participants.",
+            )
             assertNotEquals(LOCAL_CHAT_ID, posted.id)
-            assertEquals(LOCAL_CHAT_ID, resolvedIds.first())
-            assertEquals(CANONICAL_CHAT_ID, resolvedIds.last())
+            assertEquals(
+                LOCAL_CHAT_ID,
+                resolvedIds.first(),
+                "The cached conversation should be emitted before canonical resolution.",
+            )
+            assertEquals(
+                CANONICAL_CHAT_ID,
+                resolvedIds.last(),
+                "The server-owned conversation should replace the cached duplicate.",
+            )
             assertNotEquals(posted.id, resolvedIds.last())
             assertEquals(
                 listOf(CANONICAL_CHAT_ID),
                 persistedChatGroups.map(ChatGroup::id),
             )
-            assertEquals(1, postCount)
+            assertEquals(1, postCount.get())
 
             // Simulate both a stale duplicate invalidation and a later
             // canonical Room refresh. Neither may trigger another POST.
@@ -191,6 +201,7 @@ class ChatGroupRepositoryDirectMessageTest {
                     )
                 )
             )
+            runCurrent()
             assertTrue(
                 roomGroups.tryEmit(
                     listOf(
@@ -202,15 +213,14 @@ class ChatGroupRepositoryDirectMessageTest {
                     )
                 )
             )
-            advanceUntilIdle()
+            runCurrent()
 
-            assertEquals(1, postCount)
+            assertEquals(1, postCount.get())
             assertEquals(CANONICAL_CHAT_ID, resolvedIds.last())
-            collection.cancel()
+            collection.cancelAndJoin()
 
             // A new collector gets one new canonical attempt, but a failed
             // attempt must keep serving the cached canonical conversation.
-            failCanonicalPost = true
             val offlineResults = mutableListOf<Result<ChatGroupWithRelations>>()
             val offlineCollection = launch(UnconfinedTestDispatcher(testScheduler)) {
                 repository.getChatGroupFlow(
@@ -218,19 +228,17 @@ class ChatGroupRepositoryDirectMessageTest {
                     chatId = null,
                 ).collect { result -> offlineResults += result }
             }
-            advanceUntilIdle()
             secondPostObserved.await()
-            advanceUntilIdle()
+            runCurrent()
 
-            assertEquals(2, postCount)
+            assertEquals(2, postCount.get())
             assertTrue(offlineResults.isNotEmpty())
             assertTrue(offlineResults.all { result -> result.isSuccess })
             assertEquals(
                 setOf(CANONICAL_CHAT_ID),
                 offlineResults.mapNotNull { it.getOrNull()?.chatGroup?.id }.toSet(),
             )
-            offlineCollection.cancel()
-            remoteRefreshGate.complete(Unit)
+            offlineCollection.cancelAndJoin()
         } finally {
             http.close()
         }
