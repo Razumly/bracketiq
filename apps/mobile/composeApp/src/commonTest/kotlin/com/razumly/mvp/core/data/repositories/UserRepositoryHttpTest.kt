@@ -362,6 +362,7 @@ class UserRepositoryHttpTest {
             startupDispatcher = StandardTestDispatcher(testScheduler),
         )
         advanceUntilIdle()
+        repository.startupAuthState.first { it is StartupAuthState.Authenticated }
         currentUserDataSource.savePushToken("device-token")
         currentUserDataSource.savePushTarget("user_user_1")
         currentUserDataSource.saveUserId("user_1")
@@ -458,6 +459,7 @@ class UserRepositoryHttpTest {
             startupDispatcher = StandardTestDispatcher(testScheduler),
         )
         advanceUntilIdle()
+        repository.startupAuthState.first { it is StartupAuthState.Authenticated }
         currentUserDataSource.savePushToken("device-token")
         currentUserDataSource.savePushTarget("user_user_1")
         currentUserDataSource.saveUserId("user_1")
