@@ -4,8 +4,6 @@ import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.EmailVerificationRequiredException
-import com.razumly.mvp.core.data.repositories.LoginMfaChallenge
-import com.razumly.mvp.core.data.repositories.LoginMfaRequiredException
 import com.razumly.mvp.core.data.repositories.SignupProfileConflict
 import com.razumly.mvp.core.data.repositories.SignupProfileConflictException
 import com.razumly.mvp.core.data.repositories.SignupProfileSelection
@@ -33,11 +31,8 @@ interface AuthComponent {
     val isSignup: StateFlow<Boolean>
     val passwordError: StateFlow<String>
     val signupConflict: StateFlow<SignupProfileConflict?>
-    val loginMfaChallenge: StateFlow<LoginMfaChallenge?>
 
     fun onLogin(email: String, password: String)
-    fun onConfirmLoginMfa(code: String)
-    fun dismissLoginMfa()
     fun onLogout()
     fun toggleIsSignup()
     fun onSignup(
@@ -79,9 +74,6 @@ class DefaultAuthComponent(
     private val _signupConflict = MutableStateFlow<SignupProfileConflict?>(null)
     override val signupConflict: StateFlow<SignupProfileConflict?> = _signupConflict.asStateFlow()
 
-    private val _loginMfaChallenge = MutableStateFlow<LoginMfaChallenge?>(null)
-    override val loginMfaChallenge: StateFlow<LoginMfaChallenge?> = _loginMfaChallenge.asStateFlow()
-
     private var pendingSignupRequest: PendingSignupRequest? = null
 
     init {
@@ -99,19 +91,11 @@ class DefaultAuthComponent(
     override fun onLogin(email: String, password: String) {
         scope.launch {
             val maskedEmail = maskEmail(email)
-            _loginMfaChallenge.value = null
             Napier.d("Auth: email login started for $maskedEmail")
             _loginState.value = LoginState.Loading
             userRepository.login(email, password).onFailure { throwable ->
-                val mfaRequired = throwable as? LoginMfaRequiredException
-                if (mfaRequired != null) {
-                    _loginMfaChallenge.value = mfaRequired.challenge
-                    _loginState.value = LoginState.Initial
-                    Napier.i("Auth: authenticator verification required for $maskedEmail")
-                } else {
-                    logAuthFailure("email login", throwable)
-                    _loginState.value = LoginState.Error(throwable.userMessage())
-                }
+                logAuthFailure("email login", throwable)
+                _loginState.value = LoginState.Error(throwable.userMessage())
             }.onSuccess {
                 val currentUser = userRepository.currentUser.value.getOrNull()
                 if (currentUser?.id.isNullOrBlank()) {
@@ -124,33 +108,6 @@ class DefaultAuthComponent(
                 }
             }
         }
-    }
-
-    override fun onConfirmLoginMfa(code: String) {
-        val challenge = _loginMfaChallenge.value ?: return
-        scope.launch {
-            _loginState.value = LoginState.Loading
-            userRepository.confirmLoginMfa(
-                challengeId = challenge.challengeId,
-                code = code,
-            ).onFailure { throwable ->
-                logAuthFailure("authenticator verification", throwable)
-                _loginState.value = LoginState.Error(throwable.userMessage())
-            }.onSuccess { currentUser ->
-                if (currentUser.id.isBlank()) {
-                    _loginState.value = LoginState.Error("Unable to complete sign in")
-                } else {
-                    _loginMfaChallenge.value = null
-                    _loginState.value = LoginState.Success
-                    Napier.i("Auth: authenticator verification succeeded for userId=${currentUser.id}")
-                }
-            }
-        }
-    }
-
-    override fun dismissLoginMfa() {
-        _loginMfaChallenge.value = null
-        _loginState.value = LoginState.Initial
     }
 
     override fun onLogout() {
@@ -169,7 +126,6 @@ class DefaultAuthComponent(
     }
 
     override fun toggleIsSignup() {
-        _loginMfaChallenge.value = null
         _isSignup.value = !_isSignup.value
         clearSignupConflict()
     }

@@ -19,20 +19,6 @@ data class LoginRequestDto(
 )
 
 @Serializable
-data class LoginMfaConfirmRequestDto(
-    val challengeId: String,
-    val code: String,
-)
-
-@Serializable
-data class AuthMfaChallengeDto(
-    val challengeId: String,
-    val expiresAt: String? = null,
-    val method: String? = null,
-    val setupQrUrl: String? = null,
-)
-
-@Serializable
 data class LogoutDeviceTargetDto(
     val pushToken: String,
     val pushTarget: String? = null,
@@ -187,9 +173,6 @@ data class AuthResponseDto(
     val email: String? = null,
     val requiresEmailVerification: Boolean? = null,
     val verificationEmailSent: Boolean? = null,
-    val requiresMfa: Boolean? = null,
-    val requiresMfaSetup: Boolean? = null,
-    val mfa: AuthMfaChallengeDto? = null,
     val requiresProfileCompletion: Boolean? = null,
     val missingProfileFields: List<String> = emptyList(),
     val user: AuthUserDto? = null,

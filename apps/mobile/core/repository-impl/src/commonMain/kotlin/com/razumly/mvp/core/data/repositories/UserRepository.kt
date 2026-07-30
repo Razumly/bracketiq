@@ -28,7 +28,6 @@ import com.razumly.mvp.core.network.dto.GoogleMobileLoginRequestDto
 import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.network.dto.InvitesResponseDto
 import com.razumly.mvp.core.network.dto.LoginRequestDto
-import com.razumly.mvp.core.network.dto.LoginMfaConfirmRequestDto
 import com.razumly.mvp.core.network.dto.LogoutDeviceTargetDto
 import com.razumly.mvp.core.network.dto.LogoutRequestDto
 import com.razumly.mvp.core.network.dto.LogoutResponseDto
@@ -230,18 +229,6 @@ class EmailVerificationRequiredException(
     message: String,
 ) : Exception(message)
 
-data class LoginMfaChallenge(
-    val challengeId: String,
-    val email: String?,
-    val expiresAt: String?,
-    val method: String,
-)
-
-class LoginMfaRequiredException(
-    val challenge: LoginMfaChallenge,
-    message: String,
-) : Exception(message)
-
 interface IUserRepository : IMVPRepository {
     val currentUser: StateFlow<Result<UserData>>
     val currentAccount: StateFlow<Result<AuthAccount>>
@@ -255,8 +242,6 @@ interface IUserRepository : IMVPRepository {
         get() = defaultChatTermsConsentLoadingFlow
 
     suspend fun login(email: String, password: String): Result<UserData>
-    suspend fun confirmLoginMfa(challengeId: String, code: String): Result<UserData> =
-        Result.failure(UnsupportedOperationException("MFA login confirmation is unavailable."))
     suspend fun logout(): Result<Unit>
     suspend fun deleteAccount(confirmationText: String): Result<Unit>
 
@@ -441,52 +426,10 @@ class UserRepository(
             path = "api/auth/login",
             body = LoginRequestDto(email = normalizedEmail, password = password),
         )
-
-        if (res.requiresMfa == true) {
-            val challenge = res.mfa
-                ?.takeIf { it.challengeId.isNotBlank() }
-                ?: error("Login MFA response missing challenge")
-            throw LoginMfaRequiredException(
-                challenge = LoginMfaChallenge(
-                    challengeId = challenge.challengeId,
-                    email = res.email?.trim()?.takeIf(String::isNotBlank),
-                    expiresAt = challenge.expiresAt?.trim()?.takeIf(String::isNotBlank),
-                    method = challenge.method?.trim()?.takeIf(String::isNotBlank) ?: "totp",
-                ),
-                message = res.error?.trim()?.takeIf(String::isNotBlank)
-                    ?: "Authenticator verification required.",
-            )
-        }
-
-        completeEmailAuthentication(res)
-    }.onFailure { throwable ->
-        if (throwable !is LoginMfaRequiredException) {
-            Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
-                "Email login failed for ${maskEmail(email)}: ${throwable.message}"
-            }
-        } else {
-            Napier.i(tag = USER_REPOSITORY_LOG_TAG) {
-                "Email login requires authenticator verification for ${maskEmail(email)}"
-            }
-        }
-    }
-
-    override suspend fun confirmLoginMfa(challengeId: String, code: String): Result<UserData> = runCatching {
-        val normalizedChallengeId = challengeId.trim()
-        val normalizedCode = code.trim()
-        require(normalizedChallengeId.isNotEmpty()) { "Authenticator challenge is required" }
-        require(normalizedCode.length in 6..16) { "Enter a valid authenticator code" }
-        val res = api.post<LoginMfaConfirmRequestDto, AuthResponseDto>(
-            path = "api/auth/mfa/login/confirm",
-            body = LoginMfaConfirmRequestDto(
-                challengeId = normalizedChallengeId,
-                code = normalizedCode,
-            ),
-        )
         completeEmailAuthentication(res)
     }.onFailure { throwable ->
         Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
-            "Authenticator login confirmation failed: ${throwable.message}"
+            "Email login failed for ${maskEmail(email)}: ${throwable.message}"
         }
     }
 
