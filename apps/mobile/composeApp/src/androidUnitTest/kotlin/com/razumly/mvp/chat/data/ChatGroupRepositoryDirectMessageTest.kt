@@ -155,17 +155,27 @@ class ChatGroupRepositoryDirectMessageTest {
             )
 
             val resolvedIds = mutableListOf<String>()
+            val canonicalObserved = CompletableDeferred<Unit>()
+            val canonicalRefreshObserved = CompletableDeferred<Unit>()
             val collection = launch(UnconfinedTestDispatcher(testScheduler)) {
                 repository.getChatGroupFlow(
                     messageUserId = OTHER_USER_ID,
                     chatId = null,
                 ).collect { result ->
-                    result.getOrNull()?.let { resolvedIds += it.chatGroup.id }
+                    result.getOrNull()?.let { chat ->
+                        resolvedIds += chat.chatGroup.id
+                        if (chat.chatGroup.id == CANONICAL_CHAT_ID) {
+                            canonicalObserved.complete(Unit)
+                        }
+                        if (chat.chatGroup.name == "Canonical refresh") {
+                            canonicalRefreshObserved.complete(Unit)
+                        }
+                    }
                 }
             }
             val posted = firstPostRequest.await()
             canonicalPersisted.await()
-            runCurrent()
+            canonicalObserved.await()
 
             assertEquals(
                 listOf(CURRENT_USER_ID, OTHER_USER_ID),
@@ -213,7 +223,7 @@ class ChatGroupRepositoryDirectMessageTest {
                     )
                 )
             )
-            runCurrent()
+            canonicalRefreshObserved.await()
 
             assertEquals(1, postCount.get())
             assertEquals(CANONICAL_CHAT_ID, resolvedIds.last())
@@ -222,14 +232,20 @@ class ChatGroupRepositoryDirectMessageTest {
             // A new collector gets one new canonical attempt, but a failed
             // attempt must keep serving the cached canonical conversation.
             val offlineResults = mutableListOf<Result<ChatGroupWithRelations>>()
+            val offlineCanonicalObserved = CompletableDeferred<Unit>()
             val offlineCollection = launch(UnconfinedTestDispatcher(testScheduler)) {
                 repository.getChatGroupFlow(
                     messageUserId = OTHER_USER_ID,
                     chatId = null,
-                ).collect { result -> offlineResults += result }
+                ).collect { result ->
+                    offlineResults += result
+                    if (result.getOrNull()?.chatGroup?.id == CANONICAL_CHAT_ID) {
+                        offlineCanonicalObserved.complete(Unit)
+                    }
+                }
             }
             secondPostObserved.await()
-            runCurrent()
+            offlineCanonicalObserved.await()
 
             assertEquals(2, postCount.get())
             assertTrue(offlineResults.isNotEmpty())
