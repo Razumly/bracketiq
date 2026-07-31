@@ -57,5 +57,7 @@ class HostedByReadOnlyRowUiTest {
         composeRule.onNodeWithText("River City Sports Club").assertIsDisplayed()
         composeRule.onNodeWithTag(ORGANIZATION_HOST_CARD_TEST_TAG).assertHasNoClickAction()
         composeRule.onAllNodesWithText("Follow").assertCountEquals(0)
+        composeRule.onAllNodesWithText("Claimed profile").assertCountEquals(0)
+        composeRule.onAllNodesWithText("Website verified").assertCountEquals(0)
     }
 }

@@ -18,7 +18,6 @@ import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateRentalUrl
 import com.razumly.mvp.core.data.dataTypes.resolvedLogoRef
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
-import com.razumly.mvp.core.presentation.composables.OrganizationOwnershipBadges
 
 @Composable
 fun DiscoverRentalSuggestion(
@@ -65,12 +64,6 @@ fun DiscoverRentalSuggestion(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
-            )
-
-            OrganizationOwnershipBadges(
-                organization = organization,
-                compact = true,
-                modifier = Modifier.padding(top = 6.dp),
             )
         }
     }

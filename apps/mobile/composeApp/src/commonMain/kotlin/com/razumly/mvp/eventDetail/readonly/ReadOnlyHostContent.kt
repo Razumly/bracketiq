@@ -25,7 +25,6 @@ import androidx.compose.ui.unit.sp
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
-import com.razumly.mvp.core.presentation.composables.OrganizationOwnershipBadges
 import com.razumly.mvp.core.presentation.composables.PlayerCardWithActions
 @Composable
 internal fun HostedByReadOnlyRow(
@@ -154,11 +153,6 @@ private fun OrganizationHostCard(
                             maxLines = 1,
                         )
                     }
-                OrganizationOwnershipBadges(
-                    organization = organization,
-                    compact = true,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
             }
         }
     }

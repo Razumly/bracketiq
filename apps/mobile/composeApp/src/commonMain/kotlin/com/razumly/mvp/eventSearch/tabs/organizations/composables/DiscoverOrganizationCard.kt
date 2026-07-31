@@ -25,7 +25,6 @@ import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationDivisionSummary
 import com.razumly.mvp.core.data.dataTypes.resolvedLogoRef
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
-import com.razumly.mvp.core.presentation.composables.OrganizationOwnershipBadges
 import com.razumly.mvp.core.presentation.util.getImageUrl
 
 @Composable
@@ -130,12 +129,6 @@ internal fun DiscoverOrganizationCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-
-                OrganizationOwnershipBadges(
-                    organization = organization,
-                    compact = true,
-                    modifier = Modifier.padding(top = 10.dp),
-                )
             }
         }
     }
