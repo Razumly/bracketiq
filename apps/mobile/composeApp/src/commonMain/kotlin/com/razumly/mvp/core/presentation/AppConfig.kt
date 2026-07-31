@@ -1,7 +1,9 @@
 package com.razumly.mvp.core.presentation
 
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 @Serializable
 enum class OrganizationDetailTab {
@@ -40,6 +42,8 @@ sealed class AppConfig {
     data class MatchDetail(
         val matchId: String,
         val eventId: String,
+        @Transient
+        val preloadedMatch: MatchWithRelations? = null,
     ) : AppConfig()
 
     @Serializable

@@ -1569,14 +1569,14 @@ class DefaultProfileComponent(
 
         val cachedEvent = _myScheduleState.value.events.firstOrNull { event -> event.id == eventId }
         if (cachedEvent != null) {
-            navigationHandler.navigateToMatchFromSchedule(match.match.id, cachedEvent.id)
+            navigationHandler.navigateToMatchFromSchedule(match, cachedEvent.id)
             return
         }
 
         scope.launch {
             eventRepository.getEvent(eventId)
                 .onSuccess { event ->
-                    navigationHandler.navigateToMatchFromSchedule(match.match.id, event.id)
+                    navigationHandler.navigateToMatchFromSchedule(match, event.id)
                 }
                 .onFailure {
                     _errorState.value = ErrorMessage(it.userMessage("Unable to open match."))

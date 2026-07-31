@@ -7,7 +7,6 @@ import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
-import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlin.time.ExperimentalTime
@@ -78,7 +77,7 @@ fun MatchDTO.toMatch(id: String): MatchMVP {
         incidents = incidents,
         start = start?.let { Instant.parse(it) },
         end = end?.let { Instant.parse(it) },
-        division = division?.normalizeDivisionLabel(),
+        division = division?.trim()?.takeIf(String::isNotBlank),
         team1Points = team1Points,
         team2Points = team2Points,
         setResults = setResults,

@@ -26,6 +26,9 @@ interface MatchDao {
     @Query("SELECT * FROM MatchMVP WHERE eventId = :tournamentId")
     suspend fun getMatchesOfTournament(tournamentId: String): List<MatchMVP>
 
+    @Query("SELECT * FROM MatchMVP WHERE id IN (:ids)")
+    suspend fun getMatchesByIds(ids: List<String>): List<MatchMVP>
+
     @Query("DELETE FROM MatchMVP WHERE eventId = :tournamentId")
     suspend fun deleteMatchesOfTournament(tournamentId: String)
 

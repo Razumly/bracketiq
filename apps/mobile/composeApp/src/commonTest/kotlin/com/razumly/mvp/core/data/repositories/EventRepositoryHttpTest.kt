@@ -15,6 +15,7 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -227,6 +228,7 @@ private class EventRepositoryHttp_FakeMatchDao : MatchDao {
     override suspend fun getTotalMatchCount(): Int = matches.size
     override suspend fun getMatchesOfTournament(tournamentId: String): List<MatchMVP> =
         matches.values.filter { match -> match.eventId == tournamentId }
+    override suspend fun getMatchesByIds(ids: List<String>): List<MatchMVP> = ids.mapNotNull(matches::get)
     override suspend fun deleteMatchesOfTournament(tournamentId: String) {
         matches.values
             .filter { match -> match.eventId == tournamentId }
@@ -238,7 +240,19 @@ private class EventRepositoryHttp_FakeMatchDao : MatchDao {
         ids.forEach(matches::remove)
     }
     override fun getMatchFlowById(id: String): Flow<MatchWithRelations?> = flowOf(null)
-    override suspend fun getMatchById(id: String): MatchWithRelations? = null
+    override suspend fun getMatchById(id: String): MatchWithRelations? = matches[id]?.let { match ->
+        MatchWithRelations(
+            match = match,
+            field = null,
+            team1 = null,
+            team2 = null,
+            teamOfficial = null,
+            winnerNextMatch = null,
+            loserNextMatch = null,
+            previousLeftMatch = null,
+            previousRightMatch = null,
+        )
+    }
     override fun getMatchesFlowOfTournament(tournamentId: String): Flow<List<MatchWithRelations>> = flowOf(emptyList())
 }
 
@@ -753,6 +767,80 @@ class EventRepositoryHttpTest {
         assertEquals(listOf(divisionId), scheduledEvent.divisionDetails.map(DivisionDetail::id))
         assertEquals(4, scheduledEvent.divisionDetails.single().poolCount)
         assertEquals(listOf(divisionId), eventDao.getEventById("event_1")?.divisions)
+    }
+
+    @Test
+    fun getMySchedule_preserves_cached_segments_from_partial_match_rows() = runTest {
+        val matchDao = EventRepositoryHttp_FakeMatchDao()
+        val cachedSegment = MatchSegmentMVP(
+            id = "match_1_segment_1",
+            eventId = "event_1",
+            matchId = "match_1",
+            sequence = 1,
+            status = "IN_PROGRESS",
+            scores = mapOf("team_1" to 2, "team_2" to 1),
+            startedAt = "2026-07-13T12:00:00Z",
+            metadata = mapOf(
+                "clockStoppedAt" to "2026-07-13T12:00:17Z",
+                "clockStoppedDurationSeconds" to "4",
+            ),
+        )
+        matchDao.upsertMatch(
+            MatchMVP(
+                id = "match_1",
+                matchId = 1,
+                eventId = "event_1",
+                status = "IN_PROGRESS",
+                segments = listOf(cachedSegment),
+            )
+        )
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            getEventDao = EventRepositoryHttp_FakeEventDao(),
+            getUserDataDao = EventRepositoryHttp_FakeUserDataDao(),
+            getTeamDao = EventRepositoryHttp_FakeTeamDao(),
+            getMatchDao = matchDao,
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("user_1"))
+        val engine = MockEngine { request ->
+            assertEquals("/api/profile/schedule", request.url.encodedPath)
+            respond(
+                content = """
+                    {
+                      "matches": [
+                        {
+                          "id": "match_1",
+                          "matchId": 1,
+                          "eventId": "event_1",
+                          "status": "IN_PROGRESS",
+                          "team1Points": [2],
+                          "team2Points": [1]
+                        }
+                      ],
+                      "pagination": {
+                        "limit": 200,
+                        "hasMore": false,
+                        "nextCursor": null,
+                        "isComplete": true,
+                        "windowFrom": "${request.url.parameters["from"]}",
+                        "windowTo": "${request.url.parameters["to"]}"
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+            "http://example.test",
+            EventRepositoryHttp_InMemoryAuthTokenStore("t123"),
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val snapshot = repo.getMySchedule().getOrThrow()
+
+        assertEquals(listOf(cachedSegment), snapshot.matches.single().segments)
+        assertEquals(listOf(cachedSegment), matchDao.matches.getValue("match_1").segments)
     }
 
     @Test

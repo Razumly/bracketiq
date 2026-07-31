@@ -119,6 +119,17 @@ private fun MatchMVP.applyLocalSegmentOperations(operations: List<MatchSegmentOp
             sequence = operation.sequence,
             status = "NOT_STARTED",
         )
+        val updatedMetadata = existing.metadata.orEmpty().toMutableMap().apply {
+            val stoppedAt = operation.clockStoppedAt
+            if (stoppedAt != null) {
+                put("clockStoppedAt", stoppedAt)
+            } else if (operation.clearClockStoppedAt) {
+                remove("clockStoppedAt")
+            }
+            operation.clockStoppedDurationSeconds?.let { seconds ->
+                put("clockStoppedDurationSeconds", seconds.coerceAtLeast(0).toString())
+            }
+        }.takeIf { it.isNotEmpty() }
         val next = existing.copy(
             id = operation.id ?: existing.id,
             status = operation.status ?: existing.status,
@@ -148,6 +159,7 @@ private fun MatchMVP.applyLocalSegmentOperations(operations: List<MatchSegmentOp
                 operation.clearStatusReason -> null
                 else -> existing.statusReason
             },
+            metadata = updatedMetadata,
         )
         if (index >= 0) {
             updated[index] = next

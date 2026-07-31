@@ -79,6 +79,23 @@ private fun Event.analyticsProperties(): Map<String, String> = buildMap {
     organizationId?.trim()?.takeIf(String::isNotBlank)?.let { put("organization_id", it) }
     sportId?.trim()?.takeIf(String::isNotBlank)?.let { put("sport_id", it) }
 }
+
+internal fun mergeScheduleMatchProjection(
+    scheduleMatch: MatchMVP,
+    cachedMatch: MatchMVP?,
+): MatchMVP {
+    if (cachedMatch == null) return scheduleMatch
+
+    // The schedule endpoint intentionally returns a narrow card projection. Do not let
+    // that partial response erase detailed state already fetched from the match endpoint.
+    return scheduleMatch.copy(
+        matchRulesSnapshot = scheduleMatch.matchRulesSnapshot ?: cachedMatch.matchRulesSnapshot,
+        resolvedMatchRules = scheduleMatch.resolvedMatchRules ?: cachedMatch.resolvedMatchRules,
+        segments = scheduleMatch.segments.ifEmpty { cachedMatch.segments },
+        incidents = scheduleMatch.incidents.ifEmpty { cachedMatch.incidents },
+    )
+}
+
 class EventRepository(
     private val databaseService: DatabaseService,
     private val api: MvpApiClient,
@@ -231,6 +248,19 @@ class EventRepository(
         }
         if (matches.isNotEmpty()) {
             databaseService.getMatchDao.upsertMatches(matches)
+        }
+    }
+
+    private suspend fun mergeScheduleMatchProjections(matches: List<MatchMVP>): List<MatchMVP> {
+        if (matches.isEmpty()) return matches
+        val cachedMatchesById = databaseService.getMatchDao
+            .getMatchesByIds(matches.map(MatchMVP::id))
+            .associateBy(MatchMVP::id)
+        return matches.map { scheduleMatch ->
+            mergeScheduleMatchProjection(
+                scheduleMatch = scheduleMatch,
+                cachedMatch = cachedMatchesById[scheduleMatch.id],
+            )
         }
     }
 
@@ -1067,7 +1097,7 @@ class EventRepository(
         } while (cursor != null)
 
         val events = databaseService.cachePartialEventsPreservingDivisionState(eventsById.values.toList())
-        val matches = matchesById.values.toList()
+        val matches = mergeScheduleMatchProjections(matchesById.values.toList())
         val teams = teamsById.values.toList()
         val fields = fieldsById.values.toList()
 

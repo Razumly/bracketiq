@@ -99,6 +99,9 @@ private class MatchRepositoryHttp_FakeMatchDao(
     override suspend fun getMatchesOfTournament(tournamentId: String): List<MatchMVP> =
         matches.value.values.filter { it.eventId == tournamentId }
 
+    override suspend fun getMatchesByIds(ids: List<String>): List<MatchMVP> =
+        ids.mapNotNull(matches.value::get)
+
     override suspend fun deleteMatchesOfTournament(tournamentId: String) {
         matches.value = matches.value.filterValues { it.eventId != tournamentId }
     }

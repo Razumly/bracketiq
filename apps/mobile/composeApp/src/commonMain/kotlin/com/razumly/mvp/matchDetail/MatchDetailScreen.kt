@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
@@ -33,7 +32,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -129,10 +130,13 @@ private val DelayedMatchTimeContainerColor = Color(0xFFFFD54F)
 private val DelayedMatchTimeContentColor = Color(0xFF3A2A00)
 private val MatchDetailBottomDockLift = 28.dp
 private val MatchDetailBottomDockContentReserve = 80.dp
-private val MatchDetailActionButtonHeight = 56.dp
-private val MatchDetailDetailsButtonWidth = 156.dp
 private val MatchDetailCourtButtonMinWidth = 96.dp
 private val MatchDetailCourtButtonMaxWidth = 220.dp
+
+internal fun matchWinnerEventTeamIdForDisplay(
+    matchFinished: Boolean,
+    winnerEventTeamId: String?,
+): String? = winnerEventTeamId?.takeIf { matchFinished }
 
 private fun matchLogTypeLabel(type: String): String = when (type.trim().uppercase()) {
     "POINT" -> "Point"
@@ -480,6 +484,10 @@ fun MatchDetailScreen(
     val showMatchRosterDialog by component.showMatchRosterDialog.collectAsState()
     val currentSet by component.currentSet.collectAsState()
     val matchFinished by component.matchFinished.collectAsState()
+    val displayedMatchWinnerEventTeamId = matchWinnerEventTeamIdForDisplay(
+        matchFinished = matchFinished,
+        winnerEventTeamId = match.match.winnerEventTeamId,
+    )
     val canManageMatchActions by component.canManageMatchActions.collectAsState()
     val assignedTeamOfficialPendingCheckIn by component.assignedTeamOfficialPendingCheckIn.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
@@ -532,6 +540,7 @@ fun MatchDetailScreen(
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
     var showMatchDetails by remember { mutableStateOf(false) }
     var pendingIncidentTarget by remember(match.match.id) { mutableStateOf<MatchIncidentDialogTarget?>(null) }
+    var showIncidentTeamPicker by remember(match.match.id) { mutableStateOf(false) }
     var pendingMatchAction by remember(match.match.id) { mutableStateOf<MatchActionDialogTarget?>(null) }
     var showForfeitTeamDialog by remember(match.match.id) { mutableStateOf(false) }
     var incidentType by remember(match.match.id) { mutableStateOf("") }
@@ -606,6 +615,7 @@ fun MatchDetailScreen(
         )
     }
     val activeSegment = orderedSegments.getOrNull(currentSet)
+    val matchSuspended = match.match.status.equals("SUSPENDED", ignoreCase = true)
     var timerNowMillis by remember(match.match.id) { mutableStateOf(Clock.System.now().toEpochMilliseconds()) }
     val activeSegmentDurationMinutes = activeSegment?.let { segment ->
         rules.timekeeping.segmentDurationMinutesBySequence.getOrNull(segment.sequence - 1)
@@ -619,8 +629,16 @@ fun MatchDetailScreen(
     val hasMatchClock = rules.timekeeping.timerMode != "NONE" && activeSegmentDurationSeconds != null
     val activeSegmentStartedAt = parseMatchInstant(activeSegment?.startedAt)
     val activeSegmentEndedAt = parseMatchInstant(activeSegment?.endedAt)
+        ?: parseMatchInstant(match.match.actualEnd).takeIf {
+            matchFinished || activeSegment?.status.equals("COMPLETE", ignoreCase = true)
+        }
+    val activeTimerStoppedAt = activeSegment?.timerStoppedAtInstant()
+    val activeTimerStoppedDurationSeconds = activeSegment?.timerStoppedDurationSeconds() ?: 0
     val rawClockSeconds = activeSegmentStartedAt?.let { started ->
-        (((activeSegmentEndedAt?.toEpochMilliseconds() ?: timerNowMillis) - started.toEpochMilliseconds()) / 1000L)
+        val clockReferenceMillis = activeSegmentEndedAt?.toEpochMilliseconds()
+            ?: activeTimerStoppedAt?.toEpochMilliseconds()
+            ?: timerNowMillis
+        (((clockReferenceMillis - started.toEpochMilliseconds()) / 1000L) - activeTimerStoppedDurationSeconds)
             .coerceAtLeast(0L)
             .toInt()
     } ?: 0
@@ -638,14 +656,28 @@ fun MatchDetailScreen(
         rules.timekeeping.addedTimeEnabled &&
         rawClockSeconds > regulationDurationSeconds
     val activeTimerRunning = hasMatchClock &&
+        !matchFinished &&
+        !activeSegment?.status.equals("COMPLETE", ignoreCase = true) &&
         activeSegmentStartedAt != null &&
         activeSegmentEndedAt == null &&
+        activeTimerStoppedAt == null &&
+        !matchSuspended &&
         (!rules.timekeeping.stopAtRegulationEnd || rawClockSeconds < regulationDurationSeconds)
     val regulationClockEnded = hasMatchClock &&
+        !matchFinished &&
+        !activeSegment?.status.equals("COMPLETE", ignoreCase = true) &&
         activeSegmentStartedAt != null &&
         activeSegmentEndedAt == null &&
         rules.timekeeping.stopAtRegulationEnd &&
         rawClockSeconds >= regulationDurationSeconds
+    val matchClockEndReached = hasMatchClock &&
+        activeSegmentStartedAt != null &&
+        rawClockSeconds >= regulationDurationSeconds
+    val timerStopped = hasMatchClock &&
+        !matchFinished &&
+        activeSegmentStartedAt != null &&
+        activeSegmentEndedAt == null &&
+        activeTimerStoppedAt != null
     val displayClockFormatter: (Int) -> String = if (useCumulativeClock) ::formatClockSecondsAsMinutes else ::formatClockSeconds
     val clockDisplay = when {
         !hasMatchClock -> ""
@@ -667,7 +699,14 @@ fun MatchDetailScreen(
     }
     var regulationAlertedTimerKey by remember(match.match.id) { mutableStateOf<String?>(null) }
     val regulationTimerKey = "${activeSegment?.id.orEmpty()}:${activeSegment?.startedAt.orEmpty()}"
-    LaunchedEffect(activeTimerRunning, activeSegment?.id, activeSegment?.startedAt, activeSegment?.endedAt) {
+    LaunchedEffect(
+        activeTimerRunning,
+        activeSegment?.id,
+        activeSegment?.startedAt,
+        activeSegment?.endedAt,
+        activeTimerStoppedAt,
+        activeTimerStoppedDurationSeconds,
+    ) {
         while (activeTimerRunning) {
             timerNowMillis = Clock.System.now().toEpochMilliseconds()
             delay(1_000L)
@@ -728,6 +767,7 @@ fun MatchDetailScreen(
     }
     val canAdjustScore = showOfficialScoreControls &&
         !matchFinished &&
+        !matchSuspended &&
         officialCheckedIn &&
         !match.match.actualStart.isNullOrBlank() &&
         activeSegment?.status != "COMPLETE"
@@ -788,13 +828,19 @@ fun MatchDetailScreen(
         !match.match.actualStart.isNullOrBlank() &&
         !matchFinished &&
         activeSegment?.status != "COMPLETE"
-    val confirmResultEnabled = canConfirmResult &&
-        !segmentConfirmSaving &&
+    val timerAllowsTerminalActions = !hasMatchClock ||
+        timerStopped ||
+        matchClockEndReached ||
+        matchSuspended
+    val showConfirmResultButton = canConfirmResult &&
+        timerAllowsTerminalActions &&
         canConfirmCurrentSegment(match.match, rules, event, currentSet)
+    val confirmResultEnabled = showConfirmResultButton && !segmentConfirmSaving
     val canStartMatch = showOfficialScoreControls &&
         officialCheckedIn &&
         officialMatchWindowOpen &&
         !matchFinished &&
+        !matchSuspended &&
         activeSegment?.status != "COMPLETE" &&
         activeSegment?.startedAt.isNullOrBlank()
     val canResetMatchTimer = showOfficialScoreControls &&
@@ -803,7 +849,8 @@ fun MatchDetailScreen(
         !matchFinished &&
         hasMatchClock &&
         activeSegment?.status != "COMPLETE" &&
-        activeSegmentStartedAt != null
+        activeSegmentStartedAt != null &&
+        timerAllowsTerminalActions
     val promptScoringIncident = shouldRequireScoringIncident(rules, event)
     val teamIncidentTypes = remember(rules) {
         incidentDialogTypes(rules = rules, teamScoped = true)
@@ -811,8 +858,16 @@ fun MatchDetailScreen(
     val teamAgnosticIncidentTypes = remember(rules) {
         incidentDialogTypes(rules = rules, teamScoped = false)
     }
-    val showTeamIncidentButtons = teamIncidentTypes.isNotEmpty()
-    val showTeamAgnosticIncidentButton = !showTeamIncidentButtons && teamAgnosticIncidentTypes.isNotEmpty()
+    val canAddIncident = canConfirmResult &&
+        !matchSuspended &&
+        (teamIncidentTypes.isNotEmpty() || teamAgnosticIncidentTypes.isNotEmpty())
+    val timerAction = when {
+        !showOfficialScoreControls || !officialCheckedIn || !officialMatchWindowOpen || matchFinished -> null
+        canStartMatch -> MatchTimerAction.Start
+        activeTimerRunning -> MatchTimerAction.Stop
+        timerStopped || matchSuspended -> MatchTimerAction.Resume
+        else -> null
+    }
     val screenBackgroundBrush = Brush.verticalGradient(
         colors = listOf(
             MaterialTheme.colorScheme.tertiaryContainer,
@@ -882,7 +937,6 @@ fun MatchDetailScreen(
 
     val canUseMatchStatusActions = (canManageMatchActions || (isOfficial && officialCheckedIn && officialMatchWindowOpen)) &&
         !matchFinished
-    val matchSuspended = match.match.status.equals("SUSPENDED", ignoreCase = true)
     val canUsePreStartMatchActions = canUseMatchStatusActions &&
         match.match.actualStart.isNullOrBlank() &&
         !matchSuspended
@@ -1168,6 +1222,61 @@ fun MatchDetailScreen(
         )
     }
 
+    if (showIncidentTeamPicker) {
+        AlertDialog(
+            onDismissRequest = { showIncidentTeamPicker = false },
+            title = { Text("Add incident") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (teamIncidentTypes.isNotEmpty()) {
+                        match.match.team1Id?.takeIf(String::isNotBlank)?.let { teamId ->
+                            Button(
+                                onClick = {
+                                    showIncidentTeamPicker = false
+                                    openIncidentDialog(teamId)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(team1Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        match.match.team2Id?.takeIf(String::isNotBlank)?.let { teamId ->
+                            Button(
+                                onClick = {
+                                    showIncidentTeamPicker = false
+                                    openIncidentDialog(teamId)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(team2Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                    if (teamAgnosticIncidentTypes.isNotEmpty()) {
+                        Button(
+                            onClick = {
+                                showIncidentTeamPicker = false
+                                openIncidentDialog(null)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("General incident")
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                Button(onClick = { showIncidentTeamPicker = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
     if (pendingIncidentTarget != null) {
         val incidentOptions = incidentDialogTypes(
             rules = rules,
@@ -1278,7 +1387,7 @@ fun MatchDetailScreen(
                 ScoreCard(
                     title = team1Text,
                     score = team1Score.toString(),
-                    isWinner = match.match.winnerEventTeamId == match.match.team1Id,
+                    isWinner = displayedMatchWinnerEventTeamId == match.match.team1Id,
                 onTap = {
                     if (promptScoringIncident) {
                         openIncidentDialog(match.match.team1Id)
@@ -1293,12 +1402,6 @@ fun MatchDetailScreen(
                 tapEnabled = canIncrementScore,
                 swipeEnabled = canAdjustScore,
                 showControls = showOfficialScoreControls,
-                addIncidentLabel = if (showTeamIncidentButtons) {
-                    "Add Incident"
-                } else {
-                    null
-                },
-                onAddIncident = { openIncidentDialog(match.match.team1Id) },
                     modifier = Modifier
                         .weight(1f)
                         .guideTarget(EventGuideTargets.MatchScoreControls),
@@ -1306,69 +1409,47 @@ fun MatchDetailScreen(
 
                 Row(
                     modifier = Modifier
-                        .guideTarget(EventGuideTargets.MatchIdentity)
-                        .background(
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
-                            shape = RoundedCornerShape(20.dp)
-                    )
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Text(
-                    text = "Match: ${match.match.matchId}",
-                    color = MaterialTheme.colorScheme.onSurface,
-                    style = MaterialTheme.typography.titleLarge
-                )
-                activeSegmentLabel?.let { label ->
-                    Text(
-                        text = " | ",
-                        color = MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.titleLarge
-                    )
-                    Text(
-                        text = label,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.titleLarge
-                    )
-                }
-            }
-
-            if (hasMatchClock) {
-                Column(
-                    modifier = Modifier
-                        .background(
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.78f),
-                            shape = RoundedCornerShape(16.dp),
-                        )
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                        .guideTarget(EventGuideTargets.MatchIdentity),
                 ) {
                     Text(
-                        text = activeSegmentLabel ?: segmentBaseLabel,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = "Match: ${match.match.matchId}",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.titleLarge
                     )
-                    Text(
-                        text = clockDisplay,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = when {
+                    activeSegmentLabel?.let { label ->
+                        Text(
+                            text = " | ",
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                        Text(
+                            text = label,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                    }
+                }
+
+                if (hasMatchClock) {
+                    MatchTimerControl(
+                        clockDisplay = clockDisplay,
+                        action = timerAction,
+                        actionEnabled = !matchStartSaving && !matchActionSaving,
+                        clockColor = when {
                             regulationClockEnded -> MaterialTheme.colorScheme.error
                             clockInAddedTime -> MaterialTheme.colorScheme.tertiary
                             else -> MaterialTheme.colorScheme.onSurface
                         },
-                    )
-                    Text(
-                        text = when {
-                            activeTimerRunning -> "Running"
-                            regulationClockEnded -> "Regulation time reached"
-                            activeSegmentStartedAt != null -> "Stopped"
-                            else -> "Ready"
+                        onAction = {
+                            when (timerAction) {
+                                MatchTimerAction.Start -> component.startMatch()
+                                MatchTimerAction.Stop -> component.stopMatchTimer()
+                                MatchTimerAction.Resume -> component.resumeMatchTimer()
+                                null -> Unit
+                            }
                         },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-            }
 
             if (segmentTrackerEntries.isNotEmpty()) {
                 MatchSegmentScoreTracker(
@@ -1377,130 +1458,44 @@ fun MatchDetailScreen(
                 )
             }
 
-                if (showOfficialScoreControls) {
-                    Row(
-                        modifier = Modifier
-                            .guideTarget(EventGuideTargets.MatchOfficialAssignment)
-                            .guideTarget(EventGuideTargets.MatchResultControls),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+            if (showOfficialScoreControls) {
+                MatchOfficialResultControls(
+                    canStartMatch = canStartMatch,
+                    showSetDelayedButton = showSetDelayedButton,
+                    canResetMatchTimer = canResetMatchTimer,
+                    showConfirmResultButton = showConfirmResultButton,
+                    confirmResultEnabled = confirmResultEnabled,
+                    matchStartSaving = matchStartSaving,
+                    matchTimeSaving = matchTimeSaving,
+                    segmentConfirmSaving = segmentConfirmSaving,
+                    startButtonLabel = if (
+                        activeSegment?.sequence == 1 &&
+                        match.match.actualStart.isNullOrBlank()
                     ) {
-                    if (canStartMatch) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Button(
-                                onClick = { component.startMatch() },
-                                enabled = !matchStartSaving,
-                            ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    if (matchStartSaving) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(16.dp),
-                                            strokeWidth = 2.dp,
-                                            color = MaterialTheme.colorScheme.onPrimary,
-                                        )
-                                    }
-                                    Text(
-                                        if (activeSegment?.sequence == 1 && match.match.actualStart.isNullOrBlank()) {
-                                            "Start Match"
-                                        } else {
-                                            "Start ${activeSegmentLabel ?: segmentBaseLabel}"
-                                        }
-                                    )
-                                }
-                            }
-                            if (showSetDelayedButton) {
-                                Button(
-                                    onClick = { component.markMatchDelayed() },
-                                    enabled = !matchTimeSaving,
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = DelayedMatchTimeContainerColor,
-                                        contentColor = DelayedMatchTimeContentColor,
-                                        disabledContainerColor = DelayedMatchTimeContainerColor.copy(alpha = 0.6f),
-                                        disabledContentColor = DelayedMatchTimeContentColor.copy(alpha = 0.7f),
-                                    ),
-                                ) {
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        if (matchTimeSaving) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(16.dp),
-                                                strokeWidth = 2.dp,
-                                                color = DelayedMatchTimeContentColor,
-                                            )
-                                        }
-                                        Text(if (matchTimeSaving) "Saving..." else "Set as delayed")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if (canResetMatchTimer) {
-                        Button(
-                            onClick = { component.resetMatchTimer() },
-                            enabled = !matchStartSaving,
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                if (matchStartSaving) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                    )
-                                }
-                                Text("Reset Timer")
-                            }
-                        }
-                    }
-                    Button(
-                        onClick = { component.completeCurrentSet() },
-                        enabled = confirmResultEnabled,
-                    ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (segmentConfirmSaving) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                )
-                            }
-                            Text(
-                                if (rules.scoringModel == "POINTS_ONLY") {
-                                    "Save Match"
-                                } else {
-                                    "Confirm ${activeSegmentLabel ?: segmentBaseLabel}"
-                                }
-                            )
-                        }
-                    }
-                }
-                if (showTeamAgnosticIncidentButton) {
-                    Button(
-                        onClick = { openIncidentDialog(null) },
-                        enabled = canConfirmResult,
-                    ) {
-                        Text("Add Incident")
-                    }
-                }
+                        "Start Match"
+                    } else {
+                        "Start ${activeSegmentLabel ?: segmentBaseLabel}"
+                    },
+                    confirmButtonLabel = if (rules.scoringModel == "POINTS_ONLY") {
+                        "Save Match"
+                    } else {
+                        "Confirm ${activeSegmentLabel ?: segmentBaseLabel}"
+                    },
+                    onStartMatch = component::startMatch,
+                    onMarkDelayed = component::markMatchDelayed,
+                    onResetTimer = component::resetMatchTimer,
+                    onConfirmResult = component::completeCurrentSet,
+                    modifier = Modifier
+                        .padding(horizontal = 24.dp)
+                        .guideTarget(EventGuideTargets.MatchOfficialAssignment)
+                        .guideTarget(EventGuideTargets.MatchResultControls),
+                )
             }
 
             ScoreCard(
                 title = team2Text,
                 score = team2Score.toString(),
-                isWinner = match.match.winnerEventTeamId == match.match.team2Id,
+                isWinner = displayedMatchWinnerEventTeamId == match.match.team2Id,
                 modifier = Modifier
                     .weight(1f),
                 onTap = {
@@ -1517,17 +1512,12 @@ fun MatchDetailScreen(
                 tapEnabled = canIncrementScore,
                 swipeEnabled = canAdjustScore,
                 showControls = showOfficialScoreControls,
-                addIncidentLabel = if (showTeamIncidentButtons) {
-                    "Add Incident"
-                } else {
-                    null
-                },
-                onAddIncident = { openIncidentDialog(match.match.team2Id) },
             )
         }
 
         if (showScoreGestureHint && showOfficialScoreControls && canAdjustScore) {
             ScoreGestureInstructionOverlay(
+                showTimerInstruction = hasMatchClock,
                 onDismiss = { showScoreGestureHint = false },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -1597,6 +1587,8 @@ fun MatchDetailScreen(
                 showSegmentBreakdown = showSegmentBreakdown,
                 orderedSegments = orderedSegments,
                 segmentBaseLabel = segmentBaseLabel,
+                regulationSegmentCount = rules.segmentCount,
+                matchWinnerEventTeamId = displayedMatchWinnerEventTeamId,
                 officialRows = officialRows,
                 visibleIncidents = visibleIncidents,
                 isOfficial = isOfficial,
@@ -1623,6 +1615,7 @@ fun MatchDetailScreen(
                     !match.match.team2Id.isNullOrBlank(),
                 canSuspendMatch = canSuspendMatch,
                 canResumeMatch = canResumeMatch,
+                canAddIncident = canAddIncident,
                 matchActionSaving = matchActionSaving,
                 onForfeitClick = { showForfeitTeamDialog = true },
                 onCancelMatchClick = {
@@ -1648,6 +1641,13 @@ fun MatchDetailScreen(
                         message = "This match will be reopened from its suspended state.",
                         confirmLabel = "Resume",
                     )
+                },
+                onAddIncidentClick = {
+                    if (teamIncidentTypes.isNotEmpty()) {
+                        showIncidentTeamPicker = true
+                    } else {
+                        openIncidentDialog(null)
+                    }
                 },
                 onEditActualTimes = {
                     actualStartDraft = parseMatchInstant(match.match.actualStart)
@@ -1696,6 +1696,168 @@ fun MatchDetailScreen(
     }
 }
 
+internal enum class MatchTimerAction {
+    Start,
+    Stop,
+    Resume,
+}
+
+@Composable
+internal fun MatchTimerControl(
+    clockDisplay: String,
+    action: MatchTimerAction?,
+    actionEnabled: Boolean,
+    clockColor: Color,
+    onAction: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = clockDisplay,
+            modifier = Modifier
+                .semantics { contentDescription = "Match timer" }
+                .clickable(
+                    enabled = action != null && actionEnabled,
+                    onClick = onAction,
+                ),
+            style = MaterialTheme.typography.displayLarge,
+            fontSize = 56.sp,
+            fontWeight = FontWeight.Bold,
+            color = clockColor,
+        )
+        when (action) {
+            MatchTimerAction.Stop -> {
+                IconButton(
+                    onClick = onAction,
+                    enabled = actionEnabled,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Pause,
+                        contentDescription = "Stop timer",
+                        modifier = Modifier.size(32.dp),
+                    )
+                }
+            }
+
+            MatchTimerAction.Start,
+            MatchTimerAction.Resume -> {
+                IconButton(
+                    onClick = onAction,
+                    enabled = actionEnabled,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = if (action == MatchTimerAction.Start) {
+                            "Start timer"
+                        } else {
+                            "Resume timer"
+                        },
+                        modifier = Modifier.size(36.dp),
+                    )
+                }
+            }
+
+            null -> Unit
+        }
+    }
+}
+
+@Composable
+internal fun MatchOfficialResultControls(
+    canStartMatch: Boolean,
+    showSetDelayedButton: Boolean,
+    canResetMatchTimer: Boolean,
+    showConfirmResultButton: Boolean,
+    confirmResultEnabled: Boolean,
+    matchStartSaving: Boolean,
+    matchTimeSaving: Boolean,
+    segmentConfirmSaving: Boolean,
+    startButtonLabel: String,
+    confirmButtonLabel: String,
+    onStartMatch: () -> Unit,
+    onMarkDelayed: () -> Unit,
+    onResetTimer: () -> Unit,
+    onConfirmResult: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (canStartMatch) {
+            Button(
+                onClick = onStartMatch,
+                enabled = !matchStartSaving,
+            ) {
+                if (matchStartSaving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+                Text(startButtonLabel)
+            }
+            if (showSetDelayedButton) {
+                Button(
+                    onClick = onMarkDelayed,
+                    enabled = !matchTimeSaving,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = DelayedMatchTimeContainerColor,
+                        contentColor = DelayedMatchTimeContentColor,
+                        disabledContainerColor = DelayedMatchTimeContainerColor.copy(alpha = 0.6f),
+                        disabledContentColor = DelayedMatchTimeContentColor.copy(alpha = 0.7f),
+                    ),
+                ) {
+                    if (matchTimeSaving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = DelayedMatchTimeContentColor,
+                        )
+                    }
+                    Text(if (matchTimeSaving) "Saving..." else "Set as delayed")
+                }
+            }
+        }
+        if (canResetMatchTimer) {
+            Button(
+                onClick = onResetTimer,
+                enabled = !matchStartSaving,
+            ) {
+                if (matchStartSaving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+                Text("Reset Timer")
+            }
+        }
+        if (showConfirmResultButton) {
+            Button(
+                onClick = onConfirmResult,
+                enabled = confirmResultEnabled,
+            ) {
+                if (segmentConfirmSaving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+                Text(confirmButtonLabel)
+            }
+        }
+    }
+}
+
 @Composable
 private fun MatchDetailBottomActions(
     fieldLocationLabel: String,
@@ -1732,7 +1894,6 @@ private fun MatchDetailBottomActions(
                             min = MatchDetailCourtButtonMinWidth,
                             max = MatchDetailCourtButtonMaxWidth,
                         )
-                        .height(MatchDetailActionButtonHeight)
                         .onGloballyPositioned {
                             onMapButtonCenterChanged(it.boundsInWindow().center)
                         },
@@ -1755,9 +1916,6 @@ private fun MatchDetailBottomActions(
                 }
                 Button(
                     onClick = onMatchDetailsToggle,
-                    modifier = Modifier
-                        .width(MatchDetailDetailsButtonWidth)
-                        .height(MatchDetailActionButtonHeight),
                 ) {
                     Text(
                         text = if (showMatchDetails) "Hide Details" else "Match Details",
@@ -1833,8 +1991,6 @@ fun ScoreCard(
     swipeEnabled: Boolean = enabled,
     showControls: Boolean,
     isWinner: Boolean = false,
-    addIncidentLabel: String? = null,
-    onAddIncident: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val interactionModifier = if (showControls) {
@@ -1922,19 +2078,12 @@ fun ScoreCard(
             color = if (isWinner) matchWinnerContentColor() else MaterialTheme.colorScheme.onSurface,
             fontSize = 64.sp,
         )
-        if (addIncidentLabel != null && onAddIncident != null) {
-            Button(
-                onClick = onAddIncident,
-                enabled = enabled,
-            ) {
-                Text(addIncidentLabel)
-            }
-        }
     }
 }
 
 @Composable
 internal fun ScoreGestureInstructionOverlay(
+    showTimerInstruction: Boolean,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1962,6 +2111,15 @@ internal fun ScoreGestureInstructionOverlay(
                 fontWeight = FontWeight.SemiBold,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
+            if (showTimerInstruction) {
+                Text(
+                    text = "Tap timer to start or stop",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+            }
         }
     }
 }

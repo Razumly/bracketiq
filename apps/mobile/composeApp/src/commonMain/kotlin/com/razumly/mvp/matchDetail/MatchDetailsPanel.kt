@@ -5,21 +5,29 @@ package com.razumly.mvp.matchDetail
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,7 +35,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,6 +63,8 @@ internal fun ExpandedMatchDetailsPanel(
     showSegmentBreakdown: Boolean,
     orderedSegments: List<MatchSegmentMVP>,
     segmentBaseLabel: String,
+    regulationSegmentCount: Int,
+    matchWinnerEventTeamId: String?,
     officialRows: List<MatchOfficialDetailRow>,
     visibleIncidents: List<MatchIncidentMVP>,
     isOfficial: Boolean,
@@ -73,11 +85,13 @@ internal fun ExpandedMatchDetailsPanel(
     canUsePreStartMatchActions: Boolean,
     canSuspendMatch: Boolean,
     canResumeMatch: Boolean,
+    canAddIncident: Boolean,
     matchActionSaving: Boolean,
     onForfeitClick: () -> Unit,
     onCancelMatchClick: () -> Unit,
     onSuspendMatchClick: () -> Unit,
     onResumeMatchClick: () -> Unit,
+    onAddIncidentClick: () -> Unit,
     onEditActualTimes: () -> Unit,
     onActualStartSelected: (Instant) -> Unit,
     onActualEndSelected: (Instant) -> Unit,
@@ -122,16 +136,18 @@ internal fun ExpandedMatchDetailsPanel(
                         team2CheckedIn = team2CheckedIn,
                     )
                 }
-                if (canUseMatchStatusActions) {
+                if (canUseMatchStatusActions || canAddIncident) {
                     MatchDetailsActionsSection(
                         canUsePreStartMatchActions = canUsePreStartMatchActions,
                         canSuspendMatch = canSuspendMatch,
                         canResumeMatch = canResumeMatch,
+                        canAddIncident = canAddIncident,
                         matchActionSaving = matchActionSaving,
                         onForfeitClick = onForfeitClick,
                         onCancelMatchClick = onCancelMatchClick,
                         onSuspendMatchClick = onSuspendMatchClick,
                         onResumeMatchClick = onResumeMatchClick,
+                        onAddIncidentClick = onAddIncidentClick,
                     )
                 }
                 if (canEditRoster) {
@@ -160,13 +176,14 @@ internal fun ExpandedMatchDetailsPanel(
                     MatchSegmentTable(
                         segments = orderedSegments,
                         segmentLabel = segmentBaseLabel,
+                        regulationSegmentCount = regulationSegmentCount,
                         team1Id = match.team1Id,
                         team2Id = match.team2Id,
                         team1Scores = match.team1Points,
                         team2Scores = match.team2Points,
                         team1Name = team1Name,
                         team2Name = team2Name,
-                        matchWinnerEventTeamId = match.winnerEventTeamId,
+                        matchWinnerEventTeamId = matchWinnerEventTeamId,
                         onSegmentSelected = onSegmentSelected,
                     )
                 }
@@ -245,34 +262,34 @@ private fun MatchDetailsActionsSection(
     canUsePreStartMatchActions: Boolean,
     canSuspendMatch: Boolean,
     canResumeMatch: Boolean,
+    canAddIncident: Boolean,
     matchActionSaving: Boolean,
     onForfeitClick: () -> Unit,
     onCancelMatchClick: () -> Unit,
     onSuspendMatchClick: () -> Unit,
     onResumeMatchClick: () -> Unit,
+    onAddIncidentClick: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             text = "Match actions",
             style = MaterialTheme.typography.titleSmall,
         )
-        Row(
+        FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (canUsePreStartMatchActions) {
                 MatchDetailsActionButton(
                     label = "Forfeit",
                     onClick = onForfeitClick,
                     enabled = !matchActionSaving,
-                    modifier = Modifier.weight(1f),
                 )
                 MatchDetailsActionButton(
                     label = "Cancel",
                     onClick = onCancelMatchClick,
                     enabled = !matchActionSaving,
-                    modifier = Modifier.weight(1f),
                 )
             }
             if (canSuspendMatch) {
@@ -280,7 +297,6 @@ private fun MatchDetailsActionsSection(
                     label = "Suspend",
                     onClick = onSuspendMatchClick,
                     enabled = !matchActionSaving,
-                    modifier = Modifier.weight(1f),
                 )
             }
             if (canResumeMatch) {
@@ -288,7 +304,13 @@ private fun MatchDetailsActionsSection(
                     label = "Resume",
                     onClick = onResumeMatchClick,
                     enabled = !matchActionSaving,
-                    modifier = Modifier.weight(1f),
+                )
+            }
+            if (canAddIncident) {
+                MatchDetailsActionButton(
+                    label = "Add Incident",
+                    onClick = onAddIncidentClick,
+                    enabled = !matchActionSaving,
                 )
             }
         }
@@ -305,7 +327,7 @@ private fun MatchDetailsActionButton(
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.heightIn(min = 48.dp),
+        modifier = modifier,
     ) {
         Text(
             text = label,
@@ -550,6 +572,7 @@ private fun MatchActualTimeField(
 internal fun MatchSegmentTable(
     segments: List<MatchSegmentMVP>,
     segmentLabel: String,
+    regulationSegmentCount: Int,
     team1Id: String?,
     team2Id: String?,
     team1Scores: List<Int>,
@@ -562,149 +585,328 @@ internal fun MatchSegmentTable(
 ) {
     if (segments.isEmpty()) return
 
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        segments.forEachIndexed { index, segment ->
-            val isActive = segment.isStarted
-            val isComplete = segment.status.equals("COMPLETE", ignoreCase = true)
-            val team1Score = segmentScore(
-                segment = segment,
-                teamId = team1Id,
-                fallbackScores = team1Scores,
-                index = index,
+    val horizontalScrollState = rememberScrollState()
+    val dividerColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.32f)
+    Column(modifier = modifier.fillMaxWidth()) {
+        HorizontalDivider(color = dividerColor)
+        Row(modifier = Modifier.fillMaxWidth()) {
+            MatchSegmentTeamLabels(
+                team1Name = team1Name,
+                team2Name = team2Name,
+                team1IsMatchWinner = matchWinnerEventTeamId == team1Id,
+                team2IsMatchWinner = matchWinnerEventTeamId == team2Id,
+                dividerColor = dividerColor,
             )
-            val team2Score = segmentScore(
-                segment = segment,
-                teamId = team2Id,
-                fallbackScores = team2Scores,
-                index = index,
+            VerticalDivider(
+                modifier = Modifier.height(MatchSegmentGridHeight),
+                color = dividerColor,
             )
-            val segmentWinnerEventTeamId = resolveSegmentWinnerEventTeamId(
-                segment = segment,
-                team1Id = team1Id,
-                team2Id = team2Id,
-                team1Score = team1Score,
-                team2Score = team2Score,
-            )
-            val containerColor = when {
-                isActive -> MaterialTheme.colorScheme.primaryContainer
-                isComplete -> MaterialTheme.colorScheme.secondaryContainer
-                else -> MaterialTheme.colorScheme.surfaceVariant
-            }
-            val contentColor = when {
-                isActive -> MaterialTheme.colorScheme.onPrimaryContainer
-                isComplete -> MaterialTheme.colorScheme.onSecondaryContainer
-                else -> MaterialTheme.colorScheme.onSurfaceVariant
-            }
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 116.dp)
-                    .clickable { onSegmentSelected(index) },
-                shape = RoundedCornerShape(14.dp),
-                color = containerColor,
-                contentColor = contentColor,
-                tonalElevation = if (isActive) 2.dp else 0.dp,
+            Box(
+                modifier = Modifier.weight(1f),
             ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(horizontalScrollState)
+                        .testTag(MatchSegmentColumnsTestTag),
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "$segmentLabel ${segment.sequence}",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
+                    segments.forEachIndexed { index, segment ->
+                        val team1Score = segmentScore(
+                            segment = segment,
+                            teamId = team1Id,
+                            fallbackScores = team1Scores,
+                            index = index,
                         )
-                        when {
-                            isActive -> Text(
-                                text = "In progress",
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                            isComplete -> Text(
-                                text = "Complete",
-                                style = MaterialTheme.typography.labelSmall,
+                        val team2Score = segmentScore(
+                            segment = segment,
+                            teamId = team2Id,
+                            fallbackScores = team2Scores,
+                            index = index,
+                        )
+                        val segmentWinnerEventTeamId = resolveSegmentWinnerEventTeamId(
+                            segment = segment,
+                            team1Id = team1Id,
+                            team2Id = team2Id,
+                            team1Score = team1Score,
+                            team2Score = team2Score,
+                        )
+                        MatchSegmentScoreColumn(
+                            headerLabel = matchSegmentHeaderLabel(
+                                segment = segment,
+                                segmentLabel = segmentLabel,
+                                regulationSegmentCount = regulationSegmentCount,
+                            ),
+                            team1Score = team1Score,
+                            team2Score = team2Score,
+                            team1IsSegmentWinner = segmentWinnerEventTeamId == team1Id,
+                            team2IsSegmentWinner = segmentWinnerEventTeamId == team2Id,
+                            dividerColor = dividerColor,
+                            onClick = { onSegmentSelected(index) },
+                        )
+                        if (index < segments.lastIndex) {
+                            VerticalDivider(
+                                modifier = Modifier.height(MatchSegmentGridHeight),
+                                color = dividerColor,
                             )
                         }
                     }
-                    MatchSegmentTeamScoreRow(
-                        roleLabel = "Home",
-                        teamName = team1Name,
-                        score = team1Score,
-                        isSetWinner = segmentWinnerEventTeamId == team1Id,
-                        isMatchWinner = matchWinnerEventTeamId == team1Id,
+                }
+                if (horizontalScrollState.canScrollBackward) {
+                    MatchSegmentScrollCue(
+                        direction = MatchSegmentScrollDirection.Backward,
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .testTag(MatchSegmentScrollBackwardCueTestTag),
                     )
-                    MatchSegmentTeamScoreRow(
-                        roleLabel = "Away",
-                        teamName = team2Name,
-                        score = team2Score,
-                        isSetWinner = segmentWinnerEventTeamId == team2Id,
-                        isMatchWinner = matchWinnerEventTeamId == team2Id,
+                }
+                if (horizontalScrollState.canScrollForward) {
+                    MatchSegmentScrollCue(
+                        direction = MatchSegmentScrollDirection.Forward,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .testTag(MatchSegmentScrollForwardCueTestTag),
                     )
                 }
             }
+        }
+        HorizontalDivider(color = dividerColor)
+    }
+}
+
+private enum class MatchSegmentScrollDirection {
+    Backward,
+    Forward,
+}
+
+@Composable
+private fun MatchSegmentScrollCue(
+    direction: MatchSegmentScrollDirection,
+    modifier: Modifier = Modifier,
+) {
+    val isBackward = direction == MatchSegmentScrollDirection.Backward
+    Box(
+        modifier = modifier
+            .width(32.dp)
+            .height(MatchSegmentGridHeight)
+            .background(
+                Brush.horizontalGradient(
+                    colors = if (isBackward) {
+                        listOf(
+                            MaterialTheme.colorScheme.surface,
+                            Color.Transparent,
+                        )
+                    } else {
+                        listOf(
+                            Color.Transparent,
+                            MaterialTheme.colorScheme.surface,
+                        )
+                    },
+                )
+            ),
+        contentAlignment = if (isBackward) Alignment.CenterStart else Alignment.CenterEnd,
+    ) {
+        Text(
+            text = if (isBackward) "‹" else "›",
+            modifier = Modifier.padding(
+                start = if (isBackward) 6.dp else 0.dp,
+                end = if (isBackward) 0.dp else 6.dp,
+            ),
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+private fun MatchSegmentTeamLabels(
+    team1Name: String,
+    team2Name: String,
+    team1IsMatchWinner: Boolean,
+    team2IsMatchWinner: Boolean,
+    dividerColor: Color,
+) {
+    Column(
+        modifier = Modifier.width(MatchSegmentTeamColumnWidth),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(MatchSegmentHeaderHeight)
+                .padding(horizontal = 8.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Text(
+                text = "Teams",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        HorizontalDivider(color = dividerColor)
+        MatchSegmentTeamLabel(
+            roleLabel = "Home",
+            teamName = team1Name,
+            isMatchWinner = team1IsMatchWinner,
+        )
+        HorizontalDivider(color = dividerColor)
+        MatchSegmentTeamLabel(
+            roleLabel = "Away",
+            teamName = team2Name,
+            isMatchWinner = team2IsMatchWinner,
+        )
+    }
+}
+
+@Composable
+private fun MatchSegmentTeamLabel(
+    roleLabel: String,
+    teamName: String,
+    isMatchWinner: Boolean,
+) {
+    val contentColor = if (isMatchWinner) {
+        matchWinnerContentColor()
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(MatchSegmentTeamRowHeight),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = roleLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = contentColor,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = teamName,
+                style = MaterialTheme.typography.bodyMedium,
+                color = contentColor,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
 
 @Composable
-private fun MatchSegmentTeamScoreRow(
-    roleLabel: String,
-    teamName: String,
-    score: Int,
-    isSetWinner: Boolean = false,
-    isMatchWinner: Boolean = false,
+private fun MatchSegmentScoreColumn(
+    headerLabel: String,
+    team1Score: Int,
+    team2Score: Int,
+    team1IsSegmentWinner: Boolean,
+    team2IsSegmentWinner: Boolean,
+    dividerColor: Color,
+    onClick: () -> Unit,
 ) {
-    val rowContentColor = if (isMatchWinner) {
-        matchWinnerContentColor()
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
+    val contentColor = MaterialTheme.colorScheme.onSurface
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        color = if (isMatchWinner) matchWinnerContainerColor() else Color.Transparent,
-        contentColor = rowContentColor,
+        modifier = Modifier
+            .width(MatchSegmentScoreColumnWidth)
+            .clickable(onClick = onClick),
+        color = Color.Transparent,
+        contentColor = contentColor,
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(MatchSegmentHeaderHeight),
+                contentAlignment = Alignment.Center,
+            ) {
                 Text(
-                    text = roleLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = rowContentColor,
-                    fontWeight = FontWeight.Medium,
-                )
-                Text(
-                    text = teamName,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = rowContentColor,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    text = headerLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = contentColor,
+                    fontWeight = FontWeight.Bold,
                 )
             }
-            Text(
-                text = score.toString(),
-                style = MaterialTheme.typography.headlineSmall,
-                color = if (isSetWinner) matchWinnerTextColor() else rowContentColor,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.End,
+            HorizontalDivider(color = dividerColor)
+            MatchSegmentScoreCell(
+                score = team1Score,
+                isSegmentWinner = team1IsSegmentWinner,
+                contentColor = contentColor,
+            )
+            HorizontalDivider(color = dividerColor)
+            MatchSegmentScoreCell(
+                score = team2Score,
+                isSegmentWinner = team2IsSegmentWinner,
+                contentColor = contentColor,
             )
         }
     }
 }
+
+@Composable
+private fun MatchSegmentScoreCell(
+    score: Int,
+    isSegmentWinner: Boolean,
+    contentColor: Color,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(MatchSegmentTeamRowHeight),
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = if (isSegmentWinner) matchWinnerContainerColor() else Color.Transparent,
+            contentColor = if (isSegmentWinner) matchWinnerTextColor() else contentColor,
+        ) {
+            Text(
+                text = score.toString(),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                style = MaterialTheme.typography.titleMedium,
+                color = if (isSegmentWinner) matchWinnerTextColor() else contentColor,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+internal fun matchSegmentHeaderLabel(
+    segment: MatchSegmentMVP,
+    segmentLabel: String,
+    regulationSegmentCount: Int,
+): String {
+    return when (segment.resultType?.trim()?.uppercase()) {
+        "OVERTIME" -> {
+            val overtimeNumber = (segment.sequence - regulationSegmentCount).coerceAtLeast(1)
+            if (overtimeNumber == 1) "OT" else "OT$overtimeNumber"
+        }
+        "SHOOTOUT" -> "SO"
+        else -> {
+            val prefix = when (segmentLabel.trim().lowercase()) {
+                "quarter" -> "Q"
+                "period" -> "P"
+                "set" -> "S"
+                "half" -> "H"
+                else -> segmentLabel.trim().take(3).ifBlank { "Seg" }
+            }
+            "$prefix${segment.sequence}"
+        }
+    }
+}
+
+internal const val MatchSegmentColumnsTestTag = "match-segment-columns"
+internal const val MatchSegmentScrollBackwardCueTestTag = "match-segment-scroll-backward-cue"
+internal const val MatchSegmentScrollForwardCueTestTag = "match-segment-scroll-forward-cue"
+private val MatchSegmentTeamColumnWidth = 136.dp
+private val MatchSegmentScoreColumnWidth = 64.dp
+private val MatchSegmentHeaderHeight = 36.dp
+private val MatchSegmentTeamRowHeight = 48.dp
+private val MatchSegmentGridHeight = 134.dp
 
 internal fun resolveSegmentWinnerEventTeamId(
     segment: MatchSegmentMVP,
@@ -747,10 +949,6 @@ private fun shouldShowMatchStatusBlock(match: MatchMVP): Boolean {
         (resultType.isNotBlank() && resultType != "REGULATION") ||
         lifecycleStatus in setOf("CANCELLED", "FORFEIT", "SUSPENDED")
 }
-
-private val MatchSegmentMVP.isStarted: Boolean
-    get() = status.equals("IN_PROGRESS", ignoreCase = true) ||
-        status.equals("STARTED", ignoreCase = true)
 
 internal fun segmentScore(
     segment: MatchSegmentMVP?,

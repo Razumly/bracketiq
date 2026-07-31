@@ -18,6 +18,7 @@ import com.razumly.mvp.chat.ChatGroupComponent
 import com.razumly.mvp.chat.ChatListComponent
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
@@ -990,6 +991,20 @@ class RootComponent(
         navigation.pushNew(AppConfig.MatchDetail(normalizedMatchId, normalizedEventId))
     }
 
+    override fun navigateToMatch(match: MatchWithRelations, eventId: String) {
+        val normalizedMatchId = match.match.id.trim()
+        val normalizedEventId = eventId.trim()
+        if (normalizedMatchId.isEmpty() || normalizedEventId.isEmpty()) return
+        setDefaultNavigationDirection()
+        navigation.pushNew(
+            AppConfig.MatchDetail(
+                matchId = normalizedMatchId,
+                eventId = normalizedEventId,
+                preloadedMatch = match,
+            )
+        )
+    }
+
     override fun navigateToMatchFromSchedule(matchId: String, eventId: String) {
         val normalizedMatchId = matchId.trim()
         val normalizedEventId = eventId.trim()
@@ -997,6 +1012,21 @@ class RootComponent(
         setDefaultNavigationDirection()
         navigation.pushNew(AppConfig.EventDetail(normalizedEventId, initialTab = EventDetailInitialTab.SCHEDULE))
         navigation.pushNew(AppConfig.MatchDetail(normalizedMatchId, normalizedEventId))
+    }
+
+    override fun navigateToMatchFromSchedule(match: MatchWithRelations, eventId: String) {
+        val normalizedMatchId = match.match.id.trim()
+        val normalizedEventId = eventId.trim()
+        if (normalizedMatchId.isEmpty() || normalizedEventId.isEmpty()) return
+        setDefaultNavigationDirection()
+        navigation.pushNew(AppConfig.EventDetail(normalizedEventId, initialTab = EventDetailInitialTab.SCHEDULE))
+        navigation.pushNew(
+            AppConfig.MatchDetail(
+                matchId = normalizedMatchId,
+                eventId = normalizedEventId,
+                preloadedMatch = match,
+            )
+        )
     }
 
     override fun navigateToTeams(
@@ -1165,7 +1195,7 @@ class RootComponent(
         )
 
         is AppConfig.MatchDetail -> Child.MatchContent(
-            component = _koin.get { parametersOf(componentContext, config.matchId, config.eventId) },
+            component = _koin.get { parametersOf(componentContext, config) },
             mapComponent = _koin.get { parametersOf(componentContext) },
         )
 

@@ -12,6 +12,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -21,7 +22,6 @@ import com.razumly.mvp.core.data.dataTypes.isUserAssignedToOfficialSlot
 import com.razumly.mvp.core.data.dataTypes.isUserCheckedInForOfficialSlot
 import com.razumly.mvp.core.data.dataTypes.normalizedRole
 import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
-import com.razumly.mvp.core.data.dataTypes.updateOfficialAssignmentCheckIn
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
@@ -34,6 +34,7 @@ import com.razumly.mvp.core.network.dto.TeamCheckInDto
 import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
 import com.razumly.mvp.core.network.dto.MatchActionOperationDto
 import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
+import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.eventDetail.resolveEventMatchRules
 import kotlinx.coroutines.Dispatchers
@@ -66,6 +67,8 @@ private const val MATCH_INCIDENT_UPLOAD_PENDING = "PENDING"
 private const val MATCH_INCIDENT_UPLOAD_FAILED = "FAILED"
 private const val MATCH_INCIDENT_DELETE_PENDING = "DELETE_PENDING"
 private const val MATCH_INCIDENT_DELETE_FAILED = "DELETE_FAILED"
+private const val MATCH_CLOCK_STOPPED_AT_METADATA_KEY = "clockStoppedAt"
+private const val MATCH_CLOCK_STOPPED_DURATION_SECONDS_METADATA_KEY = "clockStoppedDurationSeconds"
 private val INCIDENT_RETRY_DELAYS_MS = longArrayOf(3_000L, 15_000L, 30_000L)
 private const val INCIDENT_CONFIRM_NO_PROGRESS_TIMEOUT_MS = 10_000L
 private const val DIRECT_SCORE_DEBOUNCE_MS = 500L
@@ -138,6 +141,8 @@ interface MatchContentComponent {
     fun suspendMatch()
     fun resumeMatch()
     fun startMatch()
+    fun stopMatchTimer()
+    fun resumeMatchTimer()
     fun resetMatchTimer()
     fun updateActualTimes(actualStart: Instant?, actualEnd: Instant?)
     fun selectSegment(index: Int)
@@ -162,6 +167,30 @@ interface MatchContentComponent {
     fun removeMatchIncident(incidentId: String)
     fun completeCurrentSet()
 }
+
+internal fun MatchSegmentMVP.timerStoppedAtInstant(): Instant? = metadata
+    ?.get(MATCH_CLOCK_STOPPED_AT_METADATA_KEY)
+    ?.trim()
+    ?.takeIf(String::isNotBlank)
+    ?.let { value -> runCatching { Instant.parse(value) }.getOrNull() }
+
+internal fun MatchSegmentMVP.timerStoppedDurationSeconds(): Int = metadata
+    ?.get(MATCH_CLOCK_STOPPED_DURATION_SECONDS_METADATA_KEY)
+    ?.toIntOrNull()
+    ?.coerceAtLeast(0)
+    ?: 0
+
+private fun MatchSegmentMVP.withTimerStoppedAt(stoppedAt: String): MatchSegmentMVP = copy(
+    metadata = metadata.orEmpty() + (MATCH_CLOCK_STOPPED_AT_METADATA_KEY to stoppedAt),
+)
+
+private fun MatchSegmentMVP.withTimerResumed(
+    stoppedDurationSeconds: Int,
+): MatchSegmentMVP = copy(
+    metadata = metadata.orEmpty()
+        .minus(MATCH_CLOCK_STOPPED_AT_METADATA_KEY)
+        .plus(MATCH_CLOCK_STOPPED_DURATION_SECONDS_METADATA_KEY to stoppedDurationSeconds.coerceAtLeast(0).toString()),
+)
 
 
 @Serializable
@@ -190,6 +219,15 @@ fun MatchWithRelations.toMatchWithTeams(
     team2 = team2,
     teamOfficial = teamOfficial
 )
+
+private fun Team?.toPreloadedTeamWithRelations(): TeamWithRelations? = this?.let { team ->
+    TeamWithRelations(
+        team = team,
+        players = emptyList(),
+        matchAsTeam1 = emptyList(),
+        matchAsTeam2 = emptyList(),
+    )
+}
 
 private fun TeamWithRelations.isCurrentUserTeam(userId: String): Boolean {
     val normalizedUserId = userId.trim()
@@ -224,22 +262,33 @@ class DefaultMatchContentComponent(
     private val matchRepository: IMatchRepository,
     userRepository: IUserRepository,
     private val teamRepository: ITeamRepository,
+    preloadedMatch: MatchWithRelations? = null,
 ) : MatchContentComponent, ComponentContext by componentContext {
 
-    private val selectedMatch = MatchWithRelations(
-        match = MatchMVP(
-            matchId = 0,
-            eventId = selectedEventId.trim(),
-            id = selectedMatchId.trim(),
-        ),
-        field = null,
-        team1 = null,
-        team2 = null,
-        teamOfficial = null,
-        winnerNextMatch = null,
-        loserNextMatch = null,
-        previousLeftMatch = null,
-        previousRightMatch = null,
+    private val selectedMatch = preloadedMatch
+        ?.takeIf { match ->
+            match.match.id.trim() == selectedMatchId.trim() &&
+                match.match.eventId.trim() == selectedEventId.trim()
+        }
+        ?: MatchWithRelations(
+            match = MatchMVP(
+                matchId = 0,
+                eventId = selectedEventId.trim(),
+                id = selectedMatchId.trim(),
+            ),
+            field = null,
+            team1 = null,
+            team2 = null,
+            teamOfficial = null,
+            winnerNextMatch = null,
+            loserNextMatch = null,
+            previousLeftMatch = null,
+            previousRightMatch = null,
+        )
+    private val preloadedMatchWithTeams = selectedMatch.toMatchWithTeams(
+        team1 = selectedMatch.team1.toPreloadedTeamWithRelations(),
+        team2 = selectedMatch.team2.toPreloadedTeamWithRelations(),
+        teamOfficial = selectedMatch.teamOfficial.toPreloadedTeamWithRelations(),
     )
     private val selectedEvent = selectedEventId.trim()
         .takeIf(String::isNotBlank)
@@ -314,7 +363,7 @@ class DefaultMatchContentComponent(
     }.stateIn(
         scope,
         SharingStarted.Eagerly,
-        selectedMatch.toMatchWithTeams(null, null, null)
+        preloadedMatchWithTeams
             .copy(match = updateMatchStructureForCurrentContext(selectedMatch.match)),
     )
 
@@ -467,9 +516,7 @@ class DefaultMatchContentComponent(
             event.collect {
                 val normalizedMatch = updateMatchStructureForCurrentContext(matchWithTeams.value.match)
                 _matchFinished.value = isMatchOver(normalizedMatch)
-                if (!_matchFinished.value) {
-                    _currentSet.value = resolveCurrentSegmentIndex(normalizedMatch)
-                }
+                _currentSet.value = resolveCurrentSegmentIndex(normalizedMatch)
                 checkOfficialStatus()
                 updateMatchActionAccess()
                 updateCurrentUserManagedMatchTeam()
@@ -481,9 +528,7 @@ class DefaultMatchContentComponent(
             matchWithTeams.collect {
                 val normalizedMatch = updateMatchStructureForCurrentContext(it.match)
                 _matchFinished.value = isMatchOver(normalizedMatch)
-                if (!_matchFinished.value) {
-                    _currentSet.value = resolveCurrentSegmentIndex(normalizedMatch)
-                }
+                _currentSet.value = resolveCurrentSegmentIndex(normalizedMatch)
                 checkOfficialStatus()
                 updateMatchActionAccess()
                 updateCurrentUserManagedMatchTeam()
@@ -807,17 +852,13 @@ class DefaultMatchContentComponent(
                 }
 
                 if (isAssignedTeamOfficial || isAssignedUserOfficial) {
-                    val updatedMatch = matchWithTeams.value.copy(
-                        match = if (isAssignedUserOfficial) {
-                            currentMatch.updateOfficialAssignmentCheckIn(
-                                userId = currentUser.id,
-                                checkedIn = true,
-                            )
-                        } else {
-                            currentMatch.copy(officialCheckedIn = true)
-                        },
-                    )
-                    matchRepository.updateMatch(updatedMatch.match).onSuccess {
+                    matchRepository.updateMatchOperations(
+                        match = currentMatch,
+                        officialCheckIn = MatchOfficialCheckInOperationDto(
+                            userId = currentUser.id,
+                            checkedIn = true,
+                        ),
+                    ).onSuccess {
                         markOfficialCheckInConfirmed(currentMatch)
                         dismissOfficialDialog()
                         _officialCheckedIn.value = true
@@ -932,6 +973,33 @@ class DefaultMatchContentComponent(
         scope.launch {
             try {
                 val now = Clock.System.now().toString()
+                val activeSegmentIndex = currentSet.value.coerceIn(
+                    0,
+                    (currentMatch.segments.size - 1).coerceAtLeast(0),
+                )
+                val activeSegment = currentMatch.segments.getOrNull(activeSegmentIndex)
+                val clockStopOperation = if (
+                    action == "SUSPEND" &&
+                    activeSegment != null &&
+                    activeSegment.status != "COMPLETE" &&
+                    !activeSegment.startedAt.isNullOrBlank() &&
+                    activeSegment.timerStoppedAtInstant() == null
+                ) {
+                    MatchSegmentOperationDto(
+                        id = activeSegment.id,
+                        sequence = activeSegment.sequence,
+                        clockStoppedAt = now,
+                    )
+                } else {
+                    null
+                }
+                val actionSegments = if (clockStopOperation != null) {
+                    currentMatch.segments.toMutableList().apply {
+                        this[activeSegmentIndex] = activeSegment!!.withTimerStoppedAt(now)
+                    }
+                } else {
+                    currentMatch.segments
+                }
                 val updatedMatch = when (action) {
                     "FORFEIT" -> currentMatch.copy(
                         status = "COMPLETE",
@@ -953,6 +1021,7 @@ class DefaultMatchContentComponent(
                     "SUSPEND" -> currentMatch.copy(
                         status = "SUSPENDED",
                         statusReason = "Suspended",
+                        segments = actionSegments,
                     )
                     "RESUME" -> currentMatch.copy(
                         status = if (currentMatch.actualStart.isNullOrBlank()) "READY" else "IN_PROGRESS",
@@ -963,6 +1032,7 @@ class DefaultMatchContentComponent(
                 _optimisticMatch.value = currentMatchWithTeams.copy(match = updatedMatch)
                 matchRepository.updateMatchOperations(
                     match = updatedMatch,
+                    segmentOperations = listOfNotNull(clockStopOperation),
                     matchAction = MatchActionOperationDto(
                         action = action,
                         forfeitingEventTeamId = normalizedForfeitingTeamId,
@@ -977,6 +1047,11 @@ class DefaultMatchContentComponent(
                         actualEnd = remoteMatch.actualEnd ?: updatedMatch.actualEnd,
                         statusReason = remoteMatch.statusReason ?: updatedMatch.statusReason,
                         locked = remoteMatch.locked || updatedMatch.locked,
+                        segments = if (clockStopOperation != null) {
+                            updatedMatch.segments
+                        } else {
+                            remoteMatch.segments
+                        },
                     )
                     _optimisticMatch.value = currentMatchWithTeams.copy(match = syncedMatch)
                     persistMatchLocally(syncedMatch, clearOptimisticOnSuccess = true)
@@ -1015,7 +1090,7 @@ class DefaultMatchContentComponent(
                         status = "IN_PROGRESS",
                         startedAt = startedAt,
                         endedAt = null,
-                    )
+                    ).withTimerResumed(stoppedDurationSeconds = 0)
                 }
                 val updatedMatch = currentMatch.copy(
                     status = "IN_PROGRESS",
@@ -1043,6 +1118,8 @@ class DefaultMatchContentComponent(
                             winnerEventTeamId = updatedSegments[segmentIndex].winnerEventTeamId,
                             startedAt = startedAt,
                             clearEndedAt = true,
+                            clockStoppedDurationSeconds = 0,
+                            clearClockStoppedAt = true,
                         ),
                     ),
                 ).onSuccess { remoteMatch ->
@@ -1056,6 +1133,133 @@ class DefaultMatchContentComponent(
                     persistMatchLocally(syncedMatch, clearOptimisticOnSuccess = true)
                 }.onFailure { error ->
                     _errorState.value = "Failed to start timer: ${error.userMessage()}"
+                }
+            } finally {
+                _matchStartSaving.value = false
+            }
+        }
+    }
+
+    override fun stopMatchTimer() {
+        if (_matchStartSaving.value) return
+        val currentMatchWithTeams = matchWithTeams.value
+        val currentMatch = updateMatchStructureForCurrentContext(currentMatchWithTeams.match)
+        if (!isOfficial.value || officialCheckedIn.value != true || _matchFinished.value ||
+            !isOfficialMatchWindowOpen(currentMatch)
+        ) {
+            return
+        }
+        val segmentIndex = currentSet.value.coerceIn(0, (currentMatch.segments.size - 1).coerceAtLeast(0))
+        val activeSegment = currentMatch.segments.getOrNull(segmentIndex) ?: return
+        if (
+            activeSegment.status == "COMPLETE" ||
+            activeSegment.startedAt.isNullOrBlank() ||
+            activeSegment.timerStoppedAtInstant() != null
+        ) {
+            return
+        }
+
+        _matchStartSaving.value = true
+        scope.launch {
+            try {
+                val stoppedAt = Clock.System.now().toString()
+                val updatedSegments = currentMatch.segments.toMutableList().apply {
+                    this[segmentIndex] = activeSegment.withTimerStoppedAt(stoppedAt)
+                }
+                val updatedMatch = currentMatch.copy(segments = updatedSegments)
+                matchRepository.updateMatchOperations(
+                    match = updatedMatch,
+                    segmentOperations = listOf(
+                        MatchSegmentOperationDto(
+                            id = activeSegment.id,
+                            sequence = activeSegment.sequence,
+                            clockStoppedAt = stoppedAt,
+                        )
+                    ),
+                ).onSuccess { remoteMatch ->
+                    val syncedMatch = remoteMatch.copy(segments = updatedSegments)
+                    _optimisticMatch.value = currentMatchWithTeams.copy(match = syncedMatch)
+                    persistMatchLocally(syncedMatch, clearOptimisticOnSuccess = true)
+                }.onFailure { error ->
+                    _errorState.value = "Failed to stop timer: ${error.userMessage()}"
+                }
+            } finally {
+                _matchStartSaving.value = false
+            }
+        }
+    }
+
+    override fun resumeMatchTimer() {
+        if (_matchStartSaving.value || _matchActionSaving.value) return
+        val currentMatchWithTeams = matchWithTeams.value
+        val currentMatch = updateMatchStructureForCurrentContext(currentMatchWithTeams.match)
+        if (!isOfficial.value || officialCheckedIn.value != true || _matchFinished.value ||
+            !isOfficialMatchWindowOpen(currentMatch)
+        ) {
+            return
+        }
+        val segmentIndex = currentSet.value.coerceIn(0, (currentMatch.segments.size - 1).coerceAtLeast(0))
+        val activeSegment = currentMatch.segments.getOrNull(segmentIndex) ?: return
+        if (activeSegment.status == "COMPLETE") return
+
+        val stoppedAt = activeSegment.timerStoppedAtInstant()
+        val matchSuspended = currentMatch.status.equals("SUSPENDED", ignoreCase = true)
+        if (stoppedAt == null && !matchSuspended) return
+
+        _matchStartSaving.value = true
+        scope.launch {
+            try {
+                val now = Clock.System.now()
+                val addedStoppedSeconds = stoppedAt
+                    ?.let { stoppedAt ->
+                        ((now.toEpochMilliseconds() - stoppedAt.toEpochMilliseconds()) / 1_000L)
+                            .coerceAtLeast(0L)
+                            .toInt()
+                    }
+                    ?: 0
+                val stoppedDurationSeconds = activeSegment.timerStoppedDurationSeconds() + addedStoppedSeconds
+                val resumedSegment = activeSegment.withTimerResumed(stoppedDurationSeconds)
+                val updatedSegments = currentMatch.segments.toMutableList().apply {
+                    this[segmentIndex] = resumedSegment
+                }
+                val updatedMatch = currentMatch.copy(
+                    status = if (matchSuspended) {
+                        if (currentMatch.actualStart.isNullOrBlank()) "READY" else "IN_PROGRESS"
+                    } else {
+                        currentMatch.status
+                    },
+                    statusReason = if (matchSuspended) null else currentMatch.statusReason,
+                    segments = updatedSegments,
+                )
+                matchRepository.updateMatchOperations(
+                    match = updatedMatch,
+                    segmentOperations = if (stoppedAt != null) {
+                        listOf(
+                            MatchSegmentOperationDto(
+                                id = activeSegment.id,
+                                sequence = activeSegment.sequence,
+                                clockStoppedDurationSeconds = stoppedDurationSeconds,
+                                clearClockStoppedAt = true,
+                            )
+                        )
+                    } else {
+                        null
+                    },
+                    matchAction = if (matchSuspended) {
+                        MatchActionOperationDto(action = "RESUME")
+                    } else {
+                        null
+                    },
+                ).onSuccess { remoteMatch ->
+                    val syncedMatch = remoteMatch.copy(
+                        status = updatedMatch.status,
+                        statusReason = updatedMatch.statusReason,
+                        segments = updatedSegments,
+                    )
+                    _optimisticMatch.value = currentMatchWithTeams.copy(match = syncedMatch)
+                    persistMatchLocally(syncedMatch, clearOptimisticOnSuccess = true)
+                }.onFailure { error ->
+                    _errorState.value = "Failed to resume timer: ${error.userMessage()}"
                 }
             } finally {
                 _matchStartSaving.value = false
@@ -1089,7 +1293,7 @@ class DefaultMatchContentComponent(
                         status = nextStatus,
                         startedAt = null,
                         endedAt = null,
-                    )
+                    ).withTimerResumed(stoppedDurationSeconds = 0)
                 }
                 val updatedMatch = currentMatch.copy(
                     status = if (resetFirstSegment) "SCHEDULED" else currentMatch.status,
@@ -1117,6 +1321,8 @@ class DefaultMatchContentComponent(
                             winnerEventTeamId = updatedSegments[segmentIndex].winnerEventTeamId,
                             clearStartedAt = true,
                             clearEndedAt = true,
+                            clockStoppedDurationSeconds = 0,
+                            clearClockStoppedAt = true,
                         ),
                     ),
                 ).onSuccess { remoteMatch ->
@@ -1394,9 +1600,6 @@ class DefaultMatchContentComponent(
     private fun applyConfirmedMatchState(match: MatchMVP) {
         _optimisticMatch.value = matchWithTeams.value.copy(match = match)
         _matchFinished.value = isMatchOver(match)
-        if (_matchFinished.value) {
-            return
-        }
         _currentSet.value = resolveCurrentSegmentIndex(match)
     }
 
@@ -1694,6 +1897,7 @@ class DefaultMatchContentComponent(
                 val team2Score = scoringMatch.team2Points.getOrElse(setIndex) { 0 }
 
                 val currentSegment = scoringMatch.segments.getOrNull(setIndex) ?: return@launch
+                val confirmationTime = Clock.System.now()
                 val winnerEventTeamId = when {
                     team1Score > team2Score -> scoringMatch.team1Id
                     team2Score > team1Score -> scoringMatch.team2Id
@@ -1703,17 +1907,20 @@ class DefaultMatchContentComponent(
                     this[setIndex] = currentSegment.copy(
                         status = "COMPLETE",
                         winnerEventTeamId = winnerEventTeamId,
+                        endedAt = currentSegment.endedAt
+                            ?.takeIf(String::isNotBlank)
+                            ?: currentSegment.timerStoppedAtInstant()?.toString()
+                            ?: confirmationTime.toString(),
                     )
                 }
                 val updatedScoringMatch = scoringMatch.copy(segments = updatedSegments)
                     .syncLegacyScoresFromSegments(maxSets)
 
                 val persistedMatch = if (isMatchOver(updatedScoringMatch)) {
-                    val endTime = Clock.System.now()
                     syncMatchImmediatelyBlocking(
                         match = updatedScoringMatch,
                         finalize = true,
-                        time = endTime,
+                        time = confirmationTime,
                         saveLocallyBeforeRemote = false,
                     )
                 } else {

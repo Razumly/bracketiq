@@ -13,6 +13,19 @@ import kotlin.test.assertNull
 
 class TeamDtosTest {
     @Test
+    fun team_api_dto_preserves_opaque_division_id() {
+        val divisionId = "qa-official-match-camka14-open"
+
+        val team = TeamApiDto(
+            id = "team-1",
+            name = "QA Blue",
+            division = " $divisionId ",
+        ).toTeamOrNull()
+
+        assertEquals(divisionId, team?.division)
+    }
+
+    @Test
     fun invite_free_agents_response_parses_event_team_context() {
         val dto = jsonMVP.decodeFromString<TeamInviteFreeAgentsResponseDto>(
             """

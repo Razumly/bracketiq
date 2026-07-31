@@ -8,6 +8,7 @@ import com.razumly.mvp.chat.DefaultChatListComponent
 import com.razumly.mvp.app.RootComponent
 import com.razumly.mvp.app.RootComponent.DeepLinkNav
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.presentation.AppConfig
 import com.razumly.mvp.core.presentation.DefaultPlayerInteractionComponent
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
@@ -63,15 +64,16 @@ val componentModule = module {
         )
     }
 
-    factory<MatchContentComponent> { (componentContext: ComponentContext, selectedMatchId: String, selectedEventId: String) ->
+    factory<MatchContentComponent> { (componentContext: ComponentContext, config: AppConfig.MatchDetail) ->
         DefaultMatchContentComponent(
             componentContext = componentContext,
-            selectedMatchId = selectedMatchId,
-            selectedEventId = selectedEventId,
+            selectedMatchId = config.matchId,
+            selectedEventId = config.eventId,
             eventRepository = get(),
             matchRepository = get(),
             userRepository = get(),
             teamRepository = get(),
+            preloadedMatch = config.preloadedMatch,
         )
     }
 

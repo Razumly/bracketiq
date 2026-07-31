@@ -3,13 +3,16 @@ package com.razumly.mvp.matchDetail
 import android.app.Application
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -21,6 +24,7 @@ import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -36,7 +40,124 @@ class MatchIncidentUiTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun given_player_required_scoring_when_rendered_then_plus_minus_are_absent_and_incident_button_is_visible() {
+    fun given_match_winner_before_match_is_finished_then_winner_highlight_is_suppressed() {
+        assertNull(
+            matchWinnerEventTeamIdForDisplay(
+                matchFinished = false,
+                winnerEventTeamId = "team-a",
+            )
+        )
+        assertEquals(
+            "team-a",
+            matchWinnerEventTeamIdForDisplay(
+                matchFinished = true,
+                winnerEventTeamId = "team-a",
+            )
+        )
+    }
+
+    @Test
+    fun given_pre_match_controls_when_start_and_delay_are_available_then_they_share_one_row_and_confirm_is_hidden() {
+        composeRule.setContent {
+            MaterialTheme {
+                MatchOfficialResultControls(
+                    canStartMatch = true,
+                    showSetDelayedButton = true,
+                    canResetMatchTimer = false,
+                    showConfirmResultButton = false,
+                    confirmResultEnabled = false,
+                    matchStartSaving = false,
+                    matchTimeSaving = false,
+                    segmentConfirmSaving = false,
+                    startButtonLabel = "Start Match",
+                    confirmButtonLabel = "Confirm Quarter 1",
+                    onStartMatch = {},
+                    onMarkDelayed = {},
+                    onResetTimer = {},
+                    onConfirmResult = {},
+                )
+            }
+        }
+
+        val startTop = composeRule.onNodeWithText("Start Match").getUnclippedBoundsInRoot().top
+        val delayTop = composeRule.onNodeWithText("Set as delayed").getUnclippedBoundsInRoot().top
+
+        assertEquals(startTop, delayTop)
+        composeRule.onAllNodesWithText("Confirm Quarter 1").assertCountEquals(0)
+    }
+
+    @Test
+    fun given_confirm_segment_becomes_available_then_the_button_appears_enabled() {
+        val showConfirm = mutableStateOf(false)
+        composeRule.setContent {
+            MaterialTheme {
+                MatchOfficialResultControls(
+                    canStartMatch = false,
+                    showSetDelayedButton = false,
+                    canResetMatchTimer = false,
+                    showConfirmResultButton = showConfirm.value,
+                    confirmResultEnabled = showConfirm.value,
+                    matchStartSaving = false,
+                    matchTimeSaving = false,
+                    segmentConfirmSaving = false,
+                    startButtonLabel = "Start Match",
+                    confirmButtonLabel = "Confirm Quarter 1",
+                    onStartMatch = {},
+                    onMarkDelayed = {},
+                    onResetTimer = {},
+                    onConfirmResult = {},
+                )
+            }
+        }
+
+        composeRule.onAllNodesWithText("Confirm Quarter 1").assertCountEquals(0)
+        composeRule.runOnIdle { showConfirm.value = true }
+        composeRule.onNodeWithText("Confirm Quarter 1").assertIsDisplayed().assertIsEnabled()
+    }
+
+    @Test
+    fun given_ready_timer_when_tapped_then_it_starts_without_a_ready_status_label() {
+        var startCount = 0
+        composeRule.setContent {
+            MaterialTheme {
+                MatchTimerControl(
+                    clockDisplay = "00:00",
+                    action = MatchTimerAction.Start,
+                    actionEnabled = true,
+                    clockColor = Color.Black,
+                    onAction = { startCount += 1 },
+                )
+            }
+        }
+
+        composeRule.onAllNodesWithText("Ready").assertCountEquals(0)
+        composeRule.onNodeWithText("00:00").performClick()
+
+        assertEquals(1, startCount)
+    }
+
+    @Test
+    fun given_running_or_stopped_timer_then_the_control_shows_stop_or_resume_action() {
+        val action = mutableStateOf(MatchTimerAction.Stop)
+        composeRule.setContent {
+            MaterialTheme {
+                MatchTimerControl(
+                    clockDisplay = "01:12",
+                    action = action.value,
+                    actionEnabled = true,
+                    clockColor = Color.Black,
+                    onAction = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Stop timer").assertIsDisplayed()
+        composeRule.runOnIdle { action.value = MatchTimerAction.Resume }
+        composeRule.onNodeWithContentDescription("Resume timer").assertIsDisplayed()
+    }
+
+    @Test
+    fun given_player_required_scoring_when_rendered_then_plus_minus_and_incident_button_are_absent() {
         composeRule.setContent {
             MaterialTheme {
                 ScoreCard(
@@ -46,13 +167,11 @@ class MatchIncidentUiTest {
                     onSwipeDecrease = {},
                     enabled = true,
                     showControls = true,
-                    addIncidentLabel = "Add Incident",
-                    onAddIncident = {},
                 )
             }
         }
 
-        composeRule.onNodeWithText("Add Incident").assertIsDisplayed()
+        composeRule.onAllNodesWithText("Add Incident").assertCountEquals(0)
         composeRule.onAllNodesWithContentDescription("Increase score").assertCountEquals(0)
         composeRule.onAllNodesWithContentDescription("Decrease score").assertCountEquals(0)
     }
@@ -70,13 +189,11 @@ class MatchIncidentUiTest {
                     onSwipeDecrease = { swipeCount += 1 },
                     enabled = true,
                     showControls = true,
-                    addIncidentLabel = "Add Incident",
-                    onAddIncident = {},
                 )
             }
         }
 
-        composeRule.onNodeWithText("Add Incident").assertIsDisplayed()
+        composeRule.onAllNodesWithText("Add Incident").assertCountEquals(0)
         composeRule.onAllNodesWithContentDescription("Increase score").assertCountEquals(0)
         composeRule.onAllNodesWithContentDescription("Decrease score").assertCountEquals(0)
         composeRule
@@ -99,6 +216,7 @@ class MatchIncidentUiTest {
         composeRule.setContent {
             MaterialTheme {
                 ScoreGestureInstructionOverlay(
+                    showTimerInstruction = true,
                     onDismiss = { dismissed = true },
                     modifier = Modifier.size(240.dp),
                 )
@@ -107,6 +225,7 @@ class MatchIncidentUiTest {
 
         composeRule.onNodeWithText("Click to increase").assertIsDisplayed()
         composeRule.onNodeWithText("Swipe to decrease").assertIsDisplayed()
+        composeRule.onNodeWithText("Tap timer to start or stop").assertIsDisplayed()
         composeRule.onNodeWithText("Click to increase").performTouchInput { click() }
 
         assertTrue(dismissed)

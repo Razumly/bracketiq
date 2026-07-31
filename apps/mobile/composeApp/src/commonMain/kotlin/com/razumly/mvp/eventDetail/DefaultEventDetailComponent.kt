@@ -990,7 +990,7 @@ class DefaultEventDetailComponent(
 
     override fun matchSelected(selectedMatch: MatchWithRelations) {
         navigationHandler.navigateToMatch(
-            matchId = selectedMatch.match.id,
+            match = selectedMatch,
             eventId = selectedEvent.value.id,
         )
     }

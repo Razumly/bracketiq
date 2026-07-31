@@ -5,8 +5,10 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
 import com.razumly.mvp.core.util.jsonMVP
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -111,6 +113,22 @@ class MatchDtosTest {
         assertNotNull(match)
         assertEquals(Instant.parse("2026-07-11T09:30:00Z"), match.start)
         assertEquals(Instant.parse("2026-07-11T10:45:00Z"), match.end)
+    }
+
+    @Test
+    fun match_api_dto_preserves_opaque_division_id() {
+        val divisionId = "qa-official-match-camka14-open"
+        val dto = MatchApiDto(
+            id = "match-division",
+            matchId = 5,
+            eventId = "event-division",
+            division = " $divisionId ",
+        )
+
+        val match = dto.toMatchOrNull()
+
+        assertNotNull(match)
+        assertEquals(divisionId, match.division)
     }
 
     @Test
@@ -221,5 +239,36 @@ class MatchDtosTest {
 
         assertTrue("\"actualStart\"" !in encoded)
         assertTrue("\"startedAt\"" !in encoded)
+    }
+
+    @Test
+    fun match_operations_json_persists_clock_stops_without_a_paused_status() {
+        val payload = MatchUpdateDto(
+            segmentOperations = listOf(
+                MatchSegmentOperationDto(
+                    sequence = 1,
+                    status = "IN_PROGRESS",
+                    clockStoppedAt = "2026-07-31T20:15:30Z",
+                    clockStoppedDurationSeconds = 12,
+                ),
+                MatchSegmentOperationDto(
+                    sequence = 2,
+                    status = "IN_PROGRESS",
+                    clearClockStoppedAt = true,
+                    clockStoppedDurationSeconds = 18,
+                ),
+            ),
+        ).toMatchOperationsJsonObject()
+
+        val segments = payload["segmentOperations"] as JsonArray
+        val stopped = segments[0] as JsonObject
+        val resumed = segments[1] as JsonObject
+
+        assertEquals("IN_PROGRESS", (stopped["status"] as JsonPrimitive).content)
+        assertEquals("2026-07-31T20:15:30Z", (stopped["clockStoppedAt"] as JsonPrimitive).content)
+        assertEquals(12, (stopped["clockStoppedDurationSeconds"] as JsonPrimitive).content.toInt())
+        assertEquals(JsonNull, resumed["clockStoppedAt"])
+        assertEquals("IN_PROGRESS", (resumed["status"] as JsonPrimitive).content)
+        assertTrue(payload.toString().contains("PAUSED", ignoreCase = true).not())
     }
 }

@@ -6,7 +6,6 @@ import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
-import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlinx.serialization.json.JsonArray
@@ -127,7 +126,7 @@ data class MatchApiDto(
             incidents = incidents ?: emptyList(),
             start = start?.let { Instant.parse(it) },
             end = end?.let { Instant.parse(it) },
-            division = division?.normalizeDivisionLabel(),
+            division = division?.trim()?.takeIf(String::isNotBlank),
             team1Points = team1Points ?: emptyList(),
             team2Points = team2Points ?: emptyList(),
             setResults = setResults ?: emptyList(),
@@ -242,6 +241,8 @@ data class MatchSegmentOperationDto(
     val endedAt: String? = null,
     val resultType: String? = null,
     val statusReason: String? = null,
+    val clockStoppedAt: String? = null,
+    val clockStoppedDurationSeconds: Int? = null,
     val clientOperationId: String? = null,
     val clientDeviceId: String? = null,
     val clientCreatedAt: String? = null,
@@ -252,6 +253,7 @@ data class MatchSegmentOperationDto(
     @Transient val clearWinnerEventTeamId: Boolean = false,
     @Transient val clearResultType: Boolean = false,
     @Transient val clearStatusReason: Boolean = false,
+    @Transient val clearClockStoppedAt: Boolean = false,
 )
 
 @Serializable
@@ -508,6 +510,14 @@ private fun MatchSegmentOperationDto.toJsonObject(): JsonObject = buildJsonObjec
         put("statusReason", JsonPrimitive(statusReason))
     } else if (clearStatusReason) {
         put("statusReason", JsonNull)
+    }
+    if (clockStoppedAt != null) {
+        put("clockStoppedAt", JsonPrimitive(clockStoppedAt))
+    } else if (clearClockStoppedAt) {
+        put("clockStoppedAt", JsonNull)
+    }
+    clockStoppedDurationSeconds?.let { seconds ->
+        put("clockStoppedDurationSeconds", JsonPrimitive(seconds.coerceAtLeast(0)))
     }
     clientOperationId?.let { put("clientOperationId", JsonPrimitive(it)) }
     clientDeviceId?.let { put("clientDeviceId", JsonPrimitive(it)) }

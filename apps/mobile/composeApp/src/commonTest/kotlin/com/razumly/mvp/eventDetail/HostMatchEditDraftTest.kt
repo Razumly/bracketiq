@@ -34,6 +34,20 @@ class HostMatchEditDraftTest {
     }
 
     @Test
+    fun given_missing_scores_when_building_score_inputs_then_inputs_start_empty() {
+        val inputs = buildHostMatchScoreInputs(match(), count = 2)
+
+        assertEquals(listOf("", ""), inputs.map(HostMatchScoreInput::team1Score))
+        assertEquals(listOf("", ""), inputs.map(HostMatchScoreInput::team2Score))
+    }
+
+    @Test
+    fun given_empty_score_input_when_parsing_then_value_is_zero() {
+        assertEquals(0, parseHostMatchScoreInput(""))
+        assertEquals(21, parseHostMatchScoreInput("21"))
+    }
+
+    @Test
     fun given_first_set_is_confirmed_when_local_draft_updates_then_second_confirmation_enables_without_save() {
         val drafts = listOf(
             HostMatchScoreDraft(sequence = 1, team1Score = 21, team2Score = 10, confirmed = false),

@@ -6,7 +6,6 @@ import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
-import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -93,7 +92,7 @@ data class TeamApiDto(
             .orEmpty()
 
         return Team(
-            division = (division ?: DEFAULT_DIVISION).normalizeDivisionLabel(),
+            division = division?.trim()?.takeIf(String::isNotBlank) ?: DEFAULT_DIVISION,
             name = name,
             kind = kind?.trim()?.takeIf(String::isNotBlank),
             captainId = captainId?.trim().orEmpty(),

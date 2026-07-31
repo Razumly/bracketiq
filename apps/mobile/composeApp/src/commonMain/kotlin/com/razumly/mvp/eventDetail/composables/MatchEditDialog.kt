@@ -61,18 +61,22 @@ import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.util.toTeamDisplayLabel
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
+import com.razumly.mvp.eventDetail.HostMatchScoreInput
 import com.razumly.mvp.eventDetail.HostMatchScoreDraft
 import com.razumly.mvp.eventDetail.HostMatchScoreTeam
 import com.razumly.mvp.eventDetail.MatchCreateContext
 import com.razumly.mvp.eventDetail.applyHostMatchConfirmation
 import com.razumly.mvp.eventDetail.buildHostMatchPolicySnapshot
+import com.razumly.mvp.eventDetail.buildHostMatchScoreInputs
 import com.razumly.mvp.eventDetail.buildHostMatchScoreDrafts
 import com.razumly.mvp.eventDetail.buildHostMatchScorePayload
 import com.razumly.mvp.eventDetail.canToggleHostMatchConfirmation
 import com.razumly.mvp.eventDetail.editHostMatchScoreDraft
 import com.razumly.mvp.eventDetail.hostMatchStatusLabel
 import com.razumly.mvp.eventDetail.normalizeHostMatchSegmentLabel
+import com.razumly.mvp.eventDetail.parseHostMatchScoreInput
 import com.razumly.mvp.eventDetail.resizeHostMatchScoreDrafts
+import com.razumly.mvp.eventDetail.resizeHostMatchScoreInputs
 import com.razumly.mvp.eventDetail.resizeHostMatchTargetInputs
 import com.razumly.mvp.eventDetail.data.BracketLane
 import com.razumly.mvp.eventDetail.data.BracketNode
@@ -253,6 +257,9 @@ private fun MatchEditDialogContent(
     var scoreDrafts by remember(match.match.id, initialSegmentCount) {
         mutableStateOf(buildHostMatchScoreDrafts(match.match, initialSegmentCount))
     }
+    var scoreInputs by remember(match.match.id, initialSegmentCount) {
+        mutableStateOf(buildHostMatchScoreInputs(match.match, initialSegmentCount))
+    }
     var matchStarted by remember(match.match.id) {
         mutableStateOf(
             match.match.status?.trim()?.uppercase() in setOf("IN_PROGRESS", "COMPLETE") ||
@@ -366,6 +373,7 @@ private fun MatchEditDialogContent(
             fallback = initialPolicyTarget,
         )
         scoreDrafts = resizeHostMatchScoreDrafts(scoreDrafts, normalizedCount)
+        scoreInputs = resizeHostMatchScoreInputs(scoreInputs, normalizedCount)
         policyTouched = true
     }
 
@@ -451,6 +459,7 @@ private fun MatchEditDialogContent(
         policySegmentCount,
         policyTargetInputs,
         policySegmentMinutesText,
+        scoreInputs,
         scoreDrafts,
         matchStarted,
         resultType,
@@ -797,10 +806,12 @@ private fun MatchEditDialogContent(
 
             items(scoreDrafts.size, key = { index -> scoreDrafts[index].sequence }) { index ->
                 val draft = scoreDrafts[index]
+                val scoreInput = scoreInputs[index]
                 val pointTargets = policyTargetInputs.mapNotNull { target -> target.toIntOrNull() }
                 HostMatchScoreEditor(
                     segmentLabel = normalizeHostMatchSegmentLabel(policySegmentLabel, "Segment"),
                     draft = draft,
+                    scoreInput = scoreInput,
                     team1Name = teams.find { it.team.id == editedMatch.match.team1Id }
                         ?.toTeamDisplayLabel() ?: "Team 1",
                     team2Name = teams.find { it.team.id == editedMatch.match.team2Id }
@@ -810,19 +821,25 @@ private fun MatchEditDialogContent(
                         (draft.confirmed || canToggleHostMatchConfirmation(scoreDrafts, index, matchStarted)),
                     confirmationLabel = if (isSetBasedPolicy) "Confirmed" else "Complete",
                     onTeam1ScoreChange = { score ->
+                        scoreInputs = scoreInputs.mapIndexed { inputIndex, input ->
+                            if (inputIndex == index) input.copy(team1Score = score) else input
+                        }
                         scoreDrafts = editHostMatchScoreDraft(
                             drafts = scoreDrafts,
                             index = index,
                             team = HostMatchScoreTeam.TEAM1,
-                            score = score,
+                            score = parseHostMatchScoreInput(score),
                         )
                     },
                     onTeam2ScoreChange = { score ->
+                        scoreInputs = scoreInputs.mapIndexed { inputIndex, input ->
+                            if (inputIndex == index) input.copy(team2Score = score) else input
+                        }
                         scoreDrafts = editHostMatchScoreDraft(
                             drafts = scoreDrafts,
                             index = index,
                             team = HostMatchScoreTeam.TEAM2,
-                            score = score,
+                            score = parseHostMatchScoreInput(score),
                         )
                     },
                     onConfirmationChange = { confirmed ->
@@ -1242,13 +1259,14 @@ private fun NumericStepperField(
 private fun HostMatchScoreEditor(
     segmentLabel: String,
     draft: HostMatchScoreDraft,
+    scoreInput: HostMatchScoreInput,
     team1Name: String,
     team2Name: String,
     scoresEnabled: Boolean,
     confirmationEnabled: Boolean,
     confirmationLabel: String,
-    onTeam1ScoreChange: (Int) -> Unit,
-    onTeam2ScoreChange: (Int) -> Unit,
+    onTeam1ScoreChange: (String) -> Unit,
+    onTeam2ScoreChange: (String) -> Unit,
     onConfirmationChange: (Boolean) -> Unit,
 ) {
     Surface(
@@ -1270,9 +1288,9 @@ private fun HostMatchScoreEditor(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 StandardTextField(
-                    value = draft.team1Score.toString(),
+                    value = scoreInput.team1Score,
                     onValueChange = { value ->
-                        onTeam1ScoreChange(value.filter(Char::isDigit).toIntOrNull() ?: 0)
+                        onTeam1ScoreChange(value.filter(Char::isDigit))
                     },
                     modifier = Modifier.weight(1f),
                     label = team1Name,
@@ -1280,9 +1298,9 @@ private fun HostMatchScoreEditor(
                     enabled = scoresEnabled,
                 )
                 StandardTextField(
-                    value = draft.team2Score.toString(),
+                    value = scoreInput.team2Score,
                     onValueChange = { value ->
-                        onTeam2ScoreChange(value.filter(Char::isDigit).toIntOrNull() ?: 0)
+                        onTeam2ScoreChange(value.filter(Char::isDigit))
                     },
                     modifier = Modifier.weight(1f),
                     label = team2Name,

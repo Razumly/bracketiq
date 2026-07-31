@@ -16,6 +16,12 @@ internal data class HostMatchScoreDraft(
     val confirmed: Boolean,
 )
 
+internal data class HostMatchScoreInput(
+    val sequence: Int,
+    val team1Score: String,
+    val team2Score: String,
+)
+
 internal data class HostMatchConfirmationResult(
     val drafts: List<HostMatchScoreDraft>,
     val errorMessage: String? = null,
@@ -73,6 +79,55 @@ internal fun buildHostMatchScoreDrafts(
         )
     }
 }
+
+internal fun buildHostMatchScoreInputs(
+    match: MatchMVP,
+    count: Int,
+): List<HostMatchScoreInput> {
+    val normalizedCount = count.coerceAtLeast(1)
+    val segmentsBySequence = match.segments.associateBy(MatchSegmentMVP::sequence)
+
+    fun scoreInput(
+        teamId: String?,
+        segment: MatchSegmentMVP?,
+        legacyScores: List<Int>,
+        index: Int,
+    ): String {
+        val score = teamId
+            ?.let { eventTeamId -> segment?.scores?.get(eventTeamId) }
+            ?: legacyScores.getOrNull(index)
+        return score?.coerceAtLeast(0)?.toString().orEmpty()
+    }
+
+    return List(normalizedCount) { index ->
+        val sequence = index + 1
+        val segment = segmentsBySequence[sequence]
+        HostMatchScoreInput(
+            sequence = sequence,
+            team1Score = scoreInput(match.team1Id, segment, match.team1Points, index),
+            team2Score = scoreInput(match.team2Id, segment, match.team2Points, index),
+        )
+    }
+}
+
+internal fun resizeHostMatchScoreInputs(
+    inputs: List<HostMatchScoreInput>,
+    count: Int,
+): List<HostMatchScoreInput> {
+    val normalizedCount = count.coerceAtLeast(1)
+    val next = inputs.take(normalizedCount).toMutableList()
+    while (next.size < normalizedCount) {
+        next += HostMatchScoreInput(
+            sequence = next.size + 1,
+            team1Score = "",
+            team2Score = "",
+        )
+    }
+    return next.mapIndexed { index, input -> input.copy(sequence = index + 1) }
+}
+
+internal fun parseHostMatchScoreInput(value: String): Int =
+    value.filter(Char::isDigit).toIntOrNull()?.coerceAtLeast(0) ?: 0
 
 internal fun resizeHostMatchScoreDrafts(
     drafts: List<HostMatchScoreDraft>,
