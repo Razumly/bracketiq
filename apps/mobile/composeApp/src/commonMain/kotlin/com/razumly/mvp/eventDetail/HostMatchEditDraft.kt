@@ -316,14 +316,16 @@ internal fun buildHostMatchScorePayload(
         } else {
             null
         }
+        val segmentStatus = when {
+            draft.confirmed -> "COMPLETE"
+            scores.values.any { score -> score > 0 } -> "IN_PROGRESS"
+            else -> "NOT_STARTED"
+        }
         existing?.copy(
-            status = when {
-                draft.confirmed -> "COMPLETE"
-                scores.values.any { score -> score > 0 } -> "IN_PROGRESS"
-                else -> "NOT_STARTED"
-            },
+            status = segmentStatus,
             scores = scores,
             winnerEventTeamId = winnerEventTeamId,
+            startedAt = if (segmentStatus == "NOT_STARTED") null else existing.startedAt,
             endedAt = if (draft.confirmed) existing.endedAt else null,
             resultType = if (draft.confirmed) existing.resultType else null,
             statusReason = if (draft.confirmed) existing.statusReason else null,
@@ -332,11 +334,7 @@ internal fun buildHostMatchScorePayload(
             eventId = match.eventId,
             matchId = match.id,
             sequence = draft.sequence,
-            status = when {
-                draft.confirmed -> "COMPLETE"
-                scores.values.any { score -> score > 0 } -> "IN_PROGRESS"
-                else -> "NOT_STARTED"
-            },
+            status = segmentStatus,
             scores = scores,
             winnerEventTeamId = winnerEventTeamId,
         )

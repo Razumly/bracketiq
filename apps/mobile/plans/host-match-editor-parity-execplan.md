@@ -15,6 +15,9 @@ Event managers using the mobile app should be able to correct an entire match in
 - [x] (2026-07-20) Refactored the shared Compose dialog to use the typed local draft, direct per-segment fields, match state, officials, and preview.
 - [x] (2026-07-20) Passed the combined 14-test focused Android batch and built the debug APK.
 - [x] (2026-07-20) Exercised the authenticated rendered flow in the Android emulator and recorded UI-tree, screenshot, and clean logcat evidence.
+- [x] (2026-07-31) Traced host set unconfirmation through the local draft, bulk client DTO, and backend transactional route; the client bulk DTO omitted segment and lifecycle state.
+- [x] (2026-07-31) Extended the bulk save contract to include canonical segments and match lifecycle fields, clear stale result confirmation/winners while retaining the recorded match end time, and preserve structured server segment metadata.
+- [x] (2026-07-31) Passed focused mobile/backend regressions, Android and iOS compilation, and the host save/reload flow in the Android emulator.
 
 ## Surprises & Discoveries
 
@@ -26,6 +29,9 @@ Event managers using the mobile app should be able to correct an entire match in
 
 - Observation: The available emulator initially had no authenticated session and the configured local API was offline.
   Evidence: After starting `npm run dev:plain`, the documented `host@example.com` seed account authenticated successfully and exposed the E2E Playoff League host-management flow. The rejected first fallback seed login was isolated from final smoke evidence.
+
+- Observation: The score editor already converted an unconfirmed set to a non-complete segment and cleared its winner, but the event-level bulk DTO sent only legacy score arrays.
+  Evidence: `buildHostMatchScorePayload` cleared segment finalization locally while `BulkMatchUpdateEntryDto` omitted `segments`, `status`, `resultStatus`, `actualEnd`, and `winnerEventTeamId`, allowing the response to restore the server's old confirmed snapshot.
 
 ## Decision Log
 
@@ -41,6 +47,14 @@ Event managers using the mobile app should be able to correct an entire match in
   Rationale: Phone width cannot support two readable admin columns. The same panels and behaviors remain available in a scrollable order optimized for touch.
   Date/Author: 2026-07-20 / Codex
 
+- Decision: Treat segment `status = COMPLETE` as confirmation and clear segment winner/end/result fields plus the match-level winner/result state whenever a host unconfirms a result, while preserving the match's recorded `actualEnd`.
+  Rationale: A winner cannot remain authoritative once its confirming result has been reopened, but the recorded time at which play ended remains historical match data. Sending the canonical segment snapshot through the existing bulk transaction keeps modern segment state and legacy arrays consistent.
+  Date/Author: 2026-07-31 / Codex
+
+- Decision: Omit flattened mobile segment metadata from bulk writes and preserve the existing structured metadata in the backend when the field is absent.
+  Rationale: Room currently stores metadata as strings, so round-tripping it would be lossy and could erase clock state unrelated to a host score correction.
+  Date/Author: 2026-07-31 / Codex
+
 ## Outcomes & Retrospective
 
 The mobile host match editor now follows the same persistence and interaction contract as the web editor. A match-specific segment count owns the exact number of score-limit fields and score cards. The host can edit the label, count, timed segment minutes, match state, result type, direct scores, ordered confirmations, officials, check-ins, schedule, bracket links, and lock state in one staged draft. Save synchronizes modern segments and legacy score arrays before the existing event-level bulk commit.
@@ -48,6 +62,8 @@ The mobile host match editor now follows the same persistence and interaction co
 The final focused batch passed 14 tests with zero failures: six `HostMatchEditDraftTest` cases, two `MatchEditDialogUiTest` cases, and six existing `EventMatchEditingCoordinatorTest` cases. `./gradlew :composeApp:assembleDebug --no-daemon --console=plain --quiet` also passed.
 
 Authenticated emulator QA opened E2E Playoff League 19191, entered Schedule Manage mode, and opened Match #1. Increasing Set count from one to three immediately exposed `Set 1 score limit`, `Set 2 score limit`, and `Set 3 score limit`. In the same unsaved dialog, Set 3's checkbox changed from disabled to enabled immediately after entering a valid Set 2 score and confirming Set 2. The draft was cancelled instead of saved. Visual evidence is `/tmp/mvp_app_match_editor_set_count_3.png` and `/tmp/mvp_app_match_editor_set3_enabled.png`; UI hierarchy evidence is `/tmp/mvp_match_editor_set_count_3.xml` and `/tmp/mvp_match_editor_set3_now_enabled.xml`. A subsequent clean editor open/cancel produced an empty error-level log at `/tmp/mvp_app_match_editor_clean_smoke_logcat.txt`.
+
+The 2026-07-31 persistence correction passed the focused `HostMatchEditDraftTest` and `MatchRepositoryHttpTest` mobile regressions, all 65 tests in the backend schedule-route suite, Android debug APK assembly, and `compileKotlinIosSimulatorArm64`. Android emulator QA changed Set 2 from confirmed 11-25 to unconfirmed 0-0, committed the event-level bulk save, and reopened the editor. Set 2 remained 0-0 and unconfirmed; later confirmations were cleared. The database agreed that the segment returned to `NOT_STARTED`, its winner was cleared, and match-level result/winner fields were cleared while structured clock metadata survived. A follow-up correction retained the match-level `actualEnd`, because unconfirming the result should not erase the historical time at which play ended. Evidence is `/tmp/mvp_unconfirm_reopened2.png` and `/tmp/mvp_unconfirm_reopened2.xml`. The QA fixture was restored to its original host and completed score state after the smoke test.
 
 ## Context and Orientation
 
@@ -107,4 +123,4 @@ Do not add dependencies. Continue using Compose Material 3, `StandardTextField`,
 
 The helper layer must expose typed, internal functions for building and resizing score drafts, checking ordered confirmation, editing scores, applying confirmation, building a match-policy snapshot, and producing a synchronized `MatchMVP`. `MatchEditDialog` remains source-compatible with its current call sites and still returns `MatchWithRelations` through `onConfirm`.
 
-Plan revision note: Created on 2026-07-20 after auditing the current mobile dialog and the web parity contract. Completed the same day after focused unit/UI tests, final APK assembly, and authenticated emulator QA.
+Plan revision note: Created on 2026-07-20 after auditing the current mobile dialog and the web parity contract. Completed the same day after focused unit/UI tests, final APK assembly, and authenticated emulator QA. Revised on 2026-07-31 to close the bulk-persistence gap for unconfirmed sets and record cross-platform compilation plus save/reload evidence.

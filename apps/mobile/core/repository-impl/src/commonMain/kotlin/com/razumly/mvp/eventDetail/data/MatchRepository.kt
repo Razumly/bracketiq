@@ -467,6 +467,13 @@ class MatchRepository(
             addWhenCleared("start", cached.start, start)
             addWhenCleared("end", cached.end, end)
             addWhenCleared("division", cached.division, division)
+            addWhenCleared("status", cached.status, status)
+            addWhenCleared("resultStatus", cached.resultStatus, resultStatus)
+            addWhenCleared("resultType", cached.resultType, resultType)
+            addWhenCleared("actualStart", cached.actualStart, actualStart)
+            addWhenCleared("actualEnd", cached.actualEnd, actualEnd)
+            addWhenCleared("statusReason", cached.statusReason, statusReason)
+            addWhenCleared("winnerEventTeamId", cached.winnerEventTeamId, winnerEventTeamId)
             addWhenCleared("matchRulesSnapshot", cached.matchRulesSnapshot, matchRulesSnapshot)
             addWhenCleared("resolvedMatchRules", cached.resolvedMatchRules, resolvedMatchRules)
         }

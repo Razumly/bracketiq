@@ -48,7 +48,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
@@ -1279,6 +1281,113 @@ class MatchRepositoryHttpTest {
         assertFalse(updatesById.getValue("match_omit").jsonObject.containsKey("fieldId"))
         assertEquals(JsonNull, updatesById.getValue("match_clear").jsonObject["fieldId"])
         assertFalse(updatesById.getValue("match_placeholder").jsonObject.containsKey("team1Id"))
+    }
+
+    @Test
+    fun updateMatchesBulkPersistsUnconfirmedZeroScoreAndClearsFinalization() = runTest {
+        var capturedBody = ""
+        val engine = MockEngine { request ->
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+            respond(
+                content = """{ "matches": [], "created": {}, "deleted": [] }""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val completedSegment = MatchSegmentMVP(
+            id = "match_complete_segment_1",
+            eventId = "event_1",
+            matchId = "match_complete",
+            sequence = 1,
+            status = "COMPLETE",
+            scores = mapOf("team_1" to 25, "team_2" to 3),
+            winnerEventTeamId = "team_1",
+            startedAt = "2026-07-31T18:00:00Z",
+            endedAt = "2026-07-31T18:20:00Z",
+            resultType = "REGULATION",
+            statusReason = "Final",
+            metadata = mapOf("clockStoppedDurationSeconds" to "9"),
+        )
+        val cached = MatchMVP(
+            id = "match_complete",
+            matchId = 1,
+            eventId = "event_1",
+            team1Id = "team_1",
+            team2Id = "team_2",
+            status = "COMPLETE",
+            resultStatus = "FINAL",
+            resultType = "REGULATION",
+            actualStart = "2026-07-31T18:00:00Z",
+            actualEnd = "2026-07-31T18:20:00Z",
+            statusReason = "Final",
+            winnerEventTeamId = "team_1",
+            segments = listOf(completedSegment),
+            team1Points = listOf(25),
+            team2Points = listOf(3),
+            setResults = listOf(1),
+        )
+        val repository = MatchRepository(
+            api = MvpApiClient(
+                HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+                "http://example.test",
+                MatchRepositoryHttp_InMemoryAuthTokenStore(),
+            ),
+            databaseService = MatchRepositoryHttp_FakeDatabaseService(
+                MatchRepositoryHttp_FakeMatchDao(listOf(cached)),
+            ),
+        )
+
+        val result = repository.updateMatchesBulk(
+            matches = listOf(
+                cached.copy(
+                    status = "IN_PROGRESS",
+                    resultStatus = null,
+                    resultType = null,
+                    actualEnd = "2026-07-31T18:20:00Z",
+                    statusReason = null,
+                    winnerEventTeamId = null,
+                    segments = listOf(
+                        completedSegment.copy(
+                            status = "NOT_STARTED",
+                            scores = mapOf("team_1" to 0, "team_2" to 0),
+                            winnerEventTeamId = null,
+                            startedAt = null,
+                            endedAt = null,
+                            resultType = null,
+                            statusReason = null,
+                        ),
+                    ),
+                    team1Points = listOf(0),
+                    team2Points = listOf(0),
+                    setResults = listOf(0),
+                ),
+            ),
+        )
+
+        assertTrue(result.isSuccess)
+        val update = jsonMVP.parseToJsonElement(capturedBody)
+            .jsonObject.getValue("matches").jsonArray.single().jsonObject
+        assertEquals(JsonPrimitive("IN_PROGRESS"), update["status"])
+        assertEquals(JsonNull, update["resultStatus"])
+        assertEquals(JsonNull, update["resultType"])
+        assertEquals(JsonPrimitive("2026-07-31T18:20:00Z"), update["actualEnd"])
+        assertEquals(JsonNull, update["statusReason"])
+        assertEquals(JsonNull, update["winnerEventTeamId"])
+        assertEquals(JsonPrimitive("2026-07-31T18:00:00Z"), update["actualStart"])
+        assertEquals(JsonArray(listOf(JsonPrimitive(0))), update["team1Points"])
+        assertEquals(JsonArray(listOf(JsonPrimitive(0))), update["team2Points"])
+        assertEquals(JsonArray(listOf(JsonPrimitive(0))), update["setResults"])
+        val segment = update.getValue("segments").jsonArray.single().jsonObject
+        assertEquals(JsonPrimitive("NOT_STARTED"), segment["status"])
+        assertEquals(JsonPrimitive(0), segment.getValue("scores").jsonObject["team_1"])
+        assertEquals(JsonPrimitive(0), segment.getValue("scores").jsonObject["team_2"])
+        assertFalse(segment.containsKey("winnerEventTeamId"))
+        assertFalse(segment.containsKey("startedAt"))
+        assertFalse(segment.containsKey("endedAt"))
+        assertFalse(segment.containsKey("metadata"))
     }
 
     @Test

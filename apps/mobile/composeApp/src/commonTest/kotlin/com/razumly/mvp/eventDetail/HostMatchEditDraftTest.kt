@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchTimekeepingConfigMVP
 import kotlin.test.Test
@@ -159,6 +160,72 @@ class HostMatchEditDraftTest {
         assertEquals(4, updated.segments.size)
         assertEquals("COMPLETE", updated.status)
         assertEquals("team-a", updated.winnerEventTeamId)
+    }
+
+    @Test
+    fun given_completed_match_when_set_is_unconfirmed_and_zeroed_then_winners_clear_but_actual_end_remains() {
+        val source = match().copy(
+            status = "COMPLETE",
+            resultStatus = "FINAL",
+            resultType = "REGULATION",
+            actualStart = "2026-07-31T18:00:00Z",
+            actualEnd = "2026-07-31T18:30:00Z",
+            statusReason = "Final",
+            winnerEventTeamId = "team-a",
+            team1Points = listOf(25, 0, 0),
+            team2Points = listOf(3, 0, 0),
+            setResults = listOf(1, 0, 0),
+            segments = listOf(
+                MatchSegmentMVP(
+                    id = "match-1_segment_1",
+                    eventId = "event-1",
+                    matchId = "match-1",
+                    sequence = 1,
+                    status = "COMPLETE",
+                    scores = mapOf("team-a" to 25, "team-b" to 3),
+                    winnerEventTeamId = "team-a",
+                    startedAt = "2026-07-31T18:00:00Z",
+                    endedAt = "2026-07-31T18:20:00Z",
+                    resultType = "REGULATION",
+                    statusReason = "Final",
+                ),
+            ),
+        )
+        val drafts = List(3) { index ->
+            HostMatchScoreDraft(
+                sequence = index + 1,
+                team1Score = 0,
+                team2Score = 0,
+                confirmed = false,
+            )
+        }
+
+        val updated = buildHostMatchScorePayload(
+            match = source,
+            drafts = drafts,
+            rules = setRules(),
+            matchStarted = true,
+            resultType = "REGULATION",
+            forfeitingEventTeamId = null,
+            statusReason = "",
+            exceptionalActualEnd = null,
+        )
+
+        assertEquals("IN_PROGRESS", updated.status)
+        assertNull(updated.resultStatus)
+        assertNull(updated.resultType)
+        assertEquals("2026-07-31T18:30:00Z", updated.actualEnd)
+        assertNull(updated.statusReason)
+        assertNull(updated.winnerEventTeamId)
+        assertEquals(listOf(0, 0, 0), updated.team1Points)
+        assertEquals(listOf(0, 0, 0), updated.team2Points)
+        assertEquals(listOf(0, 0, 0), updated.setResults)
+        assertEquals("NOT_STARTED", updated.segments.first().status)
+        assertNull(updated.segments.first().winnerEventTeamId)
+        assertNull(updated.segments.first().startedAt)
+        assertNull(updated.segments.first().endedAt)
+        assertNull(updated.segments.first().resultType)
+        assertNull(updated.segments.first().statusReason)
     }
 
     private fun match(): MatchMVP = MatchMVP(
