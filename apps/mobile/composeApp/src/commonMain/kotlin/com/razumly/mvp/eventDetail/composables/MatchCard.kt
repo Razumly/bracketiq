@@ -90,11 +90,19 @@ private val CurrentUserOfficialMatchGlowColor = Color(0xFFD97706)
 private val DelayedMatchTimeContainerColor = Color(0xFFFFD54F)
 private val DelayedMatchTimeContentColor = Color(0xFF3A2A00)
 private val MatchCardShape = RoundedCornerShape(14.dp)
+private val ManageMatchCardShape = RoundedCornerShape(
+    topStart = 14.dp,
+    topEnd = 14.dp,
+    bottomStart = 8.dp,
+    bottomEnd = 8.dp,
+)
 private const val MATCH_DELAY_STATUS = "DELAYED"
 
 internal const val MATCH_CARD_BASE_HEIGHT_DP = 90
-private const val MATCH_CARD_MANAGE_SECTION_BASE_HEIGHT_DP = 12
-private const val MATCH_CARD_MANAGE_LINE_HEIGHT_DP = 17
+private const val MATCH_CARD_CONTENT_VERTICAL_PADDING_DP = 4
+private const val MATCH_CARD_MANAGE_TOP_PADDING_DP = 24
+private const val MATCH_CARD_MANAGE_MIN_HEIGHT_DP = 110
+private const val MATCH_CARD_MANAGE_ADDITIONAL_LINE_HEIGHT_DP = 23
 private const val MATCH_CARD_INFO_MAX_WIDTH_FRACTION = 0.5f
 private const val MATCH_CARD_PILL_HEIGHT_DP = 40
 private const val MATCH_CARD_COMPACT_FONT_SIZE_SP = 14f
@@ -208,6 +216,7 @@ fun MatchCard(
                 }
                 val showOfficial = !officialSummary.isNullOrBlank()
                 val showManageOfficials = manageMode && manageOfficialRows.isNotEmpty()
+                val cardShape = if (manageMode) ManageMatchCardShape else MatchCardShape
                 val currentUserMatchRole = remember(match, teams, currentUser.id) {
                     matchRoleForCurrentUser(
                         match = match,
@@ -276,7 +285,7 @@ fun MatchCard(
                                     radius = if (currentUserMatchRole == CurrentUserMatchRole.OFFICIAL) 38.dp else 32.dp,
                                     edgeTreatment = BlurredEdgeTreatment.Unbounded,
                                 )
-                                .background(currentUserGlowColor.copy(alpha = outerGlowAlpha), MatchCardShape),
+                                .background(currentUserGlowColor.copy(alpha = outerGlowAlpha), cardShape),
                         )
                         Box(
                             modifier = Modifier
@@ -285,14 +294,14 @@ fun MatchCard(
                                     radius = if (currentUserMatchRole == CurrentUserMatchRole.OFFICIAL) 20.dp else 18.dp,
                                     edgeTreatment = BlurredEdgeTreatment.Unbounded,
                                 )
-                                .background(currentUserGlowColor.copy(alpha = innerGlowAlpha), MatchCardShape),
+                                .background(currentUserGlowColor.copy(alpha = innerGlowAlpha), cardShape),
                         )
                     }
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable(onClick = onClick),
-                        shape = MatchCardShape,
+                        shape = cardShape,
                         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = localColors.current.primary,
@@ -302,7 +311,10 @@ fun MatchCard(
                         BoxWithConstraints {
                             val maxMatchInfoWidth = maxWidth * MATCH_CARD_INFO_MAX_WIDTH_FRACTION
                             Row(
-                                modifier = Modifier.padding(vertical = 4.dp),
+                                modifier = Modifier.padding(
+                                    top = matchCardContentTopPaddingDp(showManageOfficials).dp,
+                                    bottom = MATCH_CARD_CONTENT_VERTICAL_PADDING_DP.dp,
+                                ),
                                 verticalAlignment = if (showManageOfficials) Alignment.Top else Alignment.CenterVertically
                             ) {
                                 MatchInfoSection(
@@ -839,10 +851,33 @@ internal fun calculateMatchCardHeightDp(
     if (lineCount == 0) {
         return MATCH_CARD_BASE_HEIGHT_DP
     }
-    return MATCH_CARD_BASE_HEIGHT_DP +
-        MATCH_CARD_MANAGE_SECTION_BASE_HEIGHT_DP +
-        (lineCount * MATCH_CARD_MANAGE_LINE_HEIGHT_DP)
+    return MATCH_CARD_MANAGE_MIN_HEIGHT_DP +
+        ((lineCount - 1) * MATCH_CARD_MANAGE_ADDITIONAL_LINE_HEIGHT_DP)
 }
+
+internal fun calculateBracketMatchCardHeightDp(
+    matches: List<MatchMVP>,
+    positions: List<EventOfficialPosition>,
+    manageMode: Boolean,
+): Int {
+    if (!manageMode) {
+        return MATCH_CARD_BASE_HEIGHT_DP
+    }
+    return matches.maxOfOrNull { match ->
+        calculateMatchCardHeightDp(
+            match = match,
+            positions = positions,
+            manageMode = true,
+        )
+    } ?: MATCH_CARD_BASE_HEIGHT_DP
+}
+
+internal fun matchCardContentTopPaddingDp(showManageOfficials: Boolean): Int =
+    if (showManageOfficials) {
+        MATCH_CARD_MANAGE_TOP_PADDING_DP
+    } else {
+        MATCH_CARD_CONTENT_VERTICAL_PADDING_DP
+    }
 
 internal fun calculateManageOfficialLineCount(
     match: MatchMVP,

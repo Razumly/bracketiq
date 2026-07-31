@@ -127,13 +127,11 @@ fun TournamentBracketView(
                     .flatten()
                     .filterNotNull()
             }
-            candidateMatches.maxOfOrNull { candidate ->
-                calculateMatchCardHeightDp(
-                    match = candidate.match,
-                    positions = selectedEvent.officialPositions,
-                    manageMode = true,
-                )
-            } ?: MATCH_CARD_BASE_HEIGHT_DP
+            calculateBracketMatchCardHeightDp(
+                matches = candidateMatches.map { candidate -> candidate.match },
+                positions = selectedEvent.officialPositions,
+                manageMode = true,
+            )
         }
     }
     val cardPadding = 64

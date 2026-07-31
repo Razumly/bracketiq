@@ -7,7 +7,6 @@ import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
 import com.razumly.mvp.core.data.dataTypes.UserData
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 class MatchCardOfficialSummaryTest {
 
@@ -181,7 +180,7 @@ class MatchCardOfficialSummaryTest {
             manageMode = true,
         )
 
-        assertTrue(height > MATCH_CARD_BASE_HEIGHT_DP)
+        assertEquals(156, height)
         assertEquals(3, calculateManageOfficialLineCount(match, positions))
     }
 
@@ -212,7 +211,78 @@ class MatchCardOfficialSummaryTest {
 
         assertEquals(5, calculateManageOfficialLineCount(match, fiveSlots))
         assertEquals(6, calculateManageOfficialLineCount(match, sixSlots))
-        assertEquals(17, sixSlotHeight - fiveSlotHeight)
+        assertEquals(23, sixSlotHeight - fiveSlotHeight)
+    }
+
+    @Test
+    fun manage_card_content_reserves_space_below_the_time_pill() {
+        assertEquals(4, matchCardContentTopPaddingDp(showManageOfficials = false))
+        assertEquals(24, matchCardContentTopPaddingDp(showManageOfficials = true))
+    }
+
+    @Test
+    fun bracket_manage_cards_use_the_tallest_match_height_for_alignment() {
+        val shortMatch = MatchMVP(
+            matchId = 1,
+            eventId = "event_1",
+            id = "match_1",
+        )
+        val tallMatch = MatchMVP(
+            matchId = 2,
+            eventId = "event_1",
+            officialIds = listOf(
+                MatchOfficialAssignment(
+                    positionId = "referee",
+                    slotIndex = 0,
+                    holderType = OfficialAssignmentHolderType.OFFICIAL,
+                    userId = "user_1",
+                    eventOfficialId = "event_official_1",
+                ),
+                MatchOfficialAssignment(
+                    positionId = "scorekeeper",
+                    slotIndex = 0,
+                    holderType = OfficialAssignmentHolderType.OFFICIAL,
+                    userId = "user_2",
+                    eventOfficialId = "event_official_2",
+                ),
+                MatchOfficialAssignment(
+                    positionId = "line_judge",
+                    slotIndex = 0,
+                    holderType = OfficialAssignmentHolderType.OFFICIAL,
+                    userId = "user_3",
+                    eventOfficialId = "event_official_3",
+                ),
+            ),
+            id = "match_2",
+        )
+        val positions = listOf(
+            EventOfficialPosition(id = "referee", name = "Referee", count = 1, order = 0),
+        )
+
+        assertEquals(
+            110,
+            calculateMatchCardHeightDp(
+                match = shortMatch,
+                positions = positions,
+                manageMode = true,
+            ),
+        )
+        assertEquals(
+            156,
+            calculateBracketMatchCardHeightDp(
+                matches = listOf(shortMatch, tallMatch),
+                positions = positions,
+                manageMode = true,
+            ),
+        )
+        assertEquals(
+            MATCH_CARD_BASE_HEIGHT_DP,
+            calculateBracketMatchCardHeightDp(
+                matches = listOf(shortMatch, tallMatch),
+                positions = positions,
+                manageMode = false,
+            ),
+        )
     }
 }
 
