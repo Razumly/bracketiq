@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.sp
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
-import com.razumly.mvp.core.presentation.composables.OrganizationVerificationBadge
+import com.razumly.mvp.core.presentation.composables.OrganizationOwnershipBadges
 import com.razumly.mvp.core.presentation.composables.PlayerCardWithActions
 @Composable
 internal fun HostedByReadOnlyRow(
@@ -137,20 +137,13 @@ private fun OrganizationHostCard(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        modifier = Modifier.weight(1f),
-                        text = organizationName,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.SemiBold,
-                        ),
-                        maxLines = 1,
-                    )
-                    OrganizationVerificationBadge(organization = organization)
-                }
+                Text(
+                    text = organizationName,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    maxLines = 1,
+                )
                 organization.location
                     ?.takeIf(String::isNotBlank)
                     ?.let { location ->
@@ -161,6 +154,11 @@ private fun OrganizationHostCard(
                             maxLines = 1,
                         )
                     }
+                OrganizationOwnershipBadges(
+                    organization = organization,
+                    compact = true,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
             }
         }
     }

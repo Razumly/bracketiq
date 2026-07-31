@@ -1,11 +1,16 @@
 package com.razumly.mvp.core.network.dto
 
+import com.razumly.mvp.core.data.dataTypes.OrganizationClaimVerificationLevel
+import com.razumly.mvp.core.data.dataTypes.OrganizationOriginType
+import com.razumly.mvp.core.data.dataTypes.OrganizationOwnershipAction
+import com.razumly.mvp.core.data.dataTypes.OrganizationOwnershipStatus
 import com.razumly.mvp.core.util.jsonMVP
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class OrganizationDtosTest {
     @Test
@@ -55,5 +60,50 @@ class OrganizationDtosTest {
         assertEquals("Main Gym", facility.name)
         assertEquals("ACTIVE", facility.status)
         assertEquals("https://example.test/book", facility.affiliateUrl)
+    }
+
+    @Test
+    fun givenOwnershipFields_whenMappingOrganization_thenTypedContractIsPreserved() {
+        val organization = jsonMVP.decodeFromString<OrganizationApiDto>(
+            """
+            {
+              "id": "org_affiliate",
+              "name": "River City Sports Club",
+              "originType": "AFFILIATE_IMPORTED",
+              "ownershipStatus": "UNCLAIMED",
+              "claimVerificationLevel": "NONE",
+              "claimable": true,
+              "claimUrl": "/organizations/org_affiliate/claim",
+              "ownershipAction": "CLAIM"
+            }
+            """.trimIndent(),
+        ).toOrganizationOrNull()!!
+
+        assertEquals(OrganizationOriginType.AFFILIATE_IMPORTED, organization.originType)
+        assertEquals(OrganizationOwnershipStatus.UNCLAIMED, organization.ownershipStatus)
+        assertEquals(OrganizationClaimVerificationLevel.NONE, organization.claimVerificationLevel)
+        assertTrue(organization.claimable)
+        assertEquals("/organizations/org_affiliate/claim", organization.claimUrl)
+        assertEquals(OrganizationOwnershipAction.CLAIM, organization.ownershipAction)
+        assertTrue(organization.canClaimProfile)
+    }
+
+    @Test
+    fun givenLegacyOrganizationResponse_whenMapping_thenOwnershipDefaultsToClaimed() {
+        val organization = jsonMVP.decodeFromString<OrganizationApiDto>(
+            """
+            {
+              "id": "org_first_party",
+              "name": "Summit United"
+            }
+            """.trimIndent(),
+        ).toOrganizationOrNull()!!
+
+        assertEquals(OrganizationOriginType.FIRST_PARTY, organization.originType)
+        assertEquals(OrganizationOwnershipStatus.CLAIMED, organization.ownershipStatus)
+        assertEquals(OrganizationClaimVerificationLevel.NONE, organization.claimVerificationLevel)
+        assertFalse(organization.claimable)
+        assertEquals(OrganizationOwnershipAction.REPORT_OWNERSHIP_ISSUE, organization.ownershipAction)
+        assertFalse(organization.canClaimProfile)
     }
 }

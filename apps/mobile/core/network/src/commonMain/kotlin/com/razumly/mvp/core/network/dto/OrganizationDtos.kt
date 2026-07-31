@@ -6,7 +6,12 @@ import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationDivisionSummary
 import com.razumly.mvp.core.data.dataTypes.OrganizationFeature
+import com.razumly.mvp.core.data.dataTypes.OrganizationOwnershipStatus
 import com.razumly.mvp.core.data.dataTypes.OrganizationStaffMember
+import com.razumly.mvp.core.data.dataTypes.resolveOrganizationClaimVerificationLevel
+import com.razumly.mvp.core.data.dataTypes.resolveOrganizationOriginType
+import com.razumly.mvp.core.data.dataTypes.resolveOrganizationOwnershipAction
+import com.razumly.mvp.core.data.dataTypes.resolveOrganizationOwnershipStatus
 import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationReviewStatus
 import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationStatus
 import kotlinx.serialization.Serializable
@@ -57,10 +62,17 @@ data class OrganizationApiDto(
     val viewerPermissions: List<String>? = null,
     val facilities: List<OrganizationFacilityApiDto>? = null,
     val divisionSummary: OrganizationDivisionSummary? = null,
+    val originType: String? = null,
+    val ownershipStatus: String? = null,
+    val claimVerificationLevel: String? = null,
+    val claimable: Boolean? = null,
+    val claimUrl: String? = null,
+    val ownershipAction: String? = null,
 ) {
     fun toOrganizationOrNull(): Organization? {
         val resolvedId = id?.trim()?.takeIf(String::isNotBlank) ?: return null
         val resolvedName = name?.trim()?.takeIf(String::isNotBlank) ?: return null
+        val resolvedOwnershipStatus = resolveOrganizationOwnershipStatus(ownershipStatus)
         return Organization(
             id = resolvedId,
             name = resolvedName,
@@ -99,6 +111,15 @@ data class OrganizationApiDto(
                 .distinct(),
             facilities = facilities.orEmpty().mapNotNull(OrganizationFacilityApiDto::toFacilityOrNull),
             divisionSummary = divisionSummary ?: OrganizationDivisionSummary(),
+            originType = resolveOrganizationOriginType(originType),
+            ownershipStatus = resolvedOwnershipStatus,
+            claimVerificationLevel = resolveOrganizationClaimVerificationLevel(claimVerificationLevel),
+            claimable = claimable ?: (resolvedOwnershipStatus == OrganizationOwnershipStatus.UNCLAIMED),
+            claimUrl = claimUrl?.trim()?.takeIf(String::isNotBlank),
+            ownershipAction = resolveOrganizationOwnershipAction(
+                ownershipAction = ownershipAction,
+                ownershipStatus = resolvedOwnershipStatus,
+            ),
         )
     }
 }

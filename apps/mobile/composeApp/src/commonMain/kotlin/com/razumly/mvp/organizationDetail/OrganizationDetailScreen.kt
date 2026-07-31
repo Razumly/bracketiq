@@ -43,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -54,6 +55,8 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.evergreenDateDisplayLabel
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.dataTypes.canUsePaidBilling
+import com.razumly.mvp.core.data.dataTypes.resolveOrganizationClaimUrl
+import com.razumly.mvp.core.network.stripeRedirectBaseUrl
 import com.razumly.mvp.core.data.repositories.RentalOrderSelectionRequest
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
@@ -67,6 +70,7 @@ import com.razumly.mvp.core.presentation.composables.DiscountCodeDialog
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.composables.EventCard
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
+import com.razumly.mvp.core.presentation.composables.OrganizationOwnershipBadges
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.TeamDetailsDialog
 import com.razumly.mvp.core.presentation.composables.TeamCard
@@ -112,6 +116,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
 
     val popupHandler = LocalPopupHandler.current
     val loadingHandler = LocalLoadingHandler.current
+    val uriHandler = LocalUriHandler.current
 
     val organization by component.organization.collectAsState()
     val selectedTab by component.selectedTab.collectAsState()
@@ -149,6 +154,22 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val discountCodePrompt by component.discountCodePrompt.collectAsState()
     val isReservingRental by component.isReservingRental.collectAsState()
     val completedRentalReservation by component.completedRentalReservation.collectAsState()
+    val claimUrl = remember(
+        organization?.id,
+        organization?.claimable,
+        organization?.claimUrl,
+        organization?.ownershipAction,
+        stripeRedirectBaseUrl,
+    ) {
+        organization
+            ?.takeIf(Organization::canClaimProfile)
+            ?.let { currentOrganization ->
+                resolveOrganizationClaimUrl(
+                    rawUrl = currentOrganization.claimUrl,
+                    webBaseUrl = stripeRedirectBaseUrl,
+                )
+            }
+    }
 
     var selectedTeam by remember { mutableStateOf<TeamWithPlayers?>(null) }
     var teamDialogKnownUsers by remember { mutableStateOf<Map<String, UserData>>(emptyMap()) }
@@ -473,6 +494,16 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                 navigationIcon = {
                     IconButton(onClick = component::onBackClicked) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (selectedTab == OrganizationDetailTab.OVERVIEW) {
+                        OrganizationClaimAction(
+                            claimUrl = claimUrl,
+                            onOpenClaim = { targetUrl ->
+                                runCatching { uriHandler.openUri(targetUrl) }
+                            },
+                        )
                     }
                 }
             )
@@ -955,6 +986,8 @@ private fun OverviewTabContent(
             Text(text = "Loading organization...", style = MaterialTheme.typography.bodyMedium)
         }
 
+        OrganizationOwnershipBadges(organization = organization)
+
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OrganizationOverviewSectionHeader(
                 title = "About",
@@ -1065,6 +1098,17 @@ private fun OverviewTabContent(
             isLoading = isLoadingReviews,
             onViewReviews = { onOpenSection(OrganizationDetailTab.REVIEWS) },
         )
+    }
+}
+
+@Composable
+internal fun OrganizationClaimAction(
+    claimUrl: String?,
+    onOpenClaim: (String) -> Unit,
+) {
+    val targetUrl = claimUrl?.trim()?.takeIf(String::isNotBlank) ?: return
+    TextButton(onClick = { onOpenClaim(targetUrl) }) {
+        Text("Claim")
     }
 }
 

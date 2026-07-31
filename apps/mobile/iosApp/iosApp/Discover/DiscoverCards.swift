@@ -177,16 +177,9 @@ struct NativeDiscoverOrganizationCard: View {
                     )
 
                     VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text(organization.name.isEmpty ? "Organization" : organization.name)
-                                .font(.headline)
-                                .lineLimit(1)
-                            if organization.verificationStatus.name == "VERIFIED" {
-                                Image(systemName: "checkmark.seal.fill")
-                                    .foregroundStyle(Color.accentColor)
-                                    .accessibilityLabel("Verified")
-                            }
-                        }
+                        Text(organization.name.isEmpty ? "Organization" : organization.name)
+                            .font(.headline)
+                            .lineLimit(1)
 
                         if let location = discoverNonEmpty(organization.location) {
                             Text(location)
@@ -216,6 +209,8 @@ struct NativeDiscoverOrganizationCard: View {
                         .foregroundStyle(.secondary)
                 }
                 .font(.caption.weight(.semibold))
+
+                NativeOrganizationOwnershipBadges(organization: organization)
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -322,6 +317,8 @@ struct NativeDiscoverRentalCard: View {
                 Text(discoverFieldCountLabel(organization.fieldIds.count))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Color.accentColor)
+
+                NativeOrganizationOwnershipBadges(organization: organization)
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -333,6 +330,60 @@ struct NativeDiscoverRentalCard: View {
             }
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct NativeOrganizationOwnershipBadges: View {
+    let organization: Organization
+
+    var body: some View {
+        HStack(spacing: 6) {
+            NativeOrganizationOwnershipBadge(
+                label: organization.ownershipBadgeLabel,
+                tone: organization.ownershipBadgeTone.name
+            )
+            if organization.showsWebsiteVerifiedBadge {
+                NativeOrganizationOwnershipBadge(
+                    label: "Website verified",
+                    tone: "TRUST"
+                )
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+private struct NativeOrganizationOwnershipBadge: View {
+    let label: String
+    let tone: String
+
+    var body: some View {
+        Text(label)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(foregroundColor)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(backgroundColor)
+            .clipShape(Capsule())
+    }
+
+    private var foregroundColor: Color {
+        switch tone {
+        case "INFO":
+            return Color.accentColor
+        case "WARNING":
+            return .orange
+        case "ERROR":
+            return .red
+        case "TRUST":
+            return .teal
+        default:
+            return .secondary
+        }
+    }
+
+    private var backgroundColor: Color {
+        foregroundColor.opacity(0.14)
     }
 }
 

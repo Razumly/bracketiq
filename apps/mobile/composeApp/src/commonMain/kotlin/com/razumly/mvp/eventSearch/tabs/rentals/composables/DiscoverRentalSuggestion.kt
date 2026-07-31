@@ -18,7 +18,7 @@ import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateRentalUrl
 import com.razumly.mvp.core.data.dataTypes.resolvedLogoRef
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
-import com.razumly.mvp.core.presentation.composables.OrganizationVerificationBadge
+import com.razumly.mvp.core.presentation.composables.OrganizationOwnershipBadges
 
 @Composable
 fun DiscoverRentalSuggestion(
@@ -42,20 +42,13 @@ fun DiscoverRentalSuggestion(
                     size = 32.dp,
                     contentDescription = "Organization logo",
                 )
-                Row(
+                Text(
                     modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        modifier = Modifier.weight(1f),
-                        text = organization.name.ifBlank { "Organization" },
-                        style = MaterialTheme.typography.bodyLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    OrganizationVerificationBadge(organization = organization)
-                }
+                    text = organization.name.ifBlank { "Organization" },
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
             val affiliateUrl = organization.normalizedAffiliateRentalUrl()
@@ -72,6 +65,12 @@ fun DiscoverRentalSuggestion(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
+            )
+
+            OrganizationOwnershipBadges(
+                organization = organization,
+                compact = true,
+                modifier = Modifier.padding(top = 6.dp),
             )
         }
     }

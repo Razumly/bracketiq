@@ -24,6 +24,46 @@ enum class OrganizationVerificationReviewStatus {
 }
 
 @Serializable
+enum class OrganizationOriginType {
+    FIRST_PARTY,
+    AFFILIATE_IMPORTED,
+}
+
+@Serializable
+enum class OrganizationOwnershipStatus {
+    UNCLAIMED,
+    CLAIM_PENDING,
+    CLAIMED,
+    REVIEW_REQUIRED,
+    DISPUTED,
+    SUSPENDED,
+}
+
+@Serializable
+enum class OrganizationClaimVerificationLevel {
+    NONE,
+    AFFILIATION,
+    SITE_CONTROL,
+    MANUAL_REVIEW,
+}
+
+@Serializable
+enum class OrganizationOwnershipAction {
+    CLAIM,
+    VIEW_PENDING_CLAIM,
+    REPORT_OWNERSHIP_ISSUE,
+    CONTACT_SUPPORT,
+    NONE,
+}
+
+enum class OrganizationOwnershipBadgeTone {
+    NEUTRAL,
+    INFO,
+    WARNING,
+    ERROR,
+}
+
+@Serializable
 data class OrganizationDivisionSummary(
     val count: Int = 0,
     val minPrice: Int? = null,
@@ -76,7 +116,44 @@ data class Organization(
     val viewerPermissions: List<String> = emptyList(),
     val facilities: List<Facility> = emptyList(),
     val divisionSummary: OrganizationDivisionSummary = OrganizationDivisionSummary(),
-)
+    val originType: OrganizationOriginType = OrganizationOriginType.FIRST_PARTY,
+    val ownershipStatus: OrganizationOwnershipStatus = OrganizationOwnershipStatus.CLAIMED,
+    val claimVerificationLevel: OrganizationClaimVerificationLevel =
+        OrganizationClaimVerificationLevel.NONE,
+    val claimable: Boolean = ownershipStatus == OrganizationOwnershipStatus.UNCLAIMED,
+    val claimUrl: String? = null,
+    val ownershipAction: OrganizationOwnershipAction =
+        organizationOwnershipActionFor(ownershipStatus),
+) {
+    val ownershipBadgeLabel: String
+        get() = when (ownershipStatus) {
+            OrganizationOwnershipStatus.UNCLAIMED -> "Unclaimed profile"
+            OrganizationOwnershipStatus.CLAIM_PENDING -> "Claim pending"
+            OrganizationOwnershipStatus.CLAIMED -> "Claimed profile"
+            OrganizationOwnershipStatus.REVIEW_REQUIRED,
+            OrganizationOwnershipStatus.DISPUTED,
+            -> "Ownership under review"
+            OrganizationOwnershipStatus.SUSPENDED -> "Ownership restricted"
+        }
+
+    val ownershipBadgeTone: OrganizationOwnershipBadgeTone
+        get() = when (ownershipStatus) {
+            OrganizationOwnershipStatus.UNCLAIMED -> OrganizationOwnershipBadgeTone.NEUTRAL
+            OrganizationOwnershipStatus.CLAIMED -> OrganizationOwnershipBadgeTone.INFO
+            OrganizationOwnershipStatus.CLAIM_PENDING,
+            OrganizationOwnershipStatus.REVIEW_REQUIRED,
+            OrganizationOwnershipStatus.DISPUTED,
+            -> OrganizationOwnershipBadgeTone.WARNING
+            OrganizationOwnershipStatus.SUSPENDED -> OrganizationOwnershipBadgeTone.ERROR
+        }
+
+    val showsWebsiteVerifiedBadge: Boolean
+        get() = ownershipStatus == OrganizationOwnershipStatus.CLAIMED &&
+            claimVerificationLevel == OrganizationClaimVerificationLevel.SITE_CONTROL
+
+    val canClaimProfile: Boolean
+        get() = claimable && ownershipAction == OrganizationOwnershipAction.CLAIM
+}
 
 fun Organization.activeAffiliateRentalFacilities(): List<Facility> =
     facilities.filter { facility -> facility.isActiveAffiliateRental() }
@@ -183,6 +260,113 @@ fun resolveOrganizationVerificationReviewStatus(
         OrganizationVerificationReviewStatus.RESOLVED.name -> OrganizationVerificationReviewStatus.RESOLVED
         else -> OrganizationVerificationReviewStatus.NONE
     }
+}
+
+fun resolveOrganizationOriginType(originType: String?): OrganizationOriginType {
+    return when (originType?.trim()?.uppercase()) {
+        OrganizationOriginType.AFFILIATE_IMPORTED.name -> OrganizationOriginType.AFFILIATE_IMPORTED
+        else -> OrganizationOriginType.FIRST_PARTY
+    }
+}
+
+fun resolveOrganizationOwnershipStatus(ownershipStatus: String?): OrganizationOwnershipStatus {
+    return when (ownershipStatus?.trim()?.uppercase()) {
+        OrganizationOwnershipStatus.UNCLAIMED.name -> OrganizationOwnershipStatus.UNCLAIMED
+        OrganizationOwnershipStatus.CLAIM_PENDING.name -> OrganizationOwnershipStatus.CLAIM_PENDING
+        OrganizationOwnershipStatus.REVIEW_REQUIRED.name -> OrganizationOwnershipStatus.REVIEW_REQUIRED
+        OrganizationOwnershipStatus.DISPUTED.name -> OrganizationOwnershipStatus.DISPUTED
+        OrganizationOwnershipStatus.SUSPENDED.name -> OrganizationOwnershipStatus.SUSPENDED
+        else -> OrganizationOwnershipStatus.CLAIMED
+    }
+}
+
+fun resolveOrganizationClaimVerificationLevel(
+    verificationLevel: String?,
+): OrganizationClaimVerificationLevel {
+    return when (verificationLevel?.trim()?.uppercase()) {
+        OrganizationClaimVerificationLevel.AFFILIATION.name ->
+            OrganizationClaimVerificationLevel.AFFILIATION
+        OrganizationClaimVerificationLevel.SITE_CONTROL.name ->
+            OrganizationClaimVerificationLevel.SITE_CONTROL
+        OrganizationClaimVerificationLevel.MANUAL_REVIEW.name ->
+            OrganizationClaimVerificationLevel.MANUAL_REVIEW
+        else -> OrganizationClaimVerificationLevel.NONE
+    }
+}
+
+fun organizationOwnershipActionFor(
+    ownershipStatus: OrganizationOwnershipStatus,
+): OrganizationOwnershipAction {
+    return when (ownershipStatus) {
+        OrganizationOwnershipStatus.UNCLAIMED -> OrganizationOwnershipAction.CLAIM
+        OrganizationOwnershipStatus.CLAIM_PENDING -> OrganizationOwnershipAction.VIEW_PENDING_CLAIM
+        OrganizationOwnershipStatus.CLAIMED -> OrganizationOwnershipAction.REPORT_OWNERSHIP_ISSUE
+        OrganizationOwnershipStatus.REVIEW_REQUIRED,
+        OrganizationOwnershipStatus.DISPUTED,
+        OrganizationOwnershipStatus.SUSPENDED,
+        -> OrganizationOwnershipAction.CONTACT_SUPPORT
+    }
+}
+
+fun resolveOrganizationOwnershipAction(
+    ownershipAction: String?,
+    ownershipStatus: OrganizationOwnershipStatus,
+): OrganizationOwnershipAction {
+    return when (ownershipAction?.trim()?.uppercase()) {
+        OrganizationOwnershipAction.CLAIM.name -> OrganizationOwnershipAction.CLAIM
+        OrganizationOwnershipAction.VIEW_PENDING_CLAIM.name ->
+            OrganizationOwnershipAction.VIEW_PENDING_CLAIM
+        OrganizationOwnershipAction.REPORT_OWNERSHIP_ISSUE.name ->
+            OrganizationOwnershipAction.REPORT_OWNERSHIP_ISSUE
+        OrganizationOwnershipAction.CONTACT_SUPPORT.name ->
+            OrganizationOwnershipAction.CONTACT_SUPPORT
+        OrganizationOwnershipAction.NONE.name -> OrganizationOwnershipAction.NONE
+        else -> organizationOwnershipActionFor(ownershipStatus)
+    }
+}
+
+private const val CANONICAL_ORGANIZATION_CLAIM_ORIGIN = "https://bracket-iq.com"
+
+fun resolveOrganizationClaimUrl(
+    rawUrl: String?,
+    webBaseUrl: String,
+): String? {
+    val url = rawUrl?.trim()?.takeIf(String::isNotBlank) ?: return null
+    if (url.any { it.isWhitespace() || it.code < 0x20 || it.code == 0x7f } || url.contains('\\')) {
+        return null
+    }
+
+    fun isClaimPath(value: String): Boolean {
+        if (!value.startsWith('/') || value.startsWith("//") || value.contains("//")) return false
+        val path = value.substringBefore('?').substringBefore('#')
+        val segments = path.removePrefix("/").split('/')
+        return segments.size == 3 &&
+            segments[0] == "organizations" &&
+            segments[1].isNotBlank() &&
+            segments[1] != "." &&
+            segments[1] != ".." &&
+            segments[2] == "claim"
+    }
+
+    val normalizedBase = webBaseUrl.trim().trimEnd('/')
+    if (
+        normalizedBase.any { it.isWhitespace() || it.code < 0x20 || it.code == 0x7f } ||
+        normalizedBase.contains('\\') ||
+        (!normalizedBase.startsWith("https://") && !normalizedBase.startsWith("http://"))
+    ) {
+        return null
+    }
+
+    if (url.startsWith('/')) {
+        return if (isClaimPath(url)) "$normalizedBase$url" else null
+    }
+
+    val allowedOrigins = listOf(normalizedBase, CANONICAL_ORGANIZATION_CLAIM_ORIGIN).distinct()
+    val matchingOrigin = allowedOrigins.firstOrNull { origin ->
+        url.startsWith("$origin/", ignoreCase = true)
+    } ?: return null
+    val suffix = url.substring(matchingOrigin.length)
+    return if (isClaimPath(suffix)) "$matchingOrigin$suffix" else null
 }
 
 fun Organization.isVerified(): Boolean = verificationStatus == OrganizationVerificationStatus.VERIFIED

@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventSearch.tabs.organizations.composables
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,7 +19,7 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.resolvedLogoRef
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
-import com.razumly.mvp.core.presentation.composables.OrganizationVerificationBadge
+import com.razumly.mvp.core.presentation.composables.OrganizationOwnershipBadges
 
 @Composable
 fun DiscoverOrganizationSuggestion(
@@ -25,10 +27,17 @@ fun DiscoverOrganizationSuggestion(
     onClick: () -> Unit,
 ) {
     Card(
-        Modifier
+        modifier = Modifier
             .padding(vertical = 4.dp, horizontal = 8.dp)
             .clickable(onClick = onClick)
-            .fillMaxWidth()
+            .fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        ),
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant,
+        ),
     ) {
         Column(modifier = Modifier.padding(8.dp)) {
             Row(
@@ -41,20 +50,13 @@ fun DiscoverOrganizationSuggestion(
                     size = 32.dp,
                     contentDescription = "Organization logo",
                 )
-                Row(
+                Text(
                     modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        modifier = Modifier.weight(1f),
-                        text = organization.name.ifBlank { "Organization" },
-                        style = MaterialTheme.typography.bodyLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    OrganizationVerificationBadge(organization = organization)
-                }
+                    text = organization.name.ifBlank { "Organization" },
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
             val fieldCount = organization.fieldIds.size
@@ -66,6 +68,12 @@ fun DiscoverOrganizationSuggestion(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
+            )
+
+            OrganizationOwnershipBadges(
+                organization = organization,
+                compact = true,
+                modifier = Modifier.padding(top = 6.dp),
             )
         }
     }

@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventSearch.tabs.organizations.composables
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,7 +25,7 @@ import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationDivisionSummary
 import com.razumly.mvp.core.data.dataTypes.resolvedLogoRef
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
-import com.razumly.mvp.core.presentation.composables.OrganizationVerificationBadge
+import com.razumly.mvp.core.presentation.composables.OrganizationOwnershipBadges
 import com.razumly.mvp.core.presentation.util.getImageUrl
 
 @Composable
@@ -43,7 +45,14 @@ internal fun DiscoverOrganizationCard(
     val showPlaceholder = logoModel != null && logoState is AsyncImagePainter.State.Loading
 
     Card(
-        modifier = if (showPlaceholder) modifier else modifier.clickable(onClick = onClick)
+        modifier = if (showPlaceholder) modifier else modifier.clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        ),
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant,
+        ),
     ) {
         if (showPlaceholder) {
             DiscoverOrganizationCardPlaceholderContent()
@@ -63,20 +72,13 @@ internal fun DiscoverOrganizationCard(
                         size = 36.dp,
                         contentDescription = "Organization logo",
                     )
-                    Row(
+                    Text(
                         modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            modifier = Modifier.weight(1f),
-                            text = organization.name.ifBlank { "Organization" },
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        OrganizationVerificationBadge(organization = organization)
-                    }
+                        text = organization.name.ifBlank { "Organization" },
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
 
                 organization.location?.takeIf { it.isNotBlank() }?.let { location ->
@@ -128,6 +130,12 @@ internal fun DiscoverOrganizationCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+
+                OrganizationOwnershipBadges(
+                    organization = organization,
+                    compact = true,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
             }
         }
     }
