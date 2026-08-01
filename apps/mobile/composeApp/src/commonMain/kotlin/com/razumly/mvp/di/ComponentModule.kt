@@ -93,6 +93,7 @@ val componentModule = module {
             apiClient = get(),
             notificationsRepository = get(),
             navigationHandler = navHandler,
+            permissionsController = get(),
         )
     }
 
@@ -130,7 +131,9 @@ val componentModule = module {
             sportsRepository = get(),
             userRepository = get(),
             eventId = eventId,
-            navigationHandler = navHandler
+            navigationHandler = navHandler,
+            permissionsController = get(),
+            currentUserDataSource = get(),
         )
     }
 

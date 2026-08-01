@@ -9,6 +9,13 @@ import platform.Foundation.NSBundle
 
 val mapComponentModule = module {
     factory { (componentContext: ComponentContext) ->
-        MapComponent(componentContext, get(), get(), AppSecrets.googlePlacesApiKey, NSBundle.mainBundle.bundleIdentifier ?: "unknown")
+        MapComponent(
+            componentContext,
+            get(),
+            get(),
+            get(),
+            AppSecrets.googlePlacesApiKey,
+            NSBundle.mainBundle.bundleIdentifier ?: "unknown",
+        )
     }
 }

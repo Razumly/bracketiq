@@ -2,6 +2,8 @@ package com.razumly.mvp.matchDetail
 
 import android.app.Application
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
@@ -40,19 +42,34 @@ class MatchIncidentUiTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun given_match_winner_before_match_is_finished_then_winner_highlight_is_suppressed() {
-        assertNull(
-            matchWinnerEventTeamIdForDisplay(
-                matchFinished = false,
-                winnerEventTeamId = "team-a",
-            )
+    fun given_match_score_is_tied_then_winner_highlight_is_suppressed() {
+        val tiedPresentation = resolveMatchScorePresentation(
+            scoringModel = "PERIODS",
+            segments = emptyList(),
+            team1Id = "team-a",
+            team2Id = "team-b",
+            team1LegacyScores = listOf(3),
+            team2LegacyScores = listOf(3),
+            actualStart = "2026-07-31T18:00:00Z",
+            actualEnd = "2026-07-31T19:00:00Z",
+            selectedSegmentIndex = null,
         )
+        val winningPresentation = resolveMatchScorePresentation(
+            scoringModel = "PERIODS",
+            segments = emptyList(),
+            team1Id = "team-a",
+            team2Id = "team-b",
+            team1LegacyScores = listOf(4),
+            team2LegacyScores = listOf(3),
+            actualStart = "2026-07-31T18:00:00Z",
+            actualEnd = "2026-07-31T19:00:00Z",
+            selectedSegmentIndex = null,
+        )
+
+        assertNull(tiedPresentation.winnerEventTeamId)
         assertEquals(
             "team-a",
-            matchWinnerEventTeamIdForDisplay(
-                matchFinished = true,
-                winnerEventTeamId = "team-a",
-            )
+            winningPresentation.winnerEventTeamId,
         )
     }
 
@@ -84,6 +101,42 @@ class MatchIncidentUiTest {
 
         assertEquals(startTop, delayTop)
         composeRule.onAllNodesWithText("Confirm Quarter 1").assertCountEquals(0)
+    }
+
+    @Test
+    fun given_set_score_tracker_when_selecting_match_and_set_then_callbacks_receive_selection() {
+        var selectedSegmentIndex: Int? = null
+        composeRule.setContent {
+            MaterialTheme {
+                MatchSegmentScoreTracker(
+                    entries = listOf(
+                        MatchSegmentTrackerEntry(
+                            label = "Set 1",
+                            team1Score = null,
+                            team2Score = null,
+                            isActive = true,
+                            isComplete = false,
+                        ),
+                        MatchSegmentTrackerEntry(
+                            label = "Set 2",
+                            team1Score = 25,
+                            team2Score = 21,
+                            isActive = false,
+                            isComplete = true,
+                        ),
+                    ),
+                    selectedSegmentIndex = selectedSegmentIndex,
+                    onMatchSelected = { selectedSegmentIndex = null },
+                    onSegmentSelected = { index -> selectedSegmentIndex = index },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Set 2").performClick()
+        composeRule.runOnIdle { assertEquals(1, selectedSegmentIndex) }
+        composeRule.onNodeWithText("Match").performClick()
+        composeRule.runOnIdle { assertNull(selectedSegmentIndex) }
+        composeRule.onNodeWithText("—-—").assertIsDisplayed()
     }
 
     @Test
@@ -213,22 +266,32 @@ class MatchIncidentUiTest {
     @Test
     fun given_gesture_instruction_overlay_when_clicked_then_it_dismisses() {
         var dismissed = false
+        var bottomActionClicks = 0
         composeRule.setContent {
             MaterialTheme {
-                ScoreGestureInstructionOverlay(
+                MatchGestureInstructionHost(
+                    showOverlay = true,
                     showTimerInstruction = true,
                     onDismiss = { dismissed = true },
                     modifier = Modifier.size(240.dp),
-                )
+                ) {
+                    Button(
+                        onClick = { bottomActionClicks += 1 },
+                        modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter),
+                    ) {
+                        Text("Bottom action")
+                    }
+                }
             }
         }
 
         composeRule.onNodeWithText("Click to increase").assertIsDisplayed()
         composeRule.onNodeWithText("Swipe to decrease").assertIsDisplayed()
         composeRule.onNodeWithText("Tap timer to start or stop").assertIsDisplayed()
-        composeRule.onNodeWithText("Click to increase").performTouchInput { click() }
+        composeRule.onNodeWithText("Bottom action").performTouchInput { click() }
 
         assertTrue(dismissed)
+        assertEquals(0, bottomActionClicks)
     }
 
     @Test

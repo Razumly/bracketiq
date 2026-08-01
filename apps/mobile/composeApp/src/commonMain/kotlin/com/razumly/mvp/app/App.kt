@@ -125,10 +125,6 @@ fun App(root: RootComponent) {
     var analyticsUserId by remember { mutableStateOf<String?>(null) }
 
 
-    LaunchedEffect(Unit) {
-        root.requestInitialPermissions()
-    }
-
     LaunchedEffect(currentUserResult) {
         val userId = currentUserResult.getOrNull()?.id?.trim().orEmpty()
         if (userId.isNotEmpty()) {

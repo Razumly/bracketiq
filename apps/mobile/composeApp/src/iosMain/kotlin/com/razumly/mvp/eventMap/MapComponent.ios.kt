@@ -9,6 +9,9 @@ import com.razumly.mvp.core.util.getBounds
 import com.razumly.mvp.core.util.jsonMVP
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
+import dev.icerock.moko.permissions.Permission
+import dev.icerock.moko.permissions.PermissionsController
+import dev.icerock.moko.permissions.location.LOCATION
 import io.github.aakira.napier.Napier
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -23,6 +26,7 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,6 +42,7 @@ actual class MapComponent(
     componentContext: ComponentContext,
     private val eventRepository: IEventRepository,
     val locationTracker: LocationTracker,
+    private val permissionsController: PermissionsController,
     private val apiKey: String,
     private val bundleId: String
 ) : ComponentContext by componentContext {
@@ -76,27 +81,33 @@ actual class MapComponent(
 
     init {
         scope.launch {
-            runCatching {
-                locationTracker.startTracking()
-            }.onFailure { error ->
-                Napier.w("Location tracking disabled: ${error.message}")
+            _showMap.collectLatest { visible ->
+                if (!visible) {
+                    runCatching { locationTracker.stopTracking() }
+                    return@collectLatest
+                }
+
+                if (!permissionsController.isPermissionGranted(Permission.LOCATION)) {
+                    Napier.d("Location tracking skipped because permission is not granted")
+                    return@collectLatest
+                }
+
+                runCatching {
+                    locationTracker.startTracking()
+                    locationTracker.getLocationsFlow().collect {
+                        _currentLocation.value = it
+                    }
+                }.onFailure { error ->
+                    Napier.w("Location tracking disabled: ${error.message}")
+                }
             }
+
         }
 
         instanceKeeper.put(
             CLEANUP_KEY,
             Cleanup(locationTracker)
         )
-
-        scope.launch {
-            try {
-                locationTracker.getLocationsFlow().collect {
-                    _currentLocation.value = it
-                }
-            } catch (error: Exception) {
-                Napier.w("Location updates unavailable: ${error.message}")
-            }
-        }
     }
 
     actual fun setEvents(events: List<Event>) {

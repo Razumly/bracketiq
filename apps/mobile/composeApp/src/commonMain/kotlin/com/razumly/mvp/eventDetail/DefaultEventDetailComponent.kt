@@ -63,6 +63,8 @@ import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
+import com.razumly.mvp.core.presentation.composables.PermissionPrimerKind
+import com.razumly.mvp.core.presentation.composables.PermissionPrimerState
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.LoadingOperation
@@ -72,6 +74,7 @@ import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -88,6 +91,12 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import dev.icerock.moko.permissions.DeniedAlwaysException
+import dev.icerock.moko.permissions.DeniedException
+import dev.icerock.moko.permissions.Permission
+import dev.icerock.moko.permissions.PermissionsController
+import dev.icerock.moko.permissions.notifications.REMOTE_NOTIFICATION
+import com.razumly.mvp.registerForRemoteNotificationsAfterPermission
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -97,7 +106,7 @@ class DefaultEventDetailComponent(
     private val userRepository: IUserRepository,
     fieldRepository: IFieldRepository,
     eventId: String,
-    notificationsRepository: IPushNotificationsRepository,
+    private val notificationsRepository: IPushNotificationsRepository,
     private val billingRepository: IBillingRepository,
     private val eventRepository: IEventRepository,
     private val matchRepository: IMatchRepository,
@@ -107,6 +116,7 @@ class DefaultEventDetailComponent(
     private val navigationHandler: INavigationHandler,
     private val currentUserDataSource: CurrentUserDataSource? = null,
     private val apiClient: MvpApiClient? = null,
+    private val permissionsController: PermissionsController? = null,
 
 ) : EventDetailComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val event = Event(id = eventId.trim())
@@ -159,6 +169,10 @@ class DefaultEventDetailComponent(
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
+    private val _notificationPermissionPrimer = MutableStateFlow<PermissionPrimerState?>(null)
+    override val notificationPermissionPrimer: StateFlow<PermissionPrimerState?> =
+        _notificationPermissionPrimer.asStateFlow()
+    private var notificationPermissionRequestJob: Job? = null
     private val registrationFlowCoordinator = EventRegistrationFlowCoordinator()
     private val joinExecutionCoordinator = EventJoinExecutionCoordinator(registrationFlowCoordinator)
     private val withdrawalActionCoordinator = EventWithdrawalActionCoordinator(registrationFlowCoordinator)
@@ -185,6 +199,64 @@ class DefaultEventDetailComponent(
 
     override fun setLoadingHandler(loadingHandler: LoadingHandler) {
         this.loadingHandler = loadingHandler
+    }
+
+    override fun requestNotificationPermission() {
+        val current = _notificationPermissionPrimer.value ?: return
+        if (current.isRequesting || current.settingsRequired) return
+
+        val permissionController = permissionsController ?: return
+        notificationPermissionRequestJob?.cancel()
+        notificationPermissionRequestJob = scope.launch {
+            currentUserDataSource?.setNotificationPermissionPrimerHandled(true)
+            _notificationPermissionPrimer.value = current.copy(isRequesting = true)
+            try {
+                permissionController.providePermission(Permission.REMOTE_NOTIFICATION)
+                if (permissionController.isPermissionGranted(Permission.REMOTE_NOTIFICATION)) {
+                    registerForRemoteNotificationsAfterPermission()
+                    notificationsRepository.addDeviceAsTarget().onFailure { error ->
+                        Napier.w("Failed to sync push target after permission grant: ${error.message}")
+                    }
+                }
+                _notificationPermissionPrimer.value = null
+            } catch (_: DeniedAlwaysException) {
+                _notificationPermissionPrimer.value = current.copy(
+                    isRequesting = false,
+                    settingsRequired = true,
+                )
+            } catch (_: DeniedException) {
+                _notificationPermissionPrimer.value = null
+            } catch (error: Throwable) {
+                Napier.w("Notification permission failed: ${error.message}")
+                _notificationPermissionPrimer.value = null
+            }
+        }
+    }
+
+    override fun dismissNotificationPermissionPrimer() {
+        if (_notificationPermissionPrimer.value?.isRequesting == true) return
+        scope.launch {
+            currentUserDataSource?.setNotificationPermissionPrimerHandled(true)
+        }
+        _notificationPermissionPrimer.value = null
+    }
+
+    override fun openNotificationPermissionSettings() {
+        permissionsController?.openAppSettings()
+    }
+
+    private fun onSuccessfulJoin() {
+        val permissionController = permissionsController ?: return
+        val dataSource = currentUserDataSource ?: return
+        if (_notificationPermissionPrimer.value != null || notificationPermissionRequestJob?.isActive == true) return
+
+        scope.launch {
+            if (dataSource.isNotificationPermissionPrimerHandledNow()) return@launch
+            if (permissionController.isPermissionGranted(Permission.REMOTE_NOTIFICATION)) return@launch
+            _notificationPermissionPrimer.value = PermissionPrimerState(
+                kind = PermissionPrimerKind.NOTIFICATIONS,
+            )
+        }
     }
 
     private fun showRegistrationPaymentLoading(message: String) {
@@ -780,6 +852,7 @@ class DefaultEventDetailComponent(
         clearPaymentResult = ::clearPaymentResult,
         setScheduleTrackedUserIds = { ids -> _scheduleTrackedUserIds.value = ids },
         setMessage = { message -> _errorState.value = ErrorMessage(message) },
+        onSuccessfulJoin = ::onSuccessfulJoin,
     )
     private val registrationActionHandler = EventRegistrationActionHandler(
         scope = scope,
@@ -830,6 +903,7 @@ class DefaultEventDetailComponent(
         clearPaymentResult = ::clearPaymentResult,
         presentPaymentSheet = ::presentPaymentSheet,
         setError = { message -> _errorState.value = ErrorMessage(message) },
+        onSuccessfulJoin = ::onSuccessfulJoin,
     )
 
     private fun ensureEventRegistrationQuestionsAnswered(onReady: () -> Unit): Boolean {

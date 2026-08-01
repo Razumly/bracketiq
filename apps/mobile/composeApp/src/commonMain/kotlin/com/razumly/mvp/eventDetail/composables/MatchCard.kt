@@ -103,6 +103,7 @@ private const val MATCH_CARD_CONTENT_VERTICAL_PADDING_DP = 4
 private const val MATCH_CARD_MANAGE_TOP_PADDING_DP = 24
 private const val MATCH_CARD_MANAGE_MIN_HEIGHT_DP = 110
 private const val MATCH_CARD_MANAGE_ADDITIONAL_LINE_HEIGHT_DP = 23
+private const val MATCH_CARD_MANAGE_ROW_HEIGHT_DP = 22
 private const val MATCH_CARD_INFO_MAX_WIDTH_FRACTION = 0.5f
 private const val MATCH_CARD_PILL_HEIGHT_DP = 40
 private const val MATCH_CARD_COMPACT_FONT_SIZE_SP = 14f
@@ -488,6 +489,9 @@ private fun MatchInfoSection(
     ) {
         Text(
             text = "M: ${match.match.matchId}",
+            modifier = Modifier
+                .fillMaxWidth()
+                .thenManageRowHeight(showManageOfficials),
             style = rowTextStyle,
             color = localColors.current.onPrimary,
             maxLines = 1,
@@ -496,6 +500,9 @@ private fun MatchInfoSection(
         HorizontalDivider(color = localColors.current.onPrimary)
         Text(
             "F: $fieldLabel",
+            modifier = Modifier
+                .fillMaxWidth()
+                .thenManageRowHeight(showManageOfficials),
             style = rowTextStyle,
             color = localColors.current.onPrimary,
             maxLines = 1,
@@ -506,6 +513,9 @@ private fun MatchInfoSection(
                 HorizontalDivider(color = localColors.current.onPrimary)
                 Text(
                     text = row.positionLabel,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(MATCH_CARD_MANAGE_ROW_HEIGHT_DP.dp),
                     style = rowTextStyle,
                     color = localColors.current.onPrimary,
                     maxLines = 1,
@@ -623,7 +633,9 @@ private fun TeamsSection(
                 HorizontalDivider(thickness = 1.dp, color = localColors.current.onPrimary)
                 Text(
                     text = row.officialLabel,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(MATCH_CARD_MANAGE_ROW_HEIGHT_DP.dp),
                     style = rowTextStyle,
                     color = localColors.current.onPrimary,
                     maxLines = 1,
@@ -653,6 +665,11 @@ private fun TeamRow(
         fontSizeSp = MATCH_CARD_COMPACT_FONT_SIZE_SP,
         lineHeightSp = MATCH_CARD_COMPACT_LINE_HEIGHT_SP,
     )
+    val manageBodyStyle = fixedBracketTextStyle(
+        base = MaterialTheme.typography.bodyLarge,
+        fontSizeSp = MATCH_CARD_MANAGE_FONT_SIZE_SP,
+        lineHeightSp = MATCH_CARD_MANAGE_LINE_HEIGHT_SP,
+    )
     val usesReferenceLabel = team == null
     val label = when {
         team != null -> resolveTeamLabel(team)
@@ -666,13 +683,17 @@ private fun TeamRow(
     }
 
     Row(
-        modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
+        modifier = Modifier
+            .fillMaxWidth()
+            .thenManageRowHeight(forceUniformStyle),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = label,
             modifier = Modifier.weight(1f),
             style = if (forceUniformStyle) {
-                emphasizedBodyStyle
+                manageBodyStyle
             } else {
                 if (usesReferenceLabel) {
                     compactBodyStyle
@@ -687,13 +708,20 @@ private fun TeamRow(
         if (points.isNotEmpty()) {
             Text(
                 " ${points.joinToString(separator = ", ")}",
-                style = compactBodyStyle,
+                style = if (forceUniformStyle) manageBodyStyle else compactBodyStyle,
                 color = localColors.current.onPrimary,
                 maxLines = 1,
             )
         }
     }
 }
+
+private fun Modifier.thenManageRowHeight(enabled: Boolean): Modifier =
+    if (enabled) {
+        height(MATCH_CARD_MANAGE_ROW_HEIGHT_DP.dp)
+    } else {
+        this
+    }
 
 @Composable
 private fun fixedBracketTextStyle(

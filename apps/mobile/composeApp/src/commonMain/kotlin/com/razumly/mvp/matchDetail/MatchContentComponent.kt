@@ -320,7 +320,7 @@ class DefaultMatchContentComponent(
     private var directScoreSyncJob: Job? = null
     private var directScoreEditVersion = 0L
     private var directScoreInvalidatedThroughVersion = 0L
-    private var pendingDirectScoreSync: PendingDirectScoreSync? = null
+    private val pendingDirectScoreSyncs = linkedMapOf<PendingDirectScoreSyncKey, PendingDirectScoreSync>()
     private var incidentQueueRetryJob: Job? = null
     private var incidentRetryAttempt = 0
     private var incidentQueueStartupDrainMatchId: String? = null
@@ -1085,9 +1085,21 @@ class DefaultMatchContentComponent(
             try {
                 val startTime = Clock.System.now()
                 val startedAt = startTime.toString()
+                val initializedScores = buildMap {
+                    putAll(activeSegment.scores)
+                    currentMatch.team1Id
+                        ?.trim()
+                        ?.takeIf(String::isNotBlank)
+                        ?.let { teamId -> if (teamId !in this) put(teamId, 0) }
+                    currentMatch.team2Id
+                        ?.trim()
+                        ?.takeIf(String::isNotBlank)
+                        ?.let { teamId -> if (teamId !in this) put(teamId, 0) }
+                }
                 val updatedSegments = currentMatch.segments.toMutableList().apply {
                     this[segmentIndex] = activeSegment.copy(
                         status = "IN_PROGRESS",
+                        scores = initializedScores,
                         startedAt = startedAt,
                         endedAt = null,
                     ).withTimerResumed(stoppedDurationSeconds = 0)
@@ -1948,12 +1960,19 @@ class DefaultMatchContentComponent(
         if (pendingSync.editVersion <= directScoreInvalidatedThroughVersion) {
             return
         }
-        pendingDirectScoreSync = pendingSync
+        pendingDirectScoreSyncs.keys
+            .filter { key ->
+                key.matchId == pendingSync.match.id && key.sequence == pendingSync.sequence
+            }
+            .forEach { key ->
+                pendingDirectScoreSyncs[key] = pendingDirectScoreSyncs.getValue(key).copy(match = pendingSync.match)
+            }
+        pendingDirectScoreSyncs[pendingSync.key] = pendingSync
         directScoreSyncJob?.cancel()
         directScoreSyncJob = scope.launch {
             delay(DIRECT_SCORE_DEBOUNCE_MS)
             directScoreSyncJob = null
-            syncPendingDirectScore(pendingSync.editVersion)
+            syncPendingDirectScores()
         }
     }
 
@@ -1966,35 +1985,42 @@ class DefaultMatchContentComponent(
         }
         directScoreSyncJob?.cancel()
         directScoreSyncJob = null
-        pendingDirectScoreSync = null
+        pendingDirectScoreSyncs.clear()
     }
 
-    private suspend fun syncPendingDirectScore(
-        editVersion: Long,
-    ) {
-        if (editVersion <= directScoreInvalidatedThroughVersion) {
-            return
-        }
-        val pendingSync = pendingDirectScoreSync?.takeIf { pending -> pending.editVersion == editVersion }
-            ?: return
-        pendingDirectScoreSync = null
+    private suspend fun syncPendingDirectScores() {
+        val pendingBatch = pendingDirectScoreSyncs.values
+            .filter { pending -> pending.editVersion > directScoreInvalidatedThroughVersion }
+        pendingDirectScoreSyncs.clear()
+        if (pendingBatch.isEmpty()) return
 
-        matchRepository.setMatchScore(
-            match = pendingSync.match,
-            segmentId = pendingSync.segmentId,
-            sequence = pendingSync.sequence,
-            eventTeamId = pendingSync.eventTeamId,
-            points = pendingSync.points,
-        ).onSuccess {
-            clearOptimisticAfterDirectScoreSync(editVersion)
-        }.onFailure { error ->
-            _errorState.value = "Failed to sync score: ${error.userMessage()}"
-            clearOptimisticAfterDirectScoreSync(editVersion)
+        val pendingGroups = pendingBatch
+            .groupBy { pending -> pending.key.matchId to pending.key.sequence }
+            .values
+        pendingGroups.forEach { segmentUpdates ->
+            val orderedSegmentUpdates = segmentUpdates.sortedWith(
+                compareBy<PendingDirectScoreSync> { pending -> pending.points }
+                    .thenBy { pending -> pending.editVersion },
+            )
+            for (pendingSync in orderedSegmentUpdates) {
+                val result = matchRepository.setMatchScore(
+                    match = pendingSync.match,
+                    segmentId = pendingSync.segmentId,
+                    sequence = pendingSync.sequence,
+                    eventTeamId = pendingSync.eventTeamId,
+                    points = pendingSync.points,
+                )
+                if (result.isFailure) {
+                    _errorState.value = "Failed to sync score: ${result.exceptionOrNull()?.userMessage()}"
+                    break
+                }
+            }
         }
+        clearOptimisticAfterDirectScoreSync(pendingBatch.maxOf { pending -> pending.editVersion })
     }
 
     private fun clearOptimisticAfterDirectScoreSync(editVersion: Long) {
-        if (pendingDirectScoreSync == null && directScoreEditVersion == editVersion) {
+        if (pendingDirectScoreSyncs.isEmpty() && directScoreEditVersion == editVersion) {
             _optimisticMatch.value = null
         }
     }
@@ -2028,39 +2054,24 @@ class DefaultMatchContentComponent(
                 }
             }
 
-            return if (finalize) {
-                matchRepository.updateMatchOperations(
-                    match = match,
-                    segmentOperations = match.toSegmentOperations(),
-                    incidentOperations = null,
-                    finalize = finalize,
-                    time = time,
-                ).onSuccess {
+            return matchRepository.updateMatchOperations(
+                match = match,
+                segmentOperations = match.toSegmentOperations(),
+                incidentOperations = null,
+                finalize = finalize,
+                time = time,
+            ).onSuccess {
+                _optimisticMatch.value = null
+            }.onFailure { error ->
+                if (!saveLocallyBeforeRemote) {
                     _optimisticMatch.value = null
-                }.onFailure { error ->
-                    if (!saveLocallyBeforeRemote) {
-                        _optimisticMatch.value = null
-                    }
-                    _errorState.value = if (finalize) {
-                        "Failed to finish match: ${error.userMessage()}"
-                    } else {
-                        "Failed to sync match: ${error.userMessage()}"
-                    }
-                }.getOrNull()
-            } else {
-                matchRepository.updateMatch(match).onSuccess {
-                    // Clear optimistic state since database is now up to date
-                    _optimisticMatch.value = null
-                }.onFailure { error ->
-                    _errorState.value = "Failed to sync match: ${error.userMessage()}"
-                    if (!saveLocallyBeforeRemote) {
-                        _optimisticMatch.value = null
-                    }
-                }.fold(
-                    onSuccess = { match },
-                    onFailure = { null },
-                )
-            }
+                }
+                _errorState.value = if (finalize) {
+                    "Failed to finish match: ${error.userMessage()}"
+                } else {
+                    "Failed to sync match: ${error.userMessage()}"
+                }
+            }.getOrNull()
     }
 
     private suspend fun processIncidentQueueUntilBlocked(
@@ -2934,6 +2945,19 @@ private data class PendingDirectScoreSync(
     val eventTeamId: String,
     val editVersion: Long,
     val points: Int,
+) {
+    val key: PendingDirectScoreSyncKey
+        get() = PendingDirectScoreSyncKey(
+            matchId = match.id,
+            sequence = sequence,
+            eventTeamId = eventTeamId,
+        )
+}
+
+private data class PendingDirectScoreSyncKey(
+    val matchId: String,
+    val sequence: Int,
+    val eventTeamId: String,
 )
 
 private class Cleanup(

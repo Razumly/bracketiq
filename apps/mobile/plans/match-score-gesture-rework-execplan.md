@@ -10,6 +10,8 @@
 
  The timer is the primary clock control. It is displayed as large flat text without a segment/status card; tapping the timer or its play/pause icon starts, stops, or resumes the clock. A routine clock stoppage does not change the match or segment status: both remain `IN_PROGRESS`, while clock-only metadata preserves the stop instant and accumulated stopped duration. Reset and segment confirmation remain hidden while regulation time is actively running, appearing only after the clock is stopped, the configured segment duration is reached, or the match is suspended.
 
+ Set-based matches default to a match summary whose scores are sets won. Before the match starts, both scores are unset rather than zero. Selecting a set changes only the presentation to that set's point score and highlights its winner only after the set is complete and untied. The match summary highlights a winner only when `actualEnd` is present and the completed-set totals are unequal. Timed matches always show their aggregate match score; segment selection never changes their main score or winner presentation.
+
  ## Progress
 
  - [x] (2026-07-14) Read the repository guidelines and `PLANS.md`; confirmed this feature requires a living ExecPlan under `plans/`.
@@ -39,6 +41,14 @@
 - [x] (2026-07-31 17:29Z) Implemented persistent clock-only stop/resume metadata without changing match or segment status, including backend metadata merging and local optimistic application.
 - [x] (2026-07-31 17:29Z) Flattened and enlarged the timer, removed redundant labels/containers and score-card incident buttons, and moved the conditionally visible incident action into Match Details.
 - [x] (2026-07-31 17:43Z) Added timer/action and partial-schedule-cache regressions, passed the focused component/UI/repository/backend suites, built and installed Android, and exercised start/stop/resume against the local backend and Pixel emulator.
+- [x] (2026-07-31 19:04Z) Reopened the plan for set-score presentation and confirmed that the existing UI incorrectly displayed the active set's points as the match score and trusted stored winner metadata for green styling.
+- [x] (2026-07-31 20:22Z) Implemented nullable pre-start scores, match-level sets-won totals, selectable set point scores, and score-derived untied winner presentation.
+- [x] (2026-07-31 20:22Z) Initialized the active set to 0-0 when play starts, reset the local QA fixture to absent pre-start scores, and verified `camka` remains host and assigned official.
+- [x] (2026-07-31 20:25Z) Passed 86 focused component/UI tests, compiled Android, and installed the build on `emulator-5554`; direct screen inspection is gated because the emulator is currently signed out and opens on Login.
+- [x] (2026-07-31 20:36Z) Moved the gesture scrim into an explicit topmost host layer so it uniformly covers and intercepts the close button, score content, and bottom action dock.
+- [x] (2026-07-31 20:49Z) Added compact per-set score targets below Actual Times, sourced from the match's resolved policy and omitted when no positive targets are configured; all five focused panel tests, Android compilation, diff hygiene, and emulator installation pass.
+- [x] (2026-07-31 21:10Z) Fixed cross-team score edits inside one debounce window so both absolute scores are retained and the lower score reaches the server before a target-reaching winner; moved every segment confirmation onto the atomic segment-operation endpoint.
+- [x] (2026-07-31 21:10Z) Passed all 71 focused component tests, installed Android on `emulator-5554`, and reproduced the exact fast interaction against the local backend: Gold reached 25 and Confirm was pressed before debounce completion, the screen advanced to Start Set 3, and Postgres stored Set 2 as complete at 11-25 without an HTTP 400.
 
  ## Surprises & Discoveries
 
@@ -78,6 +88,12 @@
   Evidence: `MatchSegmentMVP.status` uses lifecycle values such as `NOT_STARTED`, `IN_PROGRESS`, and `COMPLETE`; `completeCurrentSet()` writes `endedAt` when a segment is confirmed. The backend segment operation already supports metadata, which is the appropriate place for independent clock state.
 - Observation: The profile schedule endpoint is intentionally a narrow card projection, but `getMySchedule()` previously upserted those rows directly into Room and erased detailed `segments` and `incidents` fetched by the match endpoint.
   Evidence: During emulator testing, the backend retained Quarter 2 as `IN_PROGRESS` with `clockStoppedAt`, while the Room `MatchMVP` row had `segments = []`; the next UI action therefore rebuilt an unstarted segment and reset the clock.
+- Observation: The main score resolver currently returns the selected active segment's point score for `SETS`, while its winner helper accepts any stored winner id once the component calls the match finished.
+  Evidence: `matchDisplayScore()` indexes directly into `currentSegmentIndex` for set scoring, and `matchWinnerEventTeamIdForDisplay()` does not compare scores, check for a tie, or require `actualEnd`.
+- Observation: Merely assigning `Matches.team1Id` and `team2Id` was insufficient for the real schedule loader to hydrate the fixture teams because event teams are discovered through active event registrations.
+  Evidence: The list API returned null teams until active `TEAM`/`PARTICIPANT` rows were added for QA Blue and QA Gold; it then returned both canonical team ids and names while retaining empty score arrays and maps.
+- Observation: Direct score synchronization previously kept only one pending edit for the entire match. Editing Blue and then Gold inside the 500 ms debounce replaced Blue's pending value, so Android displayed 11-25 while the server completed the set at 0-25. The subsequent broad confirmation PATCH included legacy score arrays, and the backend correctly rejected changing that already-complete set to 11-25.
+  Evidence: The local fixture had Set 2 persisted as `0-25 COMPLETE` while the emulator displayed `11-25`; the reported response came from the backend's legacy set-score validator. After retaining pending edits by match, segment, and team, the same fixture persisted `11-25 COMPLETE` and advanced to Set 3.
 
  ## Decision Log
 
@@ -93,9 +109,12 @@
  - Decision: Supersede the 2026-07-14 vertical-card decision with a compact grid that fixes Home/Away team identities on the left and horizontally scrolls the segment columns.
    Rationale: The user selected this structure after reviewing a visual mockup. It supports many quarters, periods, or sets without repeatedly rendering team names or creating a very tall details panel.
    Date/Author: 2026-07-30, Codex.
- - Decision: Show the gesture hint only when official score controls are present, and store dismissal with `rememberSaveable` keyed by match id.
-   Rationale: Web/read-only viewers do not have the gesture interaction, and the hint should not reappear on recomposition or rotation after the official dismisses it.
-   Date/Author: 2026-07-14, Codex.
+- Decision: Show the gesture hint only when official score controls are present, and store dismissal with `rememberSaveable` keyed by match id.
+  Rationale: Web/read-only viewers do not have the gesture interaction, and the hint should not reappear on recomposition or rotation after the official dismisses it.
+  Date/Author: 2026-07-14, Codex.
+- Decision: Render the gesture hint as the final, explicitly elevated child of the complete match foreground rather than as a sibling before persistent controls.
+  Rationale: The scrim is a modal instruction state; every underlying control must be uniformly dimmed and must not receive pointer input until the user dismisses the hint.
+  Date/Author: 2026-07-31, Codex.
  - Decision: Derive compact headers from the canonical segment label (`Q1`, `P1`, `S1`, or `H1`) and use explicit `resultType` for `OT` and `SO`.
    Rationale: Compact headers preserve horizontal space, while explicit result metadata avoids silently misclassifying regulation segments.
    Date/Author: 2026-07-30, Codex.
@@ -108,9 +127,15 @@
  - Decision: Derive both edge cues from `ScrollState.canScrollBackward` and `ScrollState.canScrollForward`.
    Rationale: The cues now describe hidden content precisely: only right before scrolling, both while content is hidden on both sides, and only left at the end.
    Date/Author: 2026-07-30, Codex.
- - Decision: Treat `matchFinished` as a required condition for full-team winner highlighting.
-   Rationale: Segment winner metadata can exist during regulation; only a finalized match result should color an entire team score surface or fixed team row as the winner.
-   Date/Author: 2026-07-30, Codex.
+- Decision: Treat `matchFinished` as a required condition for full-team winner highlighting.
+  Rationale: Segment winner metadata can exist during regulation; only a finalized match result should color an entire team score surface or fixed team row as the winner.
+  Date/Author: 2026-07-30, Codex.
+- Decision: Supersede the generic `matchFinished` winner gate with score-derived presentation rules keyed to `actualEnd` for match summaries and segment completion for an explicitly selected set.
+  Rationale: A stored winner id can be stale or describe a segment, and a tie has no winner. Comparing the exact scores being displayed prevents either team from turning green unless that displayed result is complete and unequal.
+  Date/Author: 2026-07-31, Codex.
+- Decision: Represent an unopened set with absent segment score keys and render absent scores as an em dash; initialize both team keys to zero atomically when the set starts.
+  Rationale: Zero is a real score after play begins, while an absent value communicates that the event has not started and avoids declaring an artificial 0-0 result.
+  Date/Author: 2026-07-31, Codex.
  - Decision: Use one confirmation instant for the segment `endedAt` value and, when final, the match finalization time.
    Rationale: The active timer and match lifecycle end atomically from the user’s confirmation, avoiding a running final-segment clock or mismatched timestamps.
    Date/Author: 2026-07-30, Codex.
@@ -135,6 +160,15 @@
 - Decision: Merge the narrow schedule match projection with cached detailed match state before a batched Room upsert.
   Rationale: Schedule status and score summaries can stay current without allowing an unrelated background refresh to erase canonical segment/timer metadata or pending incident history.
   Date/Author: 2026-07-31, Codex.
+- Decision: Render score limits from `matchRulesSnapshot` when present, otherwise `resolvedMatchRules`, and show only positive per-set targets immediately below Actual Times.
+  Rationale: The match snapshot is the durable match-specific policy, while hiding an empty block preserves the compact details layout for matches without configured limits.
+  Date/Author: 2026-07-31, Codex.
+- Decision: Retain one pending direct-score update per match, segment, and team, and send all edits for a segment from lower to higher score.
+  Rationale: A target-reaching score can cause the server to complete a set immediately. Sending the losing score first prevents a valid local result such as 11-25 from becoming 0-25 solely because both teams were edited during the same debounce window.
+  Date/Author: 2026-07-31, Codex.
+- Decision: Confirm both final and non-final segments through `updateMatchOperations` with explicit segment operations instead of using the broad legacy match update for non-final segments.
+  Rationale: Confirmation is an atomic segment lifecycle change. The operation endpoint validates the submitted canonical segment result and avoids conflicting with an earlier auto-completion observed by the direct-score endpoint.
+  Date/Author: 2026-07-31, Codex.
 
  ## Outcomes & Retrospective
 
@@ -143,6 +177,12 @@ The original score-gesture work remains intact. The 2026-07-30 revisions replace
 Runtime verification used the local `Official Match View QA — camka14` fixture. One completed-fixture check rendered a stable `Final` clock instead of `Running`, colored only the finalized match winner, and kept Quarter 4 selected after reopening. A second clean end-to-end confirmation started from three complete quarters and an in-progress fourth quarter: the operation returned HTTP 200, stored Quarter 4 and the match as `COMPLETE`, gave both records the timestamp `2026-07-30 23:41:52.363`, displayed `Final 00:00`, and colored only QA Blue after its 9–8 overall win. The final verification reopened the reset fixture from its schedule card with QA Blue, QA Gold, Match 1, and Quarter 1 already present on the destination, displayed a compact flat score matrix with uniformly transparent Q1-Q4 columns, and completed the host match-save path without the prior division error. The backend and refreshed Room rows both retained `qa-official-match-camka14-open`; the backend retained four regulation segments and Samuel Razumovskiy as the checked-in official. The bottom field/details controls use the standard compact button height.
 
 The 2026-07-31 timer revision keeps ordinary clock stoppages inside the normal `IN_PROGRESS` lifecycle. Emulator testing displayed the large flat clock with play/stop controls and no Ready, Running, Stopped, or Paused status label. Starting Quarter 2 advanced the clock; stopping it froze the display and revealed Reset Timer and Confirm Quarter 2. The local backend retained both the match and segment as `IN_PROGRESS`, kept `endedAt` null, and stored `clockStoppedAt` plus accumulated stopped seconds in segment metadata. A schedule-cache regression found during this run is also fixed: narrow schedule rows now preserve cached detailed segments/incidents via one batched Room lookup. The focused repository/component/UI suites and the 64-test backend schedule route suite pass.
+
+The set-score revision makes the large team scores describe the selected result unambiguously. An unstarted match renders em dashes, the default started view counts completed set wins, and the explicit Match/Set chips switch between that summary and a chosen set's point score. A team surface becomes green only when the exact displayed result is complete and unequal: `actualEnd` is required for match-level sets-won or timed aggregate results, while a selected set requires segment completion. Null winner and null team ids are explicitly excluded from winner styling. The start operation initializes only the active set to 0-0. The local QA event now has canonical QA Blue and QA Gold event registrations, five unopened score maps, and `camka` as both host and assigned referee. The focused 86-test suite, Android compile, and emulator install pass; runtime visual navigation remains gated only by the emulator's signed-out session.
+
+Match Details now displays the configured match-specific set targets immediately below Actual Times as a compact wrapping row (`S1: 25` through a distinct deciding-set target such as `S5: 15`). Non-set matches and set matches without positive targets render no score-limit heading or empty space. Five focused panel tests pass, Android compiles, and the APK installs on `emulator-5554`.
+
+The set-confirmation regression was caused by a client synchronization race rather than an invalid 11-25 result or bad division data. Pending direct edits are now keyed per team and ordered so the target-reaching winner is sent last, while segment confirmation always uses the atomic operation contract. The 71-test component suite passes. Live Android verification used `Official Match View QA — camka14`: after resetting Set 2 to 11-24, tapping Gold and immediately confirming advanced to Start Set 3 with no error. The database retained Blue 11, Gold 25, `status = COMPLETE`, and QA Gold as the Set 2 winner. The local backend remains available on port 3000.
 
  ## Context and Orientation
 
@@ -249,3 +289,6 @@ Opening Match Details on a four-quarter match shows one fixed Home/Away team col
  Plan revision note (2026-07-30): Final runtime acceptance now records the clean sequence-13 Quarter 4 PATCH, matching segment/match end timestamps, the stopped `Final 00:00` clock, and winner-only final styling. The earlier 409 is retained as a QA outbox-reset artifact so future reruns preserve the client operation high-water mark.
  Plan revision note (2026-07-30): Added schedule-card destination preloading, opaque division-id preservation, compact neutral segment columns, and real-fixture Android verification. The plan now records that the reported division rejection originated in client DTO normalization rather than the backend fixture.
  Plan revision note (2026-07-31): Reopened for the timer-centered official controls. The revision explicitly separates ordinary clock stoppage from lifecycle status, moves clock state into durable metadata, removes redundant timer/incident controls, and adds state-dependent visibility and Android runtime acceptance.
+ Plan revision note (2026-07-31): Corrected the gesture hint stacking after visual review. The full-screen scrim is now the final elevated child over the complete match foreground, and the focused test proves taps over the bottom dock dismiss the overlay without triggering the covered action.
+ Plan revision note (2026-07-31): Added match-specific per-set score targets below Actual Times, with snapshot-first rule resolution, compact wrapping presentation, empty-state omission, and focused Compose regression coverage.
+ Plan revision note (2026-07-31): Diagnosed and fixed the cross-team direct-score debounce race and moved non-final set confirmation onto the atomic segment-operation endpoint. The plan records the focused tests plus exact emulator and database verification of the formerly failing 11-25 Set 2 confirmation.

@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.razumly.mvp.core.util.jsonMVP
 import com.razumly.mvp.core.util.newId
@@ -52,6 +53,10 @@ class CurrentUserDataSource(
     private val dismissedAppReleaseKey = stringPreferencesKey("dismissed_app_release_key")
     private val legacyCompletedGuideIds = stringPreferencesKey("completed_guide_ids")
     private val matchOperationDeviceId = stringPreferencesKey("match_operation_device_id")
+    private val locationPermissionPrimerSuppressedKey =
+        booleanPreferencesKey("location_permission_primer_suppressed")
+    private val notificationPermissionPrimerHandledKey =
+        booleanPreferencesKey("notification_permission_primer_handled")
 
     suspend fun saveUserId(userId: String) {
         dataStore.edit { dataStore ->
@@ -111,6 +116,24 @@ class CurrentUserDataSource(
         dataStore.edit { preferences ->
             preferences.remove(pushToken)
             preferences.remove(pushTarget)
+        }
+    }
+
+    suspend fun isLocationPermissionPrimerSuppressedNow(): Boolean =
+        dataStore.data.first()[locationPermissionPrimerSuppressedKey] ?: false
+
+    suspend fun setLocationPermissionPrimerSuppressed(suppressed: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[locationPermissionPrimerSuppressedKey] = suppressed
+        }
+    }
+
+    suspend fun isNotificationPermissionPrimerHandledNow(): Boolean =
+        dataStore.data.first()[notificationPermissionPrimerHandledKey] ?: false
+
+    suspend fun setNotificationPermissionPrimerHandled(handled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[notificationPermissionPrimerHandledKey] = handled
         }
     }
 

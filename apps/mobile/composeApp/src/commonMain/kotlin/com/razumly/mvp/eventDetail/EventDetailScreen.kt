@@ -45,6 +45,7 @@ import com.razumly.mvp.core.presentation.EventDetailInitialTab
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
+import com.razumly.mvp.core.presentation.composables.PermissionPrimerDialog
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.util.LocalLoadingHandler
@@ -76,6 +77,7 @@ fun EventDetailScreen(
     val eventTags by component.eventTags.collectAsState()
     val divisionTypeParameters by component.divisionTypeParameters.collectAsState()
     val currentUser by component.currentUser.collectAsState()
+    val notificationPermissionPrimer by component.notificationPermissionPrimer.collectAsState()
     val showEventTeamCheckInDialog by component.showEventTeamCheckInDialog.collectAsState()
     val eventTeamCheckInSaving by component.eventTeamCheckInSaving.collectAsState()
     val currentUserManagedEventTeamId by component.currentUserManagedEventTeamId.collectAsState()
@@ -1202,6 +1204,14 @@ fun EventDetailScreen(
                 onDismissBillingAddress = component::dismissBillingAddressPrompt,
             ),
         )
+        notificationPermissionPrimer?.let { state ->
+            PermissionPrimerDialog(
+                state = state,
+                onNext = component::requestNotificationPermission,
+                onNotNow = component::dismissNotificationPermissionPrimer,
+                onOpenSettings = component::openNotificationPermissionSettings,
+            )
+        }
         }
     }
 }

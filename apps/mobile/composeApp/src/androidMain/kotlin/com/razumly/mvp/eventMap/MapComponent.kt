@@ -25,6 +25,9 @@ import com.razumly.mvp.core.util.getBounds
 import dev.icerock.moko.geo.LocationTracker
 import dev.icerock.moko.permissions.DeniedAlwaysException
 import dev.icerock.moko.permissions.DeniedException
+import dev.icerock.moko.permissions.Permission
+import dev.icerock.moko.permissions.PermissionsController
+import dev.icerock.moko.permissions.location.LOCATION
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -50,7 +53,8 @@ actual class MapComponent(
     componentContext: ComponentContext,
     private val eventRepository: IEventRepository,
     context: Context,
-    val locationTracker: LocationTracker
+    val locationTracker: LocationTracker,
+    private val permissionsController: PermissionsController,
 ) : ComponentContext by componentContext {
 
     private val logTag = "MapComponent"
@@ -158,6 +162,14 @@ actual class MapComponent(
                                     tag = logTag,
                                 )
                             }
+                        return@collectLatest
+                    }
+
+                    if (!permissionsController.isPermissionGranted(Permission.LOCATION)) {
+                        Napier.d(
+                            message = "Location tracking skipped because permission is not granted",
+                            tag = logTag,
+                        )
                         return@collectLatest
                     }
 

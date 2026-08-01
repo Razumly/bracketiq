@@ -28,6 +28,7 @@ internal class EventJoinExecutionCoordinator(
         showLoading: (String) -> Unit,
         hideLoading: () -> Unit,
         setError: (String) -> Unit,
+        onSuccessfulJoin: suspend () -> Unit = {},
     ) {
         try {
             val joiningWaitlist = !event.teamSignup && isEventFull
@@ -43,6 +44,7 @@ internal class EventJoinExecutionCoordinator(
                     event.id,
                     "Failed to refresh event after child registration.",
                 )
+                onSuccessfulJoin()
                 setError(registrationFlowCoordinator.childRegistrationResultMessage(child, registration))
             }.onFailure { throwable ->
                 setError(throwable.userMessage("Failed to register child."))
@@ -122,6 +124,7 @@ internal class EventJoinExecutionCoordinator(
         setPendingJoinConfirmationTarget: (JoinConfirmationTarget?) -> Unit,
         showLoading: (String) -> Unit,
         setError: (String) -> Unit,
+        onSuccessfulJoin: suspend () -> Unit = {},
     ) {
         val paymentPlan = resolveEffectivePaymentPlan(
             event = event,
@@ -157,6 +160,7 @@ internal class EventJoinExecutionCoordinator(
                     rollbackUserJoinAfterBillingFailure = rollbackUserJoinAfterBillingFailure,
                     refreshAfterParticipantMutation = refreshAfterParticipantMutation,
                     clearRegistrationProgress = clearRegistrationProgress,
+                    onSuccessfulJoin = onSuccessfulJoin,
                     showLoading = showLoading,
                     setError = setError,
                 )
@@ -169,6 +173,7 @@ internal class EventJoinExecutionCoordinator(
                     addCurrentUserToEvent = addCurrentUserToEvent,
                     refreshAfterParticipantMutation = refreshAfterParticipantMutation,
                     clearRegistrationProgress = clearRegistrationProgress,
+                    onSuccessfulJoin = onSuccessfulJoin,
                     showLoading = showLoading,
                     setError = setError,
                 )
@@ -183,6 +188,7 @@ internal class EventJoinExecutionCoordinator(
                             "Failed to refresh event after joining.",
                         )
                         clearRegistrationProgress()
+                        onSuccessfulJoin()
                         registrationFlowCoordinator.selfRegistrationResultMessage(registration)?.let(setError)
                     }.onFailure { throwable ->
                         setError(throwable.userMessage())
@@ -252,6 +258,7 @@ internal class EventJoinExecutionCoordinator(
         setPendingJoinConfirmationTarget: (JoinConfirmationTarget?) -> Unit,
         showLoading: (String) -> Unit,
         setError: (String) -> Unit,
+        onSuccessfulJoin: suspend () -> Unit = {},
     ) {
         val paymentPlan = resolveEffectivePaymentPlan(
             event = event,
@@ -287,6 +294,7 @@ internal class EventJoinExecutionCoordinator(
                     rollbackTeamJoinAfterBillingFailure = rollbackTeamJoinAfterBillingFailure,
                     refreshAfterParticipantMutation = refreshAfterParticipantMutation,
                     clearRegistrationProgress = clearRegistrationProgress,
+                    onSuccessfulJoin = onSuccessfulJoin,
                     showLoading = showLoading,
                     setError = setError,
                 )
@@ -300,6 +308,7 @@ internal class EventJoinExecutionCoordinator(
                     addTeamToEvent = addTeamToEvent,
                     refreshAfterParticipantMutation = refreshAfterParticipantMutation,
                     clearRegistrationProgress = clearRegistrationProgress,
+                    onSuccessfulJoin = onSuccessfulJoin,
                     showLoading = showLoading,
                     setError = setError,
                 )
@@ -314,6 +323,7 @@ internal class EventJoinExecutionCoordinator(
                             "Failed to refresh event after team join.",
                         )
                         clearRegistrationProgress()
+                        onSuccessfulJoin()
                     }.onFailure { throwable ->
                         setError(throwable.userMessage())
                     }
@@ -359,6 +369,7 @@ internal class EventJoinExecutionCoordinator(
         clearRegistrationProgress: suspend () -> Unit,
         showLoading: (String) -> Unit,
         setError: (String) -> Unit,
+        onSuccessfulJoin: suspend () -> Unit,
     ) {
         showLoading("Joining Event ...")
         addCurrentUserToEvent(event, selectedDivisionId, weeklyOccurrence)
@@ -369,6 +380,7 @@ internal class EventJoinExecutionCoordinator(
                     "Failed to refresh event after joining.",
                 )
                 clearRegistrationProgress()
+                onSuccessfulJoin()
                 registrationFlowCoordinator.selfRegistrationResultMessage(registration)
                     ?.let(setError)
                     ?: setError("Joined. Manual payment bill created. Upload proof from your Profile.")
@@ -392,6 +404,7 @@ internal class EventJoinExecutionCoordinator(
         clearRegistrationProgress: suspend () -> Unit,
         showLoading: (String) -> Unit,
         setError: (String) -> Unit,
+        onSuccessfulJoin: suspend () -> Unit,
     ) {
         showLoading("Joining Event ...")
         addTeamToEvent(event, team.team, selectedDivisionId, weeklyOccurrence)
@@ -402,6 +415,7 @@ internal class EventJoinExecutionCoordinator(
                     "Failed to refresh event after team join.",
                 )
                 clearRegistrationProgress()
+                onSuccessfulJoin()
                 setError("Team joined. Manual payment bill created. Upload proof from your Profile.")
             }.onFailure { throwable ->
                 setError(throwable.userMessage())
@@ -429,6 +443,7 @@ internal class EventJoinExecutionCoordinator(
         clearRegistrationProgress: suspend () -> Unit,
         showLoading: (String) -> Unit,
         setError: (String) -> Unit,
+        onSuccessfulJoin: suspend () -> Unit,
     ) {
         var joinedByThisFlow = false
         showLoading("Joining Event ...")
@@ -462,6 +477,9 @@ internal class EventJoinExecutionCoordinator(
                     "Failed to refresh event after starting payment plan.",
                 )
                 clearRegistrationProgress()
+                if (joinedByThisFlow) {
+                    onSuccessfulJoin()
+                }
                 setError(
                     registrationFlowCoordinator.paymentPlanBillSuccessMessage(
                         status = status,
@@ -499,6 +517,7 @@ internal class EventJoinExecutionCoordinator(
         clearRegistrationProgress: suspend () -> Unit,
         showLoading: (String) -> Unit,
         setError: (String) -> Unit,
+        onSuccessfulJoin: suspend () -> Unit,
     ) {
         var joinedByThisFlow = false
         showLoading("Joining Event ...")
@@ -526,6 +545,9 @@ internal class EventJoinExecutionCoordinator(
                 "Failed to refresh event after starting team payment plan.",
             )
             clearRegistrationProgress()
+            if (joinedByThisFlow) {
+                onSuccessfulJoin()
+            }
             setError(
                 registrationFlowCoordinator.paymentPlanBillSuccessMessage(
                     status = status,

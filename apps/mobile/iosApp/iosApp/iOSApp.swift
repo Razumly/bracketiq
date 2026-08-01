@@ -41,7 +41,13 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         IQKeyboardManager.shared.isEnabled = false
 
         IosNotificationBridgeKt.initializeIosNotificationManager()
-        evaluateNotificationAuthorization(application: application)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(registerForRemoteNotificationsAfterPermission),
+            name: .mvpRegisterForRemoteNotificationsAfterPermission,
+            object: nil
+        )
+        refreshNotificationRegistration(application: application)
         
         UserDefaults.standard.set(true, forKey: AppDelegate.appForegroundKey)
 
@@ -183,7 +189,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func applicationDidBecomeActive(_ application: UIApplication) {
         UserDefaults.standard.set(true, forKey: AppDelegate.appForegroundKey)
-        evaluateNotificationAuthorization(application: application)
+        refreshNotificationRegistration(application: application)
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
@@ -201,6 +207,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             return
         }
         UserDefaults.standard.removeObject(forKey: AppDelegate.fcmTokenDefaultsKey)
+    }
+
+    @objc private func registerForRemoteNotificationsAfterPermission() {
+        DispatchQueue.main.async {
+            UIApplication.shared.registerForRemoteNotifications()
+        }
     }
 
     private func notificationDeepLinkUrl(from userInfo: [AnyHashable: Any]) -> URL? {
@@ -225,21 +237,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         return nil
     }
 
-    private func evaluateNotificationAuthorization(application: UIApplication) {
+    private func refreshNotificationRegistration(application: UIApplication) {
         let center = UNUserNotificationCenter.current()
         center.getNotificationSettings { settings in
             switch settings.authorizationStatus {
             case .notDetermined:
-                center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-                    if let error {
-                        print("Notification authorization request failed: \(error.localizedDescription)")
-                    } else {
-                        print("Notification authorization prompt result: granted=\(granted)")
-                    }
-                    DispatchQueue.main.async {
-                        application.registerForRemoteNotifications()
-                    }
-                }
+                print("Notification authorization not determined. Waiting for the in-app permission primer.")
             case .authorized, .provisional, .ephemeral:
                 print("Notification authorization already granted: \(self.authorizationStatusName(settings.authorizationStatus))")
                 DispatchQueue.main.async {
@@ -279,6 +282,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
 extension Notification.Name {
     static let deepLinkReceived = Notification.Name("deepLinkReceived")
+    static let mvpRegisterForRemoteNotificationsAfterPermission =
+        Notification.Name("MVPRegisterForRemoteNotificationsAfterPermission")
 }
 
 private extension Dictionary where Key == String, Value == String {

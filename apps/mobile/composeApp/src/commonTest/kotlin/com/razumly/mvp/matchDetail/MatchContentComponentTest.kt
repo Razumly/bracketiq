@@ -51,6 +51,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.minutes
@@ -61,47 +62,114 @@ private const val TEST_ACTUAL_START = "2026-06-08T07:52:35.109Z"
 
 class MatchContentComponentTest : MainDispatcherTest() {
     @Test
-    fun given_set_scoring_when_displaying_main_score_then_current_segment_score_is_returned() {
+    fun given_unstarted_set_match_when_displaying_score_then_scores_are_unset() {
         val segments = listOf(
-            createSegment(sequence = 1, team1Score = 21, team2Score = 18),
-            createSegment(sequence = 2, team1Score = 7, team2Score = 11),
+            createSegment(sequence = 1, team1Score = 0, team2Score = 0),
         )
 
-        val team1Score = matchDisplayScore(
+        val presentation = resolveMatchScorePresentation(
             scoringModel = "SETS",
             segments = segments,
-            teamId = "team-a",
-            legacyScores = listOf(21, 7),
-            currentSegmentIndex = 1,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            team1LegacyScores = listOf(0),
+            team2LegacyScores = listOf(0),
+            actualStart = null,
+            actualEnd = null,
+            selectedSegmentIndex = null,
         )
 
-        assertEquals(7, team1Score)
+        assertNull(presentation.team1Score)
+        assertNull(presentation.team2Score)
+        assertNull(presentation.winnerEventTeamId)
     }
 
     @Test
-    fun given_period_scoring_when_displaying_main_score_then_full_match_score_is_returned() {
+    fun given_set_scoring_when_displaying_match_summary_then_completed_set_wins_are_returned() {
         val segments = listOf(
-            createSegment(sequence = 1, team1Score = 14, team2Score = 10),
-            createSegment(sequence = 2, team1Score = 7, team2Score = 3),
+            createSegment(sequence = 1, team1Score = 21, team2Score = 18).copy(status = "COMPLETE"),
+            createSegment(sequence = 2, team1Score = 7, team2Score = 11).copy(status = "COMPLETE"),
+            createSegment(sequence = 3, team1Score = 15, team2Score = 8).copy(status = "COMPLETE"),
         )
 
-        val team1Score = matchDisplayScore(
-            scoringModel = "PERIODS",
+        val presentation = resolveMatchScorePresentation(
+            scoringModel = "SETS",
             segments = segments,
-            teamId = "team-a",
-            legacyScores = listOf(14, 7),
-            currentSegmentIndex = 1,
-        )
-        val team2Score = matchDisplayScore(
-            scoringModel = "PERIODS",
-            segments = segments,
-            teamId = "team-b",
-            legacyScores = listOf(10, 3),
-            currentSegmentIndex = 1,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            team1LegacyScores = listOf(21, 7, 15),
+            team2LegacyScores = listOf(18, 11, 8),
+            actualStart = TEST_ACTUAL_START,
+            actualEnd = "2026-06-08T08:52:35.109Z",
+            selectedSegmentIndex = null,
         )
 
-        assertEquals(21, team1Score)
-        assertEquals(13, team2Score)
+        assertEquals(2, presentation.team1Score)
+        assertEquals(1, presentation.team2Score)
+        assertEquals("team-a", presentation.winnerEventTeamId)
+    }
+
+    @Test
+    fun given_completed_set_selected_when_displaying_score_then_set_points_and_winner_are_returned() {
+        val presentation = resolveMatchScorePresentation(
+            scoringModel = "SETS",
+            segments = listOf(
+                createSegment(sequence = 1, team1Score = 25, team2Score = 22).copy(status = "COMPLETE"),
+                createSegment(sequence = 2, team1Score = 0, team2Score = 0),
+            ),
+            team1Id = "team-a",
+            team2Id = "team-b",
+            team1LegacyScores = listOf(25, 0),
+            team2LegacyScores = listOf(22, 0),
+            actualStart = TEST_ACTUAL_START,
+            actualEnd = null,
+            selectedSegmentIndex = 0,
+        )
+
+        assertEquals(25, presentation.team1Score)
+        assertEquals(22, presentation.team2Score)
+        assertEquals("team-a", presentation.winnerEventTeamId)
+    }
+
+    @Test
+    fun given_tied_completed_set_selected_when_displaying_score_then_no_winner_is_returned() {
+        val presentation = resolveMatchScorePresentation(
+            scoringModel = "SETS",
+            segments = listOf(
+                createSegment(sequence = 1, team1Score = 25, team2Score = 25).copy(status = "COMPLETE"),
+            ),
+            team1Id = "team-a",
+            team2Id = "team-b",
+            team1LegacyScores = listOf(25),
+            team2LegacyScores = listOf(25),
+            actualStart = TEST_ACTUAL_START,
+            actualEnd = null,
+            selectedSegmentIndex = 0,
+        )
+
+        assertNull(presentation.winnerEventTeamId)
+    }
+
+    @Test
+    fun given_timed_match_when_segment_is_selected_then_aggregate_score_and_final_winner_are_returned() {
+        val presentation = resolveMatchScorePresentation(
+            scoringModel = "PERIODS",
+            segments = listOf(
+                createSegment(sequence = 1, team1Score = 14, team2Score = 10),
+                createSegment(sequence = 2, team1Score = 7, team2Score = 3),
+            ),
+            team1Id = "team-a",
+            team2Id = "team-b",
+            team1LegacyScores = listOf(14, 7),
+            team2LegacyScores = listOf(10, 3),
+            actualStart = TEST_ACTUAL_START,
+            actualEnd = "2026-06-08T08:52:35.109Z",
+            selectedSegmentIndex = 1,
+        )
+
+        assertEquals(21, presentation.team1Score)
+        assertEquals(13, presentation.team2Score)
+        assertEquals("team-a", presentation.winnerEventTeamId)
     }
 
     @Test
@@ -141,7 +209,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
             team2Points = listOf(0, 0),
             setResults = listOf(0, 0),
             segments = listOf(
-                createSegment(sequence = 1, team1Score = 0, team2Score = 0),
+                createSegment(sequence = 1, team1Score = 0, team2Score = 0).copy(scores = emptyMap()),
                 createSegment(sequence = 2, team1Score = 0, team2Score = 0),
             ),
         )
@@ -209,6 +277,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
         assertEquals("IN_PROGRESS", operation.lifecycle?.status)
         assertEquals("IN_PROGRESS", operation.segmentOperations.single().status)
         assertTrue(operation.segmentOperations.single().startedAt?.isNotBlank() == true)
+        assertEquals(mapOf("team-a" to 0, "team-b" to 0), operation.segmentOperations.single().scores)
         val savedMatch = harness.matchRepository.savedMatches.last()
         assertEquals("IN_PROGRESS", savedMatch.status)
         assertTrue(savedMatch.actualStart?.isNotBlank() == true)
@@ -558,6 +627,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
             team1Scores = listOf(21, 9, 0),
             team2Scores = listOf(18, 11, 0),
             currentSegmentIndex = 1,
+            matchStarted = true,
         )
 
         assertEquals(3, trackerEntries.size)
@@ -567,8 +637,32 @@ class MatchContentComponentTest : MainDispatcherTest() {
         assertTrue(trackerEntries[0].isComplete)
         assertFalse(trackerEntries[0].isActive)
         assertTrue(trackerEntries[1].isActive)
-        assertEquals(0, trackerEntries[2].team1Score)
-        assertEquals(0, trackerEntries[2].team2Score)
+        assertNull(trackerEntries[2].team1Score)
+        assertNull(trackerEntries[2].team2Score)
+    }
+
+    @Test
+    fun given_match_has_not_started_when_building_segment_tracker_then_scores_are_unset() {
+        val trackerEntries = buildMatchSegmentTrackerEntries(
+            rules = ResolvedMatchRulesMVP(
+                scoringModel = "SETS",
+                segmentCount = 2,
+                segmentLabel = "Set",
+            ),
+            segmentBaseLabel = "Set",
+            segments = listOf(
+                createSegment(sequence = 1, team1Score = 0, team2Score = 0),
+                createSegment(sequence = 2, team1Score = 0, team2Score = 0),
+            ),
+            team1Id = "team-a",
+            team2Id = "team-b",
+            team1Scores = listOf(0, 0),
+            team2Scores = listOf(0, 0),
+            currentSegmentIndex = 0,
+            matchStarted = false,
+        )
+
+        assertTrue(trackerEntries.all { entry -> entry.team1Score == null && entry.team2Score == null })
     }
 
     @Test
@@ -597,6 +691,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
             team1Scores = listOf(15),
             team2Scores = listOf(10),
             currentSegmentIndex = 0,
+            matchStarted = true,
         )
 
         assertFalse(showSegmentBreakdown)
@@ -620,6 +715,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
             team1Scores = listOf(7, 0, 0, 0),
             team2Scores = listOf(3, 0, 0, 0),
             currentSegmentIndex = 0,
+            matchStarted = true,
         )
 
         assertTrue(trackerEntries.isEmpty())
@@ -1435,6 +1531,62 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun given_both_teams_change_inside_debounce_when_scores_sync_then_losing_score_is_sent_before_winning_target() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
+            eventType = EventType.LEAGUE,
+            usesSets = true,
+            setsPerMatch = 1,
+            pointsToVictory = listOf(25),
+        )
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = true,
+        ).copy(
+            actualStart = TEST_ACTUAL_START,
+            team1Points = listOf(10),
+            team2Points = listOf(24),
+            setResults = listOf(0),
+            segments = listOf(createSegment(sequence = 1, team1Score = 10, team2Score = 24)),
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+        )
+
+        advance()
+
+        harness.component.updateScore(isTeam1 = true, increment = true)
+        testDispatcher.scheduler.runCurrent()
+        harness.component.updateScore(isTeam1 = false, increment = true)
+        testDispatcher.scheduler.runCurrent()
+
+        testDispatcher.scheduler.advanceTimeBy(499)
+        testDispatcher.scheduler.runCurrent()
+        assertTrue(harness.matchRepository.scoreSetCalls.isEmpty())
+
+        testDispatcher.scheduler.advanceTimeBy(1)
+        advance()
+
+        assertEquals(
+            listOf("team-a" to 11, "team-b" to 25),
+            harness.matchRepository.scoreSetCalls.map { call -> call.eventTeamId to call.points },
+        )
+        assertTrue(harness.matchRepository.scoreSetCalls.all { call ->
+            call.match.team1Points == listOf(11) && call.match.team2Points == listOf(25)
+        })
+    }
+
+    @Test
     fun given_direct_score_update_before_local_save_completes_when_confirming_segment_then_debounced_score_post_is_not_sent() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
         val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c"))
@@ -1475,6 +1627,60 @@ class MatchContentComponentTest : MainDispatcherTest() {
         assertEquals(listOf(1), confirmationSync.match.team1Points)
         assertEquals("COMPLETE", confirmationSync.match.segments.first().status)
         assertEquals(1, confirmationSync.match.segments.first().scores["team-a"])
+    }
+
+    @Test
+    fun given_winning_set_point_is_confirmed_inside_debounce_then_atomic_confirmation_keeps_both_scores() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
+            eventType = EventType.LEAGUE,
+            usesSets = true,
+            setsPerMatch = 3,
+            pointsToVictory = listOf(25, 25, 15),
+        )
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = true,
+        ).copy(
+            actualStart = TEST_ACTUAL_START,
+            team1Points = listOf(25, 11, 0),
+            team2Points = listOf(3, 24, 0),
+            setResults = listOf(1, 0, 0),
+            segments = listOf(
+                createSegment(sequence = 1, team1Score = 25, team2Score = 3).copy(status = "COMPLETE"),
+                createSegment(sequence = 2, team1Score = 11, team2Score = 24).copy(status = "IN_PROGRESS"),
+                createSegment(sequence = 3, team1Score = 0, team2Score = 0),
+            ),
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+        )
+
+        advance()
+
+        harness.component.updateScore(isTeam1 = false, increment = true)
+        harness.component.completeCurrentSet()
+        advance()
+
+        assertTrue(harness.matchRepository.scoreSetCalls.isEmpty())
+        val confirmationSync = harness.matchRepository.operationCalls.single()
+        assertFalse(confirmationSync.finalize)
+        assertEquals(listOf(25, 11, 0), confirmationSync.match.team1Points)
+        assertEquals(listOf(3, 25, 0), confirmationSync.match.team2Points)
+        assertEquals("COMPLETE", confirmationSync.match.segments[1].status)
+        assertEquals(11, confirmationSync.match.segments[1].scores["team-a"])
+        assertEquals(25, confirmationSync.match.segments[1].scores["team-b"])
+        assertEquals(2, harness.component.currentSet.value)
     }
 
     @Test
@@ -1746,6 +1952,12 @@ class MatchContentComponentTest : MainDispatcherTest() {
         assertEquals("COMPLETE", harness.component.matchWithTeams.value.match.segments.first().status)
         assertTrue(harness.component.matchWithTeams.value.match.segments.first().endedAt?.isNotBlank() == true)
         assertEquals("NOT_STARTED", harness.component.matchWithTeams.value.match.segments[1].status)
+        assertTrue(harness.matchRepository.updatedMatches.isEmpty())
+        val confirmationOperation = harness.matchRepository.operationCalls.single()
+        assertFalse(confirmationOperation.finalize)
+        assertEquals(listOf(21, 0, 0), confirmationOperation.match.team1Points)
+        assertEquals(listOf(18, 0, 0), confirmationOperation.match.team2Points)
+        assertEquals("COMPLETE", confirmationOperation.segmentOperations.first().status)
     }
 
     @Test
@@ -1935,7 +2147,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
         assertEquals(1, harness.component.currentSet.value)
         assertEquals("COMPLETE", harness.component.matchWithTeams.value.match.segments.first().status)
 
-        val confirmedMatch = harness.matchRepository.updatedMatches.single()
+        val confirmedMatch = harness.matchRepository.operationCalls.single().match
         val canonicalConfirmedMatch = confirmedMatch.copy(
             segments = confirmedMatch.segments.mapIndexed { index, segment ->
                 if (index == 0) {
@@ -2239,7 +2451,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
                 createTeam(id = "team-b", captainId = "captain-b"),
                 createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
             ),
-            updateFailure = IllegalStateException("offline"),
+            operationFailure = IllegalStateException("offline"),
         )
 
         advance()
@@ -2247,7 +2459,8 @@ class MatchContentComponentTest : MainDispatcherTest() {
         harness.component.completeCurrentSet()
         advance()
 
-        assertEquals("COMPLETE", harness.matchRepository.updatedMatches.single().segments.first().status)
+        assertEquals("COMPLETE", harness.matchRepository.operationCalls.single().match.segments.first().status)
+        assertTrue(harness.matchRepository.updatedMatches.isEmpty())
         assertTrue(harness.matchRepository.savedMatches.isEmpty())
         assertEquals("IN_PROGRESS", harness.component.matchWithTeams.value.match.segments.first().status)
         assertEquals(0, harness.component.currentSet.value)

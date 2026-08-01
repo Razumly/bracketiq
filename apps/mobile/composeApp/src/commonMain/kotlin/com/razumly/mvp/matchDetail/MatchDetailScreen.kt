@@ -73,6 +73,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.Field
@@ -132,11 +133,6 @@ private val MatchDetailBottomDockLift = 28.dp
 private val MatchDetailBottomDockContentReserve = 80.dp
 private val MatchDetailCourtButtonMinWidth = 96.dp
 private val MatchDetailCourtButtonMaxWidth = 220.dp
-
-internal fun matchWinnerEventTeamIdForDisplay(
-    matchFinished: Boolean,
-    winnerEventTeamId: String?,
-): String? = winnerEventTeamId?.takeIf { matchFinished }
 
 private fun matchLogTypeLabel(type: String): String = when (type.trim().uppercase()) {
     "POINT" -> "Point"
@@ -307,32 +303,160 @@ private fun officialPositionLabel(
 private fun officialDisplayName(user: UserData?): String =
     user?.fullName?.trim()?.takeIf(String::isNotBlank) ?: "Unknown official"
 
-internal fun matchDisplayScore(
+internal data class MatchScorePresentation(
+    val team1Score: Int?,
+    val team2Score: Int?,
+    val winnerEventTeamId: String?,
+)
+
+internal fun resolveMatchScorePresentation(
     scoringModel: String,
     segments: List<MatchSegmentMVP>,
-    teamId: String?,
-    legacyScores: List<Int>,
-    currentSegmentIndex: Int,
-): Int {
-    val orderedSegments = segments.sortedBy { segment -> segment.sequence }
-    if (scoringModel.trim().uppercase() == "SETS") {
-        return segmentScore(
-            segment = orderedSegments.getOrNull(currentSegmentIndex),
-            teamId = teamId,
-            fallbackScores = legacyScores,
-            index = currentSegmentIndex,
+    team1Id: String?,
+    team2Id: String?,
+    team1LegacyScores: List<Int>,
+    team2LegacyScores: List<Int>,
+    actualStart: String?,
+    actualEnd: String?,
+    selectedSegmentIndex: Int?,
+): MatchScorePresentation {
+    if (actualStart.isNullOrBlank()) {
+        return MatchScorePresentation(
+            team1Score = null,
+            team2Score = null,
+            winnerEventTeamId = null,
         )
     }
 
-    val normalizedTeamId = teamId?.trim()?.takeIf(String::isNotBlank) ?: return legacyScores.sum()
+    val orderedSegments = segments.sortedBy { segment -> segment.sequence }
+    if (scoringModel.trim().uppercase() == "SETS") {
+        if (selectedSegmentIndex != null) {
+            val selectedSegment = orderedSegments.getOrNull(selectedSegmentIndex)
+            val team1Score = selectedSegmentDisplayScore(
+                segment = selectedSegment,
+                teamId = team1Id,
+                fallbackScores = team1LegacyScores,
+                index = selectedSegmentIndex,
+            )
+            val team2Score = selectedSegmentDisplayScore(
+                segment = selectedSegment,
+                teamId = team2Id,
+                fallbackScores = team2LegacyScores,
+                index = selectedSegmentIndex,
+            )
+            val segmentComplete = selectedSegment?.status.equals("COMPLETE", ignoreCase = true) ||
+                !selectedSegment?.endedAt.isNullOrBlank()
+            return MatchScorePresentation(
+                team1Score = team1Score,
+                team2Score = team2Score,
+                winnerEventTeamId = scoreWinnerEventTeamId(
+                    resultComplete = segmentComplete,
+                    team1Id = team1Id,
+                    team2Id = team2Id,
+                    team1Score = team1Score,
+                    team2Score = team2Score,
+                ),
+            )
+        }
+
+        val completedSetScores = orderedSegments.mapIndexedNotNull { index, segment ->
+            val complete = segment.status.equals("COMPLETE", ignoreCase = true) ||
+                !segment.endedAt.isNullOrBlank()
+            if (!complete) return@mapIndexedNotNull null
+            val team1Score = selectedSegmentDisplayScore(
+                segment = segment,
+                teamId = team1Id,
+                fallbackScores = team1LegacyScores,
+                index = index,
+            )
+            val team2Score = selectedSegmentDisplayScore(
+                segment = segment,
+                teamId = team2Id,
+                fallbackScores = team2LegacyScores,
+                index = index,
+            )
+            if (team1Score == null || team2Score == null || team1Score == team2Score) {
+                null
+            } else {
+                team1Score to team2Score
+            }
+        }
+        val team1SetWins = completedSetScores.count { (team1Score, team2Score) ->
+            team1Score > team2Score
+        }
+        val team2SetWins = completedSetScores.count { (team1Score, team2Score) ->
+            team2Score > team1Score
+        }
+        return MatchScorePresentation(
+            team1Score = team1SetWins,
+            team2Score = team2SetWins,
+            winnerEventTeamId = scoreWinnerEventTeamId(
+                resultComplete = !actualEnd.isNullOrBlank(),
+                team1Id = team1Id,
+                team2Id = team2Id,
+                team1Score = team1SetWins,
+                team2Score = team2SetWins,
+            ),
+        )
+    }
+
+    val normalizedTeam1Id = team1Id?.trim()?.takeIf(String::isNotBlank)
+    val normalizedTeam2Id = team2Id?.trim()?.takeIf(String::isNotBlank)
     val hasSegmentScores = orderedSegments.any { segment ->
-        segment.scores.containsKey(normalizedTeamId)
+        normalizedTeam1Id?.let(segment.scores::containsKey) == true ||
+            normalizedTeam2Id?.let(segment.scores::containsKey) == true
     }
-    return if (hasSegmentScores) {
-        orderedSegments.sumOf { segment -> segment.scores[normalizedTeamId] ?: 0 }
+    val team1Score = if (hasSegmentScores && normalizedTeam1Id != null) {
+        orderedSegments.sumOf { segment -> segment.scores[normalizedTeam1Id] ?: 0 }
     } else {
-        legacyScores.sum()
+        team1LegacyScores.sum()
     }
+    val team2Score = if (hasSegmentScores && normalizedTeam2Id != null) {
+        orderedSegments.sumOf { segment -> segment.scores[normalizedTeam2Id] ?: 0 }
+    } else {
+        team2LegacyScores.sum()
+    }
+    return MatchScorePresentation(
+        team1Score = team1Score,
+        team2Score = team2Score,
+        winnerEventTeamId = scoreWinnerEventTeamId(
+            resultComplete = !actualEnd.isNullOrBlank(),
+            team1Id = team1Id,
+            team2Id = team2Id,
+            team1Score = team1Score,
+            team2Score = team2Score,
+        ),
+    )
+}
+
+private fun selectedSegmentDisplayScore(
+    segment: MatchSegmentMVP?,
+    teamId: String?,
+    fallbackScores: List<Int>,
+    index: Int,
+): Int? {
+    val normalizedTeamId = teamId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val segmentInitialized = segment != null && (
+        segment.scores.isNotEmpty() ||
+            !segment.startedAt.isNullOrBlank() ||
+            !segment.endedAt.isNullOrBlank() ||
+            !segment.status.equals("NOT_STARTED", ignoreCase = true)
+        )
+    if (!segmentInitialized) return null
+    return segment.scores[normalizedTeamId] ?: fallbackScores.getOrNull(index) ?: 0
+}
+
+private fun scoreWinnerEventTeamId(
+    resultComplete: Boolean,
+    team1Id: String?,
+    team2Id: String?,
+    team1Score: Int?,
+    team2Score: Int?,
+): String? {
+    if (!resultComplete || team1Score == null || team2Score == null || team1Score == team2Score) {
+        return null
+    }
+    return if (team1Score > team2Score) team1Id else team2Id
 }
 
 internal fun matchDetailSegmentCount(
@@ -373,8 +497,8 @@ internal fun activeMatchSegmentLabel(
 
 internal data class MatchSegmentTrackerEntry(
     val label: String,
-    val team1Score: Int,
-    val team2Score: Int,
+    val team1Score: Int?,
+    val team2Score: Int?,
     val isActive: Boolean,
     val isComplete: Boolean,
 )
@@ -388,6 +512,7 @@ internal fun buildMatchSegmentTrackerEntries(
     team1Scores: List<Int>,
     team2Scores: List<Int>,
     currentSegmentIndex: Int,
+    matchStarted: Boolean,
 ): List<MatchSegmentTrackerEntry> {
     if (rules.scoringModel != "SETS") {
         return emptyList()
@@ -403,8 +528,16 @@ internal fun buildMatchSegmentTrackerEntries(
         val segment = orderedSegments.getOrNull(index)
         MatchSegmentTrackerEntry(
             label = "$segmentBaseLabel ${index + 1}",
-            team1Score = segmentScore(segment, team1Id, team1Scores, index),
-            team2Score = segmentScore(segment, team2Id, team2Scores, index),
+            team1Score = if (matchStarted) {
+                selectedSegmentDisplayScore(segment, team1Id, team1Scores, index)
+            } else {
+                null
+            },
+            team2Score = if (matchStarted) {
+                selectedSegmentDisplayScore(segment, team2Id, team2Scores, index)
+            } else {
+                null
+            },
             isActive = index == currentSegmentIndex,
             isComplete = segment?.status.equals("COMPLETE", ignoreCase = true),
         )
@@ -484,10 +617,6 @@ fun MatchDetailScreen(
     val showMatchRosterDialog by component.showMatchRosterDialog.collectAsState()
     val currentSet by component.currentSet.collectAsState()
     val matchFinished by component.matchFinished.collectAsState()
-    val displayedMatchWinnerEventTeamId = matchWinnerEventTeamIdForDisplay(
-        matchFinished = matchFinished,
-        winnerEventTeamId = match.match.winnerEventTeamId,
-    )
     val canManageMatchActions by component.canManageMatchActions.collectAsState()
     val assignedTeamOfficialPendingCheckIn by component.assignedTeamOfficialPendingCheckIn.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
@@ -497,6 +626,7 @@ fun MatchDetailScreen(
     val showScoreControls = !isWebLayout
     val showOfficialScoreControls = showScoreControls && isOfficial
     var showScoreGestureHint by rememberSaveable(match.match.id) { mutableStateOf(true) }
+    var selectedScoreSegmentIndex by rememberSaveable(match.match.id) { mutableStateOf<Int?>(null) }
     val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
     val density = LocalDensity.current
     val safeBottomPadding = with(density) { WindowInsets.safeDrawing.getBottom(this).toDp() }
@@ -770,24 +900,44 @@ fun MatchDetailScreen(
         !matchSuspended &&
         officialCheckedIn &&
         !match.match.actualStart.isNullOrBlank() &&
+        !activeSegment?.startedAt.isNullOrBlank() &&
         activeSegment?.status != "COMPLETE"
     val canIncrementScore = canAdjustScore &&
         canIncrementCurrentSegment(match.match, rules, event, currentSet)
     val isTimedMatch = rules.scoringModel == "POINTS_ONLY"
-    val team1Score = matchDisplayScore(
+    LaunchedEffect(rules.scoringModel, orderedSegments.size, selectedScoreSegmentIndex) {
+        if (
+            rules.scoringModel != "SETS" ||
+            selectedScoreSegmentIndex?.let { index -> index !in orderedSegments.indices } == true
+        ) {
+            selectedScoreSegmentIndex = null
+        }
+    }
+    val matchSummaryScorePresentation = resolveMatchScorePresentation(
         scoringModel = rules.scoringModel,
         segments = orderedSegments,
-        teamId = match.match.team1Id,
-        legacyScores = match.match.team1Points,
-        currentSegmentIndex = currentSet,
+        team1Id = match.match.team1Id,
+        team2Id = match.match.team2Id,
+        team1LegacyScores = match.match.team1Points,
+        team2LegacyScores = match.match.team2Points,
+        actualStart = match.match.actualStart,
+        actualEnd = match.match.actualEnd,
+        selectedSegmentIndex = null,
     )
-    val team2Score = matchDisplayScore(
+    val displayedScorePresentation = resolveMatchScorePresentation(
         scoringModel = rules.scoringModel,
         segments = orderedSegments,
-        teamId = match.match.team2Id,
-        legacyScores = match.match.team2Points,
-        currentSegmentIndex = currentSet,
+        team1Id = match.match.team1Id,
+        team2Id = match.match.team2Id,
+        team1LegacyScores = match.match.team1Points,
+        team2LegacyScores = match.match.team2Points,
+        actualStart = match.match.actualStart,
+        actualEnd = match.match.actualEnd,
+        selectedSegmentIndex = selectedScoreSegmentIndex,
     )
+    val displayedMatchWinnerEventTeamId = matchSummaryScorePresentation.winnerEventTeamId
+    val canAdjustDisplayedScore = canAdjustScore &&
+        (selectedScoreSegmentIndex == null || selectedScoreSegmentIndex == currentSet)
     val segmentBaseLabel = rules.segmentLabel.ifBlank {
         if (event?.usesSets == true) "Set" else "Total"
     }
@@ -802,6 +952,9 @@ fun MatchDetailScreen(
         currentSegmentIndex = currentSet,
         showSegmentBreakdown = showSegmentBreakdown,
     )
+    val displayedSegmentLabel = selectedScoreSegmentIndex?.let { selectedIndex ->
+        "$segmentBaseLabel ${selectedIndex + 1}"
+    }
     val segmentTrackerEntries = remember(
         rules,
         segmentBaseLabel,
@@ -811,6 +964,7 @@ fun MatchDetailScreen(
         match.match.team1Points,
         match.match.team2Points,
         currentSet,
+        match.match.actualStart,
     ) {
         buildMatchSegmentTrackerEntries(
             rules = rules,
@@ -821,6 +975,7 @@ fun MatchDetailScreen(
             team1Scores = match.match.team1Points,
             team2Scores = match.match.team2Points,
             currentSegmentIndex = currentSet,
+            matchStarted = !match.match.actualStart.isNullOrBlank(),
         )
     }
     val canConfirmResult = showOfficialScoreControls &&
@@ -1366,7 +1521,10 @@ fun MatchDetailScreen(
                 }
             },
             foregroundContent = {
-                Box(
+                MatchGestureInstructionHost(
+                    showOverlay = showScoreGestureHint && showOfficialScoreControls && canAdjustScore,
+                    showTimerInstruction = hasMatchClock,
+                    onDismiss = { showScoreGestureHint = false },
                     modifier = Modifier
                         .fillMaxSize()
                         .then(
@@ -1386,9 +1544,13 @@ fun MatchDetailScreen(
         ) {
                 ScoreCard(
                     title = team1Text,
-                    score = team1Score.toString(),
-                    isWinner = displayedMatchWinnerEventTeamId == match.match.team1Id,
+                    score = displayedScorePresentation.team1Score?.toString() ?: "—",
+                    isWinner = displayedScorePresentation.winnerEventTeamId != null &&
+                        displayedScorePresentation.winnerEventTeamId == match.match.team1Id,
                 onTap = {
+                    if (rules.scoringModel == "SETS" && selectedScoreSegmentIndex == null) {
+                        selectedScoreSegmentIndex = currentSet
+                    }
                     if (promptScoringIncident) {
                         openIncidentDialog(match.match.team1Id)
                     } else {
@@ -1396,11 +1558,14 @@ fun MatchDetailScreen(
                     }
                 },
                 onSwipeDecrease = {
+                    if (rules.scoringModel == "SETS" && selectedScoreSegmentIndex == null) {
+                        selectedScoreSegmentIndex = currentSet
+                    }
                     component.updateScore(isTeam1 = true, increment = false)
                 },
-                enabled = canAdjustScore,
-                tapEnabled = canIncrementScore,
-                swipeEnabled = canAdjustScore,
+                enabled = canAdjustDisplayedScore,
+                tapEnabled = canAdjustDisplayedScore && canIncrementScore,
+                swipeEnabled = canAdjustDisplayedScore,
                 showControls = showOfficialScoreControls,
                     modifier = Modifier
                         .weight(1f)
@@ -1416,7 +1581,7 @@ fun MatchDetailScreen(
                         color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.titleLarge
                     )
-                    activeSegmentLabel?.let { label ->
+                    displayedSegmentLabel?.let { label ->
                         Text(
                             text = " | ",
                             color = MaterialTheme.colorScheme.onSurface,
@@ -1454,6 +1619,9 @@ fun MatchDetailScreen(
             if (segmentTrackerEntries.isNotEmpty()) {
                 MatchSegmentScoreTracker(
                     entries = segmentTrackerEntries,
+                    selectedSegmentIndex = selectedScoreSegmentIndex,
+                    onMatchSelected = { selectedScoreSegmentIndex = null },
+                    onSegmentSelected = { index -> selectedScoreSegmentIndex = index },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -1494,11 +1662,15 @@ fun MatchDetailScreen(
 
             ScoreCard(
                 title = team2Text,
-                score = team2Score.toString(),
-                isWinner = displayedMatchWinnerEventTeamId == match.match.team2Id,
+                score = displayedScorePresentation.team2Score?.toString() ?: "—",
+                isWinner = displayedScorePresentation.winnerEventTeamId != null &&
+                    displayedScorePresentation.winnerEventTeamId == match.match.team2Id,
                 modifier = Modifier
                     .weight(1f),
                 onTap = {
+                    if (rules.scoringModel == "SETS" && selectedScoreSegmentIndex == null) {
+                        selectedScoreSegmentIndex = currentSet
+                    }
                     if (promptScoringIncident) {
                         openIncidentDialog(match.match.team2Id)
                     } else {
@@ -1506,20 +1678,15 @@ fun MatchDetailScreen(
                     }
                 },
                 onSwipeDecrease = {
+                    if (rules.scoringModel == "SETS" && selectedScoreSegmentIndex == null) {
+                        selectedScoreSegmentIndex = currentSet
+                    }
                     component.updateScore(isTeam1 = false, increment = false)
                 },
-                enabled = canAdjustScore,
-                tapEnabled = canIncrementScore,
-                swipeEnabled = canAdjustScore,
+                enabled = canAdjustDisplayedScore,
+                tapEnabled = canAdjustDisplayedScore && canIncrementScore,
+                swipeEnabled = canAdjustDisplayedScore,
                 showControls = showOfficialScoreControls,
-            )
-        }
-
-        if (showScoreGestureHint && showOfficialScoreControls && canAdjustScore) {
-            ScoreGestureInstructionOverlay(
-                showTimerInstruction = hasMatchClock,
-                onDismiss = { showScoreGestureHint = false },
-                modifier = Modifier.fillMaxSize(),
             )
         }
 
@@ -2082,6 +2249,28 @@ fun ScoreCard(
 }
 
 @Composable
+internal fun MatchGestureInstructionHost(
+    showOverlay: Boolean,
+    showTimerInstruction: Boolean,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    Box(modifier = modifier) {
+        content()
+        if (showOverlay) {
+            ScoreGestureInstructionOverlay(
+                showTimerInstruction = showTimerInstruction,
+                onDismiss = onDismiss,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(1f),
+            )
+        }
+    }
+}
+
+@Composable
 internal fun ScoreGestureInstructionOverlay(
     showTimerInstruction: Boolean,
     onDismiss: () -> Unit,
@@ -2127,6 +2316,9 @@ internal fun ScoreGestureInstructionOverlay(
 @Composable
 internal fun MatchSegmentScoreTracker(
     entries: List<MatchSegmentTrackerEntry>,
+    selectedSegmentIndex: Int?,
+    onMatchSelected: () -> Unit,
+    onSegmentSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (entries.isEmpty()) {
@@ -2141,22 +2333,44 @@ internal fun MatchSegmentScoreTracker(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            entries.forEach { entry ->
-                val containerColor = when {
-                    entry.isActive -> MaterialTheme.colorScheme.primaryContainer
-                    entry.isComplete -> MaterialTheme.colorScheme.secondaryContainer
-                    else -> MaterialTheme.colorScheme.surfaceVariant
-                }
-                val contentColor = when {
-                    entry.isActive -> MaterialTheme.colorScheme.onPrimaryContainer
-                    entry.isComplete -> MaterialTheme.colorScheme.onSecondaryContainer
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                }
+            Surface(
+                onClick = onMatchSelected,
+                color = if (selectedSegmentIndex == null) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant
+                },
+                contentColor = if (selectedSegmentIndex == null) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                shape = RoundedCornerShape(18.dp),
+                tonalElevation = if (selectedSegmentIndex == null) 2.dp else 0.dp,
+            ) {
+                Text(
+                    text = "Match",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            entries.forEachIndexed { index, entry ->
+                val selected = selectedSegmentIndex == index
                 Surface(
-                    color = containerColor,
-                    contentColor = contentColor,
+                    onClick = { onSegmentSelected(index) },
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                    contentColor = if (selected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                     shape = RoundedCornerShape(18.dp),
-                    tonalElevation = if (entry.isActive) 2.dp else 0.dp,
+                    tonalElevation = if (selected) 2.dp else 0.dp,
                 ) {
                     Column(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -2168,7 +2382,7 @@ internal fun MatchSegmentScoreTracker(
                             style = MaterialTheme.typography.labelSmall,
                         )
                         Text(
-                            text = "${entry.team1Score}-${entry.team2Score}",
+                            text = "${entry.team1Score?.toString() ?: "—"}-${entry.team2Score?.toString() ?: "—"}",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                         )

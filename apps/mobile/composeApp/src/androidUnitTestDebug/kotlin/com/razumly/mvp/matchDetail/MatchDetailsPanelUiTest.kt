@@ -15,7 +15,9 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
+import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import org.junit.Rule
@@ -180,5 +182,64 @@ class MatchDetailsPanelUiTest {
                 team2Score = 18,
             ),
         )
+    }
+
+    @Test
+    fun given_match_set_score_limits_when_rendered_then_each_configured_target_appears() {
+        val match = MatchMVP(
+            matchId = 1,
+            eventId = "event-1",
+            id = "match-1",
+            matchRulesSnapshot = ResolvedMatchRulesMVP(
+                scoringModel = "SETS",
+                segmentCount = 5,
+                segmentLabel = "Set",
+                setPointTargets = listOf(25, 25, 25, 25, 15),
+            ),
+        )
+        val limits = matchSetScoreLimits(match = match, segmentLabel = "Set")
+
+        assertEquals(
+            listOf(
+                MatchSetScoreLimit("S1", 25),
+                MatchSetScoreLimit("S2", 25),
+                MatchSetScoreLimit("S3", 25),
+                MatchSetScoreLimit("S4", 25),
+                MatchSetScoreLimit("S5", 15),
+            ),
+            limits,
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                MatchSetScoreLimitsSection(limits = limits)
+            }
+        }
+
+        composeRule.onNodeWithText("Set score limits").assertIsDisplayed()
+        composeRule.onNodeWithText("S1: 25").assertIsDisplayed()
+        composeRule.onNodeWithText("S5: 15").assertIsDisplayed()
+    }
+
+    @Test
+    fun given_no_match_set_score_limits_when_rendered_then_limits_section_is_hidden() {
+        val limits = matchSetScoreLimits(
+            match = MatchMVP(
+                matchId = 1,
+                eventId = "event-1",
+                id = "match-1",
+                resolvedMatchRules = ResolvedMatchRulesMVP(scoringModel = "SETS"),
+            ),
+            segmentLabel = "Set",
+        )
+
+        assertEquals(emptyList(), limits)
+        composeRule.setContent {
+            MaterialTheme {
+                MatchSetScoreLimitsSection(limits = limits)
+            }
+        }
+
+        composeRule.onNodeWithText("Set score limits").assertDoesNotExist()
     }
 }

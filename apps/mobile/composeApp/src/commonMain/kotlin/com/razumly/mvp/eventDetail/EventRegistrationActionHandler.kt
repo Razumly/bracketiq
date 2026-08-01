@@ -92,6 +92,7 @@ internal class EventRegistrationActionHandler(
         billingAddress: BillingAddressDraft?,
     ) -> Unit,
     private val setError: (String) -> Unit,
+    private val onSuccessfulJoin: () -> Unit = {},
 ) {
     fun joinEvent() {
         scope.launch {
@@ -642,6 +643,7 @@ internal class EventRegistrationActionHandler(
             showLoading = loadingOperation::showLoading,
             hideLoading = loadingOperation::hideLoading,
             setError = setError,
+            onSuccessfulJoin = { onSuccessfulJoin() },
         )
     }
 
@@ -802,6 +804,7 @@ internal class EventRegistrationActionHandler(
                 },
                 showLoading = loadingOperation::showLoading,
                 setError = setError,
+                onSuccessfulJoin = { onSuccessfulJoin() },
             )
         } finally {
             loadingOperation.hideLoading()
@@ -891,6 +894,7 @@ internal class EventRegistrationActionHandler(
                 },
                 showLoading = loadingOperation::showLoading,
                 setError = setError,
+                onSuccessfulJoin = { onSuccessfulJoin() },
             )
         } finally {
             loadingOperation.hideLoading()

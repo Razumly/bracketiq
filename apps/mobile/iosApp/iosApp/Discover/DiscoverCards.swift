@@ -59,10 +59,10 @@ struct NativeDiscoverEventCard: View {
                         Button(action: onMapSelected) {
                             Label("Map", systemImage: "map.fill")
                                 .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Color(red: 0.07, green: 0.12, blue: 0.20))
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 5)
-                                .background(.regularMaterial, in: Capsule())
+                                .background(Color.white.opacity(0.92), in: Capsule())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Show \(event.name) on map")

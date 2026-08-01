@@ -8,6 +8,7 @@ import com.arkivanov.essenty.instancekeeper.InstanceKeeper
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.analytics.AnalyticsEvent
 import com.razumly.mvp.core.analytics.AnalyticsTracker
+import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Event
@@ -30,6 +31,8 @@ import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
+import com.razumly.mvp.core.presentation.composables.PermissionPrimerKind
+import com.razumly.mvp.core.presentation.composables.PermissionPrimerState
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.calcDistance
@@ -41,6 +44,9 @@ import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
 import dev.icerock.moko.permissions.DeniedAlwaysException
 import dev.icerock.moko.permissions.DeniedException
+import dev.icerock.moko.permissions.Permission
+import dev.icerock.moko.permissions.PermissionsController
+import dev.icerock.moko.permissions.location.LOCATION
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CancellationException
@@ -67,6 +73,7 @@ interface EventSearchComponent {
     val suggestedOrganizations: StateFlow<List<Organization>>
     val suggestedTeams: StateFlow<List<Team>>
     val currentLocation: StateFlow<LatLng?>
+    val locationPermissionPrimer: StateFlow<PermissionPrimerState?>
     val selectedSearchLocationLabel: StateFlow<String?>
     val sports: StateFlow<List<Sport>>
     val divisionTypeParameters: StateFlow<DivisionTypeParameters>
@@ -96,6 +103,11 @@ interface EventSearchComponent {
     val currentUserId: StateFlow<String>
 
     fun setLoadingHandler(handler: LoadingHandler)
+    fun onDiscoverVisible()
+    fun setLocationPermissionDoNotAskAgain(value: Boolean)
+    fun requestLocationPermission()
+    fun dismissLocationPermissionPrimer()
+    fun openLocationPermissionSettings()
     fun loadMoreEvents()
     fun loadMoreOrganizations()
     fun loadMoreRentals()
@@ -180,7 +192,9 @@ class DefaultEventSearchComponent(
     private val userRepository: IUserRepository,
     eventId: String?,
     override val locationTracker: LocationTracker,
-    private val navigationHandler: INavigationHandler
+    private val navigationHandler: INavigationHandler,
+    private val permissionsController: PermissionsController,
+    private val currentUserDataSource: CurrentUserDataSource,
 ) : ComponentContext by componentContext, EventSearchComponent {
     private val scopeExceptionHandler = CoroutineExceptionHandler { _, throwable ->
         when (throwable) {
@@ -216,6 +230,9 @@ class DefaultEventSearchComponent(
 
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
     override val currentLocation = _currentLocation.asStateFlow()
+    private val _locationPermissionPrimer = MutableStateFlow<PermissionPrimerState?>(null)
+    override val locationPermissionPrimer: StateFlow<PermissionPrimerState?> =
+        _locationPermissionPrimer.asStateFlow()
     private val _isLocationSearchEnabled = MutableStateFlow(true)
     private val _searchCenter = MutableStateFlow<LatLng?>(null)
     private val _mapSearchRadiusMiles = MutableStateFlow<Double?>(null)
@@ -290,6 +307,8 @@ class DefaultEventSearchComponent(
     private var suggestTeamsJob: Job? = null
     private var cachedEventsSyncJob: Job? = null
     private var eventPageLoadJob: Job? = null
+    private var locationPermissionRequestJob: Job? = null
+    private var locationTrackingStarted = false
     private val discoverEventRequests = DiscoverRequestGenerationTracker()
     private val discoverOrganizationRequests = DiscoverRequestGenerationTracker()
     private var isAwaitingInitialEventLocation = true
@@ -300,6 +319,83 @@ class DefaultEventSearchComponent(
 
     override fun setLoadingHandler(handler: LoadingHandler) {
         loadingHandler = handler
+    }
+
+    override fun onDiscoverVisible() {
+        if (locationTrackingStarted || locationPermissionRequestJob?.isActive == true) return
+        if (_locationPermissionPrimer.value != null) return
+
+        locationPermissionRequestJob = scope.launch {
+            if (permissionsController.isPermissionGranted(Permission.LOCATION)) {
+                startTrackingLocationSafely()
+            } else if (currentUserDataSource.isLocationPermissionPrimerSuppressedNow()) {
+                handleLocationUnavailable(reportError = false)
+            } else {
+                _locationPermissionPrimer.value = PermissionPrimerState(
+                    kind = PermissionPrimerKind.LOCATION,
+                )
+            }
+        }
+    }
+
+    override fun setLocationPermissionDoNotAskAgain(value: Boolean) {
+        val current = _locationPermissionPrimer.value ?: return
+        if (current.kind != PermissionPrimerKind.LOCATION || current.settingsRequired) return
+        _locationPermissionPrimer.value = current.copy(doNotAskAgain = value)
+    }
+
+    override fun requestLocationPermission() {
+        val current = _locationPermissionPrimer.value ?: return
+        if (current.kind != PermissionPrimerKind.LOCATION || current.isRequesting || current.settingsRequired) {
+            return
+        }
+
+        locationPermissionRequestJob?.cancel()
+        locationPermissionRequestJob = scope.launch {
+            if (current.doNotAskAgain) {
+                currentUserDataSource.setLocationPermissionPrimerSuppressed(true)
+            }
+            _locationPermissionPrimer.value = current.copy(isRequesting = true)
+            try {
+                permissionsController.providePermission(Permission.LOCATION)
+                if (permissionsController.isPermissionGranted(Permission.LOCATION)) {
+                    _locationPermissionPrimer.value = null
+                    startTrackingLocationSafely()
+                } else {
+                    _locationPermissionPrimer.value = null
+                    handleLocationUnavailable(reportError = false)
+                }
+            } catch (_: DeniedAlwaysException) {
+                _locationPermissionPrimer.value = current.copy(
+                    isRequesting = false,
+                    settingsRequired = true,
+                )
+                handleLocationPermissionDenied(alwaysDenied = true)
+            } catch (_: DeniedException) {
+                _locationPermissionPrimer.value = null
+                handleLocationPermissionDenied(alwaysDenied = false)
+            } catch (e: Throwable) {
+                Napier.w("Location permission failed: ${e.message}")
+                _locationPermissionPrimer.value = null
+                handleLocationUnavailable(reportError = false)
+            }
+        }
+    }
+
+    override fun dismissLocationPermissionPrimer() {
+        val current = _locationPermissionPrimer.value ?: return
+        if (current.isRequesting) return
+        if (current.doNotAskAgain) {
+            scope.launch {
+                currentUserDataSource.setLocationPermissionPrimerSuppressed(true)
+            }
+        }
+        _locationPermissionPrimer.value = null
+        handleLocationUnavailable(reportError = false)
+    }
+
+    override fun openLocationPermissionSettings() {
+        permissionsController.openAppSettings()
     }
 
     private val _selectedEvent = MutableStateFlow<Event?>(null)
@@ -317,10 +413,6 @@ class DefaultEventSearchComponent(
                 }
             }
         }
-        scope.launch {
-            startTrackingLocationSafely()
-        }
-
         instanceKeeper.put(CLEANUP_KEY, Cleanup(locationTracker))
 
         scope.launch {
@@ -1354,28 +1446,36 @@ class DefaultEventSearchComponent(
             _currentLocation.value == null
 
     private suspend fun startTrackingLocationSafely() {
+        if (locationTrackingStarted) return
+        locationTrackingStarted = true
         try {
             locationTracker.startTracking()
             _isLocationSearchEnabled.value = true
         } catch (_: DeniedAlwaysException) {
+            locationTrackingStarted = false
             handleLocationPermissionDenied(alwaysDenied = true)
         } catch (_: DeniedException) {
+            locationTrackingStarted = false
             handleLocationPermissionDenied(alwaysDenied = false)
         } catch (cancelled: CancellationException) {
+            locationTrackingStarted = false
             throw cancelled
         } catch (e: Exception) {
+            locationTrackingStarted = false
             Napier.w("Location tracking disabled: ${e.message}")
             handleLocationUnavailable()
         }
     }
 
-    private fun handleLocationUnavailable() {
+    private fun handleLocationUnavailable(reportError: Boolean = true) {
         _searchCenter.value = null
         _mapSearchRadiusMiles.value = null
         _selectedSearchLocationLabel.value = null
         _isLocationSearchEnabled.value = false
         _currentLocation.value = null
-        _errorState.value = ErrorMessage("Location is unavailable. Showing upcoming events without location filtering.")
+        if (reportError) {
+            _errorState.value = ErrorMessage("Location is unavailable. Showing upcoming events without location filtering.")
+        }
         refreshEvents(force = true)
         refreshOrganizations(force = true)
         refreshRentals(force = true)

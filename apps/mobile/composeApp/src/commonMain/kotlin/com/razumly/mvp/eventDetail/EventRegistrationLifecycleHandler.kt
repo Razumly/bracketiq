@@ -41,6 +41,7 @@ internal class EventRegistrationLifecycleHandler(
     private val clearPaymentResult: () -> Unit,
     private val setScheduleTrackedUserIds: (Set<String>) -> Unit,
     private val setMessage: (String) -> Unit,
+    private val onSuccessfulJoin: () -> Unit = {},
 ) {
     private fun currentRegistrationProgressScope(): EventRegistrationProgressScope =
         EventRegistrationProgressScope(
@@ -207,6 +208,7 @@ internal class EventRegistrationLifecycleHandler(
                                 }
                             )
                             refreshEventDetails()
+                            onSuccessfulJoin()
                         } else {
                             setMessage(
                                 "Payment submitted, but team registration confirmation is still pending. Please reload the event."
@@ -250,6 +252,9 @@ internal class EventRegistrationLifecycleHandler(
                             )
                         } else if (membershipCoordinator.isRegistrationPaymentPending.value) {
                             setMessage("Payment submitted. Registration is pending until the bank payment clears.")
+                        }
+                        if (userJoinedSuccessfully) {
+                            onSuccessfulJoin()
                         }
                     }
                     clearCurrentRegistrationProgress()

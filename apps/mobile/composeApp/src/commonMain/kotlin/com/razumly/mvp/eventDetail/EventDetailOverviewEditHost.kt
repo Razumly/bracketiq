@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -386,9 +387,15 @@ internal fun EventDetailOverviewEditHost(
         onAddOfficialId = actions.onAddOfficialId,
         onRemoveOfficialId = actions.onRemoveOfficialId,
         heroTopControls = {
-            EventDetailOverviewHeaderControls(state = state, actions = actions)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .guideTarget(EventGuideTargets.OverviewHeader),
+            ) {
+                EventDetailOverviewHeaderControls(state = state, actions = actions)
+            }
         },
-        modifier = modifier.guideTarget(EventGuideTargets.OverviewHeader),
+        modifier = modifier,
     ) { isValid ->
         EventDetailOverviewEditFooter(
             state = state,

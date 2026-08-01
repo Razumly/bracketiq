@@ -64,9 +64,9 @@
 	<key>NSContactsUsageDescription</key>
 	<string>BracketIQ uses your contacts only when you choose Add from contacts, so you can find an existing account or prefill one team invitation. Your full address book is not uploaded.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>BracketIQ uses your location to center the map on your area, show nearby events and sports venues, and help you find facilities near you, such as soccer fields or gyms in your city. BracketIQ does not track your location in the background.</string>
+	<string>BracketIQ uses your location only for finding local events while you use the app. Your data is not shared or sold.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>BracketIQ uses your location while the app is open to center the map on your area, show nearby events and sports venues, and help you find facilities near you, such as soccer fields or gyms in your city.</string>
+	<string>BracketIQ uses your location only for finding local events while you use the app. Your data is not shared or sold.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>This app does not access motion, but a third-party library may require this permission for compatibility.</string>
 	<key>UIApplicationSceneManifest</key>

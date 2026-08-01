@@ -45,6 +45,7 @@ import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import com.razumly.mvp.core.network.dto.TeamCheckInDto
 import com.razumly.mvp.core.presentation.IPaymentProcessor
+import com.razumly.mvp.core.presentation.composables.PermissionPrimerState
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
@@ -76,6 +77,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val participantComplianceLoading: StateFlow<Boolean>
     val eventMatchesLoading: StateFlow<Boolean>
     val errorState: StateFlow<ErrorMessage?>
+    val notificationPermissionPrimer: StateFlow<PermissionPrimerState?>
     val eventWithRelations: StateFlow<EventWithFullRelations>
     val currentUser: StateFlow<UserData>
     val eventTeamCheckIns: StateFlow<Map<String, TeamCheckInDto>>
@@ -152,6 +154,9 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun onHostCreateAccount()
     fun selectDivision(division: String)
     fun setLoadingHandler(loadingHandler: LoadingHandler)
+    fun requestNotificationPermission()
+    fun dismissNotificationPermissionPrimer()
+    fun openNotificationPermissionSettings()
     fun clearError()
     fun toggleBracketView()
     fun toggleLosersBracket()

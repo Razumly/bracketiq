@@ -2,6 +2,7 @@ package com.razumly.mvp
 
 import com.mmk.kmpnotifier.notification.NotifierManager
 import com.mmk.kmpnotifier.notification.configuration.NotificationPlatformConfiguration
+import platform.Foundation.NSNotificationCenter
 
 fun initializeIosNotificationManager() {
     NotifierManager.initialize(
@@ -10,5 +11,12 @@ fun initializeIosNotificationManager() {
             askNotificationPermissionOnStart = false,
             notificationSoundName = null,
         ),
+    )
+}
+
+actual fun registerForRemoteNotificationsAfterPermission() {
+    NSNotificationCenter.defaultCenter.postNotificationName(
+        "MVPRegisterForRemoteNotificationsAfterPermission",
+        null,
     )
 }

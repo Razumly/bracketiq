@@ -58,10 +58,7 @@ import com.razumly.mvp.userAuth.AuthComponent
 import dev.icerock.moko.geo.LocationTracker
 import dev.icerock.moko.permissions.DeniedAlwaysException
 import dev.icerock.moko.permissions.DeniedException
-import dev.icerock.moko.permissions.Permission
 import dev.icerock.moko.permissions.PermissionsController
-import dev.icerock.moko.permissions.location.LOCATION
-import dev.icerock.moko.permissions.notifications.REMOTE_NOTIFICATION
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -956,30 +953,6 @@ class RootComponent(
         if (stack.backStack.isNotEmpty()) {
             setDefaultNavigationDirection()
             navigation.pop()
-        }
-    }
-
-    fun requestInitialPermissions() {
-        scope.launch {
-            try {
-                permissionsController.providePermission(Permission.LOCATION)
-            } catch (_: DeniedAlwaysException) {
-                Napier.w("Location permission always denied")
-            } catch (_: DeniedException) {
-                Napier.w("Location permission denied")
-            } catch (e: Throwable) {
-                Napier.w("Location permission failed: ${e.message}")
-            }
-
-            try {
-                permissionsController.providePermission(Permission.REMOTE_NOTIFICATION)
-            } catch (_: DeniedAlwaysException) {
-                Napier.w("Notification permission always denied")
-            } catch (_: DeniedException) {
-                Napier.w("Notification permission denied")
-            } catch (e: Throwable) {
-                Napier.w("Notification permission failed: ${e.message}")
-            }
         }
     }
 

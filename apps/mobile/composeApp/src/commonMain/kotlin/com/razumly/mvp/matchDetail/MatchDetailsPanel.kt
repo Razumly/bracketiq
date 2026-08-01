@@ -172,6 +172,12 @@ internal fun ExpandedMatchDetailsPanel(
                     onCancelActualTimes = onCancelActualTimes,
                     onSaveActualTimes = onSaveActualTimes,
                 )
+                MatchSetScoreLimitsSection(
+                    limits = matchSetScoreLimits(
+                        match = match,
+                        segmentLabel = segmentBaseLabel,
+                    ),
+                )
                 if (showSegmentBreakdown) {
                     MatchSegmentTable(
                         segments = orderedSegments,
@@ -471,6 +477,58 @@ private fun MatchActualTimesSection(
     }
 }
 
+internal data class MatchSetScoreLimit(
+    val label: String,
+    val points: Int,
+)
+
+internal fun matchSetScoreLimits(
+    match: MatchMVP,
+    segmentLabel: String,
+): List<MatchSetScoreLimit> {
+    val rules = match.matchRulesSnapshot ?: match.resolvedMatchRules ?: return emptyList()
+    if (!rules.scoringModel.equals("SETS", ignoreCase = true)) return emptyList()
+    val prefix = matchSegmentPrefix(segmentLabel)
+    return rules.setPointTargets.mapIndexedNotNull { index, points ->
+        points.takeIf { it > 0 }?.let { target ->
+            MatchSetScoreLimit(
+                label = "$prefix${index + 1}",
+                points = target,
+            )
+        }
+    }
+}
+
+@Composable
+internal fun MatchSetScoreLimitsSection(
+    limits: List<MatchSetScoreLimit>,
+    modifier: Modifier = Modifier,
+) {
+    if (limits.isEmpty()) return
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = "Set score limits",
+            style = MaterialTheme.typography.titleSmall,
+        )
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            limits.forEach { limit ->
+                Text(
+                    text = "${limit.label}: ${limit.points}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun MatchOfficialsSection(officialRows: List<MatchOfficialDetailRow>) {
     Text(
@@ -593,8 +651,8 @@ internal fun MatchSegmentTable(
             MatchSegmentTeamLabels(
                 team1Name = team1Name,
                 team2Name = team2Name,
-                team1IsMatchWinner = matchWinnerEventTeamId == team1Id,
-                team2IsMatchWinner = matchWinnerEventTeamId == team2Id,
+                team1IsMatchWinner = matchWinnerEventTeamId != null && matchWinnerEventTeamId == team1Id,
+                team2IsMatchWinner = matchWinnerEventTeamId != null && matchWinnerEventTeamId == team2Id,
                 dividerColor = dividerColor,
             )
             VerticalDivider(
@@ -887,17 +945,20 @@ internal fun matchSegmentHeaderLabel(
         }
         "SHOOTOUT" -> "SO"
         else -> {
-            val prefix = when (segmentLabel.trim().lowercase()) {
-                "quarter" -> "Q"
-                "period" -> "P"
-                "set" -> "S"
-                "half" -> "H"
-                else -> segmentLabel.trim().take(3).ifBlank { "Seg" }
-            }
+            val prefix = matchSegmentPrefix(segmentLabel)
             "$prefix${segment.sequence}"
         }
     }
 }
+
+private fun matchSegmentPrefix(segmentLabel: String): String =
+    when (segmentLabel.trim().lowercase()) {
+        "quarter" -> "Q"
+        "period" -> "P"
+        "set" -> "S"
+        "half" -> "H"
+        else -> segmentLabel.trim().take(3).ifBlank { "Seg" }
+    }
 
 internal const val MatchSegmentColumnsTestTag = "match-segment-columns"
 internal const val MatchSegmentScrollBackwardCueTestTag = "match-segment-scroll-backward-cue"
