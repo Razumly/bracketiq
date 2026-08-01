@@ -6,7 +6,8 @@ package com.razumly.mvp.core.network
  * Android: backed by `BuildConfig.MVP_API_BASE_URL` (Secrets Gradle plugin). When running on a
  * physical device, `BuildConfig.MVP_API_BASE_URL_REMOTE` is preferred to avoid localhost.
  * iOS: backed by `Secrets.plist` key `mvpApiBaseUrl`, with optional `mvpApiBaseUrlRemote` when
- * running on a physical device.
+ * running on a physical device. Release builds override that local secret with the tracked
+ * `MVP_RELEASE_API_BASE_URL` Xcode setting.
  */
 expect val apiBaseUrl: String
 

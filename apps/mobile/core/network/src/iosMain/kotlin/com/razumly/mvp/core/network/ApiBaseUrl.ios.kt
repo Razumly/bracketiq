@@ -2,11 +2,13 @@ package com.razumly.mvp.core.network
 
 import com.razumly.mvp.core.util.AppSecrets
 import io.github.aakira.napier.Napier
+import platform.Foundation.NSBundle
 import platform.Foundation.NSProcessInfo
 import platform.Foundation.NSURL
 
 private const val DEFAULT_IOS_API_BASE_URL = "http://localhost:3000"
 private const val SIMULATOR_ENV_KEY = "SIMULATOR_DEVICE_NAME"
+private const val RELEASE_API_BASE_URL_INFO_KEY = "MVP_RELEASE_API_BASE_URL"
 private const val NGROK_HOST_TOKEN = "ngrok"
 private const val UNSET_WEB_BASE_URL = "__MVP_WEB_BASE_URL_UNSET__"
 private const val LOCALHOST_HOST = "localhost"
@@ -29,9 +31,17 @@ private fun isIosSimulator(): Boolean {
     return env[SIMULATOR_ENV_KEY] != null
 }
 
+private fun releaseConfiguredApiBaseUrl(): String =
+    (NSBundle.mainBundle.objectForInfoDictionaryKey(RELEASE_API_BASE_URL_INFO_KEY) as? String)
+        ?.trim()
+        ?.trimEnd('/')
+        ?.takeUnless { it.isBlank() || it.startsWith("\$(") }
+        .orEmpty()
+
 private fun resolveIosApiBaseUrl(): String {
     val configured = AppSecrets.mvpApiBaseUrl.trim().trimEnd('/')
-    val remoteConfigured = AppSecrets.mvpApiBaseUrlRemote.trim().trimEnd('/')
+    val remoteConfigured = releaseConfiguredApiBaseUrl()
+        .ifBlank { AppSecrets.mvpApiBaseUrlRemote.trim().trimEnd('/') }
     val runningOnSimulator = isIosSimulator()
 
     if (!runningOnSimulator && remoteConfigured.isNotBlank()) {
@@ -67,7 +77,8 @@ private fun isLocalHostUrl(url: String): Boolean {
 private fun resolveStripeRedirectBaseUrl(resolvedApiBaseUrl: String): String {
     val runningOnSimulator = isIosSimulator()
     val normalizedApi = resolvedApiBaseUrl.trim().trimEnd('/')
-    val remoteConfigured = AppSecrets.mvpApiBaseUrlRemote.trim().trimEnd('/')
+    val remoteConfigured = releaseConfiguredApiBaseUrl()
+        .ifBlank { AppSecrets.mvpApiBaseUrlRemote.trim().trimEnd('/') }
     val webConfigured = AppSecrets.mvpWebBaseUrl.trim().trimEnd('/')
         .takeUnless { it.equals(UNSET_WEB_BASE_URL, ignoreCase = true) }
         .orEmpty()

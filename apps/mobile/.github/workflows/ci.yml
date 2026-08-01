@@ -62,6 +62,9 @@ jobs:
           "platforms;android-36"
           "build-tools;36.0.0"
 
+      - name: Verify iOS release API endpoint
+        run: ./scripts/tests/ios-release-api-base-url-contract.sh
+
       - name: Select and boot an iOS simulator
         shell: bash
         run: |

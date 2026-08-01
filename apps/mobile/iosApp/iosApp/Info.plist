@@ -51,6 +51,8 @@
 	<string>49655448987-5mt89kqe079js16hbb4476epf06mhjgp.apps.googleusercontent.com</string>
 	<key>GOOGLE_MAPS_MAP_ID</key>
 	<string>$(GOOGLE_MAPS_MAP_ID)</string>
+	<key>MVP_RELEASE_API_BASE_URL</key>
+	<string>$(MVP_RELEASE_API_BASE_URL)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
