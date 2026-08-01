@@ -72,8 +72,9 @@ fi
 release_apk="$repo_root/composeApp/build/outputs/apk/release/composeApp-release-unsigned.apk"
 [[ -f "$release_apk" ]] || fail "release APK was not produced at ${release_apk#"$repo_root"/}"
 
-if ! "$aapt2" dump resources "$release_apk" 2>/dev/null |
-  rg --fixed-strings 'default_web_client_id' >/dev/null; then
+resource_dump="$("$aapt2" dump resources "$release_apk" 2>/dev/null)" ||
+  fail "aapt2 could not inspect the release APK"
+if [[ "$resource_dump" != *default_web_client_id* ]]; then
   fail "release APK does not contain the generated default_web_client_id resource"
 fi
 
