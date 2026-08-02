@@ -142,6 +142,7 @@ import com.razumly.mvp.eventSearch.tabs.rentals.composables.DiscoverRentalSugges
 import com.razumly.mvp.eventSearch.tabs.teams.DiscoverTeamList
 import com.razumly.mvp.eventSearch.tabs.teams.DiscoverTeamSuggestion
 import com.razumly.mvp.eventSearch.util.EventFilter
+import com.razumly.mvp.core.data.repositories.EventSearchSort
 import com.razumly.mvp.icons.Jersey
 import com.razumly.mvp.icons.MVPIcons
 import dev.chrisbanes.haze.hazeEffect
@@ -233,6 +234,36 @@ private val DISCOVER_GUIDE_REQUIRED_TARGETS = setOf(
     DISCOVER_GUIDE_TARGET_TABS,
     DISCOVER_GUIDE_TARGET_SEARCH,
 )
+
+@Composable
+internal fun DiscoverEventSortSection(
+    selectedSort: EventSearchSort,
+    onSortSelected: (EventSearchSort) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "Sort events",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            listOf(
+                EventSearchSort.RECOMMENDED to "Recommended",
+                EventSearchSort.NEAREST to "Nearest",
+                EventSearchSort.SOONEST to "Soonest",
+            ).forEach { (sort, label) ->
+                FilterChip(
+                    selected = selectedSort == sort,
+                    onClick = { onSortSelected(sort) },
+                    label = { Text(label) },
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun DiscoverFilterSportSection(
@@ -1469,6 +1500,12 @@ internal fun ComposeEventSearchScreen(
         val discoverFilterExtraContent: (@Composable () -> Unit)? = when (selectedTab) {
             DiscoverTab.EVENTS -> {
                 {
+                    DiscoverEventSortSection(
+                        selectedSort = currentFilter.sort,
+                        onSortSelected = { sort ->
+                            component.updateFilter { copy(sort = sort) }
+                        },
+                    )
                     DiscoverFilterSportSection(
                         sports = sports,
                         selectedSportIds = currentFilter.sportIds,

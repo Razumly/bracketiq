@@ -2,6 +2,7 @@
 
 package com.razumly.mvp.core.presentation.composables
 
+import com.razumly.mvp.core.data.repositories.EventSearchSort
 import com.razumly.mvp.eventSearch.util.EventFilter
 import kotlinx.datetime.TimeZone
 import kotlin.test.Test
@@ -14,6 +15,11 @@ import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
 class SearchBoxFilterStateTest {
+    @Test
+    fun nonDefaultEventSortIsActive() {
+        assertTrue(isFilterActive(EventFilter(sort = EventSearchSort.NEAREST)))
+    }
+
     private val now = Instant.parse("2026-07-13T19:30:00Z")
     private val utc = TimeZone.UTC
 

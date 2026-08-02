@@ -2,11 +2,13 @@
 
 package com.razumly.mvp.eventSearch.util
 
+import com.razumly.mvp.core.data.repositories.EventSearchSort
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.days
@@ -14,6 +16,11 @@ import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
 class EventFilterTest {
+    @Test
+    fun defaultsToRecommendedSort() {
+        assertEquals(EventSearchSort.RECOMMENDED, EventFilter().sort)
+    }
+
     private val now = Instant.parse("2026-02-25T00:00:00Z")
 
     @Test

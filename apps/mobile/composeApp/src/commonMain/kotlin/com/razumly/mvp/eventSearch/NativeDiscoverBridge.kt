@@ -5,6 +5,7 @@ package com.razumly.mvp.eventSearch
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.repositories.EventSearchSort
 import com.razumly.mvp.eventSearch.util.EventFilter
 import kotlin.time.Instant
 
@@ -14,6 +15,7 @@ import kotlin.time.Instant
  * Kotlin receiver lambdas or unpack a generic Pair.
  */
 data class NativeDiscoverFilterSnapshot(
+    val sort: String,
     val priceEnabled: Boolean,
     val priceMin: Double,
     val priceMax: Double,
@@ -44,6 +46,7 @@ data class NativeDiscoverSearchSnapshot(
 
 internal fun EventFilter.toNativeDiscoverFilterSnapshot(): NativeDiscoverFilterSnapshot =
     NativeDiscoverFilterSnapshot(
+        sort = sort.name,
         priceEnabled = price != null,
         priceMin = price?.first ?: 0.0,
         priceMax = price?.second ?: 200.0,
@@ -59,6 +62,11 @@ internal fun EventFilter.toNativeDiscoverFilterSnapshot(): NativeDiscoverFilterS
         divisionPriceMaxEnabled = divisionPriceMax != null,
         divisionPriceMax = divisionPriceMax ?: 0.0,
     )
+
+internal fun nativeDiscoverEventSort(value: String): EventSearchSort =
+    EventSearchSort.entries.firstOrNull { candidate ->
+        candidate.name == value.trim().uppercase()
+    } ?: EventSearchSort.RECOMMENDED
 
 internal fun normalizedDiscoverFilterValues(values: List<String>): Set<String> =
     values

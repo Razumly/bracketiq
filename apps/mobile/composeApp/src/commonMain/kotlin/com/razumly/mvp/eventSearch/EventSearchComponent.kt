@@ -139,6 +139,7 @@ interface EventSearchComponent {
     fun eventFilterSnapshot(): NativeDiscoverFilterSnapshot
     fun organizationFilterSnapshot(): NativeDiscoverFilterSnapshot
     fun applyNativeEventFilters(
+        sort: String,
         priceEnabled: Boolean,
         priceMin: Double,
         priceMax: Double,
@@ -509,6 +510,7 @@ class DefaultEventSearchComponent(
         _organizationFilter.value.toNativeDiscoverFilterSnapshot()
 
     override fun applyNativeEventFilters(
+        sort: String,
         priceEnabled: Boolean,
         priceMin: Double,
         priceMax: Double,
@@ -526,6 +528,7 @@ class DefaultEventSearchComponent(
         }
         updateFilter {
             copy(
+                sort = nativeDiscoverEventSort(sort),
                 price = priceRange,
                 date = startDate to endDate,
                 sportIds = normalizedDiscoverFilterValues(sportIds),
@@ -769,9 +772,14 @@ class DefaultEventSearchComponent(
                     dateTo = activeFilter.date.second,
                     sports = selectedSportNames(activeFilter),
                     tags = activeFilter.tagSlugs.toList(),
+                    price = null,
+                    divisionGenders = emptyList(),
+                    skillDivisionTypeIds = emptyList(),
+                    ageDivisionTypeIds = emptyList(),
                     limit = EVENTS_PAGE_SIZE,
                     offset = eventOffset,
                     includeDistanceFilter = includeDistanceFilter,
+                    sort = activeFilter.sort,
                 )
                     .onSuccess { (eventsPage, hasMore) ->
                         if (!discoverEventRequests.isCurrent(generation)) return@onSuccess
@@ -859,7 +867,8 @@ class DefaultEventSearchComponent(
         val dateRangeChanged = previous.date != updated.date
         val sportsChanged = previous.sportIds != updated.sportIds
         val tagsChanged = previous.tagSlugs != updated.tagSlugs
-        if (dateRangeChanged || sportsChanged || tagsChanged) {
+        val sortChanged = previous.sort != updated.sort
+        if (dateRangeChanged || sportsChanged || tagsChanged || sortChanged) {
             refreshEvents(force = true)
         } else {
             _events.value = applyEventFilter(_rawEvents.value, updated)

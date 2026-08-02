@@ -615,6 +615,7 @@ data class EventSearchFiltersDto(
 @Serializable
 data class EventSearchRequestDto(
     val filters: EventSearchFiltersDto? = null,
+    val sort: String? = null,
     val limit: Int? = null,
     val offset: Int? = null,
 )

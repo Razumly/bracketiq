@@ -744,6 +744,7 @@ class EventRepository(
         limit: Int,
         offset: Int,
         includeDistanceFilter: Boolean,
+        sort: EventSearchSort,
     ): Result<Pair<List<Event>, Boolean>> = catalogCoordinator.getEventsInBounds(
         bounds = bounds,
         dateFrom = dateFrom,
@@ -757,6 +758,7 @@ class EventRepository(
         limit = limit,
         offset = offset,
         includeDistanceFilter = includeDistanceFilter,
+        sort = sort.name,
     )
 
     override suspend fun searchEvents(

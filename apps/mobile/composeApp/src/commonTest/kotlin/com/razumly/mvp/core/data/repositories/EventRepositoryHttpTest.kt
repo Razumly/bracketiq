@@ -3299,11 +3299,16 @@ class EventRepositoryHttpTest {
         val eventDao = EventRepositoryHttp_FakeEventDao()
         val db = EventRepositoryHttp_FakeDatabaseService(eventDao, EventRepositoryHttp_FakeUserDataDao(), EventRepositoryHttp_FakeTeamDao())
         val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        var capturedBody = ""
 
         val engine = MockEngine { request ->
             assertEquals("/api/events/search", request.url.encodedPath)
             assertEquals(HttpMethod.Post, request.method)
             assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
 
             respond(
                 content = """
@@ -3346,6 +3351,7 @@ class EventRepositoryHttpTest {
         assertEquals(1, result.first.size)
         assertFalse(result.second)
         assertEquals("e1", eventDao.getEventById("e1")?.id)
+        assertTrue(capturedBody.contains("\"sort\":\"NEAREST\""))
     }
 
     @Test
@@ -3578,6 +3584,7 @@ class EventRepositoryHttpTest {
         assertFalse(secondPage.second)
         assertTrue(capturedBodies.first().contains("\"limit\":2"))
         assertTrue(capturedBodies.first().contains("\"offset\":0"))
+        assertTrue(capturedBodies.first().contains("\"sort\":\"RECOMMENDED\""))
         assertFalse(capturedBodies.first().contains("\"maxDistance\""))
         assertFalse(capturedBodies.first().contains("\"userLocation\""))
         assertTrue(capturedBodies.last().contains("\"offset\":2"))

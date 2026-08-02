@@ -56,6 +56,32 @@ struct NativeOptionGridFilter: View {
     }
 }
 
+struct NativeEventSortFilter: View {
+    @Binding var selectedSort: String
+
+    private let options = [
+        NativeFilterOption(id: "RECOMMENDED", label: "Recommended"),
+        NativeFilterOption(id: "NEAREST", label: "Nearest"),
+        NativeFilterOption(id: "SOONEST", label: "Soonest"),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            NativeFilterSectionTitle("Sort events")
+            HStack(spacing: 8) {
+                ForEach(options) { option in
+                    NativeFilterChip(
+                        label: option.label,
+                        isSelected: selectedSort == option.id
+                    ) {
+                        selectedSort = option.id
+                    }
+                }
+            }
+        }
+    }
+}
+
 struct NativePriceRangeFilter: View {
     @Binding var draft: NativeDiscoverFilterDraft
 

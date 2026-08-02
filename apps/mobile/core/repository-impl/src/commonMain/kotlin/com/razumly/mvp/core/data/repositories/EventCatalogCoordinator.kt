@@ -5,7 +5,6 @@ import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.normalizedEventTags
-import com.razumly.mvp.core.data.dataTypes.usableLatitudeLongitude
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.EventSearchFiltersDto
 import com.razumly.mvp.core.network.dto.EventSearchRequestDto
@@ -27,6 +26,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlin.time.Instant
+
+private const val EVENT_SEARCH_SORT_RECOMMENDED = "RECOMMENDED"
+private const val EVENT_SEARCH_SORT_NEAREST = "NEAREST"
 
 private const val KILOMETERS_PER_MILE = 1.60934
 private const val EVENT_PAGE_SIZE = 50
@@ -147,6 +149,7 @@ internal class EventCatalogCoordinator(
             limit = EVENT_PAGE_SIZE,
             offset = 0,
             includeDistanceFilter = true,
+            sort = EVENT_SEARCH_SORT_NEAREST,
         )
 
     suspend fun getEventsInBounds(
@@ -158,6 +161,7 @@ internal class EventCatalogCoordinator(
         limit: Int,
         offset: Int,
         includeDistanceFilter: Boolean,
+        sort: String = EVENT_SEARCH_SORT_RECOMMENDED,
     ): Result<Pair<List<Event>, Boolean>> = getEventsInBounds(
         bounds = bounds,
         dateFrom = dateFrom,
@@ -171,6 +175,7 @@ internal class EventCatalogCoordinator(
         limit = limit,
         offset = offset,
         includeDistanceFilter = includeDistanceFilter,
+        sort = sort,
     )
 
     suspend fun getEventsInBounds(
@@ -186,6 +191,7 @@ internal class EventCatalogCoordinator(
         limit: Int,
         offset: Int,
         includeDistanceFilter: Boolean,
+        sort: String = EVENT_SEARCH_SORT_RECOMMENDED,
     ): Result<Pair<List<Event>, Boolean>> = runCatching {
         val normalizedLimit = limit.coerceIn(1, 500)
         val normalizedOffset = offset.coerceAtLeast(0)
@@ -223,6 +229,7 @@ internal class EventCatalogCoordinator(
             path = "api/events/search",
             body = EventSearchRequestDto(
                 filters = filters,
+                sort = sort,
                 limit = normalizedLimit,
                 offset = normalizedOffset,
             ),
@@ -233,17 +240,7 @@ internal class EventCatalogCoordinator(
             userRepository.currentUser.value.getOrNull(),
         )
         cacheCatalogEvents(events)
-        val orderedEvents = if (includeDistanceFilter) {
-            events.sortedBy { event ->
-                event.usableLatitudeLongitude()
-                    ?.let { (latitude, longitude) -> calcDistance(bounds.center, LatLng(latitude, longitude)) }
-                    ?: Double.MAX_VALUE
-            }
-        } else {
-            events
-        }
-
-        Pair(orderedEvents, response.hasMoreEventRows(normalizedLimit))
+        Pair(events, response.hasMoreEventRows(normalizedLimit))
     }
 
     suspend fun searchEvents(
@@ -258,6 +255,7 @@ internal class EventCatalogCoordinator(
             path = "api/events/search",
             body = EventSearchRequestDto(
                 filters = EventSearchFiltersDto(query = searchQuery),
+                sort = EVENT_SEARCH_SORT_RECOMMENDED,
                 limit = normalizedLimit,
                 offset = normalizedOffset,
             ),
@@ -269,15 +267,7 @@ internal class EventCatalogCoordinator(
         )
         cacheCatalogEvents(events)
 
-        val orderedEvents = userLocation?.let { location ->
-            events.sortedBy { event ->
-                event.usableLatitudeLongitude()
-                    ?.let { (latitude, longitude) -> calcDistance(location, LatLng(latitude, longitude)) }
-                    ?: Double.MAX_VALUE
-            }
-        } ?: events
-
-        Pair(orderedEvents, response.hasMoreEventRows(normalizedLimit))
+        Pair(events, response.hasMoreEventRows(normalizedLimit))
     }
 
     suspend fun getEventTags(query: String?, filterOnly: Boolean): Result<List<EventTag>> = runCatching {

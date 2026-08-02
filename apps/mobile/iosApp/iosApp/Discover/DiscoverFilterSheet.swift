@@ -80,6 +80,7 @@ private extension NativeDiscoverFilterSheet {
 
         if selectedTab == .events {
             state.component.applyNativeEventFilters(
+                sort: draft.eventSort,
                 priceEnabled: draft.priceEnabled,
                 priceMin: draft.priceMinimum,
                 priceMax: draft.priceMaximum,
@@ -121,6 +122,7 @@ private struct NativeEventFilterContent: View {
     var body: some View {
         NativePriceRangeFilter(draft: $draft)
         NativeDateRangeFilter(draft: $draft)
+        NativeEventSortFilter(selectedSort: $draft.eventSort)
         NativeOptionGridFilter(
             title: "Sports",
             options: state.sports.map { NativeFilterOption(id: $0.id, label: $0.name) },
@@ -214,6 +216,7 @@ private extension NativeOrganizationFilterContent {
 }
 
 struct NativeDiscoverFilterDraft {
+    var eventSort: String
     var priceEnabled: Bool
     var priceMinimumText: String
     var priceMaximumText: String
@@ -233,6 +236,7 @@ struct NativeDiscoverFilterDraft {
     var radiusMiles: Double
 
     init(snapshot: NativeDiscoverFilterSnapshot?, radiusMiles: Double) {
+        eventSort = snapshot?.sort ?? "RECOMMENDED"
         priceEnabled = snapshot?.priceEnabled ?? false
         priceMinimumText = Self.format(snapshot?.priceMin ?? 0)
         priceMaximumText = Self.format(snapshot?.priceMax ?? 200)

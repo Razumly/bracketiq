@@ -20,6 +20,12 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlin.time.Instant
 
+enum class EventSearchSort {
+    RECOMMENDED,
+    NEAREST,
+    SOONEST,
+}
+
 interface IEventRepository : IMVPRepository {
     fun getCachedEventsFlow(): Flow<Result<List<Event>>>
     fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
@@ -115,6 +121,7 @@ interface IEventRepository : IMVPRepository {
         limit: Int = 50,
         offset: Int = 0,
         includeDistanceFilter: Boolean = true,
+        sort: EventSearchSort = EventSearchSort.RECOMMENDED,
     ): Result<Pair<List<Event>, Boolean>> = getEventsInBounds(
         bounds = bounds,
         dateFrom = dateFrom,

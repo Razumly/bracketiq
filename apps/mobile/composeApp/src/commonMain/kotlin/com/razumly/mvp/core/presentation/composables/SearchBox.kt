@@ -62,6 +62,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.data.repositories.EventSearchSort
 import com.razumly.mvp.eventSearch.util.EventFilter
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
@@ -208,6 +209,7 @@ internal fun isFilterActive(
     val hasChangedStartDate = startLocalDate != now.toLocalDateTime(timeZone).date ||
         filter.date.first == startLocalDate.atStartOfDayIn(timeZone)
     return filter.price != null ||
+        filter.sort != EventSearchSort.RECOMMENDED ||
         filter.sportIds.isNotEmpty() ||
         filter.tagSlugs.isNotEmpty() ||
         hasChangedStartDate ||

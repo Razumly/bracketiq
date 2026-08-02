@@ -3,6 +3,7 @@
 package com.razumly.mvp.eventSearch
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.repositories.EventSearchSort
 import com.razumly.mvp.eventSearch.util.EventFilter
 import kotlinx.coroutines.CancellationException
 import kotlin.test.Test
@@ -18,6 +19,7 @@ class NativeDiscoverBridgeTest {
         val start = Instant.fromEpochSeconds(1_700_000_000)
         val end = Instant.fromEpochSeconds(1_800_000_000)
         val snapshot = EventFilter(
+            sort = EventSearchSort.NEAREST,
             price = 15.0 to 75.0,
             date = start to end,
             sportIds = setOf("volleyball", "basketball"),
@@ -29,6 +31,7 @@ class NativeDiscoverBridgeTest {
             divisionPriceMax = 60.0,
         ).toNativeDiscoverFilterSnapshot()
 
+        assertEquals("NEAREST", snapshot.sort)
         assertTrue(snapshot.priceEnabled)
         assertEquals(15.0, snapshot.priceMin)
         assertEquals(75.0, snapshot.priceMax)
@@ -50,6 +53,7 @@ class NativeDiscoverBridgeTest {
         val start = Instant.fromEpochSeconds(1_700_000_000)
         val snapshot = EventFilter(date = start to null).toNativeDiscoverFilterSnapshot()
 
+        assertEquals("RECOMMENDED", snapshot.sort)
         assertFalse(snapshot.priceEnabled)
         assertEquals(0.0, snapshot.priceMin)
         assertEquals(200.0, snapshot.priceMax)
@@ -59,6 +63,12 @@ class NativeDiscoverBridgeTest {
         assertEquals(0.0, snapshot.divisionPriceMin)
         assertFalse(snapshot.divisionPriceMaxEnabled)
         assertEquals(0.0, snapshot.divisionPriceMax)
+    }
+
+    @Test
+    fun givenSwiftSortValue_whenNormalized_thenKnownValuesPassAndUnknownValuesUseRecommended() {
+        assertEquals(EventSearchSort.SOONEST, nativeDiscoverEventSort(" soonest "))
+        assertEquals(EventSearchSort.RECOMMENDED, nativeDiscoverEventSort("unknown"))
     }
 
     @Test

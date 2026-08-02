@@ -3,12 +3,14 @@ package com.razumly.mvp.eventSearch.util
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.eventTagIdentity
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.EventSearchSort
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
 @OptIn(ExperimentalTime::class)
 data class EventFilter(
+    val sort: EventSearchSort = EventSearchSort.RECOMMENDED,
     val price: Pair<Double, Double>? = null,
     val date: Pair<Instant, Instant?> = Pair(Clock.System.now(), null),
     val sportIds: Set<String> = emptySet(),
