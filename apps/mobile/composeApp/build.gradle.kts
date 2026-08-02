@@ -141,8 +141,8 @@ tasks.matching { it.name == "preBuild" }.configureEach {
     dependsOn(verifyLogoVectors)
 }
 
-val mvpVersion = "1.6.16"
-val mvpVersionCode = 69
+val mvpVersion = "1.6.17"
+val mvpVersionCode = 70
 
 fun loadProperties(path: String): Properties =
     Properties().apply {
