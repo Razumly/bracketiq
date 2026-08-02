@@ -26,6 +26,8 @@ fun configProperty(name: String, fallback: String = ""): String =
 fun String.asBuildConfigString(): String =
     "\"${replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
+val productionApiBaseUrl = "https://bracket-iq.com"
+
 kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
@@ -95,7 +97,7 @@ android {
         buildConfigField(
             "String",
             "MVP_API_BASE_URL_REMOTE",
-            configProperty("MVP_API_BASE_URL_REMOTE", "https://bracket-iq.com").asBuildConfigString(),
+            configProperty("MVP_API_BASE_URL_REMOTE", productionApiBaseUrl).asBuildConfigString(),
         )
         buildConfigField(
             "String",
@@ -106,6 +108,26 @@ android {
 
     buildFeatures {
         buildConfig = true
+    }
+
+    buildTypes {
+        release {
+            buildConfigField(
+                "String",
+                "MVP_API_BASE_URL",
+                productionApiBaseUrl.asBuildConfigString(),
+            )
+            buildConfigField(
+                "String",
+                "MVP_API_BASE_URL_REMOTE",
+                productionApiBaseUrl.asBuildConfigString(),
+            )
+            buildConfigField(
+                "String",
+                "MVP_WEB_BASE_URL",
+                productionApiBaseUrl.asBuildConfigString(),
+            )
+        }
     }
 
     compileOptions {

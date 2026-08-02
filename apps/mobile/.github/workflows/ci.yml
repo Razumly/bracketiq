@@ -38,6 +38,9 @@ jobs:
       - name: Verify release Google Sign-In resource
         run: ./scripts/tests/google-sign-in-release-resource-contract.sh
 
+      - name: Verify Android release API endpoint
+        run: ./scripts/tests/android-release-api-base-url-contract.sh
+
       - name: Run Android unit tests
         run: ./gradlew testDebugUnitTest --continue --stacktrace
 

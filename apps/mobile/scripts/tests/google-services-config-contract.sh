@@ -21,11 +21,15 @@ require_text() {
 }
 
 require_text "$gitignore_file" 'composeApp/google-services.json'
-require_text "$build_file" 'id("com.google.gms.google-services") version "4.5.0" apply false'
+require_text "$build_file" 'alias(libs.plugins.google.services) apply false'
 require_text "$build_file" 'if (hasGoogleServicesConfig) {'
 require_text "$build_file" 'apply(plugin = "com.google.gms.google-services")'
 require_text "$build_file" 'tasks.matching { it.name == "preReleaseBuild" }.configureEach'
 require_text "$build_file" 'dependsOn(requireGoogleServicesConfig)'
+require_text "$build_file" 'missingGoogleServicesConfigValues(googleServicesConfigFile)'
+require_text "$build_file" 'Release builds require complete values'
+require_text "$build_file" 'verifyReleaseGoogleServicesResources'
+require_text "$build_file" 'Android Release Google Services resources are missing values'
 require_text "$readme_file" './scripts/provision-google-services.sh'
 require_text "$readme_file" 'MVP_GOOGLE_SERVICES_JSON_BASE64'
 
@@ -93,5 +97,20 @@ if [[ -e "$invalid_output" ]]; then
   fail "failed validation left a configuration file behind"
 fi
 require_text "$temporary_root/invalid.err" 'no Android client exists for package com.razumly.mvp'
+
+invalid_web_client_fixture="$temporary_root/invalid-web-client.json"
+sed 's/example.apps.googleusercontent.com/example.invalid/' \
+  "$fixture" > "$invalid_web_client_fixture"
+invalid_web_client_output="$temporary_root/invalid-web-client-output.json"
+if MVP_GOOGLE_SERVICES_OUTPUT="$invalid_web_client_output" \
+  "$provision_script" "$invalid_web_client_fixture" \
+  > /dev/null 2> "$temporary_root/invalid-web-client.err"; then
+  fail "provisioning accepted an invalid OAuth web client"
+fi
+if [[ -e "$invalid_web_client_output" ]]; then
+  fail "failed OAuth web client validation left a configuration file behind"
+fi
+require_text "$temporary_root/invalid-web-client.err" \
+  'the OAuth web client used by Android Google sign-in is missing or invalid'
 
 echo "Google Services configuration contract passed"

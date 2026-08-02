@@ -102,9 +102,9 @@ web_client_ids = [
     for entry in android_client.get("oauth_client") or []
     if entry.get("client_type") == 3
 ]
-if not any(web_client_ids):
+if not any(client_id.endswith(".apps.googleusercontent.com") for client_id in web_client_ids):
     print(
-        "Google Services provisioning failed: the OAuth web client used by Android Google sign-in is missing",
+        "Google Services provisioning failed: the OAuth web client used by Android Google sign-in is missing or invalid",
         file=sys.stderr,
     )
     raise SystemExit(1)

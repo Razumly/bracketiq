@@ -1,4 +1,5 @@
 
+import groovy.json.JsonSlurper
 import co.touchlab.skie.configuration.SuppressSkieWarning
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
@@ -7,6 +8,7 @@ import org.gradle.api.tasks.bundling.Zip
 import java.io.ByteArrayOutputStream
 import java.util.Properties
 import java.util.concurrent.TimeUnit
+import javax.xml.parsers.DocumentBuilderFactory
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -24,6 +26,75 @@ plugins {
 
 val googleServicesConfigFile = layout.projectDirectory.file("google-services.json").asFile
 val hasGoogleServicesConfig = googleServicesConfigFile.isFile
+val releaseGoogleServicesValuesFile =
+    layout.buildDirectory.file("generated/res/processReleaseGoogleServices/values/values.xml")
+
+private fun missingGoogleServicesConfigValues(configFile: java.io.File): List<String> = runCatching {
+    val root = JsonSlurper().parse(configFile) as? Map<*, *>
+        ?: return@runCatching listOf("valid JSON")
+    val missingValues = mutableListOf<String>()
+    val projectInfo = root["project_info"] as? Map<*, *>
+
+    if (projectInfo?.get("project_number")?.toString()?.trim().isNullOrEmpty()) {
+        missingValues += "project_info.project_number"
+    }
+    if (projectInfo?.get("project_id")?.toString()?.trim().isNullOrEmpty()) {
+        missingValues += "project_info.project_id"
+    }
+
+    val androidClient = (root["client"] as? List<*>)?.firstNotNullOfOrNull { rawClient ->
+        val client = rawClient as? Map<*, *> ?: return@firstNotNullOfOrNull null
+        val clientInfo = client["client_info"] as? Map<*, *>
+            ?: return@firstNotNullOfOrNull null
+        val androidClientInfo = clientInfo["android_client_info"] as? Map<*, *>
+            ?: return@firstNotNullOfOrNull null
+        client.takeIf { androidClientInfo["package_name"] == "com.razumly.mvp" }
+    }
+    if (androidClient == null) {
+        missingValues += "client for package com.razumly.mvp"
+        return@runCatching missingValues
+    }
+
+    val clientInfo = androidClient["client_info"] as? Map<*, *>
+    if (clientInfo?.get("mobilesdk_app_id")?.toString()?.trim().isNullOrEmpty()) {
+        missingValues += "client_info.mobilesdk_app_id"
+    }
+    val hasApiKey = (androidClient["api_key"] as? List<*>)?.any { rawApiKey ->
+        val apiKey = rawApiKey as? Map<*, *> ?: return@any false
+        apiKey["current_key"]?.toString()?.trim()?.isNotEmpty() == true
+    } == true
+    if (!hasApiKey) {
+        missingValues += "api_key.current_key"
+    }
+    val hasWebClient = (androidClient["oauth_client"] as? List<*>)?.any { rawOauthClient ->
+        val oauthClient = rawOauthClient as? Map<*, *> ?: return@any false
+        oauthClient["client_type"].toString() == "3" &&
+            oauthClient["client_id"]
+                ?.toString()
+                ?.trim()
+                ?.endsWith(".apps.googleusercontent.com") == true
+    } == true
+    if (!hasWebClient) {
+        missingValues += "OAuth web client_id"
+    }
+
+    missingValues
+}.getOrElse { listOf("valid JSON") }
+
+private fun generatedGoogleServiceStrings(valuesFile: java.io.File): Map<String, String> {
+    val document = DocumentBuilderFactory.newInstance()
+        .newDocumentBuilder()
+        .parse(valuesFile)
+    val stringNodes = document.getElementsByTagName("string")
+
+    return buildMap {
+        for (index in 0 until stringNodes.length) {
+            val node = stringNodes.item(index)
+            val name = node.attributes?.getNamedItem("name")?.nodeValue ?: continue
+            put(name, node.textContent?.trim().orEmpty())
+        }
+    }
+}
 
 if (hasGoogleServicesConfig) {
     apply(plugin = "com.google.gms.google-services")
@@ -35,14 +106,69 @@ if (hasGoogleServicesConfig) {
     )
 }
 
+if (hasGoogleServicesConfig) {
+    val verifyReleaseGoogleServicesResources = tasks.register("verifyReleaseGoogleServicesResources") {
+        group = "verification"
+        description = "Verifies required Google Services values generated for Android Release."
+        dependsOn("processReleaseGoogleServices")
+        inputs.file(releaseGoogleServicesValuesFile)
+        doLast {
+            val valuesFile = releaseGoogleServicesValuesFile.get().asFile
+            if (!valuesFile.isFile) {
+                throw GradleException(
+                    "Android Release Google Services resources were not generated at " +
+                        valuesFile.relativeTo(rootProject.projectDir),
+                )
+            }
+
+            val generatedStrings = generatedGoogleServiceStrings(valuesFile)
+            val requiredResources = listOf(
+                "default_web_client_id",
+                "gcm_defaultSenderId",
+                "google_api_key",
+                "google_app_id",
+                "project_id",
+            )
+            val missingResources = requiredResources.filter {
+                generatedStrings[it].isNullOrBlank()
+            }
+            if (missingResources.isNotEmpty()) {
+                throw GradleException(
+                    "Android Release Google Services resources are missing values: " +
+                        missingResources.joinToString(),
+                )
+            }
+            if (!generatedStrings.getValue("default_web_client_id")
+                    .endsWith(".apps.googleusercontent.com")
+            ) {
+                throw GradleException(
+                    "Android Release default_web_client_id is not an OAuth web client.",
+                )
+            }
+        }
+    }
+
+    tasks.matching { it.name == "mergeReleaseResources" }.configureEach {
+        dependsOn(verifyReleaseGoogleServicesResources)
+    }
+}
+
 val requireGoogleServicesConfig by tasks.registering {
     group = "verification"
-    description = "Fails release builds when the untracked Android Google Services config is missing."
+    description = "Fails release builds when the Android Google Services config is missing or incomplete."
     doLast {
         if (!googleServicesConfigFile.isFile) {
             throw GradleException(
                 "Release builds require composeApp/google-services.json. " +
                     "Run scripts/provision-google-services.sh; see README.md for local and CI setup.",
+            )
+        }
+        val missingValues = missingGoogleServicesConfigValues(googleServicesConfigFile)
+        if (missingValues.isNotEmpty()) {
+            throw GradleException(
+                "Release builds require complete values in composeApp/google-services.json. " +
+                    "Missing or invalid values: ${missingValues.joinToString()}. " +
+                    "Run scripts/provision-google-services.sh; see README.md for setup.",
             )
         }
     }
