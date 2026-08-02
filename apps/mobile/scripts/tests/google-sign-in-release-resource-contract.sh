@@ -78,13 +78,13 @@ if [[ "$resource_dump" != *default_web_client_id* ]]; then
   fail "release APK does not contain the generated default_web_client_id resource"
 fi
 
-default_web_client_id="$(printf '%s\n' "$resource_dump" | sed -n '
+default_web_client_id="$(sed -n '
   /string\/default_web_client_id$/ {
     n
     s/.*"\([^"]*\)".*/\1/p
     q
   }
-')"
+' <<<"$resource_dump")"
 if [[ "$default_web_client_id" != *.apps.googleusercontent.com ]]; then
   fail "release APK default_web_client_id is missing or is not an OAuth web client"
 fi
