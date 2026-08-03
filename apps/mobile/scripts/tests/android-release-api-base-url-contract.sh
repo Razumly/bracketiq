@@ -13,11 +13,54 @@ generated_build_configs=(
   "$repo_root/wearApp/build/generated/source/buildConfig/release/com/razumly/mvp/wear/BuildConfig.java"
 )
 release_properties="$repo_root/release.properties"
+google_services_config="$repo_root/composeApp/google-services.json"
+temporary_google_services_created=false
 
 fail() {
   echo "Android release API base URL contract failed: $*" >&2
   exit 1
 }
+
+cleanup() {
+  if [[ "$temporary_google_services_created" == true ]]; then
+    rm -f -- "$google_services_config"
+  fi
+}
+trap cleanup EXIT
+
+if [[ ! -f "$google_services_config" ]]; then
+  temporary_google_services_created=true
+  cat > "$google_services_config" <<'JSON'
+{
+  "project_info": {
+    "project_number": "123456789",
+    "project_id": "example-project"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:123456789:android:example",
+        "android_client_info": {
+          "package_name": "com.razumly.mvp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "example-web-client.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "example-api-key"
+        }
+      ]
+    }
+  ],
+  "configuration_version": "1"
+}
+JSON
+fi
 
 for build_file in "${build_files[@]}"; do
   [[ -f "$build_file" ]] || fail "${build_file#"$repo_root/"} was not found"
