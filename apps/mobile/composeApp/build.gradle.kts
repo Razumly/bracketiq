@@ -269,6 +269,7 @@ tasks.matching { it.name == "preBuild" }.configureEach {
 
 val mvpVersion = "1.6.18"
 val mvpVersionCode = 71
+val productionApiBaseUrl = "https://bracket-iq.com"
 
 fun loadProperties(path: String): Properties =
     Properties().apply {
@@ -285,6 +286,10 @@ fun configProperty(name: String, fallback: String = ""): String =
     secretProperties.getProperty(name)
         ?: defaultProperties.getProperty(name)
         ?: fallback
+
+fun String.asBuildConfigString(): String =
+    "\"${replace("\\", "\\\\").replace("\"", "\\\"")}\""
+
 kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
@@ -497,6 +502,21 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            buildConfigField(
+                "String",
+                "MVP_API_BASE_URL",
+                productionApiBaseUrl.asBuildConfigString(),
+            )
+            buildConfigField(
+                "String",
+                "MVP_API_BASE_URL_REMOTE",
+                productionApiBaseUrl.asBuildConfigString(),
+            )
+            buildConfigField(
+                "String",
+                "MVP_WEB_BASE_URL",
+                productionApiBaseUrl.asBuildConfigString(),
+            )
             proguardFiles (
                 getDefaultProguardFile("proguard-android-optimize.txt"),
             )

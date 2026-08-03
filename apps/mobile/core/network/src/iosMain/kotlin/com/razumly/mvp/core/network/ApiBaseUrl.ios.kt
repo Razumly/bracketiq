@@ -39,9 +39,14 @@ private fun releaseConfiguredApiBaseUrl(): String =
         .orEmpty()
 
 private fun resolveIosApiBaseUrl(): String {
+    val releaseConfigured = releaseConfiguredApiBaseUrl()
+    if (releaseConfigured.isNotBlank()) {
+        Napier.i("apiBaseUrl(iOS): using the configured Release endpoint $releaseConfigured")
+        return releaseConfigured
+    }
+
     val configured = AppSecrets.mvpApiBaseUrl.trim().trimEnd('/')
-    val remoteConfigured = releaseConfiguredApiBaseUrl()
-        .ifBlank { AppSecrets.mvpApiBaseUrlRemote.trim().trimEnd('/') }
+    val remoteConfigured = AppSecrets.mvpApiBaseUrlRemote.trim().trimEnd('/')
     val runningOnSimulator = isIosSimulator()
 
     if (!runningOnSimulator && remoteConfigured.isNotBlank()) {
@@ -75,10 +80,15 @@ private fun isLocalHostUrl(url: String): Boolean {
 }
 
 private fun resolveStripeRedirectBaseUrl(resolvedApiBaseUrl: String): String {
+    val releaseConfigured = releaseConfiguredApiBaseUrl()
+    if (releaseConfigured.isNotBlank()) {
+        Napier.i("stripeRedirectBaseUrl(iOS): using the configured Release endpoint $releaseConfigured")
+        return releaseConfigured
+    }
+
     val runningOnSimulator = isIosSimulator()
     val normalizedApi = resolvedApiBaseUrl.trim().trimEnd('/')
-    val remoteConfigured = releaseConfiguredApiBaseUrl()
-        .ifBlank { AppSecrets.mvpApiBaseUrlRemote.trim().trimEnd('/') }
+    val remoteConfigured = AppSecrets.mvpApiBaseUrlRemote.trim().trimEnd('/')
     val webConfigured = AppSecrets.mvpWebBaseUrl.trim().trimEnd('/')
         .takeUnless { it.equals(UNSET_WEB_BASE_URL, ignoreCase = true) }
         .orEmpty()

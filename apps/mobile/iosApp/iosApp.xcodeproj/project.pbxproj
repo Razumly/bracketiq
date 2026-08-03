@@ -252,6 +252,7 @@
 				7555FF77242A565900829871 /* Sources */,
 				B92378962B6B1156000C7307 /* Frameworks */,
 				7555FF79242A565900829871 /* Resources */,
+				A1B2C3D4E5F60718293A4B5C /* Sanitize Release Runtime URLs */,
 				3E49CE228438BEF604104DCD /* [CP] Embed Pods Frameworks */,
 				E9D46276B393F787FAFA2AB6 /* [CP] Copy Pods Resources */,
 			);
@@ -271,6 +272,7 @@
 				FA9A190CF93BE838571BB536 /* Sources */,
 				07A1A2BA7A2FCE9C3535629C /* Frameworks */,
 				5705C7EC234CDC956EF280F4 /* Resources */,
+				A1B2C3D4E5F60718293A4B5D /* Sanitize Release Runtime URLs */,
 			);
 			buildRules = (
 			);
@@ -354,6 +356,44 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		A1B2C3D4E5F60718293A4B5C /* Sanitize Release Runtime URLs */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Sanitize Release Runtime URLs";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/../scripts/sanitize-ios-release-runtime-urls.sh\"\n";
+		};
+		A1B2C3D4E5F60718293A4B5D /* Sanitize Release Runtime URLs */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Sanitize Release Runtime URLs";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/../scripts/sanitize-ios-release-runtime-urls.sh\"\n";
+		};
 		3E49CE228438BEF604104DCD /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;

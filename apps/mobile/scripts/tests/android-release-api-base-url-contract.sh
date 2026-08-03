@@ -2,46 +2,75 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-build_file="$repo_root/core/network/build.gradle.kts"
-generated_build_config="$repo_root/core/network/build/generated/source/buildConfig/release/com/razumly/mvp/core/network/BuildConfig.java"
+build_files=(
+  "$repo_root/composeApp/build.gradle.kts"
+  "$repo_root/core/network/build.gradle.kts"
+  "$repo_root/wearApp/build.gradle.kts"
+)
+generated_build_configs=(
+  "$repo_root/composeApp/build/generated/source/buildConfig/release/com/razumly/mvp/BuildConfig.java"
+  "$repo_root/core/network/build/generated/source/buildConfig/release/com/razumly/mvp/core/network/BuildConfig.java"
+  "$repo_root/wearApp/build/generated/source/buildConfig/release/com/razumly/mvp/wear/BuildConfig.java"
+)
+release_properties="$repo_root/release.properties"
 
 fail() {
   echo "Android release API base URL contract failed: $*" >&2
   exit 1
 }
 
-[[ -f "$build_file" ]] || fail "core/network/build.gradle.kts was not found"
+for build_file in "${build_files[@]}"; do
+  [[ -f "$build_file" ]] || fail "${build_file#"$repo_root/"} was not found"
+done
+[[ -f "$release_properties" ]] || fail "release.properties was not found"
+for property_name in MVP_API_BASE_URL MVP_API_BASE_URL_REMOTE MVP_WEB_BASE_URL; do
+  grep -Fxq "$property_name=https://bracket-iq.com" "$release_properties" \
+    || fail "release.properties does not pin $property_name to production"
+done
+if grep -Fqi 'ngrok' "$release_properties"; then
+  fail "release.properties contains an ngrok endpoint"
+fi
 
 (
   cd "$repo_root"
-  ./gradlew :core:network:generateReleaseBuildConfig --no-daemon --console=plain
+  ./gradlew \
+    :composeApp:generateReleaseBuildConfig \
+    :core:network:generateReleaseBuildConfig \
+    :wearApp:generateReleaseBuildConfig \
+    --no-daemon \
+    --console=plain
 )
 
-release_block="$(awk '
-  /^[[:space:]]*buildTypes[[:space:]]*\{/ { in_build_types = 1 }
-  in_build_types { print }
-  in_build_types && /^[[:space:]]*compileOptions[[:space:]]*\{/ { exit }
-' "$build_file")"
+for build_file in "${build_files[@]}"; do
+  release_block="$(awk '
+    /^[[:space:]]*buildTypes[[:space:]]*\{/ { in_build_types = 1 }
+    in_build_types { print }
+    in_build_types && /^[[:space:]]*compileOptions[[:space:]]*\{/ { exit }
+  ' "$build_file")"
 
-for property_name in MVP_API_BASE_URL MVP_API_BASE_URL_REMOTE MVP_WEB_BASE_URL; do
-  grep -Fq "$property_name" <<<"$release_block" \
-    || fail "the Android Release build does not override $property_name"
+  for property_name in MVP_API_BASE_URL MVP_API_BASE_URL_REMOTE MVP_WEB_BASE_URL; do
+    grep -Fq "$property_name" <<<"$release_block" \
+      || fail "${build_file#"$repo_root/"} Release does not override $property_name"
+  done
+  production_override_count="$(grep -Fc 'productionApiBaseUrl.asBuildConfigString()' <<<"$release_block")"
+  [[ "$production_override_count" -eq 3 ]] \
+    || fail "${build_file#"$repo_root/"} Release does not pin all URL values to production"
+  if grep -Fqi 'ngrok' <<<"$release_block"; then
+    fail "${build_file#"$repo_root/"} Release contains an ngrok endpoint"
+  fi
 done
-production_override_count="$(grep -Fc 'productionApiBaseUrl.asBuildConfigString()' <<<"$release_block")"
-[[ "$production_override_count" -eq 3 ]] \
-  || fail "the Android Release build does not pin all URL values to production"
-if grep -Fqi 'ngrok' <<<"$release_block"; then
-  fail "the Android Release build configuration contains an ngrok endpoint"
-fi
 
-[[ -f "$generated_build_config" ]] || fail "the generated Android Release BuildConfig was not found"
-for property_name in MVP_API_BASE_URL MVP_API_BASE_URL_REMOTE MVP_WEB_BASE_URL; do
-  grep -Fq "public static final String $property_name = \"https://bracket-iq.com\";" \
-    "$generated_build_config" \
-    || fail "the generated Android Release $property_name does not use the production endpoint"
+for generated_build_config in "${generated_build_configs[@]}"; do
+  [[ -f "$generated_build_config" ]] \
+    || fail "${generated_build_config#"$repo_root/"} was not generated"
+  for property_name in MVP_API_BASE_URL MVP_API_BASE_URL_REMOTE MVP_WEB_BASE_URL; do
+    grep -Fq "public static final String $property_name = \"https://bracket-iq.com\";" \
+      "$generated_build_config" \
+      || fail "${generated_build_config#"$repo_root/"} $property_name is not production"
+  done
+  if grep -Fqi 'ngrok' "$generated_build_config"; then
+    fail "${generated_build_config#"$repo_root/"} contains an ngrok endpoint"
+  fi
 done
-if grep -Fqi 'ngrok' "$generated_build_config"; then
-  fail "the generated Android Release BuildConfig contains an ngrok endpoint"
-fi
 
 echo "Android release API base URL contract passed"

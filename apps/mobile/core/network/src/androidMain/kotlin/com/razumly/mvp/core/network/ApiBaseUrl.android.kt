@@ -8,6 +8,7 @@ private const val EMULATOR_HOST_ALIAS = "10.0.2.2"
 private const val LOOPBACK_HOST = "127.0.0.1"
 private const val LOCALHOST_HOST = "localhost"
 private const val NGROK_HOST_TOKEN = "ngrok"
+private const val PRODUCTION_API_BASE_URL = "https://bracket-iq.com"
 private const val UNSET_WEB_BASE_URL = "__MVP_WEB_BASE_URL_UNSET__"
 
 private fun isEmulator(): Boolean {
@@ -28,10 +29,19 @@ private fun isEmulator(): Boolean {
         product.contains("sdk", ignoreCase = true)
 }
 
-private fun resolveApiBaseUrl(baseUrl: String, remoteBaseUrl: String): String {
+internal fun resolveAndroidApiBaseUrl(
+    baseUrl: String,
+    remoteBaseUrl: String,
+    runningOnEmulator: Boolean,
+    isDebugBuild: Boolean,
+): String {
+    if (!isDebugBuild) {
+        Napier.i("apiBaseUrl(android): using the production Release endpoint")
+        return PRODUCTION_API_BASE_URL
+    }
+
     val normalized = baseUrl.trim().trimEnd('/')
     val normalizedRemote = remoteBaseUrl.trim().trimEnd('/')
-    val runningOnEmulator = isEmulator()
 
     if (!runningOnEmulator) {
         if (normalizedRemote.isNotBlank()) {
@@ -68,12 +78,18 @@ private fun isLocalHostUrl(url: String): Boolean {
     return host == EMULATOR_HOST_ALIAS || host == LOOPBACK_HOST || host == LOCALHOST_HOST
 }
 
-private fun resolveStripeRedirectBaseUrl(
+internal fun resolveAndroidStripeRedirectBaseUrl(
     resolvedApiBaseUrl: String,
     remoteBaseUrl: String,
     webBaseUrl: String,
+    runningOnEmulator: Boolean,
+    isDebugBuild: Boolean,
 ): String {
-    val runningOnEmulator = isEmulator()
+    if (!isDebugBuild) {
+        Napier.i("stripeRedirectBaseUrl(android): using the production Release endpoint")
+        return PRODUCTION_API_BASE_URL
+    }
+
     val normalizedApi = resolvedApiBaseUrl.trim().trimEnd('/')
     val normalizedRemote = remoteBaseUrl.trim().trimEnd('/')
     val normalizedWeb = webBaseUrl.trim().trimEnd('/')
@@ -101,15 +117,21 @@ private fun resolveStripeRedirectBaseUrl(
     return normalizedApi
 }
 
-private val resolvedAndroidApiBaseUrl = resolveApiBaseUrl(
+private val runningOnAndroidEmulator = isEmulator()
+
+private val resolvedAndroidApiBaseUrl = resolveAndroidApiBaseUrl(
     BuildConfig.MVP_API_BASE_URL,
     BuildConfig.MVP_API_BASE_URL_REMOTE,
+    runningOnAndroidEmulator,
+    BuildConfig.DEBUG,
 )
 
 actual val apiBaseUrl: String = resolvedAndroidApiBaseUrl
 
-actual val stripeRedirectBaseUrl: String = resolveStripeRedirectBaseUrl(
+actual val stripeRedirectBaseUrl: String = resolveAndroidStripeRedirectBaseUrl(
     resolvedAndroidApiBaseUrl,
     BuildConfig.MVP_API_BASE_URL_REMOTE,
     BuildConfig.MVP_WEB_BASE_URL,
+    runningOnAndroidEmulator,
+    BuildConfig.DEBUG,
 )

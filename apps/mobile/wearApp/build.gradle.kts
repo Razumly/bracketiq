@@ -2,6 +2,7 @@ import java.util.Properties
 
 val wearVersion = "0.1.0"
 val wearVersionCode = 100001
+val productionApiBaseUrl = "https://bracket-iq.com"
 
 plugins {
     alias(libs.plugins.androidApplication)
@@ -48,7 +49,7 @@ android {
         buildConfigField(
             "String",
             "MVP_API_BASE_URL_REMOTE",
-            configProperty("MVP_API_BASE_URL_REMOTE", "https://bracket-iq.com").asBuildConfigString(),
+            configProperty("MVP_API_BASE_URL_REMOTE", productionApiBaseUrl).asBuildConfigString(),
         )
         buildConfigField(
             "String",
@@ -60,6 +61,26 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    buildTypes {
+        release {
+            buildConfigField(
+                "String",
+                "MVP_API_BASE_URL",
+                productionApiBaseUrl.asBuildConfigString(),
+            )
+            buildConfigField(
+                "String",
+                "MVP_API_BASE_URL_REMOTE",
+                productionApiBaseUrl.asBuildConfigString(),
+            )
+            buildConfigField(
+                "String",
+                "MVP_WEB_BASE_URL",
+                productionApiBaseUrl.asBuildConfigString(),
+            )
+        }
     }
 
     compileOptions {
