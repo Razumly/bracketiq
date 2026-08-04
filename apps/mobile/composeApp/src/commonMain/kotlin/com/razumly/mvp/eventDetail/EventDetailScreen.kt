@@ -573,7 +573,14 @@ fun EventDetailScreen(
                 enabled = !showMap,
                 modifier = Modifier.fillMaxSize(),
             ) {
-                Scaffold(Modifier.fillMaxSize()) { innerPadding ->
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    topBar = {
+                        if (isEditing) {
+                            EventEditSetupHeader(onCancel = component::cancelEditingEvent)
+                        }
+                    },
+                ) { innerPadding ->
                 Box(
                     Modifier.background(MaterialTheme.colorScheme.background).fillMaxSize()
                 ) {
@@ -833,6 +840,11 @@ fun EventDetailScreen(
                                 },
                                 onOpenDetails = component::viewEvent,
                             ),
+                            modifier = if (isEditing) {
+                                Modifier.padding(top = innerPadding.calculateTopPadding())
+                            } else {
+                                Modifier
+                            },
                         )
                     }
                 }

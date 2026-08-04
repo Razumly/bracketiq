@@ -75,7 +75,6 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.displayPriceRangeLabel
 import com.razumly.mvp.core.data.dataTypes.evergreenDateDisplayLabel
 import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
-import com.razumly.mvp.core.data.dataTypes.label
 import com.razumly.mvp.core.data.dataTypes.officialPositionSummary
 import com.razumly.mvp.core.data.dataTypes.positionSummary
 import com.razumly.mvp.core.data.dataTypes.toLeagueConfig
@@ -1948,14 +1947,6 @@ fun EventDetails(
                 )
             }
     }
-    val officialSchedulingModeOptions = remember {
-        OfficialSchedulingMode.entries.map { mode ->
-            DropdownOption(
-                value = mode.name,
-                label = mode.label(),
-            )
-        }
-    }
     val teamCheckInModeOptions = remember {
         TeamCheckInMode.entries.map { mode ->
             DropdownOption(
@@ -2345,6 +2336,10 @@ fun EventDetails(
             }
         }
     }
+    val contentBackdropCornerSize = resolveEventDetailsBackdropCornerSize(
+        contentBackdropOffsetPx = contentBackdropOffset,
+        roundedCornerSize = roundedCornerSize,
+    )
     val displayImageId = remember(
         editView,
         event.imageId,
@@ -2405,8 +2400,8 @@ fun EventDetails(
                     .graphicsLayer(translationY = contentBackdropOffset)
                     .clip(
                         RoundedCornerShape(
-                            topStart = roundedCornerSize,
-                            topEnd = roundedCornerSize,
+                            topStart = contentBackdropCornerSize,
+                            topEnd = contentBackdropCornerSize,
                         )
                     )
                     .background(MaterialTheme.colorScheme.surface)
@@ -2642,7 +2637,6 @@ fun EventDetails(
                         resolvedHostDisplay = resolvedHostDisplay,
                         assistantHostIds = assistantHostIds,
                         officialPositionSummary = officialPositionSummary,
-                        officialSchedulingModeOptions = officialSchedulingModeOptions,
                         teamCheckInModeOptions = teamCheckInModeOptions,
                         officialPositionsExpanded = officialPositionsExpanded,
                         canLoadOfficialPositionDefaults = selectedSportForOfficialDefaults != null,
@@ -3149,4 +3143,9 @@ internal fun resolveEventDetailsStickyHeaderTopInset(
 ): Dp = maxOf(
     topInset,
     if (includeStatusBarInset) statusBarInset else 0.dp,
-) + 6.dp
+)
+
+internal fun resolveEventDetailsBackdropCornerSize(
+    contentBackdropOffsetPx: Float,
+    roundedCornerSize: Dp,
+): Dp = if (contentBackdropOffsetPx > 0f) roundedCornerSize else 0.dp

@@ -17,6 +17,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +45,7 @@ import com.razumly.mvp.eventDetail.shared.DetailKeyValueList
 import com.razumly.mvp.eventDetail.shared.DetailRowSpec
 import com.razumly.mvp.eventDetail.shared.FormSectionDivider
 import com.razumly.mvp.eventDetail.shared.LabeledCheckboxRow
+import com.razumly.mvp.eventDetail.shared.OfficialSchedulingModeSelector
 import com.razumly.mvp.eventDetail.shared.animatedCardSection
 import com.razumly.mvp.eventDetail.shared.localImageScheme
 import com.razumly.mvp.eventDetail.staff.EditableStaffCardList
@@ -67,7 +72,6 @@ internal data class EventDetailsStaffState(
     val resolvedHostDisplay: String,
     val assistantHostIds: List<String>,
     val officialPositionSummary: String,
-    val officialSchedulingModeOptions: List<DropdownOption>,
     val teamCheckInModeOptions: List<DropdownOption>,
     val officialPositionsExpanded: Boolean,
     val canLoadOfficialPositionDefaults: Boolean,
@@ -191,80 +195,94 @@ internal fun LazyListScope.eventDetailsStaffSection(
             )
         },
         editContent = {
-            LabeledCheckboxRow(
-                checked = state.editEvent.usesTeamOfficialScheduling(),
-                label = "Teams provide officials",
-                onCheckedChange = actions.onUpdateDoTeamsOfficiate,
+            var teamOfficiatingExpanded by rememberSaveable(state.editEvent.id) { mutableStateOf(true) }
+            var teamOperationsExpanded by rememberSaveable(state.editEvent.id) { mutableStateOf(true) }
+            var officialSchedulingExpanded by rememberSaveable(state.editEvent.id) { mutableStateOf(true) }
+            var staffInvitesExpanded by rememberSaveable(state.editEvent.id) { mutableStateOf(true) }
+
+            CollapsibleEditorSubsectionHeader(
+                title = "Team officiating",
+                expanded = teamOfficiatingExpanded,
+                onToggle = { teamOfficiatingExpanded = !teamOfficiatingExpanded },
             )
-            if (state.editEvent.usesTeamOfficialScheduling()) {
-                LabeledCheckboxRow(
-                    checked = state.editEvent.teamOfficialsMaySwap == true,
-                    label = "Team officials may swap",
-                    onCheckedChange = actions.onUpdateTeamOfficialsMaySwap,
-                )
-            }
-            if (state.editEvent.teamSignup) {
-                FormSectionDivider()
-                Text(
-                    text = "Team check-in and match rosters",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = Color(localImageScheme.current.onSurface),
-                )
-                PlatformDropdown(
-                    selectedValue = state.editEvent.teamCheckInMode.name,
-                    onSelectionChange = { selectedMode ->
-                        TeamCheckInMode.entries
-                            .firstOrNull { mode -> mode.name == selectedMode }
-                            ?.let(actions.onUpdateTeamCheckInMode)
-                    },
-                    options = state.teamCheckInModeOptions,
-                    label = "Check-in mode",
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (state.editEvent.teamCheckInMode != TeamCheckInMode.OFF) {
-                    NumberInputField(
-                        value = state.editEvent.teamCheckInOpenMinutesBefore.coerceAtLeast(0).toString(),
-                        label = "Opens before start (minutes)",
-                        isError = false,
-                        onValueChange = { newValue ->
-                            if (newValue.all(Char::isDigit)) {
-                                actions.onUpdateTeamCheckInOpenMinutesBefore(
-                                    newValue.toIntOrNull()?.coerceAtLeast(0) ?: 0,
-                                )
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                LabeledCheckboxRow(
-                    checked = state.editEvent.allowMatchRosterEdits,
-                    label = "Allow match roster edits",
-                    onCheckedChange = actions.onUpdateAllowMatchRosterEdits,
-                )
-                if (state.editEvent.allowMatchRosterEdits) {
+            AnimatedVisibility(visible = teamOfficiatingExpanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     LabeledCheckboxRow(
-                        checked = state.editEvent.allowTemporaryMatchPlayers,
-                        label = "Allow temporary match players",
-                        onCheckedChange = actions.onUpdateAllowTemporaryMatchPlayers,
+                        checked = state.editEvent.usesTeamOfficialScheduling(),
+                        label = "Teams provide officials",
+                        onCheckedChange = actions.onUpdateDoTeamsOfficiate,
                     )
+                    if (state.editEvent.usesTeamOfficialScheduling()) {
+                        LabeledCheckboxRow(
+                            checked = state.editEvent.teamOfficialsMaySwap == true,
+                            label = "Team officials may swap",
+                            onCheckedChange = actions.onUpdateTeamOfficialsMaySwap,
+                        )
+                    }
                 }
             }
-            Text(
-                text = "Official scheduling",
-                style = MaterialTheme.typography.titleSmall,
-                color = Color(localImageScheme.current.onSurface),
+            FormSectionDivider()
+            if (state.editEvent.teamSignup) {
+                CollapsibleEditorSubsectionHeader(
+                    title = "Team check-in and match rosters",
+                    expanded = teamOperationsExpanded,
+                    onToggle = { teamOperationsExpanded = !teamOperationsExpanded },
+                )
+                AnimatedVisibility(visible = teamOperationsExpanded) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PlatformDropdown(
+                            selectedValue = state.editEvent.teamCheckInMode.name,
+                            onSelectionChange = { selectedMode ->
+                                TeamCheckInMode.entries
+                                    .firstOrNull { mode -> mode.name == selectedMode }
+                                    ?.let(actions.onUpdateTeamCheckInMode)
+                            },
+                            options = state.teamCheckInModeOptions,
+                            label = "Check-in mode",
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        if (state.editEvent.teamCheckInMode != TeamCheckInMode.OFF) {
+                            NumberInputField(
+                                value = state.editEvent.teamCheckInOpenMinutesBefore.coerceAtLeast(0).toString(),
+                                label = "Opens before start (minutes)",
+                                isError = false,
+                                onValueChange = { newValue ->
+                                    if (newValue.all(Char::isDigit)) {
+                                        actions.onUpdateTeamCheckInOpenMinutesBefore(
+                                            newValue.toIntOrNull()?.coerceAtLeast(0) ?: 0,
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        LabeledCheckboxRow(
+                            checked = state.editEvent.allowMatchRosterEdits,
+                            label = "Allow match roster edits",
+                            onCheckedChange = actions.onUpdateAllowMatchRosterEdits,
+                        )
+                        if (state.editEvent.allowMatchRosterEdits) {
+                            LabeledCheckboxRow(
+                                checked = state.editEvent.allowTemporaryMatchPlayers,
+                                label = "Allow temporary match players",
+                                onCheckedChange = actions.onUpdateAllowTemporaryMatchPlayers,
+                            )
+                        }
+                    }
+                }
+                FormSectionDivider()
+            }
+            CollapsibleEditorSubsectionHeader(
+                title = "Official scheduling",
+                expanded = officialSchedulingExpanded,
+                onToggle = { officialSchedulingExpanded = !officialSchedulingExpanded },
             )
-            PlatformDropdown(
-                selectedValue = state.editEvent.officialSchedulingMode.name,
-                onSelectionChange = { selectedMode ->
-                    OfficialSchedulingMode.entries
-                        .firstOrNull { mode -> mode.name == selectedMode }
-                        ?.let(actions.onUpdateOfficialSchedulingMode)
-                },
-                options = state.officialSchedulingModeOptions,
-                label = "Scheduling mode",
-                modifier = Modifier.fillMaxWidth(),
-            )
+            AnimatedVisibility(visible = officialSchedulingExpanded) {
+                OfficialSchedulingModeSelector(
+                    selectedMode = state.editEvent.officialSchedulingMode,
+                    onModeSelected = actions.onUpdateOfficialSchedulingMode,
+                )
+            }
             FormSectionDivider()
             CollapsibleEditorSubsectionHeader(
                 title = "Event official positions",
@@ -274,43 +292,47 @@ internal fun LazyListScope.eventDetailsStaffSection(
             AnimatedVisibility(visible = state.officialPositionsExpanded) {
                 EventOfficialPositionsEditor(state, actions)
             }
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-            Text(
-                text = "Add / Invite Staff",
-                style = MaterialTheme.typography.titleSmall,
-                color = Color(localImageScheme.current.onSurface),
+            FormSectionDivider()
+            CollapsibleEditorSubsectionHeader(
+                title = "Add / Invite Staff",
+                expanded = staffInvitesExpanded,
+                onToggle = { staffInvitesExpanded = !staffInvitesExpanded },
             )
-            StandardTextField(
-                value = state.staffSearchQuery,
-                onValueChange = actions.onStaffSearchQueryChange,
-                label = "Search existing users",
-                placeholder = "Name or username",
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (state.staffSearchQuery.isNotBlank() && state.visibleUserSuggestions.isEmpty()) {
-                Text(
-                    text = "No matching users.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(localImageScheme.current.onSurfaceVariant),
-                )
+            AnimatedVisibility(visible = staffInvitesExpanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StandardTextField(
+                        value = state.staffSearchQuery,
+                        onValueChange = actions.onStaffSearchQueryChange,
+                        label = "Search existing users",
+                        placeholder = "Name or username",
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (state.staffSearchQuery.isNotBlank() && state.visibleUserSuggestions.isEmpty()) {
+                        Text(
+                            text = "No matching users.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(localImageScheme.current.onSurfaceVariant),
+                        )
+                    }
+                    state.visibleUserSuggestions.take(6).forEach { suggestedUser ->
+                        StaffSuggestionCard(
+                            suggestedUser = suggestedUser,
+                            state = state,
+                            actions = actions,
+                        )
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    StaffEmailInviteEditor(state, actions)
+                    state.staffEditorError?.let { errorText ->
+                        Text(
+                            text = errorText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
             }
-            state.visibleUserSuggestions.take(6).forEach { suggestedUser ->
-                StaffSuggestionCard(
-                    suggestedUser = suggestedUser,
-                    state = state,
-                    actions = actions,
-                )
-            }
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-            StaffEmailInviteEditor(state, actions)
-            state.staffEditorError?.let { errorText ->
-                Text(
-                    text = errorText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+            FormSectionDivider()
             CollapsibleEditorSubsectionHeader(
                 title = "Assigned staff",
                 expanded = state.assignedStaffExpanded,

@@ -8,6 +8,8 @@ Mobile event creation has one established Advanced editor whose section content 
 
 The next simplification adds a first-page Options step. Organizers choose one of four event types from compact square buttons, then use categorized parent checkboxes to decide which dependent controls appear later. Team registration controls team-size and team-operation fields; division mode controls shared versus per-division inputs; competition choices control playoff, pool, and loser-bracket inputs; schedule choices control the end-date field; and paid registration controls price, payment-method, refund, and payment-plan controls. Advanced Setup retains its inline controls.
 
+The current refinement makes each Staff group collapsible, replaces the official scheduling dropdown with four explained radio choices, restores the per-division double-elimination control, and gives create and edit forms the same fixed header boundary. The form background and pinned section headers must join without a transparent gap when the user scrolls.
+
 ## Progress
 
 - [x] (2026-07-13) Audited `CreateEventScreen`, `DefaultCreateEventComponent`, and the modular EventDetails sections.
@@ -51,6 +53,11 @@ The next simplification adds a first-page Options step. Organizers choose one of
 - [x] (2026-07-15) Matched the tag search control to the adjacent sport field, accepted provider usernames for Cash App/Venmo/PayPal while retaining HTTPS-only link providers, and stabilized bracket cards and pills under enlarged Android font/display settings.
 - [x] (2026-07-15) Pinned provider-specific username prefixes in both payment editors: Cash App always presents `$` and Venmo always presents `@`, while saved values still normalize to backend HTTPS URLs.
 - [x] (2026-07-15) Recovered canonical division ids from relational division details when a newly created event response contains an empty legacy `divisions` array, preventing false division and pool-configuration errors when the event is reopened for editing.
+- [x] (2026-08-04) Reviewed the five Android screenshots, the Staff section implementations, the division save path, the shared sticky section card, and the `mvp-site` division playoff contract.
+- [x] (2026-08-04) Made every visible Staff group collapsible and rendered official scheduling as four radio choices with descriptions.
+- [x] (2026-08-04) Restored double elimination in each Simple division playoff or bracket configuration.
+- [x] (2026-08-04) Added a fixed edit-form header and removed the transparent gap at the pinned header boundary.
+- [x] (2026-08-04) Ran focused tests, assembled Android, and verified create and edit scrolling in the Android emulator.
 
 ## Surprises & Discoveries
 
@@ -146,6 +153,21 @@ The next simplification adds a first-page Options step. Organizers choose one of
 
 - Observation: Catalog and search responses share the Room event cache with the authoritative event-detail response, so a partial catalog row can erase richer configuration even after the detail race is fixed.
   Evidence: the affected event reached four cached division ids and five details after detail refresh, then returned to empty arrays after the Discover catalog refreshed and was reopened.
+
+- Observation: The Staff form uses collapsible headers only for official positions and assigned staff. Team operations, official scheduling, and staff invitations use static headings.
+  Evidence: both `EventDetailsStaffSection.kt` and `SimpleEventDetailsStaffSection.kt` render those groups directly inside the expanded Staff body.
+
+- Observation: The four official scheduling values already have distinct scheduler behavior, but mobile presents only their short labels in a dropdown.
+  Evidence: `OfficialSchedulingMode` contains `STAFFING`, `TEAM_STAFFING`, `SCHEDULE`, and `OFF`; `mvp-site/src/server/scheduler/officialStaffing.ts` applies full-staffing and conflict rules by mode.
+
+- Observation: The Simple division form explicitly hides the elimination control even though the editor saves `TournamentConfig.doubleElimination` into each `DivisionDetail.playoffConfig`.
+  Evidence: `SimpleEventDetailsDivisionEditorForm.kt` passes `showEliminationControl = false`, while `EventDetails.kt` saves the normalized tournament configuration on the edited division.
+
+- Observation: The visible gap has two presentation causes.
+  Evidence: `resolveEventDetailsStickyHeaderTopInset` adds 6 dp even when the create scaffold already positions content below its header, and the moving content backdrop retains rounded top corners after it reaches the top edge.
+
+- Observation: A fixed edit header can use the same sticky-section inset contract as the create form.
+  Evidence: Android emulator QA pinned the Staff and Divisions cards directly below the opaque Edit event surface with no exposed hero or window strip.
 
 ## Decision Log
 
@@ -265,6 +287,18 @@ The next simplification adds a first-page Options step. Organizers choose one of
   Rationale: The bracket must preserve connector alignment and the compact match-card proportions shown in the product reference. Full match details remain available from each card, while other app typography continues to honor accessibility scaling normally.
   Date/Author: 2026-07-15 / Codex
 
+- Decision: Use full-row radio choices for official scheduling and give each choice one short behavior description.
+  Rationale: The event stores exactly one mode. Radio choices show all four alternatives at once and make the scheduler effect clear.
+  Date/Author: 2026-08-04 / Codex
+
+- Decision: Keep double elimination in the division editor for both Simple and Advanced setup.
+  Rationale: The backend stores and schedules the value from each division playoff configuration. Hiding the Simple control prevents organizers from setting that supported value per division.
+  Date/Author: 2026-08-04 / Codex
+
+- Decision: Reuse one fixed form-header surface for creation and event editing, and pin section headers directly to its content boundary.
+  Rationale: One opaque boundary removes the exposed hero or window layer and gives both form entry points the same scroll behavior.
+  Date/Author: 2026-08-04 / Codex
+
 ## Outcomes & Retrospective
 
 Simple Setup now has an independent presentation surface. Every page dispatches to a Simple-specific section function stored under `eventDetail/simple`; those files began as close copies of the corresponding Advanced implementations but can now be simplified without changing Advanced. The two modes still share the `Event` draft, typed section state and actions, normalization functions, validation, persistence, and Preview step, so the UI is separate without creating a second backend contract.
@@ -278,6 +312,10 @@ Required inputs now use explicit `*` labels and field-level error styling. Basic
 The Basic Information tag search now uses the same 56 dp control height as the sport picker with a smaller body-sized placeholder. Manual payment validation follows the existing persistence normalizer: Cash App, Venmo, and PayPal accept provider usernames that are converted into secure provider URLs before save, while Stripe, Zelle, and custom providers remain HTTPS-link inputs. Cash App and Venmo inputs pin their expected `$` and `@` prefixes and translate existing stored provider URLs back into readable usernames when editing. Bracket date/official pills are fixed at 40 dp with one-line text, and match-card typography compensates for Android font scale so card proportions and connector alignment remain stable when font and display size are increased.
 
 Active relational `Divisions` rows are now the event-division source of truth. Create, detail, search, schedule, participant, weekly-occurrence, and registration snapshot reads no longer consult removed event-level JSON division fields. Lightweight API snapshots project relational IDs, while full event responses include the relational detail records. Participant synchronization re-reads the latest cached event before merging a partial snapshot, and catalog/schedule caching preserves richer division state when a later lightweight row arrives. Entering edit mode now refetches the full event before seeding the draft, so a schedule or catalog placeholder cannot lock the editor into an empty division list.
+
+The Staff editor now gives every visible group its own collapsible header. Official scheduling shows the four stored modes as full-row radio choices with one behavior description for each choice. The Simple division editor again exposes `doubleElimination` for tournament brackets and league playoffs, so each division can keep its own bracket format.
+
+Event edit mode now has a fixed, opaque `Edit event` header with a Cancel action. Create and edit forms pin their section cards directly below the fixed header. The content backdrop becomes square at that boundary, and the old extra 6 dp sticky inset is gone. Android emulator QA confirmed the Staff and Divisions headers without a transparency gap, confirmed Staff group collapse behavior, and showed the per-division Double elimination control. The focused Android JVM tests and `:composeApp:assembleDebug` completed successfully. Logcat contained no fatal app exception during the exercised flow.
 
 ## Context and Orientation
 

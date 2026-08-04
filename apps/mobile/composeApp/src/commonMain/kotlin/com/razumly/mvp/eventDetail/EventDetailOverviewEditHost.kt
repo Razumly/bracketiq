@@ -314,7 +314,8 @@ internal fun EventDetailOverviewEditHost(
         eventWithRelations = state.eventWithRelations,
         editEvent = state.editEvent,
         navPadding = state.navPadding,
-        topInset = state.topInset,
+        topInset = if (state.editView) 0.dp else state.topInset,
+        includeStatusBarInsetInStickyHeaders = !state.editView,
         editView = state.editView,
         showOfficialsPanel = state.showOfficialsPanel,
         isNewEvent = false,
@@ -410,7 +411,7 @@ private fun BoxScope.EventDetailOverviewHeaderControls(
     state: EventDetailOverviewEditHostState,
     actions: EventDetailOverviewEditHostActions,
 ) {
-    if (state.showMap) return
+    if (state.showMap || state.editView) return
 
     Box(
         Modifier

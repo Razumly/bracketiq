@@ -17,6 +17,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,7 +31,6 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
-import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.label
@@ -41,6 +44,7 @@ import com.razumly.mvp.eventDetail.shared.DetailKeyValueList
 import com.razumly.mvp.eventDetail.shared.DetailRowSpec
 import com.razumly.mvp.eventDetail.shared.FormSectionDivider
 import com.razumly.mvp.eventDetail.shared.LabeledCheckboxRow
+import com.razumly.mvp.eventDetail.shared.OfficialSchedulingModeSelector
 import com.razumly.mvp.eventDetail.shared.animatedCardSection
 import com.razumly.mvp.eventDetail.shared.localImageScheme
 import com.razumly.mvp.eventDetail.staff.EditableStaffCardList
@@ -127,65 +131,68 @@ internal fun LazyListScope.simpleEventDetailsStaffSection(
             )
         },
         editContent = {
+            var teamOperationsExpanded by rememberSaveable(state.editEvent.id) { mutableStateOf(true) }
+            var officialSchedulingExpanded by rememberSaveable(state.editEvent.id) { mutableStateOf(true) }
+            var staffInvitesExpanded by rememberSaveable(state.editEvent.id) { mutableStateOf(true) }
+
             if (state.editEvent.teamSignup) {
-                Text(
-                    text = "Team check-in and match rosters",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = Color(localImageScheme.current.onSurface),
+                CollapsibleEditorSubsectionHeader(
+                    title = "Team check-in and match rosters",
+                    expanded = teamOperationsExpanded,
+                    onToggle = { teamOperationsExpanded = !teamOperationsExpanded },
                 )
-                PlatformDropdown(
-                    selectedValue = state.editEvent.teamCheckInMode.name,
-                    onSelectionChange = { selectedMode ->
-                        TeamCheckInMode.entries
-                            .firstOrNull { mode -> mode.name == selectedMode }
-                            ?.let(actions.onUpdateTeamCheckInMode)
-                    },
-                    options = state.teamCheckInModeOptions,
-                    label = "Check-in mode",
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (state.editEvent.teamCheckInMode != TeamCheckInMode.OFF) {
-                    NumberInputField(
-                        value = state.editEvent.teamCheckInOpenMinutesBefore.coerceAtLeast(0).toString(),
-                        label = "Opens before start (minutes) *",
-                        isError = state.showValidationErrors &&
-                            state.editEvent.teamCheckInOpenMinutesBefore < 0,
-                        supportingText = if (
-                            state.showValidationErrors &&
-                            state.editEvent.teamCheckInOpenMinutesBefore < 0
-                        ) {
-                            "Enter 0 or more minutes."
-                        } else {
-                            ""
-                        },
-                        onValueChange = { newValue ->
-                            if (newValue.all(Char::isDigit)) {
-                                actions.onUpdateTeamCheckInOpenMinutesBefore(
-                                    newValue.toIntOrNull()?.coerceAtLeast(0) ?: 0,
-                                )
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                AnimatedVisibility(visible = teamOperationsExpanded) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PlatformDropdown(
+                            selectedValue = state.editEvent.teamCheckInMode.name,
+                            onSelectionChange = { selectedMode ->
+                                TeamCheckInMode.entries
+                                    .firstOrNull { mode -> mode.name == selectedMode }
+                                    ?.let(actions.onUpdateTeamCheckInMode)
+                            },
+                            options = state.teamCheckInModeOptions,
+                            label = "Check-in mode",
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        if (state.editEvent.teamCheckInMode != TeamCheckInMode.OFF) {
+                            NumberInputField(
+                                value = state.editEvent.teamCheckInOpenMinutesBefore.coerceAtLeast(0).toString(),
+                                label = "Opens before start (minutes) *",
+                                isError = state.showValidationErrors &&
+                                    state.editEvent.teamCheckInOpenMinutesBefore < 0,
+                                supportingText = if (
+                                    state.showValidationErrors &&
+                                    state.editEvent.teamCheckInOpenMinutesBefore < 0
+                                ) {
+                                    "Enter 0 or more minutes."
+                                } else {
+                                    ""
+                                },
+                                onValueChange = { newValue ->
+                                    if (newValue.all(Char::isDigit)) {
+                                        actions.onUpdateTeamCheckInOpenMinutesBefore(
+                                            newValue.toIntOrNull()?.coerceAtLeast(0) ?: 0,
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
                 }
                 FormSectionDivider()
             }
-            Text(
-                text = "Official scheduling",
-                style = MaterialTheme.typography.titleSmall,
-                color = Color(localImageScheme.current.onSurface),
+            CollapsibleEditorSubsectionHeader(
+                title = "Official scheduling",
+                expanded = officialSchedulingExpanded,
+                onToggle = { officialSchedulingExpanded = !officialSchedulingExpanded },
             )
-            PlatformDropdown(
-                selectedValue = state.editEvent.officialSchedulingMode.name,
-                onSelectionChange = { selectedMode ->
-                    OfficialSchedulingMode.entries
-                        .firstOrNull { mode -> mode.name == selectedMode }
-                        ?.let(actions.onUpdateOfficialSchedulingMode)
-                },
-                options = state.officialSchedulingModeOptions,
-                label = "Scheduling mode",
-                modifier = Modifier.fillMaxWidth(),
-            )
+            AnimatedVisibility(visible = officialSchedulingExpanded) {
+                OfficialSchedulingModeSelector(
+                    selectedMode = state.editEvent.officialSchedulingMode,
+                    onModeSelected = actions.onUpdateOfficialSchedulingMode,
+                )
+            }
             FormSectionDivider()
             CollapsibleEditorSubsectionHeader(
                 title = "Event official positions",
@@ -195,43 +202,47 @@ internal fun LazyListScope.simpleEventDetailsStaffSection(
             AnimatedVisibility(visible = state.officialPositionsExpanded) {
                 EventOfficialPositionsEditor(state, actions)
             }
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-            Text(
-                text = "Add / Invite Staff",
-                style = MaterialTheme.typography.titleSmall,
-                color = Color(localImageScheme.current.onSurface),
+            FormSectionDivider()
+            CollapsibleEditorSubsectionHeader(
+                title = "Add / Invite Staff",
+                expanded = staffInvitesExpanded,
+                onToggle = { staffInvitesExpanded = !staffInvitesExpanded },
             )
-            StandardTextField(
-                value = state.staffSearchQuery,
-                onValueChange = actions.onStaffSearchQueryChange,
-                label = "Search existing users",
-                placeholder = "Name or username",
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (state.staffSearchQuery.isNotBlank() && state.visibleUserSuggestions.isEmpty()) {
-                Text(
-                    text = "No matching users.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(localImageScheme.current.onSurfaceVariant),
-                )
+            AnimatedVisibility(visible = staffInvitesExpanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StandardTextField(
+                        value = state.staffSearchQuery,
+                        onValueChange = actions.onStaffSearchQueryChange,
+                        label = "Search existing users",
+                        placeholder = "Name or username",
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (state.staffSearchQuery.isNotBlank() && state.visibleUserSuggestions.isEmpty()) {
+                        Text(
+                            text = "No matching users.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(localImageScheme.current.onSurfaceVariant),
+                        )
+                    }
+                    state.visibleUserSuggestions.take(6).forEach { suggestedUser ->
+                        StaffSuggestionCard(
+                            suggestedUser = suggestedUser,
+                            state = state,
+                            actions = actions,
+                        )
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    StaffEmailInviteEditor(state, actions)
+                    state.staffEditorError?.let { errorText ->
+                        Text(
+                            text = errorText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
             }
-            state.visibleUserSuggestions.take(6).forEach { suggestedUser ->
-                StaffSuggestionCard(
-                    suggestedUser = suggestedUser,
-                    state = state,
-                    actions = actions,
-                )
-            }
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-            StaffEmailInviteEditor(state, actions)
-            state.staffEditorError?.let { errorText ->
-                Text(
-                    text = errorText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+            FormSectionDivider()
             CollapsibleEditorSubsectionHeader(
                 title = "Assigned staff",
                 expanded = state.assignedStaffExpanded,

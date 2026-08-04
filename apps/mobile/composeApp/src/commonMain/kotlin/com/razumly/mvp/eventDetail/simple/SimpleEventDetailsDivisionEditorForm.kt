@@ -141,7 +141,6 @@ private fun DivisionScheduleConfigurationFields(
             usesSets = state.divisionScheduleUsesSets,
             tournamentConfig = divisionEditor.playoffConfig,
             onTournamentConfigChange = actions.onUpdateDivisionTournamentConfig,
-            showEliminationControl = false,
         )
     }
 
@@ -161,7 +160,6 @@ private fun DivisionScheduleConfigurationFields(
                 ),
                 playoffConfig = divisionEditor.playoffConfig,
                 onPlayoffConfigChange = actions.onUpdateDivisionPlayoffConfig,
-                showEliminationControl = false,
             )
         }
     }
