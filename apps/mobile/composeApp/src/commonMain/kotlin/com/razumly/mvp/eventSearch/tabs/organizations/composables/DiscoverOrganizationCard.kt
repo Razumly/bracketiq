@@ -4,12 +4,21 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Business
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -17,15 +26,35 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationDivisionSummary
+import com.razumly.mvp.core.data.dataTypes.OrganizationFeature
 import com.razumly.mvp.core.data.dataTypes.resolvedLogoRef
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.util.getImageUrl
+
+private data class OrganizationFeatureBadgeSpec(
+    val feature: OrganizationFeature,
+    val label: String,
+    val icon: ImageVector,
+)
+
+private val organizationFeatureBadgeSpecs = listOf(
+    OrganizationFeatureBadgeSpec(OrganizationFeature.CLUB_TEAMS, "Club & Teams", Icons.Default.Groups),
+    OrganizationFeatureBadgeSpec(OrganizationFeature.FACILITIES_RENTALS, "Rentals", Icons.Default.Business),
+    OrganizationFeatureBadgeSpec(OrganizationFeature.EVENT_MANAGEMENT, "Events", Icons.Default.DateRange),
+)
+
+internal fun organizationFeatureBadgeLabels(
+    enabledFeatures: List<OrganizationFeature>,
+): List<String> = organizationFeatureBadgeSpecs
+    .filter { badge -> badge.feature in enabledFeatures }
+    .map(OrganizationFeatureBadgeSpec::label)
 
 @Composable
 internal fun DiscoverOrganizationCard(
@@ -78,6 +107,45 @@ internal fun DiscoverOrganizationCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                }
+
+                val featureBadges = remember(organization.enabledFeatures) {
+                    organizationFeatureBadgeSpecs.filter { badge -> badge.feature in organization.enabledFeatures }
+                }
+                if (featureBadges.isNotEmpty()) {
+                    FlowRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        featureBadges.forEach { badge ->
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                                shape = RoundedCornerShape(50),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        imageVector = badge.icon,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                    Text(
+                                        text = badge.label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
                 organization.location?.takeIf { it.isNotBlank() }?.let { location ->

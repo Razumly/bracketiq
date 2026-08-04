@@ -3,8 +3,10 @@ package com.razumly.mvp.eventSearch
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameterOption
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.OrganizationDivisionSummary
+import com.razumly.mvp.core.data.dataTypes.OrganizationFeature
 import com.razumly.mvp.core.data.dataTypes.SportSkillDivisionTypes
 import com.razumly.mvp.eventSearch.tabs.organizations.composables.formatOrganizationDivisionSummary
+import com.razumly.mvp.eventSearch.tabs.organizations.composables.organizationFeatureBadgeLabels
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -71,5 +73,24 @@ class OrganizationDivisionDiscoveryTest {
             "1 division · Price not specified",
             formatOrganizationDivisionSummary(OrganizationDivisionSummary(count = 1)),
         )
+    }
+
+    @Test
+    fun organization_feature_badges_follow_enabled_feature_order() {
+        assertEquals(
+            listOf("Club & Teams", "Rentals", "Events"),
+            organizationFeatureBadgeLabels(
+                listOf(
+                    OrganizationFeature.EVENT_MANAGEMENT,
+                    OrganizationFeature.CLUB_TEAMS,
+                    OrganizationFeature.FACILITIES_RENTALS,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun organization_feature_badges_are_empty_when_no_features_are_enabled() {
+        assertEquals(emptyList(), organizationFeatureBadgeLabels(emptyList()))
     }
 }
