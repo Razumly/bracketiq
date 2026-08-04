@@ -1,5 +1,16 @@
 # Repository Guidelines
 
+### ASD-STE100 Simplified Technical English
+
+- Adhere to ASD-STE100 Simplified Technical English for agent-authored plans,
+  documentation, reports, instructions, code comments, and completion notes.
+- Use short sentences, active voice, and one action per instruction.
+- Use one consistent term for each concept. Avoid idioms, vague pronouns,
+  unnecessary jargon, and long noun groups.
+- Do not rewrite exact user-provided copy, quotations, legal text, standardized
+  text, product names, API names, or code identifiers only to conform to this
+  writing standard.
+
 # ExecPlans
 When writing complex features or significant refactors, use an ExecPlan (as described in `PLANS.md` at the repository root) from design to implementation.
 
