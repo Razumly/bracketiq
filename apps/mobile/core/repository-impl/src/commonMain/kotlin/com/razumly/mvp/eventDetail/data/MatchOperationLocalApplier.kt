@@ -120,6 +120,7 @@ private fun MatchMVP.applyLocalSegmentOperations(operations: List<MatchSegmentOp
             status = "NOT_STARTED",
         )
         val updatedMetadata = existing.metadata.orEmpty().toMutableMap().apply {
+            operation.metadata?.let(::putAll)
             val stoppedAt = operation.clockStoppedAt
             if (stoppedAt != null) {
                 put("clockStoppedAt", stoppedAt)

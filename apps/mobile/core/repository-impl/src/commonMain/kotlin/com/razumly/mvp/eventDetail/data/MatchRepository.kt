@@ -502,6 +502,7 @@ class MatchRepository(
                     endedAt = segment.endedAt,
                     resultType = segment.resultType,
                     statusReason = segment.statusReason,
+                    metadata = segment.metadata,
                 )
             }
 

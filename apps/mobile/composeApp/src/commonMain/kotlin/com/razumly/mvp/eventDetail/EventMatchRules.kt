@@ -388,6 +388,7 @@ private fun mergeTimekeepingConfig(
         timerMode = override.timerMode ?: defaults.timerMode,
         segmentDurationMinutes = override.segmentDurationMinutes ?: defaults.segmentDurationMinutes,
         segmentDurationMinutesBySequence = override.segmentDurationMinutesBySequence ?: defaults.segmentDurationMinutesBySequence,
+        segmentBreakDurationMinutes = override.segmentBreakDurationMinutes ?: defaults.segmentBreakDurationMinutes,
         canUseAddedTime = override.canUseAddedTime ?: defaults.canUseAddedTime,
         addedTimeEnabled = override.addedTimeEnabled ?: defaults.addedTimeEnabled,
         stopAtRegulationEnd = override.stopAtRegulationEnd ?: defaults.stopAtRegulationEnd,
@@ -489,6 +490,7 @@ private fun normalizeMatchRulesOverride(value: MatchRulesConfigMVP?): MatchRules
         config.timerMode != null ||
             config.segmentDurationMinutes != null ||
             !config.segmentDurationMinutesBySequence.isNullOrEmpty() ||
+            config.segmentBreakDurationMinutes != null ||
             config.canUseAddedTime != null ||
             config.addedTimeEnabled != null ||
             config.stopAtRegulationEnd != null
@@ -633,12 +635,17 @@ private fun resolvedTimekeeping(
         ?: sport?.segmentDurationMinutesBySequence
         ?: fallbackRules?.segmentDurationMinutesBySequence
         ?: emptyList()
+    val segmentBreakDurationMinutes = override?.segmentBreakDurationMinutes
+        ?: sport?.segmentBreakDurationMinutes
+        ?: fallbackRules?.segmentBreakDurationMinutes
+        ?: 0
     val canUseAddedTime = timerMode != "NONE" && (sport?.canUseAddedTime == true || (sport == null && (override?.canUseAddedTime == true || fallbackRules?.canUseAddedTime == true)))
     val addedTimeEnabled = canUseAddedTime && (override?.addedTimeEnabled ?: sport?.addedTimeEnabled ?: fallbackRules?.addedTimeEnabled ?: false)
     return ResolvedMatchTimekeepingConfigMVP(
         timerMode = timerMode,
         segmentDurationMinutes = segmentDuration,
         segmentDurationMinutesBySequence = sequenceDurations.filter { it > 0 },
+        segmentBreakDurationMinutes = segmentBreakDurationMinutes.coerceAtLeast(0),
         canUseAddedTime = canUseAddedTime,
         addedTimeEnabled = addedTimeEnabled,
         stopAtRegulationEnd = if (timerMode == "NONE") {

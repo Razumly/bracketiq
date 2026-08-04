@@ -205,6 +205,7 @@ class MatchDtosTest {
                     sequence = 1,
                     status = "NOT_STARTED",
                     scores = mapOf("team-1" to 1, "team-2" to 0),
+                    metadata = mapOf("segmentBreakSkippedAt" to "2026-08-04T00:18:00Z"),
                     clearStartedAt = true,
                     clearEndedAt = true,
                 ),
@@ -221,6 +222,10 @@ class MatchDtosTest {
         assertEquals(JsonNull, lifecycle["actualEnd"])
         assertEquals(JsonNull, segment["startedAt"])
         assertEquals(JsonNull, segment["endedAt"])
+        assertEquals(
+            "2026-08-04T00:18:00Z",
+            ((segment["metadata"] as JsonObject)["segmentBreakSkippedAt"] as JsonPrimitive).content,
+        )
     }
 
     @Test

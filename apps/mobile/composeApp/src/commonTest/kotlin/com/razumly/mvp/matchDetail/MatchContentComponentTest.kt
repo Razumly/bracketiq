@@ -286,6 +286,69 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun given_active_segment_break_when_restarting_and_skipping_then_metadata_operations_are_persisted() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(usesSets = false)
+        val breakStartedAt = Clock.System.now().toString()
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = true,
+        ).copy(
+            status = "IN_PROGRESS",
+            actualStart = TEST_ACTUAL_START,
+            resolvedMatchRules = ResolvedMatchRulesMVP(
+                scoringModel = "PERIODS",
+                segmentCount = 2,
+                segmentLabel = "Half",
+                timekeeping = ResolvedMatchTimekeepingConfigMVP(
+                    timerMode = "COUNT_UP",
+                    segmentDurationMinutes = 30,
+                    segmentBreakDurationMinutes = 5,
+                ),
+            ),
+            segments = listOf(
+                createSegment(sequence = 1, team1Score = 1, team2Score = 0).copy(
+                    status = "COMPLETE",
+                    endedAt = breakStartedAt,
+                ),
+                createSegment(sequence = 2, team1Score = 0, team2Score = 0),
+            ),
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+        )
+
+        advance()
+        harness.component.startMatch()
+        advance()
+        assertTrue(harness.matchRepository.operationCalls.isEmpty())
+
+        harness.component.restartSegmentBreak()
+        advance()
+
+        val restartOperation = harness.matchRepository.operationCalls.single().segmentOperations.single()
+        assertTrue(restartOperation.metadata?.get(SEGMENT_BREAK_STARTED_AT_METADATA_KEY)?.isNotBlank() == true)
+        assertEquals(null, restartOperation.metadata?.get(SEGMENT_BREAK_SKIPPED_AT_METADATA_KEY))
+
+        harness.component.skipSegmentBreak()
+        advance()
+
+        val skipOperation = harness.matchRepository.operationCalls.last().segmentOperations.single()
+        assertTrue(skipOperation.metadata?.get(SEGMENT_BREAK_SKIPPED_AT_METADATA_KEY)?.isNotBlank() == true)
+        assertEquals(2, harness.matchRepository.operationCalls.size)
+    }
+
+    @Test
     fun given_running_match_when_stopping_clock_then_match_and_segment_remain_in_progress() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
         val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(usesSets = false)

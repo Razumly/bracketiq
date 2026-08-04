@@ -241,6 +241,7 @@ data class MatchSegmentOperationDto(
     val endedAt: String? = null,
     val resultType: String? = null,
     val statusReason: String? = null,
+    val metadata: Map<String, String>? = null,
     val clockStoppedAt: String? = null,
     val clockStoppedDurationSeconds: Int? = null,
     val clientOperationId: String? = null,
@@ -510,6 +511,9 @@ private fun MatchSegmentOperationDto.toJsonObject(): JsonObject = buildJsonObjec
         put("statusReason", JsonPrimitive(statusReason))
     } else if (clearStatusReason) {
         put("statusReason", JsonNull)
+    }
+    metadata?.let { values ->
+        put("metadata", JsonObject(values.mapValues { (_, value) -> JsonPrimitive(value) }))
     }
     if (clockStoppedAt != null) {
         put("clockStoppedAt", JsonPrimitive(clockStoppedAt))

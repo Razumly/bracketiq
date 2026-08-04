@@ -141,6 +141,8 @@ interface MatchContentComponent {
     fun suspendMatch()
     fun resumeMatch()
     fun startMatch()
+    fun skipSegmentBreak()
+    fun restartSegmentBreak()
     fun stopMatchTimer()
     fun resumeMatchTimer()
     fun resetMatchTimer()
@@ -1079,6 +1081,16 @@ class DefaultMatchContentComponent(
         if (!activeSegment.startedAt.isNullOrBlank() || activeSegment.status == "COMPLETE") {
             return
         }
+        val activeRules = resolveActiveRules(currentMatch, event.value)
+        if (resolveMatchSegmentBreakCountdown(
+                previousSegment = currentMatch.segments.getOrNull(segmentIndex - 1),
+                currentSegment = activeSegment,
+                breakDurationMinutes = activeRules.timekeeping.segmentBreakDurationMinutes,
+                now = Clock.System.now(),
+            ) != null
+        ) {
+            return
+        }
 
         _matchStartSaving.value = true
         scope.launch {
@@ -1148,6 +1160,76 @@ class DefaultMatchContentComponent(
                 }
             } finally {
                 _matchStartSaving.value = false
+            }
+        }
+    }
+
+    override fun skipSegmentBreak() {
+        updateSegmentBreak(restart = false)
+    }
+
+    override fun restartSegmentBreak() {
+        updateSegmentBreak(restart = true)
+    }
+
+    private fun updateSegmentBreak(restart: Boolean) {
+        if (_matchTimeSaving.value) return
+        val currentMatchWithTeams = matchWithTeams.value
+        val currentMatch = updateMatchStructureForCurrentContext(currentMatchWithTeams.match)
+        if (!isOfficial.value || officialCheckedIn.value != true || _matchFinished.value ||
+            !isOfficialMatchWindowOpen(currentMatch)
+        ) {
+            return
+        }
+        val segmentIndex = currentSet.value.coerceIn(0, (currentMatch.segments.size - 1).coerceAtLeast(0))
+        val activeSegment = currentMatch.segments.getOrNull(segmentIndex) ?: return
+        val now = Clock.System.now()
+        val activeRules = resolveActiveRules(currentMatch, event.value)
+        if (resolveMatchSegmentBreakCountdown(
+                previousSegment = currentMatch.segments.getOrNull(segmentIndex - 1),
+                currentSegment = activeSegment,
+                breakDurationMinutes = activeRules.timekeeping.segmentBreakDurationMinutes,
+                now = now,
+            ) == null
+        ) {
+            return
+        }
+
+        val updatedSegment = if (restart) {
+            activeSegment.withRestartedSegmentBreak(now.toString())
+        } else {
+            activeSegment.withSkippedSegmentBreak(now.toString())
+        }
+        val updatedSegments = currentMatch.segments.toMutableList().apply {
+            this[segmentIndex] = updatedSegment
+        }
+        val updatedMatch = currentMatch.copy(segments = updatedSegments)
+
+        _matchTimeSaving.value = true
+        scope.launch {
+            try {
+                matchRepository.updateMatchOperations(
+                    match = updatedMatch,
+                    segmentOperations = listOf(
+                        MatchSegmentOperationDto(
+                            id = updatedSegment.id,
+                            sequence = updatedSegment.sequence,
+                            metadata = updatedSegment.metadata,
+                        ),
+                    ),
+                ).onSuccess { remoteMatch ->
+                    val syncedMatch = remoteMatch.copy(segments = updatedSegments)
+                    _optimisticMatch.value = currentMatchWithTeams.copy(match = syncedMatch)
+                    persistMatchLocally(syncedMatch, clearOptimisticOnSuccess = true)
+                }.onFailure { error ->
+                    _errorState.value = if (restart) {
+                        "Failed to restart break: ${error.userMessage()}"
+                    } else {
+                        "Failed to skip break: ${error.userMessage()}"
+                    }
+                }
+            } finally {
+                _matchTimeSaving.value = false
             }
         }
     }

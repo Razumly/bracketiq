@@ -179,6 +179,11 @@ private data class MatchActionDialogTarget(
     val confirmLabel: String,
 )
 
+private enum class MatchBreakAction {
+    Skip,
+    Restart,
+}
+
 internal data class MatchOfficialDetailRow(
     val positionLabel: String,
     val officialName: String,
@@ -672,6 +677,7 @@ fun MatchDetailScreen(
     var pendingIncidentTarget by remember(match.match.id) { mutableStateOf<MatchIncidentDialogTarget?>(null) }
     var showIncidentTeamPicker by remember(match.match.id) { mutableStateOf(false) }
     var pendingMatchAction by remember(match.match.id) { mutableStateOf<MatchActionDialogTarget?>(null) }
+    var pendingBreakAction by remember(match.match.id) { mutableStateOf<MatchBreakAction?>(null) }
     var showForfeitTeamDialog by remember(match.match.id) { mutableStateOf(false) }
     var incidentType by remember(match.match.id) { mutableStateOf("") }
     var incidentParticipantId by remember(match.match.id) { mutableStateOf<String?>(null) }
@@ -745,8 +751,16 @@ fun MatchDetailScreen(
         )
     }
     val activeSegment = orderedSegments.getOrNull(currentSet)
+    val previousSegment = orderedSegments.getOrNull(currentSet - 1)
     val matchSuspended = match.match.status.equals("SUSPENDED", ignoreCase = true)
     var timerNowMillis by remember(match.match.id) { mutableStateOf(Clock.System.now().toEpochMilliseconds()) }
+    val segmentBreakCountdown = resolveMatchSegmentBreakCountdown(
+        previousSegment = previousSegment,
+        currentSegment = activeSegment,
+        breakDurationMinutes = rules.timekeeping.segmentBreakDurationMinutes,
+        now = Instant.fromEpochMilliseconds(timerNowMillis),
+    )
+    val segmentBreakActive = segmentBreakCountdown != null
     val activeSegmentDurationMinutes = activeSegment?.let { segment ->
         rules.timekeeping.segmentDurationMinutesBySequence.getOrNull(segment.sequence - 1)
             ?: rules.timekeeping.segmentDurationMinutes
@@ -810,6 +824,7 @@ fun MatchDetailScreen(
         activeTimerStoppedAt != null
     val displayClockFormatter: (Int) -> String = if (useCumulativeClock) ::formatClockSecondsAsMinutes else ::formatClockSeconds
     val clockDisplay = when {
+        segmentBreakCountdown != null -> formatClockSeconds(segmentBreakCountdown.remainingSeconds)
         !hasMatchClock -> ""
         activeSegmentStartedAt == null -> displayClockFormatter(if (useCumulativeClock) activeSegmentRegulationOffsetSeconds else 0)
         clockInAddedTime ->
@@ -836,8 +851,9 @@ fun MatchDetailScreen(
         activeSegment?.endedAt,
         activeTimerStoppedAt,
         activeTimerStoppedDurationSeconds,
+        segmentBreakActive,
     ) {
-        while (activeTimerRunning) {
+        while (activeTimerRunning || segmentBreakActive) {
             timerNowMillis = Clock.System.now().toEpochMilliseconds()
             delay(1_000L)
         }
@@ -901,7 +917,7 @@ fun MatchDetailScreen(
         officialCheckedIn &&
         !match.match.actualStart.isNullOrBlank() &&
         !activeSegment?.startedAt.isNullOrBlank() &&
-        activeSegment?.status != "COMPLETE"
+        activeSegment.status != "COMPLETE"
     val canIncrementScore = canAdjustScore &&
         canIncrementCurrentSegment(match.match, rules, event, currentSet)
     val isTimedMatch = rules.scoringModel == "POINTS_ONLY"
@@ -947,13 +963,21 @@ fun MatchDetailScreen(
         team1Scores = match.match.team1Points,
         team2Scores = match.match.team2Points,
     )
-    val activeSegmentLabel = activeMatchSegmentLabel(
-        segmentBaseLabel = segmentBaseLabel,
-        currentSegmentIndex = currentSet,
-        showSegmentBreakdown = showSegmentBreakdown,
-    )
-    val displayedSegmentLabel = selectedScoreSegmentIndex?.let { selectedIndex ->
-        "$segmentBaseLabel ${selectedIndex + 1}"
+    val activeSegmentLabel = if (segmentBreakActive) {
+        "Break"
+    } else {
+        activeMatchSegmentLabel(
+            segmentBaseLabel = segmentBaseLabel,
+            currentSegmentIndex = currentSet,
+            showSegmentBreakdown = showSegmentBreakdown,
+        )
+    }
+    val displayedSegmentLabel = if (segmentBreakActive) {
+        "Break"
+    } else {
+        selectedScoreSegmentIndex?.let { selectedIndex ->
+            "$segmentBaseLabel ${selectedIndex + 1}"
+        }
     }
     val segmentTrackerEntries = remember(
         rules,
@@ -997,7 +1021,8 @@ fun MatchDetailScreen(
         !matchFinished &&
         !matchSuspended &&
         activeSegment?.status != "COMPLETE" &&
-        activeSegment?.startedAt.isNullOrBlank()
+        activeSegment?.startedAt.isNullOrBlank() &&
+        !segmentBreakActive
     val canResetMatchTimer = showOfficialScoreControls &&
         officialCheckedIn &&
         officialMatchWindowOpen &&
@@ -1377,6 +1402,44 @@ fun MatchDetailScreen(
         )
     }
 
+    pendingBreakAction?.let { breakAction ->
+        val restarting = breakAction == MatchBreakAction.Restart
+        AlertDialog(
+            onDismissRequest = {
+                if (!matchTimeSaving) pendingBreakAction = null
+            },
+            title = { Text(if (restarting) "Restart break?" else "Skip break?") },
+            text = {
+                Text(
+                    if (restarting) {
+                        "Restart this break from its full duration?"
+                    } else {
+                        "Skip the remaining break and allow the next segment to start?"
+                    },
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (restarting) component.restartSegmentBreak() else component.skipSegmentBreak()
+                        pendingBreakAction = null
+                    },
+                    enabled = !matchTimeSaving,
+                ) {
+                    Text(if (restarting) "Restart Break" else "Skip Break")
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = { pendingBreakAction = null },
+                    enabled = !matchTimeSaving,
+                ) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
     if (showIncidentTeamPicker) {
         AlertDialog(
             onDismissRequest = { showIncidentTeamPicker = false },
@@ -1595,11 +1658,12 @@ fun MatchDetailScreen(
                     }
                 }
 
-                if (hasMatchClock) {
+                if (hasMatchClock || segmentBreakActive) {
                     MatchTimerControl(
                         clockDisplay = clockDisplay,
                         action = timerAction,
-                        actionEnabled = !matchStartSaving && !matchActionSaving,
+                        actionEnabled = !matchStartSaving && !matchTimeSaving && !matchActionSaving,
+                        showBreakActions = segmentBreakActive && isOfficial && officialCheckedIn && officialMatchWindowOpen,
                         clockColor = when {
                             regulationClockEnded -> MaterialTheme.colorScheme.error
                             clockInAddedTime -> MaterialTheme.colorScheme.tertiary
@@ -1613,6 +1677,8 @@ fun MatchDetailScreen(
                                 null -> Unit
                             }
                         },
+                        onSkipBreak = { pendingBreakAction = MatchBreakAction.Skip },
+                        onRestartBreak = { pendingBreakAction = MatchBreakAction.Restart },
                     )
                 }
 
@@ -1874,8 +1940,11 @@ internal fun MatchTimerControl(
     clockDisplay: String,
     action: MatchTimerAction?,
     actionEnabled: Boolean,
+    showBreakActions: Boolean = false,
     clockColor: Color,
     onAction: () -> Unit,
+    onSkipBreak: () -> Unit = {},
+    onRestartBreak: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -1929,6 +1998,25 @@ internal fun MatchTimerControl(
             }
 
             null -> Unit
+        }
+        if (showBreakActions) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Button(
+                    onClick = onSkipBreak,
+                    enabled = actionEnabled,
+                ) {
+                    Text("Skip Break")
+                }
+                Button(
+                    onClick = onRestartBreak,
+                    enabled = actionEnabled,
+                ) {
+                    Text("Restart Break")
+                }
+            }
         }
     }
 }
