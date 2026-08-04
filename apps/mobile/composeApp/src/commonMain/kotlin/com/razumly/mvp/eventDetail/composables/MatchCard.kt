@@ -81,10 +81,10 @@ data class ColorPallete(
     val onPrimaryContainer: Color,
 )
 
-private val AlternateBracketPrimary = Color(0xFF0F5C5A)
-private val AlternateBracketOnPrimary = Color(0xFFFFFFFF)
-private val AlternateBracketContainer = Color(0xFFD9F4EF)
-private val AlternateBracketOnContainer = Color(0xFF123B39)
+internal val LosersBracketPrimary = Color(0xFF0F5C5A)
+internal val LosersBracketOnPrimary = Color(0xFFFFFFFF)
+private val LosersBracketContainer = Color(0xFFD9F4EF)
+private val LosersBracketOnContainer = Color(0xFF123B39)
 private val CurrentUserParticipantMatchGlowColor = Color(0xFF2FCC71)
 private val CurrentUserOfficialMatchGlowColor = Color(0xFFD97706)
 private val DelayedMatchTimeContainerColor = Color(0xFFFFD54F)
@@ -136,10 +136,10 @@ fun MatchCard(
     }
     val matchCardColorPallet = if (match != null && match.match.losersBracket) {
         ColorPallete(
-            AlternateBracketPrimary,
-            AlternateBracketOnPrimary,
-            AlternateBracketContainer,
-            AlternateBracketOnContainer,
+            LosersBracketPrimary,
+            LosersBracketOnPrimary,
+            LosersBracketContainer,
+            LosersBracketOnContainer,
         )
     } else {
         ColorPallete(

@@ -1,6 +1,8 @@
 package com.razumly.mvp.eventDetail
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -11,9 +13,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
@@ -22,12 +24,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -42,14 +45,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
+import com.razumly.mvp.eventDetail.composables.LosersBracketOnPrimary
+import com.razumly.mvp.eventDetail.composables.LosersBracketPrimary
 import com.razumly.mvp.icons.Groups
 import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.ProfileActionEvents
@@ -80,6 +90,10 @@ private data class EventDetailTabIconStyle(
 )
 
 internal val DivisionPillContentTopOffset = 40.dp
+private val BracketToggleWidth = 164.dp
+private val BracketToggleHeight = 40.dp
+private val BracketToggleInnerPadding = 3.dp
+private val BracketToggleSegmentWidth = 79.dp
 
 @Composable
 private fun eventDetailTabVisuals(selected: Boolean): EventDetailTabVisuals {
@@ -377,21 +391,121 @@ internal fun EventDetailDivisionSelectorBar(
             )
         }
         if (showBracketToggle) {
-            Button(
-                onClick = onBracketToggle,
-                modifier = if (divisionState == null) {
-                    Modifier.widthIn(min = 112.dp)
-                } else {
-                    Modifier.weight(0.34f)
-                },
-                contentPadding = PaddingValues(horizontal = 8.dp),
-            ) {
-                Text(
-                    text = if (isLosersBracket) "Losers" else "Winners",
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            if (divisionState == null) {
+                Spacer(modifier = Modifier.weight(1f))
             }
+            EventDetailBracketToggle(
+                isLosersBracket = isLosersBracket,
+                onToggle = onBracketToggle,
+            )
         }
+    }
+}
+
+@Composable
+private fun EventDetailBracketToggle(
+    isLosersBracket: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val animationSpec = tween<Color>(durationMillis = 220)
+    val selectedColor by animateColorAsState(
+        targetValue = if (isLosersBracket) LosersBracketPrimary else MaterialTheme.colorScheme.primary,
+        animationSpec = animationSpec,
+        label = "Bracket toggle color",
+    )
+    val selectedContentColor by animateColorAsState(
+        targetValue = if (isLosersBracket) LosersBracketOnPrimary else MaterialTheme.colorScheme.onPrimary,
+        animationSpec = animationSpec,
+        label = "Bracket toggle content color",
+    )
+    val thumbOffset by animateDpAsState(
+        targetValue = if (isLosersBracket) BracketToggleSegmentWidth else 0.dp,
+        animationSpec = tween(durationMillis = 220),
+        label = "Bracket toggle position",
+    )
+    val shape = RoundedCornerShape(50)
+
+    Box(
+        modifier = modifier
+            .width(BracketToggleWidth)
+            .height(BracketToggleHeight)
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .border(1.dp, selectedColor.copy(alpha = 0.42f), shape)
+            .semantics {
+                contentDescription = "Bracket view toggle"
+                stateDescription = if (isLosersBracket) {
+                    "Losers bracket selected"
+                } else {
+                    "Winners bracket selected"
+                }
+            }
+            .padding(BracketToggleInnerPadding),
+    ) {
+        Box(
+            modifier = Modifier
+                .offset(x = thumbOffset)
+                .width(BracketToggleSegmentWidth)
+                .fillMaxHeight()
+                .background(selectedColor, shape),
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .selectableGroup(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BracketToggleSegment(
+                label = "Winners",
+                selected = !isLosersBracket,
+                selectedContentColor = selectedContentColor,
+                onClick = {
+                    if (isLosersBracket) onToggle()
+                },
+            )
+            BracketToggleSegment(
+                label = "Losers",
+                selected = isLosersBracket,
+                selectedContentColor = selectedContentColor,
+                onClick = {
+                    if (!isLosersBracket) onToggle()
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun RowScope.BracketToggleSegment(
+    label: String,
+    selected: Boolean,
+    selectedContentColor: Color,
+    onClick: () -> Unit,
+) {
+    val contentColor by animateColorAsState(
+        targetValue = if (selected) selectedContentColor else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = tween(durationMillis = 180),
+        label = "$label bracket label color",
+    )
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .selectable(
+                selected = selected,
+                onClick = onClick,
+                role = Role.Tab,
+            ),
+    ) {
+        Text(
+            text = label,
+            color = contentColor,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            maxLines = 1,
+        )
     }
 }
