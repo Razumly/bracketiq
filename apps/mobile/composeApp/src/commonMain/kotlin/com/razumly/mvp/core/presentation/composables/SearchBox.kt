@@ -2,6 +2,8 @@ package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +26,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -33,6 +36,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.SheetState
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -47,6 +52,12 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalFocusManager
@@ -61,6 +72,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.repositories.EventSearchSort
 import com.razumly.mvp.eventSearch.util.EventFilter
@@ -222,6 +234,38 @@ internal fun isFilterActive(
         ((currentRadiusMiles ?: 0.0) > 0.0)
 }
 
+internal fun shouldConsumeExpandedSheetOverflow(
+    isExpanded: Boolean,
+    availableY: Float,
+): Boolean = isExpanded && availableY < 0f
+
+@OptIn(ExperimentalMaterial3Api::class)
+private fun Modifier.consumeExpandedSheetUpwardDrag(
+    sheetState: SheetState,
+): Modifier = pointerInput(sheetState) {
+    awaitEachGesture {
+        awaitFirstDown(
+            requireUnconsumed = false,
+            pass = PointerEventPass.Initial,
+        )
+        var hasPressedPointers: Boolean
+        do {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            event.changes.forEach { change ->
+                if (
+                    shouldConsumeExpandedSheetOverflow(
+                        isExpanded = sheetState.currentValue == SheetValue.Expanded,
+                        availableY = change.positionChange().y,
+                    )
+                ) {
+                    change.consume()
+                }
+            }
+            hasPressedPointers = event.changes.any { change -> change.pressed }
+        } while (hasPressedPointers)
+    }
+}
+
 @Composable
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalTime::class)
 internal fun EventFilterSheet(
@@ -239,13 +283,48 @@ internal fun EventFilterSheet(
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
     var isPriceInputValid by remember { mutableStateOf(true) }
+    val expandedSheetOverflowGuard = remember(sheetState) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset = if (
+                shouldConsumeExpandedSheetOverflow(
+                    isExpanded = sheetState.currentValue == SheetValue.Expanded,
+                    availableY = available.y,
+                )
+            ) {
+                Offset(x = 0f, y = available.y)
+            } else {
+                Offset.Zero
+            }
+
+            override suspend fun onPostFling(
+                consumed: Velocity,
+                available: Velocity,
+            ): Velocity = if (
+                shouldConsumeExpandedSheetOverflow(
+                    isExpanded = sheetState.currentValue == SheetValue.Expanded,
+                    availableY = available.y,
+                )
+            ) {
+                Velocity(x = 0f, y = available.y)
+            } else {
+                Velocity.Zero
+            }
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        dragHandle = null,
-        sheetGesturesEnabled = false,
+        dragHandle = {
+            BottomSheetDefaults.DragHandle(
+                modifier = Modifier.consumeExpandedSheetUpwardDrag(sheetState),
+            )
+        },
         modifier = Modifier.testTag(FILTER_SHEET_TEST_TAG),
     ) {
         Box(
@@ -259,6 +338,7 @@ internal fun EventFilterSheet(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .consumeExpandedSheetUpwardDrag(sheetState)
                         .padding(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
@@ -269,26 +349,19 @@ internal fun EventFilterSheet(
                         fontWeight = FontWeight.Bold,
                     )
 
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = onDismiss) {
-                            Icon(
-                                imageVector = Icons.Default.Clear,
-                                contentDescription = "Close filters",
-                            )
-                        }
-                        TextButton(onClick = {
-                            onFilterChange { EventFilter() }
-                            onRadiusChange?.invoke(0.0)
-                            onDismiss()
-                        }) {
-                            Text("Clear All")
-                        }
+                    TextButton(onClick = {
+                        onFilterChange { EventFilter() }
+                        onRadiusChange?.invoke(0.0)
+                        onDismiss()
+                    }) {
+                        Text("Clear All")
                     }
                 }
 
                 Column(
                     modifier = Modifier
                         .weight(1f)
+                        .nestedScroll(expandedSheetOverflowGuard)
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 20.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)

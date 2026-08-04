@@ -16,6 +16,13 @@ import kotlin.time.Instant
 
 class SearchBoxFilterStateTest {
     @Test
+    fun givenExpandedSheet_whenOverflowMovesUp_thenConsumeIt() {
+        assertTrue(shouldConsumeExpandedSheetOverflow(isExpanded = true, availableY = -1f))
+        assertFalse(shouldConsumeExpandedSheetOverflow(isExpanded = true, availableY = 1f))
+        assertFalse(shouldConsumeExpandedSheetOverflow(isExpanded = false, availableY = -1f))
+    }
+
+    @Test
     fun nonDefaultEventSortIsActive() {
         assertTrue(isFilterActive(EventFilter(sort = EventSearchSort.NEAREST)))
     }

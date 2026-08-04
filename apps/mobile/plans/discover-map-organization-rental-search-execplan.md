@@ -30,6 +30,9 @@ The Teams and Rentals lists also need the same filter access as Events and Organ
 - [x] (2026-08-04) Added Team and Rental filter content to Compose and native Swift Discover.
 - [x] (2026-08-04) Stabilized Android filter-sheet scrolling and matched dropdown field backgrounds to the sheet.
 - [x] (2026-08-04) Added focused tests and completed Android, iOS, and Swift validation.
+- [x] (2026-08-04) Restored the default Android sheet drag handle and gestures, then consumed only upward overflow at the expanded anchor.
+- [x] (2026-08-04) Reproduced the required hard-swipe path with 40 to 60 millisecond swipes from the handle to `y=0` on `emulator-5554`.
+- [x] (2026-08-04) Verified that five hard upward handle swipes keep the sheet at its expanded anchor and that a downward handle swipe still dismisses it.
 
 ## Surprises & Discoveries
 
@@ -63,6 +66,8 @@ The Teams and Rentals lists also need the same filter access as Events and Organ
   Evidence: `PlatformDropdown.android.kt` forwards an optional container color, but the Discover filter calls omit it.
 - Observation: The combined focused test run reported one Kotlin incremental compiler cache error, then retried without the invalid incremental state and passed.
   Evidence: `:composeApp:testDebugUnitTest` completed with `BUILD SUCCESSFUL` after the compiler retry.
+- Observation: A hard upward release can start the Material sheet settle animation with enough velocity to move the sheet above its expanded anchor. This is a transient animation state, not another sheet anchor.
+  Evidence: Material3 `SheetState.animateTo` states that spring animations can overshoot and sends each overshoot value to the drag state. The two user screenshots show the expanded sheet and this transient over-anchor position.
 
 ## Decision Log
 
@@ -90,8 +95,8 @@ The Teams and Rentals lists also need the same filter access as Events and Organ
 - Decision: Use the area organization endpoint when a Rental distance radius is active, then filter each expanded facility by its own coordinates.
   Rationale: This loads missing nearby rental organizations and avoids limiting distance results to the first alphabetical page.
   Date/Author: 2026-08-04 / Codex.
-- Decision: Disable sheet dragging for the expanded Android filter sheet and retain explicit Close, Apply, outside-tap, and Back dismissal.
-  Rationale: The sheet has no partial state. The content scroll must own vertical gestures, so the sheet cannot over-drag above its only visible anchor.
+- Decision: Keep the default Android sheet drag handle and gestures. Consume upward pointer motion on the handle and header, plus unhandled upward scroll and fling input from the content, while the sheet is already expanded.
+  Rationale: A hard handle swipe bypasses the content nested-scroll path and gives the settle spring a high upward velocity. Consuming only that upward input prevents the over-anchor spring. Downward handle input remains available for sliding and dismissal.
   Date/Author: 2026-08-04 / Codex.
 
 ## Outcomes & Retrospective
@@ -102,9 +107,9 @@ The focused `BillingRepositoryHttpTest` passed. The Android production Kotlin co
 
 The Team and Rental filter follow-up is complete. Each tab now owns separate filter state. Rental results use facility coordinates for radius checks and nearest-first ordering. Team results use the parent organization coordinates and support sport, gender, age, skill, registration price, and distance criteria. The shared Kotlin component remains the data and filter source for both Compose and native Swift.
 
-The Android sheet no longer accepts sheet drag gestures at its expanded anchor. Its inner content owns vertical scrolling. Close, Clear All, Apply Filters, outside-tap, and Back dismissal remain available. The Android gender, age, and skill dropdown fields now use the same `surfaceContainerLow` color as the sheet.
+The Android sheet retains its default drag handle and sheet gestures. Its inner content owns normal vertical scrolling. A pointer guard consumes only upward handle and header motion at the expanded anchor. A nested-scroll guard consumes upward content overflow and fling input at the same anchor. Clear All, Apply Filters, outside-tap, Back, and downward handle dismissal remain available. The Android gender, age, and skill dropdown fields now use the same `surfaceContainerLow` color as the sheet.
 
-The focused filter, bridge, and filter-state tests passed. Android assembly passed. The iOS simulator Kotlin compile passed. Swift parsing passed. The complete arm64 iOS simulator app build passed. Android runtime validation was not available in the final shell because `adb` was not installed.
+The focused filter, bridge, and filter-state tests passed. Android assembly passed. The iOS simulator Kotlin compile passed. Swift parsing passed. The complete arm64 iOS simulator app build passed. A later Android correction passed its focused test and assembly. Runtime validation on `emulator-5554` kept the drag handle at `[592,277][688,289]` through five hard swipes from `640,285` to `640,0` in 40 to 60 milliseconds. An eight-second, 10-frame-per-second recording showed no transient over-anchor frame. A downward handle swipe dismissed the sheet.
 
 ## Context and Orientation
 
@@ -136,7 +141,7 @@ Next, add raw Team and Rental source lists plus separate Team and Rental `EventF
 
 Then expose the two filter flows and their apply, clear, and snapshot actions to native Swift. Add Team and Rental cases to both filter-sheet presentations. Keep the Kotlin component as the filter and result source of truth.
 
-Finally, stop Android sheet drag gesture consumption so the inner scroll is stable. Add an explicit close action. Pass the sheet container color into Android dropdown fields. Run focused pure tests, Android unit tests and assembly, iOS Kotlin compilation, and Swift parsing.
+Finally, keep the default Android sheet gestures. Consume upward handle and header motion plus upward content overflow after the sheet reaches its expanded anchor. Pass the sheet container color into Android dropdown fields. Run focused pure tests, Android unit tests and assembly, iOS Kotlin compilation, and Swift parsing.
 
 ## Concrete Steps
 
@@ -172,7 +177,7 @@ The event map behavior must remain unchanged. Location selection maps with `canC
 
 On Android, open Teams and Rentals and confirm that both search bars show the filter action. Apply a sport filter on each tab. Only matching loaded results must remain. Enable a distance radius on Rentals. The list must include only facilities within the radius and must order them nearest first. Enable Team division and distance filters. Each visible Team must satisfy all selected criteria.
 
-Expand the Android filter sheet and scroll from its first section through Apply Filters several times. The content must scroll without moving the expanded sheet above its anchor or entering a spring loop. The sheet must still close with Close, Apply Filters, an outside tap, or Back. Gender, age, and skill dropdown fields must use the same background color as the sheet.
+Expand the Android filter sheet and scroll from its first section through Apply Filters several times. The content must scroll without moving the expanded sheet above its anchor or entering a spring loop. Swipe the handle hard to the top edge several times. The sheet must remain at its expanded anchor. Swipe the handle down. The sheet must slide and dismiss. Apply Filters, an outside tap, and Back must also dismiss it. Gender, age, and skill dropdown fields must use the same background color as the sheet.
 
 Repeat the Team and Rental filter checks on native iOS. Native Swift must only present and edit filter state. The resulting lists must come from the shared Kotlin component.
 
@@ -199,3 +204,5 @@ Plan revision note: Updated on 2026-08-04 after implementation. It records the c
 Plan revision note: Extended on 2026-08-04 for Team and Rental list filters, nearest Rental facility ordering, the Android expanded-sheet drag loop, and Android dropdown background correction. The follow-up keeps Kotlin as the filter source of truth and treats native Swift as presentation.
 
 Plan revision note: Completed on 2026-08-04 after focused tests, Android assembly, iOS Kotlin compilation, Swift parsing, and the arm64 iOS simulator app build passed. Android device validation remains pending because `adb` was not available in the final shell.
+
+Plan revision note: Corrected on 2026-08-04 after product review and exact hard-swipe reproduction. The standard Android drag handle and sheet gestures are restored. Upward pointer motion and nested-scroll overflow are consumed only at the expanded anchor. The focused test, Android assembly, five hard top-edge swipes, an eight-second screen recording, and downward dismissal validation passed.
