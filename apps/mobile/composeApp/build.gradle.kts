@@ -267,8 +267,8 @@ tasks.matching { it.name == "preBuild" }.configureEach {
     dependsOn(verifyLogoVectors)
 }
 
-val mvpVersion = "1.6.19"
-val mvpVersionCode = 72
+val mvpVersion = "1.6.20"
+val mvpVersionCode = 73
 val productionApiBaseUrl = "https://bracket-iq.com"
 
 fun loadProperties(path: String): Properties =
