@@ -91,8 +91,6 @@ import com.kizitonwose.calendar.compose.weekcalendar.rememberWeekCalendarState
 import com.kizitonwose.calendar.core.Week
 import com.kizitonwose.calendar.core.WeekDay
 import com.kizitonwose.calendar.core.WeekDayPosition
-import com.razumly.mvp.core.analytics.AnalyticsEvent
-import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.EventTag
@@ -102,7 +100,6 @@ import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.canShowPublishedBadgeForViewer
 import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateUrl
-import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateRentalUrl
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.eventTagIdentity
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
@@ -387,6 +384,7 @@ private fun DiscoverFilterTagSection(
                 onTagSelected = onTagToggled,
                 placeholder = "Search tags",
                 clearQueryOnSelect = false,
+                fieldContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 modifier = Modifier.fillMaxWidth(),
             )
             return
@@ -441,6 +439,7 @@ private fun DiscoverFilterTagSection(
                     onTagSelected = onTagToggled,
                     placeholder = "Search tags",
                     clearQueryOnSelect = false,
+                    fieldContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -560,6 +559,7 @@ private fun DiscoverOrganizationDivisionFilterSection(
             onMultiSelectionChange = { values ->
                 onFilterChange(filter.copy(divisionGenders = values.toSet()))
             },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             modifier = Modifier.fillMaxWidth(),
         )
         PlatformDropdown(
@@ -573,6 +573,7 @@ private fun DiscoverOrganizationDivisionFilterSection(
             onMultiSelectionChange = { values ->
                 onFilterChange(filter.copy(ageDivisionTypeIds = values.toSet()))
             },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             modifier = Modifier.fillMaxWidth(),
         )
         PlatformDropdown(
@@ -586,6 +587,7 @@ private fun DiscoverOrganizationDivisionFilterSection(
             onMultiSelectionChange = { values ->
                 onFilterChange(filter.copy(skillDivisionTypeIds = values.toSet()))
             },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             modifier = Modifier.fillMaxWidth(),
         )
         Row(
@@ -602,6 +604,7 @@ private fun DiscoverOrganizationDivisionFilterSection(
                 label = "Minimum price",
                 placeholder = "\$0",
                 keyboardType = "number",
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 modifier = Modifier.weight(1f),
             )
             StandardTextField(
@@ -613,6 +616,7 @@ private fun DiscoverOrganizationDivisionFilterSection(
                 label = "Maximum price",
                 placeholder = "\$0",
                 keyboardType = "number",
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -697,6 +701,7 @@ private fun DiscoverFilterLocationSection(
                     ),
                     modifier = Modifier.fillMaxWidth(),
                     height = 52.dp,
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 )
 
                 if (canUseCurrentLocation) {
@@ -778,6 +783,7 @@ private fun LocationChoiceRow(
 internal fun ComposeEventSearchScreen(
     component: EventSearchComponent,
     mapComponent: MapComponent,
+    openExternalUrl: suspend (String) -> Result<String>,
 ) {
     val events by component.events.collectAsState()
     val organizations by component.organizations.collectAsState()
@@ -820,6 +826,8 @@ internal fun ComposeEventSearchScreen(
     val eventTagOptions by component.eventTags.collectAsState()
     val organizationTagOptions by component.organizationTags.collectAsState()
     val organizationFilter by component.organizationFilter.collectAsState()
+    val teamFilter by component.teamFilter.collectAsState()
+    val rentalFilter by component.rentalFilter.collectAsState()
     val selectedOrganizationTagSlugs by component.selectedOrganizationTagSlugs.collectAsState()
     val currentUserId by component.currentUserId.collectAsState()
 
@@ -842,7 +850,9 @@ internal fun ComposeEventSearchScreen(
     var isSearchingLocations by remember { mutableStateOf(false) }
     var lastMapSearchCenter by remember { mutableStateOf<LatLng?>(null) }
     var lastMapSearchRadiusMiles by remember { mutableStateOf<Double?>(null) }
-    var loadedInitialMapArea by remember { mutableStateOf(false) }
+    var lastMapSearchTab by remember { mutableStateOf<DiscoverTab?>(null) }
+    var loadedInitialMapTab by remember { mutableStateOf<DiscoverTab?>(null) }
+    var isSearchingOrganizationMap by remember { mutableStateOf(false) }
     val normalizedSubmittedSearchQuery = submittedSearchQuery.trim()
     val hasSubmittedSearch = normalizedSubmittedSearchQuery.isNotEmpty()
     val submittedSearchResults = remember(
@@ -984,9 +994,14 @@ internal fun ComposeEventSearchScreen(
             distanceMilesBetween(currentCenter, previousCenter) >= DISCOVER_SEARCH_THIS_AREA_THRESHOLD_MILES
         }
     } == true
+    val supportsVisibleAreaSearch = selectedTab == DiscoverTab.EVENTS ||
+        selectedTab == DiscoverTab.ORGANIZATIONS ||
+        selectedTab == DiscoverTab.RENTALS
     val showSearchThisArea = isMapVisible &&
-        selectedTab == DiscoverTab.EVENTS &&
+        supportsVisibleAreaSearch &&
+        lastMapSearchTab == selectedTab &&
         (hasMapSearchMoved || mapRadiusChangedEnough(mapViewRadiusMiles, lastMapSearchRadiusMiles))
+    val isVisibleAreaSearching = isMapLoading || isSearchingOrganizationMap
 
     val loadingHandler = LocalLoadingHandler.current
     val popupHandler = LocalPopupHandler.current
@@ -1008,39 +1023,43 @@ internal fun ComposeEventSearchScreen(
         }
     }
     val openRental: (Organization) -> Unit = { organization ->
-        val affiliateUrl = organization.normalizedAffiliateRentalUrl()
-        AnalyticsTracker.capture(
-            AnalyticsEvent.RentalClicked,
-            buildMap {
-                put("organization_id", organization.id)
-                put("organization_name", organization.name)
-                put("source", "discover_rentals")
-                put("field_count", organization.fieldIds.size.toString())
-            },
-        )
-        if (affiliateUrl != null) {
-            AnalyticsTracker.capture(
-                AnalyticsEvent.RentalOutboundClicked,
-                buildMap {
-                    put("organization_id", organization.id)
-                    put("organization_name", organization.name)
-                    put("source", "discover_rentals")
-                    putAll(AnalyticsTracker.destinationProperties(affiliateUrl))
-                },
-            )
-            runCatching { uriHandler.openUri(affiliateUrl) }
-                .onFailure { throwable ->
+        component.selectRentalFromDiscover(organization)?.let { affiliateUrl ->
+            coroutineScope.launch {
+                openExternalUrl(affiliateUrl).onFailure { throwable ->
                     popupHandler.showPopup(
                         com.razumly.mvp.core.util.ErrorMessage(
                             throwable.message ?: "Unable to open booking link.",
                         )
                     )
                 }
-        } else {
-            component.viewOrganization(
-                organization,
-                com.razumly.mvp.core.presentation.OrganizationDetailTab.RENTALS
-            )
+            }
+        }
+    }
+
+    suspend fun refreshVisibleMapArea(
+        tab: DiscoverTab,
+        center: LatLng,
+        radiusMiles: Double,
+    ) {
+        when (tab) {
+            DiscoverTab.EVENTS -> mapComponent.refreshEventsForVisibleArea()
+            DiscoverTab.ORGANIZATIONS,
+            DiscoverTab.RENTALS -> {
+                isSearchingOrganizationMap = true
+                try {
+                    val places = component.refreshOrganizationMapPlaces(
+                        center = center,
+                        radiusMiles = radiusMiles,
+                        rentalsOnly = tab == DiscoverTab.RENTALS,
+                    )
+                    if (selectedTab == tab && isMapVisible) {
+                        mapComponent.setPlaces(places)
+                    }
+                } finally {
+                    isSearchingOrganizationMap = false
+                }
+            }
+            DiscoverTab.TEAMS -> Unit
         }
     }
 
@@ -1085,21 +1104,28 @@ internal fun ComposeEventSearchScreen(
         if (!isMapVisible) {
             lastMapSearchCenter = null
             lastMapSearchRadiusMiles = null
-            loadedInitialMapArea = false
+            lastMapSearchTab = null
+            loadedInitialMapTab = null
             return@LaunchedEffect
         }
-        if (selectedTab != DiscoverTab.EVENTS) {
-            loadedInitialMapArea = false
+        if (!supportsVisibleAreaSearch) {
+            loadedInitialMapTab = null
             return@LaunchedEffect
         }
-        if (!loadedInitialMapArea && mapViewRadiusMiles != null) {
+        val radiusMiles = mapViewRadiusMiles
+        if (loadedInitialMapTab != selectedTab && radiusMiles != null) {
             val initialCenter = mapViewCenter ?: currentLocation
             if (initialCenter != null) {
                 delay(DISCOVER_MAP_REVEAL_DURATION_MILLIS.toLong())
-                mapComponent.refreshEventsForVisibleArea()
+                refreshVisibleMapArea(
+                    tab = selectedTab,
+                    center = initialCenter,
+                    radiusMiles = radiusMiles,
+                )
                 lastMapSearchCenter = initialCenter
-                lastMapSearchRadiusMiles = mapViewRadiusMiles
-                loadedInitialMapArea = true
+                lastMapSearchRadiusMiles = radiusMiles
+                lastMapSearchTab = selectedTab
+                loadedInitialMapTab = selectedTab
             }
         }
     }
@@ -1208,6 +1234,7 @@ internal fun ComposeEventSearchScreen(
                 },
                 onPlaceSelected = { place ->
                     val organization = organizationLookup[place.id]
+                        ?: component.organizationForMapPlace(place.id)
                     when (selectedTab) {
                         DiscoverTab.ORGANIZATIONS -> {
                             if (organization != null) {
@@ -1645,7 +1672,117 @@ internal fun ComposeEventSearchScreen(
                     )
                 }
             }
-            else -> null
+            DiscoverTab.TEAMS -> {
+                {
+                    DiscoverFilterSportSection(
+                        sports = sports,
+                        selectedSportIds = teamFilter.sportIds,
+                        onSportToggled = { sport ->
+                            component.updateTeamFilter {
+                                val nextSportIds = if (sport.id in sportIds) {
+                                    sportIds - sport.id
+                                } else {
+                                    sportIds + sport.id
+                                }
+                                val validSkillIds = buildOrganizationSkillFilterOptions(
+                                    parameters = divisionTypeParameters,
+                                    sports = sports,
+                                    selectedSportIds = nextSportIds,
+                                ).map { option -> option.value }.toSet()
+                                copy(
+                                    sportIds = nextSportIds,
+                                    skillDivisionTypeIds = skillDivisionTypeIds.intersect(validSkillIds),
+                                )
+                            }
+                        },
+                    )
+                    DiscoverOrganizationDivisionFilterSection(
+                        parameters = divisionTypeParameters,
+                        sports = sports,
+                        filter = teamFilter,
+                        onFilterChange = { nextFilter ->
+                            component.updateTeamFilter { nextFilter }
+                        },
+                    )
+                    DiscoverFilterLocationSection(
+                        locationLabel = selectedSearchLocationLabel ?: if (currentLocation != null) {
+                            "My location"
+                        } else {
+                            "Choose location"
+                        },
+                        pickerVisible = showLocationPicker,
+                        query = locationQuery,
+                        onQueryChange = { locationQuery = it },
+                        suggestions = locationSuggestions,
+                        isSearching = isSearchingLocations,
+                        canUseCurrentLocation = currentLocation != null,
+                        onTogglePicker = { showLocationPicker = !showLocationPicker },
+                        onUseCurrentLocation = {
+                            component.useCurrentLocationForSearch()
+                            showLocationPicker = false
+                            locationQuery = ""
+                            locationSuggestions = emptyList()
+                        },
+                        onSuggestionSelected = { place ->
+                            component.selectSearchLocation(
+                                label = place.name,
+                                center = LatLng(place.latitude, place.longitude),
+                            )
+                            showLocationPicker = false
+                            locationQuery = ""
+                            locationSuggestions = emptyList()
+                        },
+                    )
+                }
+            }
+            DiscoverTab.RENTALS -> {
+                {
+                    DiscoverFilterSportSection(
+                        sports = sports,
+                        selectedSportIds = rentalFilter.sportIds,
+                        onSportToggled = { sport ->
+                            component.updateRentalFilter {
+                                copy(
+                                    sportIds = if (sport.id in sportIds) {
+                                        sportIds - sport.id
+                                    } else {
+                                        sportIds + sport.id
+                                    },
+                                )
+                            }
+                        },
+                    )
+                    DiscoverFilterLocationSection(
+                        locationLabel = selectedSearchLocationLabel ?: if (currentLocation != null) {
+                            "My location"
+                        } else {
+                            "Choose location"
+                        },
+                        pickerVisible = showLocationPicker,
+                        query = locationQuery,
+                        onQueryChange = { locationQuery = it },
+                        suggestions = locationSuggestions,
+                        isSearching = isSearchingLocations,
+                        canUseCurrentLocation = currentLocation != null,
+                        onTogglePicker = { showLocationPicker = !showLocationPicker },
+                        onUseCurrentLocation = {
+                            component.useCurrentLocationForSearch()
+                            showLocationPicker = false
+                            locationQuery = ""
+                            locationSuggestions = emptyList()
+                        },
+                        onSuggestionSelected = { place ->
+                            component.selectSearchLocation(
+                                label = place.name,
+                                center = LatLng(place.latitude, place.longitude),
+                            )
+                            showLocationPicker = false
+                            locationQuery = ""
+                            locationSuggestions = emptyList()
+                        },
+                    )
+                }
+            }
         }
 
         AnimatedVisibility(
@@ -1668,19 +1805,14 @@ internal fun ComposeEventSearchScreen(
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = selectedTab.searchPlaceholder,
                     query = searchQuery,
-                    filter = selectedTab == DiscoverTab.EVENTS || selectedTab == DiscoverTab.ORGANIZATIONS,
+                    filter = true,
                     currentFilter = when (selectedTab) {
                         DiscoverTab.EVENTS -> currentFilter
                         DiscoverTab.ORGANIZATIONS -> organizationFilter
-                        else -> null
+                        DiscoverTab.TEAMS -> teamFilter
+                        DiscoverTab.RENTALS -> rentalFilter
                     },
-                    currentRadiusMiles = if (
-                        selectedTab == DiscoverTab.EVENTS || selectedTab == DiscoverTab.ORGANIZATIONS
-                    ) {
-                        currentRadius
-                    } else {
-                        null
-                    },
+                    currentRadiusMiles = currentRadius,
                     onChange = { query ->
                         searchQuery = query
                         if (query.isBlank()) {
@@ -1723,19 +1855,27 @@ internal fun ComposeEventSearchScreen(
         ) {
             Button(
                 onClick = {
-                    mapViewCenter?.let { center ->
+                    val center = mapViewCenter
+                    val radiusMiles = mapViewRadiusMiles
+                    if (center != null && radiusMiles != null) {
+                        val searchedTab = selectedTab
                         coroutineScope.launch {
-                            mapComponent.refreshEventsForVisibleArea()
+                            refreshVisibleMapArea(
+                                tab = searchedTab,
+                                center = center,
+                                radiusMiles = radiusMiles,
+                            )
                             lastMapSearchCenter = center
-                            lastMapSearchRadiusMiles = mapViewRadiusMiles
+                            lastMapSearchRadiusMiles = radiusMiles
+                            lastMapSearchTab = searchedTab
                         }
                     }
                 },
-                enabled = !isMapLoading,
+                enabled = !isVisibleAreaSearching,
                 shape = RoundedCornerShape(50),
                 colors = ButtonDefaults.buttonColors(),
             ) {
-                if (isMapLoading) {
+                if (isVisibleAreaSearching) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(16.dp),
                         strokeWidth = 2.dp,
@@ -1884,31 +2024,32 @@ internal fun ComposeEventSearchScreen(
             val activeFilter = when (selectedTab) {
                 DiscoverTab.EVENTS -> currentFilter
                 DiscoverTab.ORGANIZATIONS -> organizationFilter
-                else -> null
+                DiscoverTab.TEAMS -> teamFilter
+                DiscoverTab.RENTALS -> rentalFilter
             }
-            if (activeFilter != null) {
-                EventFilterSheet(
-                    currentFilter = activeFilter,
-                    currentRadiusMiles = currentRadius,
-                    onRadiusChange = component::selectRadius,
-                    extraContent = discoverFilterExtraContent,
-                    title = if (selectedTab == DiscoverTab.ORGANIZATIONS) {
-                        "Filter Organizations"
-                    } else {
-                        "Filter Events"
-                    },
-                    showPriceFilter = selectedTab == DiscoverTab.EVENTS,
-                    showDateFilter = selectedTab == DiscoverTab.EVENTS,
-                    onFilterChange = { update ->
-                        when (selectedTab) {
-                            DiscoverTab.EVENTS -> component.updateFilter(update)
-                            DiscoverTab.ORGANIZATIONS -> component.updateOrganizationFilter(update)
-                            else -> Unit
-                        }
-                    },
-                    onDismiss = { showingFilter = false },
-                )
-            }
+            EventFilterSheet(
+                currentFilter = activeFilter,
+                currentRadiusMiles = currentRadius,
+                onRadiusChange = component::selectRadius,
+                extraContent = discoverFilterExtraContent,
+                title = when (selectedTab) {
+                    DiscoverTab.EVENTS -> "Filter Events"
+                    DiscoverTab.ORGANIZATIONS -> "Filter Organizations"
+                    DiscoverTab.TEAMS -> "Filter Teams"
+                    DiscoverTab.RENTALS -> "Filter Rentals"
+                },
+                showPriceFilter = selectedTab == DiscoverTab.EVENTS,
+                showDateFilter = selectedTab == DiscoverTab.EVENTS,
+                onFilterChange = { update ->
+                    when (selectedTab) {
+                        DiscoverTab.EVENTS -> component.updateFilter(update)
+                        DiscoverTab.ORGANIZATIONS -> component.updateOrganizationFilter(update)
+                        DiscoverTab.TEAMS -> component.updateTeamFilter(update)
+                        DiscoverTab.RENTALS -> component.updateRentalFilter(update)
+                    }
+                },
+                onDismiss = { showingFilter = false },
+            )
         }
 
     }

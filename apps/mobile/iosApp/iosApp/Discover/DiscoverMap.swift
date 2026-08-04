@@ -12,6 +12,7 @@ struct NativeDiscoverMapOverlay: View {
     let onClose: () -> Void
     let onRecenter: () -> Void
     let showsSearchThisArea: Bool
+    let isSearchingThisArea: Bool
     let onSearchThisArea: () -> Void
 
     var body: some View {
@@ -36,16 +37,16 @@ struct NativeDiscoverMapOverlay: View {
             .ignoresSafeArea()
 
             VStack {
-                if selectedTab == .events,
+                if selectedTab.supportsMap,
                    state.mapViewCenter != nil,
-                   showsSearchThisArea || state.isMapLoading {
+                   showsSearchThisArea || isSearchingThisArea {
                     Button(action: onSearchThisArea) {
                         HStack(spacing: 8) {
-                            if state.isMapLoading {
+                            if isSearchingThisArea {
                                 ProgressView()
                                     .tint(.white)
                             }
-                            Text(state.isMapLoading ? "Searching" : "Search this area")
+                            Text(isSearchingThisArea ? "Searching" : "Search this area")
                                 .font(.subheadline.weight(.semibold))
                         }
                         .foregroundStyle(.white)
@@ -54,7 +55,7 @@ struct NativeDiscoverMapOverlay: View {
                         .background(Color.accentColor, in: Capsule())
                     }
                     .buttonStyle(.plain)
-                    .disabled(state.isMapLoading)
+                    .disabled(isSearchingThisArea)
                     .shadow(color: .black.opacity(0.22), radius: 8, y: 3)
                     .padding(.top, 122)
                 }
@@ -110,11 +111,13 @@ private extension NativeDiscoverMapOverlay {
     func selectPlace(_ place: MVPPlace) {
         switch selectedTab {
         case .organizations:
-            if let organization = state.organizations.first(where: { $0.id == place.id }) {
+            if let organization = state.organizations.first(where: { $0.id == place.id })
+                ?? state.component.organizationForMapPlace(placeId: place.id) {
                 onOrganizationSelected(organization)
             }
         case .rentals:
-            if let organization = state.rentals.first(where: { $0.id == place.id }) {
+            if let organization = state.rentals.first(where: { $0.id == place.id })
+                ?? state.component.organizationForMapPlace(placeId: place.id) {
                 onRentalSelected(organization)
             }
         case .events, .teams:

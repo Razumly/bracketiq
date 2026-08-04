@@ -304,6 +304,15 @@ interface IBillingRepository : IMVPRepository {
         includeAffiliateRentals = includeAffiliateRentals,
         tagSlugs = tagSlugs,
     )
+    suspend fun listOrganizationsInArea(
+        latitude: Double,
+        longitude: Double,
+        radiusMiles: Double,
+        includeAffiliateRentals: Boolean = false,
+    ): Result<List<Organization>> = listOrganizations(
+        limit = 200,
+        includeAffiliateRentals = includeAffiliateRentals,
+    )
     suspend fun searchOrganizations(
         query: String,
         limit: Int = 10,

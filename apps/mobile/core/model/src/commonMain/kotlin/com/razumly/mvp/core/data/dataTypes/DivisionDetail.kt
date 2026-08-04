@@ -45,6 +45,7 @@ data class DivisionDetail(
     val installmentDueRelativeDays: List<Int> = emptyList(),
     val installmentAmounts: List<Int> = emptyList(),
     val sportId: String? = null,
+    val registrationUrl: String? = null,
     val ageCutoffDate: String? = null,
     val ageCutoffLabel: String? = null,
     val ageCutoffSource: String? = null,

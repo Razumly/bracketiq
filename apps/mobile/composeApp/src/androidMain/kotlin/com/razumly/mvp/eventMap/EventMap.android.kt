@@ -78,6 +78,7 @@ import com.razumly.mvp.eventMap.composables.MapEventMarker
 import com.razumly.mvp.eventMap.composables.MapInitialsMarker
 import com.razumly.mvp.eventMap.composables.MapPOICard
 import com.razumly.mvp.eventMap.composables.MapPlaceCard
+import com.razumly.mvp.eventMap.composables.MapPlaceCardCarousel
 import com.razumly.mvp.eventMap.composables.MapPlaceMarker
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import io.github.aakira.napier.Napier
@@ -150,6 +151,21 @@ private data class EventMarkerGroup(
 
 private data class PendingEventMarkerGroup(
     val events: MutableList<Event>,
+    var centerX: Float,
+    var centerY: Float,
+    var latitude: Double,
+    var longitude: Double,
+)
+
+private data class PlaceMarkerGroup(
+    val key: String,
+    val places: List<MVPPlace>,
+    val position: LatLng,
+)
+
+private data class PendingPlaceMarkerGroup(
+    val markerKind: String,
+    val places: MutableList<MVPPlace>,
     var centerX: Float,
     var centerY: Float,
     var latitude: Double,
@@ -323,6 +339,7 @@ actual fun EventMap(
     }
     val cameraPositionState = rememberCameraPositionState()
     val eventMarkerStates = remember { mutableMapOf<String, MarkerState>() }
+    val discoverPlaceMarkerStates = remember { mutableMapOf<String, MarkerState>() }
     val placeMarkerStates = remember { mutableMapOf<String, MarkerState>() }
     val searchedPlaceMarkerStates = remember { mutableMapOf<String, MarkerState>() }
     val originalPlaceMarkerState = remember { MarkerState() }
@@ -330,6 +347,8 @@ actual fun EventMap(
     var selectedPOI by remember { mutableStateOf<PointOfInterest?>(null) }
     var selectedMapEvents by remember { mutableStateOf<List<Event>>(emptyList()) }
     var selectedMapEventIndex by remember { mutableIntStateOf(0) }
+    var selectedMapPlaces by remember { mutableStateOf<List<MVPPlace>>(emptyList()) }
+    var selectedMapPlaceIndex by remember { mutableIntStateOf(0) }
     var mapCameraTick by remember { mutableIntStateOf(0) }
     var isAnimating by remember { mutableStateOf(false) }
     val poiMarkerState = remember { MarkerState() }
@@ -519,6 +538,84 @@ actual fun EventMap(
         }
     }
 
+    fun buildPlaceMarkerGroups(sourcePlaces: List<MVPPlace>): List<PlaceMarkerGroup> {
+        val validPlaces = sourcePlaces.filter { place ->
+            place.latitude.isFinite() &&
+                place.longitude.isFinite() &&
+                place.latitude in -90.0..90.0 &&
+                place.longitude in -180.0..180.0 &&
+                (place.latitude != 0.0 || place.longitude != 0.0)
+        }
+        val projection = cameraPositionState.projection
+        if (projection == null) {
+            return validPlaces.map { place ->
+                PlaceMarkerGroup(
+                    key = "place:${place.markerKind}:${place.id}",
+                    places = listOf(place),
+                    position = LatLng(place.latitude, place.longitude),
+                )
+            }
+        }
+
+        val thresholdSquared = clusterTouchDistancePx * clusterTouchDistancePx
+        val pendingGroups = mutableListOf<PendingPlaceMarkerGroup>()
+        validPlaces
+            .sortedWith(compareBy<MVPPlace> { it.id }.thenBy { it.name })
+            .forEach { place ->
+                val coordinate = LatLng(place.latitude, place.longitude)
+                val point = projection.toScreenLocation(coordinate)
+                var closestGroup: PendingPlaceMarkerGroup? = null
+                var closestDistanceSquared = Float.MAX_VALUE
+
+                pendingGroups
+                    .filter { group -> group.markerKind == place.markerKind }
+                    .forEach { group ->
+                        val dx = point.x.toFloat() - group.centerX
+                        val dy = point.y.toFloat() - group.centerY
+                        val distanceSquared = dx * dx + dy * dy
+                        if (distanceSquared <= thresholdSquared && distanceSquared < closestDistanceSquared) {
+                            closestGroup = group
+                            closestDistanceSquared = distanceSquared
+                        }
+                    }
+
+                val group = closestGroup
+                if (group == null) {
+                    pendingGroups += PendingPlaceMarkerGroup(
+                        markerKind = place.markerKind,
+                        places = mutableListOf(place),
+                        centerX = point.x.toFloat(),
+                        centerY = point.y.toFloat(),
+                        latitude = place.latitude,
+                        longitude = place.longitude,
+                    )
+                } else {
+                    val nextSize = group.places.size + 1
+                    group.places += place
+                    group.centerX = ((group.centerX * (nextSize - 1)) + point.x.toFloat()) / nextSize
+                    group.centerY = ((group.centerY * (nextSize - 1)) + point.y.toFloat()) / nextSize
+                    group.latitude = ((group.latitude * (nextSize - 1)) + place.latitude) / nextSize
+                    group.longitude = ((group.longitude * (nextSize - 1)) + place.longitude) / nextSize
+                }
+            }
+
+        return pendingGroups.map { group ->
+            val groupedPlaces = group.places.sortedWith(
+                compareBy<MVPPlace> { it.name.lowercase(Locale.getDefault()) }.thenBy { it.id },
+            )
+            val key = if (groupedPlaces.size == 1) {
+                "place:${group.markerKind}:${groupedPlaces.first().id}"
+            } else {
+                "place-cluster:${group.markerKind}:${groupedPlaces.map { it.id }.sorted().joinToString("|")}"
+            }
+            PlaceMarkerGroup(
+                key = key,
+                places = groupedPlaces,
+                position = LatLng(group.latitude, group.longitude),
+            )
+        }
+    }
+
     val distinctSelectedPlace = selectedPlace?.takeIf { !sameLocation(it, originalPlace) }
     val focusedIsCurrentUserLocation = trackedLatLng?.let { tracked ->
         distanceBetweenMeters(tracked, initCameraState) <= userLocationMatchThresholdMeters
@@ -526,6 +623,9 @@ actual fun EventMap(
     val mapEvents = remember(events, focusedEvent) { uniqueMapEvents() }
     val eventMarkerGroups = remember(mapEvents, mapCameraTick, clusterTouchDistancePx) {
         buildEventMarkerGroups(mapEvents)
+    }
+    val discoverPlaceMarkerGroups = remember(places, mapCameraTick, clusterTouchDistancePx, canClickPOI) {
+        if (canClickPOI) emptyList() else buildPlaceMarkerGroups(places)
     }
 
     val clearPendingSelection: () -> Unit = {
@@ -664,6 +764,19 @@ actual fun EventMap(
         }
     }
 
+    LaunchedEffect(discoverPlaceMarkerGroups) {
+        val currentGroupKeys = discoverPlaceMarkerGroups.map { group -> group.key }.toSet()
+        discoverPlaceMarkerStates.keys.removeAll { key -> key !in currentGroupKeys }
+        discoverPlaceMarkerGroups.forEach { group ->
+            val existingState = discoverPlaceMarkerStates[group.key]
+            if (existingState == null) {
+                discoverPlaceMarkerStates[group.key] = MarkerState(position = group.position)
+            } else if (existingState.position != group.position) {
+                existingState.position = group.position
+            }
+        }
+    }
+
     LaunchedEffect(mapEvents) {
         if (selectedMapEvents.isEmpty()) return@LaunchedEffect
         val currentEventIds = mapEvents.map { it.id }.toSet()
@@ -677,6 +790,13 @@ actual fun EventMap(
     LaunchedEffect(places) {
         val currentPlaceIds = places.map { place -> place.id }.toSet()
         placeMarkerStates.keys.removeAll { placeId -> placeId !in currentPlaceIds }
+        if (selectedMapPlaces.isNotEmpty()) {
+            val retainedSelection = selectedMapPlaces.filter { place -> place.id in currentPlaceIds }
+            selectedMapPlaces = retainedSelection
+            selectedMapPlaceIndex = selectedMapPlaceIndex.coerceAtMost(
+                (retainedSelection.size - 1).coerceAtLeast(0),
+            )
+        }
     }
 
     LaunchedEffect(searchedPlaces) {
@@ -779,6 +899,8 @@ actual fun EventMap(
             onPOIClick = { poi ->
                 selectedMapEvents = emptyList()
                 selectedMapEventIndex = 0
+                selectedMapPlaces = emptyList()
+                selectedMapPlaceIndex = 0
                 if (canClickPOI && !isAnimating) {
                     selectedPOI = poi
                     armedPlaceId = null
@@ -808,6 +930,8 @@ actual fun EventMap(
             onMapClick = {
                 selectedMapEvents = emptyList()
                 selectedMapEventIndex = 0
+                selectedMapPlaces = emptyList()
+                selectedMapPlaceIndex = 0
             },
         ) {
             if (!canClickPOI) {
@@ -855,6 +979,8 @@ actual fun EventMap(
                                     selectedPOI = null
                                     selectedMapEvents = group.events
                                     selectedMapEventIndex = 0
+                                    selectedMapPlaces = emptyList()
+                                    selectedMapPlaceIndex = 0
                                     true
                                 },
                                 onInfoWindowClick = { onEventSelected(event) },
@@ -886,6 +1012,8 @@ actual fun EventMap(
                                     selectedPOI = null
                                     selectedMapEvents = group.events
                                     selectedMapEventIndex = 0
+                                    selectedMapPlaces = emptyList()
+                                    selectedMapPlaceIndex = 0
                                     true
                                 },
                                 onInfoWindowClick = {
@@ -903,91 +1031,164 @@ actual fun EventMap(
                 }
             }
 
-            places.forEach { place ->
-                key("place:${place.id}") {
-                    val markerState = placeMarkerStates.getOrPut(place.id) {
-                        MarkerState(position = LatLng(place.latitude, place.longitude))
-                    }
-                    val newPosition = LatLng(place.latitude, place.longitude)
-                    if (markerState.position != newPosition) {
-                        markerState.position = newPosition
-                    }
-                    val markerColor = when {
-                        sameLocation(place, distinctSelectedPlace) -> MAP_SELECTED_MARKER_COLOR
-                        sameLocation(place, originalPlace) -> MAP_ORIGINAL_MARKER_COLOR
-                        place.markerKind == MVPPlace.MARKER_KIND_RENTAL -> DISCOVER_RENTAL_MARKER_COLOR
-                        place.markerKind == MVPPlace.MARKER_KIND_ORGANIZATION -> DISCOVER_ORGANIZATION_MARKER_COLOR
-                        else -> MAP_PLACE_MARKER_COLOR
-                    }
-                    val markerImageUrl = remember(place.id, place.imageRef, place.imageUrl) {
-                        resolveMarkerImageUrl(place.imageRef, place.imageUrl)
-                    }
-                    val markerImage = rememberMarkerImage(markerImageUrl)
+            if (!canClickPOI) {
+                discoverPlaceMarkerGroups.forEach { group ->
+                    key(group.key) {
+                        val markerState = discoverPlaceMarkerStates.getOrPut(group.key) {
+                            MarkerState(position = group.position)
+                        }
+                        if (markerState.position != group.position) {
+                            markerState.position = group.position
+                        }
+                        val markerKind = group.places.firstOrNull()?.markerKind
+                        val markerColor = when (markerKind) {
+                            MVPPlace.MARKER_KIND_RENTAL -> DISCOVER_RENTAL_MARKER_COLOR
+                            MVPPlace.MARKER_KIND_ORGANIZATION -> DISCOVER_ORGANIZATION_MARKER_COLOR
+                            else -> MAP_PLACE_MARKER_COLOR
+                        }
 
-                    MarkerInfoWindowComposable(
-                        place.id,
-                        place.name,
-                        place.imageRef.orEmpty(),
-                        place.imageUrl.orEmpty(),
-                        place.markerKind,
-                        markerImage.renderKey,
-                        state = markerState,
-                        anchor = Offset(0.5f, 0.5f),
-                        infoWindowAnchor = Offset(0.5f, 0.0f),
-                        onClick = {
-                            if (!canClickPOI) {
-                                false
-                            } else if (selectionRequiresConfirmation) {
-                                searchResultsAwaitingPinChoice = emptyList()
+                        if (group.places.size == 1) {
+                            val place = group.places.first()
+                            val markerImageUrl = remember(place.id, place.imageRef, place.imageUrl) {
+                                resolveMarkerImageUrl(place.imageRef, place.imageUrl)
+                            }
+                            val markerImage = rememberMarkerImage(markerImageUrl)
+                            MarkerInfoWindowComposable(
+                                group.key,
+                                place.name,
+                                place.imageRef.orEmpty(),
+                                place.imageUrl.orEmpty(),
+                                place.markerKind,
+                                markerImage.renderKey,
+                                state = markerState,
+                                anchor = Offset(0.5f, 0.5f),
+                                infoWindowAnchor = Offset(0.5f, 0.0f),
+                                onClick = {
+                                    discoverPlaceMarkerStates.values.forEach(MarkerState::hideInfoWindow)
+                                    selectedPOI = null
+                                    selectedMapEvents = emptyList()
+                                    selectedMapEventIndex = 0
+                                    selectedMapPlaces = group.places
+                                    selectedMapPlaceIndex = 0
+                                    true
+                                },
+                                onInfoWindowClick = {},
+                                infoContent = {},
+                            ) {
+                                MapPlaceMarker(
+                                    place = place,
+                                    backgroundColor = markerColor,
+                                    imagePainter = markerImage.painter,
+                                )
+                            }
+                        } else {
+                            MarkerInfoWindowComposable(
+                                group.key,
+                                group.places.size,
+                                state = markerState,
+                                anchor = Offset(0.5f, 0.5f),
+                                infoWindowAnchor = Offset(0.5f, 0.0f),
+                                onClick = {
+                                    discoverPlaceMarkerStates.values.forEach(MarkerState::hideInfoWindow)
+                                    selectedPOI = null
+                                    selectedMapEvents = emptyList()
+                                    selectedMapEventIndex = 0
+                                    selectedMapPlaces = group.places
+                                    selectedMapPlaceIndex = 0
+                                    true
+                                },
+                                onInfoWindowClick = {},
+                                infoContent = {},
+                            ) {
+                                MapEventClusterMarker(
+                                    count = group.places.size,
+                                    backgroundColor = markerColor,
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                places.forEach { place ->
+                    key("place:${place.id}") {
+                        val markerState = placeMarkerStates.getOrPut(place.id) {
+                            MarkerState(position = LatLng(place.latitude, place.longitude))
+                        }
+                        val newPosition = LatLng(place.latitude, place.longitude)
+                        if (markerState.position != newPosition) {
+                            markerState.position = newPosition
+                        }
+                        val markerColor = when {
+                            sameLocation(place, distinctSelectedPlace) -> MAP_SELECTED_MARKER_COLOR
+                            sameLocation(place, originalPlace) -> MAP_ORIGINAL_MARKER_COLOR
+                            place.markerKind == MVPPlace.MARKER_KIND_RENTAL -> DISCOVER_RENTAL_MARKER_COLOR
+                            place.markerKind == MVPPlace.MARKER_KIND_ORGANIZATION -> DISCOVER_ORGANIZATION_MARKER_COLOR
+                            else -> MAP_PLACE_MARKER_COLOR
+                        }
+                        val markerImageUrl = remember(place.id, place.imageRef, place.imageUrl) {
+                            resolveMarkerImageUrl(place.imageRef, place.imageUrl)
+                        }
+                        val markerImage = rememberMarkerImage(markerImageUrl)
+
+                        MarkerInfoWindowComposable(
+                            place.id,
+                            place.name,
+                            place.imageRef.orEmpty(),
+                            place.imageUrl.orEmpty(),
+                            place.markerKind,
+                            markerImage.renderKey,
+                            state = markerState,
+                            anchor = Offset(0.5f, 0.5f),
+                            infoWindowAnchor = Offset(0.5f, 0.0f),
+                            onClick = {
+                                if (selectionRequiresConfirmation) {
+                                    searchResultsAwaitingPinChoice = emptyList()
+                                    selectedPOI = null
+                                    armedPlaceId = null
+                                    armedSearchedPlaceId = null
+                                    armedPoiPlaceId = null
+                                    scope.launch {
+                                        animateToSelectedLocation(newPosition)
+                                        updateRevealCenterFor(newPosition)
+                                        onPlaceSelected(place)
+                                    }
+                                    true
+                                } else {
+                                    val isSecondTap = armedPlaceId == place.id
+                                    armedPlaceId = if (isSecondTap) null else place.id
+                                    armedSearchedPlaceId = null
+                                    armedPoiPlaceId = null
+                                    if (isSecondTap) {
+                                        updateRevealCenterFor(newPosition)
+                                        onPlaceSelected(place)
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
+                            },
+                            onInfoWindowClick = {
                                 selectedPOI = null
                                 armedPlaceId = null
                                 armedSearchedPlaceId = null
                                 armedPoiPlaceId = null
-                                scope.launch {
-                                    animateToSelectedLocation(newPosition)
-                                    updateRevealCenterFor(newPosition)
-                                    onPlaceSelected(place)
-                                }
-                                true
-                            } else {
-                                val isSecondTap = armedPlaceId == place.id
-                                armedPlaceId = if (isSecondTap) null else place.id
-                                armedSearchedPlaceId = null
-                                armedPoiPlaceId = null
-                                if (isSecondTap) {
-                                    updateRevealCenterFor(newPosition)
-                                    onPlaceSelected(place)
-                                    true
-                                } else {
-                                    false
-                                }
-                            }
-                        },
-                        onInfoWindowClick = {
-                            selectedPOI = null
-                            armedPlaceId = null
-                            armedSearchedPlaceId = null
-                            armedPoiPlaceId = null
-                            updateRevealCenterFor(newPosition)
-                            onPlaceSelected(place)
-                        },
-                        infoContent = {
-                            MapPlaceCard(
+                                updateRevealCenterFor(newPosition)
+                                onPlaceSelected(place)
+                            },
+                            infoContent = {
+                                MapPlaceCard(
+                                    place = place,
+                                    callToAction = if (!selectionRequiresConfirmation) placeSelectionHint else null,
+                                    modifier = Modifier.wrapContentSize(),
+                                )
+                            },
+                        ) {
+                            MapPlaceMarker(
                                 place = place,
-                                callToAction = if (canClickPOI && !selectionRequiresConfirmation) {
-                                    placeSelectionHint
-                                } else {
-                                    null
-                                },
-                                modifier = Modifier.wrapContentSize(),
+                                backgroundColor = markerColor,
+                                imagePainter = markerImage.painter,
                             )
-                        },
-                    ) {
-                        MapPlaceMarker(
-                            place = place,
-                            backgroundColor = markerColor,
-                            imagePainter = markerImage.painter,
-                        )
+                        }
                     }
                 }
             }
@@ -1229,6 +1430,18 @@ actual fun EventMap(
                 onSelectedIndexChange = { selectedMapEventIndex = it },
                 onEventSelected = onEventSelected,
                 fallbackImageIdForEvent = ::eventFallbackImageId,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = closeButtonBottomPadding + 72.dp),
+            )
+        }
+
+        if (showSelectedEventCards && selectedMapPlaces.isNotEmpty()) {
+            MapPlaceCardCarousel(
+                places = selectedMapPlaces,
+                selectedIndex = selectedMapPlaceIndex,
+                onSelectedIndexChange = { selectedMapPlaceIndex = it },
+                onPlaceSelected = onPlaceSelected,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = closeButtonBottomPadding + 72.dp),

@@ -3,6 +3,7 @@ package com.razumly.mvp.core.util
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.browser.customtabs.CustomTabsClient
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.net.toUri
 import io.github.aakira.napier.Napier
@@ -43,7 +44,10 @@ actual class UrlHandler(private val context: Context) {
     }
 
     private fun launchCustomTab(targetUri: Uri) {
+        val browserPackage = CustomTabsClient.getPackageName(context, null)
+            ?: error("No web browser is available.")
         val customTabsIntent = CustomTabsIntent.Builder().build()
+        customTabsIntent.intent.setPackage(browserPackage)
         customTabsIntent.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         customTabsIntent.launchUrl(context, targetUri)
     }

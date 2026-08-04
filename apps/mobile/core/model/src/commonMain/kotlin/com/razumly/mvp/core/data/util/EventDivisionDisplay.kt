@@ -108,6 +108,28 @@ private fun Event.tournamentBracketDisplayDetails(): List<DivisionDetail> {
     return bracketDetails.values.toList()
 }
 
+fun Event.divisionDisplayDetails(): List<DivisionDetail> {
+    if (hasTournamentPoolPlayDisplayDivisions()) {
+        return tournamentBracketDisplayDetails()
+    }
+
+    val playoffDivisionIds = divisionDetails
+        .filter { detail -> detail.isPlayoffDivision() }
+        .flatMap { detail -> listOf(detail.id, detail.key) }
+        .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
+        .filter(String::isNotBlank)
+        .toSet()
+
+    return divisions
+        .normalizeDivisionIdentifiers()
+        .filterNot { divisionId -> divisionId in playoffDivisionIds }
+        .map { divisionId ->
+            divisionDetails.findByDivisionId(divisionId)
+                ?: inferDivisionDetail(identifier = divisionId, eventId = id)
+        }
+        .distinctBy { detail -> detail.normalizedDivisionId() }
+}
+
 fun Event.divisionDisplayLabels(): List<String> {
     if (hasTournamentPoolPlayDisplayDivisions()) {
         return tournamentBracketDisplayDetails()

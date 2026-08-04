@@ -69,10 +69,7 @@ import dev.chrisbanes.haze.ExperimentalHazeApi
 import dev.chrisbanes.haze.HazeInputScale
 import dev.chrisbanes.haze.HazeProgressive
 import dev.chrisbanes.haze.HazeStyle
-import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.hazeSource
-import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.ExperimentalTime
@@ -187,16 +184,22 @@ fun EventCard(
     navPadding: PaddingValues = PaddingValues(),
     showLoadingPlaceholder: Boolean = false,
     fallbackImageId: String? = null,
+    imageUrlOverride: String? = null,
     showPublishedLifecycleBadge: Boolean = false,
     onClick: (() -> Unit)? = null,
     onMapClick: (Offset) -> Unit,
 ) {
-    val imageSource = remember(event.name, event.imageId, fallbackImageId) {
-        resolveEventCardImageSource(
+    val imageSource = remember(event.name, event.imageId, fallbackImageId, imageUrlOverride) {
+        val resolvedSource = resolveEventCardImageSource(
             eventName = event.name,
             eventImageId = event.imageId,
             organizationLogoId = fallbackImageId,
         )
+        imageUrlOverride
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.let { url -> resolvedSource.copy(imageUrl = url) }
+            ?: resolvedSource
     }
     val usesLogoFallback = imageSource.usesLogoFallback
     val imageModel = imageSource.imageUrl
@@ -304,7 +307,6 @@ internal fun ComposeEventCard(
             mutableStateOf(data.imageUrl ?: data.fallbackImageUrl)
         }
         var isImageReady by remember(data.imageUrl, data.fallbackImageUrl) { mutableStateOf(false) }
-        val hazeState = rememberHazeState()
         var mapButtonOffset by remember { mutableStateOf(Offset.Zero) }
 
         BoxWithConstraints(
@@ -326,8 +328,7 @@ internal fun ComposeEventCard(
                 model = activeImageUrl,
                 contentDescription = "Event Image",
                 modifier = Modifier
-                    .matchParentSize()
-                    .hazeSource(hazeState, key = activeImageUrl),
+                    .matchParentSize(),
                 contentScale = ContentScale.Crop,
                 onState = { state ->
                     when (state) {
@@ -353,30 +354,28 @@ internal fun ComposeEventCard(
                 val progressiveHazeStartY = with(LocalDensity.current) {
                     maxWidth.toPx() * EVENT_CARD_HAZE_RAMP_START_FRACTION
                 }
-                val progressiveGlassTint = Brush.verticalGradient(
+                val darkeningGradient = Brush.verticalGradient(
                     colorStops = arrayOf(
                         0f to Color.Transparent,
-                        0.12f to Color.Transparent,
-                        0.18f to Color.Black.copy(alpha = 0.16f),
-                        0.24f to Color.Black.copy(alpha = 0.46f),
-                        0.36f to Color.Black.copy(alpha = 0.66f),
-                        0.52f to Color.Black.copy(alpha = 0.82f),
-                        0.70f to Color.Black.copy(alpha = 0.93f),
-                        1f to Color.Black.copy(alpha = 0.98f),
+                        0.50f to Color.Transparent,
+                        0.58f to Color.Black.copy(alpha = 0.12f),
+                        0.66f to Color.Black.copy(alpha = 0.35f),
+                        0.76f to Color.Black.copy(alpha = 0.51f),
+                        0.88f to Color.Black.copy(alpha = 0.63f),
+                        1f to Color.Black.copy(alpha = 0.75f),
                     ),
                 )
 
-                Box(
+                AsyncImage(
+                    model = activeImageUrl,
+                    contentDescription = null,
                     modifier = Modifier
                         .matchParentSize()
                         .hazeEffect(
-                            state = hazeState,
                             style = HazeStyle(
-                                backgroundColor = Color.Black,
-                                tint = HazeTint(progressiveGlassTint),
+                                tint = null,
                                 blurRadius = 26.dp,
                                 noiseFactor = 0.04f,
-                                fallbackTint = HazeTint(Color.Black.copy(alpha = 0.84f)),
                             ),
                         ) {
                             inputScale = HazeInputScale.Fixed(0.5f)
@@ -387,6 +386,13 @@ internal fun ComposeEventCard(
                                 endIntensity = 1f,
                             )
                         },
+                    contentScale = ContentScale.Crop,
+                )
+
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(darkeningGradient),
                 )
 
                 Column(

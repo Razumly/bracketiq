@@ -132,10 +132,26 @@ private struct NativeEventResults: View {
         .refreshable {
             state.component.refreshEvents(force: true)
         }
+        .task(id: imagePreloadIdentity) {
+            let requests = events.map { event in
+                discoverEventImageRequest(
+                    event: event,
+                    organizationLogoId: organizationLogoId(for: event)
+                )
+            }
+            await preloadDiscoverImages(requests)
+        }
     }
 }
 
 private extension NativeEventResults {
+    var imagePreloadIdentity: String {
+        events.map { event in
+            "\(event.id):\(event.imageId):\(organizationLogoId(for: event) ?? "")"
+        }
+        .joined(separator: "|")
+    }
+
     func organizationLogoId(for event: Event) -> String? {
         organization(for: event)?.logoId
     }

@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -56,6 +57,7 @@ import com.razumly.mvp.core.data.dataTypes.evergreenDateDisplayLabel
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.dataTypes.canUsePaidBilling
 import com.razumly.mvp.core.data.dataTypes.resolveOrganizationClaimUrl
+import com.razumly.mvp.core.data.util.normalizeDivisionDetail
 import com.razumly.mvp.core.network.stripeRedirectBaseUrl
 import com.razumly.mvp.core.data.repositories.RentalOrderSelectionRequest
 import com.razumly.mvp.core.data.repositories.ITeamRepository
@@ -531,6 +533,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                         bottomPadding = bottomPadding,
                         onEventClick = component::viewEvent,
                         onTeamClick = { team -> selectedTeam = team },
+                        onDivisionClick = component::openDivisionRegistration,
                         onOpenSection = component::selectTab,
                     )
                 }
@@ -971,9 +974,11 @@ private fun OverviewTabContent(
     bottomPadding: androidx.compose.ui.unit.Dp,
     onEventClick: (Event) -> Unit,
     onTeamClick: (TeamWithPlayers) -> Unit,
+    onDivisionClick: (DivisionDetail) -> Unit,
     onOpenSection: (OrganizationDetailTab) -> Unit,
 ) {
     val scrollState = rememberScrollState()
+    var showAllDivisions by remember(organization?.id) { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1093,11 +1098,119 @@ private fun OverviewTabContent(
             }
         }
 
+        val organizationDivisions = organization?.divisions.orEmpty()
+        if (organizationDivisions.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OrganizationOverviewSectionHeader(
+                    title = "Divisions",
+                    actionContent = if (organizationDivisions.size > 2) {
+                        {
+                            TextButton(onClick = { showAllDivisions = !showAllDivisions }) {
+                                Text(if (showAllDivisions) "Show less" else "More")
+                            }
+                        }
+                    } else {
+                        null
+                    },
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val visibleDivisions = if (showAllDivisions) {
+                        organizationDivisions
+                    } else {
+                        organizationDivisions.take(2)
+                    }
+                    visibleDivisions.forEach { division ->
+                        OrganizationDivisionPreviewCard(
+                            division = division,
+                            onClick = { onDivisionClick(division) },
+                        )
+                    }
+                }
+            }
+        }
+
         OrganizationReviewsPreviewSection(
             payload = reviewPayload,
             isLoading = isLoadingReviews,
             onViewReviews = { onOpenSection(OrganizationDetailTab.REVIEWS) },
         )
+    }
+}
+
+@Composable
+private fun OrganizationDivisionPreviewCard(
+    division: DivisionDetail,
+    onClick: () -> Unit,
+) {
+    val normalizedDivision = remember(division) { division.normalizeDivisionDetail() }
+    val registrationUrl = division.registrationUrl?.trim()?.takeIf { url ->
+        url.startsWith("https://", ignoreCase = true) ||
+            url.startsWith("http://", ignoreCase = true)
+    }
+    val genderLabel = when (normalizedDivision.gender.trim().uppercase()) {
+        "M" -> "Men"
+        "F" -> "Women"
+        "C" -> "Coed"
+        else -> null
+    }
+    val metadata = listOfNotNull(
+        genderLabel,
+        normalizedDivision.ageDivisionTypeName.trim().takeIf(String::isNotBlank),
+        normalizedDivision.skillDivisionTypeName.trim().takeIf(String::isNotBlank),
+    ).distinct().joinToString(" · ")
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (registrationUrl != null) {
+                    Modifier.clickable(onClick = onClick)
+                } else {
+                    Modifier
+                },
+            ),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = normalizedDivision.name.ifBlank { "Division" },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (metadata.isNotBlank()) {
+                    Text(
+                        text = metadata,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (registrationUrl != null) {
+                Text(
+                    text = "Register",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 12.dp),
+                )
+            }
+        }
     }
 }
 

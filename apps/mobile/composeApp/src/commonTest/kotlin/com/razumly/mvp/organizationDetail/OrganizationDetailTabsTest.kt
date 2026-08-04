@@ -1,5 +1,6 @@
 package com.razumly.mvp.organizationDetail
 
+import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -68,6 +69,62 @@ class OrganizationDetailTabsTest {
             ),
         )
     }
+
+    @Test
+    fun private_discover_organization_skips_eager_rental_availability() {
+        assertEquals(
+            false,
+            shouldLoadInitialRentalAvailability(
+                initialTab = OrganizationDetailTab.OVERVIEW,
+                organization = organization(publicPageEnabled = false),
+            ),
+        )
+    }
+
+    @Test
+    fun public_manager_and_direct_rental_views_load_rental_availability() {
+        assertEquals(
+            true,
+            shouldLoadInitialRentalAvailability(
+                initialTab = OrganizationDetailTab.OVERVIEW,
+                organization = organization(publicPageEnabled = true),
+            ),
+        )
+        assertEquals(
+            true,
+            shouldLoadInitialRentalAvailability(
+                initialTab = OrganizationDetailTab.OVERVIEW,
+                organization = organization(
+                    publicPageEnabled = false,
+                    viewerPermissions = listOf("organization.manage"),
+                ),
+            ),
+        )
+        assertEquals(
+            true,
+            shouldLoadInitialRentalAvailability(
+                initialTab = OrganizationDetailTab.RENTALS,
+                organization = organization(publicPageEnabled = false),
+            ),
+        )
+    }
+
+    private fun organization(
+        publicPageEnabled: Boolean,
+        viewerPermissions: List<String> = emptyList(),
+    ): Organization = Organization(
+        id = "org_1",
+        name = "Organization",
+        location = null,
+        description = null,
+        logoId = null,
+        ownerId = "owner_1",
+        website = null,
+        hasStripeAccount = false,
+        coordinates = null,
+        publicPageEnabled = publicPageEnabled,
+        viewerPermissions = viewerPermissions,
+    )
 
     private fun resolvedTabs(
         hasEvents: Boolean = false,

@@ -63,6 +63,28 @@ class OrganizationDtosTest {
     }
 
     @Test
+    fun currentOrganizationContract_preservesDivisionRegistrationUrl() {
+        val organization = jsonMVP.decodeFromString<OrganizationApiDto>(
+            """
+            {
+              "id": "org_1",
+              "name": "River City Sports Club",
+              "divisions": [{
+                "id": "division_1",
+                "name": "Girls U14 Premier",
+                "registrationUrl": "https://club.example/register"
+              }]
+            }
+            """.trimIndent(),
+        ).toOrganizationOrNull()!!
+
+        assertEquals(
+            "https://club.example/register",
+            organization.divisions.single().registrationUrl,
+        )
+    }
+
+    @Test
     fun givenOwnershipFields_whenMappingOrganization_thenTypedContractIsPreserved() {
         val organization = jsonMVP.decodeFromString<OrganizationApiDto>(
             """

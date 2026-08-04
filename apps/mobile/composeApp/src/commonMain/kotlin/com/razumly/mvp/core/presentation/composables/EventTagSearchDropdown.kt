@@ -72,6 +72,7 @@ fun EventTagSearchDropdown(
     fieldHeight: Dp? = null,
     fieldTextStyle: TextStyle? = null,
     placeholderTextStyle: TextStyle? = null,
+    fieldContainerColor: Color? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     var suppressFocusedExpansion by remember { mutableStateOf(false) }
@@ -177,6 +178,7 @@ fun EventTagSearchDropdown(
             height = fieldHeight,
             textStyle = fieldTextStyle,
             placeholderTextStyle = placeholderTextStyle,
+            containerColor = fieldContainerColor,
             leadingIcon = {
                 Icon(
                     imageVector = Icons.Default.Search,

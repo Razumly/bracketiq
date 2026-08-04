@@ -252,6 +252,74 @@ fun MapPlaceCard(
 }
 
 @Composable
+fun MapPlaceCardCarousel(
+    places: List<MVPPlace>,
+    selectedIndex: Int,
+    onSelectedIndexChange: (Int) -> Unit,
+    onPlaceSelected: (MVPPlace) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (places.isEmpty()) return
+
+    val boundedIndex = selectedIndex.coerceIn(0, places.lastIndex)
+    val place = places[boundedIndex]
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        MapPlaceCard(
+            place = place,
+            modifier = Modifier.clickable { onPlaceSelected(place) },
+        )
+
+        if (places.size > 1) {
+            Row(
+                modifier = Modifier
+                    .width(280.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.95f))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(
+                    onClick = {
+                        val nextIndex = if (boundedIndex == 0) places.lastIndex else boundedIndex - 1
+                        onSelectedIndexChange(nextIndex)
+                    },
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                        contentDescription = "Previous place",
+                    )
+                }
+
+                Text(
+                    text = "${boundedIndex + 1} / ${places.size}",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.SemiBold,
+                )
+
+                IconButton(
+                    onClick = {
+                        val nextIndex = if (boundedIndex == places.lastIndex) 0 else boundedIndex + 1
+                        onSelectedIndexChange(nextIndex)
+                    },
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Next place",
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun MapInitialsMarker(
     name: String,
     backgroundColor: Color,

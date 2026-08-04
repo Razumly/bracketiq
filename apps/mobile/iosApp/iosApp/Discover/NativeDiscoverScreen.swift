@@ -39,7 +39,7 @@ enum NativeDiscoverTab: String, CaseIterable, Identifiable {
     }
 
     var supportsFilters: Bool {
-        self == .events || self == .organizations
+        true
     }
 
     var supportsMap: Bool {
@@ -61,8 +61,10 @@ struct NativeDiscoverScreen: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var recenterRequestToken = 0
     @State private var presentedError: String?
-    @State private var loadedInitialMapArea = false
+    @State private var loadedInitialMapTab: NativeDiscoverTab?
     @State private var lastMapSearchViewport: NativeDiscoverMapViewport?
+    @State private var lastMapSearchTab: NativeDiscoverTab?
+    @State private var isSearchingOrganizationMap = false
     @State private var onboardingStepIndex: Int?
     @State private var hasCompletedOnboarding = false
     @FocusState private var searchFocused: Bool
@@ -129,6 +131,7 @@ struct NativeDiscoverScreen: View {
                     onClose: state.mapComponent.closeMap,
                     onRecenter: { recenterRequestToken += 1 },
                     showsSearchThisArea: shouldShowSearchThisArea,
+                    isSearchingThisArea: state.isMapLoading || isSearchingOrganizationMap,
                     onSearchThisArea: searchThisArea
                 )
                 .transition(.opacity)
@@ -249,8 +252,9 @@ struct NativeDiscoverScreen: View {
         }
         .onChange(of: state.isMapVisible) { isVisible in
             if !isVisible {
-                loadedInitialMapArea = false
+                loadedInitialMapTab = nil
                 lastMapSearchViewport = nil
+                lastMapSearchTab = nil
             }
         }
         .onChange(of: onboardingEligibilityKey) { _ in
@@ -291,9 +295,17 @@ struct NativeDiscoverScreen: View {
 
 private extension NativeDiscoverScreen {
     var hasActiveFilters: Bool {
-        let snapshot = selectedTab == .organizations
-            ? state.organizationFilter
-            : state.eventFilter
+        let snapshot: NativeDiscoverFilterSnapshot?
+        switch selectedTab {
+        case .events:
+            snapshot = state.eventFilter
+        case .organizations:
+            snapshot = state.organizationFilter
+        case .teams:
+            snapshot = state.teamFilter
+        case .rentals:
+            snapshot = state.rentalFilter
+        }
         guard let snapshot else { return state.radiusMiles > 0 }
         return snapshot.priceEnabled ||
             !snapshot.sportIds.isEmpty ||
@@ -363,7 +375,7 @@ private extension NativeDiscoverScreen {
     func selectTab(_ tab: NativeDiscoverTab) {
         selectedTab = tab
         showsFilters = false
-        loadedInitialMapArea = false
+        loadedInitialMapTab = nil
         scheduleSuggestions(for: searchQuery)
         if state.isMapVisible {
             synchronizeMapContent()
@@ -505,15 +517,18 @@ private extension NativeDiscoverScreen {
     }
 
     func searchThisArea() {
-        guard selectedTab == .events,
+        guard selectedTab.supportsMap,
+              selectedTab != .teams,
               let viewport = currentMapViewport
         else { return }
 
+        let searchedTab = selectedTab
         Task { @MainActor in
             do {
-                try await state.mapComponent.refreshEventsForVisibleArea()
+                try await refreshVisibleMapArea(tab: searchedTab, viewport: viewport)
                 try Task.checkCancellation()
                 lastMapSearchViewport = viewport
+                lastMapSearchTab = searchedTab
             } catch is CancellationError {
                 return
             } catch {
@@ -535,9 +550,11 @@ private extension NativeDiscoverScreen {
 
     var shouldShowSearchThisArea: Bool {
         guard state.isMapVisible,
-              selectedTab == .events,
               let currentMapViewport,
-              let lastMapSearchViewport
+              let lastMapSearchViewport,
+              lastMapSearchTab == selectedTab,
+              selectedTab.supportsMap,
+              selectedTab != .teams
         else { return false }
         return currentMapViewport.isMeaningfullyDifferent(from: lastMapSearchViewport)
     }
@@ -552,21 +569,48 @@ private extension NativeDiscoverScreen {
     @MainActor
     func loadInitialMapAreaIfNeeded() async {
         guard state.isMapVisible,
-              selectedTab == .events,
-              !loadedInitialMapArea,
+              selectedTab.supportsMap,
+              selectedTab != .teams,
+              loadedInitialMapTab != selectedTab,
               let viewport = currentMapViewport
         else { return }
 
+        let searchedTab = selectedTab
         do {
             try await Task.sleep(nanoseconds: 700_000_000)
             try Task.checkCancellation()
-            try await state.mapComponent.refreshEventsForVisibleArea()
+            try await refreshVisibleMapArea(tab: searchedTab, viewport: viewport)
             try Task.checkCancellation()
             lastMapSearchViewport = viewport
-            loadedInitialMapArea = true
+            lastMapSearchTab = searchedTab
+            loadedInitialMapTab = searchedTab
         } catch is CancellationError {
             return
         } catch {
+            return
+        }
+    }
+
+    @MainActor
+    func refreshVisibleMapArea(
+        tab: NativeDiscoverTab,
+        viewport: NativeDiscoverMapViewport
+    ) async throws {
+        switch tab {
+        case .events:
+            try await state.mapComponent.refreshEventsForVisibleArea()
+        case .organizations, .rentals:
+            isSearchingOrganizationMap = true
+            defer { isSearchingOrganizationMap = false }
+            let places = try await state.component.refreshOrganizationMapPlaces(
+                center: LatLng(latitude: viewport.latitude, longitude: viewport.longitude),
+                radiusMiles: viewport.radiusMiles,
+                rentalsOnly: tab == .rentals
+            )
+            try Task.checkCancellation()
+            guard selectedTab == tab, state.isMapVisible else { return }
+            state.mapComponent.setPlaces(places: places)
+        case .teams:
             return
         }
     }
@@ -604,23 +648,26 @@ private struct NativeDiscoverTabBar: View {
                 Button {
                     onSelection(tab)
                 } label: {
-                    VStack(spacing: 7) {
+                    VStack(spacing: 6) {
                         HStack(spacing: 4) {
                             Image(systemName: tab.systemImage)
                                 .font(.system(size: 14, weight: .semibold))
+                                .frame(width: 20, height: 20)
                             Text(tab.title)
                                 .font(.system(size: 12, weight: .semibold))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         }
                         .foregroundStyle(selectedTab == tab ? Color.accentColor : .secondary)
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity, minHeight: 22)
 
                         Rectangle()
                             .fill(selectedTab == tab ? Color.accentColor : Color.secondary.opacity(0.2))
-                            .frame(height: selectedTab == tab ? 2 : 1)
+                            .frame(height: 2)
                     }
+                    .contentShape(Rectangle())
                 }
+                .frame(maxWidth: .infinity)
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
             }

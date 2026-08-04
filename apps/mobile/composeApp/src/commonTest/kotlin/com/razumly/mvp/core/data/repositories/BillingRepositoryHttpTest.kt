@@ -956,6 +956,62 @@ class BillingRepositoryHttpTest {
     }
 
     @Test
+    fun listOrganizationsInArea_requests_visible_map_bounds_and_affiliate_rentals() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/organizations", request.url.encodedPath)
+            assertEquals("200", request.url.parameters["limit"])
+            assertEquals("0", request.url.parameters["offset"])
+            assertEquals("true", request.url.parameters["includeAffiliateRentals"])
+            assertEquals("45.52", request.url.parameters["lat"])
+            assertEquals("-122.68", request.url.parameters["lng"])
+            assertEquals(
+                40.2335,
+                requireNotNull(request.url.parameters["radiusKm"]).toDouble(),
+                0.0001,
+            )
+            assertEquals(HttpMethod.Get, request.method)
+
+            respond(
+                content = """
+                    {
+                      "organizations": [
+                        { "id": "org_map", "name": "Map Organization", "coordinates": [-122.68, 45.52] }
+                      ],
+                      "pagination": {
+                        "limit": 200,
+                        "offset": 0,
+                        "nextOffset": 1,
+                        "hasMore": false
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val organizations = repo.listOrganizationsInArea(
+            latitude = 45.52,
+            longitude = -122.68,
+            radiusMiles = 25.0,
+            includeAffiliateRentals = true,
+        ).getOrThrow()
+
+        assertEquals(listOf("org_map"), organizations.map { organization -> organization.id })
+    }
+
+    @Test
     fun getOrganizationTags_can_request_filter_only_tag_options() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
         val userRepo = BillingRepositoryHttp_FakeUserRepository(

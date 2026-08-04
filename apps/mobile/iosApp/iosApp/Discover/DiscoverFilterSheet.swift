@@ -16,9 +16,17 @@ struct NativeDiscoverFilterSheet: View {
         self.state = state
         self.selectedTab = selectedTab
         self.onDismiss = onDismiss
-        let snapshot = selectedTab == .organizations
-            ? state.organizationFilter
-            : state.eventFilter
+        let snapshot: NativeDiscoverFilterSnapshot?
+        switch selectedTab {
+        case .events:
+            snapshot = state.eventFilter
+        case .organizations:
+            snapshot = state.organizationFilter
+        case .teams:
+            snapshot = state.teamFilter
+        case .rentals:
+            snapshot = state.rentalFilter
+        }
         _draft = State(
             initialValue: NativeDiscoverFilterDraft(
                 snapshot: snapshot,
@@ -31,13 +39,24 @@ struct NativeDiscoverFilterSheet: View {
         NavigationView {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    if selectedTab == .events {
+                    switch selectedTab {
+                    case .events:
                         NativeEventFilterContent(
                             state: state,
                             draft: $draft
                         )
-                    } else {
+                    case .organizations:
                         NativeOrganizationFilterContent(
+                            state: state,
+                            draft: $draft
+                        )
+                    case .teams:
+                        NativeTeamFilterContent(
+                            state: state,
+                            draft: $draft
+                        )
+                    case .rentals:
+                        NativeRentalFilterContent(
                             state: state,
                             draft: $draft
                         )
@@ -57,7 +76,7 @@ struct NativeDiscoverFilterSheet: View {
                 .padding(.vertical, 16)
             }
             .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle(selectedTab == .organizations ? "Filter Organizations" : "Filter Events")
+            .navigationTitle(filterTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -74,11 +93,21 @@ struct NativeDiscoverFilterSheet: View {
 }
 
 private extension NativeDiscoverFilterSheet {
+    var filterTitle: String {
+        switch selectedTab {
+        case .events: return "Filter Events"
+        case .organizations: return "Filter Organizations"
+        case .teams: return "Filter Teams"
+        case .rentals: return "Filter Rentals"
+        }
+    }
+
     func applyFilters() {
         guard draft.isValid else { return }
         state.component.selectRadius(radius: draft.distanceEnabled ? draft.radiusMiles : 0)
 
-        if selectedTab == .events {
+        switch selectedTab {
+        case .events:
             state.component.applyNativeEventFilters(
                 sort: draft.eventSort,
                 priceEnabled: draft.priceEnabled,
@@ -89,7 +118,7 @@ private extension NativeDiscoverFilterSheet {
                 sportIds: Array(draft.sportIds),
                 tagSlugs: Array(draft.tagSlugs)
             )
-        } else {
+        case .organizations:
             state.component.applyNativeOrganizationFilters(
                 sportIds: Array(draft.sportIds),
                 tagSlugs: Array(draft.tagSlugs),
@@ -101,15 +130,33 @@ private extension NativeDiscoverFilterSheet {
                 divisionPriceMaxEnabled: draft.divisionPriceMaximumEnabled,
                 divisionPriceMax: draft.divisionPriceMaximum
             )
+        case .teams:
+            state.component.applyNativeTeamFilters(
+                sportIds: Array(draft.sportIds),
+                divisionGenders: Array(draft.divisionGenders),
+                skillDivisionTypeIds: Array(draft.skillDivisionTypeIds),
+                ageDivisionTypeIds: Array(draft.ageDivisionTypeIds),
+                registrationPriceMinEnabled: draft.divisionPriceMinimumEnabled,
+                registrationPriceMin: draft.divisionPriceMinimum,
+                registrationPriceMaxEnabled: draft.divisionPriceMaximumEnabled,
+                registrationPriceMax: draft.divisionPriceMaximum
+            )
+        case .rentals:
+            state.component.applyNativeRentalFilters(sportIds: Array(draft.sportIds))
         }
         onDismiss()
     }
 
     func clearFilters() {
-        if selectedTab == .events {
+        switch selectedTab {
+        case .events:
             state.component.clearNativeEventFilters()
-        } else {
+        case .organizations:
             state.component.clearNativeOrganizationFilters()
+        case .teams:
+            state.component.clearNativeTeamFilters()
+        case .rentals:
+            state.component.clearNativeRentalFilters()
         }
         onDismiss()
     }
@@ -166,7 +213,7 @@ private struct NativeOrganizationFilterContent: View {
             )
             NativeOptionGridFilter(
                 title: "Skill level",
-                options: skillOptions(parameters),
+                options: nativeDiscoverSkillOptions(parameters, selectedSportIds: draft.sportIds),
                 selectedIds: $draft.skillDivisionTypeIds
             )
         }
@@ -183,36 +230,102 @@ private struct NativeOrganizationFilterContent: View {
 }
 
 private extension NativeOrganizationFilterContent {
-    func skillOptions(_ parameters: DivisionTypeParameters) -> [NativeFilterOption] {
-        let selectedSports = draft.sportIds
-        let includedGroups = parameters.sportSkills.filter { group in
-            selectedSports.isEmpty || selectedSports.contains(group.sportId)
-        }
-        let showsSportName = Set(includedGroups.map(\.sportId)).count > 1
-
-        return includedGroups.flatMap { group in
-            group.skills.map { skill in
-                NativeFilterOption(
-                    id: skill.id.lowercased(),
-                    label: showsSportName ? "\(group.sportName) · \(skill.name)" : skill.name
-                )
-            }
-        }
-        .reduce(into: [String: NativeFilterOption]()) { result, option in
-            result[option.id] = result[option.id] ?? option
-        }
-        .values
-        .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
-    }
-
     func constrainSkillSelection() {
         guard let parameters = state.divisionTypeParameters else {
             draft.skillDivisionTypeIds = []
             return
         }
-        let validIds = Set(skillOptions(parameters).map(\.id))
+        let validIds = Set(
+            nativeDiscoverSkillOptions(parameters, selectedSportIds: draft.sportIds).map(\.id)
+        )
         draft.skillDivisionTypeIds.formIntersection(validIds)
     }
+}
+
+private struct NativeTeamFilterContent: View {
+    @ObservedObject var state: DiscoverObservableState
+    @Binding var draft: NativeDiscoverFilterDraft
+
+    var body: some View {
+        NativeOptionGridFilter(
+            title: "Sports",
+            options: state.sports.map { NativeFilterOption(id: $0.id, label: $0.name) },
+            selectedIds: $draft.sportIds,
+            onSelectionChanged: constrainSkillSelection
+        )
+
+        if let parameters = state.divisionTypeParameters {
+            NativeOptionGridFilter(
+                title: "Gender",
+                options: parameters.genders.map { NativeFilterOption(id: $0.id, label: $0.name) },
+                selectedIds: $draft.divisionGenders
+            )
+            NativeOptionGridFilter(
+                title: "Age group",
+                options: parameters.ages.map { NativeFilterOption(id: $0.id, label: $0.name) },
+                selectedIds: $draft.ageDivisionTypeIds
+            )
+            NativeOptionGridFilter(
+                title: "Skill level",
+                options: nativeDiscoverSkillOptions(parameters, selectedSportIds: draft.sportIds),
+                selectedIds: $draft.skillDivisionTypeIds
+            )
+        }
+
+        NativeDivisionPriceFilter(title: "Registration price", draft: $draft)
+        NativeLocationFilter(state: state)
+        NativeDistanceFilter(draft: $draft)
+    }
+
+    private func constrainSkillSelection() {
+        guard let parameters = state.divisionTypeParameters else {
+            draft.skillDivisionTypeIds = []
+            return
+        }
+        let validIds = Set(
+            nativeDiscoverSkillOptions(parameters, selectedSportIds: draft.sportIds).map(\.id)
+        )
+        draft.skillDivisionTypeIds.formIntersection(validIds)
+    }
+}
+
+private struct NativeRentalFilterContent: View {
+    @ObservedObject var state: DiscoverObservableState
+    @Binding var draft: NativeDiscoverFilterDraft
+
+    var body: some View {
+        NativeOptionGridFilter(
+            title: "Sports",
+            options: state.sports.map { NativeFilterOption(id: $0.id, label: $0.name) },
+            selectedIds: $draft.sportIds
+        )
+        NativeLocationFilter(state: state)
+        NativeDistanceFilter(draft: $draft)
+    }
+}
+
+private func nativeDiscoverSkillOptions(
+    _ parameters: DivisionTypeParameters,
+    selectedSportIds: Set<String>
+) -> [NativeFilterOption] {
+    let includedGroups = parameters.sportSkills.filter { group in
+        selectedSportIds.isEmpty || selectedSportIds.contains(group.sportId)
+    }
+    let showsSportName = Set(includedGroups.map(\.sportId)).count > 1
+
+    return includedGroups.flatMap { group in
+        group.skills.map { skill in
+            NativeFilterOption(
+                id: skill.id.lowercased(),
+                label: showsSportName ? "\(group.sportName) · \(skill.name)" : skill.name
+            )
+        }
+    }
+    .reduce(into: [String: NativeFilterOption]()) { result, option in
+        result[option.id] = result[option.id] ?? option
+    }
+    .values
+    .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
 }
 
 struct NativeDiscoverFilterDraft {

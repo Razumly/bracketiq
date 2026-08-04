@@ -102,6 +102,8 @@ final class DiscoverObservableState: ObservableObject {
     @Published private(set) var divisionTypeParameters: DivisionTypeParameters?
     @Published private(set) var eventFilter: NativeDiscoverFilterSnapshot?
     @Published private(set) var organizationFilter: NativeDiscoverFilterSnapshot?
+    @Published private(set) var teamFilter: NativeDiscoverFilterSnapshot?
+    @Published private(set) var rentalFilter: NativeDiscoverFilterSnapshot?
     @Published private(set) var radiusMiles = 0.0
     @Published private(set) var selectedSearchLocationLabel: String?
     @Published private(set) var currentLocation: LatLng?
@@ -121,6 +123,8 @@ final class DiscoverObservableState: ObservableObject {
         self.mapComponent = mapComponent
         eventFilter = component.eventFilterSnapshot()
         organizationFilter = component.organizationFilterSnapshot()
+        teamFilter = component.teamFilterSnapshot()
+        rentalFilter = component.rentalFilterSnapshot()
         startObserving()
     }
 
@@ -271,6 +275,18 @@ private extension DiscoverObservableState {
                 for await _ in component.organizationFilter {
                     guard let self else { return }
                     organizationFilter = component.organizationFilterSnapshot()
+                }
+            },
+            Task { [weak self] in
+                for await _ in component.teamFilter {
+                    guard let self else { return }
+                    teamFilter = component.teamFilterSnapshot()
+                }
+            },
+            Task { [weak self] in
+                for await _ in component.rentalFilter {
+                    guard let self else { return }
+                    rentalFilter = component.rentalFilterSnapshot()
                 }
             },
             Task { [weak self] in

@@ -411,10 +411,10 @@ private func makeMarkerIconView(
     return outerView
 }
 
-private func makeEventClusterIconView(count: Int) -> UIView {
+private func makeClusterIconView(count: Int, color: UIColor) -> UIView {
     let size: CGFloat = 54
     let outerView = UIView(frame: CGRect(x: 0, y: 0, width: size, height: size))
-    outerView.backgroundColor = discoverEventMarkerColor
+    outerView.backgroundColor = color
     outerView.layer.cornerRadius = size / 2
     outerView.layer.borderWidth = 4
     outerView.layer.borderColor = UIColor.white.cgColor
@@ -428,6 +428,10 @@ private func makeEventClusterIconView(count: Int) -> UIView {
     outerView.addSubview(label)
 
     return outerView
+}
+
+private func makeEventClusterIconView(count: Int) -> UIView {
+    makeClusterIconView(count: count, color: discoverEventMarkerColor)
 }
 
 private func dedupePlaces(_ places: [MVPPlace]) -> [MVPPlace] {
@@ -499,6 +503,116 @@ private struct EventMapCardCarousel: View {
                 }
             }
         }
+    }
+}
+
+private struct PlaceMapCardCarousel: View {
+    let places: [MVPPlace]
+    @Binding var selectedIndex: Int
+    let onPlaceSelected: (MVPPlace) -> Void
+
+    var body: some View {
+        if !places.isEmpty {
+            let boundedIndex = min(max(selectedIndex, 0), places.count - 1)
+            let place = places[boundedIndex]
+
+            VStack(spacing: 8) {
+                Button {
+                    onPlaceSelected(place)
+                } label: {
+                    PlaceMapCarouselCard(place: place)
+                }
+                .buttonStyle(.plain)
+
+                if places.count > 1 {
+                    HStack {
+                        Button {
+                            selectedIndex = boundedIndex == 0 ? places.count - 1 : boundedIndex - 1
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 17, weight: .semibold))
+                                .frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel("Previous place")
+
+                        Spacer()
+
+                        Text("\(boundedIndex + 1) / \(places.count)")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+
+                        Spacer()
+
+                        Button {
+                            selectedIndex = boundedIndex == places.count - 1 ? 0 : boundedIndex + 1
+                        } label: {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 17, weight: .semibold))
+                                .frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel("Next place")
+                    }
+                    .frame(width: 280)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(.regularMaterial)
+                    .clipShape(Capsule())
+                }
+            }
+        }
+    }
+}
+
+private struct PlaceMapCarouselCard: View {
+    let place: MVPPlace
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            AsyncImage(url: placeImageURL(place, width: 96, height: 96)) { phase in
+                if case .success(let image) = phase {
+                    image
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Text(markerInitials(place.name))
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(uiColor: markerColor(for: place, selectedPlace: nil, originalPlace: nil)))
+                }
+            }
+            .frame(width: 52, height: 52)
+            .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(place.name)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+
+                if let address = place.address?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !address.isEmpty {
+                    Text(address)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                if let summary = place.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !summary.isEmpty {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .frame(width: 280)
+        .background(Color(uiColor: .systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 3)
     }
 }
 
@@ -600,6 +714,8 @@ struct EventMap: View {
     @State private var searchTask: Task<Void, Never>? = nil
     @State private var selectedEventGroup: [Event] = []
     @State private var selectedEventIndex: Int = 0
+    @State private var selectedPlaceGroup: [MVPPlace] = []
+    @State private var selectedPlaceIndex: Int = 0
     
     init(
         component: MapComponent,
@@ -658,8 +774,16 @@ struct EventMap: View {
                     onEventGroupSelected: { events in
                         selectedEventGroup = events
                         selectedEventIndex = 0
+                        selectedPlaceGroup = []
+                        selectedPlaceIndex = 0
                     },
                     onPlaceSelected: onPlaceSelected,
+                    onPlaceGroupSelected: { places in
+                        selectedPlaceGroup = places
+                        selectedPlaceIndex = 0
+                        selectedEventGroup = []
+                        selectedEventIndex = 0
+                    },
                     onPlaceSelectionPoint: onPlaceSelectionPoint,
                     selectionRequiresConfirmation: selectionRequiresConfirmation,
                     originalPlace: originalPlace,
@@ -668,6 +792,8 @@ struct EventMap: View {
                     onMapTapped: {
                         selectedEventGroup = []
                         selectedEventIndex = 0
+                        selectedPlaceGroup = []
+                        selectedPlaceIndex = 0
                     },
                     places: mergedPlaces,
                     organizationLogoIdsById: organizationLogoIdsById,
@@ -767,6 +893,21 @@ struct EventMap: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
+
+                if showSelectedEventCards && !selectedPlaceGroup.isEmpty {
+                    VStack {
+                        Spacer()
+                        PlaceMapCardCarousel(
+                            places: selectedPlaceGroup,
+                            selectedIndex: $selectedPlaceIndex,
+                            onPlaceSelected: onPlaceSelected
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, locationButtonBottomPadding + 48)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
             .background(Color.clear)
             .onChange(of: selectedPlace?.id) { newValue in
@@ -774,6 +915,14 @@ struct EventMap: View {
                 searchPlaces = []
                 suggestions = []
                 searchText = ""
+            }
+            .onChange(of: componentPlaces.map(\.id)) { currentPlaceIds in
+                let retainedPlaces = selectedPlaceGroup.filter { currentPlaceIds.contains($0.id) }
+                selectedPlaceGroup = retainedPlaces
+                selectedPlaceIndex = min(
+                    selectedPlaceIndex,
+                    max(retainedPlaces.count - 1, 0)
+                )
             }
         }
     }
@@ -790,6 +939,7 @@ struct GoogleMapView: UIViewRepresentable {
     let onEventSelected: (Event) -> Void
     let onEventGroupSelected: ([Event]) -> Void
     let onPlaceSelected: (MVPPlace) -> Void
+    let onPlaceGroupSelected: ([MVPPlace]) -> Void
     let onPlaceSelectionPoint: (KotlinFloat, KotlinFloat) -> Void
     let selectionRequiresConfirmation: Bool
     let originalPlace: MVPPlace?
@@ -954,33 +1104,66 @@ struct GoogleMapView: UIViewRepresentable {
             }
         }
 
-        // Add searched places markers
-        for place in places {
-            let coord = CLLocationCoordinate2D(latitude: place.latitude, longitude: place.longitude)
-            let marker = GMSMarker(position: coord)
-            marker.title = place.name
-            marker.userData = PlaceMarkerData(place: place)
-            marker.iconView = makeMarkerIconView(
-                name: place.name,
-                color: markerColor(for: place, selectedPlace: distinctSelectedPlace, originalPlace: originalPlace),
-                imageURL: placeImageURL(
-                    place,
-                    width: eventMarkerImageRequestSize,
-                    height: eventMarkerImageRequestSize
-                ),
-                marker: marker
-            )
-            marker.map = mapView
+        if canClickPOI {
+            for place in places {
+                let coord = CLLocationCoordinate2D(latitude: place.latitude, longitude: place.longitude)
+                let marker = GMSMarker(position: coord)
+                marker.title = place.name
+                marker.userData = PlaceMarkerData(place: place)
+                marker.iconView = makeMarkerIconView(
+                    name: place.name,
+                    color: markerColor(for: place, selectedPlace: distinctSelectedPlace, originalPlace: originalPlace),
+                    imageURL: placeImageURL(
+                        place,
+                        width: eventMarkerImageRequestSize,
+                        height: eventMarkerImageRequestSize
+                    ),
+                    marker: marker
+                )
+                marker.map = mapView
 
-            context.coordinator.placeMarkers.append(marker)
-            if selectedMarkerKey == context.coordinator.selectionKey(for: marker) {
-                markerToReselect = marker
+                context.coordinator.placeMarkers.append(marker)
+                if selectedMarkerKey == context.coordinator.selectionKey(for: marker) {
+                    markerToReselect = marker
+                }
+
+                if places.count == 1 {
+                    mapView.animate(with: GMSCameraUpdate.setTarget(coord))
+                    if markerToReselect == nil {
+                        markerToReselect = marker
+                    }
+                }
             }
-
-            if places.count == 1 {
-                mapView.animate(with: GMSCameraUpdate.setTarget(coord))
-                // Show info window automatically for a single result if nothing is already selected.
-                if markerToReselect == nil {
+        } else {
+            for group in groupedPlaceMarkers(in: mapView) {
+                let marker = GMSMarker(position: group.coordinate)
+                let firstPlace = group.places[0]
+                let groupColor = markerColor(
+                    for: firstPlace,
+                    selectedPlace: nil,
+                    originalPlace: nil
+                )
+                if group.places.count == 1 {
+                    marker.title = firstPlace.name
+                    marker.userData = PlaceMarkerData(place: firstPlace)
+                    marker.iconView = makeMarkerIconView(
+                        name: firstPlace.name,
+                        color: groupColor,
+                        imageURL: placeImageURL(
+                            firstPlace,
+                            width: eventMarkerImageRequestSize,
+                            height: eventMarkerImageRequestSize
+                        ),
+                        marker: marker
+                    )
+                } else {
+                    marker.title = "\(group.places.count) places"
+                    marker.userData = PlaceClusterMarkerData(key: group.key, places: group.places)
+                    marker.iconView = makeClusterIconView(count: group.places.count, color: groupColor)
+                }
+                marker.map = mapView
+                context.coordinator.placeMarkers.append(marker)
+                if selectedMarkerKey == context.coordinator.selectionKey(for: marker) {
                     markerToReselect = marker
                 }
             }
@@ -1174,6 +1357,85 @@ struct GoogleMapView: UIViewRepresentable {
             )
         }
     }
+
+    fileprivate func groupedPlaceMarkers(in mapView: GMSMapView) -> [PlaceMarkerGroup] {
+        let markerTouchDistance: CGFloat = 54
+        let thresholdSquared = markerTouchDistance * markerTouchDistance
+        var pendingGroups: [PendingPlaceMarkerGroup] = []
+
+        for place in places.sorted(by: { first, second in
+            if first.id == second.id { return first.name < second.name }
+            return first.id < second.id
+        }) {
+            guard isUsableCoordinate(latitude: place.latitude, longitude: place.longitude) else {
+                continue
+            }
+            let coordinate = CLLocationCoordinate2D(
+                latitude: place.latitude,
+                longitude: place.longitude
+            )
+            let point = mapView.projection.point(for: coordinate)
+            var closestIndex: Int?
+            var closestDistanceSquared = CGFloat.greatestFiniteMagnitude
+
+            for index in pendingGroups.indices where pendingGroups[index].markerKind == place.markerKind {
+                let group = pendingGroups[index]
+                let dx = point.x - group.center.x
+                let dy = point.y - group.center.y
+                let distanceSquared = dx * dx + dy * dy
+                if distanceSquared <= thresholdSquared && distanceSquared < closestDistanceSquared {
+                    closestIndex = index
+                    closestDistanceSquared = distanceSquared
+                }
+            }
+
+            if let closestIndex = closestIndex {
+                let nextSize = CGFloat(pendingGroups[closestIndex].places.count + 1)
+                pendingGroups[closestIndex].places.append(place)
+                pendingGroups[closestIndex].center = CGPoint(
+                    x: ((pendingGroups[closestIndex].center.x * (nextSize - 1)) + point.x) / nextSize,
+                    y: ((pendingGroups[closestIndex].center.y * (nextSize - 1)) + point.y) / nextSize
+                )
+                pendingGroups[closestIndex].latitude =
+                    ((pendingGroups[closestIndex].latitude * Double(nextSize - 1)) + place.latitude) / Double(nextSize)
+                pendingGroups[closestIndex].longitude =
+                    ((pendingGroups[closestIndex].longitude * Double(nextSize - 1)) + place.longitude) / Double(nextSize)
+            } else {
+                pendingGroups.append(
+                    PendingPlaceMarkerGroup(
+                        markerKind: place.markerKind,
+                        places: [place],
+                        center: point,
+                        latitude: place.latitude,
+                        longitude: place.longitude
+                    )
+                )
+            }
+        }
+
+        return pendingGroups.map { group in
+            let groupedPlaces = group.places.sorted { first, second in
+                let firstName = first.name.localizedLowercase
+                let secondName = second.name.localizedLowercase
+                if firstName == secondName { return first.id < second.id }
+                return firstName < secondName
+            }
+            let key: String
+            if groupedPlaces.count == 1 {
+                key = "place:\(group.markerKind):\(groupedPlaces[0].id)"
+            } else {
+                key = "place-cluster:\(group.markerKind):\(groupedPlaces.map { $0.id }.sorted().joined(separator: "|"))"
+            }
+            return PlaceMarkerGroup(
+                key: key,
+                places: groupedPlaces,
+                coordinate: CLLocationCoordinate2D(
+                    latitude: group.latitude,
+                    longitude: group.longitude
+                )
+            )
+        }
+    }
 }
 
 class Coordinator: NSObject, GMSMapViewDelegate {
@@ -1211,6 +1473,9 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         }
         if let placeData = marker.userData as? PlaceMarkerData {
             return .place(placeData.place.id)
+        }
+        if let clusterData = marker.userData as? PlaceClusterMarkerData {
+            return .placeCluster(clusterData.key)
         }
         if let poiData = marker.userData as? POIMarkerData {
             return .poi(poiData.placeId)
@@ -1360,6 +1625,16 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         }
         if let clusterData = marker.userData as? EventClusterMarkerData {
             parent.onEventGroupSelected(clusterData.events)
+            mapView.selectedMarker = nil
+            return true
+        }
+        if !parent.canClickPOI, let placeData = marker.userData as? PlaceMarkerData {
+            parent.onPlaceGroupSelected([placeData.place])
+            mapView.selectedMarker = nil
+            return true
+        }
+        if !parent.canClickPOI, let clusterData = marker.userData as? PlaceClusterMarkerData {
+            parent.onPlaceGroupSelected(clusterData.places)
             mapView.selectedMarker = nil
             return true
         }
@@ -1690,6 +1965,25 @@ fileprivate struct PendingEventMarkerGroup {
     var longitude: Double
 }
 
+struct PlaceClusterMarkerData {
+    let key: String
+    let places: [MVPPlace]
+}
+
+fileprivate struct PlaceMarkerGroup {
+    let key: String
+    let places: [MVPPlace]
+    let coordinate: CLLocationCoordinate2D
+}
+
+fileprivate struct PendingPlaceMarkerGroup {
+    let markerKind: String
+    var places: [MVPPlace]
+    var center: CGPoint
+    var latitude: Double
+    var longitude: Double
+}
+
 struct PlaceMarkerData {
     let place: MVPPlace
 }
@@ -1703,6 +1997,7 @@ fileprivate enum MarkerSelectionKey: Equatable {
     case event(String)
     case eventCluster(String)
     case place(String)
+    case placeCluster(String)
     case poi(String)
 }
 

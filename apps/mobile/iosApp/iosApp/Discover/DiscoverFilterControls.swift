@@ -246,11 +246,12 @@ private extension NativeTagFilter {
 }
 
 struct NativeDivisionPriceFilter: View {
+    var title = "Division price"
     @Binding var draft: NativeDiscoverFilterDraft
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            NativeFilterSectionTitle("Division price")
+            NativeFilterSectionTitle(title)
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 8) {
                     Toggle("Minimum", isOn: $draft.divisionPriceMinimumEnabled)
@@ -279,9 +280,11 @@ struct NativeDistanceFilter: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     NativeFilterSectionTitle("Distance")
-                    Text(draft.distanceEnabled ? "Within \(Int(draft.radiusMiles.rounded())) mi" : "Any distance")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    if !draft.distanceEnabled {
+                        Text("Any distance")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 Toggle("", isOn: $draft.distanceEnabled)
@@ -289,7 +292,7 @@ struct NativeDistanceFilter: View {
             }
 
             if draft.distanceEnabled {
-                Slider(value: $draft.radiusMiles, in: 10...100, step: 1)
+                NativeDistanceSlider(value: $draft.radiusMiles)
                 HStack {
                     Text("10 mi")
                     Spacer()
@@ -299,6 +302,43 @@ struct NativeDistanceFilter: View {
                 .foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+private struct NativeDistanceSlider: View {
+    @Binding var value: Double
+
+    private let range = 10.0...100.0
+    private let thumbInset: CGFloat = 14
+    private let valueLabelWidth: CGFloat = 58
+
+    var body: some View {
+        GeometryReader { proxy in
+            let trackWidth = max(proxy.size.width - (thumbInset * 2), 0)
+            let progress = (value - range.lowerBound) / (range.upperBound - range.lowerBound)
+            let thumbCenter = thumbInset + (trackWidth * CGFloat(progress))
+            let labelLeading = min(
+                max(thumbCenter - (valueLabelWidth / 2), 0),
+                max(proxy.size.width - valueLabelWidth, 0)
+            )
+
+            ZStack(alignment: .topLeading) {
+                Text("\(Int(value.rounded())) mi")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                    .frame(width: valueLabelWidth)
+                    .padding(.vertical, 3)
+                    .background(Color.accentColor, in: Capsule())
+                    .offset(x: labelLeading)
+                    .accessibilityHidden(true)
+
+                Slider(value: $value, in: range, step: 1)
+                    .offset(y: 22)
+                    .accessibilityLabel("Distance")
+                    .accessibilityValue("\(Int(value.rounded())) miles")
+            }
+        }
+        .frame(height: 52)
     }
 }
 

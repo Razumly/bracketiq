@@ -6,6 +6,7 @@ import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.lifecycle.doOnDestroy
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationReviewsPayload
@@ -183,6 +184,13 @@ internal fun resolveOrganizationDetailTabs(
     }
 }
 
+internal fun shouldLoadInitialRentalAvailability(
+    initialTab: OrganizationDetailTab,
+    organization: Organization,
+): Boolean = initialTab == OrganizationDetailTab.RENTALS ||
+    organization.publicPageEnabled ||
+    "organization.manage" in organization.viewerPermissions
+
 interface OrganizationDetailComponent : IPaymentProcessor {
     val initialTab: OrganizationDetailTab
     val selectedTab: StateFlow<OrganizationDetailTab>
@@ -237,6 +245,7 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     fun deleteReview(reviewId: String)
     fun reportReview(reviewId: String)
     fun signInToReview()
+    fun openDivisionRegistration(division: DivisionDetail)
     fun refreshRentals(rangeStart: Instant, rangeEnd: Instant, force: Boolean = false)
     fun startProductPurchase(product: Product)
     fun startTeamRegistration(team: TeamWithPlayers)
@@ -617,11 +626,17 @@ class DefaultOrganizationDetailComponent(
             organizationLoaded = true
 
             if (_organization.value != null) {
+                val loadedOrganization = _organization.value ?: return@launch
                 refreshEvents(force = true)
                 refreshTeams(force = true)
                 refreshProducts(force = true)
                 refreshReviews(force = true)
-                refreshCurrentRentalWeek(force = true)
+                if (shouldLoadInitialRentalAvailability(initialTab, loadedOrganization)) {
+                    refreshCurrentRentalWeek(force = true)
+                } else {
+                    rentalsLoaded = true
+                    updateVisibleTabs()
+                }
             } else {
                 eventsLoaded = true
                 teamsLoaded = true
@@ -941,6 +956,30 @@ class DefaultOrganizationDetailComponent(
 
     override fun signInToReview() {
         navigationHandler.navigateToLogin()
+    }
+
+    override fun openDivisionRegistration(division: DivisionDetail) {
+        val targetUrl = division.registrationUrl
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.takeIf { url ->
+                url.startsWith("https://", ignoreCase = true) ||
+                    url.startsWith("http://", ignoreCase = true)
+            }
+            ?: return
+        scope.launch {
+            val handler = urlHandler
+            if (handler == null) {
+                _errorState.value = ErrorMessage("Unable to open division registration.")
+                return@launch
+            }
+            handler.openUrlInWebView(targetUrl)
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage(
+                        error.userMessage("Unable to open division registration."),
+                    )
+                }
+        }
     }
 
     override fun refreshRentals(

@@ -80,6 +80,8 @@ interface EventSearchComponent {
     val eventTags: StateFlow<List<EventTag>>
     val organizationTags: StateFlow<List<EventTag>>
     val organizationFilter: StateFlow<EventFilter>
+    val teamFilter: StateFlow<EventFilter>
+    val rentalFilter: StateFlow<EventFilter>
     val selectedOrganizationTagSlugs: StateFlow<Set<String>>
     val isLoadingMore: StateFlow<Boolean>
     val hasMoreEvents: StateFlow<Boolean>
@@ -124,6 +126,8 @@ interface EventSearchComponent {
     fun nativeDiscoverSearchSnapshot(query: String): NativeDiscoverSearchSnapshot
     fun updateFilter(update: EventFilter.() -> EventFilter)
     fun updateOrganizationFilter(update: EventFilter.() -> EventFilter)
+    fun updateTeamFilter(update: EventFilter.() -> EventFilter)
+    fun updateRentalFilter(update: EventFilter.() -> EventFilter)
     fun updateOrganizationTagSlugs(tagSlugs: Set<String>)
     fun refreshEvents(force: Boolean = false)
     fun refreshOrganizations(force: Boolean = false)
@@ -138,6 +142,8 @@ interface EventSearchComponent {
     fun clearRentalBusyBlocks()
     fun eventFilterSnapshot(): NativeDiscoverFilterSnapshot
     fun organizationFilterSnapshot(): NativeDiscoverFilterSnapshot
+    fun teamFilterSnapshot(): NativeDiscoverFilterSnapshot
+    fun rentalFilterSnapshot(): NativeDiscoverFilterSnapshot
     fun applyNativeEventFilters(
         sort: String,
         priceEnabled: Boolean,
@@ -159,11 +165,30 @@ interface EventSearchComponent {
         divisionPriceMaxEnabled: Boolean,
         divisionPriceMax: Double,
     )
+    fun applyNativeTeamFilters(
+        sportIds: List<String>,
+        divisionGenders: List<String>,
+        skillDivisionTypeIds: List<String>,
+        ageDivisionTypeIds: List<String>,
+        registrationPriceMinEnabled: Boolean,
+        registrationPriceMin: Double,
+        registrationPriceMaxEnabled: Boolean,
+        registrationPriceMax: Double,
+    )
+    fun applyNativeRentalFilters(sportIds: List<String>)
     fun clearNativeEventFilters()
     fun clearNativeOrganizationFilters()
+    fun clearNativeTeamFilters()
+    fun clearNativeRentalFilters()
     fun selectTeamFromDiscover(team: Team): String?
     fun selectRentalFromDiscover(organization: Organization): String?
     fun discoverOrganizationMapPlaces(rentalsOnly: Boolean): List<MVPPlace>
+    suspend fun refreshOrganizationMapPlaces(
+        center: LatLng,
+        radiusMiles: Double,
+        rentalsOnly: Boolean,
+    ): List<MVPPlace>
+    fun organizationForMapPlace(placeId: String): Organization?
 }
 
 data class RentalFieldOption(
@@ -257,6 +282,11 @@ class DefaultEventSearchComponent(
     override val organizationTags: StateFlow<List<EventTag>> = _organizationTags.asStateFlow()
     private val _organizationFilter = MutableStateFlow(EventFilter())
     override val organizationFilter: StateFlow<EventFilter> = _organizationFilter.asStateFlow()
+    private val _teamFilter = MutableStateFlow(EventFilter())
+    override val teamFilter: StateFlow<EventFilter> = _teamFilter.asStateFlow()
+    private val _rentalFilter = MutableStateFlow(EventFilter())
+    override val rentalFilter: StateFlow<EventFilter> = _rentalFilter.asStateFlow()
+    private var mapOrganizationsByPlaceId: Map<String, Organization> = emptyMap()
     private val _selectedOrganizationTagSlugs = MutableStateFlow<Set<String>>(emptySet())
     override val selectedOrganizationTagSlugs: StateFlow<Set<String>> = _selectedOrganizationTagSlugs.asStateFlow()
 
@@ -281,12 +311,15 @@ class DefaultEventSearchComponent(
     override val hasMoreOrganizations: StateFlow<Boolean> = _hasMoreOrganizations.asStateFlow()
     private val _rentals = MutableStateFlow<List<Organization>>(emptyList())
     override val rentals: StateFlow<List<Organization>> = _rentals.asStateFlow()
+    private val _allRentals = MutableStateFlow<List<Organization>>(emptyList())
     private val _isLoadingRentals = MutableStateFlow(false)
     override val isLoadingRentals: StateFlow<Boolean> = _isLoadingRentals.asStateFlow()
     private val _hasMoreRentals = MutableStateFlow(true)
     override val hasMoreRentals: StateFlow<Boolean> = _hasMoreRentals.asStateFlow()
     private val _teams = MutableStateFlow<List<Team>>(emptyList())
     override val teams: StateFlow<List<Team>> = _teams.asStateFlow()
+    private val _allTeams = MutableStateFlow<List<Team>>(emptyList())
+    private var teamOrganizationsById: Map<String, Organization> = emptyMap()
     private val _isLoadingTeams = MutableStateFlow(false)
     override val isLoadingTeams: StateFlow<Boolean> = _isLoadingTeams.asStateFlow()
     private val _hasMoreTeams = MutableStateFlow(true)
@@ -429,7 +462,8 @@ class DefaultEventSearchComponent(
                         _isLocationSearchEnabled.value = true
                         refreshEvents(force = true)
                         refreshOrganizations(force = false)
-                        refreshRentals(force = false)
+                        refreshRentals(force = activeSearchRadiusMiles() > 0.0)
+                        _teams.value = applyTeamFilters(_allTeams.value)
                     }
                 }
             } catch (_: DeniedAlwaysException) {
@@ -447,7 +481,8 @@ class DefaultEventSearchComponent(
         scope.launch {
             currentRadius.collect {
                 refreshOrganizations(force = false)
-                refreshRentals(force = false)
+                refreshRentals(force = true)
+                _teams.value = applyTeamFilters(_allTeams.value)
             }
         }
 
@@ -509,6 +544,12 @@ class DefaultEventSearchComponent(
     override fun organizationFilterSnapshot(): NativeDiscoverFilterSnapshot =
         _organizationFilter.value.toNativeDiscoverFilterSnapshot()
 
+    override fun teamFilterSnapshot(): NativeDiscoverFilterSnapshot =
+        _teamFilter.value.toNativeDiscoverFilterSnapshot()
+
+    override fun rentalFilterSnapshot(): NativeDiscoverFilterSnapshot =
+        _rentalFilter.value.toNativeDiscoverFilterSnapshot()
+
     override fun applyNativeEventFilters(
         sort: String,
         priceEnabled: Boolean,
@@ -563,6 +604,36 @@ class DefaultEventSearchComponent(
         }
     }
 
+    override fun applyNativeTeamFilters(
+        sportIds: List<String>,
+        divisionGenders: List<String>,
+        skillDivisionTypeIds: List<String>,
+        ageDivisionTypeIds: List<String>,
+        registrationPriceMinEnabled: Boolean,
+        registrationPriceMin: Double,
+        registrationPriceMaxEnabled: Boolean,
+        registrationPriceMax: Double,
+    ) {
+        updateTeamFilter {
+            copy(
+                sportIds = normalizedDiscoverFilterValues(sportIds),
+                divisionGenders = normalizedDiscoverFilterValues(divisionGenders),
+                skillDivisionTypeIds = normalizedDiscoverFilterValues(skillDivisionTypeIds),
+                ageDivisionTypeIds = normalizedDiscoverFilterValues(ageDivisionTypeIds),
+                divisionPriceMin = registrationPriceMin
+                    .takeIf { registrationPriceMinEnabled && it.isFinite() && it >= 0.0 },
+                divisionPriceMax = registrationPriceMax
+                    .takeIf { registrationPriceMaxEnabled && it.isFinite() && it >= 0.0 },
+            )
+        }
+    }
+
+    override fun applyNativeRentalFilters(sportIds: List<String>) {
+        updateRentalFilter {
+            copy(sportIds = normalizedDiscoverFilterValues(sportIds))
+        }
+    }
+
     override fun clearNativeEventFilters() {
         updateFilter { EventFilter() }
         selectRadius(0.0)
@@ -570,6 +641,16 @@ class DefaultEventSearchComponent(
 
     override fun clearNativeOrganizationFilters() {
         updateOrganizationFilter { EventFilter() }
+        selectRadius(0.0)
+    }
+
+    override fun clearNativeTeamFilters() {
+        updateTeamFilter { EventFilter() }
+        selectRadius(0.0)
+    }
+
+    override fun clearNativeRentalFilters() {
+        updateRentalFilter { EventFilter() }
         selectRadius(0.0)
     }
 
@@ -619,6 +700,55 @@ class DefaultEventSearchComponent(
         }
         return source.mapNotNull { organization -> organization.toMvpPlaceOrNull(markerKind) }
     }
+
+    override suspend fun refreshOrganizationMapPlaces(
+        center: LatLng,
+        radiusMiles: Double,
+        rentalsOnly: Boolean,
+    ): List<MVPPlace> {
+        mapOrganizationsByPlaceId = emptyMap()
+        val organizations = billingRepository.listOrganizationsInArea(
+            latitude = center.latitude,
+            longitude = center.longitude,
+            radiusMiles = radiusMiles,
+            includeAffiliateRentals = rentalsOnly,
+        ).onFailure { error ->
+            _errorState.value = ErrorMessage(
+                if (rentalsOnly) {
+                    "Failed to fetch rentals for this map area: ${error.userMessage()}"
+                } else {
+                    "Failed to fetch organizations for this map area: ${error.userMessage()}"
+                },
+            )
+        }.getOrNull() ?: return emptyList()
+
+        val resolvedOrganizations = if (rentalsOnly) {
+            resolveOrganizationsWithFieldIds(
+                organizations = organizations,
+                forceFieldRefresh = false,
+            ).flatMap { organization -> organization.toDiscoverRentalEntries() }
+        } else {
+            organizations
+        }
+        val markerKind = if (rentalsOnly) {
+            MVPPlace.MARKER_KIND_RENTAL
+        } else {
+            MVPPlace.MARKER_KIND_ORGANIZATION
+        }
+        val visibleEntries = resolvedOrganizations.mapNotNull { organization ->
+            val place = organization.toMvpPlaceOrNull(markerKind) ?: return@mapNotNull null
+            val placeLocation = LatLng(place.latitude, place.longitude)
+            if (calcDistance(center, placeLocation) > radiusMiles) return@mapNotNull null
+            organization to place
+        }
+        mapOrganizationsByPlaceId = visibleEntries.associate { (organization, _) ->
+            organization.id to organization
+        }
+        return visibleEntries.map { (_, place) -> place }
+    }
+
+    override fun organizationForMapPlace(placeId: String): Organization? =
+        mapOrganizationsByPlaceId[placeId]
 
     override fun suggestEvents(searchQuery: String) {
         val normalizedQuery = searchQuery.trim()
@@ -907,6 +1037,24 @@ class DefaultEventSearchComponent(
         }
     }
 
+    override fun updateTeamFilter(update: EventFilter.() -> EventFilter) {
+        val previous = _teamFilter.value
+        val updated = previous.update()
+        if (previous == updated) return
+
+        _teamFilter.value = updated
+        _teams.value = applyTeamFilters(_allTeams.value)
+    }
+
+    override fun updateRentalFilter(update: EventFilter.() -> EventFilter) {
+        val previous = _rentalFilter.value
+        val updated = previous.update()
+        if (previous == updated) return
+
+        _rentalFilter.value = updated
+        _rentals.value = applyRentalFilters(_allRentals.value)
+    }
+
     override fun refreshOrganizations(force: Boolean) {
         scope.launch {
             loadOrganizations(force = force)
@@ -1015,6 +1163,8 @@ class DefaultEventSearchComponent(
             sportsRepository.getSports()
                 .onSuccess { sports ->
                     _sports.value = sports
+                    _rentals.value = applyRentalFilters(_allRentals.value)
+                    _teams.value = applyTeamFilters(_allTeams.value)
                 }
                 .onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to load sports: ${e.userMessage()}")
@@ -1116,6 +1266,28 @@ class DefaultEventSearchComponent(
             }
     }
 
+    private suspend fun cacheOrganizationsForTeams(
+        teams: List<Team>,
+        force: Boolean,
+    ) {
+        val organizationIds = teams
+            .mapNotNull { team -> team.organizationId?.trim()?.takeIf(String::isNotBlank) }
+            .distinct()
+            .filter { organizationId -> force || organizationId !in teamOrganizationsById }
+        if (organizationIds.isEmpty()) return
+
+        billingRepository.getOrganizationsByIds(organizationIds)
+            .onSuccess { organizations ->
+                teamOrganizationsById = buildMap {
+                    putAll(teamOrganizationsById)
+                    organizations.forEach { organization -> put(organization.id, organization) }
+                }
+            }
+            .onFailure { error ->
+                Napier.w("Failed to load organizations for team distance filters: ${error.message}")
+            }
+    }
+
     private fun observeCachedEvents() {
         if (cachedEventsSyncJob != null) return
         cachedEventsSyncJob = scope.launch {
@@ -1153,38 +1325,64 @@ class DefaultEventSearchComponent(
 
     private suspend fun loadRentalOrganizations(force: Boolean = false) {
         if (_isLoadingRentals.value) return
-        if (rentalsLoaded && !force) return
+        if (rentalsLoaded && !force) {
+            _rentals.value = applyRentalFilters(_allRentals.value)
+            return
+        }
 
         _isLoadingRentals.value = true
-        rentalOffset = 0
-        _hasMoreRentals.value = true
-        val page = billingRepository.listOrganizationsPage(
-            limit = DISCOVER_PAGE_SIZE,
-            offset = 0,
-            includeAffiliateRentals = true,
-        )
-            .onFailure { e ->
-                _errorState.value = ErrorMessage("Failed to fetch rentals: ${e.userMessage()}")
+        try {
+            rentalOffset = 0
+            _hasMoreRentals.value = true
+            val searchLocation = activeSearchLocationOrNull()
+            val radiusMiles = activeSearchRadiusMiles()
+            val organizations = if (searchLocation != null && radiusMiles > 0.0) {
+                _hasMoreRentals.value = false
+                billingRepository.listOrganizationsInArea(
+                    latitude = searchLocation.latitude,
+                    longitude = searchLocation.longitude,
+                    radiusMiles = radiusMiles,
+                    includeAffiliateRentals = true,
+                )
+                    .onFailure { error ->
+                        _errorState.value = ErrorMessage("Failed to fetch rentals: ${error.userMessage()}")
+                    }
+                    .getOrNull()
+                    .orEmpty()
+            } else {
+                val page = billingRepository.listOrganizationsPage(
+                    limit = DISCOVER_PAGE_SIZE,
+                    offset = 0,
+                    includeAffiliateRentals = true,
+                )
+                    .onFailure { error ->
+                        _errorState.value = ErrorMessage("Failed to fetch rentals: ${error.userMessage()}")
+                    }
+                    .getOrNull()
+                rentalOffset = page?.pagination?.nextOffset ?: page?.items?.size ?: 0
+                _hasMoreRentals.value = page?.pagination?.hasMore ?: false
+                page?.items.orEmpty()
             }
-            .getOrNull()
-        val organizations = page?.items.orEmpty()
-        val rentals = resolveOrganizationsWithFieldIds(
-            organizations = organizations,
-            forceFieldRefresh = force,
-        )
-            .flatMap { organization -> organization.toDiscoverRentalEntries() }
-            .sortedBy { organization -> organization.name.lowercase() }
+            val rentals = resolveOrganizationsWithFieldIds(
+                organizations = organizations,
+                forceFieldRefresh = force,
+            ).flatMap { organization -> organization.toDiscoverRentalEntries() }
 
-        _rentals.value = rentals
-        rentalOffset = page?.pagination?.nextOffset ?: organizations.size
-        _hasMoreRentals.value = page?.pagination?.hasMore ?: false
-        rentalsLoaded = true
-        _isLoadingRentals.value = false
-        Napier.d("Loaded ${_rentals.value.size} rental organizations", tag = "Discover")
+            _allRentals.value = rentals
+            _rentals.value = applyRentalFilters(rentals)
+            rentalsLoaded = true
+            Napier.d("Loaded ${_rentals.value.size} rental organizations", tag = "Discover")
+        } finally {
+            _isLoadingRentals.value = false
+        }
     }
 
     private suspend fun loadMoreRentalOrganizationsPage() {
         if (_isLoadingRentals.value || !_hasMoreRentals.value) return
+        if (activeSearchLocationOrNull() != null && activeSearchRadiusMiles() > 0.0) {
+            _hasMoreRentals.value = false
+            return
+        }
 
         _isLoadingRentals.value = true
         val page = billingRepository.listOrganizationsPage(
@@ -1202,8 +1400,8 @@ class DefaultEventSearchComponent(
             forceFieldRefresh = false,
         )
             .flatMap { organization -> organization.toDiscoverRentalEntries() }
-        _rentals.value = mergeOrganizations(_rentals.value, rentals)
-            .sortedBy { organization -> organization.name.lowercase() }
+        _allRentals.value = mergeOrganizations(_allRentals.value, rentals)
+        _rentals.value = applyRentalFilters(_allRentals.value)
         rentalOffset = page?.pagination?.nextOffset ?: rentalOffset + organizations.size
         _hasMoreRentals.value = page?.pagination?.hasMore ?: false
         rentalsLoaded = true
@@ -1212,7 +1410,10 @@ class DefaultEventSearchComponent(
 
     private suspend fun loadTeams(force: Boolean = false): List<Team> {
         if (_isLoadingTeams.value) return _teams.value
-        if (teamsLoaded && !force) return _teams.value
+        if (teamsLoaded && !force) {
+            _teams.value = applyTeamFilters(_allTeams.value)
+            return _teams.value
+        }
 
         _isLoadingTeams.value = true
         teamOffset = 0
@@ -1225,9 +1426,9 @@ class DefaultEventSearchComponent(
             }
             .getOrNull()
         val teams = page?.items.orEmpty()
-            .sortedBy { team -> team.name.lowercase() }
-
-        _teams.value = teams
+        cacheOrganizationsForTeams(teams, force = force)
+        _allTeams.value = teams
+        _teams.value = applyTeamFilters(teams)
         teamOffset = page?.pagination?.nextOffset ?: teams.size
         _hasMoreTeams.value = page?.pagination?.hasMore ?: false
         teamsLoaded = true
@@ -1247,8 +1448,9 @@ class DefaultEventSearchComponent(
             }
             .getOrNull()
         val teams = page?.items.orEmpty()
-        _teams.value = mergeTeams(_teams.value, teams)
-            .sortedBy { team -> team.name.lowercase() }
+        cacheOrganizationsForTeams(teams, force = false)
+        _allTeams.value = mergeTeams(_allTeams.value, teams)
+        _teams.value = applyTeamFilters(_allTeams.value)
         teamOffset = page?.pagination?.nextOffset ?: teamOffset + teams.size
         _hasMoreTeams.value = page?.pagination?.hasMore ?: false
         teamsLoaded = true
@@ -1416,6 +1618,25 @@ class DefaultEventSearchComponent(
         return applyDistanceFilter(sportFiltered)
     }
 
+    private fun applyRentalFilters(rentals: List<Organization>): List<Organization> =
+        filterAndSortDiscoverRentals(
+            rentals = rentals,
+            filter = _rentalFilter.value,
+            sports = _sports.value,
+            searchLocation = activeSearchLocationOrNull(),
+            radiusMiles = activeSearchRadiusMiles(),
+        )
+
+    private fun applyTeamFilters(teams: List<Team>): List<Team> =
+        filterAndSortDiscoverTeams(
+            teams = teams,
+            filter = _teamFilter.value,
+            sports = _sports.value,
+            organizationsById = teamOrganizationsById,
+            searchLocation = activeSearchLocationOrNull(),
+            radiusMiles = activeSearchRadiusMiles(),
+        )
+
     private fun applyDistanceFilter(organizations: List<Organization>): List<Organization> {
         val currentLocation = activeSearchLocationOrNull() ?: return organizations
         val radiusMiles = activeSearchRadiusMiles()
@@ -1488,6 +1709,7 @@ class DefaultEventSearchComponent(
         refreshEvents(force = true)
         refreshOrganizations(force = true)
         refreshRentals(force = true)
+        refreshTeams(force = false)
     }
 
     private fun handleLocationPermissionDenied(alwaysDenied: Boolean) {
@@ -1506,6 +1728,7 @@ class DefaultEventSearchComponent(
         refreshEvents(force = true)
         refreshOrganizations(force = true)
         refreshRentals(force = true)
+        refreshTeams(force = false)
     }
 
     private class Cleanup(private val locationTracker: LocationTracker) : InstanceKeeper.Instance {

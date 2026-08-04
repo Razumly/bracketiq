@@ -20,8 +20,17 @@ import kotlinx.serialization.encodeToString
 private const val ORGANIZATION_CATALOG_RESOURCE = "organizations"
 private const val ORGANIZATION_DETAIL_PROJECTION = "detail"
 private const val ORGANIZATION_PUBLIC_PROJECTION = "public"
+private const val ORGANIZATION_AREA_LIMIT = 200
+private const val KILOMETERS_PER_MILE = 1.60934
+private const val MAX_ORGANIZATION_AREA_RADIUS_MILES = 12_458.0
 // The review mutation routes return getOrganizationReviewsPayload() with the backend's default 50.
 private const val MUTATED_REVIEW_FIRST_PAGE_LIMIT = 50
+
+private data class OrganizationCatalogArea(
+    val latitude: Double,
+    val longitude: Double,
+    val radiusKilometers: Double,
+)
 
 private fun Organization.toCacheEntry(
     scope: CatalogCacheScope,
@@ -147,11 +156,69 @@ internal class BillingOrganizationCoordinator(
         divisionGenders: Set<String>,
         skillDivisionTypeIds: Set<String>,
         ageDivisionTypeIds: Set<String>,
+    ): Result<RepositoryPage<Organization>> = listOrganizationsPage(
+        limit = limit,
+        offset = offset,
+        includeAffiliateRentals = includeAffiliateRentals,
+        tagSlugs = tagSlugs,
+        price = price,
+        divisionGenders = divisionGenders,
+        skillDivisionTypeIds = skillDivisionTypeIds,
+        ageDivisionTypeIds = ageDivisionTypeIds,
+        area = null,
+    )
+
+    suspend fun listOrganizationsInArea(
+        latitude: Double,
+        longitude: Double,
+        radiusMiles: Double,
+        includeAffiliateRentals: Boolean,
+    ): Result<List<Organization>> {
+        require(latitude.isFinite() && latitude in -90.0..90.0) {
+            "Organization map latitude must be valid."
+        }
+        require(longitude.isFinite() && longitude in -180.0..180.0) {
+            "Organization map longitude must be valid."
+        }
+        require(radiusMiles.isFinite() && radiusMiles > 0.0) {
+            "Organization map radius must be greater than zero."
+        }
+        val normalizedRadiusMiles = radiusMiles.coerceAtMost(MAX_ORGANIZATION_AREA_RADIUS_MILES)
+        return listOrganizationsPage(
+            limit = ORGANIZATION_AREA_LIMIT,
+            offset = 0,
+            includeAffiliateRentals = includeAffiliateRentals,
+            tagSlugs = emptySet(),
+            price = null,
+            divisionGenders = emptySet(),
+            skillDivisionTypeIds = emptySet(),
+            ageDivisionTypeIds = emptySet(),
+            area = OrganizationCatalogArea(
+                latitude = latitude,
+                longitude = longitude,
+                radiusKilometers = normalizedRadiusMiles * KILOMETERS_PER_MILE,
+            ),
+        ).map(RepositoryPage<Organization>::items)
+    }
+
+    private suspend fun listOrganizationsPage(
+        limit: Int,
+        offset: Int,
+        includeAffiliateRentals: Boolean,
+        tagSlugs: Set<String>,
+        price: Pair<Double, Double>?,
+        divisionGenders: Set<String>,
+        skillDivisionTypeIds: Set<String>,
+        ageDivisionTypeIds: Set<String>,
+        area: OrganizationCatalogArea?,
     ): Result<RepositoryPage<Organization>> = runCatching {
         val normalizedLimit = limit.coerceIn(1, 200)
         val normalizedOffset = offset.coerceAtLeast(0)
         val affiliateParam = if (includeAffiliateRentals) "&includeAffiliateRentals=true" else ""
         val tagsParam = tagSlugs.toOrganizationTagsQueryParam()
+        val areaParam = area?.let { value ->
+            "&lat=${value.latitude}&lng=${value.longitude}&radiusKm=${value.radiusKilometers}"
+        }.orEmpty()
         val divisionParams = buildString {
             price?.first?.times(100.0)?.toInt()?.let { append("&divisionPriceMin=$it") }
             price?.second?.times(100.0)?.toInt()?.let { append("&divisionPriceMax=$it") }
@@ -169,6 +236,9 @@ internal class BillingOrganizationCoordinator(
             normalizedLimit.toString(),
             normalizedOffset.toString(),
             includeAffiliateRentals.toString(),
+            area?.latitude?.toString().orEmpty(),
+            area?.longitude?.toString().orEmpty(),
+            area?.radiusKilometers?.toString().orEmpty(),
             price?.first?.toString().orEmpty(),
             price?.second?.toString().orEmpty(),
             *divisionGenders.map(String::trim).filter(String::isNotBlank).sorted().toTypedArray(),
@@ -179,7 +249,7 @@ internal class BillingOrganizationCoordinator(
         val previousIds = dao.getCatalogQuery(cacheKey, scope.viewerKey).orderedCatalogIdsOrEmpty()
         val refreshedPage = try {
             val response = scope.api.get<OrganizationsResponseDto>(
-                path = "api/organizations?limit=$normalizedLimit&offset=$normalizedOffset$affiliateParam$tagsParam$divisionParams",
+                path = "api/organizations?limit=$normalizedLimit&offset=$normalizedOffset$affiliateParam$tagsParam$divisionParams$areaParam",
             )
             val organizations = response.organizations.toOrganizationsStrict("Organization list")
             RepositoryPage(

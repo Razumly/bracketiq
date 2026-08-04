@@ -544,6 +544,18 @@ class BillingRepository(
         ageDivisionTypeIds = ageDivisionTypeIds,
     )
 
+    override suspend fun listOrganizationsInArea(
+        latitude: Double,
+        longitude: Double,
+        radiusMiles: Double,
+        includeAffiliateRentals: Boolean,
+    ): Result<List<Organization>> = organizationCoordinator.listOrganizationsInArea(
+        latitude = latitude,
+        longitude = longitude,
+        radiusMiles = radiusMiles,
+        includeAffiliateRentals = includeAffiliateRentals,
+    )
+
     override suspend fun searchOrganizations(
         query: String,
         limit: Int,

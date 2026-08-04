@@ -11,18 +11,15 @@ struct NativeDiscoverEventCard: View {
 
     var body: some View {
         let cardMetadata = EventCardMetadataKt.buildNativeEventCardMetadata(event: event)
+        let imageRequest = discoverEventImageRequest(
+            event: event,
+            organizationLogoId: organizationLogoId
+        )
 
         ZStack(alignment: .bottomLeading) {
             DiscoverRemoteImage(
-                url: discoverImageURL(
-                    reference: event.imageId.isEmpty ? organizationLogoId : event.imageId,
-                    width: 900,
-                    height: 900
-                ),
-                fallbackURL: discoverInitialsImageURL(
-                    name: event.name.isEmpty ? "Event" : event.name,
-                    size: 512
-                ),
+                url: imageRequest.url,
+                fallbackURL: imageRequest.fallbackURL,
                 fallbackName: event.name,
                 systemImage: "calendar"
             )
@@ -201,14 +198,9 @@ struct NativeDiscoverOrganizationCard: View {
                         .lineLimit(2)
                 }
 
-                HStack {
-                    Text(discoverFieldCountLabel(organization.fieldIds.count))
-                        .foregroundStyle(Color.accentColor)
-                    Spacer()
-                    Text(discoverDivisionSummary(organization.divisionSummary))
-                        .foregroundStyle(.secondary)
-                }
-                .font(.caption.weight(.semibold))
+                Text(discoverDivisionSummary(organization.divisionSummary))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -312,9 +304,6 @@ struct NativeDiscoverRentalCard: View {
                         .lineLimit(2)
                 }
 
-                Text(discoverFieldCountLabel(organization.fieldIds.count))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -487,45 +476,119 @@ struct DiscoverRemoteImage: View {
     @MainActor
     private func loadImage() async {
         phase = .loading
+        let request = DiscoverImageRequest(url: url, fallbackURL: fallbackURL)
+        if let image = await DiscoverImageStore.shared.image(for: request) {
+            guard !Task.isCancelled else { return }
+            phase = .success(image)
+        } else if !Task.isCancelled {
+            phase = .failure
+        }
+    }
+}
+
+struct DiscoverImageRequest: Hashable, Sendable {
+    let url: URL?
+    let fallbackURL: URL?
+
+    fileprivate var candidates: [URL] {
         var seenURLs = Set<String>()
-        let candidates = [url, fallbackURL]
+        return [url, fallbackURL]
             .compactMap { $0 }
             .filter { candidate in
                 seenURLs.insert(candidate.absoluteString).inserted
             }
+    }
+}
 
-        for candidate in candidates {
-            if let cachedImage = discoverImageCache.object(forKey: candidate as NSURL) {
-                phase = .success(cachedImage)
-                return
+func discoverEventImageRequest(
+    event: Event,
+    organizationLogoId: String?
+) -> DiscoverImageRequest {
+    DiscoverImageRequest(
+        url: discoverImageURL(
+            reference: event.imageId.isEmpty ? organizationLogoId : event.imageId,
+            width: 900,
+            height: 900
+        ),
+        fallbackURL: discoverInitialsImageURL(
+            name: event.name.isEmpty ? "Event" : event.name,
+            size: 512
+        )
+    )
+}
+
+@MainActor
+func preloadDiscoverImages(_ requests: [DiscoverImageRequest]) async {
+    var seenRequests = Set<DiscoverImageRequest>()
+    let uniqueRequests = requests.filter { request in
+        seenRequests.insert(request).inserted
+    }
+    for startIndex in stride(from: 0, to: uniqueRequests.count, by: 6) {
+        guard !Task.isCancelled else { return }
+        let endIndex = min(startIndex + 6, uniqueRequests.count)
+        let batch = uniqueRequests[startIndex..<endIndex]
+        await withTaskGroup(of: Void.self) { group in
+            batch.forEach { request in
+                group.addTask {
+                    _ = await DiscoverImageStore.shared.image(for: request)
+                }
             }
-
-            var request = URLRequest(
-                url: candidate,
-                cachePolicy: .returnCacheDataElseLoad,
-                timeoutInterval: 8
-            )
-            request.setValue("image/*", forHTTPHeaderField: "Accept")
-
-            do {
-                let (data, response) = try await URLSession.shared.data(for: request)
-                try Task.checkCancellation()
-                guard let httpResponse = response as? HTTPURLResponse,
-                      (200..<300).contains(httpResponse.statusCode),
-                      let image = UIImage(data: data)
-                else { continue }
-
-                discoverImageCache.setObject(image, forKey: candidate as NSURL)
-                phase = .success(image)
-                return
-            } catch is CancellationError {
-                return
-            } catch {
-                continue
-            }
+            await group.waitForAll()
         }
+    }
+}
 
-        phase = .failure
+@MainActor
+private final class DiscoverImageStore {
+    static let shared = DiscoverImageStore()
+
+    private let cache = NSCache<NSURL, UIImage>()
+    private var inFlightRequests: [URL: Task<Data?, Never>] = [:]
+
+    func image(for request: DiscoverImageRequest) async -> UIImage? {
+        for candidate in request.candidates {
+            if let cachedImage = cache.object(forKey: candidate as NSURL) {
+                return cachedImage
+            }
+
+            let task: Task<Data?, Never>
+            if let currentTask = inFlightRequests[candidate] {
+                task = currentTask
+            } else {
+                let newTask = Task { await fetchDiscoverImageData(from: candidate) }
+                inFlightRequests[candidate] = newTask
+                task = newTask
+            }
+
+            let data = await task.value
+            inFlightRequests[candidate] = nil
+            if let cachedImage = cache.object(forKey: candidate as NSURL) {
+                return cachedImage
+            }
+            guard let data, let image = UIImage(data: data) else { continue }
+            cache.setObject(image, forKey: candidate as NSURL)
+            return image
+        }
+        return nil
+    }
+}
+
+private func fetchDiscoverImageData(from url: URL) async -> Data? {
+    var request = URLRequest(
+        url: url,
+        cachePolicy: .returnCacheDataElseLoad,
+        timeoutInterval: 8
+    )
+    request.setValue("image/*", forHTTPHeaderField: "Accept")
+
+    do {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode)
+        else { return nil }
+        return data
+    } catch {
+        return nil
     }
 }
 
@@ -535,8 +598,6 @@ private enum DiscoverRemoteImagePhase {
     case success(UIImage)
     case failure
 }
-
-private let discoverImageCache = NSCache<NSURL, UIImage>()
 
 private struct DiscoverImageFallback: View {
     let name: String

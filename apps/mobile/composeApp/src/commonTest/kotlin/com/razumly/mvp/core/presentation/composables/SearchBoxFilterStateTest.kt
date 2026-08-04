@@ -20,6 +20,12 @@ class SearchBoxFilterStateTest {
         assertTrue(isFilterActive(EventFilter(sort = EventSearchSort.NEAREST)))
     }
 
+    @Test
+    fun teamRegistrationPriceMakesFilterActive() {
+        assertTrue(isFilterActive(EventFilter(divisionPriceMin = 25.0)))
+        assertTrue(isFilterActive(EventFilter(divisionPriceMax = 100.0)))
+    }
+
     private val now = Instant.parse("2026-07-13T19:30:00Z")
     private val utc = TimeZone.UTC
 

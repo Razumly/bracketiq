@@ -216,6 +216,8 @@ internal fun isFilterActive(
         filter.divisionGenders.isNotEmpty() ||
         filter.skillDivisionTypeIds.isNotEmpty() ||
         filter.ageDivisionTypeIds.isNotEmpty() ||
+        filter.divisionPriceMin != null ||
+        filter.divisionPriceMax != null ||
         filter.date.second != null ||
         ((currentRadiusMiles ?: 0.0) > 0.0)
 }
@@ -242,6 +244,8 @@ internal fun EventFilterSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        dragHandle = null,
+        sheetGesturesEnabled = false,
         modifier = Modifier.testTag(FILTER_SHEET_TEST_TAG),
     ) {
         Box(
@@ -265,12 +269,20 @@ internal fun EventFilterSheet(
                         fontWeight = FontWeight.Bold,
                     )
 
-                    TextButton(onClick = {
-                        onFilterChange { EventFilter() }
-                        onRadiusChange?.invoke(0.0)
-                        onDismiss()
-                    }) {
-                        Text("Clear All")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = onDismiss) {
+                            Icon(
+                                imageVector = Icons.Default.Clear,
+                                contentDescription = "Close filters",
+                            )
+                        }
+                        TextButton(onClick = {
+                            onFilterChange { EventFilter() }
+                            onRadiusChange?.invoke(0.0)
+                            onDismiss()
+                        }) {
+                            Text("Clear All")
+                        }
                     }
                 }
 

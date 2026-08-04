@@ -39,8 +39,62 @@ class EventCardMetadataTest {
             ),
         )
 
-        assertEquals("Divisions: 14U, 16U +1", metadata.divisionLabel)
-        assertEquals("Skills: Beginner, Intermediate +1", metadata.skillLevelLabel)
+        assertEquals("U14–U18 · Beginner–Advanced · 3 divisions", metadata.divisionLabel)
+        assertNull(metadata.skillLevelLabel)
+    }
+
+    @Test
+    fun buildNativeEventCardMetadata_formatsGenderAgeSkillRangesAndCount() {
+        val details = buildList {
+            listOf("M", "F").forEach { gender ->
+                listOf("u6", "u18").forEach { age ->
+                    listOf("recreational", "premier").forEach { skill ->
+                        val id = "${gender.lowercase()}_skill_${skill}_age_${age}"
+                        add(
+                            DivisionDetail(
+                                id = id,
+                                key = id,
+                                gender = gender,
+                                ageDivisionTypeId = age,
+                                skillDivisionTypeId = skill,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+        val metadata = buildNativeEventCardMetadata(
+            Event(
+                divisions = details.map(DivisionDetail::id),
+                divisionDetails = details,
+            ),
+        )
+
+        assertEquals("Men/Women · U6–U18 · Rec–Premier · 8 divisions", metadata.divisionLabel)
+        assertNull(metadata.skillLevelLabel)
+    }
+
+    @Test
+    fun buildNativeEventCardMetadata_prefersCompactCanonicalAgeTokens() {
+        val details = listOf("u16", "u14", "u9").map { age ->
+            DivisionDetail(
+                id = "c_$age",
+                key = "c_$age",
+                name = age.removePrefix("u") + "U",
+                gender = "C",
+                skillDivisionTypeId = "c_$age",
+                ageDivisionTypeId = "18plus",
+            )
+        }
+        val metadata = buildNativeEventCardMetadata(
+            Event(
+                divisions = details.map(DivisionDetail::id),
+                divisionDetails = details,
+            ),
+        )
+
+        assertEquals("Coed · U9–U16 · 3 divisions", metadata.divisionLabel)
+        assertNull(metadata.skillLevelLabel)
     }
 
     @Test
