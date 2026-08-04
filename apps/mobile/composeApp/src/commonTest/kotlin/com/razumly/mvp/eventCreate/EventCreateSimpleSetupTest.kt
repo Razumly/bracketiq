@@ -2,6 +2,8 @@ package com.razumly.mvp.eventCreate
 
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.DivisionPhaseSettingsMVP
+import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_MANUAL
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
@@ -54,7 +56,7 @@ class EventCreateSimpleSetupTest {
     }
 
     @Test
-    fun league_setup_includes_every_advanced_section() {
+    fun league_setup_moves_match_rules_into_divisions() {
         val pages = resolveEventCreateSetupPages(
             event = Event(eventType = EventType.LEAGUE),
             currentPageId = EventCreateSetupPageId.BASIC_INFORMATION,
@@ -64,7 +66,9 @@ class EventCreateSimpleSetupTest {
             ),
         )
 
-        assertTrue(pages.all(EventCreateSetupPage::used))
+        assertFalse(pages.first { it.id == EventCreateSetupPageId.MATCH_RULES }.used)
+        assertTrue(pages.first { it.id == EventCreateSetupPageId.DIVISIONS }.used)
+        assertTrue(pages.first { it.id == EventCreateSetupPageId.LEAGUE_SCORING }.used)
         assertEquals(
             EventCreateSetupPageStatus.AVAILABLE,
             pages.first { it.id == EventCreateSetupPageId.EVENT_DETAILS }.status,
@@ -72,14 +76,15 @@ class EventCreateSimpleSetupTest {
     }
 
     @Test
-    fun tournament_setup_includes_match_rules_but_not_league_scoring() {
+    fun tournament_setup_uses_division_rules_but_not_league_scoring() {
         val pages = resolveEventCreateSetupPages(
             event = Event(eventType = EventType.TOURNAMENT),
             currentPageId = EventCreateSetupPageId.BASIC_INFORMATION,
             completedPageIds = emptySet(),
         )
 
-        assertTrue(pages.first { it.id == EventCreateSetupPageId.MATCH_RULES }.used)
+        assertFalse(pages.first { it.id == EventCreateSetupPageId.MATCH_RULES }.used)
+        assertTrue(pages.first { it.id == EventCreateSetupPageId.DIVISIONS }.used)
         assertFalse(pages.first { it.id == EventCreateSetupPageId.LEAGUE_SCORING }.used)
     }
 
@@ -152,6 +157,26 @@ class EventCreateSimpleSetupTest {
         assertTrue(isSimpleSetupPageComplete(EventCreateSetupPageId.BASIC_INFORMATION, event))
         assertTrue(isSimpleSetupPageComplete(EventCreateSetupPageId.SCHEDULE, event))
         assertFalse(isSimpleSetupPageComplete(EventCreateSetupPageId.DIVISIONS, event))
+    }
+
+    @Test
+    fun given_set_based_division_rules_when_timing_is_omitted_then_divisions_remain_complete() {
+        val event = Event(
+            usesSets = true,
+            divisions = listOf("open"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "open",
+                    phaseSettings = mapOf(
+                        "LEAGUE" to DivisionPhaseSettingsMVP(
+                            matchRulesOverride = MatchRulesConfigMVP(supportsDraw = false),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        assertTrue(isSimpleSetupPageComplete(EventCreateSetupPageId.DIVISIONS, event))
     }
 
     @Test

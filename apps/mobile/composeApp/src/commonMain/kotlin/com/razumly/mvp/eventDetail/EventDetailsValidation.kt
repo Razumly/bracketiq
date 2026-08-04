@@ -248,7 +248,12 @@ internal fun computeEventValidationResult(
             slotEditorEnabled = slotEditorEnabled,
         )
     ) {
-        leagueTimeSlots.isNotEmpty() && leagueSlotErrors.isEmpty()
+        leagueTimeSlots.isNotEmpty() &&
+            leagueSlotErrors.isEmpty() &&
+            (
+                editEvent.eventType != EventType.WEEKLY_EVENT ||
+                    leagueTimeSlots.any { slot -> slot.repeating }
+                )
     } else {
         true
     }
@@ -591,7 +596,12 @@ internal fun computeEventValidationResult(
         }
         if (!scheduleTimeLocked && !isLeagueSlotsValid) {
             add(
-                if (leagueTimeSlots.isEmpty()) {
+                if (
+                    editEvent.eventType == EventType.WEEKLY_EVENT &&
+                    leagueTimeSlots.none { slot -> slot.repeating }
+                ) {
+                    "Add at least one weekly repeating timeslot."
+                } else if (leagueTimeSlots.isEmpty()) {
                     "Add at least one timeslot for scheduling."
                 } else {
                     "Fix timeslot issues before continuing."

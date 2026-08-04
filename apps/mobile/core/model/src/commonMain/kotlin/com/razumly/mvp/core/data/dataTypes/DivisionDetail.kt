@@ -3,6 +3,22 @@ package com.razumly.mvp.core.data.dataTypes
 import kotlinx.serialization.Serializable
 
 @Serializable
+enum class DivisionCompetitionPhase {
+    LEAGUE,
+    POOL,
+    BRACKET,
+    PLAYOFF,
+}
+
+@Serializable
+data class DivisionPhaseSettingsMVP(
+    val matchRulesOverride: MatchRulesConfigMVP? = null,
+    val autoCreatePointMatchIncidents: Boolean? = null,
+    val segmentLengthMinutes: Int? = null,
+    val segmentBreakMinutes: Int? = null,
+)
+
+@Serializable
 data class DivisionDetail(
     val id: String,
     val sourceDivisionId: String? = null,
@@ -42,5 +58,6 @@ data class DivisionDetail(
     val setDurationMinutes: Int? = null,
     val setsPerMatch: Int? = null,
     val pointsToVictory: List<Int> = emptyList(),
+    val phaseSettings: Map<String, DivisionPhaseSettingsMVP> = emptyMap(),
     val teamIds: List<String> = emptyList(),
 )

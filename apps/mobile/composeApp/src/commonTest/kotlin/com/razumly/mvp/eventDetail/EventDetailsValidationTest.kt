@@ -5,6 +5,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_MANUAL
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.buildEventDivisionId
@@ -13,6 +14,43 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class EventDetailsValidationTest {
+
+    @Test
+    fun weekly_events_require_a_repeating_timeslot_and_resource_count() {
+        val event = baseLeagueEvent(maxParticipants = 2).copy(
+            eventType = EventType.WEEKLY_EVENT,
+            noFixedEndDateTime = false,
+        )
+        val oneTimeSlot = TimeSlot(
+            id = "slot-once",
+            repeating = false,
+            dayOfWeek = null,
+            startTimeMinutes = null,
+            endTimeMinutes = null,
+            scheduledFieldId = "field-1",
+            scheduledFieldIds = listOf("field-1"),
+            startDate = event.start,
+            endDate = event.end,
+            price = null,
+        )
+
+        val result = computeEventValidationResult(
+            editEvent = event,
+            isNewEvent = true,
+            fieldCount = 0,
+            leagueTimeSlots = listOf(oneTimeSlot),
+            leagueSlotErrors = emptyMap(),
+            slotEditorEnabled = true,
+            divisionDetailsForSettings = emptyList(),
+            isColorLoaded = true,
+            scheduleTimeLocked = false,
+            requiresPositiveRegistrationPrice = false,
+        )
+
+        assertFalse(result.isFieldCountValid)
+        assertFalse(result.isLeagueSlotsValid)
+        assertTrue("Add at least one weekly repeating timeslot." in result.validationErrors)
+    }
 
     @Test
     fun online_event_edits_require_a_confirmed_price_quote() {

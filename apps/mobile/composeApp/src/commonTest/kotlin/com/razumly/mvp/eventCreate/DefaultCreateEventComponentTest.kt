@@ -790,8 +790,58 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         assertEquals(EventType.WEEKLY_EVENT, harness.component.newEventState.value.eventType)
         assertFalse(harness.component.newEventState.value.teamSignup)
-        assertTrue(harness.component.newEventState.value.noFixedEndDateTime)
+        assertFalse(harness.component.newEventState.value.noFixedEndDateTime)
         assertFalse(harness.component.newEventState.value.singleDivision)
+    }
+
+    @Test
+    fun weekly_event_creation_persists_resource_count_and_repeating_timeslot() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        harness.component.setLoadingHandler(harness.loadingHandler)
+        advance()
+
+        harness.component.onTypeSelected(EventType.WEEKLY_EVENT)
+        advance()
+        harness.component.selectFieldCount(2)
+        advance()
+        val localFieldIds = harness.component.localFields.value.map { field -> field.id }
+        harness.component.updateEventField {
+            copy(
+                name = "Weekly Training",
+                organizationId = "org-weekly",
+                divisions = listOf("Open"),
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_604_800_000),
+                noFixedEndDateTime = true,
+            )
+        }
+        harness.component.updateLeagueTimeSlot(0) {
+            copy(
+                repeating = true,
+                dayOfWeek = 1,
+                daysOfWeek = listOf(1, 3),
+                startTimeMinutes = 18 * 60,
+                endTimeMinutes = 20 * 60,
+                scheduledFieldId = localFieldIds.first(),
+                scheduledFieldIds = localFieldIds,
+            )
+        }
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        val createCall = harness.eventRepository.createEventCalls.single()
+        assertEquals(2, createCall.fields.orEmpty().size)
+        assertEquals(createCall.fields.orEmpty().map { field -> field.id }, createCall.event.fieldIds)
+        assertFalse(createCall.event.noFixedEndDateTime)
+        assertEquals(1, createCall.timeSlots.orEmpty().size)
+        assertTrue(createCall.timeSlots.orEmpty().single().repeating)
+        assertEquals(listOf(1, 3), createCall.timeSlots.orEmpty().single().daysOfWeek)
+        assertEquals(
+            createCall.timeSlots.orEmpty().map { slot -> slot.id },
+            createCall.event.timeSlotIds,
+        )
     }
 
     @Test

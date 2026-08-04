@@ -160,7 +160,7 @@ class EventDetailsScheduleLockingTest {
     }
 
     @Test
-    fun field_count_validation_only_applies_to_leagues_and_tournaments() {
+    fun field_count_validation_applies_to_leagues_tournaments_and_weekly_events() {
         assertTrue(
             requiresFieldCountValidation(
                 eventType = EventType.LEAGUE,
@@ -179,7 +179,7 @@ class EventDetailsScheduleLockingTest {
                 scheduleTimeLocked = false,
             ),
         )
-        assertFalse(
+        assertTrue(
             requiresFieldCountValidation(
                 eventType = EventType.WEEKLY_EVENT,
                 scheduleTimeLocked = false,

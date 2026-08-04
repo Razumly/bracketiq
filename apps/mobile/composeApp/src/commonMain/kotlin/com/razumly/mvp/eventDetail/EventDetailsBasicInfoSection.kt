@@ -203,6 +203,8 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                 state.editEvent.eventType == EventType.LEAGUE ||
                     state.editEvent.eventType == EventType.TOURNAMENT ||
                     state.editEvent.eventType == EventType.WEEKLY_EVENT
+            val canEditNoFixedEndDateTime = supportsNoFixedEndDateTime &&
+                state.editEvent.eventType != EventType.WEEKLY_EVENT
 
             if (state.editEvent.eventType == EventType.EVENT || supportsNoFixedEndDateTime) {
                 Row(
@@ -273,17 +275,19 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Checkbox(
-                        checked = state.editEvent.noFixedEndDateTime,
-                        enabled = !state.scheduleTimeLocked,
+                        checked = canEditNoFixedEndDateTime && state.editEvent.noFixedEndDateTime,
+                        enabled = canEditNoFixedEndDateTime && !state.scheduleTimeLocked,
                         onCheckedChange = { checked ->
-                            actions.onEditEvent {
-                                copy(
-                                    noFixedEndDateTime = checked,
-                                    end = when {
-                                        end <= start -> minimumFixedEnd
-                                        else -> end
-                                    },
-                                )
+                            if (canEditNoFixedEndDateTime) {
+                                actions.onEditEvent {
+                                    copy(
+                                        noFixedEndDateTime = checked,
+                                        end = when {
+                                            end <= start -> minimumFixedEnd
+                                            else -> end
+                                        },
+                                    )
+                                }
                             }
                         },
                     )

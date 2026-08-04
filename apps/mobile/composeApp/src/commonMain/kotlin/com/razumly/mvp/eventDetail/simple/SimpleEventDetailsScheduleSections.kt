@@ -169,7 +169,14 @@ internal fun LazyListScope.simpleEventDetailsScheduleSection(
                     )
             ) {
                 Text(
-                    text = "Fix timeslot issues before continuing.",
+                    text = if (
+                        state.editEvent.eventType == EventType.WEEKLY_EVENT &&
+                        state.leagueTimeSlots.none { slot -> slot.repeating }
+                    ) {
+                        "Add at least one weekly repeating timeslot."
+                    } else {
+                        "Fix timeslot issues before continuing."
+                    },
                     color = MaterialTheme.colorScheme.error,
                 )
             }

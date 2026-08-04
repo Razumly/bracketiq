@@ -85,7 +85,8 @@ internal fun requiresFieldCountValidation(
     return !scheduleTimeLocked &&
         (
             eventType == EventType.LEAGUE ||
-                eventType == EventType.TOURNAMENT
+                eventType == EventType.TOURNAMENT ||
+                eventType == EventType.WEEKLY_EVENT
             )
 }
 

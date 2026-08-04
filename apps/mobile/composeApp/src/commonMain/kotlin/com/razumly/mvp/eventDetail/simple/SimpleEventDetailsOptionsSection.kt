@@ -96,14 +96,16 @@ internal fun LazyListScope.simpleEventDetailsOptionsSection(
             }
 
             OptionsCategory(title = "Schedule & competition") {
-                val canGenerateEndDate = state.editEvent.eventType == EventType.LEAGUE ||
-                    state.editEvent.eventType == EventType.TOURNAMENT ||
+                val supportsGeneratedEndDate = state.editEvent.eventType == EventType.LEAGUE ||
+                    state.editEvent.eventType == EventType.TOURNAMENT
+                val showsGeneratedEndDate = supportsGeneratedEndDate ||
                     state.editEvent.eventType == EventType.WEEKLY_EVENT
-                if (canGenerateEndDate) {
+                if (showsGeneratedEndDate) {
                     OptionCheckboxRow(
-                        checked = state.editEvent.noFixedEndDateTime,
+                        checked = supportsGeneratedEndDate && state.editEvent.noFixedEndDateTime,
                         label = "Set end date during match generation",
                         description = "The generated match schedule will determine the event end date.",
+                        enabled = supportsGeneratedEndDate,
                         onCheckedChange = actions.onNoFixedEndDateChange,
                     )
                 }

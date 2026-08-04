@@ -12,6 +12,27 @@ import kotlin.time.Instant
 
 class EventEditPayloadBuilderTest {
     @Test
+    fun prepareForUpdate_clears_generated_end_date_mode_for_weekly_events() {
+        val event = leagueEvent(
+            eventType = EventType.WEEKLY_EVENT,
+            fieldIds = emptyList(),
+        ).copy(noFixedEndDateTime = true)
+
+        val result = EventEditPayloadBuilder.prepareForUpdate(
+            EventEditPayloadInput(
+                editedEvent = event,
+                editableFields = emptyList(),
+                editableLeagueTimeSlots = emptyList(),
+                selectedRentalFields = emptyList(),
+                leagueScoringConfig = LeagueScoringConfigDTO(),
+                originalEventStart = event.start,
+            ),
+        )
+
+        assertEquals(false, result.prepared.event.noFixedEndDateTime)
+    }
+
+    @Test
     fun prepareForUpdate_preserves_selected_rental_fields_and_returns_only_custom_field_drafts() {
         val event = leagueEvent(
             divisions = listOf("division-a"),

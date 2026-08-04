@@ -29,6 +29,7 @@ fun LeagueConfigurationFields(
     title: String = "League Configuration",
     leagueConfig: LeagueConfig,
     onLeagueConfigChange: (LeagueConfig) -> Unit,
+    showTimedMatchDuration: Boolean = true,
 ) {
     val currentSets = normalizeSetCount(leagueConfig.setsPerMatch)
 
@@ -127,7 +128,7 @@ fun LeagueConfigurationFields(
                 showZero = true,
             )
         }
-    } else {
+    } else if (showTimedMatchDuration) {
         TwoColumnRow(
             first = {
                 NumberInputField(
@@ -202,6 +203,7 @@ fun LeaguePlayoffConfigurationFields(
     playoffConfig: TournamentConfig,
     onPlayoffConfigChange: (TournamentConfig) -> Unit,
     showEliminationControl: Boolean = true,
+    showTimedMatchDuration: Boolean = true,
 ) {
     if (!leagueConfig.includePlayoffs) return
 
@@ -212,6 +214,7 @@ fun LeaguePlayoffConfigurationFields(
         onTournamentConfigChange = onPlayoffConfigChange,
         showPrize = false,
         showEliminationControl = showEliminationControl,
+        showTimedMatchDuration = showTimedMatchDuration,
     )
 }
 
@@ -223,6 +226,7 @@ fun TournamentConfigurationFields(
     onTournamentConfigChange: (TournamentConfig) -> Unit,
     showPrize: Boolean = true,
     showEliminationControl: Boolean = true,
+    showTimedMatchDuration: Boolean = true,
 ) {
     val playoffConfig = tournamentConfig
     val onPlayoffConfigChange = onTournamentConfigChange
@@ -298,7 +302,7 @@ fun TournamentConfigurationFields(
                     errorMessage = "Set duration should be at least 5 minutes.",
                     showZero = true,
                 )
-            } else {
+            } else if (showTimedMatchDuration) {
                 NumberInputField(
                     modifier = Modifier.fillMaxWidth(),
                     value = playoffConfig.matchDurationMinutes?.toString().orEmpty(),

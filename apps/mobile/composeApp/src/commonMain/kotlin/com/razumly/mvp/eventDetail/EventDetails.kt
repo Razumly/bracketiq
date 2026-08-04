@@ -547,6 +547,7 @@ fun EventDetails(
                 ?: baseLeagueConfig,
             defaultPlayoffConfig = defaultDivisionConfigDetail?.toTournamentConfig(baseTournamentConfig)
                 ?: baseTournamentConfig,
+            defaultPhaseSettings = divisionDetailsForSettings.firstOrNull()?.phaseSettings.orEmpty(),
         )
     }
     var divisionEditor by remember(editEvent.id) {
@@ -740,6 +741,21 @@ fun EventDetails(
         if (editEvent.singleDivision && editEvent.eventType == EventType.TOURNAMENT) {
             onEditTournament {
                 withTournamentConfig(normalizedTournamentConfig)
+            }
+        }
+    }
+    fun updateDivisionPhaseSettings(updated: Map<String, com.razumly.mvp.core.data.dataTypes.DivisionPhaseSettingsMVP>) {
+        divisionEditor = divisionEditor.copy(
+            phaseSettings = updated,
+            error = null,
+        )
+        if (editEvent.singleDivision) {
+            onEditEvent {
+                copy(
+                    divisionDetails = divisionDetails.map { detail ->
+                        detail.copy(phaseSettings = updated)
+                    },
+                )
             }
         }
     }
@@ -1304,6 +1320,7 @@ fun EventDetails(
             installmentDueDates = normalizedInstallmentDueDates,
             installmentDueRelativeDays = normalizedInstallmentDueRelativeDays,
             installmentAmounts = normalizedInstallmentAmounts,
+            phaseSettings = divisionEditor.phaseSettings,
         )
         if (editEvent.eventType == EventType.LEAGUE) {
             nextDetail = nextDetail
@@ -1409,6 +1426,7 @@ fun EventDetails(
             installmentAmounts = detail.installmentAmounts,
             leagueConfig = scheduleConfigs.leagueConfig,
             playoffConfig = scheduleConfigs.playoffConfig,
+            phaseSettings = detail.phaseSettings,
             nameTouched = true,
             error = null,
         )
@@ -1489,7 +1507,8 @@ fun EventDetails(
     val hasAvailableRentalResources = availableRentalResources.isNotEmpty()
     val allowLockedSlotDivisionEdits = (scheduleTimeLocked || hasRentalBackedSlots) && splitByDivisionScheduling
     val allowLocalResourceCreationWithRentalResources = editEvent.eventType == EventType.LEAGUE ||
-        editEvent.eventType == EventType.TOURNAMENT
+        editEvent.eventType == EventType.TOURNAMENT ||
+        editEvent.eventType == EventType.WEEKLY_EVENT
     val supportsOptionalManualTimeSlots = remember(
         isNewEvent,
         scheduleTimeLocked,
@@ -2215,7 +2234,7 @@ fun EventDetails(
             ),
             matchRules = ReadOnlySectionModel(
                 sectionId = "match_rules",
-                title = "Match Rules",
+                title = "Default Match Rules",
                 summary = matchRulesSummary,
             ),
             staff = ReadOnlySectionModel(
@@ -2273,7 +2292,7 @@ fun EventDetails(
             ),
             matchRules = EditSectionModel(
                 sectionId = "match_rules",
-                title = "Match Rules",
+                title = "Default Match Rules",
                 summary = matchRulesSummary,
             ),
             staff = EditSectionModel(
@@ -2437,7 +2456,9 @@ fun EventDetails(
                                 )
                             },
                             onNoFixedEndDateChange = { enabled ->
-                                onEditEvent { copy(noFixedEndDateTime = enabled) }
+                                if (editEvent.eventType != EventType.WEEKLY_EVENT) {
+                                    onEditEvent { copy(noFixedEndDateTime = enabled) }
+                                }
                             },
                             onPlayoffsOrPoolPlayChange = { enabled ->
                                 onEditEvent { withSimplePlayoffsOrPoolPlay(enabled) }
@@ -2766,6 +2787,7 @@ fun EventDetails(
                             divisionEditorDefaults = divisionEditorDefaults,
                             divisionEditorReady = divisionEditorReady,
                             divisionScheduleUsesSets = divisionScheduleUsesSets,
+                            selectedSport = selectedSportForDivisionOptions,
                             skillDivisionTypeOptions = skillDivisionTypeSelectOptions,
                             ageDivisionTypeOptions = ageDivisionTypeSelectOptions,
                             genderOptions = genderSelectOptions,
@@ -2786,6 +2808,7 @@ fun EventDetails(
                             onUpdateDivisionLeagueConfig = ::updateDivisionLeagueConfig,
                             onUpdateDivisionPlayoffConfig = ::updateDivisionPlayoffConfig,
                             onUpdateDivisionTournamentConfig = ::updateDivisionTournamentConfig,
+                            onUpdateDivisionPhaseSettings = ::updateDivisionPhaseSettings,
                             onSyncLeagueSlotsForSelectedDivisions = ::syncLeagueSlotsForSelectedDivisions,
                             onSetDivisionPaymentPlansEnabled = ::setDivisionPaymentPlansEnabled,
                             onSyncDivisionInstallmentCount = ::syncDivisionInstallmentCount,

@@ -75,7 +75,12 @@ internal class EventEditActionHandler(
         enabled: Boolean,
         seedEvent: Event? = null,
     ) {
-        val selected = seedEvent ?: selectedEvent()
+        val rawSelected = seedEvent ?: selectedEvent()
+        val selected = if (rawSelected.eventType == EventType.WEEKLY_EVENT) {
+            rawSelected.copy(noFixedEndDateTime = false)
+        } else {
+            rawSelected
+        }
         val unsupportedFeatures = mobileEventEditUnsupportedFeatures(selected)
         if (enabled && unsupportedFeatures.isNotEmpty()) {
             setError(mobileEventEditUnsupportedMessage(unsupportedFeatures))
@@ -303,7 +308,12 @@ internal class EventEditActionHandler(
     }
 
     fun onTypeSelected(type: EventType) {
-        editEventField { copy(eventType = type) }
+        editEventField {
+            copy(
+                eventType = type,
+                noFixedEndDateTime = if (type == EventType.WEEKLY_EVENT) false else noFixedEndDateTime,
+            )
+        }
     }
 
     fun selectFieldCount(count: Int) = editDraftCoordinator.selectFieldCount(count)

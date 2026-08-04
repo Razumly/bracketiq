@@ -821,7 +821,8 @@ class DefaultCreateEventComponent(
 
                 EventType.WEEKLY_EVENT -> copy(
                     eventType = type,
-                    noFixedEndDateTime = true,
+                    noFixedEndDateTime = false,
+                    end = end.takeIf { it > start } ?: defaultEventEnd(start),
                 )
 
                 EventType.TRYOUT -> copy(
@@ -1401,12 +1402,20 @@ class DefaultCreateEventComponent(
     )
 
     private suspend fun prepareEventForCreation(eventDraft: Event): Result<PreparedEventForCreation> = runCatching {
-        var preparedEvent = eventDraft
+        var preparedEvent = if (eventDraft.eventType == EventType.WEEKLY_EVENT) {
+            eventDraft.copy(noFixedEndDateTime = false)
+        } else {
+            eventDraft
+        }
         var preparedFields = emptyList<Field>()
         var preparedTimeSlots = emptyList<TimeSlot>()
 
         val shouldManageLocalFields =
-            (preparedEvent.eventType == EventType.LEAGUE || preparedEvent.eventType == EventType.TOURNAMENT) &&
+            (
+                preparedEvent.eventType == EventType.LEAGUE ||
+                    preparedEvent.eventType == EventType.TOURNAMENT ||
+                    preparedEvent.eventType == EventType.WEEKLY_EVENT
+                ) &&
             _fieldCount.value > 0
 
         val selectedRentalFieldIds = selectedRentalResourceFields()
@@ -1438,9 +1447,12 @@ class DefaultCreateEventComponent(
         val shouldPersistManagedSlots = if (hasRentalBackedSlots) {
             preparedEvent.eventType == EventType.EVENT ||
                 preparedEvent.eventType == EventType.LEAGUE ||
-                preparedEvent.eventType == EventType.TOURNAMENT
+                preparedEvent.eventType == EventType.TOURNAMENT ||
+                preparedEvent.eventType == EventType.WEEKLY_EVENT
         } else {
-            preparedEvent.eventType == EventType.LEAGUE || preparedEvent.eventType == EventType.TOURNAMENT
+            preparedEvent.eventType == EventType.LEAGUE ||
+                preparedEvent.eventType == EventType.TOURNAMENT ||
+                preparedEvent.eventType == EventType.WEEKLY_EVENT
         }
         if (shouldPersistManagedSlots) {
             preparedTimeSlots = if (shouldUseConfiguredLeagueSlots(event = preparedEvent)) {
@@ -1575,6 +1587,13 @@ class DefaultCreateEventComponent(
     private fun validateConfiguredLeagueSlots(event: Event): String? {
         if (!shouldUseConfiguredLeagueSlots(event)) {
             return null
+        }
+
+        if (
+            event.eventType == EventType.WEEKLY_EVENT &&
+            _leagueSlots.value.none { slot -> slot.repeating }
+        ) {
+            return "Add at least one weekly repeating timeslot for this Weekly Event."
         }
 
         val validFieldIds = _localFields.value

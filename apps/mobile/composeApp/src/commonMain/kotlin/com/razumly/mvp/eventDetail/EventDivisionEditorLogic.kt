@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.DivisionPhaseSettingsMVP
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameterOption
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.LeagueConfig
@@ -35,6 +36,7 @@ internal data class DivisionEditorState(
     val installmentAmounts: List<Int> = emptyList(),
     val leagueConfig: LeagueConfig = LeagueConfig(),
     val playoffConfig: TournamentConfig = TournamentConfig(),
+    val phaseSettings: Map<String, DivisionPhaseSettingsMVP> = emptyMap(),
     val nameTouched: Boolean = false,
     val error: String? = null,
 )
@@ -121,6 +123,7 @@ internal fun defaultDivisionEditorState(
     defaultInstallmentAmounts: List<Int>,
     defaultLeagueConfig: LeagueConfig = LeagueConfig(),
     defaultPlayoffConfig: TournamentConfig = TournamentConfig(),
+    defaultPhaseSettings: Map<String, DivisionPhaseSettingsMVP> = emptyMap(),
 ): DivisionEditorState {
     val fallbackMax = defaultMaxParticipants.takeIf { value -> value >= 2 }
     val fallbackPlayoff = defaultPlayoffTeamCount?.coerceAtLeast(2)
@@ -164,6 +167,7 @@ internal fun defaultDivisionEditorState(
         installmentAmounts = if (normalizedAllowPaymentPlans) normalizedInstallmentAmounts else emptyList(),
         leagueConfig = defaultLeagueConfig,
         playoffConfig = defaultPlayoffConfig,
+        phaseSettings = defaultPhaseSettings,
         nameTouched = false,
         error = null,
     )

@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.DivisionCompetitionPhase
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.LeagueConfig
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
@@ -132,6 +133,19 @@ private fun DivisionScheduleConfigurationFields(
                 playoffTeamCount = null,
             ),
             onLeagueConfigChange = actions.onUpdateDivisionLeagueConfig,
+            showTimedMatchDuration = false,
+        )
+        DivisionPhaseRulesFields(
+            title = "Pool",
+            phase = DivisionCompetitionPhase.POOL,
+            event = editEvent,
+            sport = state.selectedSport,
+            usesSets = state.divisionScheduleUsesSets,
+            phaseSettings = divisionEditor.phaseSettings,
+            onPhaseSettingsChange = actions.onUpdateDivisionPhaseSettings,
+            onCalculatedDurationChange = { duration ->
+                actions.onUpdateDivisionLeagueConfig(divisionEditor.leagueConfig.copy(matchDurationMinutes = duration))
+            },
         )
     }
 
@@ -141,6 +155,19 @@ private fun DivisionScheduleConfigurationFields(
             usesSets = state.divisionScheduleUsesSets,
             tournamentConfig = divisionEditor.playoffConfig,
             onTournamentConfigChange = actions.onUpdateDivisionTournamentConfig,
+            showTimedMatchDuration = false,
+        )
+        DivisionPhaseRulesFields(
+            title = "Bracket",
+            phase = DivisionCompetitionPhase.BRACKET,
+            event = editEvent,
+            sport = state.selectedSport,
+            usesSets = state.divisionScheduleUsesSets,
+            phaseSettings = divisionEditor.phaseSettings,
+            onPhaseSettingsChange = actions.onUpdateDivisionPhaseSettings,
+            onCalculatedDurationChange = { duration ->
+                actions.onUpdateDivisionTournamentConfig(divisionEditor.playoffConfig.copy(matchDurationMinutes = duration))
+            },
         )
     }
 
@@ -151,6 +178,19 @@ private fun DivisionScheduleConfigurationFields(
                 playoffTeamCount = divisionEditor.playoffTeamCount,
             ),
             onLeagueConfigChange = actions.onUpdateDivisionLeagueConfig,
+            showTimedMatchDuration = false,
+        )
+        DivisionPhaseRulesFields(
+            title = "League",
+            phase = DivisionCompetitionPhase.LEAGUE,
+            event = editEvent,
+            sport = state.selectedSport,
+            usesSets = state.divisionScheduleUsesSets,
+            phaseSettings = divisionEditor.phaseSettings,
+            onPhaseSettingsChange = actions.onUpdateDivisionPhaseSettings,
+            onCalculatedDurationChange = { duration ->
+                actions.onUpdateDivisionLeagueConfig(divisionEditor.leagueConfig.copy(matchDurationMinutes = duration))
+            },
         )
         if (editEvent.includePlayoffs) {
             LeaguePlayoffConfigurationFields(
@@ -160,6 +200,19 @@ private fun DivisionScheduleConfigurationFields(
                 ),
                 playoffConfig = divisionEditor.playoffConfig,
                 onPlayoffConfigChange = actions.onUpdateDivisionPlayoffConfig,
+                showTimedMatchDuration = false,
+            )
+            DivisionPhaseRulesFields(
+                title = "Playoff",
+                phase = DivisionCompetitionPhase.PLAYOFF,
+                event = editEvent,
+                sport = state.selectedSport,
+                usesSets = state.divisionScheduleUsesSets,
+                phaseSettings = divisionEditor.phaseSettings,
+                onPhaseSettingsChange = actions.onUpdateDivisionPhaseSettings,
+                onCalculatedDurationChange = { duration ->
+                    actions.onUpdateDivisionPlayoffConfig(divisionEditor.playoffConfig.copy(matchDurationMinutes = duration))
+                },
             )
         }
     }

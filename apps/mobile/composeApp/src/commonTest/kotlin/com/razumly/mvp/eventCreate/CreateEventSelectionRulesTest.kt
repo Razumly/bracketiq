@@ -95,7 +95,7 @@ class CreateEventSelectionRulesTest {
             eventType = EventType.WEEKLY_EVENT,
             teamSignup = false,
             singleDivision = false,
-            noFixedEndDateTime = false,
+            noFixedEndDateTime = true,
             priceCents = 2000,
             allowPaymentPlans = true,
             installmentCount = 2,
@@ -110,6 +110,7 @@ class CreateEventSelectionRulesTest {
         assertEquals(EventType.WEEKLY_EVENT, updated.eventType)
         assertFalse(updated.teamSignup)
         assertFalse(updated.singleDivision)
+        assertFalse(updated.noFixedEndDateTime)
         assertTrue(updated.allowPaymentPlans == true)
         assertEquals(2, updated.installmentCount)
         assertEquals(listOf(-1, 0), updated.installmentDueRelativeDays)

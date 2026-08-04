@@ -2,6 +2,7 @@ package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.DivisionPhaseSettingsMVP
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventTag
@@ -11,6 +12,7 @@ import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_CASH_APP
 import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_PAYPAL
 import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_VENMO
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
+import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_MANUAL
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
@@ -629,6 +631,49 @@ class EventDtosTest {
         assertEquals(0, detail.playoffConfig?.setDurationMinutes)
         assertEquals(0, detail.playoffConfig?.restTimeMinutes)
         assertEquals(listOf(25, 25, 15), detail.playoffConfig?.winnerBracketPointsToVictory)
+    }
+
+    @Test
+    fun given_independent_phase_rules_when_building_update_dto_then_they_are_preserved() {
+        val event = Event(
+            id = "event-phase-rules",
+            name = "Phase Rules League",
+            eventType = EventType.LEAGUE,
+            hostId = "host-phase-rules",
+            start = Instant.fromEpochMilliseconds(1_700_000_000_000),
+            end = Instant.fromEpochMilliseconds(1_700_003_600_000),
+            divisions = listOf("open"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "open",
+                    phaseSettings = mapOf(
+                        "LEAGUE" to DivisionPhaseSettingsMVP(
+                            matchRulesOverride = MatchRulesConfigMVP(segmentCount = 2),
+                            segmentLengthMinutes = 40,
+                            segmentBreakMinutes = 10,
+                        ),
+                        "PLAYOFF" to DivisionPhaseSettingsMVP(
+                            matchRulesOverride = MatchRulesConfigMVP(segmentCount = 4),
+                            segmentLengthMinutes = 12,
+                            segmentBreakMinutes = 2,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val dto = event.toUpdateDto()
+        val encoded = jsonMVP.encodeToString(EventUpdateDto.serializer(), dto)
+        val phaseSettings = jsonMVP.decodeFromString<EventUpdateDto>(encoded)
+            .divisionDetails
+            .single()
+            .phaseSettings
+
+        assertTrue(encoded.contains("\"phaseSettings\""))
+        assertEquals(2, phaseSettings["LEAGUE"]?.matchRulesOverride?.segmentCount)
+        assertEquals(40, phaseSettings["LEAGUE"]?.segmentLengthMinutes)
+        assertEquals(4, phaseSettings["PLAYOFF"]?.matchRulesOverride?.segmentCount)
+        assertEquals(2, phaseSettings["PLAYOFF"]?.segmentBreakMinutes)
     }
 
     @Test

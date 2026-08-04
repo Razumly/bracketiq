@@ -14,7 +14,6 @@ import com.razumly.mvp.eventDetail.EventDetailsSectionVisibility
 import com.razumly.mvp.eventDetail.eventAgeRangeErrors
 import com.razumly.mvp.eventDetail.manualPaymentLinkError
 import com.razumly.mvp.eventDetail.composables.leagueScoringValidationErrors
-import com.razumly.mvp.eventDetail.shouldShowMatchRulesSection
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Clock
@@ -137,11 +136,8 @@ private fun simpleSetupPageUnavailableReason(
     pageId: EventCreateSetupPageId,
     event: Event,
 ): String? = when (pageId) {
-    EventCreateSetupPageId.MATCH_RULES -> if (shouldShowMatchRulesSection(event.eventType)) {
-        null
-    } else {
-        "Match rules are not used for this event type."
-    }
+    EventCreateSetupPageId.MATCH_RULES ->
+        "Match rules are configured inside each division phase."
     EventCreateSetupPageId.LEAGUE_SCORING -> if (event.eventType == EventType.LEAGUE) {
         null
     } else {
@@ -208,7 +204,16 @@ fun isSimpleSetupPageComplete(
                 leagueScoringValidationErrors(config, selectedSport).isEmpty()
             } == true
     }
-    EventCreateSetupPageId.DIVISIONS -> event.divisions.isNotEmpty()
+    EventCreateSetupPageId.DIVISIONS -> {
+        val usesSets = selectedSport?.usePointsPerSetWin ?: event.usesSets
+        event.divisions.isNotEmpty() && event.divisionDetails.all { detail ->
+            usesSets || detail.phaseSettings.values.all { settings ->
+                val segmentCount = settings.matchRulesOverride?.segmentCount
+                settings.segmentLengthMinutes?.let { it >= 1 } == true &&
+                    (segmentCount == null || segmentCount >= 1)
+            }
+        }
+    }
     EventCreateSetupPageId.SCHEDULE -> {
         event.location.isNotBlank() &&
             event.lat != 0.0 &&

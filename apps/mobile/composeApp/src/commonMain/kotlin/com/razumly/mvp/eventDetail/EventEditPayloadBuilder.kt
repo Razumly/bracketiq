@@ -51,7 +51,11 @@ private data class FieldDraftResult(
 
 internal object EventEditPayloadBuilder {
     fun prepareForUpdate(input: EventEditPayloadInput): EventEditPayloadResult {
-        val eventDraft = input.editedEvent
+        val eventDraft = if (input.editedEvent.eventType == EventType.WEEKLY_EVENT) {
+            input.editedEvent.copy(noFixedEndDateTime = false)
+        } else {
+            input.editedEvent
+        }
         val hasRentalBackedSlots = input.editableLeagueTimeSlots.any { slot -> slot.isRentalBacked() }
         val selectedRentalFieldIds = (
             input.selectedRentalFields.map { field -> field.id.trim() } +
