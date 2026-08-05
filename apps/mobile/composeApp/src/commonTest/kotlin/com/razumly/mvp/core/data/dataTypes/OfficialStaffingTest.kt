@@ -82,7 +82,7 @@ class OfficialStaffingTest {
         val event = Event(
             id = "event-1",
             name = "Event",
-            sportId = sport.id,
+            sportIds = listOf(sport.id),
             officialIds = listOf("official-1", "official-2"),
         )
 
@@ -113,7 +113,7 @@ class OfficialStaffingTest {
         )
         val defaultBackedEvent = Event(
             id = "event-2",
-            sportId = nextSport.id,
+            sportIds = listOf(nextSport.id),
             officialPositions = previousSport.defaultEventOfficialPositions("event-2"),
         )
         val customizedEvent = defaultBackedEvent.copy(
@@ -150,7 +150,7 @@ class OfficialStaffingTest {
         )
         val baseEvent = Event(
             id = "event-3",
-            sportId = sport.id,
+            sportIds = listOf(sport.id),
             officialIds = listOf("official-1"),
         ).syncOfficialStaffing(sport = sport)
 
@@ -185,7 +185,7 @@ class OfficialStaffingTest {
         )
         val seeded = Event(
             id = "event-4",
-            sportId = sport.id,
+            sportIds = listOf(sport.id),
             officialIds = listOf("official-1"),
         ).syncOfficialStaffing(sport = sport)
 

@@ -11,7 +11,7 @@ class EventTypeWithSportLabelTest {
     fun event_type_with_sport_label_includes_sport_when_present() {
         val event = Event(
             eventType = EventType.LEAGUE,
-            sportId = "Indoor Volleyball",
+            sportIds = listOf("Indoor Volleyball"),
         )
 
         assertEquals("League: Indoor Volleyball", event.eventTypeWithSportLabel())
@@ -21,7 +21,7 @@ class EventTypeWithSportLabelTest {
     fun event_type_with_sport_label_falls_back_to_type_when_sport_missing() {
         val event = Event(
             eventType = EventType.WEEKLY_EVENT,
-            sportId = "   ",
+            sportIds = listOf("   "),
         )
 
         assertEquals("Weekly Event", event.eventTypeWithSportLabel())

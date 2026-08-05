@@ -1857,7 +1857,7 @@ class EventRepositoryHttpTest {
             minAge = 12,
             maxAge = 18,
             cancellationRefundHours = 24,
-            sportId = "sport_1",
+            sportIds = listOf("sport_1"),
             matchDurationMinutes = 45,
             setDurationMinutes = 20,
         )
@@ -1900,7 +1900,7 @@ class EventRepositoryHttpTest {
             minAge = null,
             maxAge = null,
             cancellationRefundHours = null,
-            sportId = null,
+            sportIds = emptyList(),
             matchDurationMinutes = null,
             setDurationMinutes = null,
         )).getOrThrow()
@@ -1913,7 +1913,6 @@ class EventRepositoryHttpTest {
         assertEquals(JsonNull, eventPatch["minAge"])
         assertEquals(JsonNull, eventPatch["maxAge"])
         assertEquals(JsonNull, eventPatch["cancellationRefundHours"])
-        assertEquals(JsonNull, eventPatch["sportId"])
         assertEquals(JsonNull, eventPatch["matchDurationMinutes"])
         assertEquals(JsonNull, eventPatch["setDurationMinutes"])
     }

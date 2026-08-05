@@ -234,7 +234,7 @@ internal fun computeEventValidationResult(
     val isSkillLevelValid = editEvent.eventType == EventType.LEAGUE || editEvent.divisions.isNotEmpty()
     val duplicateDivisionNames = duplicateDivisionIdentityNames(divisionDetailsForSettings)
     val isDivisionIdentityValid = duplicateDivisionNames.isEmpty()
-    val isSportValid = !isNewEvent || !editEvent.sportId.isNullOrBlank()
+    val isSportValid = !isNewEvent || editEvent.sportIds.isNotEmpty()
     val requiresFixedEndValidation = requiresFixedEndRangeValidation(
         event = editEvent,
         scheduleTimeLocked = scheduleTimeLocked,

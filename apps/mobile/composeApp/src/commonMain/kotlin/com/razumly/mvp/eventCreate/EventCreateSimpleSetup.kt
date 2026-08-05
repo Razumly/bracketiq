@@ -174,7 +174,7 @@ fun isSimpleSetupPageComplete(
     EventCreateSetupPageId.BASIC_INFORMATION -> {
         event.name.isNotBlank() &&
             event.imageId.isNotBlank() &&
-            !event.sportId.isNullOrBlank() &&
+            event.sportIds.isNotEmpty() &&
             event.location.isNotBlank() &&
             event.lat != 0.0 &&
             event.long != 0.0 &&

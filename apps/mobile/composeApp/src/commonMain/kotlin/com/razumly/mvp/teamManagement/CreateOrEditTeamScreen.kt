@@ -431,8 +431,8 @@ fun CreateOrEditTeamScreen(
     val complianceByUserId = remember(memberCompliance) {
         memberCompliance?.users?.associateBy(EventComplianceUserSummary::userId).orEmpty()
     }
-    val resolvedEventSportName = remember(selectedEvent?.sportId, sports) {
-        val normalizedEventSportId = selectedEvent?.sportId?.trim().orEmpty()
+    val resolvedEventSportName = remember(selectedEvent?.sportIds, sports) {
+        val normalizedEventSportId = selectedEvent?.sportIds?.firstOrNull()?.trim().orEmpty()
         if (normalizedEventSportId.isBlank()) {
             ""
         } else {
@@ -508,7 +508,7 @@ fun CreateOrEditTeamScreen(
     val selectedSportIdForDivisionTypes = remember(
         divisionSportInput,
         resolvedEventSportName,
-        selectedEvent?.sportId,
+        selectedEvent?.sportIds,
         sports,
     ) {
         val normalizedDivisionSport = divisionSportInput.trim()
@@ -517,7 +517,7 @@ fun CreateOrEditTeamScreen(
                 sport.id.trim().equals(normalizedDivisionSport, ignoreCase = true)
         }?.id?.trim().orEmpty()
         matchingSportId.ifBlank {
-            selectedEvent?.sportId
+            selectedEvent?.sportIds?.firstOrNull()
                 ?.trim()
                 ?.takeIf { eventSportId ->
                     normalizedDivisionSport.equals(resolvedEventSportName.trim(), ignoreCase = true) ||
@@ -529,7 +529,7 @@ fun CreateOrEditTeamScreen(
     val selectedSportMatchesEventSport = remember(
         divisionSportInput,
         resolvedEventSportName,
-        selectedEvent?.sportId,
+        selectedEvent?.sportIds,
         sports,
     ) {
         val normalizedDivisionSport = divisionSportInput.trim()
@@ -541,9 +541,9 @@ fun CreateOrEditTeamScreen(
                     sport.id.trim().equals(normalizedDivisionSport, ignoreCase = true)
             }?.id?.trim().orEmpty()
             normalizedDivisionSport.equals(resolvedEventSportName.trim(), ignoreCase = true) ||
-                normalizedDivisionSport.equals(selectedEvent.sportId?.trim().orEmpty(), ignoreCase = true) ||
+                normalizedDivisionSport.equals(selectedEvent.sportIds.firstOrNull()?.trim().orEmpty(), ignoreCase = true) ||
                 (matchingSportId.isNotBlank() &&
-                    matchingSportId.equals(selectedEvent.sportId?.trim().orEmpty(), ignoreCase = true))
+                    matchingSportId.equals(selectedEvent.sportIds.firstOrNull()?.trim().orEmpty(), ignoreCase = true))
         }
     }
     val eventDivisionOptions = remember(normalizedEventDivisionDetails, selectedSportMatchesEventSport) {

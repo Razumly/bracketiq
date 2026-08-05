@@ -148,7 +148,7 @@ class EventCreateSimpleSetupTest {
         val event = Event(
             name = "Summer League",
             imageId = "image-1",
-            sportId = "basketball",
+            sportIds = listOf("basketball"),
             location = "Main Gym",
             coordinates = listOf(-122.6, 45.5),
             noFixedEndDateTime = true,
@@ -184,7 +184,7 @@ class EventCreateSimpleSetupTest {
         val event = Event(
             name = "Summer League",
             imageId = "",
-            sportId = "basketball",
+            sportIds = listOf("basketball"),
             location = "Main Gym",
             coordinates = listOf(-122.6, 45.5),
             noFixedEndDateTime = true,
@@ -207,7 +207,7 @@ class EventCreateSimpleSetupTest {
             usePointsForDraw = true,
             usePointsForLoss = true,
         ).toSport(id = "soccer")
-        val event = Event(eventType = EventType.LEAGUE, sportId = sport.id)
+        val event = Event(eventType = EventType.LEAGUE, sportIds = listOf(sport.id))
 
         assertFalse(
             isSimpleSetupPageComplete(

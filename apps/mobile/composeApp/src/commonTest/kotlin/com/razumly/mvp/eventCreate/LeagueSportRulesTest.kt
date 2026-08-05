@@ -27,7 +27,7 @@ class LeagueSportRulesTest : MainDispatcherTest() {
 
         harness.component.updateEventField {
             copy(
-                sportId = setBasedSport.id,
+                sportIds = listOf(setBasedSport.id),
                 setsPerMatch = 3,
                 setDurationMinutes = null,
                 matchDurationMinutes = null,
@@ -55,7 +55,7 @@ class LeagueSportRulesTest : MainDispatcherTest() {
 
         harness.component.onTypeSelected(EventType.LEAGUE)
         advance()
-        harness.component.updateEventField { copy(sportId = volleyball.id) }
+        harness.component.updateEventField { copy(sportIds = listOf(volleyball.id)) }
         advance()
         harness.component.updateEventField {
             copy(
@@ -81,7 +81,7 @@ class LeagueSportRulesTest : MainDispatcherTest() {
 
         harness.component.updateEventField {
             copy(
-                sportId = timedSport.id,
+                sportIds = listOf(timedSport.id),
                 usesSets = true,
                 setsPerMatch = 5,
                 setDurationMinutes = 25,
@@ -117,7 +117,7 @@ class LeagueSportRulesTest : MainDispatcherTest() {
 
         harness.component.updateTournamentField {
             copy(
-                sportId = timedSport.id,
+                sportIds = listOf(timedSport.id),
                 winnerSetCount = 5,
                 loserSetCount = 3,
                 winnerBracketPointsToVictory = listOf(30, 30),
@@ -144,7 +144,7 @@ class LeagueSportRulesTest : MainDispatcherTest() {
         harness.component.onTypeSelected(EventType.TOURNAMENT)
         advance()
 
-        harness.component.updateTournamentField { copy(sportId = setBasedSport.id) }
+        harness.component.updateTournamentField { copy(sportIds = listOf(setBasedSport.id)) }
         advance()
 
         harness.component.updateTournamentField {

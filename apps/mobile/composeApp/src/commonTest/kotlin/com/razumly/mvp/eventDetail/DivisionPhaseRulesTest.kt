@@ -31,7 +31,7 @@ class DivisionPhaseRulesTest {
     @Test
     fun given_phase_override_when_resolving_rules_then_it_wins_over_event_and_sport_defaults() {
         val event = Event(
-            sportId = soccer.id,
+            sportIds = listOf(soccer.id),
             matchRulesOverride = MatchRulesConfigMVP(supportsOvertime = true),
         )
         val resolved = resolveDivisionPhaseMatchRules(
@@ -58,7 +58,7 @@ class DivisionPhaseRulesTest {
     @Test
     fun given_set_phase_when_resolving_rules_then_it_keeps_the_sport_segment_count() {
         val resolved = resolveDivisionPhaseMatchRules(
-            event = Event(sportId = soccer.id),
+            event = Event(sportIds = listOf(soccer.id)),
             sport = soccer,
             usesSets = true,
             settings = DivisionPhaseSettingsMVP(

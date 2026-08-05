@@ -124,7 +124,7 @@ internal fun LazyListScope.eventDetailsLeagueScoringSection(
                 rows = listOf(
                     DetailRowSpec(
                         "Scoring profile",
-                        state.sports.firstOrNull { it.id == state.editEvent.sportId }?.name ?: "Default",
+                        state.sports.firstOrNull { it.id == state.editEvent.sportIds.firstOrNull() }?.name ?: "Default",
                     ),
                 ),
             )
@@ -132,7 +132,7 @@ internal fun LazyListScope.eventDetailsLeagueScoringSection(
         editContent = {
             LeagueScoringConfigFields(
                 config = state.leagueScoringConfig,
-                sport = state.sports.firstOrNull { it.id == state.editEvent.sportId },
+                sport = state.sports.firstOrNull { it.id == state.editEvent.sportIds.firstOrNull() },
                 onConfigChange = actions.onConfigChange,
                 showValidationErrors = state.showValidationErrors,
             )

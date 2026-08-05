@@ -166,7 +166,7 @@ fun String.toEnumTitleCase(): String {
 
 fun Event.eventTypeWithSportLabel(): String {
     val eventTypeLabel = eventType.name.toEnumTitleCase()
-    val sportLabel = sportId
+    val sportLabel = sportIds.firstOrNull()
         ?.trim()
         ?.takeIf { it.isNotEmpty() }
 

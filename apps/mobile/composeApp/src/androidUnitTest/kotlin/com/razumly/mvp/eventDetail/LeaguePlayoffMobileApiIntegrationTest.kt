@@ -148,7 +148,7 @@ class LeaguePlayoffMobileApiIntegrationTest {
         val loadedSports = participant.sportsRepository.getSports().getOrThrow()
 
         assertEquals(UPLOADED_DOCUMENT_IMAGE_ID, loadedEvent.imageId)
-        assertEquals(SEEDED_SPORT_ID, loadedEvent.sportId)
+        assertEquals(listOf(SEEDED_SPORT_ID), loadedEvent.sportIds)
         assertTrue(loadedEvent.includePlayoffs)
         assertEquals(TEST_PLAYOFF_TEAM_COUNT, loadedEvent.playoffTeamCount)
         assertTrue(
@@ -237,7 +237,7 @@ class LeaguePlayoffMobileApiIntegrationTest {
             teamIds = SEEDED_TEAM_IDS,
             fieldIds = listOf(testFieldId),
             timeSlotIds = listOf(testSlotId),
-            sportId = SEEDED_SPORT_ID,
+            sportIds = listOf(SEEDED_SPORT_ID),
             maxParticipants = SEEDED_TEAM_IDS.size,
             eventType = EventType.LEAGUE,
             gamesPerOpponent = 1,

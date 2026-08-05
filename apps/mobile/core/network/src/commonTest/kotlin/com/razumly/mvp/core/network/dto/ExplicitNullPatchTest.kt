@@ -10,7 +10,7 @@ class ExplicitNullPatchTest {
     fun event_patch_emits_only_requested_changed_nullable_fields_as_json_null() {
         val previous = encodeExplicitNullPatchObject(
             serializer = EventUpdateDto.serializer(),
-            value = EventUpdateDto(address = "123 Main St", minAge = 12, sportId = "volleyball"),
+            value = EventUpdateDto(address = "123 Main St", minAge = 12, affiliateUrl = "https://example.com/event"),
         )
         val updated = encodeExplicitNullPatchObject(
             serializer = EventUpdateDto.serializer(),
@@ -20,7 +20,7 @@ class ExplicitNullPatchTest {
         val clearFields = explicitNullFieldsForPatch(
             previous = previous,
             updated = updated,
-            clearableFields = setOf("address", "minAge", "sportId"),
+            clearableFields = setOf("address", "minAge", "affiliateUrl"),
         )
         val payload = encodeExplicitNullPatchObject(
             serializer = EventUpdateDto.serializer(),
@@ -28,9 +28,9 @@ class ExplicitNullPatchTest {
             explicitNullFields = clearFields,
         )
 
-        assertEquals(setOf("address", "sportId"), clearFields)
+        assertEquals(setOf("address", "affiliateUrl"), clearFields)
         assertEquals(JsonNull, payload["address"])
-        assertEquals(JsonNull, payload["sportId"])
+        assertEquals(JsonNull, payload["affiliateUrl"])
         assertFalse("minAge" in payload && payload["minAge"] == JsonNull)
     }
 

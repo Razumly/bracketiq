@@ -412,20 +412,20 @@ class DefaultCreateEventComponent(
                 .update()
                 .applyCreateSelectionRules()
             val updated = candidate.withSportRules(
-                applySportDefaults = previous.sportId != candidate.sportId ||
+                applySportDefaults = previous.sportIds.firstOrNull() != candidate.sportIds.firstOrNull() ||
                     previous.eventType != candidate.eventType,
             )
             val normalized = syncOfficialStaffingForSportTransition(
                 previous = previous,
                 updated = updated,
             )
-            val sportChanged = previous.sportId != normalized.sportId
+            val sportChanged = previous.sportIds.firstOrNull() != normalized.sportIds.firstOrNull()
 
             _newEventState.value = normalized
             if (sportChanged) {
-                initializeLeagueScoringConfig(normalized.sportId)
+                initializeLeagueScoringConfig(normalized.sportIds.firstOrNull())
             } else if (!leagueScoringConfigInitialized && normalized.eventType == EventType.LEAGUE) {
-                initializeLeagueScoringConfig(normalized.sportId)
+                initializeLeagueScoringConfig(normalized.sportIds.firstOrNull())
             }
             syncLeagueSlotDefaultStartDates(previousEvent = previous, updatedEvent = normalized)
             syncLeagueSlotDefaultEndDates(previousEvent = previous, updatedEvent = normalized)
@@ -439,20 +439,20 @@ class DefaultCreateEventComponent(
             val candidate = previous
                 .update()
             val updated = candidate.withSportRules(
-                applySportDefaults = previous.sportId != candidate.sportId ||
+                applySportDefaults = previous.sportIds.firstOrNull() != candidate.sportIds.firstOrNull() ||
                     previous.eventType != candidate.eventType,
             )
             val normalized = syncOfficialStaffingForSportTransition(
                 previous = previous,
                 updated = updated,
             )
-            val sportChanged = previous.sportId != normalized.sportId
+            val sportChanged = previous.sportIds.firstOrNull() != normalized.sportIds.firstOrNull()
 
             _newEventState.value = normalized
             if (sportChanged) {
-                initializeLeagueScoringConfig(normalized.sportId)
+                initializeLeagueScoringConfig(normalized.sportIds.firstOrNull())
             } else if (!leagueScoringConfigInitialized && normalized.eventType == EventType.LEAGUE) {
-                initializeLeagueScoringConfig(normalized.sportId)
+                initializeLeagueScoringConfig(normalized.sportIds.firstOrNull())
             }
             syncLeagueSlotDefaultStartDates(previousEvent = previous, updatedEvent = normalized)
             syncLeagueSlotDefaultEndDates(previousEvent = previous, updatedEvent = normalized)
@@ -495,7 +495,7 @@ class DefaultCreateEventComponent(
                 .update()
                 .applyCreateSelectionRules()
             val updated = candidate.withSportRules(
-                applySportDefaults = previous.sportId != candidate.sportId ||
+                applySportDefaults = previous.sportIds.firstOrNull() != candidate.sportIds.firstOrNull() ||
                     previous.eventType != candidate.eventType,
             )
             val normalized = syncOfficialStaffingForSportTransition(
@@ -554,7 +554,7 @@ class DefaultCreateEventComponent(
         updateEventField {
             addOfficialUser(
                 userId = normalizedOfficialId,
-                sport = resolveSport(sportId),
+                sport = resolveSport(sportIds.firstOrNull()),
             )
         }
     }
@@ -565,7 +565,7 @@ class DefaultCreateEventComponent(
         updateEventField {
             removeOfficialUser(
                 userId = normalizedOfficialId,
-                sport = resolveSport(sportId),
+                sport = resolveSport(sportIds.firstOrNull()),
             )
         }
     }
@@ -1923,7 +1923,7 @@ class DefaultCreateEventComponent(
                         updated = _newEventState.value.withSportRules(applySportDefaults = true),
                     )
                     if (!leagueScoringConfigInitialized && _newEventState.value.eventType == EventType.LEAGUE) {
-                        initializeLeagueScoringConfig(_newEventState.value.sportId)
+                        initializeLeagueScoringConfig(_newEventState.value.sportIds.firstOrNull())
                     }
                 }
                 .onFailure { error ->
@@ -1975,7 +1975,7 @@ class DefaultCreateEventComponent(
     private fun usesSetScoringForSport(sportId: String?): Boolean {
         val sport = resolveSport(sportId) ?: return false
         return resolveEventMatchRules(
-            event = Event(eventType = EventType.LEAGUE, sportId = sport.id),
+            event = Event(eventType = EventType.LEAGUE, sportIds = listOf(sport.id)),
             sport = sport,
         ).scoringModel == "SETS"
     }
@@ -1984,9 +1984,9 @@ class DefaultCreateEventComponent(
         ?.let { selectedSportId -> _sports.value.firstOrNull { it.id == selectedSportId } }
 
     private fun syncOfficialStaffingForSportTransition(previous: Event, updated: Event): Event {
-        val previousSport = resolveSport(previous.sportId)
-        val nextSport = resolveSport(updated.sportId)
-        val shouldReplaceDefaults = previous.sportId != updated.sportId &&
+        val previousSport = resolveSport(previous.sportIds.firstOrNull())
+        val nextSport = resolveSport(updated.sportIds.firstOrNull())
+        val shouldReplaceDefaults = previous.sportIds.firstOrNull() != updated.sportIds.firstOrNull() &&
             previous.shouldReplaceOfficialPositionsWithSportDefaults(
                 previousSport = previousSport,
                 nextSport = nextSport,
@@ -2023,7 +2023,7 @@ class DefaultCreateEventComponent(
     }
 
     private fun Event.withSportRules(applySportDefaults: Boolean = false): Event {
-        val rules = resolveEventMatchRules(this, resolveSport(sportId))
+        val rules = resolveEventMatchRules(this, resolveSport(sportIds.firstOrNull()))
         val requiresSets = rules.scoringModel == "SETS"
         return when (eventType) {
             EventType.EVENT, EventType.TRYOUT, EventType.WEEKLY_EVENT -> this

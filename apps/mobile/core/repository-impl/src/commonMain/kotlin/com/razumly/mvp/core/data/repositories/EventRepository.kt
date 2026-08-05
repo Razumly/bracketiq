@@ -77,7 +77,7 @@ private fun Event.analyticsProperties(): Map<String, String> = buildMap {
     put("event_type", eventType.name)
     put("team_signup", teamSignup.toString())
     organizationId?.trim()?.takeIf(String::isNotBlank)?.let { put("organization_id", it) }
-    sportId?.trim()?.takeIf(String::isNotBlank)?.let { put("sport_id", it) }
+    sportIds.firstOrNull()?.trim()?.takeIf(String::isNotBlank)?.let { put("sport_id", it) }
 }
 
 internal fun mergeScheduleMatchProjection(

@@ -496,8 +496,9 @@ fun EventDetails(
         )
     }
     val slotDivisionOptions = divisionOptions
-    val selectedSportForDivisionOptions = remember(sports, editEvent.sportId) {
-        val normalizedSportId = editEvent.sportId?.trim().orEmpty()
+    val editEventSportId = editEvent.sportIds.firstOrNull()
+    val selectedSportForDivisionOptions = remember(sports, editEventSportId) {
+        val normalizedSportId = editEventSportId.orEmpty()
         sports.firstOrNull { sport -> sport.id == normalizedSportId }
     }
     val divisionScheduleUsesSets = selectedSportForDivisionOptions?.usePointsPerSetWin ?: editEvent.usesSets
@@ -591,11 +592,11 @@ fun EventDetails(
     val skillDivisionTypeSelectOptions = remember(
         divisionDetailsForSettings,
         divisionTypeParameters,
-        editEvent.sportId,
+        editEventSportId,
     ) {
         buildSkillDivisionTypeOptions(
             existingDetails = divisionDetailsForSettings,
-            skillDivisionTypes = divisionTypeParameters.skillsForSport(editEvent.sportId),
+            skillDivisionTypes = divisionTypeParameters.skillsForSport(editEventSportId),
         )
     }
     val ageDivisionTypeSelectOptions = remember(
@@ -1628,7 +1629,7 @@ fun EventDetails(
                 requiresPositiveRegistrationPrice = useSimpleSectionContent &&
                     simplePaidRegistrationEnabled,
                 leagueScoringConfig = leagueScoringConfig,
-                selectedSport = sports.firstOrNull { sport -> sport.id == editEvent.sportId },
+                selectedSport = sports.firstOrNull { sport -> sport.id == editEventSportId },
             )
         }
 
@@ -1703,25 +1704,28 @@ fun EventDetails(
             .filter { it.isNotBlank() }
             .joinToString(" - ")
     }
-    val eventSportName = remember(eventWithRelations.sport, sports, event.sportId) {
-        eventWithRelations.sport?.name
-            ?: sports.firstOrNull { it.id == event.sportId }?.name
-            ?: event.sportId
-                ?.takeIf(String::isNotBlank)
-                ?.replace('_', ' ')
-                ?.replace('-', ' ')
-                ?.toTitleCase()
-            ?: "Sport not set"
+    val eventSportName = remember(eventWithRelations.sport, sports, event.sportIds) {
+        val eventSportIds = event.sportIds
+        val names = eventSportIds.mapNotNull { sportId ->
+            sports.firstOrNull { sport -> sport.id == sportId }?.name
+                ?: sportId
+                    .takeIf(String::isNotBlank)
+                    ?.replace('_', ' ')
+                    ?.replace('-', ' ')
+                    ?.toTitleCase()
+        }
+        names
+            .ifEmpty { listOfNotNull(eventWithRelations.sport?.name) }
+            .joinToString(", ")
+            .ifBlank { "Sport not set" }
     }
-    val selectedSportForOfficialDefaults = remember(sports, editEvent.sportId) {
-        val normalizedSportId = editEvent.sportId
-            ?.trim()
-            ?.takeIf(String::isNotBlank)
+    val selectedSportForOfficialDefaults = remember(sports, editEventSportId) {
+        val normalizedSportId = editEventSportId
         normalizedSportId?.let { sportId ->
             sports.firstOrNull { sport -> sport.id == sportId }
         }
     }
-    val sportRequiredSectionEnabled = !isNewEvent || editEvent.sportId?.isNotBlank() == true
+    val sportRequiredSectionEnabled = !isNewEvent || editEvent.sportIds.isNotEmpty()
     fun showSelectSportMessage() {
         popupHandler.showPopup("Please select a sport.")
     }

@@ -17,7 +17,7 @@ class EventSportRulesHelpersTest {
 
     @Test
     fun event_and_weekly_events_are_not_changed_by_sport_rules() {
-        val event = Event(eventType = EventType.EVENT, sportId = "sets-sport", usesSets = true)
+        val event = Event(eventType = EventType.EVENT, sportIds = listOf("sets-sport"), usesSets = true)
         val weeklyEvent = event.copy(eventType = EventType.WEEKLY_EVENT)
         val sports = listOf(sport("sets-sport", useSetScoring = true))
 
@@ -29,7 +29,7 @@ class EventSportRulesHelpersTest {
     fun league_set_scoring_normalizes_event_and_division_set_rules() {
         val event = Event(
             eventType = EventType.LEAGUE,
-            sportId = "sets-sport",
+            sportIds = listOf("sets-sport"),
             usesSets = false,
             setsPerMatch = 4,
             pointsToVictory = listOf(25, 15),
@@ -75,7 +75,7 @@ class EventSportRulesHelpersTest {
     fun league_timed_scoring_clears_set_rules_and_limits_bracket_points() {
         val event = Event(
             eventType = EventType.LEAGUE,
-            sportId = "timed-sport",
+            sportIds = listOf("timed-sport"),
             usesSets = true,
             setsPerMatch = 3,
             pointsToVictory = listOf(25, 15, 15),
@@ -131,7 +131,7 @@ class EventSportRulesHelpersTest {
     fun tournament_set_scoring_normalizes_bracket_set_counts_and_points() {
         val event = Event(
             eventType = EventType.TOURNAMENT,
-            sportId = "sets-sport",
+            sportIds = listOf("sets-sport"),
             usesSets = false,
             winnerSetCount = 2,
             loserSetCount = 5,

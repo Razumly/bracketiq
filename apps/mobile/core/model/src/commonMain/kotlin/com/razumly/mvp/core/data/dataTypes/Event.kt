@@ -61,7 +61,7 @@ data class Event(
     val cancellationRefundHours: Int? = null,
     val registrationCutoffHours: Int = 0,
     val seedColor: Int = DEFAULT_EVENT_SEED_COLOR_ARGB,
-    val sportId: String? = null,
+    val sportIds: List<String> = emptyList(),
     val timeSlotIds: List<String> = emptyList(),
     val fieldIds: List<String> = emptyList(),
     val leagueScoringConfigId: String? = null,

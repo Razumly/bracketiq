@@ -248,7 +248,24 @@ private val MIGRATION_92_93_CANONICAL_MEMBERSHIP = migration(
     ),
 )
 
-internal val IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V93: Array<Migration> = arrayOf(
+private val MIGRATION_93_94_EVENT_SPORT_IDS = migration(
+    93,
+    94,
+    listOf(
+        "ALTER TABLE `Event` ADD COLUMN `sportIds` TEXT NOT NULL DEFAULT '[]'",
+        "UPDATE `Event` SET `sportIds` = json_array(`sportId`) WHERE `sportId` IS NOT NULL AND trim(`sportId`) <> ''",
+    ),
+)
+
+private val MIGRATION_94_95_DROP_EVENT_SPORT_ID = migration(
+    94,
+    95,
+    listOf(
+        "ALTER TABLE `Event` DROP COLUMN `sportId`",
+    ),
+)
+
+internal val IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V95: Array<Migration> = arrayOf(
     MIGRATION_32_33_REFUND_SCOPE,
     MIGRATION_33_34_PENDING_RENTAL_ORDERS,
     MIGRATION_34_35_PENDING_RENTAL_PAYER_SCOPE,
@@ -256,4 +273,6 @@ internal val IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V93: Array<Migration> = arrayOf(
     MIGRATION_90_91_FIELD_FACILITY_ID,
     MIGRATION_91_92_ROOM_FIRST_CATALOG_CACHE,
     MIGRATION_92_93_CANONICAL_MEMBERSHIP,
+    MIGRATION_93_94_EVENT_SPORT_IDS,
+    MIGRATION_94_95_DROP_EVENT_SPORT_ID,
 )

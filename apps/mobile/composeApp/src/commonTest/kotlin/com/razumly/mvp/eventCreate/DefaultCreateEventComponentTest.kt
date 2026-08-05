@@ -62,7 +62,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             name = "Seeded League",
             hostId = "user-1",
             eventType = EventType.LEAGUE,
-            sportId = "Indoor Volleyball",
+            sportIds = listOf("Indoor Volleyball"),
             start = Instant.parse("2026-07-01T00:00:00Z"),
             end = Instant.parse("2026-07-01T02:00:00Z"),
             divisions = listOf("open"),
@@ -221,7 +221,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         val harness = CreateEventHarness(sports = listOf(sport))
         advance()
 
-        harness.component.updateEventField { copy(sportId = sport.id) }
+        harness.component.updateEventField { copy(sportIds = listOf(sport.id)) }
         advance()
 
         val updatedEvent = harness.component.newEventState.value
@@ -240,7 +240,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         val harness = CreateEventHarness(sports = listOf(sport))
         advance()
 
-        harness.component.updateEventField { copy(sportId = sport.id) }
+        harness.component.updateEventField { copy(sportIds = listOf(sport.id)) }
         advance()
         harness.component.addOfficialId("official-9")
         advance()
@@ -264,7 +264,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         val harness = CreateEventHarness(sports = listOf(sport))
         advance()
 
-        harness.component.updateEventField { copy(sportId = sport.id) }
+        harness.component.updateEventField { copy(sportIds = listOf(sport.id)) }
         advance()
 
         val seededPositionId = harness.component.newEventState.value.officialPositions.single().id
@@ -308,7 +308,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         val harness = CreateEventHarness(sports = listOf(originalSport, nextSport))
         advance()
 
-        harness.component.updateEventField { copy(sportId = originalSport.id) }
+        harness.component.updateEventField { copy(sportIds = listOf(originalSport.id)) }
         advance()
         harness.component.updateEventField {
             copy(
@@ -324,7 +324,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         }
         advance()
 
-        harness.component.updateEventField { copy(sportId = nextSport.id) }
+        harness.component.updateEventField { copy(sportIds = listOf(nextSport.id)) }
         advance()
 
         assertEquals(
@@ -617,7 +617,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         val harness = CreateEventHarness(sports = listOf(setBasedSport, timedSport))
         advance()
 
-        harness.component.updateEventField { copy(sportId = timedSport.id) }
+        harness.component.updateEventField { copy(sportIds = listOf(timedSport.id)) }
         advance()
 
         harness.component.updateLeagueScoringConfig {
@@ -632,7 +632,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(9, harness.component.leagueScoringConfig.value.pointsForWin)
         assertEquals(1.5, harness.component.leagueScoringConfig.value.pointsPerSetWin)
 
-        harness.component.updateEventField { copy(sportId = setBasedSport.id) }
+        harness.component.updateEventField { copy(sportIds = listOf(setBasedSport.id)) }
         advance()
 
         assertEquals(LeagueScoringConfigDTO(), harness.component.leagueScoringConfig.value)
@@ -648,7 +648,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         advance()
 
         harness.component.onTypeSelected(EventType.LEAGUE)
-        harness.component.updateEventField { copy(sportId = setBasedSport.id) }
+        harness.component.updateEventField { copy(sportIds = listOf(setBasedSport.id)) }
         advance()
         assertEquals(20, harness.component.newEventState.value.setDurationMinutes)
 
@@ -671,7 +671,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         val harness = CreateEventHarness(sports = listOf(soccer))
         advance()
 
-        harness.component.updateEventField { copy(sportId = soccer.id) }
+        harness.component.updateEventField { copy(sportIds = listOf(soccer.id)) }
         advance()
 
         assertEquals(3, harness.component.leagueScoringConfig.value.pointsForWin)
@@ -695,7 +695,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
                 initialSeed = SeededEventTemplateDraft(
                     event = com.razumly.mvp.core.data.dataTypes.Event(
                         eventType = EventType.EVENT,
-                        sportId = soccer.id,
+                        sportIds = listOf(soccer.id),
                     ),
                 ),
             )
@@ -726,7 +726,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         val harness = CreateEventHarness(sports = listOf(timedSport))
         advance()
 
-        harness.component.updateEventField { copy(sportId = timedSport.id) }
+        harness.component.updateEventField { copy(sportIds = listOf(timedSport.id)) }
         advance()
 
         harness.component.updateLeagueScoringConfig {
@@ -740,7 +740,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         harness.component.updateEventField {
             copy(
-                sportId = timedSport.id,
+                sportIds = listOf(timedSport.id),
                 name = "League Config Should Stay",
             )
         }

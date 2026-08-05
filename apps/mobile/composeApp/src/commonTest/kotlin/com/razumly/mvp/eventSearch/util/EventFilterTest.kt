@@ -87,7 +87,7 @@ class EventFilterTest {
     @Test
     fun givenSportFilter_whenEventSportMatches_thenFilterReturnsTrue() {
         val filter = EventFilter(date = now to null, sportIds = setOf("volleyball"))
-        val event = eventAt(now + 1.days, sportId = "volleyball")
+        val event = eventAt(now + 1.days, sportIds = listOf("volleyball"))
 
         assertTrue(filter.filter(event))
     }
@@ -95,9 +95,20 @@ class EventFilterTest {
     @Test
     fun givenSportFilter_whenEventSportDiffers_thenFilterReturnsFalse() {
         val filter = EventFilter(date = now to null, sportIds = setOf("volleyball"))
-        val event = eventAt(now + 1.days, sportId = "soccer")
+        val event = eventAt(now + 1.days, sportIds = listOf("soccer"))
 
         assertFalse(filter.filter(event))
+    }
+
+    @Test
+    fun givenSportFilter_whenMultiSportEventContainsSport_thenFilterReturnsTrue() {
+        val filter = EventFilter(date = now to null, sportIds = setOf("soccer"))
+        val event = eventAt(
+            now + 1.days,
+            sportIds = listOf("volleyball", "soccer"),
+        )
+
+        assertTrue(filter.filter(event))
     }
 
     @Test
@@ -163,7 +174,7 @@ class EventFilterTest {
     private fun eventAt(
         start: Instant,
         end: Instant = start,
-        sportId: String? = null,
+        sportIds: List<String> = emptyList(),
         tags: List<EventTag> = emptyList(),
         eventType: EventType = EventType.EVENT,
         noFixedEndDateTime: Boolean = false,
@@ -171,7 +182,7 @@ class EventFilterTest {
         name = "Test League",
         start = start,
         end = end,
-        sportId = sportId,
+        sportIds = sportIds,
         tags = tags,
         eventType = eventType,
         noFixedEndDateTime = noFixedEndDateTime,

@@ -130,7 +130,7 @@ data class EventTemplateSummary(
     val sourceEventId: String? = null,
     val ownerUserId: String? = null,
     val organizationId: String? = null,
-    val sportId: String? = null,
+    val sportIds: List<String> = emptyList(),
     val eventType: String? = null,
     val createdAt: Instant? = null,
     val updatedAt: Instant? = null,

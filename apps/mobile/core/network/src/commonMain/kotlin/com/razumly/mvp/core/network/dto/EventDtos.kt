@@ -106,7 +106,7 @@ data class EventApiDto(
     val registrationCutoffHours: Int? = null,
     val seedColor: Int? = null,
 
-    val sportId: String? = null,
+    val sportIds: List<String>? = null,
     val timeSlotIds: List<String>? = null,
     val fieldIds: List<String>? = null,
     val fields: List<Field> = emptyList(),
@@ -381,7 +381,11 @@ data class EventApiDto(
             cancellationRefundHours = cancellationRefundHours,
             registrationCutoffHours = registrationCutoffHours ?: 0,
             seedColor = seedColor ?: DEFAULT_EVENT_SEED_COLOR_ARGB,
-            sportId = sportId,
+            sportIds = sportIds
+                ?.map(String::trim)
+                ?.filter(String::isNotBlank)
+                ?.distinct()
+                .orEmpty(),
             timeSlotIds = timeSlotIds ?: emptyList(),
             fieldIds = resolvedFieldIds,
             leagueScoringConfigId = leagueScoringConfigId,
@@ -542,7 +546,7 @@ data class EventTemplateApiDto(
     val sourceEventId: String? = null,
     val ownerUserId: String? = null,
     val organizationId: String? = null,
-    val sportId: String? = null,
+    val sportIds: List<String>? = null,
     val eventType: String? = null,
     val createdAt: String? = null,
     val updatedAt: String? = null,
@@ -974,7 +978,7 @@ data class EventUpdateDto(
     val officialSchedulingMode: String? = null,
     val officialPositions: List<EventOfficialPosition>? = null,
     val eventOfficials: List<EventOfficial>? = null,
-    val sportId: String? = null,
+    val sportIds: List<String>? = null,
     val timeSlotIds: List<String>? = null,
     val fieldIds: List<String>? = null,
     val fields: List<Field>? = null,
@@ -1043,6 +1047,10 @@ fun Event.toUpdateDto(
     val resolvedRequiredTemplateIds = sourceRequiredTemplateIds
         .map { templateId -> templateId.trim() }
         .filter { templateId -> templateId.isNotEmpty() }
+        .distinct()
+    val resolvedSportIds = sportIds
+        .map(String::trim)
+        .filter(String::isNotBlank)
         .distinct()
     val normalizedDivisions = divisions.normalizeDivisionIdentifiers()
     val normalizedDivisionDetails = mergeDivisionDetailsForDivisions(
@@ -1265,7 +1273,7 @@ fun Event.toUpdateDto(
         officialSchedulingMode = officialSchedulingMode.name,
         officialPositions = officialPositions,
         eventOfficials = eventOfficials,
-        sportId = sportId,
+        sportIds = resolvedSportIds,
         timeSlotIds = timeSlotIds,
         fieldIds = fieldIds,
         fields = if (includeFieldObjects) fieldsOverride else null,

@@ -23,8 +23,8 @@ data class EventFilter(
 ) {
     fun filter(event: Event, includePastEvents: Boolean = false): Boolean {
         if (sportIds.isNotEmpty()) {
-            val eventSportId = event.sportId?.trim()?.takeIf(String::isNotBlank) ?: return false
-            if (eventSportId !in sportIds) return false
+            val eventSportIds = event.sportIds
+            if (eventSportIds.none { sportId -> sportId in sportIds }) return false
         }
         if (tagSlugs.isNotEmpty()) {
             val eventTagSlugs = event.tags.map { tag -> tag.eventTagIdentity() }.toSet()

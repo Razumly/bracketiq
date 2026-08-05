@@ -170,21 +170,58 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                val supportsMultipleSports = state.editEvent.eventType == EventType.EVENT ||
+                    state.editEvent.eventType == EventType.WEEKLY_EVENT
+                val selectedSportIds = state.editEvent.sportIds
+
                 PlatformDropdown(
-                    selectedValue = state.editEvent.sportId.orEmpty(),
+                    selectedValue = selectedSportIds.firstOrNull().orEmpty(),
                     onSelectionChange = actions.onSportSelected,
                     options = state.sports.map { sport ->
                         DropdownOption(value = sport.id, label = sport.name)
                     },
-                    label = "Sport *",
+                    label = if (supportsMultipleSports) "Sports *" else "Sport *",
                     placeholder = if (state.sports.isEmpty()) "No sports available" else "Select a sport",
                     isError = state.showValidationErrors && !state.isSportValid,
                     supportingText = if (state.showValidationErrors && !state.isSportValid) {
-                        "Select a sport to continue."
+                        "Select at least one sport to continue."
                     } else {
                         ""
                     },
                     enabled = state.sports.isNotEmpty(),
+                    multiSelect = supportsMultipleSports,
+                    selectedValues = selectedSportIds,
+                    onMultiSelectionChange = { sportIds ->
+                        val normalizedSportIds = sportIds
+                            .map(String::trim)
+                            .filter(String::isNotBlank)
+                            .distinct()
+                        val primarySportChanged = normalizedSportIds.firstOrNull() != state.editEvent.sportIds.firstOrNull()
+                        actions.onEditEvent {
+                            copy(
+                                sportIds = normalizedSportIds,
+                                matchRulesOverride = if (primarySportChanged) null else matchRulesOverride,
+                                resolvedMatchRules = if (primarySportChanged) null else resolvedMatchRules,
+                                usesSets = if (primarySportChanged) false else usesSets,
+                                matchDurationMinutes = if (primarySportChanged) null else matchDurationMinutes,
+                                setDurationMinutes = if (primarySportChanged) null else setDurationMinutes,
+                                setsPerMatch = if (primarySportChanged) null else setsPerMatch,
+                                pointsToVictory = if (primarySportChanged) emptyList() else pointsToVictory,
+                                winnerSetCount = if (primarySportChanged) 1 else winnerSetCount,
+                                loserSetCount = if (primarySportChanged) 1 else loserSetCount,
+                                winnerBracketPointsToVictory = if (primarySportChanged) {
+                                    emptyList()
+                                } else {
+                                    winnerBracketPointsToVictory
+                                },
+                                loserBracketPointsToVictory = if (primarySportChanged) {
+                                    emptyList()
+                                } else {
+                                    loserBracketPointsToVictory
+                                },
+                            )
+                        }
+                    },
                     modifier = Modifier.weight(1f),
                 )
                 EventTagsEditor(

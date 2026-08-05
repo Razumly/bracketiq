@@ -60,14 +60,14 @@ class EventSportsCatalogCoordinatorTest {
         coordinator.applySportsSuccess(listOf(previousSport, nextSport))
         val previous = Event(
             id = "event-1",
-            sportId = previousSport.id,
+            sportIds = listOf(previousSport.id),
             eventType = EventType.LEAGUE,
             officialIds = listOf("official-1"),
         ).syncOfficialStaffing(sport = previousSport)
 
         val updated = coordinator.syncOfficialStaffingForSportTransition(
             previous = previous,
-            updated = previous.copy(sportId = nextSport.id),
+            updated = previous.copy(sportIds = listOf(nextSport.id)),
         )
 
         assertTrue(updated.usesSets)

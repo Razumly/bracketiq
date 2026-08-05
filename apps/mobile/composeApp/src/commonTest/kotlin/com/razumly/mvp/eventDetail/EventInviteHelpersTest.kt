@@ -24,7 +24,7 @@ class EventInviteHelpersTest {
     fun invite_context_uses_event_values_before_relation_fallbacks() {
         val event = Event(
             organizationId = " event-org ",
-            sportId = " pickleball ",
+            sportIds = listOf(" pickleball "),
         )
 
         assertEquals(

@@ -467,7 +467,7 @@ class DefaultEventDetailComponent(
         eventTeams,
         sportsCatalogCoordinator.sports,
     ) { selected, players, matches, teams, sports ->
-        val sport = selected.sportId
+        val sport = selected.sportIds.firstOrNull()
             ?.takeIf(String::isNotBlank)
             ?.let { sportId -> sports.firstOrNull { it.id == sportId } }
         EventWithFullRelations(
@@ -739,9 +739,7 @@ class DefaultEventDetailComponent(
         val targetSportName = relations.sport?.name
             ?.trim()
             ?.takeIf(String::isNotBlank)
-            ?: relations.event.sportId
-                ?.trim()
-                .orEmpty()
+            ?: relations.event.sportIds.firstOrNull().orEmpty()
         val normalizedTargetSport = targetSportName.lowercase()
         val relevantTeams = if (normalizedTargetSport.isNotBlank()) {
             teams.filter { teamWithPlayers ->
@@ -1196,7 +1194,7 @@ class DefaultEventDetailComponent(
             put("source", "event_detail")
             put("team_signup", event.teamSignup.toString())
             event.organizationId?.trim()?.takeIf(String::isNotBlank)?.let { put("organization_id", it) }
-            event.sportId?.trim()?.takeIf(String::isNotBlank)?.let { put("sport_id", it) }
+            event.sportIds.firstOrNull()?.trim()?.takeIf(String::isNotBlank)?.let { put("sport_id", it) }
         }
         AnalyticsTracker.capture(
             AnalyticsEvent.EventOutboundClicked,

@@ -24,7 +24,6 @@ internal fun Event.explicitlyClearedEventPatchFields(previous: Event): Set<Strin
     if (previous.address != null && address == null) add("address")
     if (previous.rating != null && rating == null) add("rating")
     if (previous.cancellationRefundHours != null && cancellationRefundHours == null) add("cancellationRefundHours")
-    if (previous.sportId != null && sportId == null) add("sportId")
     if (previous.leagueScoringConfigId != null && leagueScoringConfigId == null) add("leagueScoringConfigId")
     if (previous.affiliateUrl != null && affiliateUrl == null) add("affiliateUrl")
     if (previous.scheduleText != null && scheduleText == null) add("scheduleText")
@@ -228,7 +227,7 @@ internal fun EventTemplateApiDto.toEventTemplateSummaryOrNull(): EventTemplateSu
         sourceEventId = sourceEventId?.trim()?.takeIf(String::isNotBlank),
         ownerUserId = ownerUserId?.trim()?.takeIf(String::isNotBlank),
         organizationId = organizationId?.trim()?.takeIf(String::isNotBlank),
-        sportId = sportId?.trim()?.takeIf(String::isNotBlank),
+        sportIds = sportIds.orEmpty().map(String::trim).filter(String::isNotBlank).distinct(),
         eventType = eventType?.trim()?.takeIf(String::isNotBlank),
         createdAt = createdAt?.trim()?.takeIf(String::isNotBlank)?.let { raw ->
             runCatching { Instant.parse(raw) }.getOrNull()

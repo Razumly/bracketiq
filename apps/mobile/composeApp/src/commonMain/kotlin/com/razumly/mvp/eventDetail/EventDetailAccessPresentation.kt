@@ -88,8 +88,8 @@ internal fun buildEventDetailAccessPresentation(
         event = event,
         organization = selectedEvent.organization,
     )
-    val selectedSport = sports.firstOrNull { it.id == editedEvent.sportId }
-    val standingsSport = sports.firstOrNull { it.id == event.sportId }
+    val selectedSport = sports.firstOrNull { it.id == editedEvent.sportIds.firstOrNull() }
+    val standingsSport = sports.firstOrNull { it.id == event.sportIds.firstOrNull() }
     val showStandingsDrawColumn = resolveLeagueStandingsSupportsDraw(
         event = event,
         sport = standingsSport,

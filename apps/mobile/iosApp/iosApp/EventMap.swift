@@ -45,7 +45,7 @@ private func enumTitleCase(_ value: String) -> String {
 
 private func eventTypeWithSportLabel(for event: Event) -> String {
     let eventTypeLabel = enumTitleCase(event.eventType.name)
-    let sportLabel = event.sportId?
+    let sportLabel = event.sportIds.first?
         .trimmingCharacters(in: .whitespacesAndNewlines)
 
     guard let sportLabel = sportLabel, !sportLabel.isEmpty else {

@@ -231,6 +231,33 @@ class EventDtosTest {
     }
 
     @Test
+    fun event_sport_ids_round_trip_without_a_scalar_sport() {
+        val event = EventApiDto(
+            id = "multi-sport-event",
+            name = "Multi Sport Event",
+            hostId = "host-1",
+            eventType = "EVENT",
+            sportIds = listOf(" volleyball ", "soccer", "volleyball"),
+            start = "2026-08-05T10:00:00Z",
+            end = "2026-08-05T11:00:00Z",
+        ).toEventOrNull()
+
+        assertNotNull(event)
+        assertEquals(listOf("volleyball", "soccer"), event.sportIds)
+        assertEquals(emptyList(), event.copy(sportIds = emptyList()).toUpdateDto().sportIds)
+    }
+
+    @Test
+    fun event_update_dto_preserves_multi_sport_ids() {
+        val dto = Event(
+            eventType = EventType.WEEKLY_EVENT,
+            sportIds = listOf("volleyball", "soccer"),
+        ).toUpdateDto()
+
+        assertEquals(listOf("volleyball", "soccer"), dto.sportIds)
+    }
+
+    @Test
     fun to_update_dto_uses_event_required_template_ids_when_override_is_not_provided() {
         val event = Event(
             name = "Regular Event",

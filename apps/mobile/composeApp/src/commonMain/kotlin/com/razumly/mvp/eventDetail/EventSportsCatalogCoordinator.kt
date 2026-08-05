@@ -45,9 +45,9 @@ internal class EventSportsCatalogCoordinator {
 
     fun syncOfficialStaffingForSportTransition(previous: Event, updated: Event): Event {
         val updatedWithSportRules = updated.withSportRules(_sports.value)
-        val previousSport = sportForId(previous.sportId)
-        val nextSport = sportForId(updatedWithSportRules.sportId)
-        val shouldReplaceDefaults = previous.sportId != updatedWithSportRules.sportId &&
+        val previousSport = sportForId(previous.sportIds.firstOrNull())
+        val nextSport = sportForId(updatedWithSportRules.sportIds.firstOrNull())
+        val shouldReplaceDefaults = previous.sportIds.firstOrNull() != updatedWithSportRules.sportIds.firstOrNull() &&
             previous.shouldReplaceOfficialPositionsWithSportDefaults(
                 previousSport = previousSport,
                 nextSport = nextSport,

@@ -156,14 +156,15 @@ fun CreateEventScreen(
             .copy(event = newEventState)
     }
 
-    val eventWithCreateRelations = remember(eventWithRelations, sports, leagueSlots) {
+    val selectedSportId = newEventState.sportIds.firstOrNull()
+    val eventWithCreateRelations = remember(eventWithRelations, sports, leagueSlots, selectedSportId) {
         eventWithRelations.copy(
-            sport = sports.firstOrNull { it.id == newEventState.sportId },
+            sport = sports.firstOrNull { it.id == selectedSportId },
             timeSlots = leagueSlots,
         )
     }
-    val selectedSport = remember(sports, newEventState.sportId) {
-        sports.firstOrNull { it.id == newEventState.sportId }
+    val selectedSport = remember(sports, selectedSportId) {
+        sports.firstOrNull { it.id == selectedSportId }
     }
     val setupPages = remember(
         newEventState,
@@ -544,7 +545,7 @@ fun CreateEventScreen(
                                     onSportSelected = { sportId ->
                                         onEditEvent {
                                             copy(
-                                                sportId = sportId.takeIf(String::isNotBlank),
+                                                sportIds = sportId.takeIf(String::isNotBlank)?.let(::listOf).orEmpty(),
                                                 matchRulesOverride = null,
                                                 resolvedMatchRules = null,
                                                 usesSets = false,
@@ -591,7 +592,7 @@ fun CreateEventScreen(
                                     onLoadOfficialPositionDefaults = {
                                         onEditEvent {
                                             syncOfficialStaffing(
-                                                sport = sports.firstOrNull { sport -> sport.id == sportId },
+                                                sport = sports.firstOrNull { sport -> sport.id == selectedSportId },
                                                 replacePositionsWithSportDefaults = true,
                                             )
                                         }

@@ -89,7 +89,7 @@ internal fun buildNativeDiscoverSearchSnapshot(
                 add(event.description)
                 add(event.location)
                 add(event.address)
-                add(event.sportId)
+                addAll(event.sportIds)
                 addAll(event.divisions)
                 event.divisionDetails.forEach { division ->
                     add(division.name)

@@ -312,7 +312,7 @@ fun Event.shouldReplaceOfficialPositionsWithSportDefaults(
     previousSport: Sport?,
     nextSport: Sport?,
 ): Boolean {
-    if (sportId == nextSport?.id && officialPositions.isEmpty()) {
+    if (sportIds.firstOrNull() == nextSport?.id && officialPositions.isEmpty()) {
         return true
     }
     val previousTemplates = previousSport?.officialPositionTemplates.orEmpty()

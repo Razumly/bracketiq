@@ -48,7 +48,7 @@ class EventDetailsMatchRulesTest {
     @Test
     fun given_baseball_selected_without_server_template_when_resolving_rules_then_baseball_defaults_replace_stale_rules() {
         val event = Event(
-            sportId = "Baseball",
+            sportIds = listOf("Baseball"),
             eventType = EventType.LEAGUE,
             resolvedMatchRules = stalePointRules(),
         )
@@ -68,7 +68,7 @@ class EventDetailsMatchRulesTest {
     @Test
     fun given_partial_sport_template_when_resolving_rules_then_sport_defaults_fill_missing_fields() {
         val event = Event(
-            sportId = "Baseball",
+            sportIds = listOf("Baseball"),
             eventType = EventType.LEAGUE,
             resolvedMatchRules = stalePointRules(),
         )
@@ -90,7 +90,7 @@ class EventDetailsMatchRulesTest {
     @Test
     fun given_volleyball_selected_when_event_has_stale_overtime_and_tiebreak_overrides_then_options_are_clamped_off() {
         val event = Event(
-            sportId = "Indoor Volleyball",
+            sportIds = listOf("Indoor Volleyball"),
             eventType = EventType.LEAGUE,
             matchRulesOverride = MatchRulesConfigMVP(
                 supportsOvertime = true,
@@ -110,7 +110,7 @@ class EventDetailsMatchRulesTest {
     @Test
     fun given_soccer_selected_when_tiebreak_is_enabled_then_draws_are_not_a_separate_result_path() {
         val event = Event(
-            sportId = "Indoor Soccer",
+            sportIds = listOf("Indoor Soccer"),
             eventType = EventType.LEAGUE,
             matchRulesOverride = MatchRulesConfigMVP(supportsShootout = true),
         )
@@ -127,7 +127,7 @@ class EventDetailsMatchRulesTest {
     @Test
     fun given_auto_point_incidents_when_sport_template_disables_player_requirement_then_auto_capture_requires_participant() {
         val event = Event(
-            sportId = "Basketball",
+            sportIds = listOf("Basketball"),
             eventType = EventType.LEAGUE,
             autoCreatePointMatchIncidents = true,
             matchRulesOverride = MatchRulesConfigMVP(pointIncidentRequiresParticipant = false),
@@ -145,7 +145,7 @@ class EventDetailsMatchRulesTest {
     @Test
     fun given_auto_point_incidents_disabled_when_sport_template_requires_player_then_requirement_is_off() {
         val event = Event(
-            sportId = "Indoor Soccer",
+            sportIds = listOf("Indoor Soccer"),
             eventType = EventType.LEAGUE,
             autoCreatePointMatchIncidents = false,
         )
@@ -162,7 +162,7 @@ class EventDetailsMatchRulesTest {
     @Test
     fun given_segment_count_override_when_resolving_rules_then_sport_count_remains_source_of_truth() {
         val event = Event(
-            sportId = "Indoor Soccer",
+            sportIds = listOf("Indoor Soccer"),
             eventType = EventType.LEAGUE,
             matchRulesOverride = MatchRulesConfigMVP(segmentCount = 4),
         )
@@ -177,7 +177,7 @@ class EventDetailsMatchRulesTest {
     @Test
     fun given_set_based_sport_when_resolving_rules_then_per_set_score_defaults_are_retained() {
         val event = Event(
-            sportId = "Indoor Volleyball",
+            sportIds = listOf("Indoor Volleyball"),
             eventType = EventType.LEAGUE,
         )
         val sport = sport(
@@ -214,7 +214,7 @@ class EventDetailsMatchRulesTest {
     @Test
     fun given_custom_sport_without_template_when_resolving_rules_then_persisted_rules_are_preserved() {
         val event = Event(
-            sportId = "custom-sport",
+            sportIds = listOf("custom-sport"),
             eventType = EventType.LEAGUE,
             resolvedMatchRules = ResolvedMatchRulesMVP(
                 scoringModel = "PERIODS",

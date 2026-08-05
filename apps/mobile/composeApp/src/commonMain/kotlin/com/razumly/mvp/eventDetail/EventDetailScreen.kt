@@ -664,7 +664,7 @@ fun EventDetailScreen(
                                 onSportSelected = { sportId ->
                                     component.editEventField {
                                         copy(
-                                            sportId = sportId.takeIf(String::isNotBlank),
+                                            sportIds = sportId.takeIf(String::isNotBlank)?.let(::listOf).orEmpty(),
                                             matchRulesOverride = null,
                                             resolvedMatchRules = null,
                                         )
@@ -718,7 +718,7 @@ fun EventDetailScreen(
                                 onLoadOfficialPositionDefaults = {
                                     component.editEventField {
                                         syncOfficialStaffing(
-                                            sport = sports.firstOrNull { sport -> sport.id == sportId },
+                                            sport = sports.firstOrNull { sport -> sport.id == editedEvent.sportIds.firstOrNull() },
                                             replacePositionsWithSportDefaults = true,
                                         )
                                     }

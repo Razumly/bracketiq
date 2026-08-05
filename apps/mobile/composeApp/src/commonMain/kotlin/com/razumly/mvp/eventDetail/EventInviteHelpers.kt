@@ -39,7 +39,7 @@ internal fun resolveEventInviteSportName(
     return relationSportName
         ?.trim()
         ?.takeIf(String::isNotBlank)
-        ?: event.sportId?.trim()?.takeIf(String::isNotBlank)
+        ?: event.sportIds.firstOrNull()?.trim()?.takeIf(String::isNotBlank)
 }
 
 internal fun eventParticipantTeamIdsForInviteSearch(

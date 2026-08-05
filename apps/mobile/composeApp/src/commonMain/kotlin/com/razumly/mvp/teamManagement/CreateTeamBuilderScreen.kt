@@ -143,7 +143,7 @@ fun CreateTeamBuilderScreen(
     var teamSizeInput by remember(draft.team.id, selectedEvent?.id) {
         mutableStateOf((selectedEvent?.teamSizeLimit?.takeIf { it >= 2 } ?: draft.team.teamSize.coerceAtLeast(2)).toString())
     }
-    val selectedEventSportName = sports.firstOrNull { it.id == selectedEvent?.sportId }?.name.orEmpty()
+    val selectedEventSportName = sports.firstOrNull { it.id == selectedEvent?.sportIds?.firstOrNull() }?.name.orEmpty()
     var sportInput by remember(draft.team.id, selectedEvent?.id) {
         mutableStateOf(draft.team.sport.orEmpty())
     }
@@ -198,7 +198,7 @@ fun CreateTeamBuilderScreen(
         user.id == currentUser.id || staffInvites.any { it.user?.id == user.id }
     }
     val sportOptions = sports.map { DropdownOption(it.name, it.name) }
-    val selectedEventSportLocked = !selectedEvent?.sportId.isNullOrBlank()
+    val selectedEventSportLocked = !selectedEvent?.sportIds?.firstOrNull().isNullOrBlank()
     val staffRoleOptions = TeamBuilderStaffRole.entries.map { DropdownOption(it.inviteType, it.label) }
     val creatorCoachOptions = listOf(
         DropdownOption("NONE", "No coaching role"),

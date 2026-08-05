@@ -208,7 +208,7 @@ class EventLifecycleMobileApiIntegrationTest {
                 Team(hostUserId).copy(
                     name = "Mobile ${variant.key} Team ${index + 1}",
                     division = divisionId,
-                    sport = variant.event.sportId,
+                    sport = variant.event.sportIds.firstOrNull(),
                     teamSize = 2,
                 ).withSynchronizedMembership(),
             ).getOrElse { error ->
@@ -278,7 +278,7 @@ class EventLifecycleMobileApiIntegrationTest {
                 Team(hostUserId).copy(
                     name = "Mobile Incident Team ${index + 1}",
                     division = divisionId,
-                    sport = variant.event.sportId,
+                    sport = variant.event.sportIds.firstOrNull(),
                     teamSize = 2,
                 ).withSynchronizedMembership(),
             ).getOrElse { error ->
@@ -467,7 +467,7 @@ class EventLifecycleMobileApiIntegrationTest {
         } else {
             assertEquals(variant.event.includePlayoffs, event.includePlayoffs, "${variant.key} playoff flag drifted")
         }
-        assertEquals(variant.event.sportId, event.sportId, "${variant.key} sport drifted")
+        assertEquals(variant.event.sportIds, event.sportIds, "${variant.key} sports drifted")
         assertEquals(variant.event.usesSets, event.usesSets, "${variant.key} scoring model drifted")
         assertEquals(
             variant.event.officialSchedulingMode,
@@ -752,7 +752,7 @@ private fun buildVariant(
         userIds = if (eventType.isSchedulable()) emptyList() else emptyList(),
         fieldIds = fields.map(Field::id),
         timeSlotIds = timeSlots.map(TimeSlot::id),
-        sportId = sportId,
+        sportIds = listOf(sportId),
         organizationId = if (officialCase == OfficialCase.NAMED_OFFICIALS) {
             null
         } else {

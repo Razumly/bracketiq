@@ -1225,6 +1225,23 @@ val MIGRATION_92_93_CANONICAL_MEMBERSHIP = migration(
     ),
 )
 
+val MIGRATION_93_94_EVENT_SPORT_IDS = migration(
+    93,
+    94,
+    listOf(
+        "ALTER TABLE `Event` ADD COLUMN `sportIds` TEXT NOT NULL DEFAULT '[]'",
+        "UPDATE `Event` SET `sportIds` = json_array(`sportId`) WHERE `sportId` IS NOT NULL AND trim(`sportId`) <> ''",
+    ),
+)
+
+val MIGRATION_94_95_DROP_EVENT_SPORT_ID = migration(
+    94,
+    95,
+    listOf(
+        "ALTER TABLE `Event` DROP COLUMN `sportId`",
+    ),
+)
+
 val MVP_DATABASE_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_3_4_OFFICIAL_TERMINOLOGY_AND_PRIVACY,
     MIGRATION_4_5_NO_SCHEMA_CHANGE,
@@ -1236,4 +1253,6 @@ val MVP_DATABASE_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_90_91_FIELD_FACILITY_ID,
     MIGRATION_91_92_ROOM_FIRST_CATALOG_CACHE,
     MIGRATION_92_93_CANONICAL_MEMBERSHIP,
+    MIGRATION_93_94_EVENT_SPORT_IDS,
+    MIGRATION_94_95_DROP_EVENT_SPORT_ID,
 )

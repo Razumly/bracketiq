@@ -47,7 +47,7 @@ class RoomMigrationsIosTest {
                 "INSERT INTO `MatchOperationOutboxEntry` (`id`, `payloadJson`) VALUES ('outbox-1', '{\"score\":1}')",
             )
 
-            val migrations = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V93.take(4)
+            val migrations = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V95.take(4)
             assertEquals(listOf(32, 33, 34, 35), migrations.map { it.startVersion })
             assertEquals(listOf(33, 34, 35, 90), migrations.map { it.endVersion })
 
@@ -123,7 +123,7 @@ class RoomMigrationsIosTest {
                 """.trimIndent(),
             )
 
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V93.first { it.startVersion == 90 }
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V95.first { it.startVersion == 90 }
             assertEquals(90, migration.startVersion)
             assertEquals(91, migration.endVersion)
             migration.migrate(connection)
@@ -140,7 +140,7 @@ class RoomMigrationsIosTest {
     @Test
     fun v91CatalogMigration_createsViewerScopedExactQueryCacheTables() {
         BundledSQLiteDriver().open(":memory:").use { connection ->
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V93.first { it.startVersion == 91 }
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V95.first { it.startVersion == 91 }
             assertEquals(91, migration.startVersion)
             assertEquals(92, migration.endVersion)
             migration.migrate(connection)
@@ -195,7 +195,7 @@ class RoomMigrationsIosTest {
             connection.execute("INSERT INTO `team_user_cross_ref` VALUES ('team-array', 'existing_user')")
             connection.execute("INSERT INTO `chat_user_cross_ref` VALUES ('chat-array', 'existing_user')")
 
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V93.last()
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V95.first { it.startVersion == 92 }
             assertEquals(92, migration.startVersion)
             assertEquals(93, migration.endVersion)
             migration.migrate(connection)

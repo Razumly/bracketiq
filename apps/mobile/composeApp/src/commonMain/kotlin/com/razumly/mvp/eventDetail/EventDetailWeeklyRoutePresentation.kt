@@ -75,14 +75,13 @@ internal fun buildEventDetailWeeklyRoutePresentation(
             ),
         )
     }
-    val teamSelectionSportLabel = selectedEvent.sport?.name
-        ?: sports.firstOrNull { it.id == event.sportId }?.name
-        ?: event.sportId
-            ?.takeIf(String::isNotBlank)
-            ?.replace('_', ' ')
-            ?.replace('-', ' ')
-            ?.toTitleCase()
-        ?: "this event"
+    val teamSelectionSportLabel = event.sportIds
+        .mapNotNull { sportId ->
+            sports.firstOrNull { sport -> sport.id == sportId }?.name
+                ?: sportId.replace('_', ' ').replace('-', ' ').toTitleCase()
+        }
+        .joinToString(", ")
+        .ifBlank { selectedEvent.sport?.name ?: "this event" }
     val selectedWeeklyOccurrenceJoined = isWeeklyParentEvent &&
         selectedWeeklyOccurrence != null &&
         isUserInEvent

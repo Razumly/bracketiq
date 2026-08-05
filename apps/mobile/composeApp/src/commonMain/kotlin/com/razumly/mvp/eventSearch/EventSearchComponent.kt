@@ -1771,7 +1771,7 @@ private fun Event.analyticsProperties(source: String): Map<String, String> = bui
     put("team_signup", teamSignup.toString())
     put("source", source)
     organizationId?.trim()?.takeIf(String::isNotBlank)?.let { put("organization_id", it) }
-    sportId?.trim()?.takeIf(String::isNotBlank)?.let { put("sport_id", it) }
+    sportIds.firstOrNull()?.trim()?.takeIf(String::isNotBlank)?.let { put("sport_id", it) }
     if (affiliateUrl?.trim()?.isNotEmpty() == true) {
         put("is_affiliate_event", "true")
     }

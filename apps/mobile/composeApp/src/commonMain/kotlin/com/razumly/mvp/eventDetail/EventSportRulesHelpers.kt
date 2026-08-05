@@ -9,7 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 private val allowedSetCounts = setOf(1, 3, 5)
 
 internal fun Event.withSportRules(sports: List<Sport>): Event {
-    val requiresSets = sportId
+    val requiresSets = sportIds.firstOrNull()
         ?.let { selectedSportId -> sports.firstOrNull { sport -> sport.id == selectedSportId } }
         ?.usePointsPerSetWin
         ?: false
