@@ -1,6 +1,6 @@
 Pod::Spec.new do |spec|
     spec.name                     = 'composeApp'
-    spec.version                  = '1.6.20'
+    spec.version                  = '1.6.21'
     spec.homepage                 = 'https://example.com'
     spec.source                   = { :http=> ''}
     spec.authors                  = ''
