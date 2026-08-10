@@ -63,17 +63,20 @@ type DiscoveryDependencies = {
   fetchResource?: typeof fetchBoundedPublicResource;
   workerId?: string;
 };
-const db = () => ({
-  campaigns: (prisma as any).affiliateSourceDiscoveryCampaigns,
-  runs: (prisma as any).affiliateSourceDiscoveryRuns,
-  results: (prisma as any).affiliateSourceDiscoveryResults,
-  policies: (prisma as any).affiliateSourceDomainPolicies,
-  intakes: (prisma as any).affiliateSourceIntakes,
-  pages: (prisma as any).affiliateSourceIntakePages,
-  intakeRuns: (prisma as any).affiliateSourceIntakeRuns,
-  sports: (prisma as any).sports,
-  queryExecutions: (prisma as any).affiliateSourceDiscoveryQueryExecutions,
-});
+const db = (client: unknown = prisma) => {
+  const dbClient = client as Record<string, unknown>;
+  return {
+    campaigns: dbClient.affiliateSourceDiscoveryCampaigns as any,
+    runs: dbClient.affiliateSourceDiscoveryRuns as any,
+    results: dbClient.affiliateSourceDiscoveryResults as any,
+    policies: dbClient.affiliateSourceDomainPolicies as any,
+    intakes: dbClient.affiliateSourceIntakes as any,
+    pages: dbClient.affiliateSourceIntakePages as any,
+    intakeRuns: dbClient.affiliateSourceIntakeRuns as any,
+    sports: dbClient.sports as any,
+    queryExecutions: dbClient.affiliateSourceDiscoveryQueryExecutions as any,
+  };
+};
 
 const stringValue = (value: unknown): string | null => (
   typeof value === 'string' && value.trim() ? value.trim() : null
@@ -385,18 +388,30 @@ const findSiteIntake = async (
   });
 };
 
-const queueAllowedIntake = async (intakeId: string, userId: string): Promise<void> => {
-  const active = await db().intakeRuns.findFirst({
+const queueAllowedIntake = async (
+  intakeId: string,
+  userId: string,
+  client: unknown = prisma,
+): Promise<void> => {
+  const intakeDb = db(client);
+  const active = await intakeDb.intakeRuns.findFirst({
     where: { intakeId, status: { in: ['QUEUED', 'RUNNING'] } },
   });
   if (active) return;
-  const pages = await db().pages.findMany({
+  const pages = await intakeDb.pages.findMany({
     where: { intakeId, status: 'ACTIVE' },
     orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
     take: 10,
     select: { id: true },
   });
-  if (pages.length) await queueAffiliateSourceIntakeRun(intakeId, pages.map((page: any) => page.id), userId);
+  if (pages.length) {
+    await queueAffiliateSourceIntakeRun(
+      intakeId,
+      pages.map((page: any) => page.id),
+      userId,
+      { db: client },
+    );
+  }
 };
 
 const promoteDiscoveryResult = async (
@@ -493,31 +508,29 @@ export const applyAffiliateSourceDomainPolicy = async (
   policyKey: string,
   input: AffiliateSourceDomainPolicyReview,
   userId: string,
+  options: { db?: unknown } = {},
 ) => {
   const review = affiliateSourceDomainPolicyReviewSchema.parse(input);
+  const policyClient = options.db ?? prisma;
+  const policyDb = db(policyClient);
   const now = new Date();
-  const previousPolicy = await db().policies.findUnique({ where: { policyKey } });
+  const previousPolicy = await policyDb.policies.findUnique({ where: { policyKey } });
   const previousEvidence = recordValue(previousPolicy?.evidence);
-  const reviewHistory = Array.isArray(previousEvidence.reviewHistory)
-    ? previousEvidence.reviewHistory
-    : [];
+  const reviewHistory = Array.isArray(previousEvidence.reviewHistory) ? previousEvidence.reviewHistory : [];
   const evidence = {
     ...previousEvidence,
     ...recordValue(review.evidence),
-    reviewHistory: [
-      ...reviewHistory,
-      {
-        reviewedAt: now.toISOString(),
-        reviewedByUserId: userId,
-        previousStatus: previousPolicy?.status ?? null,
-        status: review.status,
-        termsUrl: review.termsUrl ?? null,
-        robotsSummary: review.robotsSummary ?? null,
-        restrictionNotes: review.restrictionNotes ?? null,
-      },
-    ].slice(-20),
+    reviewHistory: [...reviewHistory, {
+      reviewedAt: now.toISOString(),
+      reviewedByUserId: userId,
+      previousStatus: previousPolicy?.status ?? null,
+      status: review.status,
+      termsUrl: review.termsUrl ?? null,
+      robotsSummary: review.robotsSummary ?? null,
+      restrictionNotes: review.restrictionNotes ?? null,
+    }].slice(-20),
   };
-  const policy = await db().policies.upsert({
+  const policy = await policyDb.policies.upsert({
     where: { policyKey },
     create: {
       id: createId(),
@@ -536,11 +549,11 @@ export const applyAffiliateSourceDomainPolicy = async (
       evidence,
     },
   });
-  const resultRows = await db().results.findMany({
+  const resultRows = await policyDb.results.findMany({
     where: { policyKey, matchingIntakeId: { not: null } },
     select: { id: true, matchingIntakeId: true },
   });
-  const directIntakeIds = await findAffiliateIntakeIdsForPolicyKey(prisma as any, policyKey);
+  const directIntakeIds = await findAffiliateIntakeIdsForPolicyKey(policyClient as any, policyKey);
   const intakeIds = Array.from(new Set([
     ...resultRows.map((row: any) => row.matchingIntakeId).filter(Boolean),
     ...directIntakeIds,
@@ -550,29 +563,17 @@ export const applyAffiliateSourceDomainPolicy = async (
       complianceStatus: review.status,
       termsUrl: review.termsUrl,
       notes: review.restrictionNotes,
-    }, userId);
-    if (review.status === 'ALLOWED') await queueAllowedIntake(intakeId, userId);
+    }, userId, { db: policyClient });
+    if (review.status === 'ALLOWED') await queueAllowedIntake(intakeId, userId, policyClient);
   }
   const reviewableStatuses = ['NEW', 'INTAKE_CREATED', 'REVIEW_REQUIRED', 'BLOCKED'];
   if (review.status === 'BLOCKED') {
-    await db().results.updateMany({
-      where: { policyKey, status: { in: reviewableStatuses } },
-      data: { status: 'BLOCKED' },
-    });
+    await policyDb.results.updateMany({ where: { policyKey, status: { in: reviewableStatuses } }, data: { status: 'BLOCKED' } });
   } else if (review.status === 'NEEDS_REVIEW') {
-    await db().results.updateMany({
-      where: { policyKey, status: { in: reviewableStatuses } },
-      data: { status: 'REVIEW_REQUIRED' },
-    });
+    await policyDb.results.updateMany({ where: { policyKey, status: { in: reviewableStatuses } }, data: { status: 'REVIEW_REQUIRED' } });
   } else {
-    await db().results.updateMany({
-      where: { policyKey, matchingIntakeId: { not: null }, status: { in: reviewableStatuses } },
-      data: { status: 'INTAKE_CREATED' },
-    });
-    await db().results.updateMany({
-      where: { policyKey, matchingIntakeId: null, status: { in: reviewableStatuses } },
-      data: { status: 'NEW' },
-    });
+    await policyDb.results.updateMany({ where: { policyKey, matchingIntakeId: { not: null }, status: { in: reviewableStatuses } }, data: { status: 'INTAKE_CREATED' } });
+    await policyDb.results.updateMany({ where: { policyKey, matchingIntakeId: null, status: { in: reviewableStatuses } }, data: { status: 'NEW' } });
   }
   return { policy, intakeIds, queuedIntakeCount: review.status === 'ALLOWED' ? intakeIds.length : 0 };
 };

@@ -3,27 +3,35 @@ import {
   affiliateAgentTargetKindSchema,
   affiliateMappingTrainingExampleSchema,
   affiliateSourceDraftSchema,
+  affiliateSourceDraftV2Schema,
   stableAgentArtifactSha256,
   type AffiliateMappingTrainingExample,
   type AffiliateSourceDraft,
 } from './agentContracts';
+import { affiliateSportsCatalogSnapshotSchema } from './affiliateSportsCatalog';
 import {
   AFFILIATE_MAPPING_SYSTEM_PROMPT,
+  isAffiliateMappingJobContextV2,
   type AffiliateMappingJobContext,
 } from './agentModelClient';
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/i);
 const nonEmptyStringSchema = z.string().trim().min(1);
-
 const mappingJobContextSchema = z.object({
+  contextContractVersion: z.literal(2).optional(),
   jobId: nonEmptyStringSchema,
   intakeId: nonEmptyStringSchema,
   sourceKey: nonEmptyStringSchema,
+  workerId: nonEmptyStringSchema.optional(),
+  claimedAt: z.string().datetime({ offset: true }).optional(),
   runId: nonEmptyStringSchema,
   evidenceRunIds: z.array(nonEmptyStringSchema).min(1).optional(),
+  sportsCatalog: affiliateSportsCatalogSnapshotSchema.optional(),
+  humanSportResolution: z.unknown().optional(),
   policyDisposition: z.enum(['ALLOWED', 'BLOCKED', 'NEEDS_REVIEW']),
   targetKindHints: z.array(affiliateAgentTargetKindSchema),
   artifacts: z.array(z.object({
+    artifactId: nonEmptyStringSchema.optional(),
     kind: nonEmptyStringSchema,
     sha256: sha256Schema,
     pageUrl: z.string().url(),
@@ -56,9 +64,10 @@ export const affiliateMappingTeachingEnvelopeSchema = z.object({
 export type AffiliateMappingTeachingEnvelope = z.infer<
   typeof affiliateMappingTeachingEnvelopeSchema
 >;
-
 export type AffiliateMappingSftRow = {
-  schemaVersion: 1;
+  schemaVersion: 2;
+  contextContractVersion: 2;
+  sportsCatalogSha256: string;
   exampleId: string;
   split: 'train' | 'validation' | 'test';
   registrableDomain: string;
@@ -75,7 +84,7 @@ export type AffiliateMappingSftRelease = {
     schemaVersion: 1;
     releaseId: string;
     createdAt: string;
-    promptContractVersion: 1;
+    promptContractVersion: 2;
     systemPromptSha256: string;
     sourceEnvelopeSha256s: string[];
     rowSha256s: string[];
@@ -86,7 +95,9 @@ export type AffiliateMappingSftRelease = {
 };
 
 const affiliateMappingSftRowSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
+  contextContractVersion: z.literal(2),
+  sportsCatalogSha256: sha256Schema,
   exampleId: nonEmptyStringSchema,
   split: z.enum(['train', 'validation', 'test']),
   registrableDomain: nonEmptyStringSchema,
@@ -102,8 +113,8 @@ export const affiliateMappingSftReleaseSchema = z.object({
   manifest: z.object({
     schemaVersion: z.literal(1),
     releaseId: nonEmptyStringSchema,
+    promptContractVersion: z.literal(2),
     createdAt: z.string().datetime({ offset: true }),
-    promptContractVersion: z.literal(1),
     systemPromptSha256: sha256Schema,
     sourceEnvelopeSha256s: z.array(sha256Schema),
     rowSha256s: z.array(sha256Schema),
@@ -154,6 +165,11 @@ const validateTeachingEnvelope = (
   draft: AffiliateSourceDraft;
 } => {
   const { trainingExample: example, context, approvedDraft: draft } = envelope;
+  const v2Context = isAffiliateMappingJobContextV2(context) ? context : null;
+  if (!v2Context) {
+    throw new Error(`${example.exampleId} is legacy v1 context; it is parse-only and cannot enter a current release.`);
+  }
+  affiliateSourceDraftV2Schema.parse(draft);
   if (!['FAITHFUL', 'BLOCKED'].includes(example.evidenceLabel)) {
     throw new Error(
       `${example.exampleId} is ${example.evidenceLabel}; only FAITHFUL and BLOCKED examples may train.`,
@@ -197,13 +213,17 @@ const validateTeachingEnvelope = (
   assertNoForbiddenAffiliateTrainingData(envelope);
   return { example, context, draft };
 };
-
 const rowForEnvelope = (
   envelope: AffiliateMappingTeachingEnvelope,
 ): AffiliateMappingSftRow => {
   const { example, context, draft } = validateTeachingEnvelope(envelope);
+  if (!isAffiliateMappingJobContextV2(context)) {
+    throw new Error('Current SFT rows require a v2 context.');
+  }
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    contextContractVersion: 2,
+    sportsCatalogSha256: context.sportsCatalog.sha256,
     exampleId: example.exampleId,
     split: example.split,
     registrableDomain: example.registrableDomain,
@@ -253,7 +273,7 @@ export const buildAffiliateMappingSftRelease = (
       schemaVersion: 1,
       releaseId,
       createdAt: options.createdAt.toISOString(),
-      promptContractVersion: 1,
+      promptContractVersion: 2,
       systemPromptSha256: stableAgentArtifactSha256(AFFILIATE_MAPPING_SYSTEM_PROMPT),
       sourceEnvelopeSha256s: rows.map((row) => row.sourceEnvelopeSha256),
       rowSha256s: rows.map((row) => stableAgentArtifactSha256(row)),

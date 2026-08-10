@@ -6,6 +6,10 @@ import {
   type AffiliateCandidateAssertion,
   type AffiliateSourceDraft,
 } from './agentContracts';
+import {
+  affiliateSportsCatalogSnapshotSchema,
+  type AffiliateSportsCatalogSnapshot,
+} from './affiliateSportsCatalog';
 import type { AffiliateModelRuntimeObservation } from './agentBakeoff';
 import type { AffiliateMappingEvaluationReport } from './agentEvaluation';
 import {
@@ -41,16 +45,21 @@ const safeReleaseIdSchema = nonEmptyStringSchema.regex(
   /^[a-z0-9][a-z0-9._-]*$/i,
   'Release id may contain only letters, numbers, periods, underscores, and hyphens.',
 );
-
 const mappingJobContextSchema = z.object({
+  contextContractVersion: z.literal(2).optional(),
   jobId: nonEmptyStringSchema,
   intakeId: nonEmptyStringSchema,
   sourceKey: nonEmptyStringSchema,
+  workerId: nonEmptyStringSchema.optional(),
+  claimedAt: isoDateTimeSchema.optional(),
   runId: nonEmptyStringSchema,
   evidenceRunIds: z.array(nonEmptyStringSchema).min(1).optional(),
+  sportsCatalog: affiliateSportsCatalogSnapshotSchema.optional(),
+  humanSportResolution: z.unknown().optional(),
   policyDisposition: z.enum(['ALLOWED', 'BLOCKED', 'NEEDS_REVIEW']),
   targetKindHints: z.array(listingKindSchema),
   artifacts: z.array(z.object({
+    artifactId: nonEmptyStringSchema.optional(),
     kind: nonEmptyStringSchema,
     sha256: sha256Schema,
     pageUrl: z.string().url(),
@@ -162,11 +171,13 @@ const validatePersistedCandidate = (
   candidateIndex: number,
   draft: AffiliateSourceDraft,
   approvedAt: string,
+  catalogNames: readonly string[],
   context: z.RefinementCtx,
 ) => {
   const sportIssue = validateAffiliateAgentSportName(
     candidate.sportName,
     `expectedPersistedCandidates.${candidateIndex}.sportName`,
+    catalogNames,
   );
   if (sportIssue) {
     context.addIssue({
@@ -179,6 +190,7 @@ const validatePersistedCandidate = (
     const issue = validateAffiliateAgentSportName(
       sportName,
       `expectedPersistedCandidates.${candidateIndex}.sportNames.${sportIndex}`,
+      catalogNames,
     );
     if (issue) {
       context.addIssue({
@@ -404,12 +416,23 @@ export const affiliateMappingGoldExampleSchema = z.object({
       message: 'Non-executable gold examples cannot expect persisted candidates.',
     });
   }
+  const catalogNames = example.context.sportsCatalog?.sports.map(
+    (sport) => sport.name,
+  ) ?? [];
+  if (example.context.contextContractVersion !== 2 || !example.context.sportsCatalog) {
+    context.addIssue({
+      code: 'custom',
+      path: ['context'],
+      message: 'Current gold examples require contextContractVersion 2 and a catalog snapshot.',
+    });
+  }
   example.expectedPersistedCandidates.forEach((candidate, index) => {
     validatePersistedCandidate(
       candidate as AffiliateCandidateAssertion,
       index,
       example.approvedDraft,
       example.humanApproval.approvedAt,
+      catalogNames,
       context,
     );
   });
@@ -440,8 +463,8 @@ export const affiliateMappingGoldReleaseSchema = z.object({
     schemaVersion: z.literal(1),
     releaseId: safeReleaseIdSchema,
     createdAt: isoDateTimeSchema,
+    promptContractVersion: z.literal(2),
     repositoryCommit: nonEmptyStringSchema,
-    promptContractVersion: z.literal(1),
     systemPromptSha256: sha256Schema,
     goldContractRevision: nonEmptyStringSchema,
     exampleIds: z.array(nonEmptyStringSchema),
@@ -555,7 +578,7 @@ export type AffiliateMappingTrainingReadinessReport = z.infer<
   typeof affiliateMappingTrainingReadinessReportSchema
 >;
 
-export const AFFILIATE_MAPPING_GOLD_CONTRACT_REVISION = 'affiliate-mapping-gold-v1';
+export const AFFILIATE_MAPPING_GOLD_CONTRACT_REVISION = 'affiliate-mapping-gold-v2';
 
 const increment = (counts: Record<string, number>, key: string) => {
   counts[key] = (counts[key] ?? 0) + 1;
@@ -624,7 +647,7 @@ export const buildAffiliateMappingGoldRelease = (
       releaseId,
       createdAt: options.createdAt.toISOString(),
       repositoryCommit,
-      promptContractVersion: 1 as const,
+      promptContractVersion: 2 as const,
       systemPromptSha256: stableAgentArtifactSha256(AFFILIATE_MAPPING_SYSTEM_PROMPT),
       goldContractRevision: AFFILIATE_MAPPING_GOLD_CONTRACT_REVISION,
       exampleIds: examples.map((example) => example.exampleId),
@@ -731,7 +754,8 @@ export const affiliateMappingTeachingEnvelopeFromGoldExample = (
             },
           ]),
         ).values()),
-        contextContractVersion: 1,
+        contextContractVersion: 2,
+        sportsCatalog: example.context.sportsCatalog,
       },
       output: {
         draftHash,

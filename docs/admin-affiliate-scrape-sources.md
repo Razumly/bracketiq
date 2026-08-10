@@ -641,3 +641,53 @@ Use this section as a changelog when a source moves forward. For each implemente
 - 2026-07-31: Next Level Sports Center Indoor Basketball Court Rentals was implemented from live intake `new-york-new-york-metropolitan-area-indoor-basketball-court-huntington-long-island-new-york-nextleve`, run `378d3b66-da72-4f5c-b5a7-c06c4618db41`, captured 2026-07-29 via ScrapingDog. The stored ALLOWED homepage supports one review-only `CLUB` profile and one ongoing `RENTAL` link-out for Next Level Sports Center at 156 Railroad Street, Huntington NY, with two regulation courts, a half-court training area, basketball clinics, events, and court rentals for groups. Court-rental, clinic, birthday-event, contact, and other detail pages are `UNCHECKED`; no availability, prices, dates, or packages are inferred. The stored first-party Next Level Sports Center logo was normalized to an opaque 1024px PNG. Local key `new-york-new-york-metropolitan-area-indoor-basketball-court-huntington-long-island-new-york-nextleve` owns `affiliate_org_next_level_sports_center` and `affiliate_mapping_next_level_sports_center_v1`; weekly cadence is configured, automatic scraping is disabled, and mapping validation remains human-gated. Run locally with `npm run affiliate:setup:next-level-sports-center -- --scrape`.
 - 2026-07-31: PowerZone Volleyball Court Rental was implemented from live intake `new-york-new-york-metropolitan-area-court-rental-powerzonevb-com`, run `413e1a7b-678f-4a2b-bcd9-a4f8669c6832`, captured 2026-07-29 via ScrapingDog. The stored ALLOWED Court Rental page supports one review-only `CLUB` profile and one ongoing `RENTAL` link-out for PowerZone Volleyball, describing six indoor volleyball courts, a 30,000-square-foot Olympic Taraflex floor, team/group rentals, limited-schedule pickleball, and special-event hosting. The stored page does not publish a canonical street address; homepage, booking, pickleball, rules, tournament, and other detail pages are `UNCHECKED`. Only a favicon-level PowerZone branding candidate is stored, so logo disposition is `MANUAL_REVIEW`. Local key `new-york-new-york-metropolitan-area-court-rental-powerzonevb-com` owns `affiliate_org_powerzone_volleyball` and `affiliate_mapping_powerzone_volleyball_court_rental_v1`; weekly cadence is configured, automatic scraping is disabled, and mapping validation remains human-gated. Run locally with `npm run affiliate:setup:powerzone-volleyball-court-rental -- --scrape`.
 - 2026-07-31: Albion Hurricanes FC was implemented from live intake `houston-texas-metropolitan-area-albion-hurricanes-fc-youth-soccer-club-in-houston-tx-albionhurricane`, run `0486a3b6-7a79-4f15-afd2-7893e798cb78`, captured 2026-07-31 via ScrapingDog. The stored ALLOWED homepage supports one review-only ongoing `CLUB` profile for boys and girls ages 6-19 across recreational, competitive, and elite soccer pathways, with free registration, year-round training, college-bound support, and multiple Greater Houston locations. Past and unchecked event, rental, facility, and team rows remain withheld. The stored first-party AHFC crest was normalized to an opaque 1024px PNG. Local key `albion-hurricanes-fc` owns `affiliate_org_albion_hurricanes_fc` and `affiliate_mapping_albion_hurricanes_fc_v1`; weekly cadence is configured, automatic scraping is disabled, and mapping validation remains human-gated. Run with `npm run affiliate:setup:albion-hurricanes-fc -- --scrape` for local review or add `--live` through the guarded approved-package application path.
+## Current sport-evidence review authority (2026-08-10)
+
+The registry's source notes remain historical provenance and must not be
+treated as a substitute for the claim-time catalog. New mapping claims export
+one live `Sports` snapshot and exact intake/run before a mapper inspects
+evidence. The compact `sourceEvidence` metadata stores the catalog hash; the
+full snapshot remains in the manifest/context. Discovery `sportHints`,
+campaign metadata, organization names, URL tokens, bare generic family words,
+`DEFAULT_SPORTS`, and the former two-argument validator are not canonical
+authority.
+
+The mapping-review panel must show each persisted v2 `sportDetermination`:
+exact source labels, status, rationale, canonical names when resolved,
+artifact hash/kind, excerpt or screenshot observation, page URL, and an
+authenticated stored-artifact link. Load the claim and current catalog hashes
+once per list request and mark stale rows as system-owned. A stale row offers
+`REFRESH_CATALOG`/requeue, not an inferred sport. An administrator may submit
+an authenticated, rationale-bearing, catalog-hash-bound choice for every
+unresolved/unsupported determination, or confirm an all-blacklisted exclusion
+set. The server derives source labels and determination hashes from persisted
+evidence; clients cannot forge them. Human selections are consumed one-to-one
+by the next successful mapping completion and remain auditable with prior
+envelopes.
+
+Use this evidence matrix when reviewing labels (it is not a keyword
+substitution map):
+
+| Stored first-party evidence | Governed outcome |
+|---|---|
+| expressly outdoor/grass/field soccer | `Grass Soccer` |
+| expressly indoor/arena/boarded soccer | `Indoor Soccer` |
+| futsal rules or futsal court | `Futsal` |
+| sand/beach soccer | `Beach Soccer` |
+| only `Soccer`, no surface evidence | `SPORT_VARIANT_UNRESOLVED` |
+| indoor/gym/hard-court volleyball | `Indoor Volleyball` |
+| sand/beach volleyball | `Beach Volleyball` |
+| grass/outdoor-field volleyball | `Grass Volleyball` |
+| only `Volleyball`, no surface evidence | `SPORT_VARIANT_UNRESOLVED` |
+| evidenced family absent from current catalog | `SPORT_NOT_IN_CATALOG` |
+| exact blacklist-policy activity | `BLACKLISTED`, excluded |
+
+Schema-v1 result records remain parse-only history. A review-ready package is
+not approval; live application exists only inside validated v2 approval
+completion. Reconciliation is dry-run-first, expected-count/selection-hash
+guarded, and idempotent. Before requeue or restart, stop and preflight every
+mapper, reviewer, coverage, and separate model-controller writer.
+
+Revision note (2026-08-10): Added evidence display, authenticated human sport
+actions, v2 approval and application boundaries, reconciliation, and
+stopped-fleet guidance without rewriting source history.

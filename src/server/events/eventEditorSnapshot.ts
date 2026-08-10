@@ -307,7 +307,7 @@ const loadCreateSourceEvent = async (
         leagueScoringConfig,
       } as any, {
         newEventId: '',
-        newStartDate: asDate(event.start) ?? new Date(),
+        newStartDate: asDate(query.start ?? event.start) ?? new Date(),
         hostId: '',
       });
       event = {
@@ -392,7 +392,7 @@ const emptyEvent = (query: EventEditorBootstrapQuery = {}): Record<string, unkno
   description: '',
   eventType: query.eventType ?? 'EVENT',
   sportIds: query.sportId ? [query.sportId] : [],
-  start: new Date().toISOString(),
+  start: query.start ?? new Date().toISOString(),
   end: null,
   scheduleEndConstraint: null,
   generatedScheduleEnd: null,

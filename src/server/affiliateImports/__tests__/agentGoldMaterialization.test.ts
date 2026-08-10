@@ -8,10 +8,16 @@ import {
   buildAffiliateTrainingValidationSplitAssignments,
   materializeAffiliateMappingGoldExample,
 } from '../agentGoldMaterialization';
-import type { AffiliateMappingJobContext } from '../agentModelClient';
-import type { AffiliateScrapeMapping } from '../types';
+import {
+  type AffiliateMappingJobContextV2,
+} from '../agentModelClient';
+import { buildAffiliateSportsCatalogSnapshot } from '../affiliateSportsCatalog';
 
 describe('affiliate mapping gold materialization', () => {
+  const sportsCatalog = buildAffiliateSportsCatalogSnapshot(
+    [{ id: 'sport_grass_soccer', name: 'Grass Soccer' }],
+    '2026-01-01T00:00:00.000Z',
+  );
   let directory: string;
 
   beforeEach(async () => {
@@ -44,16 +50,21 @@ describe('affiliate mapping gold materialization', () => {
 
   const contextFor = (
     hash: string,
-    policyDisposition: AffiliateMappingJobContext['policyDisposition'] = 'ALLOWED',
-  ): AffiliateMappingJobContext => ({
+    policyDisposition: AffiliateMappingJobContextV2['policyDisposition'] = 'ALLOWED',
+  ): AffiliateMappingJobContextV2 => ({
+    contextContractVersion: 2,
     jobId: 'job_river',
     intakeId: 'intake_river',
     sourceKey: 'river-source',
+    workerId: 'worker_1',
+    claimedAt: '2026-01-01T00:00:00.000Z',
     runId: 'run_river',
     evidenceRunIds: ['run_river'],
+    sportsCatalog,
     policyDisposition,
     targetKindHints: ['EVENT'],
     artifacts: [{
+      artifactId: 'artifact_river',
       kind: policyDisposition === 'BLOCKED' ? 'POLICY_NOTE' : 'PAGE_HTML',
       sha256: hash,
       pageUrl: 'https://river.example/events',
@@ -61,7 +72,7 @@ describe('affiliate mapping gold materialization', () => {
       intakeId: 'intake_river',
       runId: 'run_river',
     }],
-    instructionsRevision: 'affiliate-source-mapping-contract-v1',
+    instructionsRevision: 'affiliate-source-mapping-contract-v2',
   });
 
   const mappingFor = (startsAt: string): AffiliateScrapeMapping => ({

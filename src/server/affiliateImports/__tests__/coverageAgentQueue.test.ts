@@ -18,7 +18,7 @@ const database = (overrides: Record<string, any> = {}) => ({
     findFirst: jest.fn(),
     findMany: jest.fn().mockResolvedValue([]),
     create: jest.fn(),
-    updateMany: jest.fn(),
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     update: jest.fn(),
   },
   campaigns: {
@@ -347,6 +347,7 @@ describe('affiliate coverage agent queue', () => {
       subjectType: 'MARKET_COVERAGE',
       status: 'CLAIMED',
       workerId: 'coverage-1',
+      claimedAt: now,
       leaseExpiresAt: new Date('2026-08-03T18:30:00.000Z'),
       context: { campaignId: 'market_1' },
     };
@@ -374,6 +375,7 @@ describe('affiliate coverage agent queue', () => {
       schemaVersion: 1 as const,
       jobId: 'coverage_job',
       agentId: 'coverage-1',
+      claimGeneration: { jobId: 'coverage_job', agentId: 'coverage-1', claimedAt: now.toISOString() },
       name: 'San Francisco Volleyball Tournament Operators',
       region: 'San Francisco Bay Area, California',
       location: 'San Francisco, California',
@@ -417,6 +419,7 @@ describe('affiliate coverage agent queue', () => {
       subjectType: 'FAILED_INTAKE_CAPTURE',
       status: 'CLAIMED',
       workerId: 'coverage-1',
+      claimedAt: now,
       leaseExpiresAt: new Date('2026-08-03T18:30:00.000Z'),
       context: { intakeId: 'intake_1', runId: 'failed_run' },
     };
@@ -449,7 +452,7 @@ describe('affiliate coverage agent queue', () => {
     const result = await storeAffiliateManualBrowserEvidence({
       jobId: 'repair_job',
       agentId: 'coverage-1',
-      pageId: 'page_1',
+      claimGeneration: { jobId: 'repair_job', agentId: 'coverage-1', claimedAt: now.toISOString() },
       sourceUrl: 'https://www.official.example/programs',
       finalUrl: 'https://www.official.example/programs',
       html,
@@ -485,12 +488,14 @@ describe('affiliate coverage agent queue', () => {
       status: 'CLAIMED',
       workerId: 'coverage-1',
       leaseExpiresAt: new Date('2026-08-03T18:30:00.000Z'),
+      claimedAt: now,
     });
 
     await expect(completeAffiliateCoverageJob({
       schemaVersion: 1,
       jobId: 'job_1',
       agentId: 'coverage-1',
+      claimGeneration: { jobId: 'job_1', agentId: 'coverage-1', claimedAt: now.toISOString() },
       decision: 'COVERED',
       summary: 'The market appears complete.',
       campaignIds: [],
@@ -529,6 +534,7 @@ describe('affiliate coverage agent queue', () => {
       schemaVersion: 1,
       jobId: 'job_1',
       agentId: 'coverage-1',
+      claimGeneration: { jobId: 'job_1', agentId: 'coverage-1', claimedAt: now.toISOString() },
       decision: 'CAMPAIGNS_CREATED',
       summary: 'Created and ran a focused tournament operator campaign.',
       campaignIds: ['campaign_1'],
@@ -536,8 +542,8 @@ describe('affiliate coverage agent queue', () => {
       reasonCodes: [],
     }, { database: db as any, now: () => now });
 
-    expect(db.jobs.update).toHaveBeenCalledWith({
-      where: { id: 'job_1' },
+    expect(db.jobs.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'job_1', status: 'CLAIMED', workerId: 'coverage-1' }),
       data: expect.objectContaining({
         status: 'QUEUED',
         claimedAt: null,
@@ -545,7 +551,7 @@ describe('affiliate coverage agent queue', () => {
         leaseExpiresAt: null,
         finishedAt: null,
       }),
-    });
+    }));
   });
 
   it('does not return a market job to the queue while its latest campaign run is active', async () => {
@@ -571,6 +577,7 @@ describe('affiliate coverage agent queue', () => {
       schemaVersion: 1,
       jobId: 'job_1',
       agentId: 'coverage-1',
+      claimGeneration: { jobId: 'job_1', agentId: 'coverage-1', claimedAt: now.toISOString() },
       decision: 'CAMPAIGNS_CREATED',
       summary: 'The focused campaign was created and is still queued.',
       campaignIds: ['campaign_1'],
@@ -599,6 +606,7 @@ describe('affiliate coverage agent queue', () => {
       schemaVersion: 1,
       jobId: 'capture_job',
       agentId: 'coverage-1',
+      claimGeneration: { jobId: 'capture_job', agentId: 'coverage-1', claimedAt: now.toISOString() },
       decision: 'MAPPER_REPAIR_REQUIRED',
       summary: 'The official page renders, but the approved source selectors no longer match it.',
       campaignIds: [],
@@ -627,7 +635,8 @@ describe('affiliate coverage agent queue', () => {
       where: { id: 'intake_1' },
       data: { status: 'READY_FOR_MAPPING' },
     });
-    expect(db.jobs.update).toHaveBeenCalledWith(expect.objectContaining({
+    expect(db.jobs.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'capture_job', status: 'CLAIMED', workerId: 'coverage-1' }),
       data: expect.objectContaining({
         result: expect.objectContaining({ repairMappingJobId: 'mapping_repair_1' }),
       }),
@@ -667,6 +676,7 @@ describe('affiliate coverage agent queue', () => {
       schemaVersion: 1,
       jobId: 'job_1',
       agentId: 'coverage-1',
+      claimGeneration: { jobId: 'job_1', agentId: 'coverage-1', claimedAt: now.toISOString() },
       decision: 'COVERED',
       summary: 'Focused operator searches are complete and no unresolved leads remain.',
       campaignIds: [],
@@ -680,10 +690,10 @@ describe('affiliate coverage agent queue', () => {
       reasonCodes: [],
     }, { database: db as any, now: () => now });
 
-    expect(db.jobs.update).toHaveBeenCalledWith({
-      where: { id: 'job_1' },
+    expect(db.jobs.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'job_1', status: 'CLAIMED', workerId: 'coverage-1' }),
       data: expect.objectContaining({ status: 'COMPLETED', finishedAt: now }),
-    });
+    }));
   });
 
   it('schedules a bounded transient retry and excludes an exhausted retry', async () => {
@@ -703,13 +713,14 @@ describe('affiliate coverage agent queue', () => {
       schemaVersion: 1,
       jobId: 'capture_job',
       agentId: 'coverage-1',
+      claimGeneration: { jobId: 'capture_job', agentId: 'coverage-1', claimedAt: now.toISOString() },
       decision: 'RETRY_LATER',
       summary: 'A transient TLS failure prevented the bounded public capture.',
       campaignIds: [],
       coverageEvidence: null,
       reasonCodes: ['TLS_ERROR'],
     }, { database: db as any, now: () => now });
-    expect(db.jobs.update).toHaveBeenLastCalledWith(expect.objectContaining({
+    expect(db.jobs.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         status: 'RETRY_SCHEDULED',
         result: expect.objectContaining({ retryAt: '2026-08-03T17:00:00.000Z' }),
@@ -723,13 +734,14 @@ describe('affiliate coverage agent queue', () => {
       schemaVersion: 1,
       jobId: 'capture_job',
       agentId: 'coverage-1',
+      claimGeneration: { jobId: 'capture_job', agentId: 'coverage-1', claimedAt: now.toISOString() },
       decision: 'RETRY_LATER',
       summary: 'The public endpoint still returns a transient network error.',
       campaignIds: [],
       coverageEvidence: null,
       reasonCodes: ['NETWORK_ERROR'],
     }, { database: db as any, now: () => now });
-    expect(db.jobs.update).toHaveBeenLastCalledWith(expect.objectContaining({
+    expect(db.jobs.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         status: 'EXCLUDED',
         result: expect.objectContaining({
@@ -747,6 +759,7 @@ describe('affiliate coverage agent queue', () => {
       id: 'capture_job',
       subjectType: 'FAILED_INTAKE_CAPTURE',
       status: 'CLAIMED',
+      claimedAt: now,
       workerId: 'coverage-1',
       leaseExpiresAt: new Date('2026-08-03T18:30:00.000Z'),
     });
@@ -754,6 +767,7 @@ describe('affiliate coverage agent queue', () => {
       schemaVersion: 1,
       jobId: 'capture_job',
       agentId: 'coverage-1',
+      claimGeneration: { jobId: 'capture_job', agentId: 'coverage-1', claimedAt: now.toISOString() },
       decision: 'HUMAN_REVIEW_REQUIRED',
       summary: 'The website returned an inconclusive public access response.',
       campaignIds: [],
@@ -762,5 +776,63 @@ describe('affiliate coverage agent queue', () => {
     }, { database: db as any, now: () => now })).rejects.toThrow(
       'HUMAN_REVIEW_REQUIRED requires conflicting identity',
     );
+  });
+  it('rejects a stale same-agent completion generation before queue writes', async () => {
+    const db = database();
+    db.jobs.findUnique.mockResolvedValue({
+      id: 'capture_job',
+      subjectType: 'FAILED_INTAKE_CAPTURE',
+      status: 'CLAIMED',
+      claimedAt: new Date('2026-08-03T16:31:00.000Z'),
+      workerId: 'coverage-1',
+      leaseExpiresAt: new Date('2026-08-03T18:30:00.000Z'),
+    });
+    await expect(completeAffiliateCoverageJob({
+      schemaVersion: 1,
+      jobId: 'capture_job',
+      agentId: 'coverage-1',
+      claimGeneration: { jobId: 'capture_job', agentId: 'coverage-1', claimedAt: now.toISOString() },
+      decision: 'RETRY_LATER',
+      summary: 'A transient TLS failure prevented the bounded public capture.',
+      campaignIds: [],
+      coverageEvidence: null,
+      reasonCodes: ['TLS_ERROR'],
+    }, { database: db as any, now: () => now })).rejects.toThrow('stale');
+    expect(db.jobs.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('does not repair a mapper job while another mapper still owns its lease', async () => {
+    const db = database();
+    db.jobs.findUnique.mockResolvedValue({
+      id: 'capture_job',
+      subjectType: 'FAILED_INTAKE_CAPTURE',
+      status: 'CLAIMED',
+      claimedAt: now,
+      workerId: 'coverage-1',
+      leaseExpiresAt: new Date('2026-08-03T18:30:00.000Z'),
+      context: { intakeId: 'intake_1' },
+    });
+    db.mappingJobs.findFirst.mockResolvedValue({
+      id: 'mapping_job',
+      intakeId: 'intake_1',
+      status: 'CLAIMED',
+      workerId: 'mapper-1',
+      claimedAt: now,
+      leaseExpiresAt: new Date('2026-08-03T18:31:00.000Z'),
+      resultSummary: {},
+    });
+    await expect(completeAffiliateCoverageJob({
+      schemaVersion: 1,
+      jobId: 'capture_job',
+      agentId: 'coverage-1',
+      claimGeneration: { jobId: 'capture_job', agentId: 'coverage-1', claimedAt: now.toISOString() },
+      decision: 'MAPPER_REPAIR_REQUIRED',
+      summary: 'The approved source selectors no longer match the captured page.',
+      campaignIds: [],
+      coverageEvidence: null,
+      reasonCodes: ['SELECTOR_DRIFT'],
+    }, { database: db as any, now: () => now })).rejects.toThrow('already claimed');
+    expect(db.mappingJobs.update).not.toHaveBeenCalled();
+    expect(db.intakes.update).not.toHaveBeenCalled();
   });
 });

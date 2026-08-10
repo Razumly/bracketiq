@@ -18,6 +18,13 @@ import {
   type EditorSnapshotClient,
 } from './eventEditorSnapshot';
 import { editorDraftToLegacyEvent } from '@/app/events/[id]/schedule/components/eventForm/editorContractAdapters';
+import {
+  claimEventEditorCreateOperation,
+  completeEventEditorCreateOperation,
+  eventEditorCreateRequestHash,
+  waitForEventEditorCreateOperation,
+  type EventCreateOperationClaim,
+} from './eventCreateOperationReplay';
 import { resolveMatchTimingPolicy } from '@/server/scheduler/matchTimingPolicy';
 import {
   type CreateEventEditorCommand,
@@ -73,6 +80,7 @@ export class EditorCapabilityError extends Error {
 export type EditorSaveOptions = {
   client?: EditorSnapshotClient;
   sendStaffInvites?: (candidates: unknown[], eventId: string) => Promise<'NOT_REQUESTED' | 'QUEUED' | 'FAILED'>;
+  onEventCreated?: (eventId: string, draft: EventEditorDraft) => Promise<void>;
 };
 
 type QuestionRow = {
@@ -333,10 +341,22 @@ export const createEventEditor = async (
   options: EditorSaveOptions = {},
 ): Promise<EventEditorSaveResult> => {
   const client = options.client ?? prisma;
-  const eventId = createId();
-  let emailCandidates: unknown[] = [];
+  const requestHash = eventEditorCreateRequestHash(command);
+  let claim: EventCreateOperationClaim | null = null;
+  let firstClaimResult: EventEditorSaveResult | null = null;
   let questionIdMap: Record<string, string> = {};
+  let emailCandidates: unknown[] = [];
+
   await client.$transaction(async (tx: Prisma.TransactionClient) => {
+    const claimed = await claimEventEditorCreateOperation({
+      client: tx,
+      createOperationId: command.createOperationId,
+      actorUserId: actor.userId,
+      requestHash,
+    });
+    claim = claimed;
+    if (!claimed.firstClaim) return;
+
     const organizationId = draftOrganizationId(command.draft);
     const requestedHostId = command.draft.basics.hostId;
     if (!actor.isAdmin && requestedHostId && requestedHostId !== actor.userId) {
@@ -365,16 +385,83 @@ export const createEventEditor = async (
       parentEventId: command.draft.basics.parentEvent ?? undefined,
       templateId: command.draft.resources.requiredTemplateIds[0],
       rentalBookingId: command.draft.resources.rentalBookingId ?? undefined,
+      start: command.draft.basics.start,
     };
     const createSnapshot = await loadCreateEventEditorSnapshot(createQuery, { actor, client: tx });
-    ({ questionIdMap, emailCandidates } = await saveWithinTransaction(tx, actor, command.draft, eventId, createSnapshot));
+    await assertPaymentCapability(command.draft, createSnapshot);
+
+    ({ questionIdMap, emailCandidates } = await saveWithinTransaction(
+      tx,
+      actor,
+      command.draft,
+      claimed.eventId,
+      createSnapshot,
+    ));
+    const snapshot = await loadEventEditorSnapshot(claimed.eventId, { actor, client: tx });
+    firstClaimResult = {
+      status: 'SAVED',
+      snapshot,
+      questionIdMap,
+      staffEmailDelivery: 'NOT_REQUESTED',
+    };
+    // Keep the receipt non-replayable until all post-commit hooks finish.
+    // The canonical domain result is already durable for recovery.
+    await completeEventEditorCreateOperation({
+      client: tx,
+      createOperationId: command.createOperationId,
+      result: firstClaimResult,
+      emailDelivery: 'PROCESSING',
+    });
   });
+
+  const operationClaim: EventCreateOperationClaim | null = claim as EventCreateOperationClaim | null;
+  if (!operationClaim) throw new Error('The event create operation was not claimed.');
+  if (operationClaim.firstClaim === false) {
+    const replay = operationClaim.result
+      ? operationClaim
+      : await waitForEventEditorCreateOperation({
+        client,
+        createOperationId: command.createOperationId,
+        actorUserId: actor.userId,
+        requestHash,
+        returnCommittedResultOnTimeout: true,
+      });
+    if (!replay.result) throw new Error('The event create operation has no stored result.');
+    return replay.result;
+  }
+  const canonicalResult: EventEditorSaveResult | null = firstClaimResult as EventEditorSaveResult | null;
+  if (!canonicalResult) throw new Error('The event create operation has no canonical result.');
+
   let staffEmailDelivery: EventEditorSaveResult['staffEmailDelivery'] = 'NOT_REQUESTED';
   if (emailCandidates.length && options.sendStaffInvites) {
-    staffEmailDelivery = await options.sendStaffInvites(emailCandidates, eventId);
+    try {
+      staffEmailDelivery = await options.sendStaffInvites(emailCandidates, operationClaim.eventId);
+    } catch (error) {
+      staffEmailDelivery = 'FAILED';
+      console.error('[event-editor] staff invite delivery failed after create', error);
+    }
   }
-  const snapshot = await loadEventEditorSnapshot(eventId, { actor, client });
-  return { status: 'SAVED', snapshot, questionIdMap, staffEmailDelivery };
+  if (options.onEventCreated) {
+    try {
+      await options.onEventCreated(operationClaim.eventId, command.draft);
+    } catch (error) {
+      console.error('[event-editor] create notification failed after commit', error);
+    }
+  }
+  const finalResult = { ...canonicalResult, staffEmailDelivery };
+  try {
+    await completeEventEditorCreateOperation({
+      client,
+      createOperationId: command.createOperationId,
+      result: finalResult,
+      emailDelivery: staffEmailDelivery,
+    });
+  } catch (error) {
+    // The committed canonical result remains replayable if delivery metadata
+    // cannot be updated after the domain transaction.
+    console.error('[event-editor] create delivery metadata update failed', error);
+  }
+  return finalResult;
 };
 export const createEventFromEditor = async (
   command: CreateEventEditorCommand,

@@ -3,6 +3,7 @@ import type { Event, EventOfficial, EventOfficialPosition, Field, TimeSlot } fro
 import type { EventFormValues } from './formTypes';
 import {
   EVENT_EDITOR_CONTRACT_VERSION,
+  projectEventEditorDraftNestedInput,
   type EventEditorDraft,
   type EventEditorSnapshot,
   type RegistrationQuestionInput,
@@ -44,6 +45,7 @@ const objectArray = (value: unknown): Record<string, unknown>[] => (
       .map((entry) => ({ ...entry }))
     : []
 );
+
 
 const asIsoDateTime = (value: unknown, fallback: string): string => {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
@@ -266,7 +268,7 @@ const draftFromRecord = (
       pendingInvites: objectArray(event.pendingStaffInvites ?? event.staffInvites).map(normalizePendingInvite),
     },
   };
-  return draft as unknown as EventEditorDraft;
+  return projectEventEditorDraftNestedInput(draft) as EventEditorDraft;
 };
 
 export const legacyEventToEditorDraft = (event: Event, questions?: unknown): EventEditorDraft => (

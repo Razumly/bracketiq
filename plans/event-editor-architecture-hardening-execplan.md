@@ -25,8 +25,11 @@ The result is visible in these workflows: open an existing event and save no cha
 - [x] (2026-08-09) Focused editor, contract, API, and scheduler suites pass: 356 tests across 15 suites. `npx tsc --noEmit` passes. Targeted ESLint reports zero errors in milestone files and seven pre-existing warnings.
 - [x] (2026-08-09) `npm run test:ci` passes, including route coverage (320 API files; 65.61% statements against a 64% floor). Prisma validation also passed earlier in this run. Full repository lint remains non-zero because 23 pre-existing error diagnostics are outside this milestone.
 - [ ] (2026-08-09) Authenticated browser smoke remains blocked: the direct Next page reached successfully, but login/editor bootstrap returned 500 because local Postgres refused connections and Docker was unavailable.
+- [x] (2026-08-09) Added an editor-boundary projection for division details so hydrated form metadata cannot cross the strict save command; regression coverage now parses league and playoff division payloads with those fields present.
 
 ## Surprises & Discoveries
+- Observation: `DivisionDetailForm` includes hydrated `skillDivisionTypeName`, `ageDivisionTypeName`, and `sportId` values that are not part of the strict editor command.
+  Evidence: The form-to-draft adapter previously copied division records unchanged, so any division-enabled create or edit could be rejected as `INVALID_EDITOR_COMMAND` by the strict route schema. The adapter now allowlists the canonical division fields before building the draft.
 
 - Observation: The form has been split into sections and hooks, but the split preserved the previous state and mutation model.
   Evidence: `src/app/events/[id]/schedule/components/EventForm.tsx` is smaller than the historical monolith, but it still subscribes to the complete form with `watch()`, keeps separate Simple Setup choice state, and coordinates many hooks that call `setValue`.

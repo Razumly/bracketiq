@@ -8,7 +8,8 @@ import { AffiliateAgentToolbox } from '../agentTooling';
 const HASH_B = 'b'.repeat(64);
 
 const draftFor = (artifactSha256: string) => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
+  contextContractVersion: 2,
   intakeId: 'intake_1',
   sourceKey: 'river-city',
   runId: 'run_1',
@@ -56,6 +57,20 @@ const draftFor = (artifactSha256: string) => ({
   },
   warnings: [],
   unresolvedQuestions: [],
+  sportDeterminations: [{
+    sourceLabels: ['outdoor soccer'],
+    status: 'RESOLVED',
+    resolutionBasis: 'SOURCE_EVIDENCE',
+    canonicalSportNames: ['Grass Soccer'],
+    rationale: 'Explicit outdoor soccer evidence.',
+    evidence: [{
+      artifactId: 'artifact_events',
+      artifactSha256,
+      artifactKind: 'PAGE_HTML',
+      pageUrl: 'https://rivercity.example/events',
+      excerpt: 'River City Summer League',
+    }],
+  }],
 });
 
 describe('affiliate mapping bounded agent tools', () => {
@@ -99,14 +114,11 @@ describe('affiliate mapping bounded agent tools', () => {
     );
   });
 
-  afterEach(async () => {
-    await fs.rm(temporaryDirectory, { recursive: true, force: true });
-  });
-
   const toolbox = () => new AffiliateAgentToolbox({
     evidenceDirectory,
     repositoryRoot,
     writableRoot,
+    catalogNames: ['Grass Soccer'],
     maxArtifactReadBytes: 16,
   });
 

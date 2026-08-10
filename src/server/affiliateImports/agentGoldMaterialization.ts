@@ -4,7 +4,10 @@ import {
   affiliateMappingGoldExampleSchema,
   type AffiliateMappingGoldExample,
 } from './agentGoldDataset';
-import type { AffiliateMappingJobContext } from './agentModelClient';
+import {
+  isAffiliateMappingJobContextV2,
+  type AffiliateMappingJobContext,
+} from './agentModelClient';
 import { AffiliateAgentReviewFixtureClient } from './agentReviewFixtureClient';
 import { extractAffiliateCandidatesFromPage } from './mappingExtractor';
 import {
@@ -23,7 +26,7 @@ import type {
   AffiliateDateDisplayMode,
   AffiliateScrapeMapping,
 } from './types';
-import { validateAffiliateAgentSportName } from './affiliateSportMapping';
+import { assertAffiliateSourceDraftSports, validateAffiliateAgentSportName } from './affiliateSportMapping';
 
 export type AffiliateGoldScenarioIntent =
   | 'EXECUTABLE_MAPPING'
@@ -479,11 +482,47 @@ const draftFor = (input: {
   expectedCandidates: AffiliateCandidateAssertion[];
   warnings: string[];
 }): AffiliateSourceDraft => {
-  const { materialization, implementationMode, mapping, expectedCandidates, warnings } = input;
+  const {
+    materialization,
+    implementationMode,
+    mapping,
+    expectedCandidates,
+    warnings,
+  } = input;
   const executable = implementationMode === 'GENERIC_MAPPING'
     || implementationMode === 'MANUAL_CANDIDATES';
+  const evidenceArtifact = materialization.context.artifacts.find((artifact) => (
+    ['PAGE_HTML', 'PAGE_MARKDOWN', 'PAGE_SCREENSHOT'].includes(artifact.kind)
+  )) ?? materialization.context.artifacts[0];
+  const sportNames = Array.from(new Set(expectedCandidates.flatMap((candidate) => [
+    ...(candidate.sportNames ?? []),
+    ...(candidate.sportName ? [candidate.sportName] : []),
+  ]))).sort();
+  const sportDeterminations = executable && evidenceArtifact
+    ? sportNames.map((sportName) => ({
+        sourceLabels: [sportName],
+        status: 'RESOLVED' as const,
+        resolutionBasis: 'SOURCE_EVIDENCE' as const,
+        canonicalSportNames: [sportName],
+        rationale: 'Gold materialization retained a catalog-validated candidate sport.',
+        evidence: [{
+          artifactId: evidenceArtifact.artifactId ?? evidenceArtifact.sha256,
+          artifactSha256: evidenceArtifact.sha256,
+          artifactKind: (
+            evidenceArtifact.kind === 'PAGE_SCREENSHOT'
+              ? 'PAGE_SCREENSHOT'
+              : evidenceArtifact.kind === 'PAGE_HTML'
+                ? 'PAGE_HTML'
+                : 'PAGE_MARKDOWN'
+          ) as 'PAGE_HTML' | 'PAGE_MARKDOWN' | 'PAGE_SCREENSHOT',
+          pageUrl: evidenceArtifact.pageUrl,
+          excerpt: sportName,
+        }],
+      }))
+    : [];
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    contextContractVersion: 2,
     intakeId: materialization.context.intakeId,
     sourceKey: materialization.context.sourceKey,
     runId: materialization.context.runId,
@@ -511,9 +550,9 @@ const draftFor = (input: {
     unresolvedQuestions: executable
       ? []
       : ['Human review is required before this source can produce persisted candidates.'],
+    sportDeterminations,
   };
 };
-
 export const materializeAffiliateMappingGoldExample = async (
   input: AffiliateGoldMaterializationInput,
 ): Promise<AffiliateGoldMaterializationResult> => {
@@ -584,10 +623,6 @@ export const materializeAffiliateMappingGoldExample = async (
           const supportedManualCandidates = input.mapping.manualCandidates.filter(
             (_candidate, index) => supportedSourceIndexes.has(index),
           );
-          approvedMapping = {
-            ...input.mapping,
-            manualCandidates: supportedManualCandidates,
-          };
           const removedCount = input.mapping.manualCandidates.length
             - supportedManualCandidates.length;
           if (removedCount > 0) {
@@ -595,6 +630,10 @@ export const materializeAffiliateMappingGoldExample = async (
               `Pruned ${removedCount} stale or unsupported manual candidate(s) from the approved mapping.`,
             );
           }
+          approvedMapping = {
+            ...input.mapping,
+            manualCandidates: supportedManualCandidates,
+          };
         }
         evidenceSupportedCandidateCount = supported.length;
         expectedCandidates = Array.from(new Map(
@@ -620,6 +659,11 @@ export const materializeAffiliateMappingGoldExample = async (
     }
   }
 
+  const v2Context = isAffiliateMappingJobContextV2(input.context) ? input.context : null;
+  const catalogNames = v2Context?.sportsCatalog.sports.map((sport) => sport.name) ?? [];
+  if (!v2Context) {
+    throw new Error('Gold materialization requires a v2 context with a catalog snapshot.');
+  }
   const sportIssues = expectedCandidates.flatMap((candidate, index) => {
     const values = [
       ...(candidate.sportNames ?? []),
@@ -629,6 +673,7 @@ export const materializeAffiliateMappingGoldExample = async (
       const issue = validateAffiliateAgentSportName(
         sportName,
         `expectedCandidates.${index}.${candidate.sportNames?.length ? 'sportNames' : 'sportName'}.${sportIndex}`,
+        catalogNames,
       );
       return issue ? [issue] : [];
     });

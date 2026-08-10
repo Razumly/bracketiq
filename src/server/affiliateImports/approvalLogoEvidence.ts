@@ -6,7 +6,7 @@ import { deriveAffiliateHtmlArtifacts } from './affiliateHtmlArtifacts';
 import type { AffiliateSourceCaptureClient } from './affiliateProviderContracts';
 import { createAffiliateSourceCaptureClient } from './affiliateProviderFactory';
 import { codexAffiliateIngestionResultSchema } from './codexIngestionResult';
-import { persistAffiliateSourceIntakeArtifact } from './sourceIntakeArtifacts';
+import type { AffiliateApprovalClaimGeneration } from './approvalResult';
 import { evaluateRobotsPath } from './sourceIntakeRobots';
 import {
   affiliateIntakeUrlKey,
@@ -15,6 +15,7 @@ import {
   fetchBoundedPublicResource,
 } from './sourceIntakeUrlSafety';
 import { affiliateDiscoveryPolicyKeyForUrl } from './sourceDiscoveryRules';
+import { persistAffiliateSourceIntakeArtifact } from './sourceIntakeArtifacts';
 
 const MAX_LOGO_BYTES = 3 * 1024 * 1024;
 const MAX_ROBOTS_BYTES = 4 * 1024 * 1024;
@@ -31,14 +32,13 @@ const stringValue = (value: unknown): string | null => (
 
 const jsonBuffer = (value: unknown): Buffer => Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
 
-const db = () => ({
-  approvals: (prisma as any).affiliateApprovalJobs,
-  mappingJobs: (prisma as any).affiliateSourceMappingJobs,
-  intakes: (prisma as any).affiliateSourceIntakes,
-  pages: (prisma as any).affiliateSourceIntakePages,
-  runs: (prisma as any).affiliateSourceIntakeRuns,
+const db = (client: any = prisma) => ({
+  approvals: client.affiliateApprovalJobs,
+  mappingJobs: client.affiliateSourceMappingJobs,
+  intakes: client.affiliateSourceIntakes,
+  pages: client.affiliateSourceIntakePages,
+  runs: client.affiliateSourceIntakeRuns,
 });
-
 const resolvePageReference = (value: string, baseUrl: string): string | null => {
   const trimmed = value.trim().replace(/^['"]|['"]$/g, '');
   if (!trimmed || trimmed.startsWith('data:') || trimmed.startsWith('javascript:')) return null;
@@ -82,18 +82,19 @@ export type CaptureAffiliateApprovalLogoEvidenceInput = {
   approvalJobId: string;
   mappingJobId: string;
   reviewerId: string;
+  claimGeneration: AffiliateApprovalClaimGeneration;
   pageUrl: string;
   logoUrl: string;
 };
 
 export type AffiliateApprovalLogoEvidenceDependencies = {
+  db?: unknown;
   captureClient?: AffiliateSourceCaptureClient;
   fetchResource?: typeof fetchBoundedPublicResource;
   assertSafeUrl?: typeof assertSafePublicUrl;
   persistArtifact?: typeof persistAffiliateSourceIntakeArtifact;
   now?: () => Date;
 };
-
 export const captureAffiliateApprovalLogoEvidence = async (
   input: CaptureAffiliateApprovalLogoEvidenceInput,
   dependencies: AffiliateApprovalLogoEvidenceDependencies = {},
@@ -106,18 +107,46 @@ export const captureAffiliateApprovalLogoEvidence = async (
   if (!approvalJobId || !mappingJobId || !reviewerId) {
     throw new Error('Approval job, mapping job, and reviewer id are required.');
   }
-  const { approvals, mappingJobs, intakes, pages, runs } = db();
+  if (!input.claimGeneration) {
+    throw new Error('Approval claim generation is required for supplemental evidence.');
+  }
+  const { approvals, mappingJobs, intakes, pages, runs } = db(dependencies.db);
   const [approval, mappingJob] = await Promise.all([
     approvals.findUnique({ where: { id: approvalJobId } }),
     mappingJobs.findUnique({ where: { id: mappingJobId } }),
   ]);
+  const now = dependencies.now?.() ?? new Date();
+  const claimedAt = approval?.claimedAt instanceof Date
+    ? approval.claimedAt.getTime()
+    : new Date(approval?.claimedAt ?? 0).getTime();
+  const requestedClaimedAt = new Date(input.claimGeneration.claimedAt).getTime();
+  const leaseExpiresAt = approval?.leaseExpiresAt instanceof Date
+    ? approval.leaseExpiresAt.getTime()
+    : new Date(approval?.leaseExpiresAt ?? 0).getTime();
   if (!approval
     || approval.subjectType !== 'MAPPING_PACKAGE'
     || approval.subjectKey !== mappingJobId
     || approval.status !== 'CLAIMED'
-    || approval.reviewerId !== reviewerId) {
+    || approval.reviewerId !== reviewerId
+    || approval.id !== input.claimGeneration.approvalJobId
+    || input.claimGeneration.reviewerId !== reviewerId
+    || !Number.isFinite(claimedAt)
+    || claimedAt !== requestedClaimedAt
+    || !Number.isFinite(leaseExpiresAt)
+    || leaseExpiresAt < now.getTime()) {
     throw new Error('The reviewer does not own an active approval claim for this mapping package.');
   }
+  const extended = await approvals.updateMany({
+    where: {
+      id: approvalJobId,
+      status: 'CLAIMED',
+      reviewerId,
+      claimedAt: approval.claimedAt,
+      leaseExpiresAt: { gte: now },
+    },
+    data: { leaseExpiresAt: new Date(now.getTime() + 2 * 60 * 60 * 1000) },
+  });
+  if (extended.count !== 1) throw new Error('STALE_APPROVAL_CLAIM: supplemental evidence ownership changed.');
   if (!mappingJob) throw new Error('Affiliate source mapping job not found.');
   const envelope = recordValue(mappingJob.resultSummary);
   const result = codexAffiliateIngestionResultSchema.parse(envelope.result);
@@ -161,12 +190,11 @@ export const captureAffiliateApprovalLogoEvidence = async (
         targetKindHints: [],
         status: 'ACTIVE',
         discoverySource: 'APPROVAL_REVIEW',
-        metadata: { approvalJobId, mappingJobId, reviewerId },
+        metadata: { approvalJobId, mappingJobId, reviewerId, claimGeneration: input.claimGeneration },
       },
     });
   }
 
-  const now = dependencies.now?.() ?? new Date();
   const runId = createId();
   const captureClient = dependencies.captureClient ?? createAffiliateSourceCaptureClient('SCRAPINGDOG');
   const fetchResource = dependencies.fetchResource ?? fetchBoundedPublicResource;
@@ -189,10 +217,11 @@ export const captureAffiliateApprovalLogoEvidence = async (
         approvalJobId,
         mappingJobId,
         reviewerId,
+        claimGeneration: input.claimGeneration,
         priorRunId: intake.lastRunId ?? null,
       },
-    },
-  });
+      },
+    });
 
   try {
     const robotsUrl = new URL('/robots.txt', pageUrl).toString();
@@ -212,7 +241,7 @@ export const captureAffiliateApprovalLogoEvidence = async (
       provider: 'DIRECT',
       httpStatus: robots.statusCode,
       mimeType: robots.contentType ?? 'text/plain',
-      metadata: { approvalJobId, mappingJobId, reviewerId },
+      metadata: { approvalJobId, mappingJobId, reviewerId, claimGeneration: input.claimGeneration },
       now,
     });
     await pages.update({
@@ -251,6 +280,7 @@ export const captureAffiliateApprovalLogoEvidence = async (
       approvalJobId,
       mappingJobId,
       reviewerId,
+      claimGeneration: input.claimGeneration,
       renderMode: capture.renderMode,
       elapsedMs: capture.elapsedMs,
       estimatedCredits: capture.estimatedCredits,
@@ -347,26 +377,66 @@ export const captureAffiliateApprovalLogoEvidence = async (
       now,
     });
     const finishedAt = dependencies.now?.() ?? new Date();
-    await runs.update({
-      where: { id: runId },
-      data: {
-        status: 'SUCCEEDED',
-        finishedAt,
-        providerJobIds: capture.providerJobId ? [capture.providerJobId] : [],
-        capturedPageCount: 1,
-        summary: {
-          purpose: 'SUPPLEMENTAL_OFFICIAL_LOGO_EVIDENCE',
-          approvalJobId,
-          mappingJobId,
+    const client = (dependencies.db ?? prisma) as any;
+    await client.$transaction(async (transaction: any) => {
+      const transactionDb = db(transaction);
+      const currentApproval = await transactionDb.approvals.findUnique({ where: { id: approvalJobId } });
+      const currentClaimedAt = currentApproval?.claimedAt instanceof Date
+        ? currentApproval.claimedAt.getTime()
+        : new Date(currentApproval?.claimedAt ?? 0).getTime();
+      const currentLease = currentApproval?.leaseExpiresAt instanceof Date
+        ? currentApproval.leaseExpiresAt.getTime()
+        : new Date(currentApproval?.leaseExpiresAt ?? 0).getTime();
+      if (!currentApproval
+        || currentApproval.status !== 'CLAIMED'
+        || currentApproval.reviewerId !== reviewerId
+        || currentClaimedAt !== requestedClaimedAt
+        || currentLease < finishedAt.getTime()) {
+        await transactionDb.runs.update({
+          where: { id: runId },
+          data: { status: 'FAILED', finishedAt, errorMessage: 'STALE_APPROVAL_CLAIM' },
+        });
+        throw new Error('STALE_APPROVAL_CLAIM: approval ownership changed during capture.');
+      }
+      const finalClaim = await transactionDb.approvals.updateMany({
+        where: {
+          id: approvalJobId,
+          status: 'CLAIMED',
           reviewerId,
-          pageUrl,
-          logoUrl,
-          logoArtifactId: logoArtifact?.id ?? null,
-          priorRunId: intake.lastRunId ?? null,
+          claimedAt: currentApproval.claimedAt,
+          leaseExpiresAt: { gte: finishedAt },
         },
-      },
+        data: { leaseExpiresAt: currentApproval.leaseExpiresAt },
+      });
+      if (finalClaim.count !== 1) {
+        await transactionDb.runs.update({
+          where: { id: runId },
+          data: { status: 'FAILED', finishedAt, errorMessage: 'STALE_APPROVAL_CLAIM' },
+        });
+        throw new Error('STALE_APPROVAL_CLAIM: approval ownership changed during capture.');
+      }
+      await transactionDb.runs.update({
+        where: { id: runId },
+        data: {
+          status: 'SUCCEEDED',
+          finishedAt,
+          providerJobIds: capture.providerJobId ? [capture.providerJobId] : [],
+          capturedPageCount: 1,
+          summary: {
+            purpose: 'SUPPLEMENTAL_OFFICIAL_LOGO_EVIDENCE',
+            approvalJobId,
+            mappingJobId,
+            reviewerId,
+            claimGeneration: input.claimGeneration,
+            pageUrl,
+            logoUrl,
+            logoArtifactId: logoArtifact?.id ?? null,
+            priorRunId: intake.lastRunId ?? null,
+          },
+        },
+      });
+      await transactionDb.intakes.update({ where: { id: intake.id }, data: { lastRunId: runId } });
     });
-    await intakes.update({ where: { id: intake.id }, data: { lastRunId: runId } });
     return {
       intakeId: intake.id,
       runId,

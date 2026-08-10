@@ -776,6 +776,21 @@ model MatchOperationReceipts {
   @@index([eventId, matchId])
   @@index([matchId, actorUserId, clientDeviceId, clientSequence])
 }
+// Durable receipts for idempotent event-editor creates. Rows are retained so
+// delayed retries cannot create a second event after the original response is lost.
+model EventEditorCreateOperations {
+  createOperationId String   @id
+  actorUserId       String
+  requestHash       String
+  eventId           String   @unique
+  responseStatus    Int      @default(201)
+  responseJson      Json?
+  emailDelivery     String   @default("NOT_REQUESTED")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([actorUserId, createdAt])
+}
 
 model Divisions {
   id                                  String             @id

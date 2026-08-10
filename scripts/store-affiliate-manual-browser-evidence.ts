@@ -18,6 +18,11 @@ const inputSchema = z.object({
   schemaVersion: z.literal(1),
   jobId: z.string().trim().min(1),
   agentId: z.string().trim().min(1),
+  claimGeneration: z.object({
+    jobId: z.string().trim().min(1),
+    agentId: z.string().trim().min(1),
+    claimedAt: z.string().datetime({ offset: true }),
+  }).strict(),
   pageId: z.string().trim().min(1),
   sourceUrl: z.string().trim().url(),
   finalUrl: z.string().trim().url().nullable().optional(),
@@ -25,8 +30,14 @@ const inputSchema = z.object({
   screenshotPath: z.string().trim().min(1).nullable().optional(),
   screenshotMimeType: z.string().trim().min(1).nullable().optional(),
   notes: z.string().trim().min(10).max(4_000),
+}).superRefine((value, context) => {
+  if (value.claimGeneration.jobId !== value.jobId) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['claimGeneration', 'jobId'], message: 'Claim generation job id must match jobId.' });
+  }
+  if (value.claimGeneration.agentId !== value.agentId) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['claimGeneration', 'agentId'], message: 'Claim generation agent id must match agentId.' });
+  }
 });
-
 const useLive = process.argv.includes('--live');
 if (useLive) {
   configureAffiliateLiveDatabaseEnvironment(process.env.DATABASE_URL_LIVE);
@@ -45,6 +56,7 @@ const main = async () => {
     console.log(JSON.stringify(await storeAffiliateManualBrowserEvidence({
       jobId: parsed.jobId,
       agentId: parsed.agentId,
+      claimGeneration: parsed.claimGeneration,
       pageId: parsed.pageId,
       sourceUrl: parsed.sourceUrl,
       finalUrl: parsed.finalUrl,

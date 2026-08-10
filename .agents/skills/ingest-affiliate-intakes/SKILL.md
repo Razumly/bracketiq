@@ -67,9 +67,11 @@ package already exists, and do not create a duplicate package or training row.
 
 Create or repair everything needed for review:
 
-- an idempotent source setup script and package command that supports the normal
-  guarded `--live` application path; validate it only against the disposable
-  database because the producer goal never authorizes live application;
+- an idempotent source setup script and package command for disposable
+  validation; any live setup invocation is internal to validated schema-v2
+  approval completion and its claim-bound permit, never a mapper action;
+- validate it only against the disposable database because the producer goal
+  never authorizes live application;
 - the canonical organization draft with website, description, sport, and the
   best defensible location. Prefer a street address. When no address exists,
   persist the most specific evidenced city or region. For US locations, use
@@ -97,15 +99,40 @@ ingestion rule when required. Run a full-project TypeScript check only when an
 explicitly authorized task changes a shared importer contract, route contract,
 or public application code outside that source package.
 
-Use the exact sport `name` from the current BracketIQ `Sports` catalog whenever
-the stored evidence supports that sport. Treat surface and format variants as
-different sports when the catalog does. Generic `Volleyball` is not a safe
-alias for `Indoor Volleyball`, `Grass Volleyball`, or `Beach Volleyball`, and
-generic `Soccer` must not be converted to an indoor or outdoor variant without
-source evidence. Do not guess. When the source sport does not exist in the
-catalog, preserve the exact source label only in the human-review evidence,
-stop before writing a source package or candidates, and complete the mapping
-job as `HUMAN_REVIEW_REQUIRED` with reason code `SPORT_NOT_IN_CATALOG`.
+Use the claim's injected `sportsCatalog` snapshot as the only live catalog
+authority. The shared claim/export/context/completion service must persist the
+exact intake/run, catalog hash, and immutable claim generation before evidence
+inspection. `DEFAULT_SPORTS`, compiled aliases, the former two-argument
+validator, discovery `sportHints`, campaign metadata, organization names, URL
+tokens, and a bare generic family word are search context only; they cannot
+resolve a sport.
+
+Record exact source labels and one or more artifact-owned citations in v2
+`sportDeterminations`. Select a canonical catalog name only when stored
+first-party HTML, Markdown, or a visually inspected screenshot establishes its
+surface or format. The following matrix is mandatory guidance, not a keyword
+substitution map:
+
+| Stored first-party evidence | Result |
+|---|---|
+| outdoor/grass/field soccer with the surface expressly established | `Grass Soccer` |
+| indoor/arena/boarded-field soccer, or expressly indoor soccer | `Indoor Soccer` |
+| futsal rules or futsal court | `Futsal` |
+| sand/beach soccer | `Beach Soccer` |
+| only `Soccer`, with no usable surface evidence | `SPORT_VARIANT_UNRESOLVED` |
+| indoor/gym/hard-court volleyball | `Indoor Volleyball` |
+| sand/beach volleyball | `Beach Volleyball` |
+| grass/outdoor-field volleyball | `Grass Volleyball` |
+| only `Volleyball`, with no usable surface evidence | `SPORT_VARIANT_UNRESOLVED` |
+| an evidenced sport family with no exact catalog entry | `SPORT_NOT_IN_CATALOG` |
+| an exact blacklisted activity | `BLACKLISTED`; omit from executable sports and preserve evidence |
+
+Multiple explicitly evidenced surfaces may produce multiple resolved names.
+Unresolved, unsupported, and all-blacklisted determinations stop package and
+candidate creation and use governed human review. A blacklisted activity
+remains excluded even when the live catalog contains that name. Schema-v1
+results are parse-only history and cannot satisfy a new review-ready
+completion or approval.
 
 Never invent dates, prices, addresses, divisions, tags, organization facts, or logos. Image tools may crop, resize, remove transparency from, or normalize an official stored asset. They must not create a new brand mark. When no reliable official mark exists, set the logo disposition to manual review and record the completed evidence search. The independent reviewer may accept that absence; the producer does not approve or publish the organization.
 
@@ -270,3 +297,30 @@ At exhaustion, report:
 - final queue status;
 - directory-expansion counts and child URLs awaiting policy review;
 - decisions still requiring the user.
+## Current v2 claim and completion boundary
+
+The mapper must not inspect evidence, render a draft, or generate a package
+until the shared claim-evidence service has persisted the exact intake/run,
+validated injected `sportsCatalog`, and `{ jobId, workerId, claimedAt }`
+handle. Completion rechecks artifact ownership and excerpts, catalog freshness,
+determination-to-reason-code coverage, emitted sport equality, human decision
+coverage, and the unexpired claim-generation CAS. A catalog mismatch releases
+the exact claim for a fresh export; other repairable failures leave the lease
+available for producer repair.
+
+`REVIEW_REQUIRED` means a review-ready package, never approval. The mapper may
+not invoke live package application, approve an approval row, publish records,
+enable recurring scraping, or treat a reviewer recommendation as authority.
+Live application exists only inside validated schema-v2 approval completion.
+Schema-v1 worker/result records remain parse-only history and cannot be filled
+from current defaults.
+
+Before any historical requeue, all mapper/reviewer/coverage writers and the
+separate model-controller timer must be stopped and contract-preflighted.
+Sport reconciliation is dry-run-first, count/hash guarded, same-job,
+bounded, provenance-preserving, and idempotent; it does not infer sports or
+write candidates.
+
+Revision note (2026-08-10): Replaced the old static sport/alias guidance with
+the claim-bound evidence and completion contract while retaining historical
+producer workflow instructions.

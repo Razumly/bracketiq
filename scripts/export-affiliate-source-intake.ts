@@ -14,6 +14,7 @@ import {
   configureAffiliateLiveDatabaseEnvironment,
   resolveAffiliateDatasetEnvironment,
 } from '../src/server/affiliateImports/agentRepository';
+import { loadAffiliateSportsCatalogSnapshot } from '../src/server/affiliateImports/affiliateSportsCatalog';
 
 dotenv.config({ quiet: true });
 dotenv.config({ path: '.env.local', override: false, quiet: true });
@@ -62,8 +63,15 @@ const extensionFor = (artifact: any): string => {
   if (mime.includes('json')) return '.json';
   return '.txt';
 };
-
-const resolveIntake = async (db: any, sourceKey?: string, sourceUrl?: string) => {
+const resolveIntake = async (
+  db: any,
+  sourceKey?: string,
+  sourceUrl?: string,
+  intakeId?: string,
+) => {
+  if (intakeId) {
+    return db.affiliateSourceIntakes.findUnique({ where: { id: intakeId } });
+  }
   if (sourceKey) {
     return db.affiliateSourceIntakes.findUnique({ where: { sourceKey } });
   }
@@ -131,6 +139,7 @@ const listIntakes = async (db: any, query?: string) => {
 const main = async () => {
   const sourceKey = readOption('--source-key');
   const sourceUrl = readOption('--url');
+  const intakeId = readOption('--intake-id');
   const requestedRunId = readOption('--run-id');
   const { prisma } = await import('../src/lib/prisma');
   const {
@@ -147,17 +156,27 @@ const main = async () => {
       }, null, 2));
       return;
     }
-    if (!sourceKey && !sourceUrl) {
-      throw new Error('Provide --source-key <key> or --url <public-url>. Use --list to inspect available intakes.');
+    if (useLive && (!intakeId || !requestedRunId)) {
+      throw new Error('--live exports require exact --intake-id and --run-id selectors.');
+    }
+    if (!intakeId && !sourceKey && !sourceUrl) {
+      throw new Error('Provide --intake-id <id> with --run-id <id>, --source-key <key>, or --url <public-url>. Use --list to inspect available intakes.');
+    }
+    if (intakeId && !requestedRunId) {
+      throw new Error('--run-id is required with --intake-id.');
     }
 
-    const intake = await resolveIntake(db, sourceKey, sourceUrl);
+    const intake = await resolveIntake(db, sourceKey, sourceUrl, intakeId);
     if (!intake) {
-      throw new Error(`Affiliate source intake not found for ${sourceKey ?? sourceUrl}.`);
+      throw new Error(`Affiliate source intake not found for ${intakeId ?? sourceKey ?? sourceUrl}.`);
     }
     const initial = await getAffiliateSourceIntakeContext(intake.id, requestedRunId);
     const run = selectAffiliateSourceIntakeExportRun(initial.runs, requestedRunId);
     if (!run) throw new Error('No exportable intake run was found.');
+    if (requestedRunId && run.id !== requestedRunId) {
+      throw new Error(`Requested intake run ${requestedRunId} was not found for intake ${intake.id}.`);
+    }
+    const sportsCatalog = await loadAffiliateSportsCatalogSnapshot(db);
     const context = initial.selectedRunId === run.id
       ? initial
       : await getAffiliateSourceIntakeContext(intake.id, run.id);
@@ -195,10 +214,12 @@ const main = async () => {
       run,
       pages: context.pages,
       artifacts: exportedArtifacts,
+      sportsCatalog,
     });
     const manifest = {
       exportedAt: new Date().toISOString(),
       sourceEvidence,
+      sportsCatalog,
       intake: context.intake,
       pages: context.pages,
       run,
@@ -207,12 +228,16 @@ const main = async () => {
     await Promise.all([
       writeFile(path.join(outputDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8'),
       writeFile(path.join(outputDir, 'source-evidence.json'), `${JSON.stringify(sourceEvidence, null, 2)}\n`, 'utf8'),
+      writeFile(path.join(outputDir, 'sports-catalog.json'), `${JSON.stringify(sportsCatalog, null, 2)}\n`, 'utf8'),
       writeFile(path.join(outputDir, 'SOURCE-EVIDENCE.md'), renderAffiliateSourceEvidenceMarkdown(sourceEvidence), 'utf8'),
     ]);
     console.log(JSON.stringify({
       environment: sourceEvidence.environment,
       sourceKey: intake.sourceKey,
+      intakeId: intake.id,
       runId: run.id,
+      sportsCatalogSha256: sportsCatalog.sha256,
+      sportsCatalog,
       outputDir,
       artifactCount: exportedArtifacts.length,
     }, null, 2));

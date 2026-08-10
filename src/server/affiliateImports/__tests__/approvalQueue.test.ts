@@ -1,4 +1,5 @@
 /** @jest-environment node */
+import { buildAffiliateSportsCatalogSnapshot } from '../affiliateSportsCatalog';
 
 let idCounter = 0;
 let approvalRows: any[] = [];
@@ -19,7 +20,14 @@ const compoundApproval = (where: any) => {
 const prismaMock = {
   $transaction: jest.fn(async (callback: (transaction: any) => Promise<any>) => callback(prismaMock)),
   affiliateApprovalJobs: {
-    findUnique: jest.fn(async ({ where }: any) => compoundApproval(where)),
+    findUnique: jest.fn(async ({ where }: any) => {
+      const row = compoundApproval(where);
+      if (row?.status === 'CLAIMED') {
+        row.claimedAt ??= new Date('2099-08-01T01:00:00.000Z');
+        row.leaseExpiresAt ??= new Date('2099-08-01T03:00:00.000Z');
+      }
+      return row;
+    }),
     findMany: jest.fn(async () => approvalRows),
     findFirst: jest.fn(async ({ where }: any) => approvalRows.find((row) => {
       if (where.id && row.id !== where.id) return false;
@@ -106,6 +114,9 @@ const prismaMock = {
   affiliateSourceIntakePages: {
     findMany: jest.fn(async () => pageRows),
   },
+  sports: {
+    findMany: jest.fn(async () => [{ id: 'sport_1', name: 'Grass Soccer' }]),
+  },
 };
 
 const applyDomainPolicyMock = jest.fn();
@@ -123,12 +134,33 @@ import {
 } from '../approvalQueue';
 
 const HASH = 'a'.repeat(64);
+const catalog = buildAffiliateSportsCatalogSnapshot(
+  [{ id: 'sport_1', name: 'Grass Soccer' }],
+  '2026-08-01T00:00:00.000Z',
+);
+const determination = {
+  sourceLabels: ['Outdoor soccer'],
+  status: 'RESOLVED' as const,
+  resolutionBasis: 'SOURCE_EVIDENCE' as const,
+  canonicalSportNames: ['Grass Soccer'],
+  rationale: 'The stored page explicitly describes outdoor soccer.',
+  evidence: [{
+    artifactId: 'artifact_1',
+    artifactSha256: HASH,
+    artifactKind: 'PAGE_HTML' as const,
+    pageUrl: 'https://club.example.test/events',
+    excerpt: 'Outdoor soccer',
+  }],
+};
 const ingestionResult = (workerId = 'codex-luna-vm-1') => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   jobId: 'mapping_1',
   intakeId: 'intake_1',
-  sourceKey: 'river-city',
   workerId,
+  sourceKey: 'river-city',
+  evidenceRunId: 'run_1',
+  sportsCatalogSha256: catalog.sha256,
+  sportDeterminations: [determination],
   status: 'REVIEW_REQUIRED',
   branch: 'codex/affiliate-river-city',
   commit: 'b'.repeat(40),
@@ -144,7 +176,12 @@ const ingestionResult = (workerId = 'codex-luna-vm-1') => ({
 });
 
 const mappingApprovalResult = (reviewerId = 'codex-luna-approval-vm-1') => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
+  claimGeneration: {
+    approvalJobId: 'approval_1',
+    reviewerId,
+    claimedAt: '2099-08-01T01:00:00.000Z',
+  },
   approvalJobId: 'approval_1',
   subjectType: 'MAPPING_PACKAGE',
   subjectKey: 'mapping_1',
@@ -170,11 +207,16 @@ const mappingApprovalResult = (reviewerId = 'codex-luna-approval-vm-1') => ({
 });
 
 const domainApprovalResult = (decision: 'ALLOW' | 'DEFER') => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   approvalJobId: 'approval_1',
   subjectType: 'DOMAIN_POLICY',
   subjectKey: 'example.test',
   reviewerId: 'codex-luna-approval-vm-1',
+  claimGeneration: {
+    approvalJobId: 'approval_1',
+    reviewerId: 'codex-luna-approval-vm-1',
+    claimedAt: '2099-08-01T01:00:00.000Z',
+  },
   decision,
   confidence: 0.9,
   rationale: decision === 'ALLOW'
@@ -212,11 +254,18 @@ describe('affiliate approval queue', () => {
     }];
     mappingRows = [{
       id: 'mapping_1',
+      resultSummary: {
+        result: ingestionResult(),
+        claimEvidenceContext: {
+          evidenceRunId: 'run_1',
+          sportsCatalogSha256: catalog.sha256,
+          sportsCatalog: catalog,
+        },
+      },
       intakeId: 'intake_1',
       sourceId: 'source_1',
       mappingId: 'mapping_definition_1',
       status: 'REVIEW_REQUIRED',
-      resultSummary: { result: ingestionResult() },
       createdAt: new Date('2026-07-31T10:01:00Z'),
     }];
     intakeRows = [{ id: 'intake_1', baseUrl: 'https://club.example.test', status: 'CAPTURED' }];
@@ -378,6 +427,7 @@ describe('affiliate approval queue', () => {
         evidence: expect.objectContaining({ approvalJobId: 'approval_1' }),
       }),
       'codex-luna-approval-vm-1',
+      expect.anything(),
     );
     expect(completed.status).toBe('APPROVED');
   });
@@ -397,6 +447,43 @@ describe('affiliate approval queue', () => {
     expect(applyDomainPolicyMock).not.toHaveBeenCalled();
     expect(policyRows[0].status).toBe('NEEDS_REVIEW');
     expect(completed.status).toBe('DEFERRED');
+  });
+  it('rejects a same-reviewer approval result after the approval row was reclaimed', async () => {
+    approvalRows = [{
+      id: 'approval_1',
+      subjectType: 'MAPPING_PACKAGE',
+      subjectKey: 'mapping_1',
+      status: 'CLAIMED',
+      reviewerId: 'codex-luna-approval-vm-1',
+      claimedAt: new Date('2099-08-01T02:00:00.000Z'),
+      leaseExpiresAt: new Date('2099-08-01T04:00:00.000Z'),
+    }];
+    const applyMappingPackage = jest.fn();
+    await expect(completeAffiliateApproval(
+      mappingApprovalResult(),
+      { applyMappingPackage },
+    )).rejects.toThrow('claim generation changed');
+    expect(applyMappingPackage).not.toHaveBeenCalled();
+  });
+  it('rejects a catalog-mismatch disposition when the persisted result is not stale', async () => {
+    approvalRows = [{
+      id: 'approval_1',
+      subjectType: 'MAPPING_PACKAGE',
+      subjectKey: 'mapping_1',
+      status: 'CLAIMED',
+      reviewerId: 'codex-luna-approval-vm-1',
+    }];
+    await expect(completeAffiliateApproval({
+      ...mappingApprovalResult(),
+      decision: 'REJECT',
+      blockingIssues: ['The live catalog did not match the producer snapshot.'],
+      mappingDisposition: {
+        nextAction: 'PRODUCER_REPAIR',
+        reasonCodes: ['SPORT_CATALOG_MISMATCH'],
+      },
+    }, {
+      loadCatalog: async () => catalog,
+    })).rejects.toThrow('must represent a stale catalog hash');
   });
 
   it('rejects self-review even when every model-reported check is true', async () => {
@@ -474,7 +561,7 @@ describe('affiliate approval queue', () => {
     await expect(completeAffiliateApproval(
       mappingApprovalResult(),
       { applyMappingPackage },
-    )).rejects.toThrow('approved with durable source and mapping package identity');
+    )).rejects.toThrow('approved with durable identity');
   });
 
   it('applies an independently reviewed mapping package through the guarded callback', async () => {
@@ -492,11 +579,12 @@ describe('affiliate approval queue', () => {
       mappingApprovalResult(),
       { applyMappingPackage },
     );
-
     expect(applyMappingPackage).toHaveBeenCalledWith(
-      'mapping_1',
-      'codex-luna-approval-vm-1',
-      expect.objectContaining({ decision: 'APPROVE' }),
+      expect.objectContaining({
+        mappingJobId: 'mapping_1',
+        reviewerId: 'codex-luna-approval-vm-1',
+        approvalResult: expect.objectContaining({ decision: 'APPROVE' }),
+      }),
     );
     expect(completed.status).toBe('APPROVED');
   });
@@ -511,6 +599,11 @@ describe('affiliate approval queue', () => {
     }];
     mappingRows[0].resultSummary = {
       result: { ...ingestionResult(), logoDisposition: 'MANUAL_REVIEW' },
+      claimEvidenceContext: {
+        evidenceRunId: 'run_1',
+        sportsCatalogSha256: catalog.sha256,
+        sportsCatalog: catalog,
+      },
     };
     const applyMappingPackage = jest.fn(async () => {
       mappingRows[0].status = 'APPROVED';
@@ -528,9 +621,13 @@ describe('affiliate approval queue', () => {
       expect.objectContaining({ status: 'APPROVED' }),
     );
     expect(applyMappingPackage).toHaveBeenCalledWith(
-      'mapping_1',
-      'codex-luna-approval-vm-1',
-      expect.objectContaining({ checks: expect.objectContaining({ logoAbsenceAccepted: true }) }),
+      expect.objectContaining({
+        mappingJobId: 'mapping_1',
+        reviewerId: 'codex-luna-approval-vm-1',
+        approvalResult: expect.objectContaining({
+          checks: expect.objectContaining({ logoAbsenceAccepted: true }),
+        }),
+      }),
     );
   });
 
@@ -544,6 +641,11 @@ describe('affiliate approval queue', () => {
     }];
     mappingRows[0].resultSummary = {
       result: { ...ingestionResult(), logoDisposition: 'MANUAL_REVIEW' },
+      claimEvidenceContext: {
+        evidenceRunId: 'run_1',
+        sportsCatalogSha256: catalog.sha256,
+        sportsCatalog: catalog,
+      },
     };
 
     await expect(completeAffiliateApproval(

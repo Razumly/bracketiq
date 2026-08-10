@@ -300,3 +300,38 @@ Revision note (2026-08-02): Expanded the plan after observing that restarted rej
 Revision note (2026-08-02): Superseded the mandatory official-logo gate. Added explicit accepted logo absence, guarded missing-logo application, and reviewer retry for historical logo-only terminal packages.
 
 Revision note (2026-08-02): Added source-derived description validation and a durable, queue-gated, one-time full-mapping rereview cohort. This revision prevents the new criteria from interrupting current producer or reviewer work.
+## Current repair and application authority (2026-08-10)
+
+The historical repair cohorts and logo workflow remain preserved. New
+producer-repair claims must first acquire the shared claim-evidence context:
+one exact intake/run, one validated live `Sports` snapshot, and one immutable
+claim generation. Repair must address the persisted v2 determinations and
+artifact-owned citations, not reinterpret discovery hints or a stale compiled
+catalog. `DEFAULT_SPORTS` and the former two-argument validator are not live
+authority.
+
+Evidence can resolve a surface-specific exact catalog name only when stored
+first-party content establishes it. Bare Soccer/Volleyball is
+`SPORT_VARIANT_UNRESOLVED`; an evidenced family absent from the live catalog is
+`SPORT_NOT_IN_CATALOG`; an exact blacklist-policy match is `BLACKLISTED` and
+cannot become executable because a catalog row exists. These outcomes retain
+source labels and citations and are routed through governed human resolution,
+not guessed by the producer or reviewer. v1 envelopes remain parse-only
+history and cannot authorize new approval.
+
+Approval-only application is the current live safety boundary. A repaired
+`REVIEW_REQUIRED` package is still not approved; only schema-v2 approval
+completion with the exact approval claim generation can obtain the internal
+application permit and perform guarded unpublished/disabled/unvalidated
+application. The deleted standalone apply path, operator id, or reviewer
+recommendation cannot execute a package.
+
+Before a repair cohort is requeued, stop and preflight all mapper/reviewer
+services, coverage, and the separate digest-pinned model controller. Use the
+sport-reconciliation dry-run and exact count/selection hash guards; apply is
+same-job, bounded, noncandidate-writing, provenance-preserving, and
+idempotent. A lost claim or catalog drift must write no terminal or live state.
+
+Revision note (2026-08-10): Added v2 determination repair, approval-only
+application, reconciliation safeguards, and full queue-writer stop boundaries
+without removing historical repair evidence.

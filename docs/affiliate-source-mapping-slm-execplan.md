@@ -731,3 +731,34 @@ Implementation update 2026-07-29: connected the frozen evaluator to a bearer-aut
 Implementation update 2026-07-29: closed the local deterministic-control milestone with a hash-verified offline page client and a disposable PostgreSQL runner. Generated setup scripts can use the fixture client only when `AFFILIATE_AGENT_REVIEW_FIXTURE_DIRECTORY` is explicitly set; otherwise they retain the production scrape client. The fixture manifest requires exact URLs, contained files, bounded size, and matching SHA-256. The integration runner uses a digest-pinned database, disables scrape and geocoding credentials, runs two clean-worktree review scrapes, verifies one source, one unvalidated mapping, one deduplicated candidate, zero publication, and two successful runs, then removes its exact worktrees and database. The command passed locally without public scrape requests or live-database writes.
 
 Plan update 2026-07-29: added `docs/affiliate-source-mapping-pretraining-validation-execplan.md` after the data audit confirmed zero train-eligible examples. The child plan freezes a 35-example real test set before training-data construction, closes the persisted-candidate evaluation gap, benchmarks untouched bases, targets 100/20/35 train-validation-test examples, and makes adapter training conditional on an immutable readiness result.
+## Current live mapping contract (2026-08-10)
+
+The model worker is not an independent catalog or completion authority. Its
+live controller must use the same claim/export/context/completion service as
+Codex, persist the immutable claim handle and exact evidence run, and consume
+the injected live `Sports` snapshot. `DEFAULT_SPORTS`, compiled aliases, the
+former two-argument validator, discovery `sportHints`, campaign metadata, URL
+tokens, and generic family labels are not live sport authority. If the
+controller cannot satisfy the shared boundary, live mode fails closed.
+
+New worker and reviewer envelopes use context contract v2 and carry the full
+catalog snapshot/hash plus `sportDeterminations`; schema-version-1 artifacts
+remain parse-only history and are never silently upgraded with today's
+catalog. A `RESOLVED` determination requires stored first-party evidence that
+establishes the exact surface or format. Generic Soccer/Volleyball remains
+`VARIANT_UNRESOLVED`; an evidenced family missing from the injected catalog is
+`UNSUPPORTED`; a policy-blacklisted activity is `BLACKLISTED` regardless of
+catalog membership. Every determination cites source-owned stored artifacts.
+
+The model may generate a package or a governed human-review result, but it may
+not approve, publish, enable scraping, apply live mappings, or bypass
+completion. Reviewers inspect determinations and package evidence; human
+resolution is authenticated and consumed one-to-one on a later fresh claim.
+The separately deployed controller image is part of fleet preflight and must
+be stopped, version-checked, and digest-pinned before any reconciliation
+requeue or queue restart.
+
+Revision note (2026-08-10): Reconciled this training/deployment plan with the
+single-run claim service, v2 context/determination envelope, approval-only live
+application, and stopped model-controller boundary. Historical model and
+training decisions are retained.

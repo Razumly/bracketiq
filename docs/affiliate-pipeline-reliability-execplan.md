@@ -201,3 +201,38 @@ Revision note: 2026-08-06 18:05Z. Addressed the review findings locally. Organiz
 Revision note: 2026-08-06 18:22Z. Addressed the remaining concurrency blocker locally. Added the partial unique active-job index with transactional duplicate reconciliation, handled `P2002` races in both exact mapping claims and capture completion, and added the concurrent claim regression. The production duplicate audit was read-only and returned no rows. No live writes, process changes, deployment, or production restart were performed.
 
 Revision note: 2026-08-06 18:38Z. Addressed the stale-approval cleanup finding locally. The same migration now retires `QUEUED` and `CLAIMED` mapping-package approvals attached to discarded duplicate jobs and clears their lease fields and reviewer ownership before index creation. No live writes, process changes, deployment, or production restart were performed.
+## Current authority after the sport-evidence cutover (2026-08-10)
+
+The reliability rules above remain historical context. Current mapping work
+uses one shared live claim/export/context/completion service for Codex and the
+model agent. Before inspecting evidence or generating a result, a claimed job
+must own an exact intake/run and a validated current `Sports` snapshot. The
+snapshot hash, evidence run, claim handle, and v2 `sportDeterminations` are
+checked by completion; a stale catalog is released for a fresh claim rather
+than guessed or repaired from `DEFAULT_SPORTS`. The old two-argument validator
+and discovery `sportHints` are not live authority.
+
+Determinations are evidence-backed: surface-specific first-party evidence may
+resolve `Grass Soccer`, `Indoor Soccer`, `Futsal`, `Beach Soccer`, `Indoor
+Volleyball`, `Beach Volleyball`, or `Grass Volleyball` when that exact catalog
+name exists. Bare `Soccer` or `Volleyball` is
+`SPORT_VARIANT_UNRESOLVED`; an evidenced family absent from the catalog is
+`SPORT_NOT_IN_CATALOG`; an exact blacklisted activity is `BLACKLISTED` and
+remains excluded even if catalog membership exists. The mapper records
+citations and stops without a package for unresolved, unsupported, or
+blacklisted outcomes. v1 records remain parse-only history and cannot
+authorize fresh approval.
+
+The stopped-fleet boundary includes all ten mapper services, both reviewer
+services, the coverage writer, and the separately deployed model-controller
+timer/image. Reconciliation is a dry-run-first, hash/count-guarded,
+same-job, idempotent requeue; it never infers a sport or writes candidates.
+Restart requires the exact fleet contract from every checkout and the pinned
+controller image. Coverage repair and model-controller claims are independently
+preflighted, not assumed safe because mapper/reviewer containers are stopped.
+Live package application is reachable only from validated v2 approval
+completion; the legacy standalone apply path is removed.
+
+Revision note (2026-08-10): Added claim-generation CAS, evidence-backed sport
+resolution, reconciliation guards, coverage stop boundaries, and separate
+model-controller preflight without removing prior reliability findings.

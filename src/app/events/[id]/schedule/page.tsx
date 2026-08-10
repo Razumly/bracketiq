@@ -29,7 +29,7 @@ import { sportsService } from '@/lib/sportsService';
 import { teamService } from '@/lib/teamService';
 import { userService } from '@/lib/userService';
 import { familyService } from '@/lib/familyService';
-import { apiRequest } from '@/lib/apiClient';
+import { apiRequest, isApiRequestError } from '@/lib/apiClient';
 import { hasStaffMemberType } from '@/lib/staff';
 import {
   normalizeApiEvent,
@@ -83,6 +83,8 @@ import type {
 import { createLeagueScoringConfig } from '@/types/defaults';
 import {
   EVENT_EDITOR_CONTRACT_VERSION,
+  type CreateEventEditorCommand,
+  type EventEditorCreateBootstrap,
   type EventEditorDraft,
   type EventEditorSaveResult,
   type EventEditorSnapshot,
@@ -400,6 +402,10 @@ function EventScheduleContent() {
   const eventFormRef = useRef<EventFormHandle>(null);
   const editorDraftRef = useRef<EventEditorDraft | null>(null);
   const createdEditorEventIdRef = useRef<string | null>(null);
+  const [createBootstrap, setCreateBootstrap] = useState<EventEditorCreateBootstrap | null>(null);
+  const createBootstrapRef = useRef<EventEditorCreateBootstrap | null>(null);
+  const createBootstrapKeyRef = useRef<string | null>(null);
+  const pendingCreateCommandRef = useRef<CreateEventEditorCommand | null>(null);
   const { location: userLocation, locationInfo: userLocationInfo } = useLocation();
   const rentalCoordinates = useMemo<[number, number] | undefined>(() => {
     const lat = rentalLatParam ? Number(rentalLatParam) : undefined;
@@ -674,6 +680,10 @@ function EventScheduleContent() {
     );
     if (!user?.$id || (!isCreateMode && (!targetId || !isEditingEvent))) {
       setEditorSnapshot(null);
+      setCreateBootstrap(null);
+      createBootstrapRef.current = null;
+      createBootstrapKeyRef.current = null;
+      pendingCreateCommandRef.current = null;
       return () => {
         cancelled = true;
       };
@@ -687,21 +697,43 @@ function EventScheduleContent() {
           const fallbackSportId = typeof defaultSport === 'string' ? defaultSport : defaultSport.$id;
           const organizationValue = activeEvent?.organizationId as string | Organization | undefined;
           const organizationId = typeof organizationValue === 'string' ? organizationValue : organizationValue?.$id;
+          const start = selectedTemplateStartDate?.toISOString()
+            ?? normalizedRentalStart
+            ?? (typeof activeEvent?.start === 'string' ? activeEvent.start : null);
           if (activeEvent?.eventType) query.set('eventType', activeEvent.eventType);
           if (organizationId ?? resolvedHostOrgId) query.set('organizationId', organizationId ?? resolvedHostOrgId ?? '');
           if (sportId ?? fallbackSportId) query.set('sportId', sportId ?? fallbackSportId);
           if (parentEventIdParam) query.set('parentEventId', parentEventIdParam);
           if (templateIdParam) query.set('templateId', templateIdParam);
           if (rentalBookingIdParam) query.set('rentalBookingId', rentalBookingIdParam);
-          const result = await apiRequest<EventEditorSnapshot>(`/api/events/editor?${query.toString()}`);
-          if (!cancelled) setEditorSnapshot(result);
+          if (start) query.set('start', start);
+          const bootstrapKey = query.toString();
+          const cached = createBootstrapRef.current;
+          if (cached && createBootstrapKeyRef.current === bootstrapKey) {
+            setCreateBootstrap(cached);
+            setEditorSnapshot(cached.snapshot);
+            return;
+          }
+          const result = await apiRequest<EventEditorCreateBootstrap>(`/api/events/editor?${bootstrapKey}`);
+          if (!cancelled) {
+            createBootstrapRef.current = result;
+            createBootstrapKeyRef.current = bootstrapKey;
+            pendingCreateCommandRef.current = null;
+            setCreateBootstrap(result);
+            setEditorSnapshot(result.snapshot);
+          }
         } else {
+          createBootstrapRef.current = null;
+          createBootstrapKeyRef.current = null;
+          pendingCreateCommandRef.current = null;
+          setCreateBootstrap(null);
           const result = await apiRequest<EventEditorSnapshot>(`/api/events/${encodeURIComponent(targetId as string)}/editor`);
           if (!cancelled) setEditorSnapshot(result);
         }
       } catch (snapshotError) {
         if (!cancelled) {
           setEditorSnapshot(null);
+          setCreateBootstrap(null);
           setError(snapshotError instanceof Error ? snapshotError.message : 'Unable to load the event editor.');
         }
       }
@@ -715,15 +747,18 @@ function EventScheduleContent() {
     activeEvent?.eventType,
     activeEvent?.organizationId,
     activeEvent?.sportIds,
+    activeEvent?.start,
     defaultSport,
     eventId,
     isCreateMode,
+    isEditingEvent,
+    normalizedRentalStart,
     parentEventIdParam,
     rentalBookingIdParam,
     resolvedHostOrgId,
+    selectedTemplateStartDate,
     templateIdParam,
     user?.$id,
-    isEditingEvent,
   ]);
   const {
     clearMatchConflictDraftAlerts,
@@ -4297,27 +4332,62 @@ function EventScheduleContent() {
       if (effectiveMode === 'EDIT' && (!requestEventId || !currentSnapshot || currentSnapshot.mode !== 'EDIT')) {
         throw new Error('The event editor is still loading. Try again.');
       }
-      const command = effectiveMode === 'CREATE'
-        ? {
-          contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
-          draft: contractDraft,
+      let command: CreateEventEditorCommand | {
+        contractVersion: typeof EVENT_EDITOR_CONTRACT_VERSION;
+        editorRevision: string;
+        staffRevision: string | null;
+        draft: EventEditorDraft;
+      };
+      if (effectiveMode === 'CREATE') {
+        const pending = pendingCreateCommandRef.current;
+        if (pending) {
+          command = pending;
+        } else {
+          const createOperationId = createBootstrap?.createOperationId;
+          if (!createOperationId) {
+            throw new Error('The event editor create session is still loading. Try again.');
+          }
+          command = {
+            contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
+            createOperationId,
+            draft: contractDraft,
+          };
+          pendingCreateCommandRef.current = cloneValue(command) as CreateEventEditorCommand;
         }
-        : {
+      } else {
+        command = {
           contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
           editorRevision: currentSnapshot?.editorRevision ?? '',
           staffRevision: currentSnapshot?.staffRevision ?? null,
           draft: contractDraft,
         };
-      const result = await apiRequest<EventEditorSaveResult>(
-        effectiveMode === 'CREATE'
-          ? '/api/events/editor'
-          : `/api/events/${encodeURIComponent(requestEventId as string)}/editor`,
-        {
-          method: effectiveMode === 'CREATE' ? 'POST' : 'PUT',
-          body: command,
-        },
-      );
+      }
+      let result: EventEditorSaveResult;
+      try {
+        result = await apiRequest<EventEditorSaveResult>(
+          effectiveMode === 'CREATE'
+            ? '/api/events/editor'
+            : `/api/events/${encodeURIComponent(requestEventId as string)}/editor`,
+          {
+            method: effectiveMode === 'CREATE' ? 'POST' : 'PUT',
+            body: command,
+          },
+        );
+      } catch (error) {
+        if (
+          effectiveMode === 'CREATE'
+          && isApiRequestError(error)
+          && (error.status === 400 || error.status === 403)
+        ) {
+          pendingCreateCommandRef.current = null;
+        }
+        throw error;
+      }
+      if (effectiveMode === 'CREATE') pendingCreateCommandRef.current = null;
       setEditorSnapshot(result.snapshot);
+      if (result.staffEmailDelivery === 'FAILED') {
+        setWarningMessage('Event saved, but staff invitation delivery failed.');
+      }
       if (effectiveMode === 'CREATE' && result.snapshot.eventId) {
         createdEditorEventIdRef.current = result.snapshot.eventId;
       }
@@ -4338,6 +4408,7 @@ function EventScheduleContent() {
     },
     [
       activeEvent,
+      createBootstrap,
       editorSnapshot,
       event,
       eventFormRef,

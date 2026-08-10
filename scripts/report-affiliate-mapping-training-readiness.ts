@@ -199,8 +199,8 @@ const main = async () => {
     releaseId: 'affiliate-mapping-readiness-combined-v1',
     createdAt: new Date(latestCreatedAt),
     repositoryCommit: [
-      trainValidationGold.release.manifest.repositoryCommit,
-      testGold.release.manifest.repositoryCommit,
+      trainValidationGold.release.manifest.goldContractRevision,
+      testGold.release.manifest.goldContractRevision,
     ].join('+'),
   });
 

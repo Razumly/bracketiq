@@ -1,16 +1,32 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { AffiliateAgentToolbox } from './agentTooling';
-import type { AffiliateMappingJobContext } from './agentModelClient';
+import {
+  affiliateMappingJobContextV2Schema,
+  assertAffiliateMappingJobContextV2,
+  type AffiliateMappingJobContext,
+  type AffiliateMappingJobContextV2,
+} from './agentModelClient';
 import {
   isAffiliateAgentTargetKind,
 } from './agentContracts';
+import {
+  affiliateHumanSportResolutionSchema,
+  type AffiliateHumanSportResolution,
+} from './affiliateSportDetermination';
+import {
+  affiliateSportsCatalogSnapshotSchema,
+  type AffiliateSportsCatalogSnapshot,
+} from './affiliateSportsCatalog';
 
 type ExportManifest = {
+  contextContractVersion?: number;
+  sportsCatalog?: unknown;
   sourceEvidence?: {
     intakeId?: string;
     intakeSourceKey?: string;
     runId?: string;
+    sportsCatalogSha256?: string;
     complianceStatus?: string | null;
   };
   intake?: {
@@ -19,7 +35,17 @@ type ExportManifest = {
     complianceStatus?: string | null;
     targetKindHints?: string[];
   };
+  artifacts?: Array<{
+    id?: string;
+    contentHash?: string;
+    kind?: string;
+    sourceUrl?: string | null;
+    finalUrl?: string | null;
+  }>;
 };
+const readManifest = async (directory: string): Promise<ExportManifest> => (
+  JSON.parse(await fs.readFile(path.join(path.resolve(directory), 'manifest.json'), 'utf8')) as ExportManifest
+);
 
 const reviewedPolicy = (
   value: string | null | undefined,
@@ -51,29 +77,98 @@ const redactAffiliatePromptExcerpt = (content: string): {
     redacted: redacted !== content,
   };
 };
-
-const readManifest = async (evidenceDirectory: string): Promise<ExportManifest> => (
-  JSON.parse(
-    await fs.readFile(path.join(path.resolve(evidenceDirectory), 'manifest.json'), 'utf8'),
-  ) as ExportManifest
-);
-
 export const buildAffiliateMappingJobContextFromExport = async (input: {
   jobId: string;
   evidenceDirectory: string;
   repositoryRoot: string;
   instructionsRevision: string;
+  workerId?: string;
+  claimedAt?: string;
+  pendingHumanSportResolution?: AffiliateHumanSportResolution;
 }): Promise<{
-  context: AffiliateMappingJobContext;
+  context: AffiliateMappingJobContextV2;
   toolbox: AffiliateAgentToolbox;
-}> => buildAffiliateMappingJobContextFromExports({
-  jobId: input.jobId,
-  evidenceDirectories: [input.evidenceDirectory],
-  repositoryRoot: input.repositoryRoot,
-  instructionsRevision: input.instructionsRevision,
-});
+}> => {
+  const legacy = await buildAffiliateMappingTrainingContextFromExports({
+    jobId: input.jobId,
+    evidenceDirectories: [input.evidenceDirectory],
+    repositoryRoot: input.repositoryRoot,
+    instructionsRevision: input.instructionsRevision,
+  });
+  const manifest = await readManifest(input.evidenceDirectory);
+  const sportsCatalog = affiliateSportsCatalogSnapshotSchema.parse(manifest.sportsCatalog);
+  if (manifest.sourceEvidence?.sportsCatalogSha256 !== sportsCatalog.sha256) {
+    throw new Error('Evidence manifest catalog hash does not match source-evidence provenance.');
+  }
+  const claimPath = path.join(path.resolve(input.evidenceDirectory), 'mapping-job-context.json');
+  let persistedClaim: {
+    contextContractVersion?: number;
+    jobId?: string;
+    intakeId?: string;
+    workerId?: string;
+    claimedAt?: string;
+    evidenceRunId?: string;
+    sportsCatalog?: unknown;
+    humanSportResolution?: unknown;
+  } = {};
+  try {
+    persistedClaim = JSON.parse(await fs.readFile(claimPath, 'utf8')) as typeof persistedClaim;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const workerId = input.workerId ?? persistedClaim.workerId;
+  const claimedAt = input.claimedAt ?? persistedClaim.claimedAt;
+  if (!workerId || !claimedAt) {
+    throw new Error('A v2 mapping context requires an immutable worker id and claimedAt.');
+  }
+  if (persistedClaim.jobId && persistedClaim.jobId !== input.jobId) {
+    throw new Error('Mapping job context id does not match the requested job.');
+  }
+  if (persistedClaim.evidenceRunId && persistedClaim.evidenceRunId !== legacy.context.runId) {
+    throw new Error('Mapping job context run id does not match the evidence manifest.');
+  }
+  if (persistedClaim.sportsCatalog) {
+    const persistedCatalog = affiliateSportsCatalogSnapshotSchema.parse(persistedClaim.sportsCatalog);
+    if (persistedCatalog.sha256 !== sportsCatalog.sha256) {
+      throw new Error('Mapping job context catalog does not match the evidence manifest.');
+    }
+  }
+  const artifacts = legacy.context.artifacts.map((artifact) => {
+    if (!artifact.artifactId || !artifact.intakeId || !artifact.runId) {
+      throw new Error('Every v2 context artifact requires artifactId, intakeId, and runId provenance.');
+    }
+    return {
+      ...artifact,
+      artifactId: artifact.artifactId,
+      intakeId: artifact.intakeId,
+      runId: artifact.runId,
+    };
+  });
+  const candidateContext = {
+    ...legacy.context,
+    contextContractVersion: 2 as const,
+    workerId,
+    claimedAt,
+    evidenceRunIds: [legacy.context.runId] as [string],
+    sportsCatalog,
+    ...(input.pendingHumanSportResolution
+      ? { humanSportResolution: affiliateHumanSportResolutionSchema.parse(input.pendingHumanSportResolution) }
+      : persistedClaim.humanSportResolution
+        ? { humanSportResolution: affiliateHumanSportResolutionSchema.parse(persistedClaim.humanSportResolution) }
+        : {}),
+    artifacts,
+  };
+  return {
+    context: assertAffiliateMappingJobContextV2(candidateContext),
+    toolbox: legacy.toolbox,
+  };
+};
 
-export const buildAffiliateMappingJobContextFromExports = async (input: {
+/**
+ * Multi-export context materialization is training-only. It intentionally
+ * returns a legacy context and is never accepted by the live runner.
+ */
+export const buildAffiliateMappingTrainingContextFromExports = async (input: {
   jobId: string;
   evidenceDirectories: string[];
   repositoryRoot: string;
@@ -82,6 +177,7 @@ export const buildAffiliateMappingJobContextFromExports = async (input: {
   context: AffiliateMappingJobContext;
   toolbox: AffiliateAgentToolbox;
 }> => {
+
   if (input.evidenceDirectories.length === 0) {
     throw new Error('At least one evidence export is required.');
   }
@@ -230,6 +326,7 @@ export const buildAffiliateMappingJobContextFromExports = async (input: {
       targetKindHints: (intake.targetKindHints ?? [])
         .filter(isAffiliateAgentTargetKind),
       artifacts: artifacts.map((row) => ({
+        artifactId: row.artifact.artifactId ?? '',
         kind: row.artifact.kind,
         sha256: row.artifact.sha256,
         pageUrl: row.artifact.sourceUrl ?? row.artifact.finalUrl ?? '',
@@ -243,4 +340,28 @@ export const buildAffiliateMappingJobContextFromExports = async (input: {
     },
     toolbox,
   };
+};
+
+/**
+ * Live model execution accepts one exact export only. Multi-export
+ * materialization must call buildAffiliateMappingTrainingContextFromExports.
+ */
+export const buildAffiliateMappingJobContextFromExports = async (input: {
+  jobId: string;
+  evidenceDirectories: string[];
+  repositoryRoot: string;
+  instructionsRevision: string;
+  workerId?: string;
+  claimedAt?: string;
+}): Promise<{
+  context: AffiliateMappingJobContextV2;
+  toolbox: AffiliateAgentToolbox;
+}> => {
+  if (input.evidenceDirectories.length !== 1) {
+    throw new Error('Live v2 mapping context requires exactly one evidence export.');
+  }
+  return buildAffiliateMappingJobContextFromExport({
+    ...input,
+    evidenceDirectory: input.evidenceDirectories[0],
+  });
 };

@@ -1,32 +1,30 @@
 import { createHash } from 'crypto';
 import { createId } from '@/lib/id';
-import { prisma } from '@/lib/prisma';
-import {
-  deriveAffiliateHtmlArtifacts,
-  evaluateAffiliateHtmlQuality,
-} from './affiliateHtmlArtifacts';
 import {
   affiliateCoverageCampaignProposalSchema,
   affiliateCoverageCompletionSchema,
+  affiliateCoverageClaimGenerationSchema,
   type AffiliateCoverageCampaignProposal,
   type AffiliateCoverageCompletion,
+  type AffiliateCoverageClaimGeneration,
 } from './coverageAgentContracts';
+import {
+  appendAffiliateMappingHistory,
+  archiveAffiliateMappingResultEnvelope,
+} from './affiliateMappingResultHistory';
+import { prisma } from '@/lib/prisma';
 import { queueAffiliateSourceDiscoveryRun } from './sourceDiscovery';
-import {
-  affiliateDiscoveryPolicyKeyForUrl,
-  affiliateDiscoveryUrlKey,
-} from './sourceDiscoveryRules';
+import { AFFILIATE_COVERAGE_QUERY_STRATEGY_VERSION } from './coverageQueryStrategies';
 import { US_CITY_DISCOVERY_QUERY_STRATEGY_VERSION } from './sourceDiscoveryCampaignTemplates';
-import { AFFILIATE_COVERAGE_CAMPAIGN_TEMPLATES } from './sourceDiscoveryCampaignTemplates';
 import { reconcileAffiliateCoverageCells } from './coverageInventory';
-import {
-  AFFILIATE_COVERAGE_QUERY_STRATEGY_VERSION,
-  getAffiliateCoverageQueryStrategy,
-} from './coverageQueryStrategies';
 import { getAffiliateCoverageProfile } from './coverageProfiles';
-import { persistAffiliateSourceIntakeArtifact } from './sourceIntakeArtifacts';
+import { getAffiliateCoverageQueryStrategy } from './coverageQueryStrategies';
 import { canonicalizeAffiliateIntakeUrl } from './sourceIntakeUrlSafety';
+import { affiliateDiscoveryPolicyKeyForUrl, affiliateDiscoveryUrlKey } from './sourceDiscoveryRules';
+import { evaluateAffiliateHtmlQuality, deriveAffiliateHtmlArtifacts } from './affiliateHtmlArtifacts';
+import { persistAffiliateSourceIntakeArtifact } from './sourceIntakeArtifacts';
 type JsonRecord = Record<string, unknown>;
+
 
 const DEFAULT_LEASE_MS = 2 * 60 * 60 * 1_000;
 const DEFAULT_CAPTURE_RETRY_DELAY_MS = 30 * 60 * 1_000;
@@ -64,23 +62,33 @@ const HUMAN_DECISION_REASON_CODES = new Set([
   'REPLACEMENT_DOMAIN_APPROVAL_REQUIRED',
 ]);
 
-const coverageDatabase = () => ({
-  jobs: (prisma as any).affiliateCoverageAgentJobs,
-  campaigns: (prisma as any).affiliateSourceDiscoveryCampaigns,
-  discoveryRuns: (prisma as any).affiliateSourceDiscoveryRuns,
-  discoveryResults: (prisma as any).affiliateSourceDiscoveryResults,
-  intakes: (prisma as any).affiliateSourceIntakes,
-  pages: (prisma as any).affiliateSourceIntakePages,
-  intakeRuns: (prisma as any).affiliateSourceIntakeRuns,
-  artifacts: (prisma as any).affiliateSourceIntakeArtifacts,
-  mappingJobs: (prisma as any).affiliateSourceMappingJobs,
-  policies: (prisma as any).affiliateSourceDomainPolicies,
-  sports: (prisma as any).sports,
-  coverageCities: (prisma as any).affiliateCoverageCities,
-  coverageCells: (prisma as any).affiliateCoverageCells,
-  coverageAssessments: (prisma as any).affiliateCoverageCellAssessments,
-  queryExecutions: (prisma as any).affiliateSourceDiscoveryQueryExecutions,
+const coverageDatabaseForClient = (client: any) => ({
+  jobs: client.affiliateCoverageAgentJobs,
+  campaigns: client.affiliateSourceDiscoveryCampaigns,
+  discoveryRuns: client.affiliateSourceDiscoveryRuns,
+  discoveryResults: client.affiliateSourceDiscoveryResults,
+  intakes: client.affiliateSourceIntakes,
+  pages: client.affiliateSourceIntakePages,
+  intakeRuns: client.affiliateSourceIntakeRuns,
+  artifacts: client.affiliateSourceIntakeArtifacts,
+  mappingJobs: client.affiliateSourceMappingJobs,
+  policies: client.affiliateSourceDomainPolicies,
+  sports: client.sports,
+  coverageCities: client.affiliateCoverageCities,
+  coverageCells: client.affiliateCoverageCells,
+  coverageAssessments: client.affiliateCoverageCellAssessments,
+  queryExecutions: client.affiliateSourceDiscoveryQueryExecutions,
 });
+
+const coverageDatabase = () => {
+  const database = coverageDatabaseForClient(prisma);
+  return {
+    ...database,
+    transaction: (callback: (transactionDatabase: any) => Promise<unknown>) => (
+      (prisma as any).$transaction((tx: any) => callback(coverageDatabaseForClient(tx)))
+    ),
+  };
+};
 
 type CoverageDatabase = ReturnType<typeof coverageDatabase>;
 type CoverageDependencies = {
@@ -270,19 +278,55 @@ const currentMarketUnresolvedLeadCount = async (
   });
   return results.filter(discoveryResultNeedsPipelineResolution).length;
 };
-
 const jobIsClaimable = (job: any, now: Date): boolean => (
   job.status === 'QUEUED'
   || (job.status === 'CLAIMED' && job.leaseExpiresAt instanceof Date && job.leaseExpiresAt < now)
 );
+const claimGenerationDate = (generation: AffiliateCoverageClaimGeneration): Date => {
+  const claimedAt = new Date(generation.claimedAt);
+  if (Number.isNaN(claimedAt.getTime())) throw new Error('Coverage claim generation timestamp is invalid.');
+  return claimedAt;
+};
 
-const assertActiveClaim = (job: any, agentId: string, now: Date): void => {
-  if (!job || job.status !== 'CLAIMED' || job.workerId !== agentId) {
-    throw new Error('Coverage job is not claimed by this agent.');
+const coverageClaimWhere = (
+  generation: AffiliateCoverageClaimGeneration,
+  now: Date,
+) => ({
+  id: generation.jobId,
+  status: 'CLAIMED',
+  workerId: generation.agentId,
+  claimedAt: claimGenerationDate(generation),
+  leaseExpiresAt: { gte: now },
+});
+
+const assertActiveClaim = (
+  job: any,
+  generation: AffiliateCoverageClaimGeneration,
+  now: Date,
+): void => {
+  affiliateCoverageClaimGenerationSchema.parse(generation);
+  if (!job || job.id !== generation.jobId || job.status !== 'CLAIMED' || job.workerId !== generation.agentId) {
+    throw new Error('Coverage job is not claimed by this agent generation.');
+  }
+  if (!(job.claimedAt instanceof Date) || job.claimedAt.getTime() !== claimGenerationDate(generation).getTime()) {
+    throw new Error('Coverage job claim generation is stale.');
   }
   if (!(job.leaseExpiresAt instanceof Date) || job.leaseExpiresAt < now) {
     throw new Error('Coverage job lease has expired.');
   }
+};
+
+const withCoverageTransaction = async <T>(
+  database: CoverageDatabase,
+  callback: (transactionDatabase: CoverageDatabase) => Promise<T>,
+): Promise<T> => {
+  if (database.transaction) return database.transaction(callback) as Promise<T>;
+  return callback(database);
+};
+
+type CoverageRepairResult = {
+  mappingJobId: string;
+  coverageJob: unknown;
 };
 
 const queueCoverageMappingRepair = async (options: {
@@ -292,8 +336,9 @@ const queueCoverageMappingRepair = async (options: {
   result: AffiliateCoverageCompletion;
   now: Date;
   createIdentifier: () => string;
-}): Promise<string> => {
-  const { database, intakeId, job, result, now, createIdentifier } = options;
+  finalData: Record<string, unknown>;
+}): Promise<CoverageRepairResult> => {
+  const { database, intakeId, job, result, now, createIdentifier, finalData } = options;
   const pending = await database.mappingJobs.findFirst({
     where: { intakeId, status: { in: ['QUEUED', 'CLAIMED'] } },
     orderBy: { createdAt: 'desc' },
@@ -310,46 +355,101 @@ const queueCoverageMappingRepair = async (options: {
     repairReason: result.summary,
     repairReasons: result.reasonCodes.length ? result.reasonCodes : ['COVERAGE_CAPTURE_REPAIR'],
     coverageJobId: job.id,
+    claimGeneration: result.claimGeneration,
     priorMappingStatus: pending?.status ?? null,
+    priorMappingClaimGeneration: pending?.status === 'CLAIMED'
+      ? {
+          workerId: pending.workerId ?? null,
+          claimedAt: pending.claimedAt instanceof Date ? pending.claimedAt.toISOString() : null,
+          leaseExpiresAt: pending.leaseExpiresAt instanceof Date ? pending.leaseExpiresAt.toISOString() : null,
+        }
+      : null,
   };
-  let mappingJob;
-  if (pending) {
-    const envelope = recordValue(pending.resultSummary);
-    const history = Array.isArray(envelope.mappingRepairHistory)
-      ? envelope.mappingRepairHistory
-      : [];
-    mappingJob = await database.mappingJobs.update({
-      where: { id: pending.id },
-      data: {
-        status: 'QUEUED',
-        claimedAt: null,
-        leaseExpiresAt: null,
-        workerId: null,
-        branch: null,
-        commit: null,
-        errorMessage: null,
-        finishedAt: null,
-        resultSummary: {
+  return withCoverageTransaction(database, async (transactionDatabase) => {
+    const claim = await transactionDatabase.jobs.updateMany({
+      where: coverageClaimWhere(result.claimGeneration, now),
+      data: { errorMessage: null },
+    });
+    if (claim.count !== 1) throw new Error('STALE_COVERAGE_CLAIM');
+
+    let mappingJobId: string;
+    if (pending) {
+      const envelope = recordValue(pending.resultSummary);
+      const nextEnvelope = appendAffiliateMappingHistory({
+        envelope: {
           ...envelope,
-          mappingRepairHistory: [...history, repairEntry],
+          ...(
+            Object.prototype.hasOwnProperty.call(envelope, 'mappingRepairHistory')
+              ? {}
+              : { mappingRepairHistory: [] }
+          ),
         },
-      },
+        field: 'mappingRepairHistory',
+        entry: {
+          ...repairEntry,
+          archivedPriorResultSummary: archiveAffiliateMappingResultEnvelope(envelope),
+        },
+      });
+      const where = pending.status === 'QUEUED'
+        ? { id: pending.id, status: 'QUEUED' }
+        : {
+            id: pending.id,
+            status: 'CLAIMED',
+            workerId: pending.workerId,
+            claimedAt: pending.claimedAt,
+            leaseExpiresAt: { lt: now },
+          };
+      const updated = await transactionDatabase.mappingJobs.updateMany({
+        where,
+        data: {
+          status: 'QUEUED',
+          claimedAt: null,
+          leaseExpiresAt: null,
+          workerId: null,
+          branch: null,
+          commit: null,
+          errorMessage: null,
+          finishedAt: null,
+          resultSummary: nextEnvelope,
+        },
+      });
+      if (updated.count !== 1) throw new Error('SKIPPED_CONCURRENT_MAPPING_RECLAIM');
+      mappingJobId = pending.id;
+    } else {
+      try {
+        const created = await transactionDatabase.mappingJobs.create({
+          data: {
+            id: createIdentifier(),
+            intakeId,
+            status: 'QUEUED',
+            resultSummary: {
+              mappingRepairHistory: [{
+                ...repairEntry,
+                archivedPriorResultSummary: null,
+              }],
+            },
+          },
+        });
+        mappingJobId = created.id;
+      } catch {
+        throw new Error('SKIPPED_CONCURRENT_MAPPING_INSERT');
+      }
+    }
+    await transactionDatabase.intakes.update({
+      where: { id: intakeId },
+      data: { status: 'READY_FOR_MAPPING' },
     });
-  } else {
-    mappingJob = await database.mappingJobs.create({
+    const completed = await transactionDatabase.jobs.updateMany({
+      where: coverageClaimWhere(result.claimGeneration, now),
       data: {
-        id: createIdentifier(),
-        intakeId,
-        status: 'QUEUED',
-        resultSummary: { mappingRepairHistory: [repairEntry] },
+        ...finalData,
+        result: { ...(finalData.result as Record<string, unknown>), repairMappingJobId: mappingJobId },
       },
     });
-  }
-  await database.intakes.update({
-    where: { id: intakeId },
-    data: { status: 'READY_FOR_MAPPING' },
+    if (completed.count !== 1) throw new Error('STALE_COVERAGE_CLAIM');
+    const coverageJob = await transactionDatabase.jobs.findUnique({ where: { id: job.id } });
+    return { mappingJobId, coverageJob };
   });
-  return mappingJob.id;
 };
 const marketCoveragePriority = async (
   database: CoverageDatabase,
@@ -909,8 +1009,15 @@ export const claimNextAffiliateCoverageJob = async (
       data: { leaseExpiresAt },
     });
     if (renewed.count === 1) {
+      const claimedAt = active.claimedAt instanceof Date ? active.claimedAt : now;
+      const claimGeneration = {
+        jobId: active.id,
+        agentId,
+        claimedAt: claimedAt.toISOString(),
+      };
       return {
-        job: { ...active, leaseExpiresAt },
+        job: { ...active, leaseExpiresAt, claimedAt },
+        claimGeneration,
         resumed: true,
         context: active.subjectType === 'FAILED_INTAKE_CAPTURE'
           ? await failedCaptureContext(database, active)
@@ -955,8 +1062,14 @@ export const claimNextAffiliateCoverageJob = async (
     });
     if (claimed.count !== 1) continue;
     const claimedJob = { ...job, status: 'CLAIMED', claimedAt: now, leaseExpiresAt, workerId: agentId };
+    const claimGeneration = {
+      jobId: job.id,
+      agentId,
+      claimedAt: now.toISOString(),
+    };
     return {
       job: claimedJob,
+      claimGeneration,
       resumed: false,
       context: job.subjectType === 'FAILED_INTAKE_CAPTURE'
         ? await failedCaptureContext(database, claimedJob)
@@ -1007,7 +1120,12 @@ export const createAffiliateCoverageCampaign = async (
   const database = dependencies.database ?? coverageDatabase();
   const now = dependencies.now?.() ?? new Date();
   const job = await database.jobs.findUnique({ where: { id: proposal.jobId } });
-  assertActiveClaim(job, proposal.agentId, now);
+  assertActiveClaim(job, proposal.claimGeneration, now);
+  const campaignClaim = await database.jobs.updateMany({
+    where: coverageClaimWhere(proposal.claimGeneration, now),
+    data: { errorMessage: null },
+  });
+  if (campaignClaim.count !== 1) throw new Error('STALE_COVERAGE_CLAIM');
   if (job.subjectType !== 'MARKET_COVERAGE') {
     throw new Error('Only a market coverage job can create discovery campaigns.');
   }
@@ -1152,6 +1270,7 @@ export const createAffiliateCoverageCampaign = async (
 export const storeAffiliateManualBrowserEvidence = async (input: {
   jobId: string;
   agentId: string;
+  claimGeneration: AffiliateCoverageClaimGeneration;
   pageId: string;
   sourceUrl: string;
   finalUrl?: string | null;
@@ -1163,7 +1282,10 @@ export const storeAffiliateManualBrowserEvidence = async (input: {
   const database = dependencies.database ?? coverageDatabase();
   const now = dependencies.now?.() ?? new Date();
   const job = await database.jobs.findUnique({ where: { id: input.jobId } });
-  assertActiveClaim(job, input.agentId.trim(), now);
+  if (input.jobId !== input.claimGeneration.jobId || input.agentId.trim() !== input.claimGeneration.agentId) {
+    throw new Error('Manual evidence input does not match its claim generation.');
+  }
+  assertActiveClaim(job, input.claimGeneration, now);
   if (job.subjectType !== 'FAILED_INTAKE_CAPTURE') {
     throw new Error('Only a failed intake capture job can store manual browser evidence.');
   }
@@ -1194,7 +1316,6 @@ export const storeAffiliateManualBrowserEvidence = async (input: {
     affiliateDiscoveryPolicyKeyForUrl(sourceUrl) !== expectedPolicyKey
     || affiliateDiscoveryPolicyKeyForUrl(finalUrl) !== expectedPolicyKey
   ) {
-    throw new Error('Manual evidence URL must remain on the failed page policy key.');
   }
   const html = input.html.toString('utf8');
   const quality = evaluateAffiliateHtmlQuality(html, finalUrl);
@@ -1202,8 +1323,18 @@ export const storeAffiliateManualBrowserEvidence = async (input: {
     throw new Error(`Manual browser HTML quality was rejected: ${quality.reasons.join('; ')}`);
   }
   const derived = deriveAffiliateHtmlArtifacts(html, finalUrl);
-  const manualRunId = `coverage_manual_${createHash('sha256').update(job.id).digest('hex').slice(0, 24)}`;
+  const manualRunId = `coverage_manual_${createHash('sha256').update(JSON.stringify({
+    jobId: input.claimGeneration.jobId,
+    agentId: input.claimGeneration.agentId,
+    claimedAt: input.claimGeneration.claimedAt,
+    captureStartedAt: now.toISOString(),
+  })).digest('hex').slice(0, 24)}`;
   const priorRun = await database.intakeRuns.findUnique({ where: { id: manualRunId } });
+  const claimAcquired = await database.jobs.updateMany({
+    where: coverageClaimWhere(input.claimGeneration, now),
+    data: { errorMessage: null },
+  });
+  if (claimAcquired.count !== 1) throw new Error('STALE_COVERAGE_CLAIM');
   if (!priorRun) {
     await database.intakeRuns.create({
       data: {
@@ -1222,8 +1353,14 @@ export const storeAffiliateManualBrowserEvidence = async (input: {
     });
   }
   const persist = dependencies.persistArtifact ?? persistAffiliateSourceIntakeArtifact;
+  const claimMetadata = {
+    jobId: input.claimGeneration.jobId,
+    agentId: input.claimGeneration.agentId,
+    claimedAt: input.claimGeneration.claimedAt,
+  };
   const artifactMetadata = {
     coverageJobId: job.id,
+    claimGeneration: claimMetadata,
     captureMethod: 'MANUAL_BROWSER',
     notes: input.notes.trim(),
     quality,
@@ -1288,39 +1425,86 @@ export const storeAffiliateManualBrowserEvidence = async (input: {
       mimeType: input.screenshotMimeType?.trim() || 'image/png',
     }));
   }
-  await database.intakeRuns.update({
-    where: { id: manualRunId },
-    data: {
-      status: 'SUCCEEDED',
-      finishedAt: now,
-      capturedPageCount: 1,
-      providerJobIds: [],
-      errorMessage: null,
-      summary: {
-        coverageJobId: job.id,
-        captureMethod: 'MANUAL_BROWSER',
-        sourceUrl,
-        finalUrl,
-        artifactCount: artifacts.length,
-        notes: input.notes.trim(),
-      },
-    },
-  });
-  await database.intakes.update({
-    where: { id: intakeId },
-    data: {
-      lastRunId: manualRunId,
-      status: intake.affiliateSourceId ? 'REVIEW_REQUIRED' : 'READY_FOR_MAPPING',
-    },
-  });
-  let mappingJob = await database.mappingJobs.findFirst({
-    where: { intakeId, status: { in: ['QUEUED', 'CLAIMED', 'REVIEW_REQUIRED', 'APPROVED'] } },
-    orderBy: { createdAt: 'desc' },
-  });
-  if (!intake.affiliateSourceId && !mappingJob) {
-    mappingJob = await database.mappingJobs.create({
-      data: { id: (dependencies.createIdentifier ?? createId)(), intakeId, status: 'QUEUED' },
+  let mappingJob: { id: string } | null = null;
+  try {
+    mappingJob = await withCoverageTransaction(database, async (transactionDatabase) => {
+      const claim = await transactionDatabase.jobs.updateMany({
+        where: coverageClaimWhere(input.claimGeneration, now),
+        data: { errorMessage: null },
+      });
+      if (claim.count !== 1) throw new Error('STALE_COVERAGE_CLAIM');
+      await transactionDatabase.intakeRuns.update({
+        where: { id: manualRunId },
+        data: {
+          status: 'SUCCEEDED',
+          finishedAt: now,
+          capturedPageCount: 1,
+          providerJobIds: [],
+          errorMessage: null,
+          summary: {
+            coverageJobId: job.id,
+            claimGeneration: claimMetadata,
+            captureMethod: 'MANUAL_BROWSER',
+            sourceUrl,
+            finalUrl,
+            artifactCount: artifacts.length,
+            notes: input.notes.trim(),
+          },
+        },
+      });
+      await transactionDatabase.intakes.update({
+        where: { id: intakeId },
+        data: {
+          lastRunId: manualRunId,
+          status: intake.affiliateSourceId ? 'REVIEW_REQUIRED' : 'READY_FOR_MAPPING',
+        },
+      });
+      let current = await transactionDatabase.mappingJobs.findFirst({
+        where: { intakeId, status: { in: ['QUEUED', 'CLAIMED', 'REVIEW_REQUIRED', 'APPROVED'] } },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!intake.affiliateSourceId && !current) {
+        try {
+          current = await transactionDatabase.mappingJobs.create({
+            data: {
+              id: (dependencies.createIdentifier ?? createId)(),
+              intakeId,
+              status: 'QUEUED',
+              resultSummary: { coverageEvidenceGeneration: claimMetadata },
+            },
+          });
+        } catch {
+          throw new Error('SKIPPED_CONCURRENT_MAPPING_INSERT');
+        }
+      }
+      const completed = await transactionDatabase.jobs.updateMany({
+        where: coverageClaimWhere(input.claimGeneration, now),
+        data: { errorMessage: null },
+      });
+      if (completed.count !== 1) throw new Error('STALE_COVERAGE_CLAIM');
+      return current ? { id: current.id } : null;
     });
+  } catch (error) {
+    if (String(error instanceof Error ? error.message : error) === 'STALE_COVERAGE_CLAIM') {
+      await database.intakeRuns.update({
+        where: { id: manualRunId },
+        data: {
+          status: 'FAILED',
+          finishedAt: now,
+          errorMessage: 'STALE_COVERAGE_CLAIM',
+          summary: {
+            coverageJobId: job.id,
+            claimGeneration: claimMetadata,
+            captureMethod: 'MANUAL_BROWSER',
+            sourceUrl,
+            finalUrl,
+            artifactCount: artifacts.length,
+            notes: input.notes.trim(),
+          },
+        },
+      });
+    }
+    throw error;
   }
   return {
     jobId: job.id,
@@ -1395,7 +1579,7 @@ export const completeAffiliateCoverageJob = async (
   const database = dependencies.database ?? coverageDatabase();
   const now = dependencies.now?.() ?? new Date();
   const job = await database.jobs.findUnique({ where: { id: result.jobId } });
-  assertActiveClaim(job, result.agentId, now);
+  assertActiveClaim(job, result.claimGeneration, now);
   await validateFocusedCoverageEvidence(database, job, result);
   if (job.subjectType === 'MARKET_COVERAGE') {
     if (result.decision === 'CAMPAIGNS_CREATED' && result.campaignIds.length === 0) {
@@ -1525,19 +1709,6 @@ export const completeAffiliateCoverageJob = async (
   ) {
     throw new Error('HUMAN_REVIEW_REQUIRED requires conflicting identity, contradictory evidence, or replacement-domain approval.');
   }
-  let repairMappingJobId: string | null = null;
-  if (result.decision === 'MAPPER_REPAIR_REQUIRED') {
-    const intakeId = stringValue(recordValue(job.context).intakeId);
-    if (!intakeId) throw new Error('Coverage capture job has no intake id for mapper repair.');
-    repairMappingJobId = await queueCoverageMappingRepair({
-      database,
-      intakeId,
-      job,
-      result,
-      now,
-      createIdentifier: dependencies.createIdentifier ?? createId,
-    });
-  }
   const retryExhausted = result.decision === 'RETRY_LATER'
     && Number(job.attemptCount ?? 0) >= MAX_CAPTURE_ATTEMPTS;
   const retryAt = result.decision === 'RETRY_LATER' && !retryExhausted
@@ -1562,16 +1733,35 @@ export const completeAffiliateCoverageJob = async (
   }
   if (result.decision === 'SOURCE_EXCLUDED') status = 'EXCLUDED';
   const releasesClaim = ['QUEUED', 'WAITING_FOR_PIPELINE', 'RETRY_SCHEDULED'].includes(status);
-  return database.jobs.update({
-    where: { id: job.id },
-    data: {
-      status,
-      result: repairMappingJobId ? { ...storedResult, repairMappingJobId } : storedResult,
-      errorMessage: status === 'HUMAN_REVIEW_REQUIRED' ? result.summary : null,
-      finishedAt: releasesClaim ? null : now,
-      claimedAt: releasesClaim ? null : job.claimedAt,
-      workerId: releasesClaim ? null : job.workerId,
-      leaseExpiresAt: null,
-    },
+  const finalData: Record<string, unknown> = {
+    status,
+    result: storedResult,
+    errorMessage: status === 'HUMAN_REVIEW_REQUIRED' ? result.summary : null,
+    finishedAt: releasesClaim ? null : now,
+    claimedAt: releasesClaim ? null : job.claimedAt,
+    workerId: releasesClaim ? null : job.workerId,
+    leaseExpiresAt: null,
+  };
+  if (result.decision === 'MAPPER_REPAIR_REQUIRED') {
+    const intakeId = stringValue(recordValue(job.context).intakeId);
+    if (!intakeId) throw new Error('Coverage capture job has no intake id for mapper repair.');
+    const repair = await queueCoverageMappingRepair({
+      database,
+      intakeId,
+      job,
+      result,
+      now,
+      createIdentifier: dependencies.createIdentifier ?? createId,
+      finalData,
+    });
+    return repair.coverageJob;
+  }
+  return withCoverageTransaction(database, async (transactionDatabase) => {
+    const completed = await transactionDatabase.jobs.updateMany({
+      where: coverageClaimWhere(result.claimGeneration, now),
+      data: finalData,
+    });
+    if (completed.count !== 1) throw new Error('STALE_COVERAGE_CLAIM');
+    return transactionDatabase.jobs.findUnique({ where: { id: job.id } });
   });
 };

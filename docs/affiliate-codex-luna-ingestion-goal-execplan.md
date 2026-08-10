@@ -241,3 +241,36 @@ Revision note (2026-08-01): Upgraded the Luna ingestion process to max reasoning
 Revision note (2026-08-04): Removed the service-tier and fast-mode invocation overrides. Kept Luna at max reasoning and made the default service behavior explicit in preflight output and result provenance.
 
 Revision note (2026-08-02): Added isolated multi-mapper execution, conditional-claim concurrency proof, worker-specific progress files, and the hard valid-event-division completion gate.
+## Current sport and approval authority revision (2026-08-10)
+
+The Codex goal now starts only after the shared claim-evidence service has
+persisted the exact intake/run and a validated live `Sports` snapshot for its
+claim generation. It must inspect the exported stored artifacts, record exact
+source terminology, and emit v2 `sportDeterminations` with artifact-owned
+citations. Discovery hints, campaign metadata, organization names, URL tokens,
+bare generic family labels, `DEFAULT_SPORTS`, and the former two-argument
+validator cannot resolve a sport.
+
+Surface/format evidence may resolve an exact injected catalog name:
+`Grass Soccer`, `Indoor Soccer`, `Futsal`, `Beach Soccer`, `Indoor Volleyball`,
+`Beach Volleyball`, or `Grass Volleyball`. Only Soccer or only Volleyball
+without usable surface evidence is `SPORT_VARIANT_UNRESOLVED`; an evidenced
+family without an exact catalog entry is `SPORT_NOT_IN_CATALOG`; an exact
+blacklisted activity is `BLACKLISTED` and remains excluded even if present in
+the catalog. Unresolved, unsupported, and all-blacklisted outcomes contain no
+package or candidates and go to governed human review. Schema-v1 results stay
+parseable as historical records but are not fresh approval authority.
+
+Completion validates run/artifact ownership, catalog freshness, determination
+coverage, emitted sport equality, and the immutable mapping claim generation
+before terminal state mutation. Human sport selections are authenticated,
+per-determination, catalog-validated, and consumed once. Approval completion
+separately requires schema v2 `{ approvalJobId, reviewerId, claimedAt }` and
+its own unexpired CAS. `REVIEW_REQUIRED` remains review-ready rather than
+approved. Live package application is performed only inside validated v2
+approval completion; no operator id, reviewer flag, or standalone apply command
+can authorize it.
+
+Revision note (2026-08-10): Added the single-run claim service, v2 catalog and
+determination contract, governed human resolution, and approval-only live
+boundary while preserving the historical Codex rollout record.

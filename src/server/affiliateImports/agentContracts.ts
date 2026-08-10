@@ -4,7 +4,12 @@ import {
   affiliateScrapeMappingSchema,
   type AffiliateScrapeMapping,
 } from './types';
-import { collectAffiliateAgentSportIssues } from './affiliateSportMapping';
+import {
+  affiliateHumanSportResolutionSchema,
+  affiliateSportDeterminationSchema,
+  sortAffiliateSportDeterminations,
+} from './affiliateSportDetermination';
+import { affiliateSportsCatalogSnapshotSchema } from './affiliateSportsCatalog';
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/i, 'Expected a SHA-256 hash.');
 const nonEmptyStringSchema = z.string().trim().min(1);
@@ -178,8 +183,7 @@ const validateScheduledEvidence = (
   });
 };
 
-export const affiliateSourceDraftSchema = z.object({
-  schemaVersion: z.literal(1),
+const affiliateSourceDraftShape = z.object({
   intakeId: nonEmptyStringSchema,
   sourceKey: nonEmptyStringSchema,
   runId: nonEmptyStringSchema,
@@ -199,7 +203,12 @@ export const affiliateSourceDraftSchema = z.object({
   logo: logoDraftSchema,
   warnings: z.array(nonEmptyStringSchema).default([]),
   unresolvedQuestions: z.array(nonEmptyStringSchema).default([]),
-}).strict().superRefine((draft, context) => {
+}).strict();
+
+const validateAffiliateSourceDraftBody = (
+  draft: z.infer<typeof affiliateSourceDraftShape>,
+  context: z.RefinementCtx,
+) => {
   const executableMode = (
     draft.implementationMode === 'GENERIC_MAPPING'
     || draft.implementationMode === 'MANUAL_CANDIDATES'
@@ -265,41 +274,28 @@ export const affiliateSourceDraftSchema = z.object({
       message: 'Executable mappings require cited intake evidence.',
     });
   }
-  if (
-    (refusalMode || draft.implementationMode === 'CUSTOM_EXTRACTOR_REQUIRED')
-    && draft.mapping
-  ) {
+  if ((refusalMode || draft.implementationMode === 'CUSTOM_EXTRACTOR_REQUIRED') && draft.mapping) {
     context.addIssue({
       code: 'custom',
       path: ['mapping'],
       message: 'Refusal and custom-extractor proposals cannot include executable mappings.',
     });
   }
-  if (
-    draft.mapping
-    && draft.listingKind
-    && draft.mapping.kind !== draft.listingKind
-  ) {
+  if (draft.mapping && draft.listingKind && draft.mapping.kind !== draft.listingKind) {
     context.addIssue({
       code: 'custom',
       path: ['mapping', 'kind'],
       message: 'Mapping kind must match the draft listing kind.',
     });
   }
-  if (
-    draft.implementationMode === 'MANUAL_CANDIDATES'
-    && !draft.mapping?.manualCandidates?.length
-  ) {
+  if (draft.implementationMode === 'MANUAL_CANDIDATES' && !draft.mapping?.manualCandidates?.length) {
     context.addIssue({
       code: 'custom',
       path: ['mapping', 'manualCandidates'],
       message: 'MANUAL_CANDIDATES mode requires at least one manual candidate.',
     });
   }
-  if (
-    draft.implementationMode === 'GENERIC_MAPPING'
-    && draft.mapping?.manualCandidates?.length
-  ) {
+  if (draft.implementationMode === 'GENERIC_MAPPING' && draft.mapping?.manualCandidates?.length) {
     context.addIssue({
       code: 'custom',
       path: ['mapping', 'manualCandidates'],
@@ -324,15 +320,49 @@ export const affiliateSourceDraftSchema = z.object({
       }
     });
   }
-  for (const issue of collectAffiliateAgentSportIssues(draft)) {
+  validateScheduledEvidence(draft, context);
+};
+
+export const affiliateSourceDraftV1Schema = affiliateSourceDraftShape
+  .extend({ schemaVersion: z.literal(1) })
+  .strict()
+  .superRefine(validateAffiliateSourceDraftBody);
+
+const affiliateSourceDraftV2BodySchema = affiliateSourceDraftShape.extend({
+  schemaVersion: z.literal(2),
+  contextContractVersion: z.literal(2),
+  sportDeterminations: z.array(affiliateSportDeterminationSchema).max(50),
+}).strict();
+
+export const affiliateSourceDraftV2Schema = affiliateSourceDraftV2BodySchema.superRefine((draft, context) => {
+  validateAffiliateSourceDraftBody(draft, context);
+  const executable = draft.implementationMode === 'GENERIC_MAPPING'
+    || draft.implementationMode === 'MANUAL_CANDIDATES';
+  if (executable && draft.sportDeterminations.length === 0) {
     context.addIssue({
       code: 'custom',
-      path: issue.path.split('.'),
-      message: issue.message,
+      path: ['sportDeterminations'],
+      message: 'Executable v2 drafts require evidence-backed sport determinations.',
     });
   }
-  validateScheduledEvidence(draft, context);
+  const sorted = sortAffiliateSportDeterminations(draft.sportDeterminations);
+  if (JSON.stringify(sorted) !== JSON.stringify(draft.sportDeterminations)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['sportDeterminations'],
+      message: 'Sport determinations must be sorted canonically.',
+    });
+  }
 });
+
+/**
+ * Parse-only draft union. Executable model boundaries must use the v2 schema
+ * and assert catalog membership with assertAffiliateSourceDraftSports.
+ */
+export const affiliateSourceDraftSchema = z.union([
+  affiliateSourceDraftV2Schema,
+  affiliateSourceDraftV1Schema,
+]);
 
 const modelRevisionSchema = z.object({
   family: nonEmptyStringSchema,
@@ -348,7 +378,14 @@ const generatedFileSchema = z.object({
   sha256: sha256Schema,
 }).strict();
 
-export const affiliateMappingWorkerResultSchema = z.object({
+const workerResultValidationSchema = z.object({
+  schemaPassed: z.boolean(),
+  testsPassed: z.boolean(),
+  scrapePassed: z.boolean(),
+  warnings: z.array(nonEmptyStringSchema).default([]),
+}).strict();
+
+const affiliateMappingWorkerResultV1Schema = z.object({
   schemaVersion: z.literal(1),
   jobId: nonEmptyStringSchema,
   intakeId: nonEmptyStringSchema,
@@ -359,15 +396,10 @@ export const affiliateMappingWorkerResultSchema = z.object({
   promptContractVersion: z.number().int().positive(),
   evidenceRunId: nonEmptyStringSchema,
   evidenceArtifactSha256s: z.array(sha256Schema),
-  draft: affiliateSourceDraftSchema.nullable(),
+  draft: affiliateSourceDraftV1Schema.nullable(),
   draftSha256: sha256Schema.nullable(),
   generatedFiles: z.array(generatedFileSchema).default([]),
-  validation: z.object({
-    schemaPassed: z.boolean(),
-    testsPassed: z.boolean(),
-    scrapePassed: z.boolean(),
-    warnings: z.array(nonEmptyStringSchema).default([]),
-  }).strict(),
+  validation: workerResultValidationSchema,
   timingsMs: z.record(nonEmptyStringSchema, z.number().nonnegative()),
   errorMessage: nullableNonEmptyStringSchema,
 }).strict().superRefine((result, context) => {
@@ -394,6 +426,74 @@ export const affiliateMappingWorkerResultSchema = z.object({
   }
 });
 
+export const affiliateMappingWorkerResultSchema = z.object({
+  schemaVersion: z.literal(2),
+  contextContractVersion: z.literal(2),
+  jobId: nonEmptyStringSchema,
+  intakeId: nonEmptyStringSchema,
+  status: z.enum(['DRAFT_READY', 'REFUSED', 'FAILED']),
+  workerId: nonEmptyStringSchema,
+  model: modelRevisionSchema,
+  modelManifestSha256: sha256Schema,
+  promptContractVersion: z.number().int().positive(),
+  evidenceRunId: nonEmptyStringSchema,
+  evidenceArtifactSha256s: z.array(sha256Schema),
+  sportsCatalog: affiliateSportsCatalogSnapshotSchema,
+  humanSportResolution: affiliateHumanSportResolutionSchema.optional(),
+  draft: affiliateSourceDraftV2Schema.nullable(),
+  draftSha256: sha256Schema.nullable(),
+  generatedFiles: z.array(generatedFileSchema).default([]),
+  validation: workerResultValidationSchema,
+  timingsMs: z.record(nonEmptyStringSchema, z.number().nonnegative()),
+  errorMessage: nullableNonEmptyStringSchema,
+}).strict().superRefine((result, context) => {
+  if (result.sportsCatalog.sha256 !== result.sportsCatalog.sha256.toLowerCase()) {
+    context.addIssue({
+      code: 'custom',
+      path: ['sportsCatalog', 'sha256'],
+      message: 'Catalog hashes must be lowercase.',
+    });
+  }
+  if (result.status === 'DRAFT_READY' && (!result.draft || !result.draftSha256)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['draft'],
+      message: 'DRAFT_READY results require a draft and draft hash.',
+    });
+  }
+  if (result.draft && (
+    result.draft.intakeId !== result.intakeId
+    || result.draft.runId !== result.evidenceRunId
+    || result.draft.contextContractVersion !== 2
+  )) {
+    context.addIssue({
+      code: 'custom',
+      path: ['draft'],
+      message: 'Worker draft identity and context version must match the v2 result envelope.',
+    });
+  }
+  if (result.status === 'FAILED' && !result.errorMessage) {
+    context.addIssue({
+      code: 'custom',
+      path: ['errorMessage'],
+      message: 'FAILED results require an error message.',
+    });
+  }
+  if (result.status === 'REFUSED' && result.draft?.mapping) {
+    context.addIssue({
+      code: 'custom',
+      path: ['draft', 'mapping'],
+      message: 'Refused results cannot include an executable mapping.',
+    });
+  }
+});
+
+/** Parse-only compatibility for persisted worker rows; live completion uses the v2 schema. */
+export const affiliateMappingWorkerResultParseSchema = z.union([
+  affiliateMappingWorkerResultSchema,
+  affiliateMappingWorkerResultV1Schema,
+]);
+
 const reviewIssueSchema = z.object({
   code: nonEmptyStringSchema,
   severity: z.enum(['BLOCKING', 'WARNING', 'SUGGESTION']),
@@ -402,7 +502,7 @@ const reviewIssueSchema = z.object({
   evidencePath: nullableNonEmptyStringSchema,
 }).strict();
 
-export const affiliateMappingReviewSchema = z.object({
+const affiliateMappingReviewV1Schema = z.object({
   schemaVersion: z.literal(1),
   jobId: nonEmptyStringSchema,
   workerResultSha256: sha256Schema,
@@ -413,7 +513,29 @@ export const affiliateMappingReviewSchema = z.object({
   }).strict(),
   outcome: z.enum(['APPROVE_RECOMMENDATION', 'REQUEST_CHANGES', 'REJECT']),
   issues: z.array(reviewIssueSchema),
-  correctedDraft: affiliateSourceDraftSchema.nullable(),
+  correctedDraft: affiliateSourceDraftV1Schema.nullable(),
+  suggestedPatch: nullableNonEmptyStringSchema,
+  testAdditions: z.array(nonEmptyStringSchema).default([]),
+  confidence: z.number().min(0).max(1),
+  trainingEligibility: z.enum(['ELIGIBLE_AFTER_HUMAN_APPROVAL', 'EVALUATION_ONLY', 'INELIGIBLE']),
+  reviewedAt: isoDateTimeSchema,
+}).strict();
+
+export const affiliateMappingReviewSchema = z.object({
+  schemaVersion: z.literal(2),
+  contextContractVersion: z.literal(2),
+  jobId: nonEmptyStringSchema,
+  workerResultSha256: sha256Schema,
+  sportsCatalog: affiliateSportsCatalogSnapshotSchema,
+  humanSportResolution: affiliateHumanSportResolutionSchema.optional(),
+  reviewer: z.object({
+    provider: nonEmptyStringSchema,
+    model: nonEmptyStringSchema,
+    configurationSha256: sha256Schema,
+  }).strict(),
+  outcome: z.enum(['APPROVE_RECOMMENDATION', 'REQUEST_CHANGES', 'REJECT']),
+  issues: z.array(reviewIssueSchema),
+  correctedDraft: affiliateSourceDraftV2Schema.nullable(),
   suggestedPatch: nullableNonEmptyStringSchema,
   testAdditions: z.array(nonEmptyStringSchema).default([]),
   confidence: z.number().min(0).max(1),
@@ -435,7 +557,20 @@ export const affiliateMappingReviewSchema = z.object({
       message: 'Requested changes require a corrected draft or suggested patch.',
     });
   }
+  if (review.correctedDraft && review.correctedDraft.contextContractVersion !== 2) {
+    context.addIssue({
+      code: 'custom',
+      path: ['correctedDraft'],
+      message: 'Corrected drafts in v2 reviews must carry contextContractVersion 2.',
+    });
+  }
 });
+
+/** Parse-only compatibility for historical reviewer rows. */
+export const affiliateMappingReviewParseSchema = z.union([
+  affiliateMappingReviewSchema,
+  affiliateMappingReviewV1Schema,
+]);
 
 const trainingArtifactSchema = z.object({
   kind: nonEmptyStringSchema,
@@ -450,7 +585,8 @@ export const affiliateMappingTrainingExampleSchema = z.object({
     intakeSourceKey: nonEmptyStringSchema,
     runId: nonEmptyStringSchema,
     artifacts: z.array(trainingArtifactSchema).min(1),
-    contextContractVersion: z.number().int().positive(),
+    contextContractVersion: z.union([z.literal(1), z.literal(2)]),
+    sportsCatalog: affiliateSportsCatalogSnapshotSchema.optional(),
   }).strict(),
   output: z.object({
     draftHash: sha256Schema,
@@ -493,7 +629,17 @@ export const affiliateMappingTrainingExampleSchema = z.object({
       message: 'LEGACY_PARTIAL and STALE examples cannot enter the training split.',
     });
   }
+  if (example.input.contextContractVersion === 2 && !example.input.sportsCatalog) {
+    context.addIssue({
+      code: 'custom',
+      path: ['input', 'sportsCatalog'],
+      message: 'Version-2 training examples require their catalog snapshot.',
+    });
+  }
 });
+export type AffiliateMappingTrainingExample = z.infer<
+  typeof affiliateMappingTrainingExampleSchema
+>;
 
 export const openWeightModelManifestSchema = z.object({
   schemaVersion: z.literal(1),
@@ -528,10 +674,13 @@ export const openWeightModelManifestSchema = z.object({
 }).strict();
 
 export type AffiliateCandidateAssertion = z.infer<typeof affiliateCandidateAssertionSchema>;
-export type AffiliateSourceDraft = z.infer<typeof affiliateSourceDraftSchema>;
+export type AffiliateSourceDraftV1 = z.infer<typeof affiliateSourceDraftV1Schema>;
+export type AffiliateSourceDraftV2 = z.infer<typeof affiliateSourceDraftV2Schema>;
+export type AffiliateSourceDraft = AffiliateSourceDraftV1 | AffiliateSourceDraftV2;
 export type AffiliateMappingWorkerResult = z.infer<typeof affiliateMappingWorkerResultSchema>;
+export type AffiliateMappingWorkerResultV1 = z.infer<typeof affiliateMappingWorkerResultV1Schema>;
 export type AffiliateMappingReview = z.infer<typeof affiliateMappingReviewSchema>;
-export type AffiliateMappingTrainingExample = z.infer<typeof affiliateMappingTrainingExampleSchema>;
+export type AffiliateMappingReviewV1 = z.infer<typeof affiliateMappingReviewV1Schema>;
 export type OpenWeightModelManifest = z.infer<typeof openWeightModelManifestSchema>;
 export type ModelRevision = z.infer<typeof modelRevisionSchema>;
 

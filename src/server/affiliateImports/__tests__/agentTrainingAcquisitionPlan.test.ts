@@ -16,7 +16,12 @@ import {
   type AffiliateGoldCohortCandidate,
 } from '../agentGoldCohort';
 import { stableAgentArtifactSha256 } from '../agentContracts';
+import { buildAffiliateSportsCatalogSnapshot } from '../affiliateSportsCatalog';
 
+const sportsCatalog = buildAffiliateSportsCatalogSnapshot(
+  [{ id: 'sport_grass_soccer', name: 'Grass Soccer' }],
+  '2026-01-01T00:00:00.000Z',
+);
 const HASH = 'a'.repeat(64);
 
 const candidate = (
@@ -110,21 +115,30 @@ const goldExample = (input: {
     includedInTraining: input.split === 'train',
     includedInRetrieval: true,
     context: {
+      contextContractVersion: 2,
       jobId: `job-${input.sourceKey}`,
       intakeId: `intake-${input.sourceKey}`,
       sourceKey: input.sourceKey,
+      workerId: 'worker_1',
+      claimedAt: '2026-01-01T00:00:00.000Z',
       runId: `run-${input.sourceKey}`,
+      evidenceRunIds: [`run-${input.sourceKey}`],
+      sportsCatalog,
       policyDisposition: 'ALLOWED',
       targetKindHints: [input.targetKind],
       artifacts: [{
+        artifactId: `artifact-${input.sourceKey}`,
         kind: 'PAGE_HTML',
         sha256: HASH,
         pageUrl: listUrl,
+        intakeId: `intake-${input.sourceKey}`,
+        runId: `run-${input.sourceKey}`,
       }],
-      instructionsRevision: 'affiliate-source-mapping-contract-v1',
+      instructionsRevision: 'affiliate-source-mapping-contract-v2',
     },
     approvedDraft: {
-      schemaVersion: 1,
+      schemaVersion: 2,
+      contextContractVersion: 2,
       intakeId: `intake-${input.sourceKey}`,
       sourceKey: input.sourceKey,
       runId: `run-${input.sourceKey}`,
@@ -175,6 +189,20 @@ const goldExample = (input: {
       },
       warnings: [],
       unresolvedQuestions: [],
+      sportDeterminations: [{
+        sourceLabels: ['outdoor soccer'],
+        status: 'RESOLVED',
+        resolutionBasis: 'SOURCE_EVIDENCE',
+        canonicalSportNames: ['Grass Soccer'],
+        rationale: 'The source evidence identifies an outdoor soccer program.',
+        evidence: [{
+          artifactId: `artifact-${input.sourceKey}`,
+          artifactSha256: HASH,
+          artifactKind: 'PAGE_HTML',
+          pageUrl: listUrl,
+          excerpt: 'outdoor soccer',
+        }],
+      }],
     },
     expectedPersistedCandidates: [expectedCandidate],
     fixturePages: [{

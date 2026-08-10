@@ -1,5 +1,6 @@
 import {
   createEventEditorCommandSchema,
+  eventEditorCreateBootstrapSchema,
   eventEditorDraftSchema,
   eventEditorSnapshotSchema,
   saveEventEditorCommandSchema,
@@ -110,19 +111,66 @@ const draft = {
 
 describe('event editor contracts', () => {
   it('accepts a complete command and preserves new question identity', () => {
-    const parsed = createEventEditorCommandSchema.parse({ contractVersion: 1, draft });
+    const parsed = createEventEditorCommandSchema.parse({
+      contractVersion: 2,
+      createOperationId: 'create-operation-1',
+      draft,
+    });
     expect(parsed.draft.registration.questions[0]).toEqual(expect.objectContaining({ clientId: 'question-client-1' }));
+  });
+  it('requires the bootstrap operation identity and preserves the selected start', () => {
+    const parsed = eventEditorCreateBootstrapSchema.parse({
+      contractVersion: 2,
+      createOperationId: 'create-operation-1',
+      snapshot: {
+        contractVersion: 2,
+        mode: 'CREATE',
+        eventId: null,
+        editorRevision: 'new',
+        staffRevision: null,
+        draft,
+        capabilities: {
+          canUseOnlinePayments: true,
+          canManageStaff: true,
+          canEdit: true,
+          supportsTeamStaffing: false,
+        },
+        catalogs: { sports: [], organizations: [], fields: [], templates: [] },
+        immutable: { fieldNames: [], rental: false, template: false },
+      },
+    });
+    expect(parsed.createOperationId).toBe('create-operation-1');
+    expect(parsed.snapshot.draft.basics.start).toBe(draft.basics.start);
+    expect(() => eventEditorCreateBootstrapSchema.parse({
+      ...parsed,
+      createOperationId: undefined,
+    })).toThrow();
   });
 
   it('rejects hydrated or computed values at the command boundary', () => {
     expect(() => eventEditorDraftSchema.parse({ ...draft, matches: [] })).toThrow();
-    expect(() => saveEventEditorCommandSchema.parse({ contractVersion: 1, editorRevision: 'rev_1', staffRevision: null, draft: { ...draft, attendees: [] } })).toThrow();
+    expect(() => saveEventEditorCommandSchema.parse({
+      contractVersion: 2,
+      editorRevision: 'rev_1',
+      staffRevision: null,
+      draft: { ...draft, attendees: [] },
+    })).toThrow();
   });
 
   it('requires an end constraint only for fixed-end scheduling', () => {
     expect(eventEditorDraftSchema.parse({ ...draft, schedule: { mode: 'FIXED_END', endConstraint: '2026-09-01T18:00:00.000Z' } }).schedule.mode).toBe('FIXED_END');
     expect(() => eventEditorDraftSchema.parse({ ...draft, schedule: { mode: 'FIXED_END', endConstraint: null } })).toThrow();
-    expect(() => eventEditorSnapshotSchema.parse({ contractVersion: 1, mode: 'CREATE', eventId: null, editorRevision: 'new', staffRevision: null, draft, capabilities: {}, catalogs: {}, immutable: {} })).toThrow();
+    expect(() => eventEditorSnapshotSchema.parse({
+      contractVersion: 2,
+      mode: 'CREATE',
+      eventId: null,
+      editorRevision: 'new',
+      staffRevision: null,
+      draft,
+      capabilities: {},
+      catalogs: {},
+      immutable: {},
+    })).toThrow();
   });
   it.each([
     ['FREE', 0],
@@ -130,7 +178,7 @@ describe('event editor contracts', () => {
     ['MANUAL', 0],
   ] as const)('round-trips %s payment mode without fabrication', (mode, priceCents) => {
     const snapshot = {
-      contractVersion: 1,
+      contractVersion: 2,
       mode: 'EDIT',
       eventId: 'event_1',
       editorRevision: 'rev_1',

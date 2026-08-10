@@ -1,5 +1,6 @@
-/** @jest-environment node */
-
+import {
+  buildAffiliateSportsCatalogSnapshot,
+} from '../affiliateSportsCatalog';
 import {
   analyzeAffiliateSportQuality,
   inspectAffiliateSportQuality,
@@ -107,5 +108,30 @@ describe('affiliate sport quality', () => {
     expect(query).toHaveBeenCalledTimes(3);
     expect(query.mock.calls[0][1]).toEqual(['source-1']);
     expect(query.mock.calls[1][1]).toEqual(['source-1']);
+  });
+  it('validates against the injected claim catalog without querying disposable Sports', async () => {
+    const snapshot = buildAffiliateSportsCatalogSnapshot([
+      { id: 'fresh-1', name: 'New Surface Sport' },
+    ], '2026-08-10T00:00:00.000Z');
+    const query = jest.fn()
+      .mockResolvedValueOnce({ rows: [candidate('New Surface Sport')] })
+      .mockResolvedValueOnce({ rows: [organization(['New Surface Sport'])] });
+
+    const result = await inspectAffiliateSportQuality({
+      queryable: { query },
+      sourceId: 'source-1',
+      catalogSnapshot: snapshot,
+      catalogSha256: snapshot.sha256,
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      passed: true,
+      catalogSha256: snapshot.sha256,
+      catalogHashMatched: true,
+      expectedSportNames: [],
+      observedSportNames: ['New Surface Sport'],
+    }));
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(query.mock.calls.every(([text]) => !String(text).includes('FROM "Sports"'))).toBe(true);
   });
 });

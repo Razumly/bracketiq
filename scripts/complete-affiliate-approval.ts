@@ -1,17 +1,7 @@
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import dotenv from 'dotenv';
-import { Client } from 'pg';
 import { configureAffiliateLiveDatabaseEnvironment } from '../src/server/affiliateImports/agentRepository';
-import { codexAffiliateIngestionResultSchema } from '../src/server/affiliateImports/codexIngestionResult';
-import {
-  inspectAffiliateDisposableReviewScrapes,
-  inspectAffiliateProducerPackage,
-  resolveAffiliateDisposableDatabaseUrl,
-  resolveAffiliateProducerRepositoryRoot,
-} from '../src/server/affiliateImports/producerPackageEvidence';
-
 dotenv.config({ quiet: true });
 dotenv.config({ path: '.env.local', override: false, quiet: true });
 
@@ -49,50 +39,8 @@ const main = async () => {
   const { completeAffiliateApproval } = await import(
     '../src/server/affiliateImports/approvalQueue'
   );
-  let disposable: Client | null = null;
   try {
-    if (result.subjectType === 'MAPPING_PACKAGE' && result.decision === 'APPROVE') {
-      const disposableDatabaseUrl = resolveAffiliateDisposableDatabaseUrl();
-      const mappingJob = await (prisma as any).affiliateSourceMappingJobs.findUnique({
-        where: { id: result.subjectKey },
-      });
-      if (!mappingJob) throw new Error('Affiliate source mapping job not found.');
-      const envelope = mappingJob.resultSummary && typeof mappingJob.resultSummary === 'object'
-        ? mappingJob.resultSummary as Record<string, unknown>
-        : {};
-      const ingestionResult = codexAffiliateIngestionResultSchema.parse(envelope.result);
-      inspectAffiliateProducerPackage({
-        repositoryRoot: resolveAffiliateProducerRepositoryRoot(ingestionResult.workerId),
-        result: ingestionResult,
-      });
-      disposable = new Client({ connectionString: disposableDatabaseUrl });
-      await disposable.connect();
-      await inspectAffiliateDisposableReviewScrapes({
-        queryable: disposable,
-        result: ingestionResult,
-      });
-    }
-    const updated = await completeAffiliateApproval(result, {
-      applyMappingPackage: async (mappingJobId, reviewerId, approvalResult) => {
-        if (!useLive) {
-          throw new Error('Mapping package approval requires --live.');
-        }
-        const args = [
-          path.resolve('scripts/apply-approved-affiliate-mapping-jobs.ts'),
-          '--live',
-          '--apply',
-          `--job=${mappingJobId}`,
-          `--approved-by=${reviewerId}`,
-          `--approval-job=${approvalResult.approvalJobId}`,
-          ...(approvalResult.checks.logoAbsenceAccepted ? ['--accept-missing-logo'] : []),
-        ];
-        execFileSync(path.resolve('node_modules/.bin/tsx'), args, {
-          cwd: process.cwd(),
-          env: process.env,
-          stdio: 'inherit',
-        });
-      },
-    });
+    const updated = await completeAffiliateApproval(result);
     console.log(JSON.stringify({
       approvalJobId: updated.id,
       subjectType: updated.subjectType,
@@ -101,7 +49,6 @@ const main = async () => {
       resultPath: absoluteResultPath,
     }, null, 2));
   } finally {
-    await disposable?.end().catch(() => undefined);
     await (prisma as any).$disconnect();
   }
 };

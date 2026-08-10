@@ -12,13 +12,19 @@ import {
   affiliateSourceDraftSchema,
   stableAgentArtifactSha256,
 } from '../agentContracts';
+import { buildAffiliateSportsCatalogSnapshot } from '../affiliateSportsCatalog';
 
 const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
 const HASH_C = 'c'.repeat(64);
+const sportsCatalog = buildAffiliateSportsCatalogSnapshot(
+  [{ id: 'sport_1', name: 'Grass Soccer' }],
+  '2026-01-01T00:00:00.000Z',
+);
 
 const draft = {
-  schemaVersion: 1,
+  schemaVersion: 2,
+  contextContractVersion: 2,
   intakeId: 'intake_1',
   sourceKey: 'river-city',
   runId: 'run_1',
@@ -66,10 +72,25 @@ const draft = {
   },
   warnings: [],
   unresolvedQuestions: [],
+  sportDeterminations: [{
+    sourceLabels: ['outdoor soccer'],
+    status: 'RESOLVED',
+    resolutionBasis: 'SOURCE_EVIDENCE',
+    canonicalSportNames: ['Grass Soccer'],
+    rationale: 'The evidence says outdoor soccer.',
+    evidence: [{
+      artifactId: 'artifact_events',
+      artifactSha256: HASH_A,
+      artifactKind: 'PAGE_HTML',
+      pageUrl: 'https://rivercity.example/events',
+      excerpt: 'outdoor soccer',
+    }],
+  }],
 };
 
 const workerResult = {
-  schemaVersion: 1,
+  schemaVersion: 2,
+  contextContractVersion: 2,
   jobId: 'job_1',
   intakeId: 'intake_1',
   status: 'DRAFT_READY',
@@ -83,9 +104,10 @@ const workerResult = {
     promptTemplateRevision: 'prompt-v1',
   },
   modelManifestSha256: HASH_B,
-  promptContractVersion: 1,
+  promptContractVersion: 2,
   evidenceRunId: 'run_1',
   evidenceArtifactSha256s: [HASH_A],
+  sportsCatalog,
   draft,
   draftSha256: HASH_C,
   generatedFiles: [],
@@ -100,11 +122,13 @@ const workerResult = {
 };
 
 const reviewFor = (overrides: Record<string, unknown> = {}) => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
+  contextContractVersion: 2,
   jobId: 'job_1',
   workerResultSha256: stableAgentArtifactSha256(
     affiliateMappingWorkerResultSchema.parse(workerResult),
   ),
+  sportsCatalog,
   reviewer: {
     provider: 'codex',
     model: 'sol',

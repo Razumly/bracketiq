@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createId } from '@/lib/id';
 import { requireSession } from '@/lib/permissions';
 import { getRequestOrigin } from '@/lib/requestOrigin';
 import { hasOrgPermission } from '@/server/accessControl';
 import { ORG_PERMISSIONS } from '@/lib/organizationPermissions';
 import {
+  EVENT_EDITOR_CONTRACT_VERSION,
   eventEditorBootstrapQuerySchema,
   parseCreateEventEditorCommand,
   type CreateEventEditorCommand,
@@ -17,18 +19,37 @@ import {
 } from '@/server/events/eventEditorSave';
 import { deliverEventStaffInvitesAfterCommit } from '@/server/events/eventStaffDelivery';
 import { loadCreateEventEditorSnapshot } from '@/server/events/eventEditorSnapshot';
+import {
+  EventCreateOperationConflictError,
+  EventCreateOperationIncompleteError,
+  EventCreateOperationPayloadMismatchError,
+} from '@/server/events/eventCreateOperationReplay';
+import { notifySocialAudienceOfEventCreation } from '@/server/eventCreationNotifications';
+import { sendAdminEventCreatedNotification } from '@/server/adminNotifications';
 
 export const dynamic = 'force-dynamic';
-
 const queryInput = (request: NextRequest): Record<string, string> => {
-  const accepted = ['organizationId', 'eventType', 'sportId', 'parentEventId', 'templateId', 'rentalBookingId'];
+  const accepted = ['organizationId', 'eventType', 'sportId', 'parentEventId', 'templateId', 'rentalBookingId', 'start'];
   return Object.fromEntries(
     accepted
       .map((key) => [key, request.nextUrl.searchParams.get(key)] as const)
       .filter((entry): entry is readonly [string, string] => Boolean(entry[1])),
   );
 };
+
 const errorResponse = (error: unknown) => {
+  if (error instanceof EventCreateOperationPayloadMismatchError) {
+    return NextResponse.json({
+      error: error.message,
+      code: 'CREATE_OPERATION_PAYLOAD_MISMATCH',
+    }, { status: 409 });
+  }
+  if (error instanceof EventCreateOperationConflictError || error instanceof EventCreateOperationIncompleteError) {
+    return NextResponse.json({
+      error: error.message,
+      code: 'CREATE_OPERATION_CONFLICT',
+    }, { status: 409 });
+  }
   if (error instanceof EditorPermissionError) {
     return NextResponse.json({ error: error.message, code: 'EDITOR_PERMISSION_DENIED' }, { status: 403 });
   }
@@ -67,7 +88,11 @@ export async function GET(request: NextRequest) {
   try {
     const snapshot = await loadCreateEventEditorSnapshot(parsed.data, { actor: session });
     await assertCreateOrganizationPermission(session, snapshot);
-    return NextResponse.json(snapshot, { status: 200 });
+    return NextResponse.json({
+      contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
+      createOperationId: createId(),
+      snapshot,
+    }, { status: 200 });
   } catch (error) {
     return errorResponse(error);
   }
@@ -89,6 +114,41 @@ export async function POST(request: NextRequest) {
         candidates as Parameters<typeof deliverEventStaffInvitesAfterCommit>[1],
         getRequestOrigin(request),
       ),
+      onEventCreated: async (eventId, draft) => {
+        const eventStart = new Date(draft.basics.start);
+        const end = draft.schedule.mode === 'FIXED_END'
+          ? draft.schedule.endConstraint
+          : draft.schedule.generatedScheduleEnd;
+        await notifySocialAudienceOfEventCreation({
+          eventId,
+          hostId: draft.basics.hostId ?? session.userId,
+          eventName: draft.basics.name,
+          eventStart,
+          location: draft.basics.location,
+          baseUrl: getRequestOrigin(request),
+        });
+        await sendAdminEventCreatedNotification({
+          event: {
+            id: eventId,
+            name: draft.basics.name,
+            eventType: draft.basics.eventType,
+            state: draft.basics.state,
+            hostId: draft.basics.hostId ?? session.userId,
+            organizationId: draft.basics.organizationId,
+            sportIds: draft.basics.sportIds,
+            start: draft.basics.start,
+            end,
+            timeZone: draft.basics.timeZone,
+            location: draft.basics.location,
+            address: draft.basics.address,
+            teamSignup: draft.participation.teamSignup,
+            price: draft.registration.payment.priceCents,
+            maxParticipants: draft.participation.maxParticipants,
+            createdAt: new Date(),
+          },
+          baseUrl: getRequestOrigin(request),
+        });
+      },
     });
     return NextResponse.json(result, { status: 201 });
   } catch (error) {

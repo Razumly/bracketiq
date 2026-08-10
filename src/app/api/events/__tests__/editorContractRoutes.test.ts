@@ -10,6 +10,7 @@ const loadSnapshotMock = jest.fn();
 const createEventEditorMock = jest.fn();
 const saveEventEditorMock = jest.fn();
 const parseCreateMock = jest.fn();
+const bootstrapQueryMock = jest.fn();
 const parseSaveMock = jest.fn();
 const prismaMock = { events: { findUnique: jest.fn() } };
 const deliverInvitesMock = jest.fn();
@@ -31,7 +32,8 @@ jest.mock('@/server/accessControl', () => ({
 }));
 jest.mock('@/lib/requestOrigin', () => ({ getRequestOrigin: (...args: any[]) => getRequestOriginMock(...args) }));
 jest.mock('@/contracts/eventEditor', () => ({
-  eventEditorBootstrapQuerySchema: { safeParse: (...args: any[]) => ({ success: false, error: { flatten: () => ({ fieldErrors: {} }) } }) },
+  EVENT_EDITOR_CONTRACT_VERSION: 2,
+  eventEditorBootstrapQuerySchema: { safeParse: (...args: any[]) => bootstrapQueryMock(...args) },
   parseCreateEventEditorCommand: (...args: any[]) => parseCreateMock(...args),
   parseSaveEventEditorCommand: (...args: any[]) => parseSaveMock(...args),
 }));
@@ -54,6 +56,10 @@ jest.mock('@/server/events/eventStaffDelivery', () => ({
 
 import { GET as createGet, POST as createPost } from '@/app/api/events/editor/route';
 import { GET as editGet, PUT as editPut } from '@/app/api/events/[eventId]/editor/route';
+import {
+  EventCreateOperationConflictError,
+  EventCreateOperationPayloadMismatchError,
+} from '@/server/events/eventCreateOperationReplay';
 import { EditorRevisionConflictError } from '@/server/events/eventEditorSave';
 
 const request = (url: string, method = 'GET', body?: unknown) => new NextRequest(url, {
@@ -67,10 +73,19 @@ const editContext = (eventId = 'event_1') => ({ params: Promise.resolve({ eventI
 describe('canonical editor routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    bootstrapQueryMock.mockImplementation((input: Record<string, string>) => (
+      input.eventType === 'NOT_A_MODE'
+        ? { success: false, error: { flatten: () => ({ fieldErrors: {} }) } }
+        : { success: true, data: input }
+    ));
     requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
     hasOrgPermissionMock.mockResolvedValue(true);
     canManageEventMock.mockResolvedValue(true);
     prismaMock.events.findUnique.mockResolvedValue({ id: 'event_1', hostId: 'host_1' });
+    loadCreateSnapshotMock.mockResolvedValue({
+      draft: { basics: { organizationId: null } },
+      catalogs: { organizations: [] },
+    });
   });
 
   it('rejects malformed create bootstrap queries before loading catalogs', async () => {
@@ -93,6 +108,67 @@ describe('canonical editor routes', () => {
       { userId: 'host_1', isAdmin: false },
       command,
       expect.objectContaining({ sendStaffInvites: expect.any(Function) }),
+    );
+  });
+
+  it('maps a create payload mismatch to a typed conflict without retrying persistence', async () => {
+    const command = {
+      contractVersion: 2,
+      createOperationId: 'create-operation-1',
+      draft: { basics: { name: 'Fixture' } },
+    };
+    parseCreateMock.mockReturnValue(command);
+    createEventEditorMock.mockRejectedValue(new EventCreateOperationPayloadMismatchError());
+
+    const response = await createPost(request('http://localhost/api/events/editor', 'POST', command));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual(expect.objectContaining({
+      code: 'CREATE_OPERATION_PAYLOAD_MISMATCH',
+    }));
+    expect(createEventEditorMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps an in-flight create operation to a retryable typed conflict', async () => {
+    const command = {
+      contractVersion: 2,
+      createOperationId: 'create-operation-1',
+      draft: { basics: { name: 'Fixture' } },
+    };
+    parseCreateMock.mockReturnValue(command);
+    createEventEditorMock.mockRejectedValue(new EventCreateOperationConflictError());
+
+    const response = await createPost(request('http://localhost/api/events/editor', 'POST', command));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual(expect.objectContaining({
+      code: 'CREATE_OPERATION_CONFLICT',
+    }));
+  });
+  it('returns a versioned create bootstrap with one operation identity and preserves query intent', async () => {
+    const snapshot = {
+      draft: { basics: { organizationId: null } },
+      catalogs: { organizations: [] },
+    };
+    loadCreateSnapshotMock.mockResolvedValue(snapshot);
+    const response = await createGet(request(
+      'http://localhost/api/events/editor?eventType=EVENT&sportId=sport_1&start=2026-09-01T10%3A00%3A00.000Z',
+    ));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      contractVersion: 2,
+      createOperationId: expect.any(String),
+      snapshot,
+    });
+    expect(loadCreateSnapshotMock).toHaveBeenCalledWith(
+      {
+        eventType: 'EVENT',
+        sportId: 'sport_1',
+        start: '2026-09-01T10:00:00.000Z',
+      },
+      { actor: { userId: 'host_1', isAdmin: false } },
     );
   });
 

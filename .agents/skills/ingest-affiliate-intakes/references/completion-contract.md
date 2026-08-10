@@ -39,15 +39,36 @@ application code outside the source package.
 
 Inspect at least five candidates when five exist, plus every produced kind. Check title, official URL, schedule/date display, sport, tags, divisions, price, venue, address, city, and coordinates or geocoding inputs.
 
-Compare every candidate `sportName` and every source organization sport with
-the exact `name` values in the current `Sports` table. Use a catalog name only
-when stored source evidence supports that exact sport. Do not treat generic
-`Volleyball` as indoor, grass, or beach volleyball, and do not infer a soccer
-surface. A missing or incorrectly cased catalog name is a producer defect. A
-source sport absent from the catalog stops the mapper before package authoring:
-preserve the exact source label only in structured human-review evidence, then
-complete the job as `HUMAN_REVIEW_REQUIRED` with `SPORT_NOT_IN_CATALOG`. Such a
-result has no branch, commit, generated paths, candidates, or review scrapes.
+Every candidate `sportName` and every source-organization sport must equal a
+name in the claim's injected `sportsCatalog` snapshot and be covered by the
+resolved union of v2 `sportDeterminations`. The catalog snapshot is persisted
+by the shared claim/export/context service before evidence inspection. Do not
+use `DEFAULT_SPORTS`, compiled aliases, the former two-argument validator,
+discovery `sportHints`, campaign metadata, organization names, URL tokens, or
+a bare generic family word as authority.
+
+Select a canonical name only when stored first-party evidence establishes the
+surface or format. Use this matrix as mandatory guidance, never as keyword
+substitution:
+
+| Stored first-party evidence | Result |
+|---|---|
+| outdoor/grass/field soccer with the surface expressly established | `Grass Soccer` |
+| indoor/arena/boarded-field soccer, or expressly indoor soccer | `Indoor Soccer` |
+| futsal rules or futsal court | `Futsal` |
+| sand/beach soccer | `Beach Soccer` |
+| only `Soccer`, with no usable surface evidence | `SPORT_VARIANT_UNRESOLVED` |
+| indoor/gym/hard-court volleyball | `Indoor Volleyball` |
+| sand/beach volleyball | `Beach Volleyball` |
+| grass/outdoor-field volleyball | `Grass Volleyball` |
+| only `Volleyball`, with no usable surface evidence | `SPORT_VARIANT_UNRESOLVED` |
+| an evidenced sport family with no exact catalog entry | `SPORT_NOT_IN_CATALOG` |
+| an exact blacklisted activity | `BLACKLISTED`; omit from executable sports and preserve evidence |
+
+Every determination requires exact source labels, rationale, and at least one
+artifact-owned citation. A blacklisted activity remains excluded even if it is
+in the injected catalog. Multiple explicitly evidenced surfaces may resolve
+to multiple names.
 
 Resolve organization location separately from event location. A missing street
 address is not an organization defect when first-party content, stored intake
@@ -159,8 +180,17 @@ adds evidence; the producer must still visually verify, normalize, fit-test,
 wire, and commit the official mark.
 
 ## Result states
-
-Use `REVIEW_REQUIRED` only when the package, tests, and validation artifacts exist. Use `HUMAN_REVIEW_REQUIRED` only for an unsupported source sport that stops package authoring; include the exact preserved source labels and `SPORT_NOT_IN_CATALOG`, and do not create an approval job. Use `EXPANDED` only when a directory intake has produced at least one accepted, reused, or already-known official organization URL through the governed URL-intake command. Use `FAILED` for a claimed intake that cannot be mapped or expanded safely and include a concrete policy, evidence, parsing, or infrastructure reason. Release a claim only for a transient interruption that another run can safely resume.
+Use `REVIEW_REQUIRED` only when the package, tests, and validation artifacts
+exist. Use `HUMAN_REVIEW_REQUIRED` for `VARIANT_UNRESOLVED`, `UNSUPPORTED`, or
+`BLACKLISTED` determinations that stop package authoring; include exact
+preserved source labels, artifact citations, and the matching
+`SPORT_VARIANT_UNRESOLVED`, `SPORT_NOT_IN_CATALOG`, or `SPORT_BLACKLISTED`
+reason code. A non-sport human review must use empty sport labels and no sport
+reason code. Do not create an approval job for these results. Use `EXPANDED`
+only when a directory intake has produced at least one accepted, reused, or
+already-known official organization URL through the governed URL-intake
+command. Use `FAILED` for a claimed intake that cannot be mapped or expanded
+safely.
 
 Do not let failed or blocked rows prevent queue exhaustion. Do not turn them into positive training examples.
 
@@ -223,3 +253,29 @@ The goal is complete only when:
     runningCaptureRuns = 0
 
 When capture runs remain, process them with the exact intake-processing command supplied by the goal and then check queue status again. Active mapping leases owned by another worker are not available work. Report them separately and do not steal them before expiry.
+## Current claim, completion, and reconciliation rules
+
+The mapper cannot inspect evidence or complete until the shared claim-evidence
+service has persisted one exact intake/run, the full validated catalog
+snapshot, and `{ jobId, workerId, claimedAt }`. Completion verifies citation
+artifact ownership and normalized excerpts, catalog freshness, determination
+coverage, exact candidate/organization sport equality, and human-resolution
+one-to-one coverage before its conditional terminal update. A stale catalog
+returns the exact claim to `QUEUED` for re-export; a stale generation performs
+no write.
+
+`REVIEW_REQUIRED` is not approval. The mapper must not apply packages live,
+approve mappings, publish candidates, enable recurring scraping, or use an
+operator id as authority. New approval completion is schema v2 and owns live
+application inside its exact approval claim generation. Existing v1 records
+are parse-only history and cannot authorize new approval.
+
+Historical sport reconciliation is dry-run-first and requires the reviewed
+expected count and selection hash for apply. It requeues only the same eligible
+terminal identity-less job, preserves hash-linked prior history, writes no
+candidates, and is idempotent. Stop and preflight every mapper, reviewer,
+coverage, and separate model-controller queue writer before requeue or restart.
+
+Revision note (2026-08-10): Replaced static catalog and generic-label
+authority with claim-bound evidence-backed determinations, v2 completion,
+approval-only application, reconciliation guards, and stopped-fleet rules.

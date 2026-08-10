@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const EVENT_EDITOR_CONTRACT_VERSION = 1 as const;
+export const EVENT_EDITOR_CONTRACT_VERSION = 2 as const;
 
 const id = z.string().trim().min(1);
 const nullableId = id.nullable();
@@ -168,6 +168,113 @@ const editorTagSchema = z.object({
   name: z.string().optional(),
   label: z.string().optional(),
 }).strict();
+const editorNestedRecordKeys = {
+  fields: [
+    'id', '$id', 'name', 'location', 'address', 'lat', 'long', 'heading', 'inUse',
+    'rentalSlotIds', 'sportIds', 'createdBy', 'archivedAt', 'archivedByUserId',
+    'archiveReason', 'organizationId', 'facilityId', 'latitude', 'longitude',
+  ],
+  timeSlots: [
+    'id', '$id', 'eventId', 'archivedAt', 'archivedByUserId', 'archiveReason',
+    'dayOfWeek', 'daysOfWeek', 'startTimeMinutes', 'endTimeMinutes', 'startDate',
+    'endDate', 'start', 'end', 'timeZone', 'scheduledFieldId', 'scheduledFieldIds',
+    'fieldId', 'fieldIds', 'division', 'divisions', 'divisionKeys', 'requiredTemplateIds',
+    'hostRequiredTemplateIds', 'repeating', 'price', 'taxHandling', 'sourceType',
+    'rentalBookingId', 'rentalBookingItemId', 'rentalLocked',
+  ],
+  divisions: [
+    'id', 'sourceDivisionId', 'key', 'name', 'kind', 'poolPlay', 'divisionTypeId',
+    'skillDivisionTypeId', 'ageDivisionTypeId', 'divisionTypeName', 'ratingType',
+    'gender', 'price', 'maxParticipants', 'playoffTeamCount', 'poolCount',
+    'poolTeamCount', 'phaseSettings', 'playoffPlacementDivisionIds', 'standingsOverrides',
+    'playoffConfig', 'gamesPerOpponent', 'restTimeMinutes', 'usesSets',
+    'matchDurationMinutes', 'setDurationMinutes', 'setsPerMatch', 'pointsToVictory',
+    'standingsConfirmedAt', 'standingsConfirmedBy', 'allowPaymentPlans', 'installmentCount',
+    'installmentDueDates', 'installmentDueRelativeDays', 'installmentAmounts',
+    'ageCutoffDate', 'ageCutoffLabel', 'ageCutoffSource', 'fieldIds', 'teamIds',
+  ],
+  tags: ['id', '$id', 'slug', 'name', 'label'],
+  manualPaymentLinks: ['id', 'provider', 'label', 'url'],
+  officialPositions: ['id', 'name', 'count', 'order'],
+  eventOfficials: ['id', 'userId', 'positionIds', 'fieldIds', 'isActive'],
+  pendingInvites: [
+    'id', 'createdAt', 'updatedAt', 'sentAt', 'email', 'firstName', 'lastName',
+    'roles', 'staffTypes', 'resolvedUserId', 'userId', 'type', 'status', 'eventId',
+    'organizationId', 'teamId', 'createdBy',
+  ],
+  questions: ['id', 'clientId', 'prompt', 'answerType', 'required', 'sortOrder'],
+} as const;
+
+type UnknownRecord = Record<string, unknown>;
+
+const isUnknownRecord = (value: unknown): value is UnknownRecord => (
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
+
+const projectNestedRecords = (value: unknown, keys: readonly string[]): unknown => {
+  if (!Array.isArray(value)) return value;
+  return value.map((entry) => {
+    if (!isUnknownRecord(entry)) return entry;
+    return Object.fromEntries(
+      keys
+        .filter((key) => Object.prototype.hasOwnProperty.call(entry, key))
+        .map((key) => [key, entry[key]]),
+    );
+  });
+};
+
+
+/**
+ * Removes hydrated UI and relation properties from strict nested editor rows.
+ * Open JSON records stay untouched and strict command objects stay strict.
+ */
+export const projectEventEditorDraftNestedInput = (input: unknown): unknown => {
+  if (!isUnknownRecord(input)) return input;
+  const basics = isUnknownRecord(input.basics)
+    ? { ...input.basics, tags: projectNestedRecords(input.basics.tags, editorNestedRecordKeys.tags) }
+    : input.basics;
+  const registration = isUnknownRecord(input.registration)
+    ? {
+      ...input.registration,
+      questions: projectNestedRecords(input.registration.questions, editorNestedRecordKeys.questions),
+      payment: isUnknownRecord(input.registration.payment)
+        ? {
+          ...input.registration.payment,
+          manualPaymentLinks: projectNestedRecords(
+            input.registration.payment.manualPaymentLinks,
+            editorNestedRecordKeys.manualPaymentLinks,
+          ),
+        }
+        : input.registration.payment,
+    }
+    : input.registration;
+  const competition = isUnknownRecord(input.competition)
+    ? {
+      ...input.competition,
+      divisionDetails: projectNestedRecords(input.competition.divisionDetails, editorNestedRecordKeys.divisions),
+      playoffDivisionDetails: projectNestedRecords(
+        input.competition.playoffDivisionDetails,
+        editorNestedRecordKeys.divisions,
+      ),
+    }
+    : input.competition;
+  const resources = isUnknownRecord(input.resources)
+    ? {
+      ...input.resources,
+      fields: projectNestedRecords(input.resources.fields, editorNestedRecordKeys.fields),
+      timeSlots: projectNestedRecords(input.resources.timeSlots, editorNestedRecordKeys.timeSlots),
+    }
+    : input.resources;
+  const staff = isUnknownRecord(input.staff)
+    ? {
+      ...input.staff,
+      officialPositions: projectNestedRecords(input.staff.officialPositions, editorNestedRecordKeys.officialPositions),
+      eventOfficials: projectNestedRecords(input.staff.eventOfficials, editorNestedRecordKeys.eventOfficials),
+      pendingInvites: projectNestedRecords(input.staff.pendingInvites, editorNestedRecordKeys.pendingInvites),
+    }
+    : input.staff;
+  return { ...input, basics, registration, competition, resources, staff };
+};
 
 export const existingRegistrationQuestionSchema = questionBase.extend({
   id,
@@ -344,7 +451,13 @@ export const eventEditorSnapshotSchema = z.object({
     template: z.boolean(),
   }).strict(),
 }).strict();
+export const eventEditorCreateBootstrapSchema = z.object({
+  contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+  createOperationId: id,
+  snapshot: eventEditorSnapshotSchema,
+}).strict();
 
+export type EventEditorCreateBootstrap = z.infer<typeof eventEditorCreateBootstrapSchema>;
 export const eventEditorBootstrapQuerySchema = z.object({
   organizationId: id.nullish(),
   eventType: z.string().trim().min(1).nullish(),
@@ -352,6 +465,7 @@ export const eventEditorBootstrapQuerySchema = z.object({
   parentEventId: id.nullish(),
   templateId: id.nullish(),
   rentalBookingId: id.nullish(),
+  start: isoDateTime.nullish(),
 }).strict();
 
 export const saveEventEditorCommandSchema = z.object({
@@ -363,6 +477,7 @@ export const saveEventEditorCommandSchema = z.object({
 
 export const createEventEditorCommandSchema = z.object({
   contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+  createOperationId: id,
   draft: eventEditorDraftSchema,
 }).strict();
 
@@ -385,7 +500,10 @@ export const eventEditorErrorSchema = z.object({
     'EDITOR_CAPABILITY_REQUIRED',
     'EDITOR_NOT_FOUND',
     'EDITOR_SAVE_FAILED',
+    'CREATE_OPERATION_PAYLOAD_MISMATCH',
+    'CREATE_OPERATION_CONFLICT',
   ]),
+  field: z.string().nullable().optional(),
   editorRevision: z.string().nullable().optional(),
   staffRevision: z.string().nullable().optional(),
   details: z.unknown().optional(),

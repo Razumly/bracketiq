@@ -2,6 +2,8 @@
 
 import {
   buildCodexAffiliateDirectoryExpansionResult,
+  buildCodexAffiliateNonSportHumanReviewResult,
+  buildCodexAffiliateSportHumanReviewResult,
   buildCodexAffiliateUnsupportedSportHumanReviewResult,
   codexAffiliateIngestionResultSchema,
 } from '../codexIngestionResult';
@@ -213,6 +215,66 @@ describe('Codex affiliate ingestion result', () => {
       },
     })).toThrow('require SPORT_NOT_IN_CATALOG');
   });
+
+  it('builds distinct v2 sport and non-sport human-review envelopes', () => {
+    const determination = {
+      sourceLabels: ['Soccer'],
+      status: 'VARIANT_UNRESOLVED' as const,
+      resolutionBasis: 'SOURCE_EVIDENCE' as const,
+      canonicalSportNames: [],
+      rationale: 'The stored source says Soccer without a surface.',
+      evidence: [{
+        artifactId: 'artifact-1',
+        artifactSha256: HASH,
+        artifactKind: 'PAGE_HTML' as const,
+        pageUrl: 'https://example.com/sports',
+        excerpt: 'Soccer',
+      }],
+    };
+    const sportReview = buildCodexAffiliateSportHumanReviewResult({
+      jobId: 'job_1',
+      intakeId: 'intake_1',
+      sourceKey: 'river-city',
+      workerId: 'codex-luna-vm-1',
+      evidenceRunId: 'run-1',
+      sportsCatalogSha256: HASH,
+      sportDeterminations: [determination],
+    });
+    expect(sportReview).toEqual(expect.objectContaining({
+      schemaVersion: 2,
+      status: 'HUMAN_REVIEW_REQUIRED',
+      sportDeterminations: [determination],
+      humanReviewRequired: expect.objectContaining({
+        reasonCodes: ['SPORT_VARIANT_UNRESOLVED'],
+        sourceSportLabels: ['Soccer'],
+      }),
+    }));
+    const nonSportReview = buildCodexAffiliateNonSportHumanReviewResult({
+      jobId: 'job_1',
+      intakeId: 'intake_1',
+      sourceKey: 'river-city',
+      workerId: 'codex-luna-vm-1',
+      evidenceRunId: 'run-1',
+      sportsCatalogSha256: HASH,
+      reasonCodes: ['INSUFFICIENT_STORED_EVIDENCE'],
+      rationale: 'The stored pages do not establish a supported listing type.',
+    });
+    expect(nonSportReview.humanReviewRequired).toEqual(expect.objectContaining({
+      sourceSportLabels: [],
+      reasonCodes: ['INSUFFICIENT_STORED_EVIDENCE'],
+    }));
+    expect(() => buildCodexAffiliateNonSportHumanReviewResult({
+      jobId: 'job_1',
+      intakeId: 'intake_1',
+      sourceKey: 'river-city',
+      workerId: 'codex-luna-vm-1',
+      evidenceRunId: 'run-1',
+      sportsCatalogSha256: HASH,
+      reasonCodes: ['SPORT_NOT_IN_CATALOG'],
+      rationale: 'Invalid generic review.',
+    })).toThrow(/sport reason codes/i);
+  });
+
 
   it('accepts a directory expansion only when every submitted URL is accounted for', () => {
     const expanded = {

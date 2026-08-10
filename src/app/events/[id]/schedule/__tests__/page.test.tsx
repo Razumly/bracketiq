@@ -300,9 +300,9 @@ const buildEditorSnapshot = (
   const { legacyEventToEditorDraft } = require('../components/eventForm/editorContractAdapters');
   const draft = draftOverride ?? legacyEventToEditorDraft(sourceEvent);
   return {
-    contractVersion: 1,
-    mode,
+    contractVersion: 2,
     eventId: mode === 'CREATE' ? null : (sourceEvent.$id ?? sourceEvent.id ?? 'event_1'),
+    mode,
     editorRevision: 'test-editor-revision',
     staffRevision: 'test-staff-revision',
     draft,
@@ -360,12 +360,13 @@ const installApiEditorContractMock = () => {
   mock.mockImplementation = (implementation: (path: string, options?: MockRequestOptions) => unknown) => (
     originalMockImplementation(async (path: string, options?: MockRequestOptions) => {
       const response: any = await implementation(path, options);
-      const editorBootstrapMatch = path.match(/^\/api\/events\/editor(?:\?([^/]+))?$/);
+      const editorBootstrapMatch = path.match(/^\/api\/events\/editor(?:\?([^/]*))?$/);
       const isEditorBootstrap = Boolean(editorBootstrapMatch)
         || /^\/api\/events\/[^/]+\/editor$/.test(path);
       const isEditorSave = isEditorBootstrap && options?.method && options.method !== 'GET';
       if (isEditorBootstrap && !isEditorSave) {
-        if (!(response?.draft && response?.capabilities)) {
+        if (!(response?.draft && response?.capabilities)
+          && !(response?.snapshot?.draft && response?.snapshot?.capabilities)) {
           await new Promise((resolve) => setTimeout(resolve, 0));
           const mode = editorBootstrapMatch ? 'CREATE' : 'EDIT';
           const query = new URLSearchParams(editorBootstrapMatch?.[1] ?? '');
@@ -381,7 +382,14 @@ const installApiEditorContractMock = () => {
                 organizationId: query.get('organizationId') ?? null,
               }
               : (latestEditorEvent ?? buildApiEvent()));
-          return buildEditorSnapshot(source, mode);
+          const snapshot = buildEditorSnapshot(source, mode);
+          return editorBootstrapMatch
+            ? {
+              contractVersion: 2,
+              createOperationId: 'create-operation-test',
+              snapshot,
+            }
+            : snapshot;
         }
         return response;
       }
@@ -624,7 +632,7 @@ describe('League schedule page', () => {
     (eventService.createEvent as jest.Mock).mockReset();
     (eventService.scheduleEvent as jest.Mock).mockReset();
     apiRequestMock.mockImplementation((path: string, options?: any) => {
-      const editorMatch = path.match(/^\/api\/events\/editor(?:\?([^/]+))?$/);
+      const editorMatch = path.match(/^\/api\/events\/editor(?:\?([^/]*))?$/);
       const editEditorMatch = path.match(/^\/api\/events\/([^/]+)\/editor$/);
       if (editorMatch || editEditorMatch) {
         const isCreate = Boolean(editorMatch);
@@ -660,6 +668,14 @@ describe('League schedule page', () => {
         if (isCreate && isWrite) {
           snapshot.eventId = 'event_created';
           snapshot.mode = 'EDIT';
+        }
+        if (isCreate && !isWrite) {
+          const response = {
+            contractVersion: 2,
+            createOperationId: 'create-operation-test',
+            snapshot,
+          };
+          return Promise.resolve(response);
         }
         return Promise.resolve(isWrite
           ? { status: 'SAVED', snapshot, questionIdMap: {}, staffEmailDelivery: 'NOT_REQUESTED' }
@@ -2669,7 +2685,7 @@ describe('League schedule page', () => {
       expect(editorSaveCall).toBeDefined();
     });
     const command = editorSaveCall?.[1]?.body;
-    expect(command.contractVersion).toBe(1);
+    expect(command.contractVersion).toBe(2);
     expect(command.draft.basics.state).toBe('UNPUBLISHED');
     expect(command.draft.resources.timeSlots).toHaveLength(1);
     expect(command.draft).not.toHaveProperty('matches');
@@ -3283,6 +3299,56 @@ describe('League schedule page', () => {
     expect(await screen.findByText(/Selected resources and time range conflict/)).toBeInTheDocument();
     expect(screen.getByTestId('event-form')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
+  });
+  it('reuses the frozen create command when the first save response is lost', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => {
+        if (key === 'create') return '1';
+        if (key === 'mode') return 'edit';
+        return null;
+      },
+    });
+    (eventService.scheduleEvent as jest.Mock).mockResolvedValue({
+      event: buildApiEvent({
+        id: 'event_created',
+        $id: 'event_created',
+        state: 'UNPUBLISHED',
+      }),
+    });
+
+    const defaultImplementation = apiRequestMock.getMockImplementation();
+    let rejected = false;
+    apiRequestMock.mockImplementation((path: string, options?: any) => {
+      if (
+        path === '/api/events/editor'
+        && options?.method === 'POST'
+        && !rejected
+      ) {
+        rejected = true;
+        return Promise.reject(new Error('Network response lost.'));
+      }
+      return defaultImplementation?.(path, options) ?? Promise.resolve({});
+    });
+
+    renderWithMantine(<LeagueSchedulePage />);
+
+    const publishButton = await screen.findByRole('button', { name: /create event/i });
+    await waitFor(() => expect(publishButton).toBeEnabled());
+    fireEvent.click(publishButton);
+
+    const createCalls = () => apiRequestMock.mock.calls.filter(([path, options]) => (
+      path === '/api/events/editor' && options?.method === 'POST'
+    ));
+    await waitFor(() => expect(createCalls()).toHaveLength(1));
+    expect(await screen.findByText(/Network response lost/)).toBeInTheDocument();
+
+    fireEvent.click(publishButton);
+    await waitFor(() => expect(eventService.scheduleEvent).toHaveBeenCalledTimes(1));
+
+    const calls = createCalls();
+    expect(calls).toHaveLength(2);
+    expect(calls[0][1]?.body).toEqual(calls[1][1]?.body);
+    expect(calls[0][1]?.body?.createOperationId).toBe('create-operation-test');
   });
 
   it('normalizes create payload with multi-day slots and slot divisions before schedule preview', async () => {

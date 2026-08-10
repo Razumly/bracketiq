@@ -408,11 +408,13 @@ describe('affiliate source discovery orchestration', () => {
       'directory_child_1',
       expect.objectContaining({ complianceStatus: 'ALLOWED' }),
       'codex-luna-approval-vm-1',
+      { db: prismaMock },
     );
     expect(queueIntakeMock).toHaveBeenCalledWith(
       'directory_child_1',
       ['page_child_1'],
       'codex-luna-approval-vm-1',
+      { db: prismaMock },
     );
   });
 
