@@ -21,14 +21,6 @@ import {
   type EventDetailBootstrapResponse,
   type EventParticipantDivisionWarning,
 } from '@/lib/eventService';
-import {
-  applyEventStaffSnapshot,
-  buildEventStaffPutInput,
-  eventStaffService,
-  stripEventStaffAssignments,
-  stripEventStaffAssignmentsFromPayload,
-  type EventStaffDraft,
-} from '@/lib/eventStaffService';
 import { getHomePathForUser } from '@/lib/homePage';
 import { leagueService } from '@/lib/leagueService';
 import { tournamentService, type LeagueStandingsDivisionResponse } from '@/lib/tournamentService';
@@ -71,7 +63,6 @@ import {
   pickPreferredBracketRootMatch as pickPreferredRootMatch,
   toBracketDivisionKey as toDivisionKey,
 } from '@/lib/bracketViewCore';
-import { toEventPayload } from '@/types';
 import type {
   Event,
   Field,
@@ -90,6 +81,12 @@ import type {
   UserData,
 } from '@/types';
 import { createLeagueScoringConfig } from '@/types/defaults';
+import {
+  EVENT_EDITOR_CONTRACT_VERSION,
+  type EventEditorDraft,
+  type EventEditorSaveResult,
+  type EventEditorSnapshot,
+} from '@/contracts/eventEditor';
 import type {
   EventTeamComplianceResponse,
   EventUserComplianceResponse,
@@ -97,6 +94,7 @@ import type {
   TeamComplianceUserSummary,
 } from '@/lib/eventTeamCompliance';
 import { validateAndNormalizeBracketGraph } from '@/server/matches/bracketGraph';
+import { editorDraftToLegacyEvent, legacyEventToEditorDraft } from './components/eventForm/editorContractAdapters';
 import type { EventFormHandle } from './components/EventForm';
 import TeamCard from '@/components/ui/TeamCard';
 import UserCard from '@/components/ui/UserCard';
@@ -270,6 +268,7 @@ function EventScheduleContent() {
   const orgIdParam = searchParams?.get('orgId') || undefined;
   const hostOrgIdParam = searchParams?.get('hostOrgId') || undefined;
   const templateIdParam = searchParams?.get('templateId')?.trim() || undefined;
+  const parentEventIdParam = searchParams?.get('parentEventId')?.trim() || undefined;
   const skipTemplatePromptParam = searchParams?.get('skipTemplatePrompt') === '1';
   const rentalOrgIdParam = searchParams?.get('rentalOrgId') || undefined;
   const rentalStartParam = searchParams?.get('rentalStart') || undefined;
@@ -321,6 +320,7 @@ function EventScheduleContent() {
   const defaultSport = DEFAULT_SPORT;
 
   const [event, setEvent] = useState<Event | null>(null);
+  const [editorSnapshot, setEditorSnapshot] = useState<EventEditorSnapshot | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
   const [changesEvent, setChangesEvent] = useState<Event | null>(null);
   const [changesMatches, setChangesMatches] = useState<Match[]>([]);
@@ -398,6 +398,8 @@ function EventScheduleContent() {
   const [isQrCodeModalOpen, setIsQrCodeModalOpen] = useState(false);
   const isMobile = useMediaQuery('(max-width: 36em)');
   const eventFormRef = useRef<EventFormHandle>(null);
+  const editorDraftRef = useRef<EventEditorDraft | null>(null);
+  const createdEditorEventIdRef = useRef<string | null>(null);
   const { location: userLocation, locationInfo: userLocationInfo } = useLocation();
   const rentalCoordinates = useMemo<[number, number] | undefined>(() => {
     const lat = rentalLatParam ? Number(rentalLatParam) : undefined;
@@ -550,6 +552,7 @@ function EventScheduleContent() {
     activeEvent,
     activeMatches,
     hasPendingUnsavedChanges,
+    editorDraftRef,
     eventFormRef,
     templateIdParam,
     skipTemplatePromptParam,
@@ -664,6 +667,64 @@ function EventScheduleContent() {
   const canManageEvent = Boolean(isPrimaryHost || isAssistantHost || isOrganizationManager || isRazumlyAdmin);
   const isEditingEvent = isTemplateEvent || ((isPreview || isEditParam) && canManageEvent);
   const canEditMatches = Boolean(canManageEvent && isEditingEvent);
+  useEffect(() => {
+    let cancelled = false;
+    const targetId = isCreateMode ? null : normalizeIdToken(
+      activeEvent?.$id ?? (activeEvent as Event & { id?: string })?.id ?? eventId,
+    );
+    if (!user?.$id || (!isCreateMode && (!targetId || !isEditingEvent))) {
+      setEditorSnapshot(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+    const loadEditorSnapshot = async () => {
+      try {
+        const query = new URLSearchParams();
+        if (isCreateMode) {
+          const sportValue = activeEvent?.sportIds?.[0] as string | Sport | undefined;
+          const sportId = typeof sportValue === 'string' ? sportValue : sportValue?.$id;
+          const fallbackSportId = typeof defaultSport === 'string' ? defaultSport : defaultSport.$id;
+          const organizationValue = activeEvent?.organizationId as string | Organization | undefined;
+          const organizationId = typeof organizationValue === 'string' ? organizationValue : organizationValue?.$id;
+          if (activeEvent?.eventType) query.set('eventType', activeEvent.eventType);
+          if (organizationId ?? resolvedHostOrgId) query.set('organizationId', organizationId ?? resolvedHostOrgId ?? '');
+          if (sportId ?? fallbackSportId) query.set('sportId', sportId ?? fallbackSportId);
+          if (parentEventIdParam) query.set('parentEventId', parentEventIdParam);
+          if (templateIdParam) query.set('templateId', templateIdParam);
+          if (rentalBookingIdParam) query.set('rentalBookingId', rentalBookingIdParam);
+          const result = await apiRequest<EventEditorSnapshot>(`/api/events/editor?${query.toString()}`);
+          if (!cancelled) setEditorSnapshot(result);
+        } else {
+          const result = await apiRequest<EventEditorSnapshot>(`/api/events/${encodeURIComponent(targetId as string)}/editor`);
+          if (!cancelled) setEditorSnapshot(result);
+        }
+      } catch (snapshotError) {
+        if (!cancelled) {
+          setEditorSnapshot(null);
+          setError(snapshotError instanceof Error ? snapshotError.message : 'Unable to load the event editor.');
+        }
+      }
+    };
+    void loadEditorSnapshot();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeEvent?.$id,
+    activeEvent?.eventType,
+    activeEvent?.organizationId,
+    activeEvent?.sportIds,
+    defaultSport,
+    eventId,
+    isCreateMode,
+    parentEventIdParam,
+    rentalBookingIdParam,
+    resolvedHostOrgId,
+    templateIdParam,
+    user?.$id,
+    isEditingEvent,
+  ]);
   const {
     clearMatchConflictDraftAlerts,
     dismissMatchConflictMessage,
@@ -1821,6 +1882,10 @@ function EventScheduleContent() {
       setFormHasUnsavedChanges(false);
     }
   }, [isCreateMode, isEditingEvent]);
+  const handleEventFormDirtyStateChange = useCallback((hasChanges: boolean) => {
+    setFormHasUnsavedChanges(hasChanges);
+  }, []);
+
 
   useEffect(() => {
     let cancelled = false;
@@ -4142,26 +4207,26 @@ function EventScheduleContent() {
   const handleDetailsClose = useCallback(() => {
     setActiveTab(defaultTab);
   }, [defaultTab]);
-
-  const handleEventFormDirtyStateChange = useCallback((hasChanges: boolean) => {
-    setFormHasUnsavedChanges(hasChanges);
+  const handleEditorDraftStateChange = useCallback((state: { draft: EventEditorDraft }) => {
+    editorDraftRef.current = cloneValue(state.draft) as EventEditorDraft;
   }, []);
-
   const getDraftFromForm = useCallback(
-    async ({ allowCurrentEventFallback = false }: { allowCurrentEventFallback?: boolean } = {}): Promise<Partial<Event> | null> => {
-      if (allowCurrentEventFallback && activeTab !== 'details' && activeEvent) {
-        return cloneValue(activeEvent) as Event;
-      }
-
+    async ({ allowCurrentEventFallback = false }: { allowCurrentEventFallback?: boolean } = {}): Promise<EventEditorDraft | null> => {
       const formApi = eventFormRef.current;
+      if (allowCurrentEventFallback && activeTab !== 'details') {
+        return editorDraftRef.current
+          ? cloneValue(editorDraftRef.current) as EventEditorDraft
+          : editorSnapshot
+            ? cloneValue(editorSnapshot.draft) as EventEditorDraft
+            : null;
+      }
       if (!formApi) {
-        if (allowCurrentEventFallback && activeEvent) {
-          return cloneValue(activeEvent) as Event;
+        if (allowCurrentEventFallback && editorSnapshot) {
+          return cloneValue(editorSnapshot.draft) as EventEditorDraft;
         }
         setSubmitError('Form is not ready to submit.');
         return null;
       }
-
       const isValid = await formApi.validate();
       if (!isValid) {
         const validationMessages = Array.from(
@@ -4187,48 +4252,17 @@ function EventScheduleContent() {
         return null;
       }
 
-      return formApi.getDraft();
+      return editorDraftRef.current
+        ? cloneValue(editorDraftRef.current) as EventEditorDraft
+        : editorSnapshot
+          ? cloneValue(editorSnapshot.draft) as EventEditorDraft
+          : null;
     },
-    [activeEvent, activeTab, setSubmitError],
+    [activeTab, editorDraftRef, editorSnapshot, eventFormRef, setSubmitError],
   );
 
-  const reconcileEventFormStaff = useCallback(
-    async (savedEvent: Event, desiredEvent: EventStaffDraft): Promise<Event> => {
-      const savedEventId = savedEvent.$id;
-      if (!savedEventId) {
-        return savedEvent;
-      }
 
-      try {
-        const loadedRevision = staffRevisionRef.current;
-        const currentSnapshot = await eventStaffService.getEventStaffState(savedEventId);
-        const input = buildEventStaffPutInput({
-          desiredEvent,
-          persistedEvent: savedEvent,
-          snapshot: currentSnapshot,
-          expectedRevision: loadedRevision,
-        });
-        const canonicalSnapshot = await eventStaffService.putEventStaffState(savedEventId, input);
-        staffRevisionRef.current = canonicalSnapshot.revision;
-        eventFormRef.current?.applyCanonicalStaffState(canonicalSnapshot);
-        return applyEventStaffSnapshot(savedEvent, canonicalSnapshot);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to save event staff.';
-        setSubmitError(message);
-        throw error;
-      }
-    },
-    [setSubmitError],
-  );
 
-  const saveEventRegistrationQuestions = useCallback(async (savedEventId?: string | null) => {
-    const eventId = typeof savedEventId === 'string' ? savedEventId.trim() : '';
-    const formApi = eventFormRef.current;
-    if (!eventId || !formApi) {
-      return;
-    }
-    await teamService.saveRegistrationQuestions('EVENT', eventId, formApi.getRegistrationQuestionDrafts());
-  }, []);
 
   const handlePreviewEventUpdate = useCallback((preview: Event) => {
     const normalizedPreview = normalizeApiEvent(preview) ?? preview;
@@ -4244,19 +4278,75 @@ function EventScheduleContent() {
     setHasUnsavedChanges(false);
     setFormHasUnsavedChanges(false);
   }, []);
-
-  const buildSchedulePayload = useCallback(
-    (draft: Partial<Event>): Record<string, unknown> => {
-      const resolvedId = eventId ?? createClientId();
-      const normalizedDraft = { ...draft, id: resolvedId } as Event;
-      if (isRentalFlow && !resolvedHostOrgId) {
-        normalizedDraft.organization = undefined;
-        normalizedDraft.organizationId = null;
+  const saveEditorConfiguration = useCallback(
+    async (draft: EventEditorDraft, mode: 'CREATE' | 'EDIT'): Promise<Event> => {
+      const contractDraft = isRentalFlow
+        ? {
+          ...draft,
+          basics: {
+            ...draft.basics,
+            organizationId: null,
+          },
+        }
+        : draft;
+      const currentSnapshot = editorSnapshot;
+      const effectiveMode = mode === 'CREATE' && createdEditorEventIdRef.current ? 'EDIT' : mode;
+      const requestEventId = effectiveMode === 'EDIT'
+        ? (createdEditorEventIdRef.current ?? eventId)
+        : null;
+      if (effectiveMode === 'EDIT' && (!requestEventId || !currentSnapshot || currentSnapshot.mode !== 'EDIT')) {
+        throw new Error('The event editor is still loading. Try again.');
       }
-      return toEventPayload(normalizedDraft) as Record<string, unknown>;
+      const command = effectiveMode === 'CREATE'
+        ? {
+          contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
+          draft: contractDraft,
+        }
+        : {
+          contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
+          editorRevision: currentSnapshot?.editorRevision ?? '',
+          staffRevision: currentSnapshot?.staffRevision ?? null,
+          draft: contractDraft,
+        };
+      const result = await apiRequest<EventEditorSaveResult>(
+        effectiveMode === 'CREATE'
+          ? '/api/events/editor'
+          : `/api/events/${encodeURIComponent(requestEventId as string)}/editor`,
+        {
+          method: effectiveMode === 'CREATE' ? 'POST' : 'PUT',
+          body: command,
+        },
+      );
+      setEditorSnapshot(result.snapshot);
+      if (effectiveMode === 'CREATE' && result.snapshot.eventId) {
+        createdEditorEventIdRef.current = result.snapshot.eventId;
+      }
+      const canonicalProjection = editorDraftToLegacyEvent(
+        result.snapshot.draft,
+        result.snapshot.eventId,
+      ) as unknown as Event;
+      const canonicalEvent = normalizeApiEvent({
+        ...(effectiveMode === 'EDIT' ? (activeEvent ?? event ?? {}) : {}),
+        ...canonicalProjection,
+      } as Event) ?? ({
+        ...(effectiveMode === 'EDIT' ? (activeEvent ?? event ?? {}) : {}),
+        ...canonicalProjection,
+      } as Event);
+      handlePreviewEventUpdate(canonicalEvent);
+      setEventFormResetVersion((version) => version + 1);
+      return canonicalEvent;
     },
-    [eventId, isRentalFlow, resolvedHostOrgId],
+    [
+      activeEvent,
+      editorSnapshot,
+      event,
+      eventFormRef,
+      eventId,
+      handlePreviewEventUpdate,
+      isRentalFlow,
+    ],
   );
+
 
   const validateDraftMatchGraph = useCallback((draftMatches: Match[]): { ok: true } | { ok: false; message: string } => {
     const graphValidation = validateAndNormalizeBracketGraph(buildBracketNodes(draftMatches));
@@ -4379,7 +4469,7 @@ function EventScheduleContent() {
   }, []);
 
   const schedulePreview = useCallback(
-    async (draft: Partial<Event>) => {
+    async (draft: EventEditorDraft) => {
       if (!draft) {
         return;
       }
@@ -4388,20 +4478,20 @@ function EventScheduleContent() {
       setError(null);
       setInfoMessage(null);
       setWarningMessage(null);
+      let persistedEventId: string | null = null;
+
 
       try {
-        const payload = buildSchedulePayload(stripEventStaffAssignments(draft as EventStaffDraft));
-        const scheduleEventId = !isCreateMode ? eventId : undefined;
-        const result = await eventService.scheduleEvent(payload, { eventId: scheduleEventId });
+        const persistedEvent = await saveEditorConfiguration(draft, 'CREATE');
+        persistedEventId = persistedEvent.$id ?? null;
+        if (!persistedEventId) {
+          throw new Error('Failed to create event.');
+        }
+        const result = await eventService.scheduleEvent(undefined, { eventId: persistedEventId });
         if (!result?.event) {
           throw new Error('Failed to apply schedule changes.');
         }
-        await saveEventRegistrationQuestions(result.event.$id);
-        const reconciledEvent = await reconcileEventFormStaff(
-          result.event,
-          draft as EventStaffDraft,
-        );
-
+        const reconciledEvent = normalizeApiEvent(result.event) ?? result.event;
         handlePreviewEventUpdate(reconciledEvent);
 
         if (pathname) {
@@ -4414,40 +4504,46 @@ function EventScheduleContent() {
         }
       } catch (err) {
         console.error('Failed to apply schedule changes:', err);
-        setError(formatActionErrorMessage('Failed to apply schedule changes.', err));
+        const message = persistedEventId
+          ? 'Settings saved, but schedule creation failed. Retry scheduling this event.'
+          : 'Failed to apply schedule changes.';
+        setError(formatActionErrorMessage(message, err));
       } finally {
         setPublishing(false);
       }
     },
-    [buildSchedulePayload, eventId, handlePreviewEventUpdate, isCreateMode, pathname, reconcileEventFormStaff, router, saveEventRegistrationQuestions, searchParams],
+    [handlePreviewEventUpdate, pathname, router, saveEditorConfiguration, searchParams],
   );
 
   const scheduleRegularEvent = useCallback(
-    async (draft: Partial<Event>) => {
+    async (draft: EventEditorDraft | Partial<Event>) => {
       if (!draft) {
         return null;
       }
+      const editorDraft = ('basics' in draft && 'participation' in draft)
+        ? draft as EventEditorDraft
+        : legacyEventToEditorDraft(draft as Event);
 
       setPublishing(true);
       setError(null);
       setInfoMessage(null);
       setWarningMessage(null);
+      let persistedEventId: string | null = null;
 
       try {
-        const payload = buildSchedulePayload(stripEventStaffAssignments(draft as EventStaffDraft));
-        const result = await eventService.scheduleEvent(payload);
-        if (!result?.event) {
+        const persistedEvent = await saveEditorConfiguration(editorDraft, 'CREATE');
+        persistedEventId = persistedEvent.$id ?? null;
+        if (!persistedEventId) {
           throw new Error('Failed to create event.');
         }
-        await saveEventRegistrationQuestions(result.event.$id);
-        const reconciledEvent = await reconcileEventFormStaff(
-          result.event,
-          draft as EventStaffDraft,
-        );
-
+        const result = await eventService.scheduleEvent(undefined, { eventId: persistedEventId });
+        if (!result?.event) {
+          throw new Error('Failed to schedule event.');
+        }
+        const reconciledEvent = normalizeApiEvent(result.event) ?? result.event;
         handlePreviewEventUpdate(reconciledEvent);
 
-        const nextId = reconciledEvent.$id ?? eventId;
+        const nextId = reconciledEvent.$id ?? persistedEventId;
         if (nextId && pathname) {
           const params = new URLSearchParams(searchParams?.toString() ?? '');
           params.delete('create');
@@ -4461,14 +4557,17 @@ function EventScheduleContent() {
         }
         return reconciledEvent;
       } catch (err) {
-        console.error('Failed to create event:', err);
-        setError(formatActionErrorMessage('Failed to create event.', err));
+        console.error('Failed to schedule event:', err);
+        const message = persistedEventId
+          ? 'Settings saved, but schedule creation failed. Retry scheduling this event.'
+          : 'Failed to create event.';
+        setError(formatActionErrorMessage(message, err));
         return null;
       } finally {
         setPublishing(false);
       }
     },
-    [buildSchedulePayload, eventId, handlePreviewEventUpdate, pathname, reconcileEventFormStaff, router, saveEventRegistrationQuestions, searchParams],
+    [handlePreviewEventUpdate, pathname, router, saveEditorConfiguration, searchParams],
   );
 
   const {
@@ -4514,23 +4613,32 @@ function EventScheduleContent() {
         return;
       }
 
-      const mergedDraft = { ...activeEvent, ...(draft as Event) } as Event;
+
+      const mergedDraft = {
+        ...activeEvent,
+        ...editorDraftToLegacyEvent(draft, activeEvent.$id),
+      } as Event;
+      const lifecycleDraft = cloneValue(mergedDraft) as Event;
+      const isTemplateDraft = typeof lifecycleDraft.state === 'string'
+        && lifecycleDraft.state.toUpperCase() === 'TEMPLATE';
+      lifecycleDraft.state = isTemplateDraft
+        ? 'TEMPLATE'
+        : toStoredEventLifecycleState(
+          selectedLifecycleStatus ?? getEventLifecycleStatus(lifecycleDraft),
+          lifecycleDraft.state,
+        );
       if (matchConflictPairs.length > 0 && !isRescheduleAction) {
         showCurrentMatchConflictOverride();
       }
-
-      setError(null);
-      setInfoMessage(null);
-      setWarningMessage(null);
-      setActionError(null);
-      if (hasSchedulingAction) {
-        setReschedulingMatches(true);
-      } else {
-        setPublishing(true);
-      }
-
+      setPublishing(true);
+      let configurationSaved = false;
       try {
-        const nextEvent = cloneValue(mergedDraft) as Event;
+        const canonicalEvent = await saveEditorConfiguration(
+          legacyEventToEditorDraft(lifecycleDraft),
+          'EDIT',
+        );
+        configurationSaved = true;
+        const nextEvent = cloneValue(canonicalEvent) as Event;
         const nextMatches = cloneValue(activeMatches) as Match[];
         nextEvent.matches = nextMatches;
 
@@ -4557,32 +4665,16 @@ function EventScheduleContent() {
           const lifecycleStatus = selectedLifecycleStatus ?? getEventLifecycleStatus(nextEvent);
           nextEvent.state = toStoredEventLifecycleState(lifecycleStatus, nextEvent.state);
         }
-        const desiredStaffDraft = cloneValue(nextEvent) as EventStaffDraft;
-
         let updatedEvent = nextEvent;
-        if (nextEvent.$id) {
-          if (!staffRevisionRef.current?.trim()) {
-            const initialStaffSnapshot = await eventStaffService.getEventStaffState(nextEvent.$id);
-            staffRevisionRef.current = initialStaffSnapshot.revision;
-          }
-          updatedEvent = await eventService.updateEvent(nextEvent.$id, nextEvent, {
-            fields: Array.isArray(nextEvent.fields) ? nextEvent.fields : undefined,
-            timeSlots: Array.isArray(nextEvent.timeSlots) ? nextEvent.timeSlots : undefined,
-            leagueScoringConfig: Object.prototype.hasOwnProperty.call(nextEvent, 'leagueScoringConfig')
-              ? nextEvent.leagueScoringConfig ?? null
-              : undefined,
-            omitStaffAssignments: true,
-            expectedStaffRevision: staffRevisionRef.current,
-          });
-        }
 
         const shouldPersistDraftMatches = !isBuildBracketAction
           && !isRebuildWithoutPlaceholdersAction
           && !skipDraftMatchPersistenceForRemovedFields;
+        const hasDraftMatchChanges = pendingSaveChanges.some((change) => change.category === 'match');
         if (
           updatedEvent.$id
           && shouldPersistDraftMatches
-          && (nextMatches.length > 0 || stagedMatchDeletes.length > 0)
+          && hasDraftMatchChanges
         ) {
           const validation = validateDraftMatchGraph(nextMatches);
           if (!validation.ok) {
@@ -4679,19 +4771,15 @@ function EventScheduleContent() {
         let scheduleWarningText: string | null = null;
         if (hasSchedulingAction && updatedEvent.$id) {
           const scheduleEventId = updatedEvent.$id;
-          if (isBuildBracketAction || isRebuildWithoutPlaceholdersAction) {
-            await leagueService.deleteMatchesByEvent(scheduleEventId);
-          }
 
-          const schedulePayload = stripEventStaffAssignmentsFromPayload(
-            toEventPayload(updatedEvent) as unknown as Record<string, unknown>,
-          );
           const scheduleOptions: {
             eventId: string;
             participantCount?: number;
             includePlaceholderTeams?: boolean;
+            replaceExistingMatches?: boolean;
           } = { eventId: scheduleEventId };
           if (isBuildBracketAction) {
+            scheduleOptions.replaceExistingMatches = true;
             const participantCount = typeof updatedEvent.maxParticipants === 'number'
               ? Math.max(2, Math.trunc(updatedEvent.maxParticipants))
               : undefined;
@@ -4702,7 +4790,7 @@ function EventScheduleContent() {
           if (isRebuildWithoutPlaceholdersAction) {
             scheduleOptions.includePlaceholderTeams = false;
           }
-          const scheduled = await eventService.scheduleEvent(schedulePayload, scheduleOptions);
+          const scheduled = await eventService.scheduleEvent(undefined, scheduleOptions);
           if (!scheduled?.event) {
             throw new Error(
               isRebuildWithoutPlaceholdersAction
@@ -4741,11 +4829,8 @@ function EventScheduleContent() {
           updatedEvent.matches = nextMatches;
         }
 
-        await saveEventRegistrationQuestions(updatedEvent.$id);
-        updatedEvent = await reconcileEventFormStaff(updatedEvent, desiredStaffDraft);
 
         hasUnsavedChangesRef.current = false;
-        eventFormRef.current?.commitDirtyBaseline();
         setHasUnsavedChanges(false);
         setFormHasUnsavedChanges(false);
         setSelectedLifecycleStatus(null);
@@ -4780,14 +4865,26 @@ function EventScheduleContent() {
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : null;
         console.error(`Failed to save ${entityLabel.toLowerCase()} changes:`, err);
-        const baseMessage = isRebuildWithoutPlaceholdersAction
-          ? 'Failed to rebuild without placeholder teams.'
-          : isBuildBracketAction
-          ? 'Failed to rebuild bracket(s).'
+        const baseMessage = configurationSaved
+          ? (
+            isRebuildWithoutPlaceholdersAction
+              ? 'Settings saved, but schedule rebuild without placeholder teams failed.'
+              : isBuildBracketAction
+                ? 'Settings saved, but bracket rebuild failed.'
+                : isRescheduleAction
+                  ? 'Settings saved, but match rescheduling failed.'
+                  : `${entityLabel} changes saved, but the scheduling action failed.`
+          )
           : (
-            isRescheduleAction
-              ? `Failed to save ${entityLabel.toLowerCase()} and reschedule matches.`
-              : `Failed to save ${entityLabel.toLowerCase()} changes.`
+            isRebuildWithoutPlaceholdersAction
+              ? 'Failed to rebuild without placeholder teams.'
+              : isBuildBracketAction
+                ? 'Failed to rebuild bracket(s).'
+                : (
+                  isRescheduleAction
+                    ? `Failed to save ${entityLabel.toLowerCase()} and reschedule matches.`
+                    : `Failed to save ${entityLabel.toLowerCase()} changes.`
+                )
           );
         setError(errorMessage ? `${baseMessage} ${errorMessage}` : baseMessage);
       } finally {
@@ -4801,11 +4898,12 @@ function EventScheduleContent() {
       entityLabel,
       event,
       getDraftFromForm,
+      saveEditorConfiguration,
       loadSchedule,
       matchConflictPairs,
+      pendingSaveChanges,
       pathname,
       router,
-      saveEventRegistrationQuestions,
       selectedLifecycleStatus,
       searchParams,
       showCurrentMatchConflictOverride,
@@ -4813,7 +4911,6 @@ function EventScheduleContent() {
       stagedMatchCreates,
       toBulkMatchUpdatePayload,
       stagedMatchDeletes,
-      reconcileEventFormStaff,
       validateDraftMatchGraph,
     ],
   );
@@ -4877,16 +4974,12 @@ function EventScheduleContent() {
 
     // Create mode: invoke createEvent with current draft and redirect to the new event.
     if (isCreateMode) {
-      const draft = await getDraftFromForm();
-      if (!draft) {
+      const editorDraft = await getDraftFromForm();
+      if (!editorDraft) {
         return;
       }
 
-      const normalizedDraft = draft.$id ? draft : { ...draft, $id: draft.$id ?? eventId };
-      const completeCreateDraft = {
-        ...(cloneValue(changesEvent ?? {}) as Partial<Event>),
-        ...(normalizedDraft as Partial<Event>),
-      } as Event;
+      const completeCreateDraft = editorDraftToLegacyEvent(editorDraft) as unknown as Event;
       setChangesEvent((prev) => {
         const base = prev ?? ({} as Event);
         return { ...base, ...completeCreateDraft };
@@ -4895,15 +4988,15 @@ function EventScheduleContent() {
       const normalizedAffiliateUrl = typeof completeCreateDraft.affiliateUrl === 'string'
         ? completeCreateDraft.affiliateUrl.trim()
         : '';
+      const editorDraftToSave: EventEditorDraft = {
+        ...editorDraft,
+        basics: { ...editorDraft.basics, state: 'UNPUBLISHED' },
+      };
+      const draftToSave = editorDraftToLegacyEvent(editorDraftToSave) as unknown as Event;
       if (normalizedAffiliateUrl.length === 0 && completeCreateDraft.eventType !== 'EVENT') {
-        await schedulePreview(completeCreateDraft);
+        await schedulePreview(editorDraftToSave);
         return;
       }
-
-      const draftToSave: Partial<Event> = {
-        ...completeCreateDraft,
-        state: 'UNPUBLISHED',
-      };
 
       if (rentalPurchaseTimeSlot) {
         const rentalPriceCents = typeof rentalPurchaseTimeSlot.price === 'number'
@@ -4923,10 +5016,7 @@ function EventScheduleContent() {
         }
       }
 
-      const scheduledEvent = await scheduleRegularEvent(draftToSave);
-      if (scheduledEvent?.$id) {
-        eventFormRef.current?.commitDirtyBaseline();
-      }
+      const scheduledEvent = await scheduleRegularEvent(editorDraftToSave);
       return;
     }
 
@@ -5667,11 +5757,12 @@ function EventScheduleContent() {
         onApplyTemplate={handleApplyTemplateWithPromptState}
         user={user}
         event={changesEvent}
+        editorSnapshot={editorSnapshot}
         templateSeedKey={templateSeedKey}
         eventFormRef={eventFormRef}
         onEventFormClose={() => router.push('/events')}
         onDirtyStateChange={handleEventFormDirtyStateChange}
-        organization={organizationForCreate}
+        onDraftStateChange={handleEditorDraftStateChange}
         defaultLocation={createLocationDefaults}
         immutableDefaults={rentalImmutableDefaults}
         rentalPurchase={rentalPurchaseContext}
@@ -5718,7 +5809,7 @@ function EventScheduleContent() {
   const leagueConfig = activeEvent.leagueConfig;
   const hasNetworkActionInFlight = publishing || reschedulingMatches || cancelling || creatingTemplate;
   const showEditActionButton = canManageEvent && !isCreateMode && !isTemplateEvent && !isEditingEvent;
-  const showSaveActionButton = isCreateMode || isEditingEvent;
+  const showSaveActionButton = Boolean(editorSnapshot && (isCreateMode || isEditingEvent));
   const showRescheduleActionButton = isEditingEvent && (isLeague || isTournament);
   const showBuildBracketsActionButton = isEditingEvent && (
     isTournament || (isLeague && Boolean(activeEvent.includePlayoffs))
@@ -5750,8 +5841,8 @@ function EventScheduleContent() {
   const showLifecycleStatusSelect = isEditingEvent && !isTemplateEvent;
   const showDiscardChangesButton = (isEditingEvent || isCreateMode) && hasPendingUnsavedChanges;
   const eventFormRenderKey = isCreateMode
-    ? `create:${activeEvent?.$id ?? eventId ?? 'event'}:${templateSeedKey}:${eventFormResetVersion}`
-    : `event:${activeEvent?.$id ?? eventId ?? 'event'}:${eventFormResetVersion}`;
+    ? `create:${activeEvent?.$id ?? eventId ?? 'event'}:${templateSeedKey}:${editorSnapshot?.editorRevision ?? 'loading'}:${eventFormResetVersion}`
+    : `event:${activeEvent?.$id ?? eventId ?? 'event'}:${editorSnapshot?.editorRevision ?? 'loading'}:${eventFormResetVersion}`;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -5889,7 +5980,6 @@ function EventScheduleContent() {
               {shouldShowBracketTab && <Tabs.Tab value="bracket">Bracket</Tabs.Tab>}
               {showFinanceTab && <Tabs.Tab value="finance">Finance</Tabs.Tab>}
             </Tabs.List>
-
             <DetailsTabPanel
               shouldShowCreationSheet={shouldShowCreationSheet}
               user={user}
@@ -5898,13 +5988,14 @@ function EventScheduleContent() {
               isActive={activeTab === 'details'}
               onClose={handleDetailsClose}
               onDirtyStateChange={handleEventFormDirtyStateChange}
+              onDraftStateChange={handleEditorDraftStateChange}
               onValidityChange={setIsEventFormValid}
               onSubmitRequest={isCreateMode ? handlePublish : handleSaveEvent}
               event={activeEvent}
+              editorSnapshot={editorSnapshot}
               organization={activeOrganization}
               defaultLocation={activeLocationDefaults}
               isCreateMode={isCreateMode}
-              immutableDefaults={rentalImmutableDefaults}
               rentalPurchase={rentalPurchaseContext}
               templateOrganizationId={resolvedRentalOrgId ?? activeOrganization?.$id ?? undefined}
               selectedOccurrence={selectedOccurrence}

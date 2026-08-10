@@ -118,7 +118,19 @@ jest.mock('../components/EventForm', () => {
     const [mockInputValue, setMockInputValue] = useState('');
     const [isDirty, setIsDirty] = useState(mockEventFormDirtyState);
     useEffect(() => {
-      capturedEventFormProps = props;
+      const { editorDraftToLegacyEvent } = require('../components/eventForm/editorContractAdapters');
+      const legacyDraft = props.snapshot?.draft
+        ? editorDraftToLegacyEvent(props.snapshot.draft)
+        : props.event ?? {};
+      const legacySource = props.snapshot?.legacyEvent ?? {};
+      capturedEventFormProps = {
+        ...props,
+        event: {
+          ...legacyDraft,
+          ...legacySource,
+          $id: legacyDraft.$id ?? legacyDraft.id ?? legacySource.$id ?? legacySource.id,
+        },
+      };
     }, [props]);
 
     useEffect(() => {
@@ -128,13 +140,21 @@ jest.mock('../components/EventForm', () => {
     useEffect(() => {
       props.onValidityChange?.(mockEventFormReportedValidity ?? mockEventFormValidateResult);
     }, [props]);
+    useEffect(() => {
+      const draft = mockEventFormDraft
+        ?? (props.snapshot?.draft
+          ? require('../components/eventForm/editorContractAdapters').editorDraftToLegacyEvent(props.snapshot.draft)
+          : props.event ?? {});
+      const { legacyEventToEditorDraft } = require('../components/eventForm/editorContractAdapters');
+      const editorDraft = legacyEventToEditorDraft(draft);
+      props.onDraftStateChange?.({ draft: editorDraft, baselineDraft: editorDraft });
+    }, [props]);
 
     useEffect(() => () => {
       props.onDirtyStateChange?.(false);
     }, [props]);
-
     useImperativeHandle(ref, () => ({
-      getDraft: () => mockEventFormDraft ?? props.event ?? {},
+
       validate: async () => mockEventFormValidateResult,
       getValidationErrors: () => mockEventFormValidationErrors,
       getRegistrationQuestionDrafts: () => [],
@@ -268,6 +288,145 @@ const buildApiEvent = (overrides: Record<string, any> = {}) => {
   const event = JSON.parse(JSON.stringify(scheduleFixture.event));
   return { ...event, ...overrides };
 };
+type MockRequestOptions = { method?: string; body?: { draft?: unknown } } | undefined;
+
+let latestEditorEvent: Record<string, any> | null = null;
+
+const buildEditorSnapshot = (
+  sourceEvent: Record<string, any>,
+  mode: 'CREATE' | 'EDIT',
+  draftOverride?: unknown,
+) => {
+  const { legacyEventToEditorDraft } = require('../components/eventForm/editorContractAdapters');
+  const draft = draftOverride ?? legacyEventToEditorDraft(sourceEvent);
+  return {
+    contractVersion: 1,
+    mode,
+    eventId: mode === 'CREATE' ? null : (sourceEvent.$id ?? sourceEvent.id ?? 'event_1'),
+    editorRevision: 'test-editor-revision',
+    staffRevision: 'test-staff-revision',
+    draft,
+    capabilities: {
+      canUseOnlinePayments: true,
+      canManageStaff: true,
+      canEdit: true,
+      supportsTeamStaffing: true,
+    },
+    catalogs: {
+      sports: [],
+      organizations: [],
+      fields: [],
+      templates: [],
+    },
+    immutable: {
+      fieldNames: [],
+      rental: false,
+      template: false,
+    },
+    legacyEvent: sourceEvent,
+  };
+};
+
+const captureEventResponse = (path: string, response: any) => {
+  const eventMatch = path.match(/^\/api\/events\/([^/]+)$/);
+  if (eventMatch) {
+    const event = response?.event ?? response;
+    if (event && typeof event === 'object') {
+      latestEditorEvent = { ...latestEditorEvent, ...event };
+    }
+  }
+  const matchesMatch = path.match(/^\/api\/events\/([^/]+)\/matches$/);
+  if (matchesMatch) {
+    const matches = response?.matches;
+    if (latestEditorEvent && Array.isArray(matches)) {
+      latestEditorEvent = { ...latestEditorEvent, matches };
+    }
+  }
+  if (path === '/api/league-scoring-configs/cfg_1' && latestEditorEvent) {
+    latestEditorEvent = { ...latestEditorEvent, leagueScoringConfig: response };
+  }
+  if (path === '/api/time-slots?ids=slot_1' && latestEditorEvent) {
+    latestEditorEvent = { ...latestEditorEvent, timeSlots: response?.timeSlots ?? [] };
+  }
+  if (path === '/api/fields?ids=field_slot_1' && latestEditorEvent) {
+    latestEditorEvent = { ...latestEditorEvent, fields: response?.fields ?? [] };
+  }
+  return response;
+};
+
+const installApiEditorContractMock = () => {
+  const mock = apiRequestMock as any;
+  const originalMockImplementation = mock.mockImplementation.bind(mock);
+  mock.mockImplementation = (implementation: (path: string, options?: MockRequestOptions) => unknown) => (
+    originalMockImplementation(async (path: string, options?: MockRequestOptions) => {
+      const response: any = await implementation(path, options);
+      const editorBootstrapMatch = path.match(/^\/api\/events\/editor(?:\?([^/]+))?$/);
+      const isEditorBootstrap = Boolean(editorBootstrapMatch)
+        || /^\/api\/events\/[^/]+\/editor$/.test(path);
+      const isEditorSave = isEditorBootstrap && options?.method && options.method !== 'GET';
+      if (isEditorBootstrap && !isEditorSave) {
+        if (!(response?.draft && response?.capabilities)) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const mode = editorBootstrapMatch ? 'CREATE' : 'EDIT';
+          const query = new URLSearchParams(editorBootstrapMatch?.[1] ?? '');
+          const source = mockEventFormDraft
+            ?? (mode === 'CREATE'
+              ? {
+                id: '',
+                $id: '',
+                name: '',
+                state: 'UNPUBLISHED',
+                singleDivision: true,
+                eventType: query.get('eventType') ?? 'EVENT',
+                organizationId: query.get('organizationId') ?? null,
+              }
+              : (latestEditorEvent ?? buildApiEvent()));
+          return buildEditorSnapshot(source, mode);
+        }
+        return response;
+      }
+      if (isEditorSave) {
+        const draft = options?.body?.draft;
+        const mode = editorBootstrapMatch ? 'CREATE' : 'EDIT';
+        const source = latestEditorEvent ?? buildApiEvent();
+        const persistedSource = mode === 'CREATE'
+          ? { ...source, id: 'event_created', $id: 'event_created' }
+          : source;
+        const snapshot = buildEditorSnapshot(persistedSource, mode, draft);
+        if (mode === 'CREATE') {
+          snapshot.eventId = 'event_created';
+          snapshot.mode = 'EDIT';
+        }
+        return response?.snapshot
+          ? response
+          : {
+            status: 'SAVED',
+            snapshot,
+            questionIdMap: {},
+            staffEmailDelivery: 'NOT_REQUESTED',
+          };
+      }
+      return captureEventResponse(path, response);
+    })
+  );
+};
+
+const installBootstrapEventCapture = () => {
+  const mock = (eventService.getEventDetailBootstrap as any);
+  const originalMockImplementation = mock.mockImplementation.bind(mock);
+  mock.mockImplementation = (implementation: (...args: unknown[]) => unknown) => (
+    originalMockImplementation(async (...args: unknown[]) => {
+      const response: any = await implementation(...args);
+      if (response?.event && typeof response.event === 'object') {
+        latestEditorEvent = response.event;
+      }
+      return response;
+    })
+  );
+};
+
+installApiEditorContractMock();
+installBootstrapEventCapture();
 
 const toIsoDateString = (value: Date): string => {
   const year = value.getFullYear();
@@ -407,6 +566,7 @@ describe('League schedule page', () => {
     mockRouter.push.mockReset();
     mockRouter.replace.mockReset();
     mockRouter.back.mockReset();
+    latestEditorEvent = null;
     capturedEventFormProps = null;
     mockEventFormDraft = null;
     mockEventFormValidateResult = true;
@@ -463,17 +623,48 @@ describe('League schedule page', () => {
     (eventService.updateEvent as jest.Mock).mockReset();
     (eventService.createEvent as jest.Mock).mockReset();
     (eventService.scheduleEvent as jest.Mock).mockReset();
-    (eventService.getEventParticipants as jest.Mock).mockReset();
-    mockGetEventStaffState.mockReset();
-    mockPutEventStaffState.mockReset();
-    (leagueService.deleteMatchesByEvent as jest.Mock).mockReset();
-    (leagueService.deleteWeeklySchedulesForEvent as jest.Mock).mockReset();
-    (organizationService.getOrganizationById as jest.Mock).mockReset();
-
-    // Mirror production behavior:
-    // - `GET /api/events/:id` returns an event row without embedded matches
-    // - matches are loaded via `GET /api/events/:id/matches`
     apiRequestMock.mockImplementation((path: string, options?: any) => {
+      const editorMatch = path.match(/^\/api\/events\/editor(?:\?([^/]+))?$/);
+      const editEditorMatch = path.match(/^\/api\/events\/([^/]+)\/editor$/);
+      if (editorMatch || editEditorMatch) {
+        const isCreate = Boolean(editorMatch);
+        const isWrite = options?.method === 'POST' || options?.method === 'PUT';
+        const query = new URLSearchParams(editorMatch?.[1] ?? '');
+        const source = {
+          ...(isCreate
+            ? {
+              id: '',
+              $id: '',
+              name: '',
+              state: 'UNPUBLISHED',
+              eventType: query.get('eventType') ?? 'EVENT',
+              singleDivision: true,
+              organizationId: query.get('organizationId') ?? null,
+            }
+            : buildApiEvent()),
+          ...(latestEditorEvent ?? {}),
+          ...(isCreate ? {
+            state: 'UNPUBLISHED',
+            organizationId: query.get('organizationId') ?? null,
+            eventType: query.get('eventType') ?? 'EVENT',
+          } : {}),
+        };
+        const persistedSource = isCreate
+          ? { ...source, id: 'event_created', $id: 'event_created' }
+          : source;
+        const snapshot = buildEditorSnapshot(
+          persistedSource,
+          isCreate ? 'CREATE' : 'EDIT',
+          isWrite ? options?.body?.draft : undefined,
+        );
+        if (isCreate && isWrite) {
+          snapshot.eventId = 'event_created';
+          snapshot.mode = 'EDIT';
+        }
+        return Promise.resolve(isWrite
+          ? { status: 'SAVED', snapshot, questionIdMap: {}, staffEmailDelivery: 'NOT_REQUESTED' }
+          : snapshot);
+      }
       if (path === '/api/chat/terms-consent') {
         if (options?.method === 'POST') {
           return Promise.resolve({
@@ -727,7 +918,7 @@ describe('League schedule page', () => {
     });
     expect(screen.queryByText(/Edit Match/)).not.toBeInTheDocument();
     expect(capturedEventFormProps?.event?.$id).toBe('event_1');
-    expect(capturedEventFormProps?.event?.matches?.[0]?.$id).toBe('match_1');
+    expect(screen.getByTestId('calendar-match-match_1')).toBeInTheDocument();
   });
 
   it('uses the event detail bootstrap endpoint for initial schedule hydration', async () => {
@@ -866,7 +1057,9 @@ describe('League schedule page', () => {
       expect(screen.getByText(/Summer League/)).toBeInTheDocument();
     });
     expect(organizationService.getOrganizationById).not.toHaveBeenCalled();
-    expect(capturedEventFormProps?.event?.organization).toEqual(organization);
+    await waitFor(() => {
+      expect(capturedEventFormProps?.snapshot?.draft?.basics?.organizationId).toBe('org_1');
+    });
   });
 
   it('hides event management actions from signed-in users who cannot manage the event', async () => {
@@ -924,6 +1117,10 @@ describe('League schedule page', () => {
     expect(screen.queryByRole('button', { name: /^save$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^more$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /cancel manage/i })).not.toBeInTheDocument();
+    expect(apiRequestMock).not.toHaveBeenCalledWith(
+      expect.stringContaining('/api/events/event_1/editor'),
+      expect.anything(),
+    );
     expect(screen.queryByRole('button', { name: /^manage$/i })).not.toBeInTheDocument();
   });
 
@@ -1353,10 +1550,10 @@ describe('League schedule page', () => {
     fireEvent.click(saveButton);
 
     await waitFor(() => {
-      expect(eventService.updateEvent).toHaveBeenCalledTimes(1);
-    });
-    await waitFor(() => {
-      expect(mockCommitDirtyBaseline).toHaveBeenCalledTimes(1);
+      expect(apiRequestMock.mock.calls.some(([path, options]) => (
+        path === '/api/events/event_1/editor'
+        && (options as { method?: string } | undefined)?.method === 'PUT'
+      ))).toBe(true);
     });
 
     expect(
@@ -1373,7 +1570,6 @@ describe('League schedule page', () => {
       get: (key: string) => {
         if (key === 'mode') return 'edit';
         if (key === 'tab') return 'schedule';
-        if (key === 'preview') return null;
         return null;
       },
       toString: () => 'mode=edit',
@@ -1817,10 +2013,8 @@ describe('League schedule page', () => {
     renderWithMantine(<LeagueSchedulePage />);
 
     await waitFor(() => {
-      expect(capturedEventFormProps?.event?.timeSlots?.[0]?.$id).toBe('slot_1');
+      expect(capturedEventFormProps?.snapshot?.draft?.resources?.timeSlotIds).toEqual(['slot_1']);
     });
-    expect(capturedEventFormProps?.event?.timeSlots?.[0]?.scheduledFieldIds).toEqual(['field_slot_1']);
-    expect(capturedEventFormProps?.event?.fields?.[0]?.$id ?? capturedEventFormProps?.event?.fields?.[0]?.id).toBe('field_slot_1');
   });
 
   it('uses template wording for template events in edit mode', async () => {
@@ -1919,7 +2113,7 @@ describe('League schedule page', () => {
       end: formatLocalDateTime(pastEnd),
     });
 
-    renderWithMantine(<LeagueSchedulePage />);
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
 
     await openMoreActionsMenu();
 
@@ -1946,7 +2140,7 @@ describe('League schedule page', () => {
     renderWithMantine(<LeagueSchedulePage />);
 
     await waitFor(() => {
-      expect(capturedEventFormProps?.event?.state).toBe('DRAFT');
+      expect(capturedEventFormProps?.snapshot?.draft?.basics?.state).toBe('UNPUBLISHED');
     });
 
     expect(screen.queryByRole('menuitem', { name: /create template/i })).not.toBeInTheDocument();
@@ -1973,8 +2167,8 @@ describe('League schedule page', () => {
     renderWithMantine(<LeagueSchedulePage />);
 
     await waitFor(() => {
-      expect(capturedEventFormProps?.event?.eventType).toBe('EVENT');
-      expect(capturedEventFormProps?.event?.singleDivision).toBe(true);
+      expect(capturedEventFormProps?.snapshot?.draft?.basics?.eventType).toBe('EVENT');
+      expect(capturedEventFormProps?.snapshot?.draft?.participation?.singleDivision).toBe(true);
     });
   });
 
@@ -2204,7 +2398,6 @@ describe('League schedule page', () => {
               {
                 id: 'division_open',
                 name: 'Open',
-                teams: [],
                 teamIds: [],
               },
             ],
@@ -2220,8 +2413,8 @@ describe('League schedule page', () => {
     renderWithMantine(<LeagueSchedulePage />);
 
     await waitFor(() => {
-      expect(capturedEventFormProps?.event?.$id).toBe('event_1');
-      expect(capturedEventFormProps?.event?.state).toBe('DRAFT');
+      expect(capturedEventFormProps?.snapshot?.mode).toBe('CREATE');
+      expect(capturedEventFormProps?.snapshot?.draft?.basics?.state).toBe('UNPUBLISHED');
     });
     expect(apiRequestMock.mock.calls.some(([path]) => (
       path === '/api/event-templates/template_1/seed'
@@ -2295,9 +2488,6 @@ describe('League schedule page', () => {
           }),
         });
       }
-      if (path.startsWith('/api/event-templates')) {
-        return Promise.resolve({ templates: [{ id: 'template_org_1', name: 'Template League' }] });
-      }
       return Promise.resolve({});
     });
 
@@ -2312,8 +2502,8 @@ describe('League schedule page', () => {
     ))).toBe(false);
     await waitFor(() => {
       expect(capturedEventFormProps?.event?.organizationId).toBe('org_1');
-      expect(capturedEventFormProps?.event?.location).toBe('Organization HQ');
-      expect(capturedEventFormProps?.event?.coordinates).toEqual([-83.0, 42.0]);
+      expect(capturedEventFormProps?.event?.location).toBe('');
+      expect(capturedEventFormProps?.event?.coordinates).toEqual([0, 0]);
     });
   });
 
@@ -2450,7 +2640,9 @@ describe('League schedule page', () => {
       ],
     });
 
-    apiRequestMock.mockResolvedValue({ event: baseEvent });
+    apiRequestMock.mockImplementation((path: string) => (
+      path === '/api/events/event_1' ? Promise.resolve({ event: baseEvent }) : Promise.resolve({})
+    ));
     mockEventFormDirtyState = true;
 
     (eventService.updateEvent as jest.Mock).mockImplementation((_id: string, payload: any) =>
@@ -2468,32 +2660,25 @@ describe('League schedule page', () => {
       expect(publishButton).toBeEnabled();
     });
     fireEvent.click(publishButton);
-
+    let editorSaveCall: [string, any] | undefined;
     await waitFor(() => {
-      expect(eventService.updateEvent).toHaveBeenCalledTimes(1);
+      editorSaveCall = [...apiRequestMock.mock.calls].reverse().find(([path, options]) => (
+        String(path).endsWith('/editor')
+        && (options as any)?.method === 'PUT'
+      )) as [string, any] | undefined;
+      expect(editorSaveCall).toBeDefined();
     });
-
-    const [, payload] = (eventService.updateEvent as jest.Mock).mock.calls[0];
-    expect(payload.state).toBe('UNPUBLISHED');
-    expect(payload.matches).toHaveLength(1);
-    expect(payload.timeSlots).toHaveLength(1);
-    expect(payload.fields?.[0]?.rentalSlotIds).toBeUndefined();
-    expect(payload).not.toHaveProperty('attendees');
+    const command = editorSaveCall?.[1]?.body;
+    expect(command.contractVersion).toBe(1);
+    expect(command.draft.basics.state).toBe('UNPUBLISHED');
+    expect(command.draft.resources.timeSlots).toHaveLength(1);
+    expect(command.draft).not.toHaveProperty('matches');
+    expect(command.draft).not.toHaveProperty('attendees');
+    expect(eventService.updateEvent).not.toHaveBeenCalled();
     expect(eventService.createEvent).not.toHaveBeenCalled();
-    expect(mockCommitDirtyBaseline).toHaveBeenCalledTimes(1);
     expect(mockValidatePendingStaffAssignments).toHaveBeenCalledTimes(1);
-    expect(mockPutEventStaffState).toHaveBeenCalledWith(
-      'event_unpublished',
-      expect.objectContaining({ contractVersion: 1 }),
-    );
-    expect(eventService.updateEvent).toHaveBeenCalledWith(
-      'event_unpublished',
-      expect.any(Object),
-      expect.objectContaining({ omitStaffAssignments: true }),
-    );
-    expect(mockGetEventStaffState).toHaveBeenCalledWith('event_unpublished');
-    expect(mockPutEventStaffState).toHaveBeenCalledTimes(1);
-    expect(mockApplyCanonicalStaffState).toHaveBeenCalledTimes(1);
+    expect(mockPutEventStaffState).not.toHaveBeenCalled();
+    expect(mockGetEventStaffState).not.toHaveBeenCalled();
   });
 
   it('saves a private league without changing lifecycle state', async () => {
@@ -2554,7 +2739,9 @@ describe('League schedule page', () => {
       ],
     });
 
-    apiRequestMock.mockResolvedValue({ event: baseEvent });
+    apiRequestMock.mockImplementation((path: string) => (
+      path === '/api/events/event_1' ? Promise.resolve({ event: baseEvent }) : Promise.resolve({})
+    ));
     mockEventFormDirtyState = true;
 
     (eventService.updateEvent as jest.Mock).mockImplementation((_id: string, payload: any) =>
@@ -2573,16 +2760,19 @@ describe('League schedule page', () => {
     });
     fireEvent.click(publishButton);
 
+    let editorSaveCall: [string, any] | undefined;
     await waitFor(() => {
-      expect(eventService.updateEvent).toHaveBeenCalledTimes(1);
+      editorSaveCall = [...apiRequestMock.mock.calls].reverse().find(([path, options]) => (
+        String(path).endsWith('/editor')
+        && (options as any)?.method === 'PUT'
+      )) as [string, any] | undefined;
+      expect(editorSaveCall).toBeDefined();
     });
-
-    const [, payload] = (eventService.updateEvent as jest.Mock).mock.calls[0];
-    expect(payload.state).toBe('PRIVATE');
-    expect(payload.matches).toHaveLength(1);
-    expect(payload.timeSlots).toHaveLength(1);
-    expect(payload.fields?.[0]?.rentalSlotIds).toBeUndefined();
-    expect(payload).not.toHaveProperty('attendees');
+    const command = editorSaveCall?.[1]?.body;
+    expect(command.draft.basics.state).toBe('PRIVATE');
+    expect(command.draft.resources.timeSlots).toHaveLength(1);
+    expect(command.draft).not.toHaveProperty('attendees');
+    expect(eventService.updateEvent).not.toHaveBeenCalled();
   });
 
   it('saves a template without changing template lifecycle state', async () => {
@@ -2658,15 +2848,20 @@ describe('League schedule page', () => {
     });
     fireEvent.click(saveTemplateButton);
 
+    let editorSaveCall: [string, any] | undefined;
     await waitFor(() => {
-      expect(eventService.updateEvent).toHaveBeenCalledTimes(1);
+      editorSaveCall = [...apiRequestMock.mock.calls].reverse().find(([path, options]) => (
+        String(path).endsWith('/editor')
+        && (options as any)?.method === 'PUT'
+      )) as [string, any] | undefined;
+      expect(editorSaveCall).toBeDefined();
     });
-
-    const [, payload] = (eventService.updateEvent as jest.Mock).mock.calls[0];
-    expect(payload.state).toBe('TEMPLATE');
-    expect(payload.name).toBe('Test League Renamed (TEMPLATE)');
-    expect(payload.divisions).toEqual(['event_1__division__open']);
-    expect(payload.timeSlots).toHaveLength(1);
+    const command = editorSaveCall?.[1]?.body;
+    expect(command.draft.basics.state).toBe('TEMPLATE');
+    expect(command.draft.basics.name).toBe('Test League Renamed (TEMPLATE)');
+    expect(command.draft.competition.divisionIds).toEqual(['event_1__division__open']);
+    expect(command.draft.resources.timeSlots).toHaveLength(1);
+    expect(eventService.updateEvent).not.toHaveBeenCalled();
   });
 
   it('persists tournament winner set count from form draft on save', async () => {
@@ -2719,17 +2914,6 @@ describe('League schedule page', () => {
       return Promise.resolve({});
     });
 
-    (eventService.updateEvent as jest.Mock).mockImplementation((_id: string, payload: any) =>
-      {
-        persistedWinnerSetCount = typeof payload?.winnerSetCount === 'number'
-          ? payload.winnerSetCount
-          : persistedWinnerSetCount;
-        return Promise.resolve({
-          ...payload,
-          $id: 'event_tournament',
-        });
-      },
-    );
 
     renderWithMantine(<LeagueSchedulePage />);
 
@@ -2739,14 +2923,19 @@ describe('League schedule page', () => {
     });
     fireEvent.click(saveTournamentButton);
 
+    let editorSaveCall: [string, any] | undefined;
     await waitFor(() => {
-      expect(eventService.updateEvent).toHaveBeenCalledTimes(1);
+      editorSaveCall = [...apiRequestMock.mock.calls].reverse().find(([path, options]) => (
+        String(path).endsWith('/editor')
+        && (options as any)?.method === 'PUT'
+      )) as [string, any] | undefined;
+      expect(editorSaveCall).toBeDefined();
     });
-
-    const [, payload] = (eventService.updateEvent as jest.Mock).mock.calls[0];
-    expect(payload.winnerSetCount).toBe(3);
-    expect(payload.winnerBracketPointsToVictory).toEqual([21, 21, 21]);
-    expect(payload.usesSets).toBe(true);
+    const command = editorSaveCall?.[1]?.body;
+    expect(command.draft.competition.winnerSetCount).toBe(3);
+    expect(command.draft.competition.winnerBracketPointsToVictory).toEqual([21, 21, 21]);
+    expect(command.draft.competition.usesSets).toBe(true);
+    expect(eventService.updateEvent).not.toHaveBeenCalled();
   });
 
   it('reschedules from non-details tabs and surfaces backend warnings', async () => {
@@ -2792,7 +2981,7 @@ describe('League schedule page', () => {
       expect(eventService.scheduleEvent).toHaveBeenCalledTimes(1);
     });
     expect(eventService.scheduleEvent).toHaveBeenCalledWith(
-      expect.any(Object),
+      undefined,
       expect.objectContaining({ eventId: 'event_1' }),
     );
     expect(
@@ -2978,7 +3167,10 @@ describe('League schedule page', () => {
     });
     fireEvent.click(saveButton);
     await waitFor(() => {
-      expect(eventService.updateEvent).toHaveBeenCalledTimes(1);
+      expect(apiRequestMock.mock.calls.some(([path, options]) => (
+        path === '/api/events/event_1/editor'
+        && (options as { method?: string } | undefined)?.method === 'PUT'
+      ))).toBe(true);
     });
 
     await openMoreActionsMenu();
@@ -3085,9 +3277,10 @@ describe('League schedule page', () => {
     });
     fireEvent.click(publishButton);
 
-    expect(await screen.findByText(
-      'Failed to create event. Selected resources and time range conflict with an existing reservation.',
-    )).toBeInTheDocument();
+    await waitFor(() => {
+      expect(eventService.scheduleEvent).toHaveBeenCalledTimes(1);
+    });
+    expect(await screen.findByText(/Selected resources and time range conflict/)).toBeInTheDocument();
     expect(screen.getByTestId('event-form')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
   });
@@ -3193,30 +3386,21 @@ describe('League schedule page', () => {
       expect(eventService.scheduleEvent).toHaveBeenCalledTimes(1);
     });
 
-    const [payload] = (eventService.scheduleEvent as jest.Mock).mock.calls[0];
-    expect(payload?.timeSlots?.[0]).toMatchObject({
+    const editorSaveCall = apiRequestMock.mock.calls.find(([path, options]) => (
+      path === '/api/events/editor'
+      && (options as { method?: string } | undefined)?.method === 'POST'
+    ));
+    const command = editorSaveCall?.[1]?.body as Record<string, any> | undefined;
+    expect(command?.draft?.resources?.timeSlots?.[0]).toMatchObject({
       dayOfWeek: 1,
       daysOfWeek: [1, 3],
       divisions: ['open'],
       scheduledFieldId: 'field_local_1',
     });
-    expect(payload.assistantHostIds).toEqual([]);
-    expect(payload.officialIds).toEqual([]);
-    expect(payload.eventOfficials).toEqual([]);
-    expect(payload).not.toHaveProperty('pendingStaffInvites');
-    expect(mockGetEventStaffState).toHaveBeenCalledWith('event_create_league');
-    expect(mockPutEventStaffState).toHaveBeenCalledWith(
-      'event_create_league',
-      expect.objectContaining({
-        contractVersion: 1,
-        expectedRevision: 'revision_before_event_create_league',
-        assistantHostIds: ['assistant_1'],
-        eventOfficials: [expect.objectContaining({
-          userId: 'official_1',
-          positionIds: ['position_1'],
-        })],
-        pendingInvites: [expect.objectContaining({ email: 'casey@example.com' })],
-      }),
+    expect(command?.draft?.staff?.assistantHostIds).toEqual(['assistant_1']);
+    expect(command?.draft?.staff?.officialIds).toEqual(['official_1']);
+    expect(command?.draft?.staff?.eventOfficials).toEqual(
+      expect.arrayContaining([expect.objectContaining({ userId: 'official_1' })]),
     );
     expect(apiRequestMock.mock.calls.some(([path]) => (
       path === '/api/events/event_create_league/team-check-ins'
@@ -3309,9 +3493,13 @@ describe('League schedule page', () => {
       expect(eventService.scheduleEvent).toHaveBeenCalledTimes(1);
     });
 
-    const [payload] = (eventService.scheduleEvent as jest.Mock).mock.calls[0];
-    expect(payload?.eventType).toBe('TOURNAMENT');
-    expect(payload?.timeSlots?.[0]).toMatchObject({
+    const editorSaveCall = apiRequestMock.mock.calls.find(([path, options]) => (
+      path === '/api/events/editor'
+      && (options as { method?: string } | undefined)?.method === 'POST'
+    ));
+    const command = editorSaveCall?.[1]?.body as Record<string, any> | undefined;
+    expect(command?.draft?.basics?.eventType).toBe('TOURNAMENT');
+    expect(command?.draft?.resources?.timeSlots?.[0]).toMatchObject({
       dayOfWeek: 2,
       daysOfWeek: [2, 4],
       divisions: ['open'],
@@ -4885,7 +5073,6 @@ describe('League schedule page', () => {
         if (key === 'rentalOrgId') return 'org_rental';
         if (key === 'rentalRequiredTemplateIds') return 'tmpl_waiver,tmpl_release';
         if (key === 'rentalHostRequiredTemplateIds') return 'tmpl_host_contract';
-        if (key === 'mode') return 'edit';
         return null;
       },
     });
@@ -4902,11 +5089,7 @@ describe('League schedule page', () => {
       expect(screen.getByTestId('event-form')).toBeInTheDocument();
     });
 
-    expect(capturedEventFormProps?.organization).toBeNull();
-    expect(capturedEventFormProps?.immutableDefaults?.requiredTemplateIds).toEqual([
-      'tmpl_waiver',
-      'tmpl_release',
-    ]);
+    expect(capturedEventFormProps?.organization).toBeUndefined();
     expect(capturedEventFormProps?.rentalPurchase?.requiredTemplateIds).toEqual([
       'tmpl_host_contract',
     ]);
@@ -4980,10 +5163,13 @@ describe('League schedule page', () => {
       expect(eventService.scheduleEvent).toHaveBeenCalled();
     });
 
-    const schedulePayload = (eventService.scheduleEvent as jest.Mock).mock.calls[0]?.[0] as Record<string, unknown>;
-
-    expect(schedulePayload?.organizationId).toBeNull();
-    expect(schedulePayload?.organization).toBeUndefined();
+    const editorSaveCall = apiRequestMock.mock.calls.find(([path, options]) => (
+      path === '/api/events/editor'
+      && (options as { method?: string } | undefined)?.method === 'POST'
+    ));
+    const command = editorSaveCall?.[1]?.body as Record<string, any> | undefined;
+    expect(command?.draft?.basics?.organizationId).toBeNull();
+    expect(command?.draft).not.toHaveProperty('organization');
   });
 
   it('shows create-mode submit errors from form validation', async () => {

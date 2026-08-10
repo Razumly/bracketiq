@@ -384,6 +384,7 @@ export interface RegistrationQuestion {
 
 export interface RegistrationQuestionDraft {
   id?: string | null;
+  clientId?: string | null;
   prompt: string;
   answerType?: RegistrationQuestionAnswerType;
   required?: boolean;
@@ -882,6 +883,8 @@ export interface Event {
   tags?: EventTag[];
   start: string;
   end: string | null;
+  scheduleEndConstraint?: string | null;
+  generatedScheduleEnd?: string | null;
   timeZone?: string;
   location: string;
   address?: string;

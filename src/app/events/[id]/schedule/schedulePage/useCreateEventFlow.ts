@@ -29,6 +29,8 @@ import type {
 } from '@/types';
 
 import type { EventFormHandle, EventFormProps } from '../components/EventForm';
+import type { EventEditorDraft } from '@/contracts/eventEditor';
+import { editorDraftToLegacyEvent } from '../components/eventForm/editorContractAdapters';
 import type { RentalCheckoutModalsProps } from './RentalCheckoutModals';
 import {
   buildScheduleLocationDefaults,
@@ -114,6 +116,7 @@ type UseCreateEventFlowParams = {
   activeMatches: Match[];
   hasPendingUnsavedChanges: boolean;
   eventFormRef: RefObject<EventFormHandle | null>;
+  editorDraftRef: RefObject<EventEditorDraft | null>;
   templateIdParam?: string;
   skipTemplatePromptParam: boolean;
   resolvedHostOrgId?: string;
@@ -154,6 +157,7 @@ export function useCreateEventFlow({
   activeMatches,
   hasPendingUnsavedChanges,
   eventFormRef,
+  editorDraftRef,
   templateIdParam,
   skipTemplatePromptParam,
   resolvedHostOrgId,
@@ -849,11 +853,12 @@ export function useCreateEventFlow({
     if (!activeEvent) {
       return null;
     }
-
-    const formDraft = eventFormRef.current?.getDraft();
+    const formDraft = editorDraftRef.current
+      ? editorDraftToLegacyEvent(editorDraftRef.current) as Partial<Event>
+      : null;
     const merged = {
       ...(cloneValue(activeEvent) as Event),
-      ...((formDraft ?? {}) as Partial<Event>),
+      ...(formDraft ?? {}),
     } as Event;
 
     if (!Array.isArray(merged.matches) || merged.matches.length === 0) {
@@ -869,7 +874,7 @@ export function useCreateEventFlow({
     }
 
     return merged;
-  }, [activeEvent, activeMatches, eventFormRef]);
+  }, [activeEvent, activeMatches, editorDraftRef]);
 
   return {
     organizationForCreate,

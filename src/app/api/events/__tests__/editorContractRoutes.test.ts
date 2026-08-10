@@ -1,0 +1,121 @@
+/** @jest-environment node */
+
+import { NextRequest } from 'next/server';
+
+const requireSessionMock = jest.fn();
+const hasOrgPermissionMock = jest.fn();
+const canManageEventMock = jest.fn();
+const loadCreateSnapshotMock = jest.fn();
+const loadSnapshotMock = jest.fn();
+const createEventEditorMock = jest.fn();
+const saveEventEditorMock = jest.fn();
+const parseCreateMock = jest.fn();
+const parseSaveMock = jest.fn();
+const prismaMock = { events: { findUnique: jest.fn() } };
+const deliverInvitesMock = jest.fn();
+const getRequestOriginMock = jest.fn(() => 'http://localhost');
+
+class MockEditorRevisionConflictError extends Error {
+  currentEditorRevision = 'current-editor';
+  currentStaffRevision = 'current-staff';
+  constructor() {
+    super('The editor changed while you were editing. Reload before saving again.');
+  }
+}
+
+jest.mock('@/lib/permissions', () => ({ requireSession: (...args: any[]) => requireSessionMock(...args) }));
+jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
+jest.mock('@/server/accessControl', () => ({
+  hasOrgPermission: (...args: any[]) => hasOrgPermissionMock(...args),
+  canManageEvent: (...args: any[]) => canManageEventMock(...args),
+}));
+jest.mock('@/lib/requestOrigin', () => ({ getRequestOrigin: (...args: any[]) => getRequestOriginMock(...args) }));
+jest.mock('@/contracts/eventEditor', () => ({
+  eventEditorBootstrapQuerySchema: { safeParse: (...args: any[]) => ({ success: false, error: { flatten: () => ({ fieldErrors: {} }) } }) },
+  parseCreateEventEditorCommand: (...args: any[]) => parseCreateMock(...args),
+  parseSaveEventEditorCommand: (...args: any[]) => parseSaveMock(...args),
+}));
+jest.mock('@/server/events/eventEditorSnapshot', () => ({
+  loadCreateEventEditorSnapshot: (...args: any[]) => loadCreateSnapshotMock(...args),
+  loadEventEditorSnapshot: (...args: any[]) => loadSnapshotMock(...args),
+}));
+jest.mock('@/server/events/eventEditorSave', () => ({
+  createEventEditor: (...args: any[]) => createEventEditorMock(...args),
+  saveEventEditor: (...args: any[]) => saveEventEditorMock(...args),
+  EditorCapabilityError: class extends Error {},
+  EditorImmutableFieldError: class extends Error {},
+  EditorInputError: class extends Error {},
+  EditorPermissionError: class extends Error {},
+  EditorRevisionConflictError: MockEditorRevisionConflictError,
+}));
+jest.mock('@/server/events/eventStaffDelivery', () => ({
+  deliverEventStaffInvitesAfterCommit: (...args: any[]) => deliverInvitesMock(...args),
+}));
+
+import { GET as createGet, POST as createPost } from '@/app/api/events/editor/route';
+import { GET as editGet, PUT as editPut } from '@/app/api/events/[eventId]/editor/route';
+import { EditorRevisionConflictError } from '@/server/events/eventEditorSave';
+
+const request = (url: string, method = 'GET', body?: unknown) => new NextRequest(url, {
+  method,
+  headers: { 'Content-Type': 'application/json' },
+  ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+});
+
+const editContext = (eventId = 'event_1') => ({ params: Promise.resolve({ eventId }) });
+
+describe('canonical editor routes', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
+    hasOrgPermissionMock.mockResolvedValue(true);
+    canManageEventMock.mockResolvedValue(true);
+    prismaMock.events.findUnique.mockResolvedValue({ id: 'event_1', hostId: 'host_1' });
+  });
+
+  it('rejects malformed create bootstrap queries before loading catalogs', async () => {
+    const response = await createGet(request('http://localhost/api/events/editor?eventType=NOT_A_MODE'));
+    expect(response.status).toBe(400);
+    expect((await response.json()).code).toBe('INVALID_EDITOR_COMMAND');
+    expect(loadCreateSnapshotMock).not.toHaveBeenCalled();
+  });
+
+  it('creates through the canonical command and returns the saved snapshot', async () => {
+    const command = { contractVersion: 1, draft: { basics: { name: 'Fixture' } } };
+    const result = { status: 'SAVED', snapshot: { eventId: 'event_1' }, questionIdMap: {} };
+    parseCreateMock.mockReturnValue(command);
+    createEventEditorMock.mockResolvedValue(result);
+
+    const response = await createPost(request('http://localhost/api/events/editor', 'POST', command));
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual(result);
+    expect(createEventEditorMock).toHaveBeenCalledWith(
+      { userId: 'host_1', isAdmin: false },
+      command,
+      expect.objectContaining({ sendStaffInvites: expect.any(Function) }),
+    );
+  });
+
+  it('maps stale edit revisions to a conflict without invoking persistence twice', async () => {
+    const command = { contractVersion: 1, editorRevision: 'old', staffRevision: 'old', draft: {} };
+    parseSaveMock.mockReturnValue(command);
+    saveEventEditorMock.mockRejectedValue(new EditorRevisionConflictError());
+
+    const response = await editPut(request('http://localhost/api/events/event_1/editor', 'PUT', command), editContext());
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual(expect.objectContaining({
+      code: 'EDITOR_REVISION_CONFLICT',
+      editorRevision: 'current-editor',
+      staffRevision: 'current-staff',
+    }));
+    expect(saveEventEditorMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks edit permissions before returning the canonical snapshot', async () => {
+    canManageEventMock.mockResolvedValue(false);
+    const response = await editGet(request('http://localhost/api/events/event_1/editor'), editContext());
+    expect(response.status).toBe(403);
+    expect((await response.json()).code).toBe('EDITOR_PERMISSION_DENIED');
+    expect(loadSnapshotMock).not.toHaveBeenCalled();
+  });
+});

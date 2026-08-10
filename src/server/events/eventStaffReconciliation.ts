@@ -46,6 +46,12 @@ export const eventStaffPutSchema = z.object({
   contractVersion: z.literal(EVENT_STAFF_CONTRACT_VERSION),
   expectedRevision: z.string().trim().min(1),
   assistantHostIds: z.array(identifierSchema).default([]),
+  officialPositions: z.array(z.object({
+    id: identifierSchema.optional(),
+    name: z.string().trim().min(1),
+    count: z.number().int().positive(),
+    order: z.number().int().nonnegative(),
+  }).strict()).default([]),
   eventOfficials: z.array(eventOfficialInputSchema).default([]),
   pendingInvites: z.array(pendingInviteInputSchema).default([]),
 }).strict();
@@ -431,17 +437,18 @@ export const reconcileEventStaffDesiredState = async (
   if (!event) {
     throw new EventStaffNotFoundError();
   }
-
   const now = new Date();
   const hostId = normalizeId(event.hostId);
   const assistantHostIds = normalizeIdList(input.assistantHostIds).filter((id) => id !== hostId);
   const fieldIds = normalizeIdList(event.fieldIds);
   const pendingNeedsOfficialPosition = input.pendingInvites.some((invite) => invite.roles.includes('OFFICIAL'));
-  const officialPositions = await resolveOfficialPositions(
-    client,
-    event,
-    input.eventOfficials.length > 0 || pendingNeedsOfficialPosition,
-  );
+  const officialPositions = input.officialPositions?.length
+    ? normalizeEventOfficialPositions(input.officialPositions, eventId)
+    : await resolveOfficialPositions(
+      client,
+      event,
+      input.eventOfficials.length > 0 || pendingNeedsOfficialPosition,
+    );
 
   let desiredOfficials: CanonicalEventOfficial[];
   try {
@@ -610,9 +617,7 @@ export const reconcileEventStaffDesiredState = async (
     where: { id: eventId },
     data: {
       assistantHostIds: { set: assistantHostIds },
-      ...(officialPositions.length && !normalizeEventOfficialPositions(event.officialPositions, eventId).length
-        ? { officialPositions }
-        : {}),
+      ...(input.officialPositions?.length ? { officialPositions } : {}),
       updatedAt: now,
     },
   });

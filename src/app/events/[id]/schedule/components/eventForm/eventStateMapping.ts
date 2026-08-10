@@ -85,7 +85,7 @@ export const mapEventToFormState = (event: Event): EventFormState => {
     );
     const normalizedEventOfficials = normalizeEventOfficials(
         event.eventOfficials,
-        Array.isArray(event.eventOfficials)
+        Array.isArray(event.eventOfficials) && event.eventOfficials.length > 0
             ? []
             : Array.isArray(event.officialIds)
                 ? event.officialIds.map((officialId) => String(officialId)).filter(Boolean)

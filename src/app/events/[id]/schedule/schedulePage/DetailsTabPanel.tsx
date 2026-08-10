@@ -1,10 +1,10 @@
 import type { RefObject } from 'react';
-import { Tabs } from '@mantine/core';
-
+import { Tabs, Center, Loader } from '@mantine/core';
 import EventDetailSheet from '@/app/discover/components/EventDetailSheet';
 import type { Event, Organization, UserData } from '@/types';
 import EventForm, { type EventFormHandle } from '../components/EventForm';
 import type { DefaultLocation, RentalPurchaseContext } from '../components/eventForm/types';
+import type { EventEditorSnapshot, EventEditorDraft } from '@/contracts/eventEditor';
 import type { WeeklyOccurrenceSelection } from './helpers';
 
 type DetailsTabPanelProps = {
@@ -16,12 +16,13 @@ type DetailsTabPanelProps = {
   onClose: () => void;
   onDirtyStateChange: (hasChanges: boolean) => void;
   onValidityChange?: (isValid: boolean) => void;
+  onDraftStateChange: (state: { draft: EventEditorDraft; baselineDraft: EventEditorDraft }) => void;
   onSubmitRequest?: () => void;
   event: Event;
+  editorSnapshot: EventEditorSnapshot | null;
   organization: Organization | null;
   defaultLocation?: DefaultLocation;
   isCreateMode: boolean;
-  immutableDefaults?: Partial<Event>;
   rentalPurchase?: RentalPurchaseContext;
   templateOrganizationId?: string;
   selectedOccurrence: WeeklyOccurrenceSelection | null;
@@ -37,12 +38,13 @@ export default function DetailsTabPanel({
   onClose,
   onDirtyStateChange,
   onValidityChange,
+  onDraftStateChange,
   onSubmitRequest,
   event,
+  editorSnapshot,
   organization,
   defaultLocation,
   isCreateMode,
-  immutableDefaults,
   rentalPurchase,
   templateOrganizationId,
   selectedOccurrence,
@@ -51,23 +53,26 @@ export default function DetailsTabPanel({
   return (
     <Tabs.Panel value="details" pt="md">
       {shouldShowCreationSheet && user ? (
-        <EventForm
-          key={eventFormRenderKey}
-          ref={eventFormRef}
-          isOpen={isActive}
-          onClose={onClose}
-          onDirtyStateChange={onDirtyStateChange}
-          onValidityChange={onValidityChange}
-          onSubmitRequest={onSubmitRequest}
-          currentUser={user}
-          event={event}
-          organization={organization}
-          defaultLocation={defaultLocation}
-          isCreateMode={isCreateMode}
-          immutableDefaults={isCreateMode ? immutableDefaults : undefined}
-          rentalPurchase={isCreateMode ? rentalPurchase : undefined}
-          templateOrganizationId={isCreateMode ? templateOrganizationId : undefined}
-        />
+        editorSnapshot ? (
+          <EventForm
+            key={eventFormRenderKey}
+            ref={eventFormRef}
+            isOpen={isActive}
+            onClose={onClose}
+            onDirtyStateChange={onDirtyStateChange}
+            onDraftStateChange={onDraftStateChange}
+            onValidityChange={onValidityChange}
+            onSubmitRequest={onSubmitRequest}
+            currentUser={user}
+            snapshot={editorSnapshot}
+            defaultLocation={defaultLocation}
+            isCreateMode={isCreateMode}
+            rentalPurchase={isCreateMode ? rentalPurchase : undefined}
+            templateOrganizationId={isCreateMode ? templateOrganizationId : undefined}
+          />
+        ) : (
+          <Center mih={240}><Loader /></Center>
+        )
       ) : (
         <EventDetailSheet
           event={event}

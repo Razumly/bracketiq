@@ -91,30 +91,29 @@ export const EventDetailsTimingControls = ({
                 control={control}
                 render={({ field, fieldState }) => (
                     <div className="space-y-2">
-                        <DateTimePicker
-                            label="End Date & Time"
-                            valueFormat="MM/DD/YYYY hh:mm A"
-                            value={parseLocalDateTime(field.value)}
-                            styles={dateTimePickerStyles}
-                            disabled={
-                                isImmutableField('end')
-                                || (supportsNoFixedEndDateTime && noFixedEndDateTime)
-                            }
-                            onChange={(val) => {
-                                if (isImmutableField('end')) return;
-                                const parsed = parseLocalDateTime(val as Date | string | null);
-                                if (!parsed) return;
-                                onEndChange(parsed);
-                            }}
-                            minDate={parseLocalDateTime(startValue) ?? todaysDate}
-                            timePickerProps={{
-                                withDropdown: true,
-                                format: '12h',
-                            }}
-                            popoverProps={popoverProps}
-                            style={{ width: '100%' }}
-                            error={fieldState.error?.message as string | undefined}
-                        />
+                        {!noFixedEndDateTime || !supportsNoFixedEndDateTime ? (
+                            <DateTimePicker
+                                label="End Date & Time"
+                                valueFormat="MM/DD/YYYY hh:mm A"
+                                value={parseLocalDateTime(field.value)}
+                                styles={dateTimePickerStyles}
+                                disabled={isImmutableField('end')}
+                                onChange={(val) => {
+                                    if (isImmutableField('end')) return;
+                                    const parsed = parseLocalDateTime(val as Date | string | null);
+                                    if (!parsed) return;
+                                    onEndChange(parsed);
+                                }}
+                                minDate={parseLocalDateTime(startValue) ?? todaysDate}
+                                timePickerProps={{
+                                    withDropdown: true,
+                                    format: '12h',
+                                }}
+                                popoverProps={popoverProps}
+                                style={{ width: '100%' }}
+                                error={fieldState.error?.message as string | undefined}
+                            />
+                        ) : null}
                         {supportsNoFixedEndDateTime ? (
                             <div className="space-y-1">
                                 <Checkbox

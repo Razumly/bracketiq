@@ -106,6 +106,7 @@ import type {
     EventSetupResolverInput,
 } from './eventForm/simpleSetup/types';
 import type { EventFormHandle, EventFormProps } from './eventForm/types';
+import { eventFormValuesToEditorDraft, editorDraftToLegacyEvent } from './eventForm/editorContractAdapters';
 import {
     buildEventFormErrorIndex,
     type EventFormErrorLocation,
@@ -179,25 +180,50 @@ export const buildDefaultSetupChoices = (values?: Partial<EventFormValues>): Eve
     };
 };
 export type { EventFormHandle, EventFormProps, RentalPurchaseContext } from './eventForm/types';
-
 const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(({
     isOpen,
     currentUser,
-    event: incomingEvent,
-    organization,
-    immutableDefaults,
+    snapshot,
     formId,
     defaultLocation,
-    isCreateMode = false,
+    isCreateMode = snapshot.mode === 'CREATE',
     initialSetupMode,
     rentalPurchase,
     templateOrganizationId: templateOrganizationIdProp,
+    immutableDefaults: immutableDefaultsProp,
     onDirtyStateChange,
     onDraftStateChange,
     onValidityChange,
     onSubmitRequest,
 }, ref) => {
     const open = isOpen ?? true;
+    const incomingEvent = useMemo(
+        () => {
+            const formEvent = editorDraftToLegacyEvent(
+                snapshot.draft,
+                snapshot.eventId ?? (snapshot.mode === 'CREATE' ? 'new-event' : null),
+            ) as unknown as Event;
+            return formEvent;
+        },
+        [snapshot.draft, snapshot.eventId, snapshot.mode],
+    );
+    const snapshotOrganization = snapshot.catalogs.organizations.find(
+        (entry) => entry.id === snapshot.draft.basics.organizationId || entry.$id === snapshot.draft.basics.organizationId,
+    ) as unknown as import('@/types').Organization | undefined;
+    const organization = snapshotOrganization ?? null;
+    const immutableDefaults = useMemo(() => ({
+        ...(immutableDefaultsProp ?? {}),
+        immutableFieldNames: snapshot.immutable.fieldNames.length > 0
+            ? snapshot.immutable.fieldNames
+            : immutableDefaultsProp?.immutableFieldNames,
+        rentalBookingId: snapshot.draft.resources.rentalBookingId ?? immutableDefaultsProp?.rentalBookingId,
+        rentalBookingItemId: snapshot.draft.resources.rentalBookingItemId ?? immutableDefaultsProp?.rentalBookingItemId,
+    }) as Partial<Event>, [
+        immutableDefaultsProp,
+        snapshot.draft.resources.rentalBookingId,
+        snapshot.draft.resources.rentalBookingItemId,
+        snapshot.immutable.fieldNames,
+    ]);
     const {
         eventTagOptions,
         hydratedOrganization,
@@ -227,8 +253,8 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(({
         eventId: activeEditingEvent?.$id,
         isCreateMode,
         open,
+        snapshotQuestions: snapshot.draft.registration.questions,
     });
-
     const { sports, sportsById, loading: sportsLoading, error: sportsError } = useSports();
     const sportOptions = useMemo(() => buildSportOptions(sports), [sports]);
     const {
@@ -250,7 +276,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(({
     });
     const {
         control,
-        watch,
         setValue: rawSetValue,
         getValues,
         reset,
@@ -274,9 +299,14 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(({
             fieldOptions?: Record<string, unknown>,
         ) => void)(name, value, options);
     }, [rawSetValue]);
+    const formValues = getValues();
     // React Hook Form intentionally remains the single persisted draft owner.
-    // eslint-disable-next-line react-hooks/incompatible-library -- `watch` is the existing form subscription boundary.
-    const formValues = watch();
+    const emitDraftState = useCallback((state: { draft: Partial<Event>; baselineDraft: Partial<Event> }) => {
+        onDraftStateChange?.({
+            draft: eventFormValuesToEditorDraft(state.draft as unknown as EventFormValues, registrationQuestionDrafts),
+            baselineDraft: eventFormValuesToEditorDraft(state.baselineDraft as unknown as EventFormValues, registrationQuestionDrafts),
+        });
+    }, [onDraftStateChange, registrationQuestionDrafts]);
     const {
         commitDirtyBaseline,
         previousEventFieldLocationRef,
@@ -290,7 +320,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(({
         isCreateMode,
         isDirty,
         onDirtyStateChange,
-        onDraftStateChange,
+        onDraftStateChange: emitDraftState,
         open,
         reset,
     });

@@ -21,7 +21,7 @@ export const useRegistrationQuestionEditorActions = ({
         setDrafts((current) => [
             ...current,
             {
-                id: createClientId(),
+                clientId: createClientId(),
                 prompt: '',
                 answerType: 'TEXT',
                 required: false,

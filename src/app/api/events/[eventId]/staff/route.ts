@@ -13,7 +13,7 @@ import {
   loadLockedEventStaffSnapshot,
   reconcileEventStaffDesiredState,
 } from '@/server/events/eventStaffReconciliation';
-import { sendInviteEmails } from '@/server/inviteEmails';
+import { deliverEventStaffInvitesAfterCommit } from '@/server/events/eventStaffDelivery';
 import { acquireEventLock } from '@/server/repositories/locks';
 
 export const dynamic = 'force-dynamic';
@@ -111,36 +111,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ even
       );
     });
 
-    if (result.emailCandidates.length) {
-      try {
-        await sendInviteEmails(result.emailCandidates, getRequestOrigin(req));
-      } catch (error) {
-        // Staff membership is already committed. Delivery is retryable and must
-        // never turn a complete staff save into a partially persisted one.
-        console.error('Event staff invite delivery failed after commit', { eventId, error });
-        await prisma.$transaction(async (tx) => {
-          await acquireEventLock(tx, eventId);
-          await tx.invites.updateMany({
-            where: {
-              id: { in: result.emailCandidates.map((invite) => invite.id) },
-              eventId,
-              type: 'STAFF',
-              status: 'PENDING',
-            },
-            data: {
-              status: 'FAILED',
-              sentAt: null,
-              updatedAt: new Date(),
-            },
-          });
-        }).catch((persistError) => {
-          console.error('Failed to mark undelivered event staff invites retryable', {
-            eventId,
-            persistError,
-          });
-        });
-      }
-    }
+    await deliverEventStaffInvitesAfterCommit(
+      eventId,
+      result.emailCandidates,
+      getRequestOrigin(req),
+    );
 
     const snapshot = await loadLockedEventStaffSnapshot(prisma, eventId);
     return NextResponse.json(snapshot, { status: 200 });

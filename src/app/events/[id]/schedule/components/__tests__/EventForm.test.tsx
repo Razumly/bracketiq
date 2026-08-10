@@ -8,9 +8,17 @@ import { eventService } from '@/lib/eventService';
 import { organizationService } from '@/lib/organizationService';
 import { fieldService } from '@/lib/fieldService';
 import { apiRequest } from '@/lib/apiClient';
+import { editorDraftToLegacyEvent, emptyEditorSnapshot, legacyEventToEditorDraft } from '../eventForm/editorContractAdapters';
 import { CONFIRMED_ORGANIZER_LIABLE_EVENT_TAX_RULES } from '@/lib/taxPolicy';
 
 jest.setTimeout(20000);
+const latestDraftByRef = new WeakMap<object, unknown>();
+const getLegacyDraft = (formRef: React.RefObject<EventFormHandle>) => {
+  const draft = latestDraftByRef.get(formRef);
+  return draft ? editorDraftToLegacyEvent(draft as any) as any : undefined;
+};
+const getEditorDraft = (formRef: React.RefObject<EventFormHandle>) => latestDraftByRef.get(formRef) as any;
+
 
 describe('buildDefaultSetupChoices', () => {
   it('does not treat sport-seeded official positions as enabled custom operations', () => {
@@ -475,18 +483,54 @@ describe('EventForm dirty state', () => {
     eventOverrides: Record<string, unknown> = {},
     organization: Record<string, unknown> | null = null,
     extraProps: Record<string, unknown> = {},
-  ) => renderWithMantine(
-    <EventForm
-      ref={ref}
-      isOpen
-      currentUser={{ $id: 'host_1', email: 'host@example.com' } as any}
-      event={{ ...buildEvent(), ...eventOverrides } as any}
-      organization={organization as any}
-      onDirtyStateChange={onDirtyStateChange}
-      initialSetupMode={extraProps.isCreateMode ? 'ADVANCED' : undefined}
-      {...extraProps}
-    />,
-  );
+  ) => {
+    const event = {
+      ...buildEvent(),
+      ...eventOverrides,
+      ...(eventOverrides.leagueData && typeof eventOverrides.leagueData === 'object'
+        ? eventOverrides.leagueData
+        : {}),
+      ...(eventOverrides.playoffData && typeof eventOverrides.playoffData === 'object'
+        ? eventOverrides.playoffData
+        : {}),
+      ...(eventOverrides.tournamentData && typeof eventOverrides.tournamentData === 'object'
+        ? eventOverrides.tournamentData
+        : {}),
+    } as any;
+    const isCreate = extraProps.isCreateMode === true;
+    const baseSnapshot = emptyEditorSnapshot(
+      legacyEventToEditorDraft(event),
+      isCreate ? 'CREATE' : 'EDIT',
+    );
+    const snapshot = {
+      ...baseSnapshot,
+      eventId: isCreate ? null : event.$id,
+      editorRevision: isCreate ? 'new' : 'revision_1',
+    };
+    if (organization) {
+      snapshot.catalogs.organizations = [organization];
+    }
+    return renderWithMantine(
+      <EventForm
+        ref={ref}
+        isOpen
+        currentUser={{ $id: 'host_1', email: 'host@example.com' } as any}
+        snapshot={snapshot}
+        onDirtyStateChange={onDirtyStateChange}
+        onDraftStateChange={(state) => {
+          if (ref) {
+            latestDraftByRef.set(ref, state.draft);
+          }
+          const callback = extraProps.onDraftStateChange;
+          if (typeof callback === 'function') {
+            callback(state);
+          }
+        }}
+        initialSetupMode={extraProps.initialSetupMode ?? 'ADVANCED'}
+        {...extraProps}
+      />,
+    );
+  };
 
   const buildOrganization = () => ({
     $id: 'org_1',
@@ -537,9 +581,8 @@ describe('EventForm dirty state', () => {
     ],
   });
 
-  it('exposes every imperative form command, including registration question drafts', async () => {
+  it('exposes imperative form commands, including registration question drafts', async () => {
     const formRef = React.createRef<EventFormHandle>();
-
     renderForm(jest.fn(), formRef, {}, null, { isCreateMode: true });
 
     await waitFor(() => {
@@ -549,13 +592,12 @@ describe('EventForm dirty state', () => {
     expect(Object.keys(formRef.current!).sort()).toEqual([
       'applyCanonicalStaffState',
       'commitDirtyBaseline',
-      'getDraft',
       'getRegistrationQuestionDrafts',
       'getValidationErrors',
       'validate',
       'validatePendingStaffAssignments',
     ]);
-    expect(formRef.current!.getDraft()).toEqual(expect.objectContaining({ name: 'Test Event' }));
+    expect(getLegacyDraft(formRef)).toEqual(expect.objectContaining({ name: 'Test Event' }));
     expect(formRef.current!.getRegistrationQuestionDrafts()).toEqual([]);
     expect(formRef.current!.getValidationErrors()).toEqual([]);
     await act(async () => {
@@ -715,10 +757,10 @@ describe('EventForm dirty state', () => {
 
     fireEvent.change(bracketTeams, { target: { value: '1' } });
     fireEvent.blur(bracketTeams);
-    expect(formRef.current?.getDraft().includePlayoffs).toBe(true);
+    expect(getLegacyDraft(formRef).includePlayoffs).toBe(true);
     const invalidBracketTeams = await screen.findByLabelText('Playoff Team Count') as HTMLInputElement;
     expect(invalidBracketTeams).toHaveValue('1');
-    expect(formRef.current?.getDraft().playoffTeamCount).toBe(1);
+    expect(getLegacyDraft(formRef).playoffTeamCount).toBe(1);
     expect(screen.getByText('At least 2 teams need to be in the bracket.')).toBeInTheDocument();
 
     fireEvent.change(invalidBracketTeams, { target: { value: '2' } });
@@ -932,7 +974,7 @@ describe('EventForm dirty state', () => {
     });
 
     await waitFor(() => {
-      expect(formRef.current?.getDraft().divisionDetails?.[0]?.price).toBe(3500);
+      expect(getLegacyDraft(formRef).divisionDetails?.[0]?.price).toBe(3500);
     });
   });
 
@@ -1361,6 +1403,10 @@ describe('EventForm dirty state', () => {
     let setRenderedEvent: React.Dispatch<React.SetStateAction<any>> | null = null;
     const Harness = () => {
       const [event, setEvent] = React.useState<any>(buildEvent());
+      const snapshot = React.useMemo(() => {
+        const base = emptyEditorSnapshot(legacyEventToEditorDraft(event), 'EDIT');
+        return { ...base, eventId: event.$id, editorRevision: 'revision_1' };
+      }, [event]);
       React.useEffect(() => {
         setRenderedEvent = setEvent;
       }, [setEvent]);
@@ -1369,8 +1415,7 @@ describe('EventForm dirty state', () => {
           ref={formRef}
           isOpen
           currentUser={{ $id: 'host_1', email: 'host@example.com' } as any}
-          event={event}
-          organization={null as any}
+          snapshot={snapshot}
           onDirtyStateChange={onDirtyStateChange}
         />
       );
@@ -1489,6 +1534,10 @@ describe('EventForm dirty state', () => {
     let setRenderVersion: React.Dispatch<React.SetStateAction<number>> | null = null;
     const Harness = () => {
       const [renderVersion, setLocalRenderVersion] = React.useState(0);
+      const snapshot = React.useMemo(() => {
+        const base = emptyEditorSnapshot(legacyEventToEditorDraft(event), 'EDIT');
+        return { ...base, eventId: event.$id, editorRevision: 'revision_1' };
+      }, []);
       React.useEffect(() => {
         setRenderVersion = setLocalRenderVersion;
       }, [setLocalRenderVersion]);
@@ -1497,8 +1546,7 @@ describe('EventForm dirty state', () => {
           key={`event-form-${renderVersion}`}
           isOpen
           currentUser={{ $id: 'host_1', email: 'host@example.com' } as any}
-          event={event}
-          organization={null as any}
+          snapshot={snapshot}
           onDirtyStateChange={onDirtyStateChange}
         />
       );
@@ -1619,7 +1667,7 @@ describe('EventForm dirty state', () => {
     );
 
     await waitFor(() => {
-      const draft = formRef.current?.getDraft();
+      const draft = getLegacyDraft(formRef);
       expect(draft?.fields).toHaveLength(2);
       expect(draft?.fields?.[0]?.location).toBe('City Rec Center');
       expect(draft?.fields?.[1]?.location).toBe('City Rec Center');
@@ -1680,7 +1728,7 @@ describe('EventForm dirty state', () => {
       expect(screen.getByTestId('league-conflict-count')).toHaveTextContent('0');
     });
     await waitFor(() => {
-      const draft = formRef.current?.getDraft();
+      const draft = getLegacyDraft(formRef);
       expect(draft?.timeSlots?.[0]?.startDate).toBe('2026-05-04T09:00:00');
     });
   });
@@ -1889,7 +1937,7 @@ describe('EventForm dirty state', () => {
     expect(screen.queryByText(/Timeslot field conflicts are warnings/i)).not.toBeInTheDocument();
   });
 
-  it('keeps the end date value visible and serialized when no fixed end datetime scheduling is enabled', async () => {
+  it('does not display a fixed end input in generated-end mode', async () => {
     const onDirtyStateChange = jest.fn();
     const formRef = React.createRef<EventFormHandle>();
 
@@ -1920,14 +1968,11 @@ describe('EventForm dirty state', () => {
       ],
     });
 
-    const endDateButton = screen.getByRole('button', { name: 'End Date & Time' });
-    expect(endDateButton).toBeDisabled();
-    expect(endDateButton).toHaveAttribute('data-value', '2026-05-03T01:20');
+    expect(screen.queryByRole('button', { name: 'End Date & Time' })).not.toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: 'Set the end date during match generation' })).toBeChecked();
-    expect(screen.queryByText('Scheduling can extend past the displayed end date/time. Turn this off to enforce the end date/time.')).not.toBeInTheDocument();
 
     await waitFor(() => {
-      const draft = formRef.current?.getDraft();
+      const draft = getLegacyDraft(formRef);
       expect(draft?.noFixedEndDateTime).toBe(true);
       expect(draft?.end).toBe('2026-05-03T01:20:00');
       expect(draft?.timeSlots?.[0]?.endDate).toBeUndefined();
@@ -1968,7 +2013,7 @@ describe('EventForm dirty state', () => {
     expect(generatedEndCheckbox).toBeDisabled();
     expect(generatedEndCheckbox).not.toBeChecked();
 
-    await waitFor(() => expect(formRef.current?.getDraft()?.noFixedEndDateTime).toBe(false));
+    await waitFor(() => expect(getLegacyDraft(formRef)?.noFixedEndDateTime).toBe(false));
   });
 
   it('marks the form dirty when a official is removed', async () => {
@@ -2092,7 +2137,7 @@ describe('EventForm dirty state', () => {
     fireEvent.click(setHostButton);
 
     await waitFor(() => {
-      expect(formRef.current?.getDraft()).toEqual(
+      expect(getLegacyDraft(formRef)).toEqual(
         expect.objectContaining({
           hostId: 'host_2',
         }),
@@ -2325,7 +2370,7 @@ describe('EventForm dirty state', () => {
       });
     });
 
-    expect(formRef.current?.getDraft()).toEqual(
+    expect(getLegacyDraft(formRef)).toEqual(
       expect.objectContaining({
         officialIds: expect.arrayContaining(['official_2']),
         assistantHostIds: expect.arrayContaining(['official_2']),
@@ -2656,7 +2701,7 @@ describe('EventForm dirty state', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add Division' }));
 
     await waitFor(() => {
-      const draft = formRef.current!.getDraft();
+      const draft = getLegacyDraft(formRef);
       expect(draft.divisionDetails).toHaveLength(1);
       expect(draft.divisions).toEqual([draft.divisionDetails?.[0]?.id]);
       expect(draft.divisionDetails?.[0]).toEqual(expect.objectContaining({
@@ -2804,7 +2849,7 @@ describe('EventForm dirty state', () => {
     });
 
     expect(screen.getByTestId('tournament-fields')).toBeInTheDocument();
-    expect(formRef.current?.getDraft()).toEqual(
+    expect(getLegacyDraft(formRef)).toEqual(
       expect.objectContaining({
         splitLeaguePlayoffDivisions: false,
         playoffDivisionDetails: [],
@@ -2858,7 +2903,7 @@ describe('EventForm dirty state', () => {
     expect(screen.getByText('Add at least one playoff division before saving split league/playoff divisions.')).toBeInTheDocument();
     expect(screen.queryByText('Playoff Division 1')).not.toBeInTheDocument();
     expect(screen.queryByText('Division Type: Playoff')).not.toBeInTheDocument();
-    expect(formRef.current?.getDraft()?.playoffDivisionDetails).toEqual([]);
+    expect(getLegacyDraft(formRef)?.playoffDivisionDetails).toEqual([]);
 
     let isValid: boolean | undefined;
     await act(async () => {
@@ -3014,7 +3059,7 @@ describe('EventForm dirty state', () => {
     await waitFor(() => {
       expect(screen.getByText('Playoff division teams count must be at least 2.')).toBeInTheDocument();
       expect((teamsCountInput as HTMLInputElement).value).toBe('1');
-      expect(formRef.current?.getDraft()?.playoffDivisionDetails).toEqual([]);
+      expect(getLegacyDraft(formRef)?.playoffDivisionDetails).toEqual([]);
     });
 
     fireEvent.change(teamsCountInput, {
@@ -3027,7 +3072,7 @@ describe('EventForm dirty state', () => {
     await waitFor(() => {
       expect(screen.getByText('Playoff division teams count must be at least 2.')).toBeInTheDocument();
       expect((teamsCountInput as HTMLInputElement).value).toBe('');
-      expect(formRef.current?.getDraft()?.playoffDivisionDetails).toEqual([]);
+      expect(getLegacyDraft(formRef)?.playoffDivisionDetails).toEqual([]);
     });
   });
 
@@ -3075,7 +3120,7 @@ describe('EventForm dirty state', () => {
     await userEvent.click(screen.getByText('Update Division'));
 
     await waitFor(() => {
-      expect(formRef.current?.getDraft()?.playoffDivisionDetails?.[0]).toMatchObject({
+      expect(getLegacyDraft(formRef)?.playoffDivisionDetails?.[0]).toMatchObject({
         id: playoffDivisionId,
         name: 'Gold Division',
       });
@@ -3207,7 +3252,7 @@ describe('EventForm dirty state', () => {
     await userEvent.click(screen.getByText('Update Division'));
 
     await waitFor(() => {
-      const draft = formRef.current?.getDraft();
+      const draft = getLegacyDraft(formRef);
       expect(draft?.divisionDetails?.[0]?.playoffPlacementDivisionIds).toEqual([
         lowerDivisionId,
         upperDivisionId,
@@ -3279,7 +3324,7 @@ describe('EventForm dirty state', () => {
 
     await waitFor(() => {
       expect(splitSwitch).not.toBeChecked();
-      const draft = formRef.current?.getDraft();
+      const draft = getLegacyDraft(formRef);
       expect(draft?.splitLeaguePlayoffDivisions).toBe(false);
       expect(draft?.playoffDivisionDetails).toEqual([]);
       expect(draft?.divisionDetails?.[0]?.playoffPlacementDivisionIds).toEqual([]);
@@ -3291,7 +3336,7 @@ describe('EventForm dirty state', () => {
       expect(splitSwitch).toBeChecked();
       expect(screen.getAllByText('Upper Division').length).toBeGreaterThan(0);
       expect(screen.getAllByText('Lower Division').length).toBeGreaterThan(0);
-      const draft = formRef.current?.getDraft();
+      const draft = getLegacyDraft(formRef);
       expect(draft?.playoffDivisionDetails).toHaveLength(2);
       expect(draft?.divisionDetails?.[0]?.playoffPlacementDivisionIds).toEqual([
         upperDivisionId,
@@ -3491,7 +3536,7 @@ describe('EventForm dirty state', () => {
       })).not.toBeChecked();
     });
 
-    const draft = formRef.current?.getDraft();
+    const draft = getLegacyDraft(formRef);
     expect(draft?.playoffDivisionDetails?.[0]).toMatchObject({
       maxParticipants: 12,
       playoffTeamCount: 6,
@@ -3557,7 +3602,7 @@ describe('EventForm dirty state', () => {
       expect(formRef.current).not.toBeNull();
     });
 
-    expect(formRef.current?.getDraft()).toEqual(
+    expect(getLegacyDraft(formRef)).toEqual(
       expect.objectContaining({
         divisions: [bracketDivisionId],
         divisionDetails: [],
@@ -3608,14 +3653,15 @@ describe('EventForm dirty state', () => {
       expect(formRef.current).not.toBeNull();
     });
 
-    expect(formRef.current?.getDraft()).toEqual(
+    expect(getEditorDraft(formRef)).toEqual(
       expect.objectContaining({
-        includePlayoffs: true,
-        includePlayoffsOrPools: true,
-        leagueScoringConfig: expect.objectContaining({
-          pointsForWin: 5,
-          pointsForDraw: 2,
-          pointsForLoss: 0,
+        competition: expect.objectContaining({
+          includePlayoffs: true,
+          leagueScoringConfig: expect.objectContaining({
+            pointsForWin: 5,
+            pointsForDraw: 2,
+            pointsForLoss: 0,
+          }),
         }),
       }),
     );
@@ -3700,7 +3746,7 @@ describe('EventForm dirty state', () => {
     );
 
     await waitFor(() => {
-      const draft = formRef.current?.getDraft();
+      const draft = getLegacyDraft(formRef);
       expect(draft?.hostId).toBe('host_1');
       expect(draft?.officialIds).toEqual([]);
     });
@@ -3746,7 +3792,7 @@ describe('EventForm dirty state', () => {
     );
 
     await waitFor(() => {
-      const draft = formRef.current?.getDraft();
+      const draft = getLegacyDraft(formRef);
       expect(draft?.fieldIds).toEqual(['org_field_1', 'local_field_1']);
       expect(draft?.fields).toEqual([
         expect.objectContaining({
@@ -3824,7 +3870,7 @@ describe('EventForm dirty state', () => {
     await userEvent.click(screen.getByLabelText('Main Court'));
 
     await waitFor(() => {
-      expect(new Set(formRef.current?.getDraft().fieldIds)).toEqual(new Set(['rental_field_1', 'org_field_1']));
+      expect(new Set(getLegacyDraft(formRef).fieldIds)).toEqual(new Set(['rental_field_1', 'org_field_1']));
     });
   });
 
@@ -3935,7 +3981,7 @@ describe('EventForm dirty state', () => {
     await userEvent.click(firstRentalResource);
 
     await waitFor(() => {
-      const draft = formRef.current?.getDraft();
+      const draft = getLegacyDraft(formRef);
       expect(draft?.fieldIds).toEqual(['rental_field_1']);
       expect(draft?.timeSlots).toEqual([
         expect.objectContaining({
@@ -4101,7 +4147,7 @@ describe('EventForm dirty state', () => {
 
     expect(noFixedEndDateTimeCheckbox).toBeChecked();
     await waitFor(() => {
-      const draft = formRef.current?.getDraft();
+      const draft = getLegacyDraft(formRef);
       expect(draft?.noFixedEndDateTime).toBe(true);
       expect(draft?.fieldIds).toEqual(['rental_field_1']);
       expect(draft?.timeSlots?.[0]).toEqual(expect.objectContaining({
@@ -4199,7 +4245,7 @@ describe('EventForm dirty state', () => {
     });
 
     await waitFor(() => {
-      const draftSlots = formRef.current?.getDraft().timeSlots ?? [];
+      const draftSlots = getLegacyDraft(formRef).timeSlots ?? [];
       expect(draftSlots).toHaveLength(1);
       expect(draftSlots[0]).toEqual(expect.objectContaining({
         $id: 'slot_rental_1',
@@ -4331,7 +4377,7 @@ describe('EventForm dirty state', () => {
     });
 
     await waitFor(() => {
-      const draft = formRef.current?.getDraft();
+      const draft = getLegacyDraft(formRef);
       expect(draft?.timeSlots).toEqual([
         expect.objectContaining({
           sourceType: 'RENTAL_BOOKING',
@@ -4542,14 +4588,14 @@ describe('EventForm dirty state', () => {
       await waitFor(() => {
         expect(screen.getByLabelText('Event Type')).toHaveValue(eventType);
         expect(screen.getByLabelText('Count')).toHaveValue('1');
-        expect(formRef.current?.getDraft().fields).toEqual([
+        expect(getLegacyDraft(formRef).fields).toEqual([
           expect.objectContaining({
             $id: 'local_field_1',
             name: 'Field 1',
           }),
         ]);
       });
-      expect(formRef.current?.getDraft().fieldCount).toBe(1);
+      expect(getLegacyDraft(formRef).fields).toHaveLength(1);
     },
   );
 
@@ -4577,7 +4623,7 @@ describe('EventForm dirty state', () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText('Event Type')).toHaveValue('LEAGUE');
-      expect(formRef.current?.getDraft().tags).toEqual([
+      expect(getLegacyDraft(formRef).tags).toEqual([
         { name: 'League', slug: 'league' },
       ]);
     });
@@ -4588,7 +4634,7 @@ describe('EventForm dirty state', () => {
     });
 
     await waitFor(() => {
-      expect(formRef.current?.getDraft().tags).toEqual([
+      expect(getLegacyDraft(formRef).tags).toEqual([
         { name: 'League', slug: 'league' },
       ]);
     });
@@ -4596,7 +4642,7 @@ describe('EventForm dirty state', () => {
     await user.selectOptions(screen.getByLabelText('Event Type'), 'TOURNAMENT');
 
     await waitFor(() => {
-      expect(formRef.current?.getDraft().tags).toEqual([
+      expect(getLegacyDraft(formRef).tags).toEqual([
         { name: 'Tournament', slug: 'tournament' },
       ]);
     });
@@ -4604,7 +4650,7 @@ describe('EventForm dirty state', () => {
     await user.selectOptions(screen.getByLabelText('Event Type'), 'EVENT');
 
     await waitFor(() => {
-      expect(formRef.current?.getDraft().tags).toEqual([]);
+      expect(getLegacyDraft(formRef).tags).toEqual([]);
     });
   });
 

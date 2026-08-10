@@ -15,12 +15,14 @@ import { DatePickerInput } from '@mantine/dates';
 import Navigation from '@/components/layout/Navigation';
 import Loading from '@/components/ui/Loading';
 import { parseLocalDateTime } from '@/lib/dateUtils';
-import type { Event, Organization, UserData } from '@/types';
+import type { UserData } from '@/types';
+import type { EventEditorSnapshot, EventEditorDraft } from '@/contracts/eventEditor';
 
 import EventForm, { type EventFormHandle, type EventFormProps } from '../components/EventForm';
 import EventSchedulePendingChangesPopover from './EventSchedulePendingChangesPopover';
 import RentalCheckoutModals, { type RentalCheckoutModalsProps } from './RentalCheckoutModals';
 import type { PendingSaveChangeItem } from './helpers';
+import type { DefaultLocation } from '../components/eventForm/types';
 import type { TemplateRentalResourcePrompt } from './useCreateEventFlow';
 
 type TemplateSelectItem = {
@@ -64,15 +66,16 @@ type CreateEventScheduleViewProps = {
   selectedTemplateStartDate: Date | null;
   onSelectedTemplateIdChange: (templateId: string | null) => void;
   onSelectedTemplateStartDateChange: (startDate: Date | null) => void;
+  defaultLocation?: DefaultLocation;
   onApplyTemplate: () => void | Promise<boolean | void>;
   user: UserData | null;
-  event: Event | null;
+  event: import('@/types').Event | null;
+  editorSnapshot: EventEditorSnapshot | null;
   templateSeedKey: number;
   eventFormRef: Ref<EventFormHandle>;
   onEventFormClose: () => void;
+  onDraftStateChange: (state: { draft: EventEditorDraft; baselineDraft: EventEditorDraft }) => void;
   onDirtyStateChange: (hasChanges: boolean) => void;
-  organization: Organization | null;
-  defaultLocation: EventFormProps['defaultLocation'];
   immutableDefaults: EventFormProps['immutableDefaults'];
   rentalPurchase: EventFormProps['rentalPurchase'];
   templateOrganizationId?: string;
@@ -119,11 +122,12 @@ export default function CreateEventScheduleView({
   onApplyTemplate,
   user,
   event,
+  editorSnapshot,
   templateSeedKey,
   eventFormRef,
   onEventFormClose,
+  onDraftStateChange,
   onDirtyStateChange,
-  organization,
   defaultLocation,
   immutableDefaults,
   rentalPurchase,
@@ -133,7 +137,7 @@ export default function CreateEventScheduleView({
 }: CreateEventScheduleViewProps) {
   const [directTemplateId, setDirectTemplateId] = useState<string | null>(null);
   const [dismissedDirectTemplateId, setDismissedDirectTemplateId] = useState<string | null>(null);
-  const validityKey = `${templateSeedKey}:${event?.$id ?? ''}`;
+  const validityKey = `${templateSeedKey}:${editorSnapshot?.editorRevision ?? ''}`;
   const [validity, setValidity] = useState({ key: '', isValid: false });
   const canCreateEvent = validity.key === validityKey && validity.isValid;
   const handleValidityChange = useCallback((isValid: boolean) => {
@@ -357,27 +361,27 @@ export default function CreateEventScheduleView({
             </Stack>
           </Modal>
 
-          {user && event ? (
+          {user && editorSnapshot ? (
             <EventForm
               key={`create-event-form-${templateSeedKey}`}
               ref={eventFormRef}
               isOpen
               onClose={onEventFormClose}
               onDirtyStateChange={onDirtyStateChange}
+              onDraftStateChange={onDraftStateChange}
               onValidityChange={handleValidityChange}
               onSubmitRequest={onPublish}
               currentUser={user}
-              organization={organization}
+              snapshot={editorSnapshot}
               defaultLocation={defaultLocation}
               immutableDefaults={immutableDefaults}
               rentalPurchase={rentalPurchase}
               templateOrganizationId={templateOrganizationId}
-              event={event}
               formId={formId}
               isCreateMode
             />
           ) : (
-            <Loading text="Loading user..." />
+            <Loading text={user ? 'Loading event editor...' : 'Loading user...'} />
           )}
         </Stack>
       </Container>

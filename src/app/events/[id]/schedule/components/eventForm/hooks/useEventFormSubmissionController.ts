@@ -14,9 +14,8 @@ import type {
     UseFormTrigger,
 } from 'react-hook-form';
 
-import type { EventStaffDraft, EventStaffSnapshot } from '@/lib/eventStaffService';
+import type { EventStaffSnapshot } from '@/lib/eventStaffService';
 import type { Event, RegistrationQuestionDraft } from '@/types';
-
 import { buildEventDraft } from '../buildEventDraft';
 import type { EventFormValues } from '../formTypes';
 import { supportsScheduleSlotsForEvent } from '../eventRules';
@@ -104,7 +103,6 @@ export const useEventFormSubmissionController = ({
     onValidationResult,
 }: UseEventFormSubmissionControllerParams) => {
     const lastValidationErrorsRef = useRef<FlattenedFormError[]>([]);
-
     const buildDraftEvent = useCallback((formValues?: EventFormValues): Partial<Event> => (
         buildEventDraft({
             activeEditingEvent,
@@ -161,13 +159,6 @@ export const useEventFormSubmissionController = ({
         sportsById,
     ]);
 
-    const getDraftSnapshot = useCallback((): EventStaffDraft => ({
-        ...buildDraftEvent(getValues()),
-        pendingStaffInvites: isAffiliateEvent
-            ? []
-            : ((getValues('pendingStaffInvites') ?? []) as PendingStaffInvite[])
-                .map(normalizePendingStaffInvite),
-    }), [buildDraftEvent, getValues, isAffiliateEvent]);
 
     const getRegistrationQuestionDrafts = useCallback((): RegistrationQuestionDraft[] => {
         if (isAffiliateEvent) {
@@ -176,7 +167,11 @@ export const useEventFormSubmissionController = ({
 
         return registrationQuestionDrafts
             .map((question, index) => ({
-                id: question.id,
+                ...(typeof question.id === 'string' && question.id.trim()
+                    ? { id: question.id.trim() }
+                    : typeof question.clientId === 'string' && question.clientId.trim()
+                        ? { clientId: question.clientId.trim() }
+                        : { clientId: `question-client-${index + 1}` }),
                 prompt: String(question.prompt ?? '').trim(),
                 answerType: question.answerType ?? 'TEXT',
                 required: Boolean(question.required),
@@ -249,7 +244,7 @@ export const useEventFormSubmissionController = ({
     }, [isAffiliateEvent, validatePendingStaffAssignments]);
 
     const applyCanonicalStaffState = useCallback((snapshot: EventStaffSnapshot) => {
-        setEventData((previous) => ({
+        setEventData((previous: EventFormValues) => ({
             ...previous,
             assistantHostIds: [...snapshot.assistantHostIds],
             officialPositions: snapshot.officialPositions.map((position) => ({ ...position })),
@@ -266,7 +261,6 @@ export const useEventFormSubmissionController = ({
     useImperativeHandle(
         formRef,
         () => ({
-            getDraft: getDraftSnapshot,
             getRegistrationQuestionDrafts,
             validate: validateDraft,
             getValidationErrors: () => lastValidationErrorsRef.current,
@@ -274,7 +268,7 @@ export const useEventFormSubmissionController = ({
             commitDirtyBaseline,
             applyCanonicalStaffState,
         }),
-        [applyCanonicalStaffState, commitDirtyBaseline, getDraftSnapshot, getRegistrationQuestionDrafts, validateDraft, validatePendingStaffAssignmentsForSubmit],
+        [applyCanonicalStaffState, commitDirtyBaseline, getRegistrationQuestionDrafts, validateDraft, validatePendingStaffAssignmentsForSubmit],
     );
 
     return { buildDraftEvent };

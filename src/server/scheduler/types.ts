@@ -838,6 +838,8 @@ export class Tournament {
   hostId: string;
   assistantHostIds: string[];
   noFixedEndDateTime: boolean;
+  scheduleEndConstraint: Date | null;
+  generatedScheduleEnd: Date | null;
   imageId: string;
   loserBracketPointsToVictory: number[] | null;
   winnerBracketPointsToVictory: number[] | null;
@@ -919,8 +921,10 @@ export class Tournament {
     fieldCount?: number | null;
     prize?: string | null;
     hostId?: string;
-    assistantHostIds?: string[];
     noFixedEndDateTime?: boolean;
+    scheduleEndConstraint?: Date | null;
+    generatedScheduleEnd?: Date | null;
+    assistantHostIds?: string[];
     imageId?: string;
     loserBracketPointsToVictory?: number[] | null;
     winnerBracketPointsToVictory?: number[] | null;
@@ -1011,9 +1015,11 @@ export class Tournament {
       this.fieldCount = null;
     }
     this.prize = params.prize ?? null;
+    this.noFixedEndDateTime = params.noFixedEndDateTime ?? true;
+    this.scheduleEndConstraint = params.scheduleEndConstraint ?? null;
+    this.generatedScheduleEnd = params.generatedScheduleEnd ?? null;
     this.hostId = params.hostId ?? '';
     this.assistantHostIds = params.assistantHostIds ?? [];
-    this.noFixedEndDateTime = params.noFixedEndDateTime ?? true;
     this.imageId = params.imageId ?? '';
     this.loserBracketPointsToVictory = params.loserBracketPointsToVictory ?? null;
     this.winnerBracketPointsToVictory = params.winnerBracketPointsToVictory ?? null;

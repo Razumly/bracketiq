@@ -908,22 +908,27 @@ class EventService {
   }
 
   async scheduleEvent(
-    eventDocument: Record<string, any>,
+    eventDocument?: Record<string, any>,
     options: {
       participantCount?: number;
       eventId?: string;
       includePlaceholderTeams?: boolean;
+      replaceExistingMatches?: boolean;
     } = {},
   ): Promise<LeagueScheduleResponse> {
-    const payload: Record<string, any> = {
-      eventDocument: normalizePayloadIdentifiers(eventDocument),
-    };
+    const payload: Record<string, any> = {};
+    if (eventDocument) {
+      payload.eventDocument = normalizePayloadIdentifiers(eventDocument);
+    }
 
     if (typeof options.participantCount === "number") {
       payload.participantCount = options.participantCount;
     }
     if (typeof options.includePlaceholderTeams === "boolean") {
       payload.includePlaceholderTeams = options.includePlaceholderTeams;
+    }
+    if (typeof options.replaceExistingMatches === "boolean") {
+      payload.replaceExistingMatches = options.replaceExistingMatches;
     }
 
     const path = options.eventId
@@ -1403,6 +1408,8 @@ class EventService {
         : [],
       start: row.start,
       end: row.end,
+      scheduleEndConstraint: row.scheduleEndConstraint ?? null,
+      generatedScheduleEnd: row.generatedScheduleEnd ?? null,
       timeZone: typeof row.timeZone === "string" && row.timeZone.trim().length > 0 ? row.timeZone : "UTC",
       location: row.location,
       address: row.address ?? undefined,

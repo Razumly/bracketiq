@@ -147,7 +147,7 @@ describe('useEventFormSubmissionController', () => {
         jest.clearAllMocks();
     });
 
-    it('preserves the exact imperative handle and builds normalized draft snapshots and questions', async () => {
+    it('preserves the imperative handle and builds normalized draft snapshots and questions', async () => {
         const formRef = createRef<EventFormHandle>();
         const commitDirtyBaseline = jest.fn();
         const validatePendingStaffAssignments = jest.fn().mockResolvedValue(undefined);
@@ -173,23 +173,16 @@ describe('useEventFormSubmissionController', () => {
         expect(Object.keys(formRef.current!).sort()).toEqual([
             'applyCanonicalStaffState',
             'commitDirtyBaseline',
-            'getDraft',
             'getRegistrationQuestionDrafts',
             'getValidationErrors',
             'validate',
             'validatePendingStaffAssignments',
         ]);
-        expect(formRef.current?.getDraft()).toEqual(expect.objectContaining({
+        expect(result.current.buildDraftEvent()).toEqual({
             $id: 'event_1',
             name: 'Summer Event',
             location: 'Previous Gym',
-            pendingStaffInvites: [{
-                firstName: 'Casey',
-                lastName: 'Ref',
-                email: 'casey@example.com',
-                roles: ['OFFICIAL'],
-            }],
-        }));
+        });
         expect(mockedBuildEventDraft).toHaveBeenLastCalledWith(expect.objectContaining({
             previousEventFieldLocation: 'Previous Gym',
             source: result.current.formValues,
@@ -290,7 +283,6 @@ describe('useEventFormSubmissionController', () => {
             validatePendingStaffAssignments,
         }));
 
-        expect(formRef.current?.getDraft().pendingStaffInvites).toEqual([]);
         expect(formRef.current?.getRegistrationQuestionDrafts()).toEqual([]);
         await formRef.current?.validatePendingStaffAssignments();
         expect(validatePendingStaffAssignments).not.toHaveBeenCalled();

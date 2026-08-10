@@ -3942,21 +3942,20 @@ export const deleteMatchesByEvent = async (
 };
 
 export const saveEventSchedule = async (event: League | Tournament, client: PrismaLike = prisma) => {
-  if (!event.noFixedEndDateTime) {
-    await client.events.update({
-      where: { id: event.id },
-      data: {
-        updatedAt: new Date(),
-      },
-    });
-    return;
-  }
+  const scheduleEndData = event.noFixedEndDateTime
+    ? {
+      end: event.end,
+      generatedScheduleEnd: event.end,
+    }
+    : event.scheduleEndConstraint
+      ? { scheduleEndConstraint: event.scheduleEndConstraint }
+      : {};
   await client.events.update({
     where: { id: event.id },
     data: {
-      end: event.end,
+      ...scheduleEndData,
       updatedAt: new Date(),
-    },
+    } as any,
   });
 };
 
@@ -4694,7 +4693,15 @@ export const syncEventDivisions = async (
     .map((entry) => entry.id);
 };
 
-export const upsertEventFromPayload = async (payload: any, client: PrismaLike = prisma): Promise<string> => {
+export type EventUpsertOptions = {
+  preserveOperationalState?: boolean;
+};
+
+export const upsertEventFromPayload = async (
+  payload: any,
+  client: PrismaLike = prisma,
+  options: EventUpsertOptions = {},
+): Promise<string> => {
   const id = payload?.id;
   if (!id) {
     throw new Error('Event payload missing id');
@@ -4706,6 +4713,8 @@ export const upsertEventFromPayload = async (payload: any, client: PrismaLike = 
       timeSlotIds: true,
       eventType: true,
       end: true,
+      scheduleEndConstraint: true,
+      generatedScheduleEnd: true,
       noFixedEndDateTime: true,
       leagueScoringConfigId: true,
       hostId: true,
@@ -5119,12 +5128,20 @@ export const upsertEventFromPayload = async (payload: any, client: PrismaLike = 
   }
   const supportsNoFixedEndDateTime = !isAffiliateExternalEvent && isSchedulableEventType(nextEventType);
   const payloadIncludesEnd = Object.prototype.hasOwnProperty.call(payload, 'end');
+  const payloadIncludesScheduleEndConstraint = Object.prototype.hasOwnProperty.call(payload, 'scheduleEndConstraint');
+  const payloadIncludesGeneratedScheduleEnd = Object.prototype.hasOwnProperty.call(payload, 'generatedScheduleEnd');
   const payloadIncludesNoFixedEndDateTime = Object.prototype.hasOwnProperty.call(payload, 'noFixedEndDateTime');
   const parsedPayloadEnd = payloadIncludesEnd ? coerceDate(payload.end, eventTimeZone) : null;
   const parsedExistingEnd = coerceDate(existingEvent?.end, eventTimeZone);
-  const candidateEnd = payloadIncludesEnd
-    ? parsedPayloadEnd
-    : parsedExistingEnd;
+  const parsedPayloadScheduleEndConstraint = payloadIncludesScheduleEndConstraint
+    ? coerceDate(payload.scheduleEndConstraint, eventTimeZone)
+    : null;
+  const parsedPayloadGeneratedScheduleEnd = payloadIncludesGeneratedScheduleEnd
+    ? coerceDate(payload.generatedScheduleEnd, eventTimeZone)
+    : null;
+  const parsedExistingScheduleEndConstraint = coerceDate((existingEvent as any)?.scheduleEndConstraint, eventTimeZone);
+  const parsedExistingGeneratedScheduleEnd = coerceDate((existingEvent as any)?.generatedScheduleEnd, eventTimeZone);
+  const candidateEnd = payloadIncludesEnd ? parsedPayloadEnd : parsedExistingEnd;
   const splitLeaguePlayoffDivisions = payloadEventType === 'LEAGUE'
     ? coerceBoolean(payload.splitLeaguePlayoffDivisions, false)
     : (nextEventType === 'TOURNAMENT' && includePlayoffsOrPools);
@@ -5134,19 +5151,36 @@ export const upsertEventFromPayload = async (payload: any, client: PrismaLike = 
   if (shouldClearLeaguePlayoffDivisionMappings) {
     normalizedPlayoffDivisionDetails = [];
   }
+  const hasExplicitScheduleMode = payloadIncludesScheduleEndConstraint || payloadIncludesGeneratedScheduleEnd;
   const fallbackNoFixedEndDateTime = supportsNoFixedEndDateTime
     ? (
-      !payloadIncludesNoFixedEndDateTime && typeof (existingEvent as any)?.noFixedEndDateTime === 'boolean'
-        ? Boolean((existingEvent as any).noFixedEndDateTime)
-        : candidateEnd === null
+      hasExplicitScheduleMode
+        ? !parsedPayloadScheduleEndConstraint
+        : !payloadIncludesNoFixedEndDateTime && typeof (existingEvent as any)?.noFixedEndDateTime === 'boolean'
+          ? Boolean((existingEvent as any).noFixedEndDateTime)
+          : candidateEnd === null
     )
     : false;
   const noFixedEndDateTime = supportsNoFixedEndDateTime
-    ? coerceBoolean(payload.noFixedEndDateTime, fallbackNoFixedEndDateTime)
+    ? hasExplicitScheduleMode
+      ? !parsedPayloadScheduleEndConstraint
+      : coerceBoolean(payload.noFixedEndDateTime, fallbackNoFixedEndDateTime)
     : false;
-  const normalizedEnd = noFixedEndDateTime
-    ? (candidateEnd ?? parsedExistingEnd)
-    : candidateEnd;
+  const scheduleEndConstraint = noFixedEndDateTime
+    ? null
+    : parsedPayloadScheduleEndConstraint ?? (
+      payloadIncludesScheduleEndConstraint
+        ? null
+        : parsedExistingScheduleEndConstraint ?? candidateEnd
+    );
+  const generatedScheduleEnd = noFixedEndDateTime
+    ? parsedPayloadGeneratedScheduleEnd ?? (
+      payloadIncludesGeneratedScheduleEnd
+        ? null
+        : parsedExistingGeneratedScheduleEnd ?? parsedExistingEnd ?? candidateEnd
+    )
+    : null;
+  const normalizedEnd = noFixedEndDateTime ? generatedScheduleEnd : scheduleEndConstraint;
 
   if (!noFixedEndDateTime && (!normalizedEnd || normalizedEnd.getTime() <= start.getTime())) {
     throw new Error('End date/time must be after start date/time when "No fixed end datetime scheduling" is disabled.');
@@ -5300,6 +5334,8 @@ export const upsertEventFromPayload = async (payload: any, client: PrismaLike = 
     name: payload.name ?? 'Untitled Event',
     start,
     end: normalizedEnd,
+    scheduleEndConstraint,
+    generatedScheduleEnd,
     timeZone: eventTimeZone,
     description: payload.description ?? null,
     affiliateUrl: normalizedAffiliateUrl.length > 0 ? normalizedAffiliateUrl : null,
@@ -5481,7 +5517,7 @@ export const upsertEventFromPayload = async (payload: any, client: PrismaLike = 
   void syncedDivisionIds;
 
   const removedFieldIds = existingFieldIds.filter((fieldId) => !allowedFieldIdSet.has(fieldId));
-  if (removedFieldIds.length) {
+  if (removedFieldIds.length && !options.preserveOperationalState) {
     await client.matches.deleteMany({
       where: {
         eventId: id,

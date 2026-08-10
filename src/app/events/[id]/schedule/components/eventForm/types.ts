@@ -1,6 +1,6 @@
 import type { Event, Organization, RegistrationQuestionDraft, UserData } from '@/types';
-import type { EventStaffDraft, EventStaffSnapshot } from '@/lib/eventStaffService';
-
+import type { EventStaffSnapshot } from '@/lib/eventStaffService';
+import type { EventEditorDraft, EventEditorSnapshot } from '@/contracts/eventEditor';
 export type DefaultLocation = {
     location?: string;
     address?: string;
@@ -21,26 +21,23 @@ export interface EventFormProps {
     isOpen?: boolean;
     onClose?: () => void;
     currentUser: UserData;
-    event: Event;
-    organization: Organization | null;
-    immutableDefaults?: Partial<Event>;
+    snapshot: EventEditorSnapshot;
     formId?: string;
     defaultLocation?: DefaultLocation;
     isCreateMode?: boolean;
     initialSetupMode?: 'SIMPLE' | 'ADVANCED';
     rentalPurchase?: RentalPurchaseContext;
+    immutableDefaults?: Partial<Event> & { immutableFieldNames?: string[] };
     templateOrganizationId?: string;
     onDirtyStateChange?: (hasChanges: boolean) => void;
     onDraftStateChange?: (state: {
-        draft: Partial<Event>;
-        baselineDraft: Partial<Event>;
+        draft: EventEditorDraft;
+        baselineDraft: EventEditorDraft;
     }) => void;
     onValidityChange?: (isValid: boolean) => void;
     onSubmitRequest?: () => void;
 }
-
 export type EventFormHandle = {
-    getDraft: () => EventStaffDraft;
     getRegistrationQuestionDrafts: () => RegistrationQuestionDraft[];
     validate: () => Promise<boolean>;
     getValidationErrors: () => Array<{ path: string; message: string }>;

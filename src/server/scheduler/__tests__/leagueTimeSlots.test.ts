@@ -480,6 +480,7 @@ describe('league scheduling (time slots)', () => {
     const scheduled = scheduleEvent({ event: league }, context);
     expect(scheduled.matches.length).toBe(6);
     const latestStart = Math.max(...scheduled.matches.map((match) => match.start.getTime()));
+    expect(scheduled.event.generatedScheduleEnd?.getTime()).toBe(scheduled.event.end.getTime());
     expect(latestStart).toBeGreaterThan(end.getTime());
   });
 
@@ -532,6 +533,73 @@ describe('league scheduling (time slots)', () => {
     const [match] = scheduled.matches;
     expect(match.start.getTime()).toBeGreaterThanOrEqual(slotStart.getTime());
     expect(match.end.getTime()).toBeLessThanOrEqual(slotEnd.getTime());
+  });
+
+  it('aligns the next match to a later explicit window after a one-hour gap', () => {
+    const division = buildDivision();
+    const field = buildField(division);
+    const teams = buildTeams(3, division);
+    const eventStart = new Date('2026-01-03T08:00:00.000Z');
+    const eventEnd = new Date('2026-01-03T15:00:00.000Z');
+    const firstSlotStart = new Date('2026-01-03T09:00:00.000Z');
+    const firstSlotEnd = new Date('2026-01-03T11:00:00.000Z');
+    const secondSlotStart = new Date('2026-01-03T12:00:00.000Z');
+    const secondSlotEnd = new Date('2026-01-03T14:00:00.000Z');
+    const league = new League({
+      id: 'league_explicit_window_gap',
+      name: 'Explicit Window Gap League',
+      start: eventStart,
+      end: eventEnd,
+      noFixedEndDateTime: false,
+      maxParticipants: 3,
+      teamSignup: true,
+      eventType: 'LEAGUE',
+      teams,
+      divisions: [division],
+      officials: [],
+      fields: { [field.id]: field },
+      timeSlots: [
+        new TimeSlot({
+          id: 'slot_gap_first',
+          dayOfWeek: 5,
+          startDate: firstSlotStart,
+          endDate: firstSlotEnd,
+          repeating: false,
+          startTimeMinutes: 9 * 60,
+          endTimeMinutes: 11 * 60,
+          timeZone: 'UTC',
+        }),
+        new TimeSlot({
+          id: 'slot_gap_second',
+          dayOfWeek: 5,
+          startDate: secondSlotStart,
+          endDate: secondSlotEnd,
+          repeating: false,
+          startTimeMinutes: 12 * 60,
+          endTimeMinutes: 14 * 60,
+          timeZone: 'UTC',
+        }),
+      ],
+      doTeamsOfficiate: false,
+      gamesPerOpponent: 1,
+      includePlayoffs: false,
+      playoffTeamCount: 0,
+      usesSets: false,
+      matchDurationMinutes: 60,
+      restTimeMinutes: 0,
+      leagueScoringConfig: { pointsForWin: 3, pointsForDraw: 1, pointsForLoss: 0 },
+    });
+
+    const scheduled = scheduleEvent({ event: league }, context);
+    expect(scheduled.matches).toHaveLength(3);
+    const starts = scheduled.matches.map((match) => match.start.getTime()).sort((a, b) => a - b);
+    expect(starts[0]).toBe(firstSlotStart.getTime());
+    expect(starts[1]).toBe(firstSlotStart.getTime() + 60 * MINUTE_MS);
+    expect(starts[2]).toBe(secondSlotStart.getTime());
+    expect(scheduled.matches.every((match) => (
+      (match.start.getTime() >= firstSlotStart.getTime() && match.end.getTime() <= firstSlotEnd.getTime())
+      || (match.start.getTime() >= secondSlotStart.getTime() && match.end.getTime() <= secondSlotEnd.getTime())
+    ))).toBe(true);
   });
 
   it('does not treat field rental slots as blockers when scheduling matches', () => {

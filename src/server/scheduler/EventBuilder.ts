@@ -3,6 +3,7 @@ import { Brackets } from './Brackets';
 import { OfficialStaffingPlanner } from './officialStaffing';
 import { Schedule } from './Schedule';
 import { resolveScheduledMatchDurationMs } from './divisionPhaseRules';
+import { resolveMatchTimingPolicy } from './matchTimingPolicy';
 import {
   Division,
   League,
@@ -442,18 +443,28 @@ export class EventBuilder {
   }
 
   private matchDuration(): number {
-    if (this.event.usesSets && this.event.setDurationMinutes && this.event.setsPerMatch) {
-      return this.event.setDurationMinutes * this.event.setsPerMatch * MINUTE_MS;
-    }
-    if (this.event.matchDurationMinutes) {
-      return this.event.matchDurationMinutes * MINUTE_MS;
-    }
-    return 60 * MINUTE_MS;
+    const matchRulesOverride = this.event.matchRulesOverride && typeof this.event.matchRulesOverride === 'object'
+      ? this.event.matchRulesOverride as Record<string, unknown>
+      : {};
+    return resolveMatchTimingPolicy({
+      usesSets: this.event.usesSets,
+      segmentCount: typeof matchRulesOverride.segmentCount === 'number' ? matchRulesOverride.segmentCount : null,
+      segmentLengthMinutes: typeof matchRulesOverride.segmentLengthMinutes === 'number' ? matchRulesOverride.segmentLengthMinutes : null,
+      segmentBreakMinutes: typeof matchRulesOverride.segmentBreakMinutes === 'number' ? matchRulesOverride.segmentBreakMinutes : null,
+      setsPerMatch: this.event.setsPerMatch,
+      setDurationMinutes: this.event.setDurationMinutes,
+      matchDurationMinutes: this.event.matchDurationMinutes,
+    }).durationMinutes * MINUTE_MS;
   }
 
   private matchBuffer(): number {
-    const restMinutes = this.event.restTimeMinutes ?? 0;
-    return Math.max(restMinutes, 0) * MINUTE_MS;
+    return resolveMatchTimingPolicy({
+      usesSets: this.event.usesSets,
+      setsPerMatch: this.event.setsPerMatch,
+      setDurationMinutes: this.event.setDurationMinutes,
+      matchDurationMinutes: this.event.matchDurationMinutes,
+      restTimeMinutes: this.event.restTimeMinutes,
+    }).breakMinutes * MINUTE_MS;
   }
 
   private resolveMatchDivision(team1: Team | null, team2: Team | null): Division {
@@ -502,6 +513,9 @@ export class EventBuilder {
     const usesSets = typeof divisionConfig?.usesSets === 'boolean'
       ? divisionConfig.usesSets
       : Boolean(this.event.usesSets);
+    const matchRulesOverride = this.event.matchRulesOverride && typeof this.event.matchRulesOverride === 'object'
+      ? this.event.matchRulesOverride as Record<string, unknown>
+      : {};
     const gamesPerOpponent = (this.isLeague || this.isTournamentPoolPlay)
       ? this.normalizePositiveInt(divisionConfig?.gamesPerOpponent, this.event.gamesPerOpponent || 1)
       : 1;
@@ -509,32 +523,28 @@ export class EventBuilder {
       divisionConfig?.restTimeMinutes,
       this.event.restTimeMinutes ?? 0,
     );
-
-    if (usesSets) {
-      const setsPerMatch = this.normalizePositiveInt(divisionConfig?.setsPerMatch, this.event.setsPerMatch || 1);
-      const setDurationMinutes = this.normalizePositiveDuration(
-        divisionConfig?.setDurationMinutes,
-        this.event.setDurationMinutes || 20,
-      );
-      return {
-        gamesPerOpponent,
-        durationMs: setDurationMinutes * setsPerMatch * MINUTE_MS,
-        bufferMs: restTimeMinutes * MINUTE_MS,
-        usesSets: true,
-        setsPerMatch,
-      };
-    }
-
-    const matchDurationMinutes = this.normalizePositiveDuration(
-      divisionConfig?.matchDurationMinutes,
-      this.event.matchDurationMinutes || 60,
-    );
+    const timing = resolveMatchTimingPolicy({
+      usesSets,
+      segmentCount: divisionConfig?.setsPerMatch
+        ?? (typeof matchRulesOverride.segmentCount === 'number' ? matchRulesOverride.segmentCount : null),
+      segmentLengthMinutes: divisionConfig?.setDurationMinutes
+        ?? (typeof matchRulesOverride.segmentLengthMinutes === 'number' ? matchRulesOverride.segmentLengthMinutes : null),
+      segmentBreakMinutes: typeof matchRulesOverride.segmentBreakMinutes === 'number'
+        ? matchRulesOverride.segmentBreakMinutes
+        : null,
+      setsPerMatch: divisionConfig?.setsPerMatch ?? this.event.setsPerMatch,
+      setDurationMinutes: divisionConfig?.setDurationMinutes ?? this.event.setDurationMinutes,
+      matchDurationMinutes: divisionConfig?.matchDurationMinutes ?? this.event.matchDurationMinutes,
+      restTimeMinutes,
+    });
     return {
       gamesPerOpponent,
-      durationMs: matchDurationMinutes * MINUTE_MS,
-      bufferMs: restTimeMinutes * MINUTE_MS,
-      usesSets: false,
-      setsPerMatch: 1,
+      durationMs: timing.durationMinutes * MINUTE_MS,
+      bufferMs: timing.breakMinutes * MINUTE_MS,
+      usesSets,
+      setsPerMatch: usesSets
+        ? this.normalizePositiveInt(divisionConfig?.setsPerMatch, this.event.setsPerMatch || 1)
+        : 1,
     };
   }
 

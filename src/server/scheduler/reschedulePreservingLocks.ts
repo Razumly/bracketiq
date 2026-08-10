@@ -475,18 +475,16 @@ const slotAllowsDateTime = (
   return slotAllowsDate(slot, matchStart) && slotAllowsTime(slot, matchStart, matchEnd);
 };
 
-const isOpenEndedSchedule = (event: SchedulerEvent): boolean => {
-  if (typeof event.noFixedEndDateTime === 'boolean') {
-    return event.noFixedEndDateTime;
-  }
-  return false;
-};
+const isOpenEndedSchedule = (event: SchedulerEvent): boolean => event.noFixedEndDateTime === true;
 
 const resolveRescheduleEndTime = (event: SchedulerEvent): Date => {
   if (!isOpenEndedSchedule(event)) {
-    return event.end;
+    return event.scheduleEndConstraint ?? event.end;
   }
-  const baseline = Math.max(event.start.getTime(), event.end.getTime());
+  const baseline = Math.max(
+    event.start.getTime(),
+    (event.generatedScheduleEnd ?? event.end).getTime(),
+  );
   return new Date(baseline + OPEN_ENDED_RESCHEDULE_WEEKS * 7 * 24 * 60 * MINUTE_MS);
 };
 
@@ -737,10 +735,15 @@ export const rescheduleEventMatchesPreservingLocks = (
     return { event, matches: [], warnings: [] };
   }
 
-  ensureSplitPlayoffTimeSlotCoverage(event);
-  ensureEventWindowCoversExplicitTimeSlots(event);
-  const schedulingDivisions = schedulingDivisionsForEvent(event);
   const openEndedSchedule = isOpenEndedSchedule(event);
+  if (!openEndedSchedule) {
+    event.end = event.scheduleEndConstraint ?? event.end;
+  }
+  ensureSplitPlayoffTimeSlotCoverage(event);
+  ensureEventWindowCoversExplicitTimeSlots(event, {
+    allowExpansion: openEndedSchedule || !event.scheduleEndConstraint,
+  });
+  const schedulingDivisions = schedulingDivisionsForEvent(event);
   const rescheduleEndTime = resolveRescheduleEndTime(event);
 
   const lockedMatches = allMatches.filter((match) => match.locked);

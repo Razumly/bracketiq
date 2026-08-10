@@ -145,6 +145,7 @@ describe('loadEventWithRelations field conflict hydration', () => {
       where: { id: 'event_open' },
       data: {
         end,
+        generatedScheduleEnd: end,
         updatedAt: expect.any(Date),
       },
     });

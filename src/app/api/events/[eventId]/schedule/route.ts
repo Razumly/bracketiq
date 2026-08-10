@@ -40,6 +40,7 @@ const scheduleSchema = z.object({
   participantCount: z.number().int().positive().optional(),
   eventDocument: z.record(z.string(), z.any()).optional(),
   includePlaceholderTeams: z.boolean().optional(),
+  replaceExistingMatches: z.boolean().optional(),
 });
 
 const buildContext = (): SchedulerContext => {
@@ -171,13 +172,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
           );
         }
       }
-
       const includePlaceholderTeams = parsed.data.includePlaceholderTeams !== false;
+      const replaceExistingMatches = parsed.data.replaceExistingMatches === true;
       const existingMatches = Object.values(event.matches);
       const existingMatchSnapshot = snapshotMatchScheduleState(existingMatches);
       const hasExistingMatches = existingMatches.length > 0;
       const scheduled = (() => {
-        if (hasExistingMatches && includePlaceholderTeams) {
+        if (hasExistingMatches && includePlaceholderTeams && !replaceExistingMatches) {
           try {
             return rescheduleEventMatchesPreservingLocks(event);
           } catch (error) {
@@ -225,7 +226,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
         scheduled: scheduled.event,
         removeOmittedPlaceholderTeams: true,
       }, tx);
-      if (!hasExistingMatches || !includePlaceholderTeams) {
+      if (!hasExistingMatches || !includePlaceholderTeams || replaceExistingMatches) {
         await deleteMatchesByEvent(eventId, tx);
       }
       await saveMatches(eventId, scheduled.matches, tx);

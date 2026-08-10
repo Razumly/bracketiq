@@ -1075,6 +1075,20 @@ export function buildEventDraft(input: BuildEventDraftInput): Partial<Event> {
             }
         }
 
+        if (rentalLockedSlotsForDraft.length && !Array.isArray(draft.timeSlots)) {
+            draft.timeSlots = rentalLockedSlotsForDraft.map((slot) => ({
+                ...slot,
+                scheduledFieldIds: normalizeSlotFieldIds(slot),
+                scheduledFieldId: normalizeSlotFieldIds(slot)[0],
+            }));
+            const rentalSlotIds = draft.timeSlots
+                .map((slot) => (typeof slot.$id === 'string' ? slot.$id : null))
+                .filter((id): id is string => Boolean(id));
+            if (rentalSlotIds.length) {
+                draft.timeSlotIds = rentalSlotIds;
+            }
+        }
+
         return draft;
 
 }
