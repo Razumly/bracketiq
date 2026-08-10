@@ -1989,25 +1989,145 @@ model AffiliateSourceDiscoveryCampaigns {
 }
 
 model AffiliateCoverageAgentJobs {
-  id             String    @id
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  subjectType    String
-  subjectKey     String
-  status         String    @default("QUEUED")
-  claimedAt      DateTime?
-  leaseExpiresAt DateTime?
-  workerId       String?
-  attemptCount   Int       @default(0)
-  context        Json?
-  result         Json?
-  errorMessage   String?
-  finishedAt     DateTime?
+  id                 String    @id
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  subjectType        String
+  subjectKey         String
+  status             String    @default("QUEUED")
+  claimedAt          DateTime?
+  leaseExpiresAt     DateTime?
+  workerId           String?
+  attemptCount       Int       @default(0)
+  context            Json?
+  result             Json?
+  errorMessage       String?
+  finishedAt         DateTime?
+  cohortPriority     Int       @default(2)
+  priorityScore      Float     @default(0)
+  priorityRank       Int       @default(2147483647)
+  isBlockingCoverage Boolean   @default(false)
 
   @@unique([subjectType, subjectKey])
-  @@index([status, createdAt])
+  @@index([status, cohortPriority, isBlockingCoverage, priorityScore, priorityRank, createdAt])
   @@index([subjectType, status])
   @@index([leaseExpiresAt])
+}
+
+model AffiliateCoverageCities {
+  id               String   @id
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  censusVintage    Int
+  placeGeoid       String   @unique
+  rank             Int
+  city             String
+  censusName       String
+  state            String
+  stateCode        String
+  population       Int
+  marketKey        String
+  marketName       String
+  cohort           String
+  populationWeight Float
+  active           Boolean  @default(true)
+
+  @@index([active, cohort, rank])
+  @@index([marketKey])
+}
+
+model AffiliateCoverageCells {
+  id                         String   @id
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+  cityId                     String
+  marketKey                  String
+  cohort                     String
+  cohortPriority             Int
+  sportId                    String
+  sportName                  String
+  profileKey                 String
+  coverageStatus             String
+  searchStatus               String
+  populationWeight           Float
+  gapSeverity                Float
+  profileWeight              Float
+  stalenessWeight            Float
+  priorityScore              Float
+  directPolicyKeyCount       Int
+  approvedSourceCount        Int
+  strategyFamilyCount        Int
+  unresolvedLeadCount        Int
+  consecutiveNoYieldCycles   Int      @default(0)
+  queryStrategyVersion       Int
+  evidenceQuality            String
+  lastAssessedAt             DateTime?
+  nextReviewAt               DateTime?
+  evidence                   Json?
+
+  @@unique([cityId, sportId, profileKey])
+  @@index([cohortPriority, searchStatus, priorityScore])
+  @@index([marketKey, searchStatus])
+  @@index([coverageStatus, searchStatus])
+  @@index([nextReviewAt])
+}
+
+model AffiliateCoverageCellAssessments {
+  id                         String   @id
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+  cellId                     String
+  cycleKey                   String
+  decision                   String
+  campaignIds                String[] @default([])
+  strategyKeys               String[] @default([])
+  strategyFamilyKeys         String[] @default([])
+  newQualifiedPolicyKeyCount Int
+  unresolvedLeadCount        Int
+  successfulQueryCount       Int
+  failedQueryCount           Int
+  queryStrategyVersion       Int
+  evidence                   Json?
+
+  @@unique([cellId, cycleKey])
+  @@index([cellId, createdAt])
+  @@index([decision, createdAt])
+}
+
+model AffiliateSourceDiscoveryQueryExecutions {
+  id                         String   @id
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+  runId                      String
+  campaignId                 String
+  queryKey                   String
+  cityGeoid                  String?
+  targetCity                 String?
+  targetState                String?
+  sportId                   String?
+  sportName                 String?
+  profileKey                 String
+  strategyKey                String
+  strategyFamilyKey          String
+  queryText                  String
+  provider                   String
+  status                     String
+  returnedResultCount        Int      @default(0)
+  qualifiedDirectCount       Int      @default(0)
+  newQualifiedPolicyKeyCount Int      @default(0)
+  intakeCreatedCount         Int      @default(0)
+  duplicateCount             Int      @default(0)
+  rejectedCount              Int      @default(0)
+  qualifiedPolicyKeys        String[] @default([])
+  newQualifiedPolicyKeys     String[] @default([])
+  errorCode                  String?
+  metadata                   Json?
+
+  @@unique([runId, queryKey])
+  @@index([cityGeoid, sportId, profileKey])
+  @@index([runId])
+  @@index([campaignId])
+  @@index([strategyFamilyKey])
 }
 
 model AffiliateSourceDiscoveryRuns {
@@ -2495,6 +2615,8 @@ model Events {
   name                          String
   start                         DateTime
   end                           DateTime?
+  scheduleEndConstraint         DateTime?
+  generatedScheduleEnd          DateTime?
   timeZone                      String                           @default("UTC")
   description                   String?
   affiliateUrl                  String?
@@ -2878,6 +3000,8 @@ model EventTemplates {
   eventType                      EventsEventTypeEnum?
   timeZone                       String                           @default("UTC")
   endOffsetMinutesFromEventStart Int?
+  scheduleEndConstraint          DateTime?
+  generatedScheduleEnd           DateTime?
   location                       String
   address                        String?
   affiliateUrl                   String?

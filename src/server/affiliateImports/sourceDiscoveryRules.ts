@@ -6,6 +6,11 @@ import {
   type AffiliateSourceDiscoveryEvaluationInput,
   type AffiliateSourceDiscoveryQuery,
 } from './sourceDiscoveryTypes';
+import { AFFILIATE_COVERAGE_PROFILES } from './coverageProfiles';
+import {
+  getAffiliateCoverageQueryStrategy,
+  renderAffiliateCoverageQuery,
+} from './coverageQueryStrategies';
 import { canonicalizeAffiliateIntakeUrl } from './sourceIntakeUrlSafety';
 import {
   INTERMEDIARY_HOSTS,
@@ -40,43 +45,11 @@ const TYPE_TERMS: Record<string, string[]> = {
   DIRECTORY: ['club directory', 'sports directory', 'find a club'],
 };
 
-const QUERY_PROFILES = [
-  {
-    templateKey: 'clubs-programs',
-    sourceTypes: ['CLUB'],
-    queryTerms: 'clubs academies competitive programs',
-  },
-  {
-    templateKey: 'tryouts-evaluations',
-    sourceTypes: ['TRYOUT'],
-    queryTerms: 'tryouts evaluations',
-  },
-  {
-    templateKey: 'events-registration',
-    sourceTypes: ['EVENT'],
-    queryTerms: 'events registration organizer',
-  },
-  {
-    templateKey: 'league-operators',
-    sourceTypes: ['LEAGUE'],
-    queryTerms: 'league operator leagues registration association',
-  },
-  {
-    templateKey: 'tournament-operators',
-    sourceTypes: ['TOURNAMENT'],
-    queryTerms: 'tournament organizer tournaments cups championships series',
-  },
-  {
-    templateKey: 'camps-clinics-open-play',
-    sourceTypes: ['CAMP', 'CLINIC', 'OPEN_PLAY'],
-    queryTerms: 'camps clinics open play pickup',
-  },
-  {
-    templateKey: 'facilities-rentals',
-    sourceTypes: ['RENTAL'],
-    queryTerms: 'field court facility rentals reservations',
-  },
-] as const;
+const QUERY_PROFILES = AFFILIATE_COVERAGE_PROFILES.map((profile) => ({
+  templateKey: profile.key,
+  sourceTypes: profile.sourceTypes,
+  queryTerms: profile.queryTerms,
+}));
 
 const US_DISCOVERY_SPORT_TERMS: Record<string, string> = {
   Football: 'American football',
@@ -197,12 +170,50 @@ export const affiliateDiscoveryPolicyKeyForUrl = (value: string): string => {
 export const affiliateDiscoveryUrlKey = (canonicalUrl: string): string => createHash('sha256')
   .update(canonicalUrl)
   .digest('hex');
+const focusedCoverageQueries = (
+  campaign: AffiliateSourceDiscoveryCampaignForRules,
+  sports: Array<{ id: string; name: string }>,
+): AffiliateSourceDiscoveryQuery[] | null => {
+  const metadata = recordValue(campaign.metadata);
+  const rawTargets = Array.isArray(metadata.coverageTargetCells) ? metadata.coverageTargetCells : [];
+  const rawStrategyKeys = Array.isArray(metadata.coverageStrategyKeys) ? metadata.coverageStrategyKeys : [];
+  if (!rawTargets.length || !rawStrategyKeys.length) return null;
+  const strategies = rawStrategyKeys.map((value) => {
+    const key = stringValue(value);
+    const strategy = key ? getAffiliateCoverageQueryStrategy(key) : null;
+    if (!strategy) throw new Error(`Unknown governed coverage strategy ${String(value)}.`);
+    return strategy;
+  });
+  const targets = rawTargets.map((value) => {
+    const target = recordValue(value);
+    const cityGeoid = stringValue(target.cityGeoid);
+    const city = stringValue(target.city);
+    const state = stringValue(target.state);
+    const profileKey = stringValue(target.profileKey);
+    if (!cityGeoid || !city || !state || !profileKey) throw new Error('Coverage target cells require city GEOID, city, state, and profile.');
+    const sportId = stringValue(target.sportId);
+    const sport = sports.find((entry) => entry.id === sportId);
+    const sportName = stringValue(target.sportName) ?? sport?.name ?? null;
+    const sourceType = stringValue(target.sourceType) ?? 'EVENT';
+    return { cityGeoid, city, state, sportId, sportName, profileKey, sourceType };
+  }).sort((left, right) => (
+    left.cityGeoid.localeCompare(right.cityGeoid)
+    || (left.sportId ?? '').localeCompare(right.sportId ?? '')
+    || left.profileKey.localeCompare(right.profileKey)
+  ));
+  return targets.flatMap((target) => strategies.map((strategy) => renderAffiliateCoverageQuery({
+    ...target,
+    profileKey: target.profileKey as Parameters<typeof renderAffiliateCoverageQuery>[0]['profileKey'],
+  }, strategy)));
+};
+
 
 export const generateAffiliateSourceDiscoveryQueries = (
   campaign: AffiliateSourceDiscoveryCampaignForRules,
   sports: Array<{ id: string; name: string }>,
   cursor = 0,
 ): { queries: AffiliateSourceDiscoveryQuery[]; nextCursor: number } => {
+  const focused = focusedCoverageQueries(campaign, sports);
   const combinations: AffiliateSourceDiscoveryQuery[] = [];
   const types = new Set(campaign.sourceTypeHints.map((value) => value.toUpperCase()));
   const targets = campaignTargets(campaign);
@@ -224,7 +235,7 @@ export const generateAffiliateSourceDiscoveryQueries = (
     });
   });
   const directoryLocation = stringValue(campaign.location) ?? campaign.region;
-  const sequence: AffiliateSourceDiscoveryQuery[] = [
+  const legacySequence: AffiliateSourceDiscoveryQuery[] = [
     ...combinations,
     {
       query: `${directoryLocation} sports clubs leagues tournaments rentals directory`,
@@ -237,6 +248,7 @@ export const generateAffiliateSourceDiscoveryQueries = (
       targetState: targets[0]?.state ?? null,
     },
   ];
+  const sequence = focused ?? legacySequence;
   const start = Math.max(0, cursor) % sequence.length;
   const queries = sequence.slice(start, start + Math.min(campaign.maxQueriesPerRun, sequence.length));
   const nextCursor = start + queries.length >= sequence.length ? 0 : start + queries.length;

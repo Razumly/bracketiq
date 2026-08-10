@@ -1,5 +1,6 @@
-import { Client } from 'pg';
+import { createHash } from 'crypto';
 import { createId } from '@/lib/id';
+import { Client } from 'pg';
 import { prisma } from '@/lib/prisma';
 import { resolvePrismaPgPoolConfig } from '@/lib/prismaConfig';
 import { isEmailEnabled, sendEmail } from '@/server/email';
@@ -22,6 +23,7 @@ import {
 } from './sourceIntakeUrlSafety';
 import {
   AFFILIATE_DISCOVERY_AUTO_INTAKE_SCORE,
+  AFFILIATE_DISCOVERY_REVIEW_SCORE,
   affiliateDiscoveryUrlKey,
   evaluateAffiliateSourceDiscoveryResult,
   generateAffiliateSourceDiscoveryQueries,
@@ -30,6 +32,7 @@ import {
   affiliateSourceDiscoveryCampaignSchema,
   affiliateSourceDomainPolicyReviewSchema,
   type AffiliateSourceDiscoveryCampaignInput,
+  type AffiliateSourceDiscoveryQuery,
   type AffiliateSourceDomainPolicyReview,
 } from './sourceDiscoveryTypes';
 import {
@@ -37,6 +40,7 @@ import {
   findAffiliateSourceUrlDuplicate,
 } from './sourceUrlIntake';
 import { findAffiliateIntakeIdsForPolicyKey } from './sourcePolicyIntakes';
+import { loadAffiliateCoverageCityCatalog } from './coverageCityCatalog';
 
 const DISCOVERY_LOCK_ID = 4201072126;
 const DEFAULT_SUMMARY_RECIPIENT = 'samuel.r@razumly.com';
@@ -59,7 +63,6 @@ type DiscoveryDependencies = {
   fetchResource?: typeof fetchBoundedPublicResource;
   workerId?: string;
 };
-
 const db = () => ({
   campaigns: (prisma as any).affiliateSourceDiscoveryCampaigns,
   runs: (prisma as any).affiliateSourceDiscoveryRuns,
@@ -69,6 +72,7 @@ const db = () => ({
   pages: (prisma as any).affiliateSourceIntakePages,
   intakeRuns: (prisma as any).affiliateSourceIntakeRuns,
   sports: (prisma as any).sports,
+  queryExecutions: (prisma as any).affiliateSourceDiscoveryQueryExecutions,
 });
 
 const stringValue = (value: unknown): string | null => (
@@ -83,6 +87,131 @@ const nextRunAt = (from: Date, intervalMinutes: number): Date => (
   new Date(from.getTime() + intervalMinutes * 60_000)
 );
 
+const profileKeyForQuery = (query: AffiliateSourceDiscoveryQuery): string => (
+  stringValue(query.profileKey) ?? (query.templateKey.replace(/^PROFILE:/, '') || 'directory')
+);
+
+const strategyKeyForQuery = (query: AffiliateSourceDiscoveryQuery): string => (
+  stringValue(query.strategyKey) ?? 'legacy-web-v1'
+);
+
+const strategyFamilyKeyForQuery = (query: AffiliateSourceDiscoveryQuery): string => (
+  stringValue(query.strategyFamilyKey) ?? 'legacy-web'
+);
+
+const cityGeoidForQuery = (query: AffiliateSourceDiscoveryQuery): string | null => {
+  if (stringValue(query.cityGeoid)) return query.cityGeoid ?? null;
+  const city = stringValue(query.targetCity);
+  const state = stringValue(query.targetState);
+  if (!city || !state) return null;
+  return loadAffiliateCoverageCityCatalog().cities.find((entry) => (
+    entry.city.toLowerCase() === city.toLowerCase() && entry.state.toLowerCase() === state.toLowerCase()
+  ))?.placeGeoid ?? null;
+};
+
+const queryExecutionKey = (query: AffiliateSourceDiscoveryQuery): string => createHash('sha256')
+  .update(JSON.stringify({
+    query: query.query,
+    cityGeoid: cityGeoidForQuery(query),
+    sportId: query.sportId,
+    profileKey: profileKeyForQuery(query),
+    strategyKey: strategyKeyForQuery(query),
+  }))
+  .digest('hex');
+
+const normalizedDiscoveryErrorCode = (error: unknown): string => {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  if (message.includes('429')) return 'HTTP_429';
+  if (message.includes('5xx') || message.includes('500') || message.includes('502') || message.includes('503')) return 'HTTP_5XX';
+  if (message.includes('tls') || message.includes('certificate')) return 'TLS_ERROR';
+  if (message.includes('timeout') || message.includes('network')) return 'NETWORK_ERROR';
+  return 'PROVIDER_ERROR';
+};
+
+const findPreviouslyQualifiedPolicyKeys = async (query: AffiliateSourceDiscoveryQuery): Promise<Set<string>> => {
+  const executions = db().queryExecutions;
+  if (!executions?.findMany) return new Set<string>();
+  const cityGeoid = cityGeoidForQuery(query);
+  const rows = await executions.findMany({
+    where: {
+      cityGeoid,
+      sportId: query.sportId,
+      profileKey: profileKeyForQuery(query),
+      status: { in: ['SUCCEEDED', 'PARTIAL'] },
+    },
+    select: { qualifiedPolicyKeys: true },
+  });
+  return new Set(rows.flatMap((row: { qualifiedPolicyKeys?: unknown }) => (
+    Array.isArray(row.qualifiedPolicyKeys)
+      ? row.qualifiedPolicyKeys.filter((key): key is string => typeof key === 'string' && Boolean(key.trim()))
+      : []
+  )));
+};
+
+const persistQueryExecution = async (input: {
+  run: { id: string; campaignId: string };
+  query: AffiliateSourceDiscoveryQuery;
+  provider: string;
+  status: string;
+  returnedResultCount: number;
+  qualifiedPolicyKeys: string[];
+  newQualifiedPolicyKeys: string[];
+  intakeCreatedCount: number;
+  duplicateCount: number;
+  rejectedCount: number;
+  errorCode?: string | null;
+  metadata?: Record<string, unknown>;
+}): Promise<void> => {
+  const executions = db().queryExecutions;
+  if (!executions?.upsert) return;
+  const cityGeoid = cityGeoidForQuery(input.query);
+  const profileKey = profileKeyForQuery(input.query);
+  const strategyKey = strategyKeyForQuery(input.query);
+  const queryKey = queryExecutionKey(input.query);
+  await executions.upsert({
+    where: { runId_queryKey: { runId: input.run.id, queryKey } },
+    create: {
+      id: createId(),
+      runId: input.run.id,
+      campaignId: input.run.campaignId,
+      queryKey,
+      cityGeoid,
+      targetCity: input.query.targetCity ?? null,
+      targetState: input.query.targetState ?? null,
+      sportId: input.query.sportId,
+      sportName: input.query.sportName,
+      profileKey,
+      strategyKey,
+      strategyFamilyKey: strategyFamilyKeyForQuery(input.query),
+      queryText: input.query.query,
+      provider: input.provider,
+      status: input.status,
+      returnedResultCount: input.returnedResultCount,
+      qualifiedDirectCount: input.qualifiedPolicyKeys.length,
+      newQualifiedPolicyKeyCount: input.newQualifiedPolicyKeys.length,
+      intakeCreatedCount: input.intakeCreatedCount,
+      duplicateCount: input.duplicateCount,
+      rejectedCount: input.rejectedCount,
+      qualifiedPolicyKeys: input.qualifiedPolicyKeys,
+      newQualifiedPolicyKeys: input.newQualifiedPolicyKeys,
+      errorCode: input.errorCode ?? null,
+      metadata: input.metadata ?? null,
+    },
+    update: {
+      status: input.status,
+      returnedResultCount: input.returnedResultCount,
+      qualifiedDirectCount: input.qualifiedPolicyKeys.length,
+      newQualifiedPolicyKeyCount: input.newQualifiedPolicyKeys.length,
+      intakeCreatedCount: input.intakeCreatedCount,
+      duplicateCount: input.duplicateCount,
+      rejectedCount: input.rejectedCount,
+      qualifiedPolicyKeys: input.qualifiedPolicyKeys,
+      newQualifiedPolicyKeys: input.newQualifiedPolicyKeys,
+      errorCode: input.errorCode ?? null,
+      metadata: input.metadata ?? null,
+    },
+  });
+};
 const policyExpiry = (now: Date): Date => new Date(now.getTime() + POLICY_EXPIRY_DAYS * 86_400_000);
 
 export const createAffiliateSourceDiscoveryCampaign = async (
@@ -624,6 +753,15 @@ export const processNextAffiliateSourceDiscoveryRun = async (
   const errors: string[] = [];
 
   for (const query of generated.queries) {
+    const priorPolicyKeys = await findPreviouslyQualifiedPolicyKeys(query);
+    const qualifiedPolicyKeys = new Set<string>();
+    let queryIntakeCreatedCount = 0;
+    let queryDuplicateCount = 0;
+    let queryRejectedCount = 0;
+    let queryReturnedResultCount = 0;
+    const providerName = (): string => (
+      'provider' in client && typeof client.provider === 'string' ? client.provider : 'FIRECRAWL'
+    );
     try {
       const search = await client.searchSources(query.query, {
         limit: maxResultsPerQuery,
@@ -631,11 +769,12 @@ export const processNextAffiliateSourceDiscoveryRun = async (
           || campaign.location
           || campaign.region,
       });
+      queryReturnedResultCount = search.rows.length;
       returnedResultCount += search.rows.length;
       if (search.providerJobId) providerJobIds.push(search.providerJobId);
       estimatedCredits += search.estimatedCredits ?? 0;
       requestSummaries.push({
-        provider: search.provider ?? ('provider' in client ? client.provider : 'FIRECRAWL'),
+        provider: search.provider ?? providerName(),
         estimatedCredits: search.estimatedCredits ?? null,
         request: search.request,
         response: search.response,
@@ -649,6 +788,11 @@ export const processNextAffiliateSourceDiscoveryRun = async (
           currentYear: now.getFullYear(),
           now,
         });
+        const isQualifiedDirect = (
+          evaluation.classification === 'DIRECT_SOURCE'
+          && evaluation.score >= AFFILIATE_DISCOVERY_REVIEW_SCORE
+          && Boolean(evaluation.policyKey)
+        );
         const persisted = await persistDiscoveryResult({
           campaign,
           run,
@@ -656,12 +800,29 @@ export const processNextAffiliateSourceDiscoveryRun = async (
           rank: index + 1,
           row: {
             ...row,
-            provider: search.provider ?? ('provider' in client ? client.provider : 'FIRECRAWL'),
+            provider: search.provider ?? providerName(),
             estimatedCredits: search.estimatedCredits ?? null,
           },
           evaluation,
           now,
         });
+        let linkedQualifiedPolicyKey = Boolean(
+          isQualifiedDirect
+          && (
+            persisted.saved.matchingIntakeId
+            || persisted.saved.matchingSourceId
+            || persisted.saved.matchingOrganizationId
+          )
+          && evaluation.policyKey,
+        );
+        if (persisted.duplicate) {
+          queryDuplicateCount += 1;
+          duplicateCount += 1;
+        }
+        if (persisted.saved.status === 'REJECTED') {
+          queryRejectedCount += 1;
+          rejectedCount += 1;
+        }
         const shouldAutoPromote = (
           campaign.autoCreateIntakes
           && persisted.saved.status === 'NEW'
@@ -674,8 +835,10 @@ export const processNextAffiliateSourceDiscoveryRun = async (
             run.requestedByUserId ?? 'affiliate-discovery',
             dependencies,
           );
+          queryIntakeCreatedCount += 1;
           createdIntakeCount += 1;
           outcomes.autoIntakeCreated += 1;
+          linkedQualifiedPolicyKey = isQualifiedDirect;
         } else if (persisted.duplicate) {
           outcomes.duplicate += 1;
         } else if (!persisted.isNew) {
@@ -687,9 +850,39 @@ export const processNextAffiliateSourceDiscoveryRun = async (
         } else {
           outcomes.newReview += 1;
         }
+        if (linkedQualifiedPolicyKey && evaluation.policyKey) qualifiedPolicyKeys.add(evaluation.policyKey);
       }
+      const newQualifiedPolicyKeys = [...qualifiedPolicyKeys].filter((key) => !priorPolicyKeys.has(key));
+      await persistQueryExecution({
+        run,
+        query,
+        provider: search.provider ?? providerName(),
+        status: 'SUCCEEDED',
+        returnedResultCount: queryReturnedResultCount,
+        qualifiedPolicyKeys: [...qualifiedPolicyKeys].sort(),
+        newQualifiedPolicyKeys: newQualifiedPolicyKeys.sort(),
+        intakeCreatedCount: queryIntakeCreatedCount,
+        duplicateCount: queryDuplicateCount,
+        rejectedCount: queryRejectedCount,
+        metadata: { providerJobId: search.providerJobId ?? null },
+      });
     } catch (error) {
-      errors.push(`${query.query}: ${error instanceof Error ? error.message : 'Unknown search failure'}`);
+      const message = error instanceof Error ? error.message : 'Unknown search failure';
+      const errorCode = normalizedDiscoveryErrorCode(error);
+      errors.push(`${query.query}: ${message}`);
+      await persistQueryExecution({
+        run,
+        query,
+        provider: providerName(),
+        status: 'FAILED',
+        returnedResultCount: queryReturnedResultCount,
+        qualifiedPolicyKeys: [],
+        newQualifiedPolicyKeys: [],
+        intakeCreatedCount: queryIntakeCreatedCount,
+        duplicateCount: queryDuplicateCount,
+        rejectedCount: queryRejectedCount,
+        errorCode,
+      });
     }
   }
   const finishedAt = dependencies.now?.() ?? new Date();

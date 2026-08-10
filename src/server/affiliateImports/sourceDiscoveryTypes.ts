@@ -67,6 +67,10 @@ export type AffiliateSourceDiscoveryQuery = {
   templateKey: string;
   targetCity?: string | null;
   targetState?: string | null;
+  cityGeoid?: string | null;
+  profileKey?: string | null;
+  strategyKey?: string | null;
+  strategyFamilyKey?: string | null;
 };
 
 export type AffiliateSourceDiscoveryEvaluationInput = {

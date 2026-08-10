@@ -5,7 +5,7 @@ description: Assess BracketIQ affiliate organization coverage, create bounded so
 
 # Plan Affiliate Discovery Campaigns
 
-Claim one coverage job at a time. Finish it before claiming another. Continue until the queue report proves no claimable job or active lease remains.
+Claim one ranked coverage job at a time. Finish it before claiming another. Continue until the queue report proves no eligible claim or active lease remains; future saturated rechecks are not current work.
 
 Before the first claim, read:
 
@@ -17,16 +17,14 @@ Before the first claim, read:
 
 ## Run the queue
 
-1. Use the exact reconcile, queue-status, claim, campaign-create, manual-evidence, intake-export, and completion commands in the active goal.
+1. Use the exact inventory, query-preview, reconcile, queue-status, claim, campaign-create, manual-evidence, intake-export, and completion commands in the active goal.
 2. Keep `--live` only when the goal supplied it.
 3. Reconcile before claiming and after every completion.
 4. Use only the claim command for assignment. Its conditional lease is the race boundary.
 5. Resume the active job returned for this worker. Do not take another worker's lease.
 6. Stop only when `claimableJobs`, `activeLeases`, and `claimedWithoutLease` are all zero.
 
-## Assess market coverage
-
-Treat the claim as one market assessment. Inspect the parent campaign, selected sports, completed query profiles, recent new-domain yield, result types, unresolved leads, and neighboring focused campaigns.
+Treat the claim as one ranked market assessment. Inspect the read-only inventory, selected cell IDs, exact query previews, prior governed strategy families, query-level marginal yield, result links, unresolved leads, and neighboring focused campaigns.
 
 Assess organization archetypes separately:
 
@@ -39,21 +37,23 @@ Assess organization archetypes separately:
 
 Separate the organization archetype from its event types. One competition operator can run leagues and tournaments. A tournament or cup name is not automatically an organization. Create an organization-oriented campaign only when evidence suggests a persistent operator identity, such as its own official domain, contact identity, recurring competition series, or independent registration operation. Otherwise keep the competition under the evidenced host organization.
 
-Create focused campaigns when a sport or archetype has weak coverage. Prefer metro searches for local operators and regional or state language for governing associations. Use `LEAGUE` and `TOURNAMENT` as separate campaign source types. Do not create arbitrary query text, duplicate a campaign fingerprint, or use provider calls outside the deterministic campaign runner.
+Create focused campaigns only for one through twenty eligible gap cells and one through three governed strategy keys. Use the query-preview command before creation. Do not create arbitrary query text, duplicate a campaign fingerprint, or use provider calls outside the deterministic campaign runner.
 
-Run every created campaign with the exact discovery-run command in the active goal. Then complete the job as `CAMPAIGNS_CREATED`. This returns the same market assessment to the queue. Reclaim it to receive fresh campaign results and reassess. Continue until the evidence supports `COVERED` or the job must wait for the intake pipeline.
+Run every created campaign with the exact discovery-run command in the active goal. Then complete the job as `CAMPAIGNS_CREATED`. This returns the same market assessment to the queue. Reclaim it to receive fresh campaign results and reassess. Continue until the persisted cell evidence supports `COVERED`, `SATURATED_NO_YIELD`, or the job must wait for the intake pipeline.
 
-Mark a market `COVERED` only when:
+Mark a cell `COVERED` only when:
 
-- at least two independent source families were checked;
-- the relevant query profiles completed;
+- the required qualified direct policy key is linked to an intake, approved source, or organization;
+- the required number of independent governed strategy families completed successfully;
 - no automatically promotable direct lead remains unresolved;
-- recent new-domain yields are recorded;
-- failed intake captures for the assessed evidence have a terminal outcome.
+- recent query-level evidence and any failed captures affecting the cell have terminal outcomes.
 
-Review-only intermediary and directory results can inform the assessment, but they do not block coverage. Organization count alone does not prove coverage. Peer-market differences are anomaly signals only.
+Review-only intermediary and directory results can inform the assessment, but they do not count as direct coverage. Organization count alone does not prove coverage. Peer-market differences are anomaly signals only.
 
 Use `WAITING_FOR_PIPELINE` only when the claim reports a nonzero count of unlinked, automatically promotable direct results. Include the exact current count. Reconciliation will return the job after those leads resolve.
+
+## Record saturation
+Use `SATURATED_NO_YIELD` only when the server can verify two completed zero-yield cycles with different governed strategies, the required strategy families have been tested, every cited query is successful or useful partial, no unresolved lead or active capture failure remains, and the active strategy version is current. Include cell IDs, cycle key, strategy keys and families, successful and failed execution IDs, new qualified policy-key count, unresolved count, and next review date. Saturation sets search status to `SATURATED` but preserves a `GAP` coverage status.
 
 ## Recover failed intake captures
 

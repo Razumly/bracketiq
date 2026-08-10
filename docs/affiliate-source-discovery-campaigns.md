@@ -1,14 +1,28 @@
 # Affiliate Source Discovery Campaign Rollout
 
-This registry defines the initial national discovery rollout. Rankings use the U.S. Census Bureau Vintage 2025 resident population estimates for incorporated places as of July 1, 2025. The setup command creates every campaign in `PAUSED` state, so creating or refreshing this registry does not consume Firecrawl credits.
+The source of record is the Census Bureau's [City and Town Population Totals: 2020-2025](https://www.census.gov/data/datasets/time-series/demo/popest/2020s-total-cities-and-towns.html). The checked-in initial catalog includes every incorporated city meeting its numeric `thresholdPopulation` of 178,618; the setup command derives 129 version-one market campaigns from it and keeps them `PAUSED`. The threshold is population-based, not a literal Eugene or Salem inclusion rule, and later catalog versions may lower it.
 
-The source of record is the Census Bureau's [City and Town Population Totals: 2020-2025](https://www.census.gov/data/datasets/time-series/demo/popest/2020s-total-cities-and-towns.html). The checked-in templates live in `src/server/affiliateImports/sourceDiscoveryCampaignTemplates.ts` and are applied idempotently with:
+The catalog generator filters workbook rows by the configured population threshold, joins stable place GEOIDs from the national places Gazetteer, and writes deterministic JSON. Runtime code does not download Census data. Eugene and Salem are current snapshot evidence only.
 
 ```bash
 npm run affiliate:discovery:setup
 ```
 
-One campaign may cover multiple top-50 cities when they belong to the same obvious sports market. This reduces duplicate provider queries and overlapping intakes. The campaign keeps every covered city and Census rank in metadata so coverage remains auditable.
+One campaign may cover multiple cities when they belong to the explicit catalog market grouping. The campaign keeps every covered city, stable place GEOID in the catalog, and Census rank in metadata so coverage remains auditable. `US_CITY_DISCOVERY_CAMPAIGN_TEMPLATES` remains a top-50 compatibility export; `AFFILIATE_COVERAGE_CAMPAIGN_TEMPLATES` is the complete registry.
+## Coverage inventory and ranked queue
+
+Run the read-only inventory before enabling coverage work:
+
+```bash
+npm run affiliate:coverage:inventory -- --cohort=west-coast-core --format=json --limit=50
+npm run affiliate:coverage:query-preview -- --campaign=<campaign-id>
+```
+
+The inventory evaluates every city, concrete sport, and one of seven profiles. It reports `coverageStatus` separately from `searchStatus`: a cell can remain `GAP / SATURATED` when governed strategies produced no new qualified direct policy keys. Population-weighted priority is ordered by `WEST_COAST_CORE`, `WEST_COAST_EXPANSION`, then `NATIONAL`; the queue uses the same order and preserves lease safety.
+
+Focused proposals select one through twenty eligible cell IDs and one through three governed strategy keys. The server materializes `coverageTargetCells` and deterministic strategy keys; agents cannot submit arbitrary provider query text. Query-level execution rows retain returned, qualified, linked, duplicate, intake, rejection, failure, and new-policy-key counts.
+
+Use `SATURATED_NO_YIELD` only after two completed zero-yield cycles with different governed strategy families, successful terminal query evidence, no unresolved pipeline lead or active capture failure, and a current strategy version. Saturation sets a future review date without changing a coverage gap into coverage.
 
 ## Location-First Search Order
 

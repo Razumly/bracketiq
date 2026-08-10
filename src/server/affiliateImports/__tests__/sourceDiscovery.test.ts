@@ -100,6 +100,10 @@ const prismaMock = {
       return { count: 1 };
     }),
   },
+  affiliateSourceDiscoveryQueryExecutions: {
+    findMany: jest.fn(async () => []),
+    upsert: jest.fn(async ({ create }) => create),
+  },
   affiliateSourceDomainPolicies: {
     findUnique: jest.fn(async () => currentPolicy),
     create: jest.fn(async ({ data }) => {
@@ -226,6 +230,53 @@ describe('affiliate source discovery orchestration', () => {
       by: ['campaignId', 'status'],
       _count: { _all: true },
     }));
+  });
+  it('persists one exact query-execution row per query and records provider failures as failed', async () => {
+    const searchSources = jest.fn()
+      .mockResolvedValueOnce({
+        provider: 'TEST_PROVIDER',
+        request: { query: 'Portland Oregon Soccer clubs' },
+        response: { web: [] },
+        rows: [],
+        estimatedCredits: 1,
+      })
+      .mockRejectedValueOnce(new Error('HTTP 503 from provider'));
+    const searchClient = { provider: 'TEST_PROVIDER', searchSources };
+    await processNextAffiliateSourceDiscoveryRun({ runId: 'run_1' }, { searchClient });
+    await processNextAffiliateSourceDiscoveryRun({ runId: 'run_2' }, { searchClient });
+
+    expect(prismaMock.affiliateSourceDiscoveryQueryExecutions.upsert).toHaveBeenCalledTimes(2);
+    expect(prismaMock.affiliateSourceDiscoveryQueryExecutions.upsert).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        create: expect.objectContaining({
+          runId: 'run_1',
+          campaignId: 'campaign_1',
+          cityGeoid: expect.any(String),
+          sportId: 'sport_soccer',
+          profileKey: 'clubs-programs',
+          strategyKey: 'legacy-web-v1',
+          strategyFamilyKey: 'legacy-web',
+          provider: 'TEST_PROVIDER',
+          status: 'SUCCEEDED',
+          returnedResultCount: 0,
+          newQualifiedPolicyKeyCount: 0,
+        }),
+      }),
+    );
+    expect(prismaMock.affiliateSourceDiscoveryQueryExecutions.upsert).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        create: expect.objectContaining({
+          runId: 'run_2',
+          provider: 'TEST_PROVIDER',
+          status: 'FAILED',
+          returnedResultCount: 0,
+          newQualifiedPolicyKeyCount: 0,
+          errorCode: 'HTTP_5XX',
+        }),
+      }),
+    );
   });
 
   it('reuses one discovery result and one intake while unknown policy prevents capture', async () => {

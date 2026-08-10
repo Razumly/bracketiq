@@ -25,6 +25,7 @@ The new worker does not replace deterministic search or capture code. It does no
 - [x] (2026-08-04) Rejected foreign government search results for United States campaigns, allowed safe same-policy-key redirects, and raised the public HTML artifact limit to 8 MiB.
 - [ ] (2026-08-04) Reclassify the existing live coverage human-review backlog through the new deterministic rules after an authorized deployment.
 - [x] (2026-08-04) Passed 45 focused tests, targeted ESLint, TypeScript, the Luna goal dry run, and `git diff --check`.
+- [x] (2026-08-09) Added the population-weighted 150-city catalog, version-one market templates, read-only coverage inventory, persisted query-execution evidence, governed strategy keys, and ranked reconciliation queue. Live deployment and backlog reclassification remain intentionally pending.
 
 ## Surprises & Discoveries
 
@@ -90,6 +91,10 @@ The new worker does not replace deterministic search or capture code. It does no
 - Decision: Store retry timing in the existing job result JSON.
   Rationale: Coverage statuses are strings and job results are JSON. The new state machine does not need a database migration.
   Date/Author: 2026-08-04 / Codex
+
+- Decision: Keep coverage inventory evidence separate from no-yield saturation.
+  Rationale: A city/sport/profile cell can have successful searches with no new qualified domain without being covered. `SATURATED_NO_YIELD` preserves the `GAP` coverage status and schedules a later review; it cannot be used while unresolved pipeline or capture work remains.
+  Date/Author: 2026-08-09 / Codex
 
 ## Outcomes & Retrospective
 

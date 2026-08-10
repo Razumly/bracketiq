@@ -17,8 +17,16 @@ import {
   affiliateDiscoveryUrlKey,
 } from './sourceDiscoveryRules';
 import { US_CITY_DISCOVERY_QUERY_STRATEGY_VERSION } from './sourceDiscoveryCampaignTemplates';
+import { AFFILIATE_COVERAGE_CAMPAIGN_TEMPLATES } from './sourceDiscoveryCampaignTemplates';
+import { reconcileAffiliateCoverageCells } from './coverageInventory';
+import {
+  AFFILIATE_COVERAGE_QUERY_STRATEGY_VERSION,
+  getAffiliateCoverageQueryStrategy,
+} from './coverageQueryStrategies';
+import { getAffiliateCoverageProfile } from './coverageProfiles';
 import { persistAffiliateSourceIntakeArtifact } from './sourceIntakeArtifacts';
 import { canonicalizeAffiliateIntakeUrl } from './sourceIntakeUrlSafety';
+type JsonRecord = Record<string, unknown>;
 
 const DEFAULT_LEASE_MS = 2 * 60 * 60 * 1_000;
 const DEFAULT_CAPTURE_RETRY_DELAY_MS = 30 * 60 * 1_000;
@@ -50,14 +58,11 @@ const SOURCE_EXCLUSION_REASON_CODES = new Set([
 ]);
 
 const HUMAN_DECISION_REASON_CODES = new Set([
-  'CONFLICTING_IDENTITY',
   'CONFLICTING_SOURCE_IDENTITY',
   'CONTRADICTORY_EVIDENCE',
-  'SOURCE_IDENTITY_CONFLICT',
+  'REPLACEMENT_DOMAIN_APPROVAL',
   'REPLACEMENT_DOMAIN_APPROVAL_REQUIRED',
 ]);
-
-type JsonRecord = Record<string, unknown>;
 
 const coverageDatabase = () => ({
   jobs: (prisma as any).affiliateCoverageAgentJobs,
@@ -71,6 +76,10 @@ const coverageDatabase = () => ({
   mappingJobs: (prisma as any).affiliateSourceMappingJobs,
   policies: (prisma as any).affiliateSourceDomainPolicies,
   sports: (prisma as any).sports,
+  coverageCities: (prisma as any).affiliateCoverageCities,
+  coverageCells: (prisma as any).affiliateCoverageCells,
+  coverageAssessments: (prisma as any).affiliateCoverageCellAssessments,
+  queryExecutions: (prisma as any).affiliateSourceDiscoveryQueryExecutions,
 });
 
 type CoverageDatabase = ReturnType<typeof coverageDatabase>;
@@ -342,6 +351,49 @@ const queueCoverageMappingRepair = async (options: {
   });
   return mappingJob.id;
 };
+const marketCoveragePriority = async (
+  database: CoverageDatabase,
+  campaign: any,
+  now: Date,
+) => {
+  if (!database.coverageCells?.findMany) return null;
+  const metadata = recordValue(campaign.metadata);
+  const marketKey = stringValue(metadata.marketKey);
+  if (!marketKey) return null;
+  const cells = await database.coverageCells.findMany({
+    where: { marketKey },
+    select: {
+      id: true,
+      cohortPriority: true,
+      priorityScore: true,
+      priorityRank: true,
+      searchStatus: true,
+      coverageStatus: true,
+      nextReviewAt: true,
+      unresolvedLeadCount: true,
+    },
+  });
+  const eligible = cells.filter((cell: any) => (
+    ['READY', 'STALE'].includes(String(cell.searchStatus))
+    && String(cell.coverageStatus) !== 'COVERED'
+    && (!(cell.nextReviewAt instanceof Date) || cell.nextReviewAt <= now)
+    && Number(cell.unresolvedLeadCount ?? 0) === 0
+  )).sort((left: any, right: any) => (
+    Number(left.cohortPriority ?? 2) - Number(right.cohortPriority ?? 2)
+    || Number(right.priorityScore ?? 0) - Number(left.priorityScore ?? 0)
+    || Number(left.priorityRank ?? 2_147_483_647) - Number(right.priorityRank ?? 2_147_483_647)
+    || String(left.id).localeCompare(String(right.id))
+  ));
+  const highest = eligible[0] ?? null;
+  return {
+    cohortPriority: Number(highest?.cohortPriority ?? 2),
+    priorityScore: Number(highest?.priorityScore ?? 0),
+    priorityRank: Number(highest?.priorityRank ?? 2_147_483_647),
+    isBlockingCoverage: false,
+    coverageCellIds: eligible.slice(0, 50).map((cell: any) => cell.id),
+  };
+};
+
 
 export const reconcileAffiliateCoverageJobs = async (
   options: { now?: Date } = {},
@@ -356,6 +408,17 @@ export const reconcileAffiliateCoverageJobs = async (
   let waitingJobsRequeued = 0;
   let retryJobsRequeued = 0;
   let sourcesExcluded = 0;
+  const coverageCellSummary = !dependencies.database
+    && database.coverageCities?.upsert
+    && database.coverageCells?.upsert
+    ? await reconcileAffiliateCoverageCells(
+      { now },
+      {
+        database: { cities: database.coverageCities, cells: database.coverageCells },
+        now,
+      } as any,
+    )
+    : null;
   for (const job of existingJobs) {
     if (job.status === 'HUMAN_REVIEW_REQUIRED') {
       const classification = classifyLegacyAffiliateCoverageHumanReview(job);
@@ -435,6 +498,7 @@ export const reconcileAffiliateCoverageJobs = async (
   const templateCampaigns = campaigns.filter((campaign: any) => recordValue(campaign.metadata).template === true);
   let marketJobsCreated = 0;
   for (const campaign of templateCampaigns) {
+    const priority = await marketCoveragePriority(database, campaign, now);
     const existing = await database.jobs.findUnique({
       where: {
         subjectType_subjectKey: {
@@ -443,20 +507,44 @@ export const reconcileAffiliateCoverageJobs = async (
         },
       },
     });
-    if (existing) continue;
+    const context = {
+      campaignId: campaign.id,
+      campaignName: campaign.name,
+      region: campaign.region,
+      queryStrategyVersion: US_CITY_DISCOVERY_QUERY_STRATEGY_VERSION,
+      coverageStrategyVersion: AFFILIATE_COVERAGE_STRATEGY_VERSION,
+      ...(priority ? { coverageCellIds: priority.coverageCellIds } : {}),
+    };
+    if (existing) {
+      if (
+        priority
+        && !(existing.status === 'CLAIMED' && existing.leaseExpiresAt instanceof Date && existing.leaseExpiresAt >= now)
+      ) {
+        await database.jobs.update({
+          where: { id: existing.id },
+          data: {
+            cohortPriority: priority.cohortPriority,
+            priorityScore: priority.priorityScore,
+            priorityRank: priority.priorityRank,
+            isBlockingCoverage: priority.isBlockingCoverage,
+            context: { ...recordValue(existing.context), ...context },
+            ...(existing.status === 'COMPLETED' ? { status: 'QUEUED', finishedAt: null } : {}),
+          },
+        });
+      }
+      continue;
+    }
     await database.jobs.create({
       data: {
         id: createIdentifier(),
         subjectType: 'MARKET_COVERAGE',
         subjectKey: marketSubjectKey(campaign.id),
         status: 'QUEUED',
-        context: {
-          campaignId: campaign.id,
-          campaignName: campaign.name,
-          region: campaign.region,
-          queryStrategyVersion: US_CITY_DISCOVERY_QUERY_STRATEGY_VERSION,
-          coverageStrategyVersion: AFFILIATE_COVERAGE_STRATEGY_VERSION,
-        },
+        cohortPriority: priority?.cohortPriority ?? 2,
+        priorityScore: priority?.priorityScore ?? 0,
+        priorityRank: priority?.priorityRank ?? 2_147_483_647,
+        isBlockingCoverage: priority?.isBlockingCoverage ?? false,
+        context,
       },
     });
     marketJobsCreated += 1;
@@ -581,18 +669,30 @@ export const reconcileAffiliateCoverageJobs = async (
       },
     });
     if (existing) continue;
+    const provenance = recordValue(run.summary);
+    const provenCohortPriority = Number(provenance.cohortPriority);
+    const provenPriorityScore = Number(provenance.priorityScore);
+    const provenPriorityRank = Number(provenance.priorityRank);
+    const hasProvenPriority = Number.isFinite(provenCohortPriority)
+      && Number.isFinite(provenPriorityScore)
+      && Number.isFinite(provenPriorityRank);
     await database.jobs.create({
       data: {
         id: createIdentifier(),
         subjectType: 'FAILED_INTAKE_CAPTURE',
         subjectKey: targetKey,
         status: 'QUEUED',
+        cohortPriority: hasProvenPriority ? provenCohortPriority : 2,
+        priorityScore: hasProvenPriority ? provenPriorityScore : 0,
+        priorityRank: hasProvenPriority ? provenPriorityRank : 2_147_483_647,
+        isBlockingCoverage: Boolean(provenance.coverageCellId),
         context: {
           intakeId: run.intakeId,
           runId: run.id,
           runStatus: run.status,
           failedPageCount: failedPageCount(run.summary),
           captureTargetKey: targetKey,
+          ...(stringValue(provenance.coverageCellId) ? { coverageCellId: provenance.coverageCellId } : {}),
           reconciledAt: now.toISOString(),
         },
       },
@@ -610,6 +710,7 @@ export const reconcileAffiliateCoverageJobs = async (
     retryJobsRequeued,
     sourcesExcluded,
     duplicateCaptureJobsExcluded,
+    coverageCellSummary,
   };
 };
 
@@ -628,6 +729,21 @@ export const summarizeAffiliateCoverageQueue = async (
     ...counts,
     [job.subjectType]: (counts[job.subjectType] ?? 0) + 1,
   }), {});
+  const coverageCells = database.coverageCells?.findMany
+    ? await database.coverageCells.findMany({ select: { cohort: true, coverageStatus: true, searchStatus: true, nextReviewAt: true } })
+    : [];
+  const cohortCounts = coverageCells.reduce((counts: Record<string, number>, cell: any) => ({
+    ...counts,
+    [cell.cohort]: (counts[cell.cohort] ?? 0) + 1,
+  }), {});
+  const coverageStatusCounts = coverageCells.reduce((counts: Record<string, number>, cell: any) => ({
+    ...counts,
+    [cell.coverageStatus]: (counts[cell.coverageStatus] ?? 0) + 1,
+  }), {});
+  const searchStatusCounts = coverageCells.reduce((counts: Record<string, number>, cell: any) => ({
+    ...counts,
+    [cell.searchStatus]: (counts[cell.searchStatus] ?? 0) + 1,
+  }), {});
   return {
     totalJobs: jobs.length,
     claimableJobs: jobs.filter((job: any) => jobIsClaimable(job, now)).length,
@@ -641,6 +757,12 @@ export const summarizeAffiliateCoverageQueue = async (
     )).length,
     statusCounts,
     typeCounts,
+    cohortCounts,
+    coverageStatusCounts,
+    searchStatusCounts,
+    saturatedReviewDates: coverageCells
+      .filter((cell: any) => cell.searchStatus === 'SATURATED' && cell.nextReviewAt)
+      .map((cell: any) => cell.nextReviewAt),
   };
 };
 
@@ -805,6 +927,10 @@ export const claimNextAffiliateCoverageJob = async (
         ],
       },
       orderBy: [
+        { cohortPriority: 'asc' },
+        { isBlockingCoverage: 'desc' },
+        { priorityScore: 'desc' },
+        { priorityRank: 'asc' },
         { subjectType: 'asc' },
         { createdAt: 'asc' },
       ],
@@ -848,7 +974,11 @@ const normalizedFingerprint = (proposal: AffiliateCoverageCampaignProposal, pare
     sportIds: [...new Set(proposal.sportIds)].sort(),
     sourceTypeHints: [...new Set(proposal.sourceTypeHints)].sort(),
     coverageArchetypes: [...new Set(proposal.coverageArchetypes)].sort(),
-    queryStrategyVersion: US_CITY_DISCOVERY_QUERY_STRATEGY_VERSION,
+    coverageCellIds: [...new Set(proposal.coverageCellIds)].sort(),
+    strategyKeys: [...new Set(proposal.strategyKeys)].sort(),
+    queryStrategyVersion: proposal.strategyKeys.length
+      ? AFFILIATE_COVERAGE_QUERY_STRATEGY_VERSION
+      : US_CITY_DISCOVERY_QUERY_STRATEGY_VERSION,
   })).digest('hex')
 );
 
@@ -857,6 +987,23 @@ export const createAffiliateCoverageCampaign = async (
   dependencies: CoverageDependencies = {},
 ) => {
   const proposal = affiliateCoverageCampaignProposalSchema.parse(input);
+  if (proposal.coverageCellIds.length > 0 && proposal.strategyKeys.length === 0) {
+    throw new Error('Focused coverage campaigns require at least one governed strategy key.');
+  }
+  if (proposal.strategyKeys.length > 0 && proposal.coverageCellIds.length === 0) {
+    throw new Error('Governed strategy keys require focused coverage cells.');
+  }
+  if (new Set(proposal.coverageCellIds).size !== proposal.coverageCellIds.length) {
+    throw new Error('Focused coverage cell IDs must be unique.');
+  }
+  if (new Set(proposal.strategyKeys).size !== proposal.strategyKeys.length) {
+    throw new Error('Governed strategy keys must be unique.');
+  }
+  for (const strategyKey of proposal.strategyKeys) {
+    if (!getAffiliateCoverageQueryStrategy(strategyKey)) {
+      throw new Error(`Unknown governed coverage strategy ${strategyKey}.`);
+    }
+  }
   const database = dependencies.database ?? coverageDatabase();
   const now = dependencies.now?.() ?? new Date();
   const job = await database.jobs.findUnique({ where: { id: proposal.jobId } });
@@ -872,7 +1019,7 @@ export const createAffiliateCoverageCampaign = async (
   const coveredCities = Array.isArray(parentMetadata.coveredCities) ? parentMetadata.coveredCities : [];
   const allowedRegions = new Set<string>([
     stringValue(parentMetadata.anchorState),
-    ...coveredCities.map((entry) => stringValue(recordValue(entry).state)),
+    ...coveredCities.map((entry: unknown) => stringValue(recordValue(entry).state)),
     stringValue(parent.location),
     stringValue(parent.region),
   ].filter((value): value is string => Boolean(value)).map((value) => value.toLowerCase()));
@@ -886,6 +1033,76 @@ export const createAffiliateCoverageCampaign = async (
   }
   const sportCount = await database.sports.count({ where: { id: { in: sportIds } } });
   if (sportCount !== sportIds.length) throw new Error('One or more coverage campaign sports do not exist.');
+  let coverageTargetCells: Array<Record<string, unknown>> = [];
+  if (proposal.coverageCellIds.length > 0) {
+    if (!database.coverageCells?.findMany || !database.coverageCities?.findMany) {
+      throw new Error('Focused coverage requires persisted coverage cells and cities.');
+    }
+    const cellIds = [...new Set(proposal.coverageCellIds)];
+    const cells = await database.coverageCells.findMany({
+      where: { id: { in: cellIds } },
+      select: {
+        id: true,
+        cityId: true,
+        marketKey: true,
+        sportId: true,
+        sportName: true,
+        profileKey: true,
+        searchStatus: true,
+        nextReviewAt: true,
+      },
+    });
+    if (cells.length !== cellIds.length) throw new Error('Every proposed coverage cell must exist.');
+    const cityIds = [...new Set(cells.map((cell: any) => cell.cityId))];
+    const cities = await database.coverageCities.findMany({
+      where: { placeGeoid: { in: cityIds }, active: true },
+      select: { placeGeoid: true, city: true, state: true, marketKey: true },
+    });
+    const cityByGeoid = new Map<string, any>(cities.map((city: any) => [city.placeGeoid, city]));
+    const coveredCityKeys = new Set(coveredCities.map((entry: unknown) => {
+      const value = recordValue(entry);
+      return `${stringValue(value.city)?.toLowerCase()}, ${stringValue(value.state)?.toLowerCase()}`;
+    }));
+    for (const cell of cells) {
+      const city = cityByGeoid.get(cell.cityId);
+      const profile = getAffiliateCoverageProfile(String(cell.profileKey));
+      if (!city || !profile) throw new Error('Every proposed coverage cell must resolve to an active catalog city and profile.');
+      if (parentMetadata.marketKey && cell.marketKey !== parentMetadata.marketKey) {
+        throw new Error('Every proposed coverage cell must belong to the claimed market.');
+      }
+      if (!parentMetadata.marketKey && !coveredCityKeys.has(`${city.city.toLowerCase()}, ${city.state.toLowerCase()}`)) {
+        throw new Error('Every proposed coverage cell must belong to the claimed market.');
+      }
+      if (
+        ['WAITING_FOR_PIPELINE', 'SATURATED'].includes(String(cell.searchStatus))
+        && cell.nextReviewAt instanceof Date
+        && cell.nextReviewAt > now
+      ) {
+        throw new Error('A waiting or saturated coverage cell is not eligible before its review date.');
+      }
+      for (const strategyKey of proposal.strategyKeys) {
+        const strategy = getAffiliateCoverageQueryStrategy(strategyKey);
+        if (!strategy || !strategy.allowedProfiles.includes(profile.key)) {
+          throw new Error(`Strategy ${strategyKey} is not allowed for profile ${profile.key}.`);
+        }
+      }
+      coverageTargetCells.push({
+        cellId: cell.id,
+        cityGeoid: city.placeGeoid,
+        city: city.city,
+        state: city.state,
+        sportId: cell.sportId,
+        sportName: cell.sportName,
+        profileKey: profile.key,
+        sourceType: profile.sourceTypes[0],
+      });
+    }
+    coverageTargetCells = coverageTargetCells.sort((left, right) => (
+      String(left.cityGeoid).localeCompare(String(right.cityGeoid))
+      || String(left.sportId).localeCompare(String(right.sportId))
+      || String(left.profileKey).localeCompare(String(right.profileKey))
+    ));
+  }
   const coverageFingerprint = normalizedFingerprint(proposal, parentCampaignId);
   let campaign = await database.campaigns.findUnique({ where: { coverageFingerprint } });
   let created = false;
@@ -912,8 +1129,14 @@ export const createAffiliateCoverageCampaign = async (
           coverageParentCampaignId: parentCampaignId,
           coverageJobId: job.id,
           coverageArchetypes: proposal.coverageArchetypes,
+          coverageCellIds: proposal.coverageCellIds,
+          coverageTargetCells,
+          coverageStrategyKeys: proposal.strategyKeys,
+          strategyKeys: proposal.strategyKeys,
           rationale: proposal.rationale,
-          queryStrategyVersion: US_CITY_DISCOVERY_QUERY_STRATEGY_VERSION,
+          queryStrategyVersion: proposal.strategyKeys.length
+            ? AFFILIATE_COVERAGE_QUERY_STRATEGY_VERSION
+            : US_CITY_DISCOVERY_QUERY_STRATEGY_VERSION,
         },
       },
     });
@@ -1108,6 +1331,62 @@ export const storeAffiliateManualBrowserEvidence = async (input: {
   };
 };
 
+const validateFocusedCoverageEvidence = async (
+  database: CoverageDatabase,
+  job: any,
+  result: AffiliateCoverageCompletion,
+): Promise<void> => {
+  if (!['COVERED', 'SATURATED_NO_YIELD'].includes(result.decision)) return;
+  const context = recordValue(job.context);
+  const expectedCellIds = Array.isArray(context.coverageCellIds)
+    ? context.coverageCellIds.filter((value): value is string => typeof value === 'string')
+    : [];
+  if (!expectedCellIds.length) return;
+  const evidence = result.coverageEvidence;
+  if (!evidence) throw new Error(`${result.decision} requires coverage evidence.`);
+  if (
+    evidence.cellIds.length === 0
+    || evidence.cellIds.some((cellId) => !expectedCellIds.includes(cellId))
+    || evidence.strategyKeys.length === 0
+    || evidence.strategyKeys.length > 3
+    || !evidence.cycleKey
+    || evidence.successfulQueryExecutionIds.length === 0
+  ) {
+    throw new Error(`${result.decision} requires bounded cell, strategy, cycle, and query execution evidence.`);
+  }
+  for (const strategyKey of evidence.strategyKeys) getAffiliateCoverageQueryStrategy(strategyKey);
+  if (database.queryExecutions?.findMany) {
+    const executionIds = [
+      ...evidence.successfulQueryExecutionIds,
+      ...evidence.failedQueryExecutionIds,
+    ];
+    const executions = await database.queryExecutions.findMany({
+      where: { id: { in: executionIds } },
+      select: { id: true, status: true },
+    });
+    if (executions.length !== new Set(executionIds).size) {
+      throw new Error(`${result.decision} cites query execution evidence that does not exist.`);
+    }
+    const byId = new Map<string, string>(executions.map((execution: { id: string; status: string }) => [execution.id, execution.status]));
+    if (evidence.successfulQueryExecutionIds.some((id) => !['SUCCEEDED', 'SUCCESS', 'PARTIAL'].includes(String(byId.get(id) ?? '')))) {
+      throw new Error(`${result.decision} cites a non-successful query execution as successful.`);
+    }
+    if (evidence.failedQueryExecutionIds.some((id) => !['FAILED', 'ERROR'].includes(String(byId.get(id) ?? '')))) {
+      throw new Error(`${result.decision} cites a non-failed query execution as failed.`);
+    }
+  }
+  if (result.decision === 'SATURATED_NO_YIELD') {
+    if (
+      evidence.failedQueryExecutionIds.length > 0
+      || evidence.recentNewDomainYields.some((yieldCount) => yieldCount > 0)
+      || evidence.newQualifiedPolicyKeyCount > 0
+      || evidence.unresolvedLeadCount !== 0
+    ) {
+      throw new Error('SATURATED_NO_YIELD requires completed strategy runs with zero new yields and zero unresolved leads.');
+    }
+  }
+};
+
 export const completeAffiliateCoverageJob = async (
   input: AffiliateCoverageCompletion,
   dependencies: CoverageDependencies = {},
@@ -1117,6 +1396,7 @@ export const completeAffiliateCoverageJob = async (
   const now = dependencies.now?.() ?? new Date();
   const job = await database.jobs.findUnique({ where: { id: result.jobId } });
   assertActiveClaim(job, result.agentId, now);
+  await validateFocusedCoverageEvidence(database, job, result);
   if (job.subjectType === 'MARKET_COVERAGE') {
     if (result.decision === 'CAMPAIGNS_CREATED' && result.campaignIds.length === 0) {
       throw new Error('CAMPAIGNS_CREATED requires at least one campaign id.');

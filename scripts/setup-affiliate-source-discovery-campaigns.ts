@@ -1,9 +1,9 @@
 import dotenv from 'dotenv';
 import { createId } from '../src/lib/id';
 import {
+  AFFILIATE_COVERAGE_CAMPAIGN_TEMPLATES,
   CENSUS_CITY_CAMPAIGN_SOURCE,
   US_CITY_DISCOVERY_QUERY_STRATEGY_VERSION,
-  US_CITY_DISCOVERY_CAMPAIGN_TEMPLATES,
 } from '../src/server/affiliateImports/sourceDiscoveryCampaignTemplates';
 
 dotenv.config({ quiet: true });
@@ -20,7 +20,7 @@ const main = async () => {
     });
     if (!sports.length) throw new Error('Default sports must be seeded before discovery campaign templates.');
     const campaigns = [];
-    for (const template of US_CITY_DISCOVERY_CAMPAIGN_TEMPLATES) {
+    for (const template of AFFILIATE_COVERAGE_CAMPAIGN_TEMPLATES) {
       const existing = await db.affiliateSourceDiscoveryCampaigns.findUnique({
         where: { name: template.name },
         select: { metadata: true },
@@ -28,7 +28,8 @@ const main = async () => {
       const metadata = {
         ...(existing?.metadata && typeof existing.metadata === 'object' ? existing.metadata : {}),
         template: true,
-        rollout: 'largest-us-cities',
+        rollout: 'census-2025-threshold',
+        marketKey: template.marketKey,
         priorityRank: template.priorityRank,
         anchorCity: template.anchorCity,
         anchorState: template.anchorState,

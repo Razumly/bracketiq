@@ -14,15 +14,17 @@ Write a proposal JSON and pass it unchanged to the campaign-create command. Use 
       "sportIds": ["canonical sport id"],
       "sourceTypeHints": ["TOURNAMENT"],
       "coverageArchetypes": ["COMPETITION_OPERATOR", "GOVERNING_ASSOCIATION"],
+      "coverageCellIds": ["city-geoid:sport-id:league-operators"],
+      "strategyKeys": ["operator-web-v1", "governing-association-directory-v1"],
       "rationale": "Existing results contain tournament events but no focused operator campaign.",
       "searchIntervalMinutes": 10080,
       "maxQueriesPerRun": 10,
       "maxResultsPerQuery": 10
     }
 
-Allowed archetypes are `CLUB_OR_ACADEMY`, `COMPETITION_OPERATOR`, `FACILITY`, `GOVERNING_ASSOCIATION`, `RECREATION_DEPARTMENT`, and `TRAINING_PROVIDER`.
+Allowed archetypes are `CLUB_OR_ACADEMY`, `COMPETITION_OPERATOR`, `FACILITY`, `GOVERNING_ASSOCIATION`, `RECREATION_DEPARTMENT`, and `TRAINING_PROVIDER`. Focused proposals select one through twenty eligible `coverageCellIds` and one through three governed `strategyKeys`; the server validates market ownership, profile compatibility, review eligibility, and the deterministic fingerprint.
+The command activates and queues the campaign but does not call the provider. An identical fingerprint returns the existing campaign and does not duplicate its active run. Use the read-only query-preview command before creation to inspect campaign metadata separately from exact provider queries.
 
-The command activates and queues the campaign but does not call the provider. An identical fingerprint returns the existing campaign and does not duplicate its active run.
 
 ## Manual browser evidence
 
@@ -60,9 +62,9 @@ Every result uses:
     }
 
 Allowed decisions are:
-
 - `CAMPAIGNS_CREATED`: Use only for a market job and include at least one campaign ID. Run each listed campaign first. Completion returns the market job to `QUEUED` for a fresh assessment.
-- `COVERED`: Use only for a market job. Include two source families, completed profiles backed by successful run summaries, at least two recent yields, and `unresolvedLeadCount: 0`. This count includes only unlinked, automatically promotable direct results. Include all focused campaign IDs whose results support the decision.
+- `COVERED`: Use only for a market job after persisted cell evidence proves linked direct coverage, required independent strategy families, no unresolved promotable leads, and terminal capture outcomes.
+- `SATURATED_NO_YIELD`: Use only for a market job after the server verifies two completed zero-yield cycles with different governed strategies, required families, successful or useful-partial cited queries, no unresolved leads, no active capture failures, and the current strategy version. It preserves `GAP` coverage and sets a future review date.
 - `WAITING_FOR_PIPELINE`: Use only for a market job with a current nonzero count of unlinked, automatically promotable direct results. Include that count in `coverageEvidence`. Reconciliation returns the job to `QUEUED` after the count reaches zero.
 - `CAPTURE_RECOVERED`: Use only for a failed-capture job and include the successful manual run ID.
 - `MAPPER_REPAIR_REQUIRED`: Use when an existing scraper package needs implementation repair.
@@ -100,16 +102,23 @@ Use one of these reason codes with `HUMAN_REVIEW_REQUIRED`:
 - `CONTRADICTORY_EVIDENCE`
 - `REPLACEMENT_DOMAIN_APPROVAL_REQUIRED`
 
-A covered result uses evidence such as:
+Saturation evidence uses the following shape; a covered result must additionally prove linked direct coverage:
 
     {
-      "sourceFamilies": ["provider search", "governing association directory"],
-      "completedQueryProfiles": ["clubs-programs", "league-operators", "tournament-operators"],
-      "recentNewDomainYields": [1, 0, 0],
+      "cellIds": ["city-geoid:sport-id:league-operators"],
+      "cycleKey": "2026-08-09T21:00:00.000Z",
+      "strategyKeys": ["operator-web-v1", "governing-association-directory-v1"],
+      "strategyFamilyKeys": ["operator-web", "governing-association-directory"],
+      "successfulQueryExecutionIds": ["query-execution-id"],
+      "failedQueryExecutionIds": [],
+      "newQualifiedPolicyKeyCount": 0,
       "unresolvedLeadCount": 0,
+      "proposedNextReviewAt": "2026-10-08T21:00:00.000Z",
+      "sourceFamilies": ["operator-web", "governing-association-directory"],
+      "completedQueryProfiles": ["league-operators", "tournament-operators"],
+      "recentNewDomainYields": [0, 0],
       "notes": ["All failed capture jobs reached a terminal result."]
     }
-
 ## Retry and stopping rules
 
 One claim permits one manual public-page pass. Reconciliation can schedule another claim only for a recognized transient reason and stops after three total claims. A same-policy-key `www` redirect is not a replacement source. A new policy key needs governed intake handling and cannot be inferred from a similar name.
