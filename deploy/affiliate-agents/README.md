@@ -47,3 +47,33 @@ Stop the fleet without deleting workspaces, Codex state, or queue rows:
 Set the restart policy back to `no` before recreating a deliberately paused
 fleet. Do not remove a mapper workspace until its branch and generated source
 package are preserved.
+## Sport-evidence cutover and fleet stop boundary (2026-08-10)
+
+The mapper, reviewer, and coverage containers are queue writers. Before a
+cutover, stop all ten `mapper-*` services, both `reviewer-*` services, and
+`coverage`; also stop the separately deployed model-controller timer/service.
+Do not infer safety from an empty mapper claim. Coverage can requeue mapping
+jobs, and the model controller claims the same mapping queue.
+
+Every checkout must expose the same fleet contract before restart:
+`contextContractVersion: 2`, `claimContractVersion: 1`,
+`completionCasVersion: 1`, `approvalResultVersion: 2`,
+`approvalCompletionCasVersion: 1`, `approvalEvidenceClaimVersion: 1`,
+`coverageRepairCasVersion: 1`, `standaloneLiveApplyEnabled: false`, and
+`strategyRevision: "sport-evidence-v1"`. Run the no-write
+`affiliate:mapping:sport-contract` preflight from each stopped service; a
+missing module, old command, stale checkout, or model image mismatch blocks
+restart.
+
+The normal mapper and model-agent live paths must claim one exact intake/run,
+persist the injected live `Sports` snapshot, and complete through the shared
+claim-generation CAS. `DEFAULT_SPORTS`, discovery hints, and generic sport
+labels are not authority. Reconciliation is dry-run-first and requires the
+reviewed count and selection hash for apply; it requeues only the same
+identity-less terminal job, never writes candidates, and is idempotent.
+Live package application is only inside validated v2 approval completion; the
+former standalone apply command is intentionally absent.
+
+Revision note (2026-08-10): Added coverage/model-controller stop boundaries,
+fleet contract preflight, reconciliation guards, and approval-only live
+application while retaining the container topology and host procedures.

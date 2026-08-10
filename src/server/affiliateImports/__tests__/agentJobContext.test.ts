@@ -5,9 +5,14 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
   buildAffiliateMappingJobContextFromExport,
-  buildAffiliateMappingJobContextFromExports,
+  buildAffiliateMappingTrainingContextFromExports,
 } from '../agentJobContext';
+import { buildAffiliateSportsCatalogSnapshot } from '../affiliateSportsCatalog';
 
+  const sportsCatalog = buildAffiliateSportsCatalogSnapshot(
+    [{ id: 'sport_1', name: 'Grass Soccer' }],
+    '2026-01-01T00:00:00.000Z',
+  );
 describe('affiliate mapping job context builder', () => {
   it('verifies the export and retrieves bounded Markdown, HTML, policy, and repository context', async () => {
     const temporaryDirectory = await fs.mkdtemp('/tmp/affiliate-agent-context-');
@@ -45,8 +50,10 @@ describe('affiliate mapping job context builder', () => {
           intakeId: 'intake_1',
           intakeSourceKey: 'river-city',
           runId: 'run_1',
+          sportsCatalogSha256: sportsCatalog.sha256,
           complianceStatus: 'ALLOWED',
         },
+        sportsCatalog,
         intake: {
           id: 'intake_1',
           sourceKey: 'river-city',
@@ -54,6 +61,7 @@ describe('affiliate mapping job context builder', () => {
         },
         artifacts: [
           {
+            id: 'artifact_page',
             kind: 'PAGE_MARKDOWN',
             contentHash: markdownHash,
             localPath: 'page.md',
@@ -62,6 +70,7 @@ describe('affiliate mapping job context builder', () => {
             sizeBytes: markdown.length,
           },
           {
+            id: 'artifact_robots',
             kind: 'ROBOTS',
             contentHash: robotsHash,
             localPath: 'robots.txt',
@@ -77,6 +86,8 @@ describe('affiliate mapping job context builder', () => {
         evidenceDirectory,
         repositoryRoot,
         instructionsRevision: 'instructions-v1',
+        workerId: 'worker_1',
+        claimedAt: '2026-01-01T00:00:00.000Z',
       });
       expect(result.context).toEqual(expect.objectContaining({
         jobId: 'job_1',
@@ -216,8 +227,7 @@ describe('affiliate mapping job context builder', () => {
           }),
         );
       }
-
-      const result = await buildAffiliateMappingJobContextFromExports({
+      const result = await buildAffiliateMappingTrainingContextFromExports({
         jobId: 'job_1',
         evidenceDirectories: [firstEvidenceDirectory, secondEvidenceDirectory],
         repositoryRoot,

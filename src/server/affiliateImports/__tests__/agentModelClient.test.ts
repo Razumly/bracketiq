@@ -4,13 +4,18 @@ import {
   AFFILIATE_MAPPING_SYSTEM_PROMPT,
   OpenAICompatibleAffiliateMappingModelClient,
 } from '../agentModelClient';
-
+import { buildAffiliateSportsCatalogSnapshot } from '../affiliateSportsCatalog';
 const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
 const HASH_C = 'c'.repeat(64);
+const sportsCatalog = buildAffiliateSportsCatalogSnapshot(
+  [{ id: 'sport_1', name: 'Grass Soccer' }],
+  '2026-01-01T00:00:00.000Z',
+);
 
 const draft = {
-  schemaVersion: 1,
+  schemaVersion: 2,
+  contextContractVersion: 2,
   intakeId: 'intake_1',
   sourceKey: 'river-city',
   runId: 'run_1',
@@ -39,6 +44,7 @@ const draft = {
   },
   warnings: [],
   unresolvedQuestions: [],
+  sportDeterminations: [],
 };
 
 describe('OpenAI-compatible open-weight mapping client', () => {
@@ -73,16 +79,24 @@ describe('OpenAI-compatible open-weight mapping client', () => {
       },
     });
     expect(await client.createDraft({
+      contextContractVersion: 2,
       jobId: 'job_1',
       intakeId: 'intake_1',
       sourceKey: 'river-city',
+      workerId: 'worker_1',
+      claimedAt: '2026-01-01T00:00:00.000Z',
       runId: 'run_1',
+      evidenceRunIds: ['run_1'],
+      sportsCatalog,
       policyDisposition: 'BLOCKED',
       targetKindHints: [],
       artifacts: [{
+        artifactId: 'artifact_robots',
         kind: 'ROBOTS',
         sha256: HASH_A,
         pageUrl: 'https://rivercity.example/robots.txt',
+        intakeId: 'intake_1',
+        runId: 'run_1',
       }],
       evidenceExcerpts: [{
         kind: 'ROBOTS',
@@ -91,7 +105,7 @@ describe('OpenAI-compatible open-weight mapping client', () => {
         content: 'Disallow: /',
         truncated: false,
       }],
-      instructionsRevision: 'v1',
+      instructionsRevision: 'v2',
     })).toEqual(draft);
     expect(requests[0].url).toBe('http://127.0.0.1:8080/v1/chat/completions');
     const body = JSON.parse(String(requests[0].init?.body));
@@ -144,14 +158,26 @@ describe('OpenAI-compatible open-weight mapping client', () => {
       },
     });
     await expect(client.createDraft({
+      contextContractVersion: 2,
       jobId: 'job',
       intakeId: 'intake',
       sourceKey: 'source',
+      workerId: 'worker_1',
+      claimedAt: '2026-01-01T00:00:00.000Z',
       runId: 'run',
+      evidenceRunIds: ['run'],
+      sportsCatalog,
       policyDisposition: 'BLOCKED',
       targetKindHints: [],
-      artifacts: [],
-      instructionsRevision: 'v1',
+      artifacts: [{
+        artifactId: 'artifact_robots',
+        kind: 'ROBOTS',
+        sha256: HASH_A,
+        pageUrl: 'https://rivercity.example/robots.txt',
+        intakeId: 'intake',
+        runId: 'run',
+      }],
+      instructionsRevision: 'v2',
     })).rejects.toThrow('non-JSON draft content');
   });
 });

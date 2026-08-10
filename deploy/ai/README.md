@@ -119,3 +119,35 @@ application, existing source mappings, or manual Codex mapping:
 Removing this stack is reversible. Stop the timer and model service, retain the
 model manifest, hashes, output reports, and job worktrees, then remove only the
 containers. Do not delete queue rows or training artifacts to roll back.
+## Current controller contract and stopped-fleet boundary (2026-08-10)
+
+The separate model controller is a live mapping-queue writer, not merely a
+model container. Keep `CONTROLLER_MODE=disabled` and the systemd timer stopped
+while mapper/reviewer/coverage cutovers or reconciliation are in progress.
+Before enabling it, update the repository and digest-pinned controller image
+from the exact implementation commit and run the no-write
+`affiliate:mapping:sport-contract` command inside the image. Its output must
+match the Compose fleet contract: context v2, claim/completion CAS versions,
+approval result/completion/evidence versions, coverage repair CAS version,
+`standaloneLiveApplyEnabled: false`, and strategy revision
+`sport-evidence-v1`.
+
+Queue mode must use the shared claim/export/context/completion service. It
+persists one exact intake/run and injected live `Sports` snapshot before model
+execution, emits v2 evidence-backed determinations, and cannot use
+`DEFAULT_SPORTS`, discovery hints, or generic labels as authority. A stale
+catalog or claim generation fails closed. The controller cannot approve,
+publish, enable recurring scraping, or invoke a standalone live-apply path;
+live package execution occurs only inside validated v2 approval completion.
+
+Historical sport repair is a separate dry-run-first reconciliation command.
+Require the reviewed selection hash and expected count for each apply, requeue
+only eligible same-job terminal rows, and verify a zero-write idempotent
+rerun. Stop and preflight all Compose mapper/reviewer services and `coverage`
+as well as this controller before any apply or queue restart. Preserve model
+manifests, output, worktrees, and reconciliation reports when rolling back;
+never start an old controller against new queue contracts.
+
+Revision note (2026-08-10): Added digest-pinned controller preflight, shared
+claim contract, approval-only execution, reconciliation, and full stopped-fleet
+rules without removing prior model security and capacity guidance.

@@ -167,15 +167,18 @@ export type AffiliateSourceClassification = {
   reasons: string[];
 };
 
-const intakePrisma = () => ({
-  intakes: (prisma as any).affiliateSourceIntakes,
-  pages: (prisma as any).affiliateSourceIntakePages,
-  runs: (prisma as any).affiliateSourceIntakeRuns,
-  artifacts: (prisma as any).affiliateSourceIntakeArtifacts,
-  policies: (prisma as any).affiliateSourceDomainPolicies,
-  discoveryResults: (prisma as any).affiliateSourceDiscoveryResults,
-  mappingJobs: (prisma as any).affiliateSourceMappingJobs,
-});
+const intakePrisma = (client: unknown = prisma) => {
+  const dbClient = client as Record<string, unknown>;
+  return {
+    intakes: dbClient.affiliateSourceIntakes as any,
+    pages: dbClient.affiliateSourceIntakePages as any,
+    runs: dbClient.affiliateSourceIntakeRuns as any,
+    artifacts: dbClient.affiliateSourceIntakeArtifacts as any,
+    policies: dbClient.affiliateSourceDomainPolicies as any,
+    discoveryResults: dbClient.affiliateSourceDiscoveryResults as any,
+    mappingJobs: dbClient.affiliateSourceMappingJobs as any,
+  };
+};
 
 const stringValue = (value: unknown): string | null => (
   typeof value === 'string' && value.trim() ? value.trim() : null
@@ -345,9 +348,9 @@ export const reviewAffiliateSourceIntakePolicy = async (
   intakeId: string,
   review: AffiliateSourcePolicyReview,
   userId: string,
-  options: { queueCaptureOnAllow?: boolean } = {},
+  options: { queueCaptureOnAllow?: boolean; db?: unknown } = {},
 ) => {
-  const { intakes, pages, runs, policies, discoveryResults } = intakePrisma();
+  const { intakes, pages, runs, policies, discoveryResults } = intakePrisma(options.db);
   const complianceStatus = stringValue(review.complianceStatus)?.toUpperCase() ?? '';
   if (!VALID_COMPLIANCE_STATUSES.has(complianceStatus)) {
     throw new Error('Unsupported affiliate source compliance status.');
@@ -621,8 +624,9 @@ export const queueAffiliateSourceIntakeRun = async (
   intakeId: string,
   requestedPageIds: string[],
   userId: string,
+  options: { db?: unknown } = {},
 ) => {
-  const { intakes, pages, runs } = intakePrisma();
+  const { intakes, pages, runs } = intakePrisma(options.db);
   const intake = await intakes.findUnique({ where: { id: intakeId } });
   if (!intake) throw new Error('Affiliate source intake not found.');
   if (intake.complianceStatus !== 'ALLOWED') {

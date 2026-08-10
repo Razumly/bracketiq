@@ -32,11 +32,34 @@ const agentId = z.string().trim().regex(
   /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/,
   'Coverage agent id must use 1-80 letters, numbers, dots, underscores, or hyphens.',
 );
+export const affiliateCoverageClaimGenerationSchema = z.object({
+  jobId: z.string().trim().min(1),
+  agentId,
+  claimedAt: z.string().datetime({ offset: true }),
+}).strict();
+
+export type AffiliateCoverageClaimGeneration = z.infer<
+  typeof affiliateCoverageClaimGenerationSchema
+>;
+
+const assertMatchingClaimGeneration = (
+  value: { jobId?: string; agentId?: string; claimGeneration?: AffiliateCoverageClaimGeneration },
+  context: z.RefinementCtx,
+): void => {
+  if (value.claimGeneration && value.jobId !== value.claimGeneration.jobId) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['claimGeneration', 'jobId'], message: 'Claim generation job id must match the action job id.' });
+  }
+  if (value.claimGeneration && value.agentId !== value.claimGeneration.agentId) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['claimGeneration', 'agentId'], message: 'Claim generation agent id must match the action agent id.' });
+  }
+};
+
 
 export const affiliateCoverageCampaignProposalSchema = z.object({
   schemaVersion: z.literal(1),
   jobId: z.string().trim().min(1),
   agentId,
+  claimGeneration: affiliateCoverageClaimGenerationSchema,
   name: z.string().trim().min(2).max(160),
   region: z.string().trim().min(2).max(200),
   location: z.string().trim().min(2).max(200).nullable().optional(),
@@ -56,7 +79,7 @@ export const affiliateCoverageCampaignProposalSchema = z.object({
   searchIntervalMinutes: z.number().int().min(1_440).max(525_600).default(10_080),
   maxQueriesPerRun: z.number().int().min(1).max(50).default(10),
   maxResultsPerQuery: z.number().int().min(1).max(20).default(10),
-});
+}).superRefine(assertMatchingClaimGeneration);
 
 export type AffiliateCoverageCampaignProposal = z.infer<typeof affiliateCoverageCampaignProposalSchema>;
 
@@ -64,6 +87,7 @@ export const affiliateCoverageCompletionSchema = z.object({
   schemaVersion: z.literal(1),
   jobId: z.string().trim().min(1),
   agentId,
+  claimGeneration: affiliateCoverageClaimGenerationSchema,
   decision: z.enum(AFFILIATE_COVERAGE_DECISIONS),
   summary: z.string().trim().min(10).max(8_000),
   campaignIds: z.array(z.string().trim().min(1)).max(50).default([]),
@@ -84,6 +108,6 @@ export const affiliateCoverageCompletionSchema = z.object({
     notes: z.array(z.string().trim().min(1)).max(50).default([]),
   }).nullable().optional(),
   reasonCodes: z.array(z.string().trim().regex(/^[A-Z0-9_]+$/)).max(50).default([]),
-});
+}).superRefine(assertMatchingClaimGeneration);
 
 export type AffiliateCoverageCompletion = z.infer<typeof affiliateCoverageCompletionSchema>;

@@ -5,11 +5,15 @@ import {
   type AffiliateMappingEvaluationExample,
 } from '../agentEvaluation';
 import { FixtureAffiliateMappingModelClient } from '../agentModelClient';
+import { buildAffiliateSportsCatalogSnapshot } from '../affiliateSportsCatalog';
 
 const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
 const HASH_C = 'c'.repeat(64);
-
+const sportsCatalog = buildAffiliateSportsCatalogSnapshot(
+  [{ id: 'sport_grass_soccer', name: 'Grass Soccer' }],
+  '2026-01-01T00:00:00.000Z',
+);
 const model = {
   family: 'fixture',
   upstreamRepository: 'bracketiq/fixture',
@@ -20,7 +24,8 @@ const model = {
 };
 
 const allowedDraft = {
-  schemaVersion: 1 as const,
+  schemaVersion: 2 as const,
+  contextContractVersion: 2 as const,
   intakeId: 'intake_1',
   sourceKey: 'river-city',
   runId: 'run_1',
@@ -76,6 +81,20 @@ const allowedDraft = {
   },
   warnings: [],
   unresolvedQuestions: [],
+  sportDeterminations: [{
+    sourceLabels: ['outdoor soccer'],
+    status: 'RESOLVED' as const,
+    resolutionBasis: 'SOURCE_EVIDENCE' as const,
+    canonicalSportNames: ['Grass Soccer'],
+    rationale: 'The page describes an outdoor grass soccer league.',
+    evidence: [{
+      artifactId: 'artifact_a',
+      artifactSha256: HASH_A,
+      artifactKind: 'PAGE_HTML' as const,
+      pageUrl: 'https://rivercity.example/events',
+      excerpt: 'outdoor soccer',
+    }],
+  }],
 };
 
 const blockedDraft = {
@@ -87,7 +106,7 @@ const blockedDraft = {
   implementationMode: 'BLOCKED' as const,
   listingKind: null,
   evidence: [{
-    artifactKind: 'ROBOTS',
+    artifactKind: 'PAGE_HTML',
     artifactSha256: HASH_B,
     pageUrl: 'https://blocked.example/robots.txt',
     supports: ['policyDisposition'],
@@ -99,42 +118,58 @@ const blockedDraft = {
     artifactSha256: null,
     sourceUrl: null,
   },
+  sportDeterminations: [],
 };
 
 const examples: AffiliateMappingEvaluationExample[] = [
   {
-    exampleId: 'allowed',
     context: {
+      contextContractVersion: 2,
       jobId: 'job_allowed',
       intakeId: 'intake_1',
       sourceKey: 'river-city',
+      workerId: 'worker_1',
+      claimedAt: '2026-01-01T00:00:00.000Z',
       runId: 'run_1',
+      evidenceRunIds: ['run_1'],
+      sportsCatalog,
       policyDisposition: 'ALLOWED',
       targetKindHints: ['EVENT'],
       artifacts: [{
+        artifactId: 'artifact_a',
         kind: 'PAGE_HTML',
         sha256: HASH_A,
         pageUrl: 'https://rivercity.example/events',
+        intakeId: 'intake_1',
+        runId: 'run_1',
       }],
-      instructionsRevision: 'v1',
+      instructionsRevision: 'v2',
     },
     expectedDraft: allowedDraft,
   },
   {
     exampleId: 'blocked',
     context: {
+      contextContractVersion: 2,
       jobId: 'job_blocked',
       intakeId: 'intake_blocked',
       sourceKey: 'blocked-source',
+      workerId: 'worker_1',
+      claimedAt: '2026-01-01T00:00:00.000Z',
       runId: 'run_blocked',
+      evidenceRunIds: ['run_blocked'],
+      sportsCatalog,
       policyDisposition: 'BLOCKED',
       targetKindHints: [],
       artifacts: [{
-        kind: 'ROBOTS',
+        artifactId: 'artifact_b',
+        kind: 'PAGE_HTML',
         sha256: HASH_B,
         pageUrl: 'https://blocked.example/robots.txt',
+        intakeId: 'intake_blocked',
+        runId: 'run_blocked',
       }],
-      instructionsRevision: 'v1',
+      instructionsRevision: 'v2',
     },
     expectedDraft: blockedDraft,
   },

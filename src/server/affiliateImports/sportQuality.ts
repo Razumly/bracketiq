@@ -1,5 +1,13 @@
 import { isAffiliateSportBlacklisted } from './affiliateSportMapping';
-
+import {
+  affiliateSportsCatalogSnapshotSchema,
+  compareAffiliateCatalogCodeUnits,
+  type AffiliateSportsCatalogSnapshot,
+} from './affiliateSportsCatalog';
+import {
+  resolvedAffiliateSportNameUnion,
+  type AffiliateSportDetermination,
+} from './affiliateSportDetermination';
 export type AffiliateSportCatalogRow = {
   id: string;
   name: string;
@@ -17,15 +25,18 @@ export type AffiliateSportOrganizationRow = {
   name: string;
   sports: string[];
 };
-
 export type AffiliateSportQualityIssue = {
-  subjectType: 'CANDIDATE' | 'ORGANIZATION';
+  subjectType: 'CANDIDATE' | 'ORGANIZATION' | 'DETERMINATION';
   subjectId: string;
   subjectName: string;
   listingKind: string | null;
   sportName: string | null;
   canonicalSuggestion: string | null;
-  code: 'SPORT_NAME_REQUIRED' | 'SPORT_NAME_NOT_CANONICAL' | 'SPORT_NOT_IN_CATALOG';
+  code:
+    | 'SPORT_NAME_REQUIRED'
+    | 'SPORT_NAME_NOT_CANONICAL'
+    | 'SPORT_NOT_IN_CATALOG'
+    | 'SPORT_DETERMINATION_MISMATCH';
   message: string;
 };
 
@@ -34,6 +45,11 @@ export type AffiliateSportQuality = {
   checkedOrganizationSportCount: number;
   canonicalSportNames: string[];
   unsupportedSportNames: string[];
+  catalogSha256: string | null;
+  catalogHashMatched: boolean;
+  determinationCoveragePassed: boolean;
+  expectedSportNames: string[];
+  observedSportNames: string[];
   issueCount: number;
   passed: boolean;
   issues: AffiliateSportQualityIssue[];
@@ -47,10 +63,13 @@ export const analyzeAffiliateSportQuality = (input: {
   candidates: AffiliateSportCandidateRow[];
   organization: AffiliateSportOrganizationRow | null;
   catalog: AffiliateSportCatalogRow[];
+  catalogSnapshot?: AffiliateSportsCatalogSnapshot;
+  catalogSha256?: string;
+  sportDeterminations?: readonly AffiliateSportDetermination[];
 }): AffiliateSportQuality => {
   const canonicalSportNames = Array.from(new Set(
     input.catalog.map((sport) => nonEmptyString(sport.name)).filter((name): name is string => Boolean(name)),
-  )).sort((left, right) => left.localeCompare(right));
+  )).sort(compareAffiliateCatalogCodeUnits);
   const exactNames = new Set(canonicalSportNames);
   const namesByLowercase = new Map<string, string[]>();
   canonicalSportNames.forEach((name) => {
@@ -139,15 +158,47 @@ export const analyzeAffiliateSportQuality = (input: {
       .filter((issue) => issue.code === 'SPORT_NOT_IN_CATALOG')
       .map((issue) => issue.sportName)
       .filter((name): name is string => Boolean(name)),
-  )).sort((left, right) => left.localeCompare(right));
+  )).sort(compareAffiliateCatalogCodeUnits);
+  const observedSportNames = Array.from(new Set([
+    ...input.candidates.map((candidate) => nonEmptyString(candidate.sportName)),
+    ...(input.organization?.sports ?? []).map((sportName) => nonEmptyString(sportName)),
+  ].filter((name): name is string => Boolean(name)))).sort(compareAffiliateCatalogCodeUnits);
+  const expectedSportNames = input.sportDeterminations
+    ? resolvedAffiliateSportNameUnion(input.sportDeterminations)
+    : [];
+  const determinationCoveragePassed = !input.sportDeterminations
+    || (
+      expectedSportNames.length === observedSportNames.length
+      && expectedSportNames.every((name, index) => name === observedSportNames[index])
+    );
+  if (!determinationCoveragePassed) {
+    issues.push({
+      subjectType: 'DETERMINATION',
+      subjectId: 'sport-union',
+      subjectName: 'sport union',
+      listingKind: null,
+      sportName: null,
+      canonicalSuggestion: null,
+      code: 'SPORT_DETERMINATION_MISMATCH',
+      message: `Observed candidate and organization sports must exactly equal resolved determination names (${expectedSportNames.join(', ')}).`,
+    });
+  }
+  const catalogHashMatched = !input.catalogSnapshot
+    || !input.catalogSha256
+    || input.catalogSnapshot.sha256.toLowerCase() === input.catalogSha256.toLowerCase();
 
   return {
     checkedCandidateCount: input.candidates.length,
     checkedOrganizationSportCount: input.organization?.sports.length ?? 0,
     canonicalSportNames,
     unsupportedSportNames,
+    catalogSha256: input.catalogSnapshot?.sha256 ?? input.catalogSha256 ?? null,
+    catalogHashMatched,
+    determinationCoveragePassed,
+    expectedSportNames,
+    observedSportNames,
     issueCount: issues.length,
-    passed: issues.length === 0,
+    passed: issues.length === 0 && catalogHashMatched && determinationCoveragePassed,
     issues,
   };
 };
@@ -160,7 +211,43 @@ export const inspectAffiliateSportQuality = async (input: {
     ) => Promise<{ rows: T[] }>;
   };
   sourceId: string;
+  catalogSnapshot?: AffiliateSportsCatalogSnapshot;
+  sportsCatalog?: AffiliateSportsCatalogSnapshot;
+  catalog?: AffiliateSportsCatalogSnapshot;
+  catalogSha256?: string;
+  sportsCatalogSha256?: string;
+  sportDeterminations?: readonly AffiliateSportDetermination[];
 }): Promise<AffiliateSportQuality> => {
+  const injectedSnapshot = input.catalogSnapshot ?? input.sportsCatalog ?? input.catalog;
+  if (injectedSnapshot) {
+    const snapshot = affiliateSportsCatalogSnapshotSchema.parse(injectedSnapshot);
+    const [candidateResult, organizationResult] = await Promise.all([
+      input.queryable.query<AffiliateSportCandidateRow>(
+        `SELECT id, "listingKind", title, "sportName"
+           FROM "AffiliateImportCandidates"
+          WHERE "sourceId" = $1
+          ORDER BY "dedupeKey" ASC`,
+        [input.sourceId],
+      ),
+      input.queryable.query<AffiliateSportOrganizationRow>(
+        `SELECT organization.id, organization.name, organization.sports
+           FROM "AffiliateScrapeSources" source
+           JOIN "Organizations" organization ON organization.id = source."organizationId"
+          WHERE source.id = $1
+          LIMIT 1`,
+        [input.sourceId],
+      ),
+    ]);
+    return analyzeAffiliateSportQuality({
+      candidates: candidateResult.rows,
+      organization: organizationResult.rows[0] ?? null,
+      catalog: snapshot.sports,
+      catalogSnapshot: snapshot,
+      catalogSha256: input.catalogSha256 ?? input.sportsCatalogSha256,
+      sportDeterminations: input.sportDeterminations,
+    });
+  }
+
   const [candidateResult, organizationResult, catalogResult] = await Promise.all([
     input.queryable.query<AffiliateSportCandidateRow>(
       `SELECT id, "listingKind", title, "sportName"

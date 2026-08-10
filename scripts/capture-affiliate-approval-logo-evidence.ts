@@ -21,10 +21,11 @@ const main = async () => {
   const approvalJobId = readOption('--approval');
   const mappingJobId = readOption('--job');
   const reviewerId = readOption('--reviewer');
+  const claimedAt = readOption('--claimed-at');
   const pageUrl = readOption('--page-url');
   const logoUrl = readOption('--logo-url');
-  if (!approvalJobId || !mappingJobId || !reviewerId || !pageUrl || !logoUrl) {
-    throw new Error('--approval, --job, --reviewer, --page-url, and --logo-url are required.');
+  if (!approvalJobId || !mappingJobId || !reviewerId || !claimedAt || !pageUrl || !logoUrl) {
+    throw new Error('--approval, --job, --reviewer, --claimed-at, --page-url, and --logo-url are required.');
   }
   const { prisma } = await import('../src/lib/prisma');
   const { captureAffiliateApprovalLogoEvidence } = await import(
@@ -35,6 +36,7 @@ const main = async () => {
       approvalJobId,
       mappingJobId,
       reviewerId,
+      claimGeneration: { approvalJobId, reviewerId, claimedAt },
       pageUrl,
       logoUrl,
     });

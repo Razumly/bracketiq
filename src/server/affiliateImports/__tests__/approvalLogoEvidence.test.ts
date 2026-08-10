@@ -1,7 +1,11 @@
 /** @jest-environment node */
 
 const prismaMock = {
-  affiliateApprovalJobs: { findUnique: jest.fn() },
+  $transaction: jest.fn((callback) => callback(prismaMock)),
+  affiliateApprovalJobs: {
+    findUnique: jest.fn(),
+    updateMany: jest.fn(async ({ data }) => ({ count: 1, ...data })),
+  },
   affiliateSourceMappingJobs: { findUnique: jest.fn() },
   affiliateSourceIntakes: { findUnique: jest.fn(), update: jest.fn() },
   affiliateSourceIntakePages: {
@@ -62,6 +66,8 @@ describe('affiliate approval supplemental logo evidence', () => {
       subjectKey: 'mapping_1',
       status: 'CLAIMED',
       reviewerId: 'reviewer_1',
+      claimedAt: new Date('2026-08-02T00:00:00.000Z'),
+      leaseExpiresAt: new Date('2026-08-02T02:00:00.000Z'),
     });
     prismaMock.affiliateSourceMappingJobs.findUnique.mockResolvedValue({
       id: 'mapping_1',
@@ -140,12 +146,16 @@ describe('affiliate approval supplemental logo evidence', () => {
       });
     const persistArtifact = jest.fn(async (input) => ({
       id: input.kind === 'LOGO_CANDIDATE' ? 'logo_artifact_1' : `artifact_${input.kind}`,
-    })) as any;
-
+    }));
     const result = await captureAffiliateApprovalLogoEvidence({
       approvalJobId: 'approval_1',
       mappingJobId: 'mapping_1',
       reviewerId: 'reviewer_1',
+      claimGeneration: {
+        approvalJobId: 'approval_1',
+        reviewerId: 'reviewer_1',
+        claimedAt: '2026-08-02T00:00:00.000Z',
+      },
       pageUrl: 'https://example.com/',
       logoUrl: 'https://cdn.example.net/official-logo.svg',
     }, {
@@ -208,6 +218,11 @@ describe('affiliate approval supplemental logo evidence', () => {
       approvalJobId: 'approval_1',
       mappingJobId: 'mapping_1',
       reviewerId: 'reviewer_1',
+      claimGeneration: {
+        approvalJobId: 'approval_1',
+        reviewerId: 'reviewer_1',
+        claimedAt: '2026-08-02T00:00:00.000Z',
+      },
       pageUrl: 'https://example.com/',
       logoUrl: 'https://unrelated.example.net/logo.svg',
     }, {
@@ -222,5 +237,28 @@ describe('affiliate approval supplemental logo evidence', () => {
     expect(prismaMock.affiliateSourceIntakeRuns.update).toHaveBeenLastCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: 'FAILED' }),
     }));
+  });
+  it('fails closed before any page, run, fetch, or artifact side effect for a stale approval generation', async () => {
+    const fetchResource = jest.fn();
+    await expect(captureAffiliateApprovalLogoEvidence({
+      approvalJobId: 'approval_1',
+      mappingJobId: 'mapping_1',
+      reviewerId: 'reviewer_1',
+      claimGeneration: {
+        approvalJobId: 'approval_1',
+        reviewerId: 'reviewer_1',
+        claimedAt: '2026-08-02T00:01:00.000Z',
+      },
+      pageUrl: 'https://example.com/',
+      logoUrl: 'https://cdn.example.net/official-logo.svg',
+    }, {
+      fetchResource,
+      persistArtifact: jest.fn(),
+      now: () => new Date('2026-08-02T01:30:00.000Z'),
+    })).rejects.toThrow('active approval claim');
+
+    expect(fetchResource).not.toHaveBeenCalled();
+    expect(prismaMock.affiliateSourceIntakePages.create).not.toHaveBeenCalled();
+    expect(prismaMock.affiliateSourceIntakeRuns.create).not.toHaveBeenCalled();
   });
 });

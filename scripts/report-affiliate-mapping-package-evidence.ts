@@ -3,6 +3,11 @@ import { Client } from 'pg';
 import { configureAffiliateLiveDatabaseEnvironment } from '../src/server/affiliateImports/agentRepository';
 import { affiliateSourceMatchesIntakeEvidence } from '../src/server/affiliateImports/codexIngestionApproval';
 import { codexAffiliateIngestionResultSchema } from '../src/server/affiliateImports/codexIngestionResult';
+import {
+  affiliateSportsCatalogSnapshotSchema,
+  loadAffiliateSportsCatalogSnapshot,
+} from '../src/server/affiliateImports/affiliateSportsCatalog';
+import { affiliateSportDeterminationSchema } from '../src/server/affiliateImports/affiliateSportDetermination';
 import { analyzeAffiliateDescriptionQuality } from '../src/server/affiliateImports/descriptionQuality';
 import { inspectAffiliateEventDivisionQuality } from '../src/server/affiliateImports/eventDivisionQuality';
 import { inspectAffiliateSportQuality } from '../src/server/affiliateImports/sportQuality';
@@ -23,6 +28,12 @@ const readOption = (name: string): string | undefined => {
   return index >= 0 ? process.argv[index + 1]?.trim() || undefined : undefined;
 };
 
+const asRecord = (value: unknown): Record<string, unknown> => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+);
+
 const disposableDatabaseUrl = resolveAffiliateDisposableDatabaseUrl();
 const useLive = process.argv.includes('--live');
 if (useLive) configureAffiliateLiveDatabaseEnvironment(process.env.DATABASE_URL_LIVE);
@@ -41,6 +52,16 @@ const main = async () => {
       ? job.resultSummary as Record<string, unknown>
       : {};
     const result = codexAffiliateIngestionResultSchema.parse(envelope.result);
+    const isV2 = result.schemaVersion === 2;
+    const claimEvidenceContext = asRecord(envelope.claimEvidenceContext);
+    const claimSnapshotCandidate = claimEvidenceContext.sportsCatalog;
+    const claimSnapshot = isV2 && claimSnapshotCandidate
+      ? affiliateSportsCatalogSnapshotSchema.safeParse(claimSnapshotCandidate)
+      : null;
+    const sportDeterminations = isV2
+      ? result.sportDeterminations.map((determination) => affiliateSportDeterminationSchema.parse(determination))
+      : [];
+    const currentLiveCatalog = await loadAffiliateSportsCatalogSnapshot(prisma);
     if (result.jobId !== job.id || result.intakeId !== job.intakeId) {
       throw new Error('Mapping result identity does not match its live queue row.');
     }
@@ -60,7 +81,24 @@ const main = async () => {
     const sportQuality = await inspectAffiliateSportQuality({
       queryable: disposable,
       sourceId: disposableReviews.sourceId,
+      ...(claimSnapshot?.success ? { catalogSnapshot: claimSnapshot.data } : {}),
+      ...(isV2 ? { catalogSha256: result.sportsCatalogSha256, sportDeterminations } : {}),
     });
+    const catalogConsistency = {
+      claimTimeHash: isV2
+        ? (claimSnapshot?.success ? claimSnapshot.data.sha256 : result.sportsCatalogSha256)
+        : null,
+      currentLiveHash: currentLiveCatalog.sha256,
+      disposableValidatorHash: sportQuality.catalogSha256,
+      passed: Boolean(
+        isV2
+        && claimSnapshot?.success
+        && claimSnapshot.data.sha256 === result.sportsCatalogSha256
+        && result.sportsCatalogSha256 === currentLiveCatalog.sha256
+        && sportQuality.catalogHashMatched
+        && sportQuality.determinationCoveragePassed,
+      ),
+    };
     const candidateSample = await disposable.query(
       `SELECT "listingKind", status, "dedupeKey", title, "organizerName",
               "sportName", city, "venueName", address, "startsAt", "endsAt",
@@ -155,6 +193,8 @@ const main = async () => {
       },
       producer,
       disposableReviews,
+      sportDeterminations,
+      catalogConsistency,
       eventDivisionQuality,
       sportQuality,
       candidateSample: candidateSample.rows,

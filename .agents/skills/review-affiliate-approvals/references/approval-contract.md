@@ -7,12 +7,16 @@ the result. `reviewerId` must exactly match the claim owner.
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "approvalJobId": "approval-job-id",
   "subjectType": "DOMAIN_POLICY",
   "subjectKey": "example.org",
   "reviewerId": "codex-luna-approval-vm-1",
-  "decision": "ALLOW",
+  "claimGeneration": {
+    "approvalJobId": "approval-job-id",
+    "reviewerId": "codex-luna-approval-vm-1",
+    "claimedAt": "2026-08-10T00:00:00.000Z"
+  },
   "confidence": 0.9,
   "rationale": "The bounded review found no explicit prohibition that applies to capture of the target public path.",
   "evidenceReferences": [
@@ -106,14 +110,34 @@ public listing path. A mapping approval requires
 and `storedEvidenceSufficient`, plus exactly one of `officialLogoVerified` or
 `logoAbsenceAccepted`.
 
-The package-evidence report contains `sportQuality`. Every candidate sport and
-every source organization sport must exactly match a current `Sports.name`.
-Use `SPORT_NAME_INVALID` with `PRODUCER_REPAIR` for a missing name or a
-deterministic spelling or casing correction. Use `SPORT_NOT_IN_CATALOG` with a
-`REJECT` decision and `HUMAN_REVIEW_REQUIRED` when a source label is absent
-from the catalog. This includes generic `Volleyball` when only surface-specific
-volleyball sports exist and sports such as Badminton until BracketIQ implements
-them. Never substitute a catalog sport based only on similarity.
+The package-evidence report contains the claim-bound `sportDeterminations`,
+catalog consistency block, citation ownership, and extended `sportQuality`.
+Every candidate and source-organization sport must equal an exact name in the
+injected live catalog and the resolved determination union. Select a resolved
+name only when stored first-party evidence establishes its surface or format.
+Use this matrix as evidence guidance, never keyword substitution:
+
+| Stored first-party evidence | Result |
+|---|---|
+| outdoor/grass/field soccer with the surface expressly established | `Grass Soccer` |
+| indoor/arena/boarded-field soccer, or expressly indoor soccer | `Indoor Soccer` |
+| futsal rules or futsal court | `Futsal` |
+| sand/beach soccer | `Beach Soccer` |
+| only `Soccer`, with no usable surface evidence | `SPORT_VARIANT_UNRESOLVED` |
+| indoor/gym/hard-court volleyball | `Indoor Volleyball` |
+| sand/beach volleyball | `Beach Volleyball` |
+| grass/outdoor-field volleyball | `Grass Volleyball` |
+| only `Volleyball`, with no usable surface evidence | `SPORT_VARIANT_UNRESOLVED` |
+| an evidenced sport family with no exact catalog entry | `SPORT_NOT_IN_CATALOG` |
+| an exact blacklisted activity | `BLACKLISTED`; omit from executable sports and preserve evidence |
+
+Missing/malformed determinations, wrong-run or tampered citations, catalog
+drift, and emitted-name disagreement use `PACKAGE_VALIDATION_FAILED`,
+`SPORT_CATALOG_MISMATCH`, or `SPORT_NAME_INVALID` with `PRODUCER_REPAIR` as
+applicable. A blacklisted activity remains excluded even when cataloged.
+Reviewers never substitute a sport, invent a determination, or treat
+`DEFAULT_SPORTS`, discovery hints, generic labels, or the former two-argument
+validator as authority.
 
 For a producer result with `logoDisposition = MANUAL_REVIEW`, the reviewer must
 inspect stored logo and branding evidence first and then perform the bounded
@@ -212,3 +236,29 @@ Positive decisions have no blocking issues. `BLOCK`, `REJECT`, and `DEFER`
 must contain at least one concrete blocking issue. Evidence references must use
 stable identifiers from the claim, database, repository commit, test output, or
 bounded policy-evidence capture; do not cite unstored browsing impressions.
+## Current v2 approval completion
+
+New approval results use schema version 2 and carry the immutable claim
+generation `{ approvalJobId, reviewerId, claimedAt }`. Every mapping
+disposition and every domain-policy, supplemental-logo, or application side
+effect must compare that generation and an unexpired lease. Persisted v1
+decisions are parse-only history and cannot authorize fresh completion.
+
+Before setting `storedEvidenceSufficient`, visually open every screenshot-only
+determination citation through its authenticated stored-artifact link. An
+`APPROVE` result requires at least one `RESOLVED` determination, permits only
+explicit `BLACKLISTED` exclusions alongside it, and must match the current
+catalog hash and any authenticated human resolution one-to-one. The reviewer
+does not choose unresolved variants. Live package application is available
+only inside validated approval completion; there is no standalone apply
+authority.
+
+Historical sport reconciliation is dry-run-first, expected-count and
+selection-hash guarded, bounded, provenance-preserving, and idempotent. It
+requeues the same eligible terminal mapping job and never writes candidates.
+Stop and preflight every mapper, reviewer, coverage, and separate model
+controller writer before any requeue or queue restart.
+
+Revision note (2026-08-10): Replaced static catalog and direct-apply authority
+with claim-bound evidence review, v2 approval generations, governed human
+resolution, reconciliation guards, and stopped-fleet rules.

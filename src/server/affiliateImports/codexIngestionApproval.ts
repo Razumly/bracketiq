@@ -1,9 +1,8 @@
 import path from 'node:path';
 import {
-  codexAffiliateIngestionResultSchema,
-  type CodexAffiliateIngestionResult,
+  codexAffiliateIngestionResultV2Schema,
+  type CodexAffiliateIngestionResultV2,
 } from './codexIngestionResult';
-
 export type AffiliateMappingApprovalJob = {
   id: string;
   intakeId: string;
@@ -19,10 +18,9 @@ export type AffiliateMappingLiveApprovalCandidate = {
   sourceId: string | null;
   mappingId: string | null;
   setupScript: string;
-  result: CodexAffiliateIngestionResult;
+  result: CodexAffiliateIngestionResultV2;
   resultEnvelope: Record<string, unknown>;
 };
-
 const recordValue = (value: unknown): Record<string, unknown> => (
   value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -50,9 +48,14 @@ export const selectAffiliateMappingLiveApprovalCandidates = (
   for (const job of jobs) {
     if (job.status !== 'REVIEW_REQUIRED') continue;
     const resultEnvelope = recordValue(job.resultSummary);
-    const result = codexAffiliateIngestionResultSchema.parse(resultEnvelope.result);
+    const result = codexAffiliateIngestionResultV2Schema.parse(resultEnvelope.result);
     if (result.jobId !== job.id || result.intakeId !== job.intakeId) {
       throw new Error(`Mapping job ${job.id} result identity does not match its live row.`);
+    }
+    const claimEvidence = recordValue(resultEnvelope.claimEvidenceContext);
+    if (claimEvidence.evidenceRunId !== result.evidenceRunId
+      || claimEvidence.sportsCatalogSha256 !== result.sportsCatalogSha256) {
+      throw new Error(`Mapping job ${job.id} is missing its exact claim evidence context.`);
     }
     const setupPaths = result.generatedPaths.filter((generatedPath) => (
       /^scripts\/setup-[a-z0-9-]+-affiliate-source\.ts$/.test(generatedPath)

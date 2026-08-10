@@ -1,16 +1,24 @@
 /** @jest-environment node */
 
 import {
+  buildAffiliateSportsCatalogSnapshot,
+} from '../affiliateSportsCatalog';
+import {
   assertAffiliateMappingSftReleaseIntegrity,
   buildAffiliateMappingSftRelease,
 } from '../agentTrainingRelease';
 import { stableAgentArtifactSha256 } from '../agentContracts';
-
 const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
 
+const sportsCatalog = buildAffiliateSportsCatalogSnapshot(
+  [{ id: 'sport_grass_soccer', name: 'Grass Soccer' }],
+  '2026-01-01T00:00:00.000Z',
+);
+
 const draft = {
-  schemaVersion: 1 as const,
+  schemaVersion: 2 as const,
+  contextContractVersion: 2 as const,
   intakeId: 'intake_1',
   sourceKey: 'river-city',
   runId: 'run_1',
@@ -39,6 +47,7 @@ const draft = {
   },
   warnings: [],
   unresolvedQuestions: [],
+  sportDeterminations: [],
 };
 
 const envelope = (overrides: Record<string, unknown> = {}) => ({
@@ -51,7 +60,8 @@ const envelope = (overrides: Record<string, unknown> = {}) => ({
       intakeSourceKey: 'river-city',
       runId: 'run_1',
       artifacts: [{ kind: 'ROBOTS', sha256: HASH_A }],
-      contextContractVersion: 1,
+      contextContractVersion: 2,
+      sportsCatalog,
     },
     output: {
       draftHash: stableAgentArtifactSha256(draft),
@@ -68,16 +78,24 @@ const envelope = (overrides: Record<string, unknown> = {}) => ({
     },
   },
   context: {
+    contextContractVersion: 2,
     jobId: 'job_1',
     intakeId: 'intake_1',
     sourceKey: 'river-city',
+    workerId: 'worker_1',
+    claimedAt: '2026-01-01T00:00:00.000Z',
     runId: 'run_1',
+    evidenceRunIds: ['run_1'],
+    sportsCatalog,
     policyDisposition: 'BLOCKED',
     targetKindHints: [],
     artifacts: [{
+      artifactId: 'artifact_robots',
       kind: 'ROBOTS',
       sha256: HASH_A,
       pageUrl: 'https://river-city.test/robots.txt',
+      intakeId: 'intake_1',
+      runId: 'run_1',
     }],
     evidenceExcerpts: [{
       kind: 'ROBOTS',
@@ -86,7 +104,7 @@ const envelope = (overrides: Record<string, unknown> = {}) => ({
       content: 'User-agent: *\nDisallow: /',
       truncated: false,
     }],
-    instructionsRevision: 'affiliate-source-mapping-contract-v1',
+    instructionsRevision: 'affiliate-source-mapping-contract-v2',
   },
   approvedDraft: draft,
   ...overrides,

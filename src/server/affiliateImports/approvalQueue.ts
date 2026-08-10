@@ -1,12 +1,28 @@
+import { createHash } from 'node:crypto';
 import { createId } from '@/lib/id';
 import { prisma } from '@/lib/prisma';
 import {
   affiliateApprovalResultSchema,
+  affiliateApprovalResultV2Schema,
+  isAffiliateApprovalResultV2,
   type AffiliateApprovalResult,
+  type AffiliateApprovalResultV2,
 } from './approvalResult';
-import { codexAffiliateIngestionResultSchema } from './codexIngestionResult';
+import {
+  codexAffiliateIngestionResultSchema,
+  codexAffiliateIngestionResultV2Schema,
+} from './codexIngestionResult';
 import { applyAffiliateSourceDomainPolicy } from './sourceDiscovery';
 import { findAffiliateIntakeIdsForPolicyKey } from './sourcePolicyIntakes';
+import {
+  assertAffiliateMappingApprovalEligibility,
+  applyVerifiedAffiliateMappingPackage,
+  type AffiliateMappingApprovalPermit,
+} from './affiliateMappingLiveApplication';
+import {
+  loadAffiliateSportsCatalogSnapshot,
+  type AffiliateSportsCatalogSnapshot,
+} from './affiliateSportsCatalog';
 import {
   affiliateMappingEvidenceProducerRepairReason,
   MAX_AUTOMATIC_AFFILIATE_MAPPING_REPAIRS,
@@ -265,6 +281,7 @@ export const claimNextAffiliateApproval = async (options: {
         id: activeApproval.id,
         status: 'CLAIMED',
         reviewerId,
+        claimedAt: activeApproval.claimedAt,
         leaseExpiresAt: { gte: now },
       },
       data: { leaseExpiresAt },
@@ -273,6 +290,11 @@ export const claimNextAffiliateApproval = async (options: {
       const claimedApproval = await approvals.findUnique({ where: { id: activeApproval.id } });
       return {
         approvalJob: claimedApproval,
+        claimGeneration: {
+          approvalJobId: activeApproval.id,
+          reviewerId,
+          claimedAt: (claimedApproval?.claimedAt ?? now).toISOString(),
+        },
         subject: await approvalSubjectContext(claimedApproval),
         resumed: true,
       };
@@ -313,8 +335,12 @@ export const claimNextAffiliateApproval = async (options: {
     try {
       return {
         approvalJob: claimedApproval,
+        claimGeneration: {
+          approvalJobId: approval.id,
+          reviewerId,
+          claimedAt: now.toISOString(),
+        },
         subject: await approvalSubjectContext(claimedApproval),
-        resumed: false,
       };
     } catch (error) {
       await approvals.update({
@@ -330,14 +356,11 @@ export const claimNextAffiliateApproval = async (options: {
   }
   return null;
 };
-
 type ApprovalCompletionDependencies = {
+  db?: unknown;
   applyDomainPolicy?: typeof applyAffiliateSourceDomainPolicy;
-  applyMappingPackage?: (
-    mappingJobId: string,
-    reviewerId: string,
-    result: AffiliateApprovalResult,
-  ) => Promise<void>;
+  applyMappingPackage?: (permit: AffiliateMappingApprovalPermit) => Promise<void>;
+  loadCatalog?: (client: unknown, capturedAt?: string) => Promise<AffiliateSportsCatalogSnapshot>;
 };
 
 const terminalApprovalStatus = (result: AffiliateApprovalResult): string => {
@@ -347,50 +370,63 @@ const terminalApprovalStatus = (result: AffiliateApprovalResult): string => {
   return 'DEFERRED';
 };
 
+const claimGenerationWhere = (result: AffiliateApprovalResultV2, now: Date) => ({
+  id: result.claimGeneration.approvalJobId,
+  status: 'CLAIMED',
+  reviewerId: result.claimGeneration.reviewerId,
+  claimedAt: new Date(result.claimGeneration.claimedAt),
+  leaseExpiresAt: { gte: now },
+});
+const jsonSha256 = (value: unknown): string => createHash('sha256')
+  .update(JSON.stringify(value))
+  .digest('hex');
+
+const requireV2Completion = (result: AffiliateApprovalResult): AffiliateApprovalResultV2 => {
+  if (!isAffiliateApprovalResultV2(result)) {
+    throw new Error('Schema-version-1 approval decisions are parse-only history and cannot authorize completion.');
+  }
+  return affiliateApprovalResultV2Schema.parse(result);
+};
+
+export { assertAffiliateMappingApprovalEligibility };
+
 export const completeAffiliateApproval = async (
   unparsedResult: unknown,
   dependencies: ApprovalCompletionDependencies = {},
 ) => {
-  const result = affiliateApprovalResultSchema.parse(unparsedResult);
-  const { approvals, policies, mappingJobs } = approvalDb();
+  const parsedResult = affiliateApprovalResultSchema.parse(unparsedResult);
+  const result = requireV2Completion(parsedResult);
+  const client = (dependencies.db ?? prisma) as {
+    $transaction: (callback: (transaction: unknown) => Promise<unknown>) => Promise<unknown>;
+  } & Record<string, unknown>;
+  const applyPolicy = dependencies.applyDomainPolicy ?? applyAffiliateSourceDomainPolicy;
+  const { approvals, policies, mappingJobs } = approvalDb(client);
   const approval = await approvals.findUnique({ where: { id: result.approvalJobId } });
   if (!approval) throw new Error('Affiliate approval job not found.');
   const terminalStatus = terminalApprovalStatus(result);
   if (['APPROVED', 'BLOCKED', 'REJECTED', 'DEFERRED'].includes(approval.status)) {
-    if (approval.status === terminalStatus && approval.reviewerId === result.reviewerId) return approval;
+    const priorHash = approval.decision ? JSON.stringify(approval.decision) : null;
+    const submittedHash = JSON.stringify(result);
+    if (approval.status === terminalStatus && priorHash === submittedHash) return approval;
     throw new Error(`Affiliate approval job is already terminal with status ${approval.status}.`);
   }
-  if (approval.status !== 'CLAIMED') {
-    throw new Error(`Affiliate approval job must be CLAIMED, received ${approval.status}.`);
-  }
-  if (approval.reviewerId !== result.reviewerId) {
-    throw new Error('Reviewer result does not own the affiliate approval claim.');
-  }
+  if (approval.status !== 'CLAIMED') throw new Error(`Affiliate approval job must be CLAIMED, received ${approval.status}.`);
+  if (approval.reviewerId !== result.reviewerId) throw new Error('Reviewer result does not own the affiliate approval claim.');
   if (approval.subjectType !== result.subjectType || approval.subjectKey !== result.subjectKey) {
     throw new Error('Reviewer result subject does not match the affiliate approval claim.');
   }
+  const now = new Date();
+  if (
+    approval.claimedAt instanceof Date
+    && approval.claimedAt.getTime() !== new Date(result.claimGeneration.claimedAt).getTime()
+  ) {
+    throw new Error('Affiliate approval claim generation changed before completion.');
+  }
+  if (!(approval.leaseExpiresAt instanceof Date) || approval.leaseExpiresAt.getTime() < now.getTime()) {
+    throw new Error('Affiliate approval claim generation is expired.');
+  }
 
-  if (result.subjectType === 'DOMAIN_POLICY') {
-    const policy = await policies.findUnique({ where: { policyKey: result.subjectKey } });
-    if (!policy) throw new Error('Affiliate source domain policy not found.');
-    if (result.decision !== 'DEFER') {
-      const desiredStatus = result.decision === 'ALLOW' ? 'ALLOWED' : 'BLOCKED';
-      if (policy.status !== desiredStatus) {
-        const applyPolicy = dependencies.applyDomainPolicy ?? applyAffiliateSourceDomainPolicy;
-        await applyPolicy(result.subjectKey, {
-          status: desiredStatus,
-          termsUrl: policy.termsUrl,
-          robotsSummary: policy.robotsSummary,
-          restrictionNotes: result.decision === 'BLOCK' ? result.rationale : policy.restrictionNotes,
-          evidence: {
-            approvalJobId: result.approvalJobId,
-            reviewerId: result.reviewerId,
-            reviewerResult: result,
-          },
-        }, result.reviewerId);
-      }
-    }
-  } else {
+  if (result.subjectType === 'MAPPING_PACKAGE') {
     const mappingJob = await mappingJobs.findUnique({ where: { id: result.subjectKey } });
     if (!mappingJob) throw new Error('Affiliate source mapping job not found.');
     const envelope = recordValue(mappingJob.resultSummary);
@@ -398,188 +434,246 @@ export const completeAffiliateApproval = async (
     const producerId = ingestionResult.success
       ? ingestionResult.data.workerId
       : stringValue(recordValue(envelope.result).workerId);
-    if (!producerId) throw new Error('Mapping package producer identity is missing.');
-    if (producerId === result.reviewerId) {
-      throw new Error('Affiliate mapping packages cannot be approved or reviewed by their producer identity.');
+    const preflightMappingDisposition = result.mappingDisposition;
+    const dispositionCodes = preflightMappingDisposition?.reasonCodes ?? [];
+    if (dispositionCodes.includes('SPORT_NAME_INVALID')
+      || dispositionCodes.includes('PACKAGE_VALIDATION_FAILED')) {
+      if (preflightMappingDisposition?.nextAction === 'HUMAN_REVIEW_REQUIRED') {
+        throw new Error('Schema-version-2 producer validation failures cannot become an ungrounded human sport decision.');
+      }
     }
+    if (dispositionCodes.includes('SPORT_CATALOG_MISMATCH')) {
+      const currentResult = codexAffiliateIngestionResultV2Schema.safeParse(envelope.result);
+      if (!currentResult.success) {
+        throw new Error('SPORT_CATALOG_MISMATCH requires a persisted schema-version-2 mapping result.');
+      }
+      const catalogEvidence = recordValue(envelope.claimEvidenceContext);
+      const catalogLoader = dependencies.loadCatalog
+        ?? (loadAffiliateSportsCatalogSnapshot as unknown as (client: unknown, capturedAt?: string) => Promise<AffiliateSportsCatalogSnapshot>);
+      const currentCatalog = await catalogLoader(client);
+      if (catalogEvidence.sportsCatalogSha256 !== currentResult.data.sportsCatalogSha256
+        || currentCatalog.sha256 === currentResult.data.sportsCatalogSha256) {
+        throw new Error('SPORT_CATALOG_MISMATCH must represent a stale catalog hash.');
+      }
+    }
+    if (!producerId) throw new Error('Mapping package producer identity is missing.');
+    if (producerId === result.reviewerId) throw new Error('Affiliate mapping packages cannot be approved or reviewed by their producer identity.');
+
     if (result.decision === 'APPROVE') {
-      if (!ingestionResult.success || ingestionResult.data.status !== 'REVIEW_REQUIRED') {
-        throw new Error('Mapping approval requires a valid review-required Codex ingestion result.');
-      }
-      const storedSourceId = stringValue(mappingJob.sourceId);
-      const storedMappingId = stringValue(mappingJob.mappingId);
-      if (Boolean(storedSourceId) !== Boolean(storedMappingId)) {
-        throw new Error('Mapping approval requires both source and mapping package identity fields.');
-      }
-      if (
-        !storedSourceId
-        && !storedMappingId
-        && mappingJob.legacyIdentityMigrationEligible !== true
-      ) {
-        throw new Error(
-          'Identity-less mapping approval requires the explicit legacy identity migration marker.',
-        );
-      }
-      if (ingestionResult.data.logoDisposition === 'MANUAL_REVIEW') {
-        if (result.checks.officialLogoVerified || !result.checks.logoAbsenceAccepted) {
-          throw new Error('Manual-logo mapping approval requires an explicit accepted logo absence.');
-        }
-      } else if (!result.checks.officialLogoVerified || result.checks.logoAbsenceAccepted) {
-        throw new Error('Official-logo mapping approval requires a verified official logo check.');
-      }
-      if (mappingJob.status === 'REVIEW_REQUIRED') {
-        if (!dependencies.applyMappingPackage) {
-          throw new Error('Mapping package approval requires the live application boundary.');
-        }
-        await dependencies.applyMappingPackage(mappingJob.id, result.reviewerId, result);
-      }
-      const applied = await mappingJobs.findUnique({ where: { id: mappingJob.id } });
-      if (
-        applied?.status !== 'APPROVED'
-        || !stringValue(applied.sourceId)
-        || !stringValue(applied.mappingId)
-      ) {
-        throw new Error(
-          'Mapping package application did not mark the mapping job approved with durable source and mapping package identity.',
-        );
-      }
-    } else {
-      if (mappingJob.status !== 'REVIEW_REQUIRED') {
-        throw new Error(`Mapping package review requires REVIEW_REQUIRED status, received ${mappingJob.status}.`);
-      }
-      const mappingDisposition = result.mappingDisposition!;
-      const repairHistory = recordArray(envelope.mappingRepairHistory);
-      const evidenceRepairReason = affiliateMappingEvidenceProducerRepairReason({
-        reasonCodes: mappingDisposition.reasonCodes,
-        evidence: [result.rationale, result.blockingIssues],
+      const permit = await assertAffiliateMappingApprovalEligibility({
+        approvalResult: result,
+        mappingJobId: mappingJob.id,
+        reviewerId: result.reviewerId,
+        claimGeneration: result.claimGeneration,
+      }, {
+        db: client,
+        loadCatalog: dependencies.loadCatalog,
       });
-      const requestedNextAction = evidenceRepairReason
-        ? 'PRODUCER_REPAIR'
-        : mappingDisposition.nextAction;
-      const retryLimitExceeded = (
-        requestedNextAction === 'PRODUCER_REPAIR'
-        && automaticRepairCountForCurrentReviewCycle(envelope)
-          >= MAX_AUTOMATIC_AFFILIATE_MAPPING_REPAIRS
-      );
-      const effectiveNextAction = retryLimitExceeded
-        ? 'HUMAN_REVIEW_REQUIRED'
-        : requestedNextAction;
-      const effectiveReasonCodes = Array.from(new Set([
-        ...(evidenceRepairReason ? [evidenceRepairReason] : mappingDisposition.reasonCodes),
-        ...(retryLimitExceeded ? ['RETRY_LIMIT_EXCEEDED'] : []),
-      ]));
-      const reviewedAt = new Date();
-
-      return (prisma as any).$transaction(async (transaction: any) => {
-        const transactionDb = approvalDb(transaction);
-        const currentApproval = await transactionDb.approvals.findUnique({
-          where: { id: approval.id },
-        });
-        const currentMapping = await transactionDb.mappingJobs.findUnique({
-          where: { id: mappingJob.id },
-        });
-        if (currentApproval?.status !== 'CLAIMED' || currentApproval.reviewerId !== result.reviewerId) {
-          throw new Error('Affiliate approval claim changed before completion.');
+      const applicationLease = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+      const extended = await approvals.updateMany({
+        where: claimGenerationWhere(result, now),
+        data: { leaseExpiresAt: applicationLease },
+      });
+      if (extended.count !== 1) throw new Error('Approval claim changed before live application lease extension.');
+      if (dependencies.applyMappingPackage) {
+        await dependencies.applyMappingPackage(permit);
+        const applied = await mappingJobs.findUnique({ where: { id: mappingJob.id } });
+        if (applied?.status !== 'APPROVED' || !stringValue(applied.sourceId) || !stringValue(applied.mappingId)) {
+          throw new Error('Mapping package application did not mark the mapping job approved with durable identity.');
         }
-        if (currentMapping?.status !== 'REVIEW_REQUIRED') {
-          throw new Error('Affiliate mapping package changed before completion.');
-        }
-
-        const currentEnvelope = recordValue(currentMapping.resultSummary);
-        const currentRepairHistory = recordArray(currentEnvelope.mappingRepairHistory);
-        const { approvalReview: _priorApprovalReview, ...preservedEnvelope } = currentEnvelope;
-        if (effectiveNextAction === 'PRODUCER_REPAIR') {
+        const final = await approvals.updateMany({
+          where: claimGenerationWhere(result, now),
+          data: { status: 'APPROVED', decision: result, errorMessage: null, finishedAt: now, leaseExpiresAt: null },
+        });
+        if (final.count !== 1) throw new Error('Approval claim changed before final approval CAS.');
+      } else {
+        const applied = await applyVerifiedAffiliateMappingPackage(permit, { db: client });
+        await client.$transaction(async (transaction: unknown) => {
+          const transactionDb = approvalDb(transaction);
+          const currentApproval = await transactionDb.approvals.findUnique({ where: { id: result.approvalJobId } });
+          if (
+            currentApproval?.status !== 'CLAIMED'
+            || currentApproval.reviewerId !== result.reviewerId
+            || new Date(currentApproval.claimedAt).getTime() !== new Date(result.claimGeneration.claimedAt).getTime()
+            || new Date(currentApproval.leaseExpiresAt).getTime() < now.getTime()
+          ) throw new Error('Approval claim changed before final approval CAS.');
+          const currentMapping = await transactionDb.mappingJobs.findUnique({ where: { id: mappingJob.id } });
+          if (
+            currentMapping?.status !== 'REVIEW_REQUIRED'
+            || jsonSha256(recordValue(currentMapping.resultSummary).result) !== permit.mappingResultSha256
+          ) throw new Error('Mapping result changed before final approval CAS.');
           await transactionDb.mappingJobs.update({
-            where: { id: currentMapping.id },
+            where: { id: mappingJob.id },
             data: {
-              status: 'QUEUED',
-              claimedAt: null,
-              leaseExpiresAt: null,
-              workerId: null,
-              branch: null,
-              commit: null,
-              errorMessage: null,
-              finishedAt: null,
+              status: 'APPROVED',
+              sourceId: applied.sourceId,
+              mappingId: applied.mappingId,
+              finishedAt: now,
               resultSummary: {
-                ...preservedEnvelope,
-                mappingRepairHistory: [...currentRepairHistory, {
-                  queuedAt: reviewedAt.toISOString(),
-                  repairReason: effectiveReasonCodes[0],
-                  repairReasons: effectiveReasonCodes,
-                  priorMappingStatus: currentMapping.status,
-                  priorMappingErrorMessage: currentMapping.errorMessage,
-                  approvalJobId: currentApproval.id,
-                  approvalStatus: terminalStatus,
-                  reviewerId: result.reviewerId,
-                  decision: result.decision,
-                  rationale: result.rationale,
-                  blockingIssues: result.blockingIssues,
-                }],
-              },
-            },
-          });
-          await transactionDb.intakes.update({
-            where: { id: currentMapping.intakeId },
-            data: { status: 'READY_FOR_MAPPING' },
-          });
-        } else {
-          const humanReason = retryLimitExceeded
-            ? `Automatic producer repair limit of ${MAX_AUTOMATIC_AFFILIATE_MAPPING_REPAIRS} was exhausted.`
-            : result.blockingIssues.join(' ');
-          await transactionDb.mappingJobs.update({
-            where: { id: currentMapping.id },
-            data: {
-              status: 'HUMAN_REVIEW_REQUIRED',
-              claimedAt: null,
-              leaseExpiresAt: null,
-              workerId: null,
-              finishedAt: reviewedAt,
-              errorMessage: humanReason,
-              resultSummary: {
-                ...preservedEnvelope,
-                mappingRepairHistory: currentRepairHistory,
-                approvalReview: result,
-                humanReviewRequired: {
-                  markedAt: reviewedAt.toISOString(),
-                  approvalJobId: currentApproval.id,
-                  reviewerId: result.reviewerId,
-                  decision: result.decision,
-                  requestedNextAction: mappingDisposition.nextAction,
-                  reasonCodes: effectiveReasonCodes,
-                  rationale: result.rationale,
-                  blockingIssues: result.blockingIssues,
+                ...permit.mappingResultEnvelope,
+                liveApproval: {
+                  approvedAt: now.toISOString(),
+                  approvedBy: result.reviewerId,
+                  sourceId: applied.sourceId,
+                  mappingId: applied.mappingId,
+                  autoScrapeEnabled: false,
+                  publicationStatus: 'UNPUBLISHED',
                 },
               },
             },
           });
-          await transactionDb.intakes.update({
-            where: { id: currentMapping.intakeId },
-            data: { status: 'REVIEW_REQUIRED' },
+          await transactionDb.intakes.update({ where: { id: mappingJob.intakeId }, data: { status: 'PROMOTED' } });
+          const approvalUpdate = await transactionDb.approvals.updateMany({
+            where: claimGenerationWhere(result, now),
+            data: { status: 'APPROVED', decision: result, errorMessage: null, finishedAt: now, leaseExpiresAt: null },
           });
-        }
+          if (approvalUpdate.count !== 1) throw new Error('Approval claim changed before final approval CAS.');
+        });
+      }
+      return approvals.findUnique({ where: { id: result.approvalJobId } });
+    }
 
-        return transactionDb.approvals.update({
-          where: { id: currentApproval.id },
+    if (mappingJob.status !== 'REVIEW_REQUIRED') {
+      throw new Error(`Mapping package review requires REVIEW_REQUIRED status, received ${mappingJob.status}.`);
+    }
+    const mappingDisposition = result.mappingDisposition;
+    if (!mappingDisposition) throw new Error('Mapping package review requires a disposition.');
+    const repairHistory = recordArray(envelope.mappingRepairHistory);
+    const evidenceRepairReason = affiliateMappingEvidenceProducerRepairReason({
+      reasonCodes: mappingDisposition.reasonCodes,
+      evidence: [result.rationale, result.blockingIssues],
+    });
+    const requestedNextAction = evidenceRepairReason ? 'PRODUCER_REPAIR' : mappingDisposition.nextAction;
+    const retryLimitExceeded = requestedNextAction === 'PRODUCER_REPAIR'
+      && automaticRepairCountForCurrentReviewCycle(envelope) >= MAX_AUTOMATIC_AFFILIATE_MAPPING_REPAIRS;
+    const effectiveNextAction = retryLimitExceeded ? 'HUMAN_REVIEW_REQUIRED' : requestedNextAction;
+    const effectiveReasonCodes = Array.from(new Set([
+      ...(evidenceRepairReason ? [evidenceRepairReason] : mappingDisposition.reasonCodes),
+      ...(retryLimitExceeded ? ['RETRY_LIMIT_EXCEEDED'] : []),
+    ]));
+    const reviewedAt = new Date();
+    return client.$transaction(async (transaction: unknown) => {
+      const transactionDb = approvalDb(transaction);
+      const currentApproval = await transactionDb.approvals.findUnique({ where: { id: result.approvalJobId } });
+      if (
+        currentApproval?.status !== 'CLAIMED'
+        || currentApproval.reviewerId !== result.reviewerId
+        || !(currentApproval.claimedAt instanceof Date)
+        || currentApproval.claimedAt.getTime() !== new Date(result.claimGeneration.claimedAt).getTime()
+        || !(currentApproval.leaseExpiresAt instanceof Date)
+        || currentApproval.leaseExpiresAt.getTime() < reviewedAt.getTime()
+      ) throw new Error('Affiliate approval claim changed before completion.');
+      const currentMapping = await transactionDb.mappingJobs.findUnique({ where: { id: mappingJob.id } });
+      if (currentMapping?.status !== 'REVIEW_REQUIRED') throw new Error('Affiliate mapping package changed before completion.');
+      const currentEnvelope = recordValue(currentMapping.resultSummary);
+      const currentRepairHistory = recordArray(currentEnvelope.mappingRepairHistory);
+      const { approvalReview: _priorApprovalReview, ...preservedEnvelope } = currentEnvelope;
+      if (effectiveNextAction === 'PRODUCER_REPAIR') {
+        await transactionDb.mappingJobs.update({
+          where: { id: currentMapping.id },
           data: {
-            status: terminalStatus,
-            decision: result,
-            errorMessage: null,
-            finishedAt: reviewedAt,
+            status: 'QUEUED',
+            claimedAt: null,
             leaseExpiresAt: null,
+            workerId: null,
+            branch: null,
+            commit: null,
+            errorMessage: null,
+            finishedAt: null,
+            resultSummary: {
+              ...preservedEnvelope,
+              mappingRepairHistory: [...currentRepairHistory, {
+                queuedAt: reviewedAt.toISOString(),
+                repairReason: effectiveReasonCodes[0],
+                repairReasons: effectiveReasonCodes,
+                priorMappingStatus: currentMapping.status,
+                priorMappingErrorMessage: currentMapping.errorMessage,
+                approvalJobId: currentApproval.id,
+                approvalStatus: terminalStatus,
+                reviewerId: result.reviewerId,
+                decision: result.decision,
+                rationale: result.rationale,
+                blockingIssues: result.blockingIssues,
+              }],
+            },
           },
         });
+        await transactionDb.intakes.update({ where: { id: currentMapping.intakeId }, data: { status: 'READY_FOR_MAPPING' } });
+      } else {
+        const humanReason = retryLimitExceeded
+          ? `Automatic producer repair limit of ${MAX_AUTOMATIC_AFFILIATE_MAPPING_REPAIRS} was exhausted.`
+          : result.blockingIssues.join(' ');
+        await transactionDb.mappingJobs.update({
+          where: { id: currentMapping.id },
+          data: {
+            status: 'HUMAN_REVIEW_REQUIRED',
+            claimedAt: null,
+            leaseExpiresAt: null,
+            workerId: null,
+            finishedAt: reviewedAt,
+            errorMessage: humanReason,
+            resultSummary: {
+              ...preservedEnvelope,
+              mappingRepairHistory: currentRepairHistory,
+              approvalReview: result,
+              humanReviewRequired: {
+                markedAt: reviewedAt.toISOString(),
+                approvalJobId: currentApproval.id,
+                reviewerId: result.reviewerId,
+                decision: result.decision,
+                requestedNextAction: mappingDisposition.nextAction,
+                reasonCodes: effectiveReasonCodes,
+                rationale: result.rationale,
+                blockingIssues: result.blockingIssues,
+              },
+            },
+          },
+        });
+        await transactionDb.intakes.update({ where: { id: currentMapping.intakeId }, data: { status: 'REVIEW_REQUIRED' } });
+      }
+      const updated = await transactionDb.approvals.updateMany({
+        where: claimGenerationWhere(result, reviewedAt),
+        data: { status: terminalStatus, decision: result, errorMessage: null, finishedAt: reviewedAt, leaseExpiresAt: null },
       });
-    }
+      if (updated.count !== 1) throw new Error('Approval claim changed before completion.');
+      return transactionDb.approvals.findUnique({ where: { id: result.approvalJobId } });
+    });
   }
 
-  return approvals.update({
-    where: { id: approval.id },
-    data: {
-      status: terminalStatus,
-      decision: result,
-      errorMessage: null,
-      finishedAt: new Date(),
-      leaseExpiresAt: null,
-    },
+  const policy = await policies.findUnique({ where: { policyKey: result.subjectKey } });
+  if (!policy) throw new Error('Affiliate source domain policy not found.');
+  if (result.decision === 'DEFER') {
+    const updated = await approvals.updateMany({
+      where: claimGenerationWhere(result, now),
+      data: { status: terminalStatus, decision: result, errorMessage: null, finishedAt: now, leaseExpiresAt: null },
+    });
+    if (updated.count !== 1) throw new Error('Affiliate approval claim changed before domain deferral terminal CAS.');
+    return approvals.findUnique({ where: { id: result.approvalJobId } });
+  }
+  const desiredStatus = result.decision === 'ALLOW' ? 'ALLOWED' : 'BLOCKED';
+  return client.$transaction(async (transaction: unknown) => {
+    const transactionDb = approvalDb(transaction);
+    const currentApproval = await transactionDb.approvals.findUnique({ where: { id: result.approvalJobId } });
+    if (
+      currentApproval?.status !== 'CLAIMED'
+      || currentApproval.reviewerId !== result.reviewerId
+      || !(currentApproval.claimedAt instanceof Date)
+      || currentApproval.claimedAt.getTime() !== new Date(result.claimGeneration.claimedAt).getTime()
+      || !(currentApproval.leaseExpiresAt instanceof Date)
+      || currentApproval.leaseExpiresAt.getTime() < now.getTime()
+    ) throw new Error('Affiliate approval claim changed before domain policy completion.');
+    await applyPolicy(result.subjectKey, {
+      status: desiredStatus,
+      termsUrl: policy.termsUrl,
+      robotsSummary: policy.robotsSummary,
+      restrictionNotes: result.decision === 'BLOCK' ? result.rationale : policy.restrictionNotes,
+      evidence: { approvalJobId: result.approvalJobId, reviewerId: result.reviewerId, reviewerResult: result },
+    }, result.reviewerId, { db: transaction });
+    const updated = await transactionDb.approvals.updateMany({
+      where: claimGenerationWhere(result, now),
+      data: { status: terminalStatus, decision: result, errorMessage: null, finishedAt: now, leaseExpiresAt: null },
+    });
+    if (updated.count !== 1) throw new Error('Approval claim changed before domain policy terminal CAS.');
+    return transactionDb.approvals.findUnique({ where: { id: result.approvalJobId } });
   });
 };

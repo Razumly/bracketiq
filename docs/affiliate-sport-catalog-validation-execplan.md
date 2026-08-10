@@ -115,3 +115,52 @@ Expected evidence excerpt for an unsupported package:
 `affiliateApprovalResultSchema` will require the boolean check `sportQualityVerified`. Its disposition reason-code union will include `SPORT_NAME_INVALID` and `SPORT_NOT_IN_CATALOG` with the routing described above.
 
 Revision note: Created and completed 2026-08-04 to implement exact canonical sport validation for affiliate mappings and approvals without changing live runtime state.
+## Current authority after the sport-evidence cutover (2026-08-10)
+
+The historical exact-catalog design above remains part of the record, but it is
+not the current live contract. A mapper claim must first persist one validated
+`Sports` snapshot from the live database, including its deterministic hash and
+the exact intake/run identity. The mapper and model-agent paths consume that
+injected snapshot through the shared claim/export/context/completion service.
+The former two-argument sport validator and `DEFAULT_SPORTS` are parse-only or
+seed/application concerns; neither is live catalog authority. Discovery
+`sportHints`, campaign metadata, organization names, URL tokens, and a bare
+generic family word are search context only and cannot resolve a sport.
+
+Sport resolution is an evidence-backed `sportDeterminations` union. A
+determination is `RESOLVED` only when stored first-party HTML, Markdown, or a
+visually inspected screenshot establishes the exact surface/format represented
+by the current catalog. `VARIANT_UNRESOLVED`, `UNSUPPORTED`, and `BLACKLISTED`
+determinations stop package generation and retain the source label and
+artifact-owned citations for human review. Blacklist policy remains
+independent of catalog membership: a blacklisted activity stays excluded even
+when a same-named `Sports` row exists.
+
+The initial decision matrix is:
+
+| Stored first-party evidence | Result |
+|---|---|
+| outdoor/grass/field soccer with the surface expressly established | `Grass Soccer` |
+| indoor/arena/boarded-field soccer, or expressly indoor soccer | `Indoor Soccer` |
+| futsal rules or futsal court | `Futsal` |
+| sand/beach soccer | `Beach Soccer` |
+| only `Soccer`, without usable surface evidence | `SPORT_VARIANT_UNRESOLVED` |
+| indoor/gym/hard-court volleyball | `Indoor Volleyball` |
+| sand/beach volleyball | `Beach Volleyball` |
+| grass/outdoor-field volleyball | `Grass Volleyball` |
+| only `Volleyball`, without usable surface evidence | `SPORT_VARIANT_UNRESOLVED` |
+| evidenced family with no exact current catalog entry | `SPORT_NOT_IN_CATALOG` |
+| exact blacklisted activity | `BLACKLISTED`, excluded from executable sports |
+
+The matrix is a review aid, not a keyword substitution map. Multiple
+explicitly evidenced surfaces may produce multiple resolved names. Schema
+version 1 records remain readable for history and parse-only training, but a
+legacy review-ready package without catalog-bound determinations cannot be
+approved as new work. Completion proves citation ownership, catalog freshness,
+determination coverage, and exact candidate/organization sport equality before
+the claim-generation CAS.
+
+Revision note (2026-08-10): Superseded compiled-default and two-argument
+validation as live authority with the injected live catalog and evidence-backed
+determination contract. No historical implementation or migration context was
+deleted.

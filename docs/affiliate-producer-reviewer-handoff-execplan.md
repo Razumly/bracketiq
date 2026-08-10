@@ -4,9 +4,19 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 ## Purpose / Big Picture
 
-The affiliate mapping agent currently produces source packages in one isolated OVH checkout, while the independent approval agent runs in another checkout. The reviewer cannot resolve the producer commit or inspect the producer's disposable review-scrape database, so otherwise valid mappings are rejected for missing evidence. After this change, the reviewer can inspect the exact committed package through a read-only producer checkout, verify the two claimed review scrapes in the shared disposable database, continue to inspect production only for safety, and apply an approved package from the exact producer commit without merging or publishing it.
+The affiliate mapping agent produces source packages in one isolated checkout,
+while the independent approval agent runs in another. The reviewer must
+resolve the exact producer commit, run-bound stored evidence, and disposable
+review-scrape database through the read-only handoff. Historical direct
+application from the reviewer checkout is superseded: the reviewer supplies
+verified evidence to schema-v2 approval completion, which alone may obtain the
+claim-bound internal application permit. No merge or publication occurs in the
+handoff.
 
-The observable outcome is that a mapping package with an official logo and valid evidence can move from `REVIEW_REQUIRED` to `APPROVED` through the Luna reviewer without being rejected merely because the producer and reviewer use separate workspaces. Previously rejected official-logo packages whose only blockers were the broken handoff can be requeued with their original decision preserved in mapping-job history. Packages with manual-review logos or genuine source defects remain blocked.
+The observable outcome is a package whose `REVIEW_REQUIRED` evidence can be
+independently verified and then approved only through the governed completion
+CAS. Previously rejected handoff-only packages retain their decision history;
+manual-logo and genuine source defects remain blocked.
 
 ## Progress
 
@@ -189,3 +199,38 @@ The guarded retry is exposed as:
     npm run affiliate:approvals:retry-handoff -- --live --apply
 
 Revision note (2026-08-01): Created after live evidence proved the reviewer was querying the wrong repository and database. The design preserves independent review while making the producer's exact immutable evidence available.
+## Current evidence handoff and approval boundary (2026-08-10)
+
+The producer/reviewer separation described above remains required, with one
+new shared contract. A producer claim persists the exact intake/run and
+claim-time live `Sports` snapshot before evidence inspection. The reviewer
+consumes the same run-bound artifact citations, catalog hash, v2
+`sportDeterminations`, and immutable claim generations; it must not merge
+exports from multiple runs or use its checkout's seeded catalog as authority.
+Discovery hints, generic family labels, `DEFAULT_SPORTS`, and the old
+two-argument validator cannot resolve a sport.
+
+The reviewer must inspect the determination and extended `sportQuality` report
+before choosing any disposition. Surface/format evidence may resolve an exact
+injected name; bare Soccer/Volleyball is `SPORT_VARIANT_UNRESOLVED`, an
+evidenced family with no exact catalog row is `SPORT_NOT_IN_CATALOG`, and a
+blacklisted exact activity is `BLACKLISTED` even when cataloged. Missing
+citations, wrong-run ownership, emitted-name disagreement, or stale catalog
+are producer repair (`PACKAGE_VALIDATION_FAILED`, `SPORT_NAME_INVALID`, or
+`SPORT_CATALOG_MISMATCH`), not a reviewer sport choice. Screenshot-only
+citations must be visually opened from the authenticated stored-artifact link.
+
+`REVIEW_REQUIRED` is a producer result awaiting independent review, not
+approval. New approval results are v2 and bind the reviewer, approval job, and
+`claimedAt`; live package application is reachable only inside validated
+approval completion. There is no standalone live-apply authority. Domain
+policy and supplemental logo evidence are also claim-generation-bound.
+
+The reconciliation command is a dry-run-first, count/hash-guarded,
+same-terminal-job, idempotent requeue and never writes candidates. Before any
+requeue or queue restart, stop and preflight all mapper, reviewer, coverage,
+and separately deployed model-controller writers.
+
+Revision note (2026-08-10): Added run-bound determination evidence, v2
+approval generations, approval-only application, reconciliation, and
+stopped-fleet rules while retaining the historical handoff design.

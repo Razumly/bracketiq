@@ -24,12 +24,16 @@ import {
   resolveGoldCaptureOperationMode,
   resolveGoldCaptureMaxAttempts,
 } from '../agentGoldCaptureCohort';
-
+import { buildAffiliateSportsCatalogSnapshot } from '../affiliateSportsCatalog';
 const HASH_HTML = 'a'.repeat(64);
 const HASH_ROBOTS = 'b'.repeat(64);
-
+const sportsCatalog = buildAffiliateSportsCatalogSnapshot(
+  [{ id: 'sport_grass_soccer', name: 'Grass Soccer' }],
+  '2026-01-01T00:00:00.000Z',
+);
 const executableDraft = {
-  schemaVersion: 1 as const,
+  schemaVersion: 2 as const,
+  contextContractVersion: 2 as const,
   intakeId: 'intake_river',
   sourceKey: 'river-city',
   runId: 'run_river',
@@ -85,6 +89,20 @@ const executableDraft = {
   },
   warnings: [],
   unresolvedQuestions: [],
+  sportDeterminations: [{
+    sourceLabels: ['outdoor soccer'],
+    status: 'RESOLVED' as const,
+    resolutionBasis: 'SOURCE_EVIDENCE' as const,
+    canonicalSportNames: ['Grass Soccer'],
+    rationale: 'The evidence describes an outdoor grass soccer league.',
+    evidence: [{
+      artifactId: 'artifact_html',
+      artifactSha256: HASH_HTML,
+      artifactKind: 'PAGE_HTML' as const,
+      pageUrl: 'https://rivercity.example/events',
+      excerpt: 'outdoor soccer',
+    }],
+  }],
 };
 
 const realExample = (overrides: Record<string, unknown> = {}) => ({
@@ -105,17 +123,25 @@ const realExample = (overrides: Record<string, unknown> = {}) => ({
   includedInTraining: false,
   includedInRetrieval: false,
   context: {
+    contextContractVersion: 2,
     jobId: 'job_river',
     intakeId: 'intake_river',
     sourceKey: 'river-city',
+    workerId: 'worker_1',
+    claimedAt: '2026-01-01T00:00:00.000Z',
     runId: 'run_river',
+    evidenceRunIds: ['run_river'],
+    sportsCatalog,
     policyDisposition: 'ALLOWED',
     targetKindHints: ['EVENT'],
     artifacts: [{
+      artifactId: 'artifact_html',
       kind: 'PAGE_HTML',
       sha256: HASH_HTML,
       pageUrl: 'https://rivercity.example/events',
       byteLength: 42,
+      intakeId: 'intake_river',
+      runId: 'run_river',
     }],
     evidenceExcerpts: [{
       kind: 'PAGE_MARKDOWN',
@@ -124,7 +150,7 @@ const realExample = (overrides: Record<string, unknown> = {}) => ({
       content: 'River City Summer League starts September 1, 2026.',
       truncated: false,
     }],
-    instructionsRevision: 'affiliate-source-mapping-contract-v1',
+    instructionsRevision: 'affiliate-source-mapping-contract-v2',
   },
   approvedDraft: executableDraft,
   expectedPersistedCandidates: executableDraft.expectedCandidates,
@@ -154,7 +180,7 @@ const blockedExample = (overrides: Record<string, unknown> = {}) => {
     implementationMode: 'BLOCKED' as const,
     listingKind: null,
     evidence: [{
-      artifactKind: 'ROBOTS',
+      artifactKind: 'PAGE_HTML',
       artifactSha256: HASH_ROBOTS,
       pageUrl: 'https://blocked.example/robots.txt',
       supports: ['policyDisposition'],
@@ -166,6 +192,7 @@ const blockedExample = (overrides: Record<string, unknown> = {}) => {
       artifactSha256: null,
       sourceUrl: null,
     },
+    sportDeterminations: [],
   };
   return {
     schemaVersion: 1,
@@ -185,18 +212,26 @@ const blockedExample = (overrides: Record<string, unknown> = {}) => {
     includedInTraining: true,
     includedInRetrieval: true,
     context: {
+      contextContractVersion: 2,
       jobId: 'job_blocked',
       intakeId: 'intake_blocked',
       sourceKey: 'blocked-source',
+      workerId: 'worker_1',
+      claimedAt: '2026-01-01T00:00:00.000Z',
       runId: 'run_blocked',
+      evidenceRunIds: ['run_blocked'],
+      sportsCatalog,
       policyDisposition: 'BLOCKED',
       targetKindHints: [],
       artifacts: [{
-        kind: 'ROBOTS',
+        artifactId: 'artifact_robots',
+        kind: 'PAGE_HTML',
         sha256: HASH_ROBOTS,
         pageUrl: 'https://blocked.example/robots.txt',
+        intakeId: 'intake_blocked',
+        runId: 'run_blocked',
       }],
-      instructionsRevision: 'affiliate-source-mapping-contract-v1',
+      instructionsRevision: 'affiliate-source-mapping-contract-v2',
     },
     approvedDraft,
     expectedPersistedCandidates: [],

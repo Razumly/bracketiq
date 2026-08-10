@@ -57,8 +57,14 @@ The goal agent must follow `$ingest-affiliate-intakes` and the affiliate source 
 
 - Search existing scripts, DB records, mappings, organizations, and aliases before creating records. Repair existing records rather than duplicating them.
 - Inspect the exported intake's unfiltered rendered list and representative detail-page artifacts before mapping. Use stored screenshots to compare the expected listing with extracted output.
-- Create or repair an idempotent setup script and matching `package.json` command that can restore the organization, source, mapping, cadence, logo association, and intentional manual candidates through both its disposable default and the guarded `--live` application mode. The producer validates only the disposable mode and must not apply the package live.
-- Run setup and scraping against a disposable database first. A launcher `--live` flag authorizes only live intake evidence reads and mapping-job queue transitions; it does not authorize live organization, source, mapping, logo, candidate, or publication writes.
+- Create or repair an idempotent setup script and matching `package.json`
+  command for disposable validation. Any live setup invocation is internal to
+  validated schema-v2 approval completion and its claim-bound permit; the
+  producer goal cannot apply a package live.
+- Run setup and scraping against a disposable database first. A launcher
+  `--live` flag authorizes only live intake evidence reads and claim/queue
+  transitions; it never authorizes live organization, source, mapping, logo,
+  candidate, publication, or approval writes.
 - Inspect at least five candidates and every produced candidate kind. Verify classification, official URLs, dates, descriptions, tags, divisions, prices, registration type, capacity, location, and coordinates against the rendered source.
 - Write public event and organization descriptions from stored first-party evidence. Describe the activity, audience, format, schedule, venue, services, or material terms in natural language. Do not narrate that a record was listed, found, scraped, captured, or mapped from a site, and do not start an event description by repeating its full title. When event-specific prose is absent, one concise organization-level activity fallback may be reused across related events if the evidence supports it.
 - Give each canonical organization the most specific defensible location. Prefer a source-backed street address. When no address is published, use an evidenced city, locality, metro, or region from first-party content, stored intake discovery context, or explicit parent-directory evidence. Record the fallback evidence and geocode the locality through the server-side Google Places path. City or region centroid coordinates are valid for an organization; do not leave its location or coordinates null only because a street address is unavailable.
@@ -125,11 +131,14 @@ The coordinator may mark a source complete only when:
 
 Do not treat the existence of a setup script as completion. The admin scrape flow and persisted candidate output must be demonstrated locally.
 
-If the stored source sport is not an exact current `Sports.name`, do not write
-a source package, generated scraper, or candidate. Preserve the exact source
-label only in a structured human-review result with reason code
-`SPORT_NOT_IN_CATALOG` and complete the mapping job as
-`HUMAN_REVIEW_REQUIRED`. This terminal result does not create an approval job.
+If evidence does not support an exact current catalog name, do not write a
+source package, generated scraper, or candidate. Preserve exact source labels
+and artifact citations in v2 determinations. Bare Soccer/Volleyball is
+`SPORT_VARIANT_UNRESOLVED`; an evidenced family without an exact current entry
+is `SPORT_NOT_IN_CATALOG`; an exact blacklisted activity is `BLACKLISTED`.
+Complete those outcomes as governed `HUMAN_REVIEW_REQUIRED` without creating an
+approval job. A surface-specific resolved package must still use the exact
+injected catalog name and evidence-backed determination union.
 
 After committing, record the terminal queue result:
 
@@ -160,3 +169,44 @@ After each batch, report:
 After every terminal result, run the queue status again and continue until all five completion counts are zero. Process allowed capture runs before concluding that no new mapping jobs exist. Historical expanded/failed/reviewed jobs and active leases owned by another worker remain visible in the final report but are not available work. A claimed job with no lease is malformed rather than complete and must be reported for operator repair.
 
 The live goal may create/reuse intake pages, policy-preflight rows, capture runs, and stored capture artifacts through the governed commands. Do not push, deploy, modify live organization/source/mapping/candidate rows, publish candidates, approve training data, alter domain-policy decisions, or enable live schedules unless the active user request explicitly authorizes those actions.
+## Current sport-evidence and cutover rules (2026-08-10)
+
+Before any evidence inspection, the goal must use the shared claim/export
+service to persist one exact intake/run and one validated live `Sports`
+snapshot bound to the immutable claim generation. The manifest and
+`mapping-job-context.json` are authoritative for that claim. A fresh catalog
+mismatch releases the claim for re-export; it is never repaired by
+`DEFAULT_SPORTS`, a compiled alias, discovery `sportHints`, campaign metadata,
+organization names, URL tokens, or a bare generic family word.
+
+Record one or more v2 `sportDeterminations` from stored first-party HTML,
+Markdown, and screenshot evidence. Resolve an exact catalog name only when the
+evidence establishes its surface/format. Outdoor/grass/field soccer resolves
+to `Grass Soccer`, indoor/arena/boarded soccer to `Indoor Soccer`, futsal
+rules/court to `Futsal`, sand soccer to `Beach Soccer`, indoor/hard-court
+volleyball to `Indoor Volleyball`, sand volleyball to `Beach Volleyball`, and
+grass/outdoor-field volleyball to `Grass Volleyball`, provided each exact name
+is in the injected catalog. Bare Soccer or Volleyball is
+`SPORT_VARIANT_UNRESOLVED`; an evidenced family with no exact entry is
+`SPORT_NOT_IN_CATALOG`; a policy-blacklisted activity is `BLACKLISTED` and
+must remain excluded. This matrix is evidence guidance, not keyword
+substitution. Preserve citations and source labels for human review.
+
+Only a determination-complete package may reach `REVIEW_REQUIRED`; completion
+also checks citation ownership, catalog freshness, candidate/organization
+sport equality, and claim-generation CAS. Human resolution is authenticated,
+per-determination, catalog-validated, and consumed one-to-one. v1 result
+records remain parse-only history. A review-ready result is not approval:
+application is available only inside validated v2 approval completion, and the
+removed standalone live-apply command or an operator id cannot bypass it.
+
+Production cutover is stopped-fleet first. Stop and preflight all ten mapper
+services, both reviewers, coverage, and the separately deployed digest-pinned
+model controller. Reconciliation is dry-run-first and requires the reviewed
+count plus selection hash for apply; it requeues the same eligible terminal
+job once, never guesses a sport, writes no candidates, and is idempotent.
+
+Revision note (2026-08-10): Added claim-bound catalog and determination
+guidance, governed human resolution, approval-only application,
+dry-run/idempotent reconciliation, and stopped-fleet/controller preflight
+without removing the historical rollout instructions.

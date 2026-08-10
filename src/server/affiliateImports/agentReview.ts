@@ -6,9 +6,17 @@ import {
   type AffiliateMappingReview,
   type AffiliateMappingWorkerResult,
 } from './agentContracts';
+import {
+  affiliateSportDeterminationSha256,
+  type AffiliateHumanSportResolution,
+} from './affiliateSportDetermination';
+import type { AffiliateSportsCatalogSnapshot } from './affiliateSportsCatalog';
 
 export type AffiliateMappingReviewerInput = {
-  schemaVersion: 1;
+  schemaVersion: 2;
+  contextContractVersion: 2;
+  sportsCatalog: AffiliateSportsCatalogSnapshot;
+  humanSportResolution?: AffiliateHumanSportResolution;
   workerResult: AffiliateMappingWorkerResult;
   scopedDiff: string;
   validationTranscripts: Array<{
@@ -82,7 +90,12 @@ export const buildAffiliateReviewerInput = (input: {
 }): AffiliateMappingReviewerInput => {
   const workerResult = affiliateMappingWorkerResultSchema.parse(input.workerResult);
   const payload: AffiliateMappingReviewerInput = {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    contextContractVersion: 2,
+    sportsCatalog: workerResult.sportsCatalog,
+    ...(workerResult.humanSportResolution
+      ? { humanSportResolution: workerResult.humanSportResolution }
+      : {}),
     workerResult,
     scopedDiff: boundedText(input.scopedDiff, 512 * 1024, 'Scoped diff'),
     validationTranscripts: input.validationTranscripts.slice(0, 20).map((transcript) => ({
@@ -204,7 +217,10 @@ export type AffiliateMappingHumanDisposition =
   | 'REJECT';
 
 export type AffiliateMappingTeachingSignal = {
-  schemaVersion: 1;
+  schemaVersion: 2;
+  contextContractVersion: 2;
+  sportsCatalogSha256: string;
+  sportDeterminationSha256s: string[];
   jobId: string;
   disposition: AffiliateMappingHumanDisposition;
   workerResultSha256: string;
@@ -245,7 +261,12 @@ export const createAffiliateMappingTeachingSignal = (input: {
     throw new Error('Rejected teaching signals require a reason.');
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    contextContractVersion: 2,
+    sportsCatalogSha256: workerResult.sportsCatalog.sha256,
+    sportDeterminationSha256s: workerResult.draft?.sportDeterminations
+      .map(affiliateSportDeterminationSha256)
+      .sort() ?? [],
     jobId: workerResult.jobId,
     disposition: input.disposition,
     workerResultSha256: stableAgentArtifactSha256(workerResult),

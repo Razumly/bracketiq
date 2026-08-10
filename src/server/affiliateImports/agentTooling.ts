@@ -5,6 +5,7 @@ import {
   affiliateSourceDraftSchema,
   type AffiliateSourceDraft,
 } from './agentContracts';
+import { assertAffiliateSourceDraftSports } from './affiliateSportMapping';
 import {
   renderAffiliateSourceDraft,
   writeAffiliateGeneratedFiles,
@@ -13,6 +14,7 @@ import {
 import type { AffiliateAgentValidationExecutor } from './agentValidation';
 
 type ExportedArtifact = {
+  id?: string;
   kind: string;
   contentHash: string;
   localPath: string;
@@ -27,16 +29,20 @@ type ExportedArtifact = {
 };
 
 type ExportManifest = {
+  contextContractVersion?: number;
+  sportsCatalog?: unknown;
   sourceEvidence?: {
     intakeId?: string;
     intakeSourceKey?: string;
     runId?: string;
+    sportsCatalogSha256?: string;
     complianceStatus?: string | null;
   };
   artifacts?: ExportedArtifact[];
 };
 
 export type AffiliateEvidenceArtifactSummary = {
+  artifactId?: string;
   kind: string;
   sha256: string;
   sourceUrl: string | null;
@@ -49,6 +55,7 @@ export type AffiliateAgentToolboxOptions = {
   evidenceDirectory: string;
   repositoryRoot: string;
   writableRoot: string;
+  catalogNames?: readonly string[];
   allowedRepositoryRoots?: string[];
   maxArtifactReadBytes?: number;
   maxRepositoryReadBytes?: number;
@@ -105,11 +112,13 @@ export class AffiliateAgentToolbox {
   private readonly maxRepositoryReadBytes: number;
   private readonly maxSearchResults: number;
   private readonly validationExecutor: AffiliateAgentValidationExecutor | null;
+  private readonly catalogNames: readonly string[] | null;
 
   constructor(options: AffiliateAgentToolboxOptions) {
     this.evidenceDirectory = path.resolve(options.evidenceDirectory);
     this.repositoryRoot = path.resolve(options.repositoryRoot);
     this.writableRoot = path.resolve(options.writableRoot);
+    this.catalogNames = options.catalogNames ? [...options.catalogNames] : null;
     this.allowedRepositoryRoots = (
       options.allowedRepositoryRoots
       ?? [
@@ -128,6 +137,7 @@ export class AffiliateAgentToolbox {
     const manifest = await readExportManifest(this.evidenceDirectory);
     return (manifest.artifacts ?? [])
       .map((artifact) => ({
+        artifactId: artifact.id,
         kind: artifact.kind,
         sha256: artifact.contentHash,
         sourceUrl: artifact.sourceUrl ?? null,
@@ -308,13 +318,21 @@ export class AffiliateAgentToolbox {
     }
     return matches;
   }
-
   validateDraft(value: unknown): AffiliateSourceDraft {
-    return affiliateSourceDraftSchema.parse(value);
+    const draft = affiliateSourceDraftSchema.parse(value);
+    if (
+      (draft.implementationMode === 'GENERIC_MAPPING'
+        || draft.implementationMode === 'MANUAL_CANDIDATES')
+      && !this.catalogNames
+    ) {
+      throw new Error('Executable draft validation requires injected catalog names.');
+    }
+    if (this.catalogNames) assertAffiliateSourceDraftSports(draft, this.catalogNames);
+    return draft;
   }
 
   renderDraft(value: unknown): AffiliateGeneratedFile[] {
-    return renderAffiliateSourceDraft(this.validateDraft(value));
+    return renderAffiliateSourceDraft(this.validateDraft(value), this.catalogNames ?? undefined);
   }
 
   async writeRenderedDraft(value: unknown): Promise<{

@@ -6,6 +6,9 @@ import {
   type AffiliateSourceDraft,
 } from './agentContracts';
 import {
+  assertAffiliateSourceDraftSports,
+} from './affiliateSportMapping';
+import {
   renderAffiliateGeneratedConfig,
   renderAffiliateGeneratedSetup,
   renderAffiliateGeneratedTest,
@@ -51,12 +54,18 @@ const generatedFile = (filePath: string, content: string): AffiliateGeneratedFil
   sha256: createHash('sha256').update(content).digest('hex'),
 });
 
-export const renderAffiliateSourceDraft = (value: unknown): AffiliateGeneratedFile[] => {
+export const renderAffiliateSourceDraft = (
+  value: unknown,
+  catalogNames?: readonly string[],
+): AffiliateGeneratedFile[] => {
   const draft = affiliateSourceDraftSchema.parse(value);
-  if (
-    draft.implementationMode !== 'GENERIC_MAPPING'
-    && draft.implementationMode !== 'MANUAL_CANDIDATES'
-  ) {
+  const executable = draft.implementationMode === 'GENERIC_MAPPING'
+    || draft.implementationMode === 'MANUAL_CANDIDATES';
+  if (executable && !catalogNames) {
+    throw new Error('Executable draft rendering requires injected catalog names.');
+  }
+  if (catalogNames) assertAffiliateSourceDraftSports(draft, catalogNames);
+  if (!executable) {
     throw new Error(`Draft mode ${draft.implementationMode} cannot generate executable files.`);
   }
   if (!draft.mapping || !draft.listingKind) {

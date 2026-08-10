@@ -51,6 +51,12 @@ describe('affiliate source intake export helpers', () => {
         contentHash: 'hash-1',
         localPath: '001-page-html.html',
       }],
+      sportsCatalog: {
+        schemaVersion: 1,
+        capturedAt: '2026-07-19T12:00:00.000Z',
+        sha256: 'a'.repeat(64),
+        sports: [{ id: 'sport-1', name: 'Soccer' }],
+      },
     });
 
     expect(evidence).toMatchObject({

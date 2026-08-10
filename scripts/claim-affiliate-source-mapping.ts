@@ -1,13 +1,16 @@
 import dotenv from 'dotenv';
-import { execFileSync } from 'child_process';
 import path from 'path';
 import { configureAffiliateLiveDatabaseEnvironment } from '../src/server/affiliateImports/agentRepository';
+import type { AffiliateSourceMappingClaimHandle } from '../src/server/affiliateImports/sourceMappingQueue';
 
 dotenv.config({ quiet: true });
 dotenv.config({ path: '.env.local', override: false, quiet: true });
 
 const useLive = process.argv.includes('--live');
 if (useLive) {
+  if (!process.env.DATABASE_URL_LIVE?.trim()) {
+    throw new Error('DATABASE_URL_LIVE is required with --live.');
+  }
   configureAffiliateLiveDatabaseEnvironment(process.env.DATABASE_URL_LIVE);
   process.env.STORAGE_PROVIDER = 'spaces';
 }
@@ -22,42 +25,51 @@ const readOption = (name: string): string | undefined => {
 const main = async () => {
   const workerId = readOption('--worker') ?? `affiliate-mapping-cli-${process.pid}`;
   const intakeId = readOption('--intake');
+  const runId = readOption('--run-id');
   const { prisma } = await import('../src/lib/prisma');
   const {
-    claimNextAffiliateSourceIntakeForMapping,
+    acquireAffiliateSourceMappingClaimEvidence,
+  } = await import('../src/server/affiliateImports/sourceMappingClaimEvidence');
+  const {
     releaseAffiliateSourceMappingClaim,
   } = await import('../src/server/affiliateImports/sourceMappingQueue');
   try {
     if (process.argv.includes('--release')) {
-      if (!intakeId) throw new Error('--intake is required with --release.');
-      console.log(JSON.stringify(await releaseAffiliateSourceMappingClaim(intakeId, workerId), null, 2));
+      const jobId = readOption('--job-id');
+      const job = jobId
+        ? await (prisma as any).affiliateSourceMappingJobs.findUnique({ where: { id: jobId } })
+        : await (prisma as any).affiliateSourceMappingJobs.findFirst({
+            where: {
+              ...(intakeId ? { intakeId } : {}),
+              status: 'CLAIMED',
+              workerId,
+            },
+            orderBy: { claimedAt: 'desc' },
+          });
+      if (!job?.claimedAt) throw new Error('--release requires an active claimed job and its immutable claim generation.');
+      const claimHandle: AffiliateSourceMappingClaimHandle = {
+        jobId: job.id,
+        workerId: String(job.workerId),
+        claimedAt: new Date(job.claimedAt).toISOString(),
+      };
+      console.log(JSON.stringify(await releaseAffiliateSourceMappingClaim({
+        claimHandle,
+        reason: readOption('--reason') ?? 'Released by mapping claim CLI.',
+        db: prisma,
+      }), null, 2));
       return;
     }
-    const claim = await claimNextAffiliateSourceIntakeForMapping({ workerId, intakeId });
-    if (!claim) {
-      console.log(JSON.stringify({ claimed: false }, null, 2));
-      return;
+    if (useLive && (!intakeId || !runId)) {
+      throw new Error('--live claims require exact --intake and --run-id selectors.');
     }
-    if (process.argv.includes('--no-export')) {
-      console.log(JSON.stringify({ claimed: true, ...claim }, null, 2));
-      return;
-    }
-    const args = [
-      path.resolve('scripts/export-affiliate-source-intake.ts'),
-      '--source-key',
-      claim.sourceKey,
-      ...(useLive ? ['--live'] : []),
-    ];
-    const exported = execFileSync(path.resolve('node_modules/.bin/tsx'), args, {
-      cwd: process.cwd(),
-      env: process.env,
-      encoding: 'utf8',
-    });
-    console.log(JSON.stringify({
-      claimed: true,
-      ...claim,
-      export: JSON.parse(exported),
-    }, null, 2));
+    const claim = await acquireAffiliateSourceMappingClaimEvidence({
+      workerId,
+      intakeId,
+      runId,
+      environment: useLive ? 'live' : 'local',
+      outputDirectory: readOption('--output') ? path.resolve(readOption('--output') as string) : undefined,
+    }, { db: prisma });
+    console.log(JSON.stringify({ claimed: Boolean(claim), ...(claim ?? {}) }, null, 2));
   } finally {
     await (prisma as any).$disconnect();
   }

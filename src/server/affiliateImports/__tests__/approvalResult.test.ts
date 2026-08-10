@@ -17,7 +17,12 @@ const checks = {
 };
 
 const domainResult = {
-  schemaVersion: 1 as const,
+  schemaVersion: 2 as const,
+  claimGeneration: {
+    approvalJobId: 'approval_1',
+    reviewerId: 'codex-luna-approval-vm-1',
+    claimedAt: '2026-08-01T01:00:00.000Z',
+  },
   approvalJobId: 'approval_1',
   subjectType: 'DOMAIN_POLICY' as const,
   subjectKey: 'example.test',
@@ -206,9 +211,11 @@ describe('affiliate approval result', () => {
     }).mappingDisposition?.reasonCodes).toEqual(['SPORT_NAME_INVALID']);
   });
 
-  it('routes a sport absent from the catalog only to human review', () => {
+  it('keeps schema-version-1 sport human review parseable but rejects it in v2', () => {
+    const { claimGeneration: _claimGeneration, ...legacyDomainResult } = domainResult;
     expect(affiliateApprovalResultSchema.parse({
-      ...domainResult,
+      ...legacyDomainResult,
+      schemaVersion: 1 as const,
       subjectType: 'MAPPING_PACKAGE',
       subjectKey: 'mapping_1',
       decision: 'REJECT',
@@ -218,6 +225,18 @@ describe('affiliate approval result', () => {
         reasonCodes: ['SPORT_NOT_IN_CATALOG'],
       },
     }).mappingDisposition?.reasonCodes).toEqual(['SPORT_NOT_IN_CATALOG']);
+
+    expect(() => affiliateApprovalResultSchema.parse({
+      ...domainResult,
+      subjectType: 'MAPPING_PACKAGE',
+      subjectKey: 'mapping_1',
+      decision: 'REJECT',
+      blockingIssues: ['Badminton is not in the BracketIQ sports catalog.'],
+      mappingDisposition: {
+        nextAction: 'HUMAN_REVIEW_REQUIRED',
+        reasonCodes: ['SPORT_NOT_IN_CATALOG'],
+      },
+    })).toThrow('Schema-version-2 approval results cannot author');
 
     expect(() => affiliateApprovalResultSchema.parse({
       ...domainResult,

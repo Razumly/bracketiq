@@ -8,7 +8,15 @@ This document must be maintained in accordance with `PLANS.md`.
 
 BracketIQ currently pauses newly discovered domains at policy review and mapping packages at source review. After this change, a second Codex CLI process pinned to Luna at `max` reasoning can independently inspect those approval items, apply evidence-backed decisions, and keep the capture-to-mapping pipeline moving without waiting for the operator to approve every routine item. The launcher does not request fast mode or a specific service tier. The reviewer remains separate from the ingestion worker and leaves a durable decision record.
 
-The reviewer may allow or block an intake domain after checking stored robots and policy evidence. It blocks only an explicit prohibition that applies to the target public path. It allows capture when the bounded check finds no explicit prohibition, including when policy resources are missing or inaccessible. The reviewer may apply a review-ready source package to the live database after it independently checks the commit, stored evidence, tests, duplicate-safe scrapes, logo evidence, and unpublished state. When a bounded review establishes that no official logo is present, the reviewer may explicitly accept the logo absence without weakening any other package check. It may defer or reject uncertain mapping work. It never publishes organizations or candidates, enables recurring scraping, validates mappings, approves training data, or approves work produced under its own reviewer identity.
+The reviewer may allow or block an intake domain after checking stored robots and
+policy evidence. It blocks only an explicit prohibition that applies to the
+target public path and allows capture when no explicit prohibition is found.
+The historical direct package-application behavior is superseded: current live
+execution is available only inside validated schema-v2 approval completion,
+bound to the exact approval claim generation. The reviewer still checks the
+commit, stored evidence, tests, duplicate-safe scrapes, logo evidence, and
+unpublished state, may defer or reject uncertain mapping work, and never
+publishes organizations or candidates.
 
 ## Progress
 
@@ -268,3 +276,40 @@ Revision note (2026-08-01): Added the current domain decision standard to each c
 Revision note (2026-08-01): Recorded the guarded live requeue of 249 deferred policies and the first successful explicit-prohibition-only review.
 
 Revision note (2026-08-02): Added configurable reviewer pools, unique claim identities, pool-wide wait behavior, worker-specific progress files, and mandatory valid-event-division review.
+## Current v2 approval and human-resolution authority (2026-08-10)
+
+The historical approval workflow above remains for audit, but new approval
+completion uses schema version 2 and an immutable approval claim generation
+(`approvalJobId`, `reviewerId`, `claimedAt`). Every mapping disposition,
+domain-policy side effect, supplemental logo capture, and final terminal CAS
+must match that generation and an unexpired lease. A schema-v1 decision remains
+parseable history only and cannot authorize a fresh completion.
+
+Before deciding a mapping package, inspect the persisted
+`sportDeterminations`, claim-time catalog/current-catalog consistency, and the
+extended disposable `sportQuality` report. A resolved name requires cited
+stored first-party evidence that establishes its surface/format and exact
+membership in the injected live catalog. Generic Soccer/Volleyball is
+`SPORT_VARIANT_UNRESOLVED`, an evidenced family without an exact entry is
+`SPORT_NOT_IN_CATALOG`, and an exact blacklisted activity is `BLACKLISTED`
+regardless of catalog membership. Missing or malformed determinations,
+evidence disagreement, or catalog drift are producer repair; reviewers never
+choose a variant or invent a determination. Open every screenshot-only
+citation through its authenticated stored-artifact link before setting
+`storedEvidenceSufficient`.
+
+`APPROVE` is valid only for a package containing at least one evidence-backed
+`RESOLVED` determination and optional explicit `BLACKLISTED` exclusions, with
+the current catalog hash and authenticated human-resolution entries matching
+one-to-one. Live package execution occurs only inside validated approval
+completion and its branded permit. The removed standalone live-apply command,
+an operator id, or a claimed approval row is not an application authority.
+
+Reconciliation and fleet operations are separate boundaries: backlog repair is
+dry-run-first, expected-count/selection-hash guarded, same-job and
+idempotent; all mapper, reviewer, coverage, and separate model-controller
+writers are stopped and contract-preflighted before requeue.
+
+Revision note (2026-08-10): Added v2 approval generations, evidence-backed
+review and human-resolution checks, approval-only application, reconciliation,
+and stopped-fleet rules without deleting prior approval findings.

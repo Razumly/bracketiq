@@ -87,10 +87,11 @@ silently query production for disposable run IDs.
 Before a package is approved for the first time, an evidence-matched live
 source and organization normally do not exist. Treat the evidence command's
 `NOT_APPLIED` live-safety state as expected unless it finds a conflicting or
-already-published record. `APPROVE` invokes the guarded application boundary,
-which creates the review state and then deterministically requires the
-organization to be unlisted, its public page disabled, recurring scraping
-disabled, and its mapping unvalidated. Do not reject a valid package merely
+already-published record. `APPROVE` submits the validated schema-v2 result to
+approval completion, which alone may obtain the branded internal application
+permit and enforce the organization as unlisted, its public page disabled,
+recurring scraping disabled, and its mapping unvalidated. The reviewer never
+invokes a standalone application command. Do not reject a valid package merely
 because those rows have not been created before approval.
 
 Review organization validity separately from candidate-event validity. Do not
@@ -110,19 +111,34 @@ coordinates to `PRODUCER_REPAIR` with `ORGANIZATION_LOCATION_INVALID` when a
 defensible locality exists. Use human review only for conflicting or genuinely
 absent locality evidence. Do not apply this city-level fallback to events.
 
-Also review event and division integrity independently of the organization:
+Also inspect the persisted v2 `sportDeterminations`, claim/current catalog
+hashes, citation ownership, and extended `sportQuality` report before any
+mapping disposition. A resolved name must be an exact injected live catalog
+name whose stored first-party evidence establishes its surface or format.
+Use this matrix as mandatory evidence guidance, not keyword substitution:
 
-- Read the deterministic `sportQuality` section from the package-evidence
-  command before any approval. Set `sportQualityVerified` only when every
-  candidate and source organization sport exactly matches a current `Sports.name`
-  row. Generic `Volleyball` is not interchangeable with `Indoor Volleyball`,
-  `Grass Volleyball`, or `Beach Volleyball`. Do not infer a volleyball or soccer
-  surface. Return missing, wrong-case, or otherwise deterministically correctable
-  catalog names to `PRODUCER_REPAIR` with `SPORT_NAME_INVALID`. When any source
-  sport is absent from the catalog, immediately `REJECT` with
-  `HUMAN_REVIEW_REQUIRED` and `SPORT_NOT_IN_CATALOG`. Preserve the source label
-  in the evidence so a human can decide whether to implement the sport. Do not
-  approve, substitute another sport, or ask the mapper to guess.
+| Stored first-party evidence | Result |
+|---|---|
+| outdoor/grass/field soccer with the surface expressly established | `Grass Soccer` |
+| indoor/arena/boarded-field soccer, or expressly indoor soccer | `Indoor Soccer` |
+| futsal rules or futsal court | `Futsal` |
+| sand/beach soccer | `Beach Soccer` |
+| only `Soccer`, with no usable surface evidence | `SPORT_VARIANT_UNRESOLVED` |
+| indoor/gym/hard-court volleyball | `Indoor Volleyball` |
+| sand/beach volleyball | `Beach Volleyball` |
+| grass/outdoor-field volleyball | `Grass Volleyball` |
+| only `Volleyball`, with no usable surface evidence | `SPORT_VARIANT_UNRESOLVED` |
+| an evidenced sport family with no exact catalog entry | `SPORT_NOT_IN_CATALOG` |
+| an exact blacklisted activity | `BLACKLISTED`; omit from executable sports and preserve evidence |
+
+Generic labels, discovery `sportHints`, campaign metadata, organization names,
+URL tokens, `DEFAULT_SPORTS`, and the former two-argument validator are not
+authority. A blacklisted activity remains excluded even if present in the
+catalog. Missing/malformed determinations, wrong-run or tampered citations,
+catalog drift, or emitted-name disagreement are producer repair; use
+`PACKAGE_VALIDATION_FAILED`, `SPORT_CATALOG_MISMATCH`, or
+`SPORT_NAME_INVALID` as applicable. Reviewers never invent a determination or
+choose a surface.
 
 - Compare the organization description and inspected event descriptions with
   stored first-party page evidence. Public copy must describe the organization
@@ -239,3 +255,31 @@ approved package as an unpublished, disabled source.
 Never publish an organization or candidate, enable recurring scraping, validate
 a mapping, approve training data, change unrelated live data, push code, or
 deploy. Never approve work produced by this reviewer identity.
+## Current v2 approval and fleet boundary
+
+New approval results are schema v2 and must include the immutable
+`{ approvalJobId, reviewerId, claimedAt }` generation. Every mapping,
+domain-policy, supplemental-logo, and final terminal side effect must compare
+that exact generation and an unexpired lease. Schema-v1 decisions remain
+parse-only history and cannot authorize a new completion.
+
+Open every screenshot-only determination citation through its authenticated
+stored-artifact link and visually inspect it before setting
+`storedEvidenceSufficient`. `APPROVE` requires only package-eligible
+determinations (`RESOLVED` plus optional explicit `BLACKLISTED` exclusions),
+at least one resolved sport, a fresh catalog hash, exact package evidence, and
+one-to-one coverage of any authenticated human resolution. Live execution is
+reachable only inside validated approval completion; the removed standalone
+apply command, operator id, or claimed approval row is not authority.
+
+The reconciliation command is dry-run-first, count/hash guarded, bounded,
+same-job and idempotent. It never infers a sport or writes candidates. Before
+any reconciliation apply or queue restart, stop and preflight all ten
+mapper services, both reviewers, coverage, and the separately deployed
+model-controller image/timer. A contract mismatch or stale controller keeps
+the entire queue fleet stopped.
+
+Revision note (2026-08-10): Added evidence-backed determinations, v2 approval
+generations, screenshot inspection, approval-only application,
+reconciliation, and stopped-fleet rules while preserving historical review
+instructions.

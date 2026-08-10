@@ -1,14 +1,16 @@
 import {
-  affiliateSourceDraftSchema,
+  affiliateSourceDraftV2Schema,
   type AffiliateCandidateAssertion,
   type AffiliateSourceDraft,
   type ModelRevision,
 } from './agentContracts';
-import { renderAffiliateSourceDraft } from './agentGenerator';
-import type {
-  AffiliateMappingJobContext,
-  AffiliateMappingModelClient,
+import {
+  assertAffiliateMappingJobContextV2,
+  type AffiliateMappingJobContext,
+  type AffiliateMappingModelClient,
 } from './agentModelClient';
+import { renderAffiliateSourceDraft } from './agentGenerator';
+import { assertAffiliateSourceDraftSports } from './affiliateSportMapping';
 
 export type AffiliateMappingEvaluationExample = {
   exampleId: string;
@@ -125,7 +127,6 @@ const isRefusal = (draft: AffiliateSourceDraft): boolean => (
   draft.implementationMode === 'BLOCKED'
   || draft.implementationMode === 'INSUFFICIENT_EVIDENCE'
 );
-
 const evaluateOne = async (
   example: AffiliateMappingEvaluationExample,
   worker: AffiliateMappingModelClient,
@@ -134,8 +135,9 @@ const evaluateOne = async (
   const errors: string[] = [];
   const hardViolations: string[] = [];
   let rawDraft: unknown;
+  const context = assertAffiliateMappingJobContextV2(example.context);
   try {
-    rawDraft = await worker.createDraft(example.context);
+    rawDraft = await worker.createDraft(context);
   } catch (error) {
     return {
       exampleId: example.exampleId,
@@ -155,7 +157,7 @@ const evaluateOne = async (
       latencyMs: Date.now() - startedAt,
     };
   }
-  const parsed = affiliateSourceDraftSchema.safeParse(rawDraft);
+  const parsed = affiliateSourceDraftV2Schema.safeParse(rawDraft);
   if (!parsed.success) {
     errors.push(...parsed.error.issues.map((issue) => (
       `${issue.path.join('.') || '<root>'}: ${issue.message}`
@@ -188,8 +190,15 @@ const evaluateOne = async (
   }
 
   const draft = parsed.data;
-  const expected = example.expectedDraft;
-  const allowedArtifactHashes = new Set(example.context.artifacts.map((artifact) => artifact.sha256));
+  const expected = affiliateSourceDraftV2Schema.parse(example.expectedDraft);
+  const catalogNames = context.sportsCatalog.sports.map((sport) => sport.name);
+  try {
+    assertAffiliateSourceDraftSports(draft, catalogNames);
+  } catch (error) {
+    hardViolations.push('SPORT_CATALOG_VALIDATION_FAILED');
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+  const allowedArtifactHashes = new Set(context.artifacts.map((artifact) => artifact.sha256));
   const citedArtifactCount = draft.evidence.filter((item) => (
     allowedArtifactHashes.has(item.artifactSha256)
   )).length;
@@ -212,7 +221,7 @@ const evaluateOne = async (
   let generatorPassed = isRefusal(draft);
   if (!isRefusal(draft) && draft.implementationMode !== 'CUSTOM_EXTRACTOR_REQUIRED') {
     try {
-      generatedFileCount = renderAffiliateSourceDraft(draft).length;
+      generatedFileCount = renderAffiliateSourceDraft(draft, catalogNames).length;
       generatorPassed = true;
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));

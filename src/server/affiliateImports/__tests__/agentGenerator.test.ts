@@ -11,7 +11,8 @@ const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
 
 const draft = {
-  schemaVersion: 1,
+  schemaVersion: 2,
+  contextContractVersion: 2,
   intakeId: 'intake_river_city',
   sourceKey: 'river-city-soccer',
   runId: 'run_river_city',
@@ -68,12 +69,26 @@ const draft = {
   },
   warnings: [],
   unresolvedQuestions: [],
+  sportDeterminations: [{
+    sourceLabels: ['outdoor soccer'],
+    status: 'RESOLVED',
+    resolutionBasis: 'SOURCE_EVIDENCE',
+    canonicalSportNames: ['Grass Soccer'],
+    rationale: 'Outdoor soccer is explicitly described.',
+    evidence: [{
+      artifactId: 'artifact_events',
+      artifactSha256: HASH_A,
+      artifactKind: 'PAGE_HTML',
+      pageUrl: 'https://rivercity.example/events',
+      excerpt: 'outdoor soccer',
+    }],
+  }],
 };
 
 describe('affiliate mapping deterministic generator', () => {
   it('renders byte-identical constrained source files', () => {
-    const first = renderAffiliateSourceDraft(draft);
-    const second = renderAffiliateSourceDraft(draft);
+    const first = renderAffiliateSourceDraft(draft, ['Grass Soccer']);
+    const second = renderAffiliateSourceDraft(draft, ['Grass Soccer']);
     expect(second).toEqual(first);
     expect(first.map((file) => file.path)).toEqual([
       'docs/affiliate-source-registry-fragments/river-city-soccer.md',
@@ -135,7 +150,7 @@ describe('affiliate mapping deterministic generator', () => {
 
   it('writes idempotently and refuses to overwrite human changes', async () => {
     const temporaryDirectory = await fs.mkdtemp('/tmp/affiliate-agent-generator-');
-    const files = renderAffiliateSourceDraft(draft);
+    const files = renderAffiliateSourceDraft(draft, ['Grass Soccer']);
     try {
       const first = await writeAffiliateGeneratedFiles({
         rootDirectory: temporaryDirectory,

@@ -9,8 +9,14 @@ import {
   openWeightModelEligibilityIssues,
   openWeightModelManifestSchema,
 } from '../agentContracts';
+import { buildAffiliateSportsCatalogSnapshot } from '../affiliateSportsCatalog';
+import { assertAffiliateSourceDraftSports } from '../affiliateSportMapping';
 
 const HASH_A = 'a'.repeat(64);
+const sportsCatalog = buildAffiliateSportsCatalogSnapshot(
+  [{ id: 'sport_1', name: 'Grass Soccer' }],
+  '2026-01-01T00:00:00.000Z',
+);
 const HASH_B = 'b'.repeat(64);
 const HASH_C = 'c'.repeat(64);
 
@@ -53,7 +59,8 @@ const genericMapping = {
 };
 
 const allowedDraft = {
-  schemaVersion: 1 as const,
+  schemaVersion: 2 as const,
+  contextContractVersion: 2 as const,
   intakeId: 'intake_1',
   sourceKey: 'river-city-soccer',
   runId: 'run_1',
@@ -77,6 +84,20 @@ const allowedDraft = {
   },
   warnings: [],
   unresolvedQuestions: [],
+  sportDeterminations: [{
+    sourceLabels: ['outdoor soccer'],
+    status: 'RESOLVED',
+    resolutionBasis: 'SOURCE_EVIDENCE',
+    canonicalSportNames: ['Grass Soccer'],
+    rationale: 'Outdoor soccer evidence.',
+    evidence: [{
+      artifactId: 'artifact_a',
+      artifactSha256: HASH_A,
+      artifactKind: 'PAGE_MARKDOWN',
+      pageUrl: 'https://rivercity.example/events',
+      excerpt: 'outdoor soccer',
+    }],
+  }],
 };
 
 const blockedDraft = {
@@ -180,19 +201,21 @@ describe('affiliate mapping agent contracts', () => {
     expect(result.success).toBe(false);
     expect(result.error?.issues.some((issue) => issue.path[0] === 'mapping')).toBe(true);
   });
-
-  it('rejects generic or composite sport labels in executable agent output', () => {
-    const generic = affiliateSourceDraftSchema.safeParse({
+  it('defers generic or composite sport labels to the executable catalog boundary', () => {
+    const genericDraft = {
       ...allowedDraft,
       expectedCandidates: [{ ...candidate, sportName: 'Volleyball' }],
-    });
-    const composite = affiliateSourceDraftSchema.safeParse({
+    };
+    const compositeDraft = {
       ...allowedDraft,
       expectedCandidates: [{ ...candidate, sportName: 'Baseball & Fastpitch Softball' }],
-    });
-    expect(generic.success).toBe(false);
-    expect(composite.success).toBe(false);
-    expect(generic.error?.issues.some((issue) => issue.message.includes('human review'))).toBe(true);
+    };
+    expect(affiliateSourceDraftSchema.safeParse(genericDraft).success).toBe(true);
+    expect(affiliateSourceDraftSchema.safeParse(compositeDraft).success).toBe(true);
+    expect(() => assertAffiliateSourceDraftSports(genericDraft, ['Grass Soccer']))
+      .toThrow('human review');
+    expect(() => assertAffiliateSourceDraftSports(compositeDraft, ['Grass Soccer']))
+      .toThrow('human review');
   });
 
   it('rejects an internal BracketIQ action URL', () => {
@@ -292,7 +315,6 @@ describe('affiliate mapping agent contracts', () => {
     expect(assertOpenWeightModelEligible(modelManifest, {
       requireOfflineColdStart: true,
     })).toEqual(modelManifest);
-
     const restricted = {
       ...modelManifest,
       license: {
@@ -313,8 +335,10 @@ describe('affiliate mapping agent contracts', () => {
   });
 
   it('validates worker, reviewer, and human-approved training envelopes', () => {
+
     const workerResult = {
-      schemaVersion: 1,
+      schemaVersion: 2,
+      contextContractVersion: 2,
       jobId: 'job_1',
       intakeId: 'intake_1',
       status: 'DRAFT_READY',
@@ -328,9 +352,10 @@ describe('affiliate mapping agent contracts', () => {
         promptTemplateRevision: 'prompt-v1',
       },
       modelManifestSha256: HASH_B,
-      promptContractVersion: 1,
+      promptContractVersion: 2,
       evidenceRunId: 'run_1',
       evidenceArtifactSha256s: [HASH_A],
+      sportsCatalog,
       draft: allowedDraft,
       draftSha256: HASH_C,
       generatedFiles: [],
@@ -346,9 +371,11 @@ describe('affiliate mapping agent contracts', () => {
     expect(affiliateMappingWorkerResultSchema.parse(workerResult).status).toBe('DRAFT_READY');
 
     const review = {
-      schemaVersion: 1,
+      schemaVersion: 2,
+      contextContractVersion: 2,
       jobId: 'job_1',
       workerResultSha256: HASH_A,
+      sportsCatalog,
       reviewer: {
         provider: 'codex',
         model: 'sol',

@@ -5,15 +5,17 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import {
   affiliateMappingWorkerResultSchema,
-  affiliateSourceDraftSchema,
+  affiliateSourceDraftV2Schema,
   stableAgentArtifactSha256,
   type AffiliateMappingWorkerResult,
 } from './agentContracts';
-import { renderAffiliateSourceDraft, writeAffiliateGeneratedFiles } from './agentGenerator';
-import type {
-  AffiliateMappingJobContext,
-  AffiliateMappingModelClient,
+import {
+  assertAffiliateMappingJobContextV2,
+  type AffiliateMappingJobContext,
+  type AffiliateMappingModelClient,
 } from './agentModelClient';
+import { assertAffiliateSourceDraftSports } from './affiliateSportMapping';
+import { renderAffiliateSourceDraft, writeAffiliateGeneratedFiles } from './agentGenerator';
 
 const execFileAsync = promisify(execFile);
 
@@ -41,33 +43,39 @@ export const runAffiliateMappingDraftJob = async (input: {
   worktreeRoot: string;
   validate?: AffiliateRunnerValidator;
 }): Promise<AffiliateMappingWorkerResult> => {
+  const context = assertAffiliateMappingJobContextV2(input.context);
+  if (input.workerId !== context.workerId) {
+    throw new Error('Runner worker id does not match the claimed v2 context.');
+  }
   const startedAt = Date.now();
   const modelStartedAt = Date.now();
   const model = await input.modelClient.modelRevision();
-  const rawDraft = await input.modelClient.createDraft(input.context);
+  const rawDraft = await input.modelClient.createDraft(context);
   const modelMs = Date.now() - modelStartedAt;
-  const draft = affiliateSourceDraftSchema.parse(rawDraft);
+  const draft = affiliateSourceDraftV2Schema.parse(rawDraft);
+  const catalogNames = context.sportsCatalog.sports.map((sport) => sport.name);
+  assertAffiliateSourceDraftSports(draft, catalogNames);
 
-  const contextArtifactHashes = new Set(input.context.artifacts.map((artifact) => artifact.sha256));
+  const contextArtifactHashes = new Set(context.artifacts.map((artifact) => artifact.sha256));
   for (const evidence of draft.evidence) {
     if (!contextArtifactHashes.has(evidence.artifactSha256)) {
       throw new Error(`Draft cites evidence outside the job bundle: ${evidence.artifactSha256}`);
     }
   }
   if (
-    draft.intakeId !== input.context.intakeId
-    || draft.sourceKey !== input.context.sourceKey
-    || draft.runId !== input.context.runId
+    draft.intakeId !== context.intakeId
+    || draft.sourceKey !== context.sourceKey
+    || draft.runId !== context.runId
   ) {
     throw new Error('Draft identity does not match the claimed intake job.');
   }
-  if (draft.policyDisposition !== input.context.policyDisposition) {
+  if (draft.policyDisposition !== context.policyDisposition) {
     throw new Error('Draft policy disposition does not match the reviewed intake policy.');
   }
 
   const renderStartedAt = Date.now();
   const refusal = isRefusalMode(draft.implementationMode);
-  const files = refusal ? [] : renderAffiliateSourceDraft(draft);
+  const files = refusal ? [] : renderAffiliateSourceDraft(draft, catalogNames);
   if (files.length) {
     await writeAffiliateGeneratedFiles({
       rootDirectory: input.worktreeRoot,
@@ -89,16 +97,19 @@ export const runAffiliateMappingDraftJob = async (input: {
   const validationMs = Date.now() - validationStartedAt;
   const draftSha256 = stableAgentArtifactSha256(draft);
   return affiliateMappingWorkerResultSchema.parse({
-    schemaVersion: 1,
-    jobId: input.context.jobId,
-    intakeId: input.context.intakeId,
+    schemaVersion: 2,
+    contextContractVersion: 2,
+    jobId: context.jobId,
+    intakeId: context.intakeId,
     status: refusal ? 'REFUSED' : 'DRAFT_READY',
     workerId: input.workerId,
     model,
     modelManifestSha256: input.modelManifestSha256,
     promptContractVersion: input.promptContractVersion,
-    evidenceRunId: input.context.runId,
+    evidenceRunId: context.runId,
     evidenceArtifactSha256s: [...contextArtifactHashes].sort(),
+    sportsCatalog: context.sportsCatalog,
+    ...(context.humanSportResolution ? { humanSportResolution: context.humanSportResolution } : {}),
     draft,
     draftSha256,
     generatedFiles: files.map((file) => ({

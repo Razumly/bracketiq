@@ -1,3 +1,5 @@
+import type { AffiliateSportsCatalogSnapshot } from './affiliateSportsCatalog';
+
 type IntakeRunLike = {
   id: string;
   status: string;
@@ -60,6 +62,7 @@ export const buildAffiliateSourceEvidence = (input: {
   run: IntakeRunLike;
   pages: IntakePageLike[];
   artifacts: IntakeArtifactLike[];
+  sportsCatalog: AffiliateSportsCatalogSnapshot;
 }) => {
   const artifactCounts = new Map<string, number>();
   input.artifacts.forEach((artifact) => {
@@ -79,6 +82,7 @@ export const buildAffiliateSourceEvidence = (input: {
     runStatus: input.run.status,
     provider: input.run.provider ?? null,
     capturedAt: isoString(input.run.finishedAt ?? input.run.startedAt ?? input.run.createdAt),
+    sportsCatalogSha256: input.sportsCatalog.sha256,
     pages: input.pages.map((page) => ({
       url: page.url,
       role: page.role ?? null,
@@ -109,6 +113,7 @@ export const renderAffiliateSourceEvidenceMarkdown = (
     `- Run: \`${evidence.runId}\` (\`${evidence.runStatus}\`)`,
     `- Provider: \`${evidence.provider ?? 'unknown'}\``,
     `- Captured at: \`${evidence.capturedAt ?? 'unknown'}\``,
+    `- Sports catalog SHA-256: \`${evidence.sportsCatalogSha256}\``,
     `- Compliance: \`${evidence.complianceStatus ?? 'unknown'}\``,
     '',
     '## Source Pages',
