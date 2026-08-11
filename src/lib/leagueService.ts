@@ -175,12 +175,9 @@ class LeagueService {
     }
 
     try {
-      const eventRow = await apiRequest<any>(`/api/events/${eventId}`);
-      const existing = Array.isArray(eventRow.timeSlotIds) ? eventRow.timeSlotIds : [];
-      const next = Array.from(new Set([...existing, ...slotIds]));
-      await apiRequest(`/api/events/${eventId}`, {
+      await apiRequest(`/api/events/${eventId}/time-slots`, {
         method: 'PATCH',
-        body: { event: { timeSlotIds: next } },
+        body: { addTimeSlotIds: slotIds, removeTimeSlotIds: [] },
       });
     } catch (error) {
       console.error('Failed to append time slots to event:', error);
@@ -194,12 +191,9 @@ class LeagueService {
     }
 
     try {
-      const eventRow = await apiRequest<any>(`/api/events/${eventId}`);
-      const existing = Array.isArray(eventRow.timeSlotIds) ? eventRow.timeSlotIds : [];
-      const next = existing.filter((id: string) => !slotIds.includes(id));
-      await apiRequest(`/api/events/${eventId}`, {
+      await apiRequest(`/api/events/${eventId}/time-slots`, {
         method: 'PATCH',
-        body: { event: { timeSlotIds: next } },
+        body: { addTimeSlotIds: [], removeTimeSlotIds: slotIds },
       });
     } catch (error) {
       console.error('Failed to remove time slots from event:', error);

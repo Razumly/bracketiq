@@ -4695,6 +4695,7 @@ export const syncEventDivisions = async (
 
 export type EventUpsertOptions = {
   preserveOperationalState?: boolean;
+  preserveStaffState?: boolean;
 };
 
 export const upsertEventFromPayload = async (
@@ -4716,8 +4717,8 @@ export const upsertEventFromPayload = async (
       scheduleEndConstraint: true,
       generatedScheduleEnd: true,
       noFixedEndDateTime: true,
-      leagueScoringConfigId: true,
       hostId: true,
+      assistantHostIds: true,
       organizationId: true,
       parentEvent: true,
       affiliateUrl: true,
@@ -4767,6 +4768,13 @@ export const upsertEventFromPayload = async (
       },
     })
     : [];
+  const preserveStaffState = options.preserveStaffState === true;
+  const payloadIncludesAssistantHostIds = Object.prototype.hasOwnProperty.call(payload, 'assistantHostIds');
+  const assistantHostIdsForAssignments = payloadIncludesAssistantHostIds
+    ? ensureStringArray(payload.assistantHostIds)
+    : preserveStaffState
+      ? ensureStringArray((existingEvent as any)?.assistantHostIds)
+      : [];
   const requestedPayloadHostId = normalizeEntityId(payload.hostId);
   const requestedEventOfficialIds: string[] = Array.isArray(payload.eventOfficials)
     ? Array.from(new Set(
@@ -4783,7 +4791,7 @@ export const upsertEventFromPayload = async (
     ? sanitizeOrganizationEventAssignments(
       {
         hostId: payload.hostId ?? resolvedHostId ?? null,
-        assistantHostIds: ensureStringArray(payload.assistantHostIds),
+        assistantHostIds: assistantHostIdsForAssignments,
         officialIds: requestedEventOfficialIds,
       },
       organizationAccess
@@ -4794,7 +4802,7 @@ export const upsertEventFromPayload = async (
   const normalizedHostId = organizationAssignments?.hostId ?? requestedPayloadHostId ?? resolvedHostId ?? '';
   const normalizedAssistantHostIds = organizationAssignments
     ? organizationAssignments.assistantHostIds
-    : ensureStringArray(payload.assistantHostIds);
+    : assistantHostIdsForAssignments;
   const normalizedOfficialIds = organizationAssignments
     ? organizationAssignments.officialIds
     : requestedEventOfficialIds;

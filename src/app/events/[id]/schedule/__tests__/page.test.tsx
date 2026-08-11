@@ -68,9 +68,6 @@ jest.mock('@/lib/eventService', () => ({
     getEventDetailBootstrap: jest.fn(),
     deleteEvent: jest.fn(),
     deleteEventResult: jest.fn(),
-    deleteUnpublishedEvent: jest.fn(),
-    updateEvent: jest.fn(),
-    createEvent: jest.fn(),
     scheduleEvent: jest.fn(),
     getEventParticipants: jest.fn(),
   },
@@ -627,9 +624,6 @@ describe('League schedule page', () => {
     (eventService.getEventWithRelations as jest.Mock).mockReset();
     (eventService.getEventDetailBootstrap as jest.Mock).mockReset();
     (eventService.deleteEvent as jest.Mock).mockReset();
-    (eventService.deleteUnpublishedEvent as jest.Mock).mockReset();
-    (eventService.updateEvent as jest.Mock).mockReset();
-    (eventService.createEvent as jest.Mock).mockReset();
     (eventService.scheduleEvent as jest.Mock).mockReset();
     apiRequestMock.mockImplementation((path: string, options?: any) => {
       const editorMatch = path.match(/^\/api\/events\/editor(?:\?([^/]*))?$/);
@@ -1539,16 +1533,6 @@ describe('League schedule page', () => {
     });
     (eventService.getEvent as jest.Mock).mockImplementation(async () => eventWithoutMatches(persistedEvent));
     (eventService.getEventById as jest.Mock).mockImplementation(async () => eventWithoutMatches(persistedEvent));
-    (eventService.updateEvent as jest.Mock).mockImplementation((_id: string, payload: any) => {
-      persistedEvent = {
-        ...eventBeforeSave,
-        ...payload,
-        fieldIds: ['field_1'],
-        fields: [fieldOne],
-      };
-      persistedMatches = [keptMatch];
-      return Promise.resolve(eventWithoutMatches(persistedEvent));
-    });
 
     mockEventFormDraft = {
       ...eventBeforeSave,
@@ -1645,7 +1629,6 @@ describe('League schedule page', () => {
     });
     (eventService.getEvent as jest.Mock).mockResolvedValue(eventWithoutMatches);
     (eventService.getEventById as jest.Mock).mockResolvedValue(eventWithoutMatches);
-    (eventService.updateEvent as jest.Mock).mockResolvedValue(eventWithoutMatches);
     const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
 
     renderWithMantine(<LeagueSchedulePage />);
@@ -2160,7 +2143,6 @@ describe('League schedule page', () => {
     });
 
     expect(screen.queryByRole('menuitem', { name: /create template/i })).not.toBeInTheDocument();
-    expect(eventService.createEvent).not.toHaveBeenCalled();
     expect(eventService.getEventWithRelations).not.toHaveBeenCalled();
   });
 
@@ -2378,7 +2360,6 @@ describe('League schedule page', () => {
         },
       });
     });
-    expect(eventService.createEvent).not.toHaveBeenCalled();
   });
 
   it('does not auto-seed create mode from a templateId query before a start date is chosen', async () => {
@@ -2591,7 +2572,6 @@ describe('League schedule page', () => {
       expect(mockRouter.back.mock.calls.length + mockRouter.push.mock.calls.length).toBeGreaterThan(0);
     });
 
-    expect(eventService.deleteUnpublishedEvent).not.toHaveBeenCalled();
     expect(eventService.deleteEvent).not.toHaveBeenCalled();
     expect(leagueService.deleteMatchesByEvent).not.toHaveBeenCalled();
     expect(leagueService.deleteWeeklySchedulesForEvent).not.toHaveBeenCalled();
@@ -2661,13 +2641,6 @@ describe('League schedule page', () => {
     ));
     mockEventFormDirtyState = true;
 
-    (eventService.updateEvent as jest.Mock).mockImplementation((_id: string, payload: any) =>
-      Promise.resolve({
-        ...payload,
-        $id: 'event_unpublished',
-        state: 'PUBLISHED',
-      }),
-    );
 
     renderWithMantine(<LeagueSchedulePage />);
 
@@ -2690,8 +2663,6 @@ describe('League schedule page', () => {
     expect(command.draft.resources.timeSlots).toHaveLength(1);
     expect(command.draft).not.toHaveProperty('matches');
     expect(command.draft).not.toHaveProperty('attendees');
-    expect(eventService.updateEvent).not.toHaveBeenCalled();
-    expect(eventService.createEvent).not.toHaveBeenCalled();
     expect(mockValidatePendingStaffAssignments).toHaveBeenCalledTimes(1);
     expect(mockPutEventStaffState).not.toHaveBeenCalled();
     expect(mockGetEventStaffState).not.toHaveBeenCalled();
@@ -2760,13 +2731,6 @@ describe('League schedule page', () => {
     ));
     mockEventFormDirtyState = true;
 
-    (eventService.updateEvent as jest.Mock).mockImplementation((_id: string, payload: any) =>
-      Promise.resolve({
-        ...payload,
-        $id: 'event_private',
-        state: 'PRIVATE',
-      }),
-    );
 
     renderWithMantine(<LeagueSchedulePage />);
 
@@ -2788,7 +2752,6 @@ describe('League schedule page', () => {
     expect(command.draft.basics.state).toBe('PRIVATE');
     expect(command.draft.resources.timeSlots).toHaveLength(1);
     expect(command.draft).not.toHaveProperty('attendees');
-    expect(eventService.updateEvent).not.toHaveBeenCalled();
   });
 
   it('saves a template without changing template lifecycle state', async () => {
@@ -2848,13 +2811,6 @@ describe('League schedule page', () => {
       return Promise.resolve({});
     });
 
-    (eventService.updateEvent as jest.Mock).mockImplementation((_id: string, payload: any) =>
-      Promise.resolve({
-        ...payload,
-        $id: 'event_1',
-        state: payload?.state ?? 'TEMPLATE',
-      }),
-    );
 
     renderWithMantine(<LeagueSchedulePage />);
 
@@ -2877,7 +2833,6 @@ describe('League schedule page', () => {
     expect(command.draft.basics.name).toBe('Test League Renamed (TEMPLATE)');
     expect(command.draft.competition.divisionIds).toEqual(['event_1__division__open']);
     expect(command.draft.resources.timeSlots).toHaveLength(1);
-    expect(eventService.updateEvent).not.toHaveBeenCalled();
   });
 
   it('persists tournament winner set count from form draft on save', async () => {
@@ -2951,7 +2906,6 @@ describe('League schedule page', () => {
     expect(command.draft.competition.winnerSetCount).toBe(3);
     expect(command.draft.competition.winnerBracketPointsToVictory).toEqual([21, 21, 21]);
     expect(command.draft.competition.usesSets).toBe(true);
-    expect(eventService.updateEvent).not.toHaveBeenCalled();
   });
 
   it('reschedules from non-details tabs and surfaces backend warnings', async () => {
@@ -2964,13 +2918,6 @@ describe('League schedule page', () => {
     });
 
     mockEventFormValidateResult = false;
-    (eventService.updateEvent as jest.Mock).mockImplementation((_id: string, payload: any) =>
-      Promise.resolve({
-        ...payload,
-        $id: 'event_1',
-        state: payload?.state ?? 'UNPUBLISHED',
-      }),
-    );
     (eventService.scheduleEvent as jest.Mock).mockResolvedValue({
       event: buildApiEvent({
         id: 'event_1',
@@ -3051,12 +2998,6 @@ describe('League schedule page', () => {
       return Promise.resolve({});
     });
 
-    (eventService.updateEvent as jest.Mock).mockImplementation((_id: string, payload: any) =>
-      Promise.resolve({
-        ...payload,
-        $id: 'event_1',
-      }),
-    );
     (eventService.scheduleEvent as jest.Mock).mockResolvedValue({
       event: buildApiEvent({
         id: 'event_1',
@@ -3155,12 +3096,6 @@ describe('League schedule page', () => {
       }
       return Promise.resolve({});
     });
-    (eventService.updateEvent as jest.Mock).mockImplementation((_id: string, payload: any) =>
-      Promise.resolve({
-        ...payload,
-        $id: 'event_1',
-      }),
-    );
     (eventService.scheduleEvent as jest.Mock).mockResolvedValue({
       event: buildApiEvent({
         id: 'event_1',
@@ -3218,8 +3153,6 @@ describe('League schedule page', () => {
       expect(eventService.scheduleEvent).not.toHaveBeenCalled();
     });
     expect(eventService.scheduleEvent).not.toHaveBeenCalled();
-    expect(eventService.createEvent).not.toHaveBeenCalled();
-    expect(eventService.updateEvent).not.toHaveBeenCalled();
   });
 
   it('shows create event failure details returned by the server', async () => {

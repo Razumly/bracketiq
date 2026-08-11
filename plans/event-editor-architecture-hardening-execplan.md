@@ -27,6 +27,8 @@ The result is visible in these workflows: open an existing event and save no cha
 - [ ] (2026-08-09) Authenticated browser smoke remains blocked: the direct Next page reached successfully, but login/editor bootstrap returned 500 because local Postgres refused connections and Docker was unavailable.
 - [x] (2026-08-09) Added an editor-boundary projection for division details so hydrated form metadata cannot cross the strict save command; regression coverage now parses league and playoff division payloads with those fields present.
 
+- [x] (2026-08-10) Authenticated browser smoke passed against the seeded local backend: canonical create returned `201`, the editor loaded the persisted location and image, a name and description edit saved, reload preserved both values, the canonical event-editor GET returned contract version 2 with editor and staff revisions, and replaying one create command returned the same event ID. Google Maps location search remains unavailable because the local API key is not configured; the smoke used a pre-seeded canonical location.
+
 ## Surprises & Discoveries
 - Observation: `DivisionDetailForm` includes hydrated `skillDivisionTypeName`, `ageDivisionTypeName`, and `sportId` values that are not part of the strict editor command.
   Evidence: The form-to-draft adapter previously copied division records unchanged, so any division-enabled create or edit could be rejected as `INVALID_EDITOR_COMMAND` by the strict route schema. The adapter now allowlists the canonical division fields before building the draft.
@@ -106,7 +108,7 @@ The result is visible in these workflows: open an existing event and save no cha
 
 ## Outcomes & Retrospective
 
-Implementation is complete through the editor snapshot, strict save command, transactional persistence, scheduler end/timing separation, explicit save-versus-schedule result boundaries, and the read-only form draft callback contract. The form no longer takes a hydrated `Event`, emits partial event writes, or exposes a draft getter through its imperative ref; legacy conversion is confined to compatibility edges. Focused editor, contract, API, and scheduler suites pass 356 tests across 15 suites, and TypeScript passes. Targeted ESLint reports zero errors in milestone files with seven pre-existing warnings. Authenticated browser smoke remains blocked by unavailable local database services.
+Implementation is complete through the editor snapshot, strict save command, transactional persistence, scheduler end/timing separation, explicit save-versus-schedule result boundaries, and the read-only form draft callback contract. The form no longer takes a hydrated `Event`, emits partial event writes, or exposes a draft getter through its imperative ref; legacy conversion is confined to compatibility edges. Focused editor, contract, API, and scheduler suites pass 356 tests across 15 suites, and TypeScript passes. Targeted ESLint reports zero errors in milestone files with seven pre-existing warnings. Authenticated browser smoke now passes against the seeded local backend. The local Google Maps API key is not configured, so the smoke used a pre-seeded location instead of map search.
 
 ## Context and Orientation
 

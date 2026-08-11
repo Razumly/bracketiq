@@ -2808,9 +2808,9 @@ function OrganizationDetailContent() {
     if (!org || !canManageEvents || !eventId || !hostId) return;
     try {
       setUpdatingEventHostId(eventId);
-      await apiRequest(`/api/events/${eventId}`, {
-        method: 'PATCH',
-        body: { event: { hostId } },
+      await apiRequest(`/api/events/${eventId}/host`, {
+        method: 'PUT',
+        body: { hostId },
       });
       setOrg((prev) => {
         if (!prev) return prev;

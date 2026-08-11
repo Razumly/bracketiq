@@ -56,11 +56,6 @@ describe('leagueService', () => {
           endDate: '2025-12-01T00:00:00',
           repeating: true,
         })
-        .mockResolvedValueOnce({
-          timeSlotIds: [],
-        })
-        .mockResolvedValueOnce({});
-
       const result = await leagueService.createWeeklySchedules('event_1', [slot]);
 
       expect(apiRequestMock).toHaveBeenNthCalledWith(
@@ -82,13 +77,12 @@ describe('leagueService', () => {
         }),
       );
 
-      expect(apiRequestMock).toHaveBeenNthCalledWith(2, '/api/events/event_1');
       expect(apiRequestMock).toHaveBeenNthCalledWith(
-        3,
-        '/api/events/event_1',
+        2,
+        '/api/events/event_1/time-slots',
         expect.objectContaining({
           method: 'PATCH',
-          body: { event: { timeSlotIds: ['slot_1'] } },
+          body: { addTimeSlotIds: ['slot_1'], removeTimeSlotIds: [] },
         }),
       );
 
@@ -130,8 +124,6 @@ describe('leagueService', () => {
           endTimeMinutes: 10 * 60,
           repeating: true,
         })
-        .mockResolvedValueOnce({ timeSlotIds: [] })
-        .mockResolvedValueOnce({});
 
       const result = await leagueService.createWeeklySchedules('event_1', [slot]);
 
@@ -153,11 +145,11 @@ describe('leagueService', () => {
         }),
       );
       expect(apiRequestMock).toHaveBeenNthCalledWith(
-        4,
-        '/api/events/event_1',
+        3,
+        '/api/events/event_1/time-slots',
         expect.objectContaining({
           method: 'PATCH',
-          body: { event: { timeSlotIds: ['slot_mon', 'slot_wed'] } },
+          body: { addTimeSlotIds: ['slot_mon', 'slot_wed'], removeTimeSlotIds: [] },
         }),
       );
     });
