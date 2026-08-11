@@ -61,12 +61,6 @@ internal data class RegistrationQuestionsResponseDto(
     val error: String? = null,
 )
 
-@Serializable
-internal data class SaveRegistrationQuestionsRequestDto(
-    val scopeType: String,
-    val scopeId: String,
-    val questions: List<RegistrationQuestionDraft>,
-)
 
 internal fun RegistrationQuestionDto.toTeamJoinQuestionOrNull(): TeamJoinQuestion? {
     val normalizedId = id.trim().takeIf(String::isNotBlank) ?: return null

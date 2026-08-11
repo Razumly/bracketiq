@@ -36,10 +36,3 @@ data class LockedRentalSelection(
     val endEpochMillis: Long,
 )
 
-@Serializable
-data class RentalBookingItemManifest(
-    val id: String,
-    val fieldId: String,
-    val start: String,
-    val end: String,
-)

@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.buildEventDivisionId
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -53,11 +54,12 @@ class EventDetailsValidationTest {
     }
 
     @Test
-    fun online_event_edits_require_a_confirmed_price_quote() {
+    fun online_event_edits_require_a_confirmed_price_quote_when_registration_is_paid() {
         assertFalse(
             isEventInclusivePriceReady(
                 editView = true,
                 manualPaymentsEnabled = false,
+                activePriceCents = 5_000,
                 isQuoteConfirmed = false,
             ),
         )
@@ -65,7 +67,62 @@ class EventDetailsValidationTest {
             isEventInclusivePriceReady(
                 editView = true,
                 manualPaymentsEnabled = false,
+                activePriceCents = 5_000,
                 isQuoteConfirmed = true,
+            ),
+        )
+    }
+
+    @Test
+    fun free_online_event_edits_do_not_require_a_price_quote() {
+        assertTrue(
+            isEventInclusivePriceReady(
+                editView = true,
+                manualPaymentsEnabled = false,
+                activePriceCents = 0,
+                isQuoteConfirmed = false,
+            ),
+        )
+    }
+
+    @Test
+    fun multi_division_edits_require_a_quote_only_for_the_active_paid_division() {
+        val persistedPaidDivisionPriceCents = 5_000
+
+        assertTrue(
+            isEventInclusivePriceReady(
+                editView = true,
+                manualPaymentsEnabled = false,
+                activePriceCents = 0,
+                isQuoteConfirmed = false,
+            ),
+        )
+        assertFalse(
+            isEventInclusivePriceReady(
+                editView = true,
+                manualPaymentsEnabled = false,
+                activePriceCents = persistedPaidDivisionPriceCents,
+                isQuoteConfirmed = false,
+            ),
+        )
+    }
+
+    @Test
+    fun not_ready_multi_division_editor_ignores_positive_event_price_fallback() {
+        val activePriceCents = activeInclusivePriceCents(
+            singleDivision = false,
+            eventPriceCents = 5_000,
+            divisionEditorReady = false,
+            divisionPriceCents = 5_000,
+        )
+
+        assertEquals(0, activePriceCents)
+        assertTrue(
+            isEventInclusivePriceReady(
+                editView = true,
+                manualPaymentsEnabled = false,
+                activePriceCents = activePriceCents,
+                isQuoteConfirmed = false,
             ),
         )
     }
@@ -76,6 +133,7 @@ class EventDetailsValidationTest {
             isEventInclusivePriceReady(
                 editView = true,
                 manualPaymentsEnabled = true,
+                activePriceCents = 5_000,
                 isQuoteConfirmed = false,
             ),
         )
@@ -83,6 +141,7 @@ class EventDetailsValidationTest {
             isEventInclusivePriceReady(
                 editView = false,
                 manualPaymentsEnabled = false,
+                activePriceCents = 5_000,
                 isQuoteConfirmed = false,
             ),
         )

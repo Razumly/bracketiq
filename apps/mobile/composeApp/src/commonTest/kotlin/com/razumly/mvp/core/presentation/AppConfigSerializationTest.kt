@@ -1,4 +1,5 @@
 package com.razumly.mvp.core.presentation
+import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
@@ -29,14 +30,9 @@ class AppConfigSerializationTest {
             selectedFreeAgentId = "user_2",
         )
         val createFromRental = AppConfig.Create(
-            rentalBookingId = "booking_1",
-            rentalBookingItems = listOf(
-                RentalBookingItemManifest(
-                    id = "item_1",
-                    fieldId = "field_1",
-                    start = "2026-07-13T10:00:00Z",
-                    end = "2026-07-13T11:00:00Z",
-                ),
+            bootstrap = EventEditorBootstrapQueryDto(
+                rentalBookingId = "booking_1",
+                start = "2026-07-13T10:00:00Z",
             ),
         )
 
@@ -63,11 +59,12 @@ class AppConfigSerializationTest {
         }
         assertIdOnlyRoundTrip(createFromRental) { encoded ->
             assertTrue(encoded.contains("\"rentalBookingId\":\"booking_1\""))
-            assertTrue(encoded.contains("\"id\":\"item_1\""))
-            assertTrue(encoded.contains("\"fieldId\":\"field_1\""))
+            assertTrue(encoded.contains("\"start\":\"2026-07-13T10:00:00Z\""))
             assertFalse(encoded.contains("\"rentalContext\":"))
+            assertFalse(encoded.contains("\"rentalBookingItems\":"))
         }
     }
+
 
     private fun assertIdOnlyRoundTrip(
         configuration: AppConfig,

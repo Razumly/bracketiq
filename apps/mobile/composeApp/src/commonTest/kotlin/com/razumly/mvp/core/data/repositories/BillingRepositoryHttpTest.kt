@@ -291,24 +291,6 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
     override suspend fun getEventStaffInvites(eventId: String): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
     override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> = error("unused")
     override suspend fun getEventsByOrganization(organizationId: String, limit: Int): Result<List<Event>> = error("unused")
-    override suspend fun createEvent(
-        newEvent: Event,
-        requiredTemplateIds: List<String>,
-        leagueScoringConfig: com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO?,
-        fields: List<com.razumly.mvp.core.data.dataTypes.Field>?,
-        timeSlots: List<com.razumly.mvp.core.data.dataTypes.TimeSlot>?,
-    ): Result<Event> = error("unused")
-    override suspend fun scheduleEvent(
-        eventId: String,
-        participantCount: Int?,
-        includePlaceholderTeams: Boolean?,
-    ): Result<Event> = error("unused")
-    override suspend fun updateEvent(
-        newEvent: Event,
-        fields: List<com.razumly.mvp.core.data.dataTypes.Field>?,
-        timeSlots: List<com.razumly.mvp.core.data.dataTypes.TimeSlot>?,
-        leagueScoringConfig: com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO?,
-    ): Result<Event> = error("unused")
     override suspend fun updateLocalEvent(newEvent: Event): Result<Event> = error("unused")
     override fun getEventsInBoundsFlow(bounds: com.razumly.mvp.core.data.dataTypes.Bounds): Flow<Result<List<Event>>> = error("unused")
     override suspend fun getEventsInBounds(bounds: com.razumly.mvp.core.data.dataTypes.Bounds): Result<Pair<List<Event>, Boolean>> = error("unused")
@@ -391,24 +373,6 @@ private class BillingRepositoryHttp_FakeEventRepository(
     override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> =
         getEventsByIdsHandler?.invoke(eventIds) ?: error("unused")
     override suspend fun getEventsByOrganization(organizationId: String, limit: Int): Result<List<Event>> = error("unused")
-    override suspend fun createEvent(
-        newEvent: Event,
-        requiredTemplateIds: List<String>,
-        leagueScoringConfig: com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO?,
-        fields: List<com.razumly.mvp.core.data.dataTypes.Field>?,
-        timeSlots: List<com.razumly.mvp.core.data.dataTypes.TimeSlot>?,
-    ): Result<Event> = error("unused")
-    override suspend fun scheduleEvent(
-        eventId: String,
-        participantCount: Int?,
-        includePlaceholderTeams: Boolean?,
-    ): Result<Event> = error("unused")
-    override suspend fun updateEvent(
-        newEvent: Event,
-        fields: List<com.razumly.mvp.core.data.dataTypes.Field>?,
-        timeSlots: List<com.razumly.mvp.core.data.dataTypes.TimeSlot>?,
-        leagueScoringConfig: com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO?,
-    ): Result<Event> = error("unused")
     override suspend fun updateLocalEvent(newEvent: Event): Result<Event> = error("unused")
     override fun getEventsInBoundsFlow(bounds: com.razumly.mvp.core.data.dataTypes.Bounds): Flow<Result<List<Event>>> = error("unused")
     override suspend fun getEventsInBounds(bounds: com.razumly.mvp.core.data.dataTypes.Bounds): Result<Pair<List<Event>, Boolean>> = error("unused")

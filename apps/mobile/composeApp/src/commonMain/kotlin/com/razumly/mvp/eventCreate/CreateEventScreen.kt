@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -14,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -95,6 +98,8 @@ fun CreateEventScreen(
     val suggestedUsers by component.suggestedUsers.collectAsState()
     val pendingStaffInvites by component.pendingStaffInvites.collectAsState()
     val termsConsentState by component.termsConsentState.collectAsState()
+    val isEditorReady by component.isEditorReady.collectAsState()
+    val editorBootstrapError by component.editorBootstrapError.collectAsState()
     val termsConsentLoading by component.termsConsentLoading.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
     val isEditing = true
@@ -122,6 +127,19 @@ fun CreateEventScreen(
                 errorHandler.showPopup(error)
             }
         }
+    }
+    if (!isEditorReady) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (editorBootstrapError == null) {
+                CircularProgressIndicator()
+            } else {
+                Text(editorBootstrapError.orEmpty())
+            }
+        }
+        return
     }
 
     var imageScheme by remember {

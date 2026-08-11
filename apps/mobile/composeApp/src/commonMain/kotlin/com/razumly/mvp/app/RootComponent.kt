@@ -31,14 +31,13 @@ import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.UserScheduleSnapshot
 import com.razumly.mvp.core.data.repositories.StartupAuthState
+import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.razumly.mvp.core.data.repositories.IEventRepository
-import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
 import com.razumly.mvp.core.presentation.AppConfig
 import com.razumly.mvp.core.presentation.CenterNavAction
 import com.razumly.mvp.core.presentation.EventDetailInitialTab
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
-import com.razumly.mvp.core.presentation.RentalBookingItemManifest
 import com.razumly.mvp.core.presentation.toCenterNavAction
 import com.razumly.mvp.eventCreate.CreateEventComponent
 import com.razumly.mvp.eventDetail.EventDetailComponent
@@ -215,7 +214,6 @@ class RootComponent(
     }
 
     private val navigation = StackNavigation<AppConfig>()
-    private var pendingCreateSeed: SeededEventTemplateDraft? = null
     private val _koin = getKoin()
     private val scopeExceptionHandler = CoroutineExceptionHandler { _, throwable ->
         when (throwable) {
@@ -643,7 +641,7 @@ class RootComponent(
         when (page) {
             is AppConfig.Search -> navigation.replaceAll(AppConfig.Search())
             AppConfig.ChatList -> navigation.replaceAll(AppConfig.ChatList)
-            is AppConfig.Create -> navigation.replaceAll(AppConfig.Create())
+            is AppConfig.Create -> navigation.replaceAll(page)
             AppConfig.Schedule -> navigation.replaceAll(AppConfig.Schedule)
             AppConfig.ProfileHome -> navigation.replaceAll(AppConfig.ProfileHome)
             AppConfig.ProfileInvites -> navigation.replaceAll(AppConfig.ProfileInvites)
@@ -1026,37 +1024,22 @@ class RootComponent(
     }
 
     override fun navigateToCreate() {
-        openCreate(seed = null)
+        openCreate(EventEditorBootstrapQueryDto())
     }
 
-    override fun navigateToCreate(seed: SeededEventTemplateDraft) {
-        openCreate(seed = seed)
+    override fun navigateToCreate(bootstrap: EventEditorBootstrapQueryDto) {
+        openCreate(bootstrap)
     }
 
-    override fun navigateToCreateFromRental(
-        rentalBookingId: String,
-        rentalBookingItems: List<RentalBookingItemManifest>,
-    ) {
+    override fun navigateToCreateFromRental(rentalBookingId: String) {
         val normalizedBookingId = rentalBookingId.trim()
         if (normalizedBookingId.isEmpty()) return
-        openCreate(
-            seed = null,
-            rentalBookingId = normalizedBookingId,
-            rentalBookingItems = rentalBookingItems,
-        )
+        openCreate(EventEditorBootstrapQueryDto(rentalBookingId = normalizedBookingId))
     }
 
-    private fun openCreate(
-        seed: SeededEventTemplateDraft?,
-        rentalBookingId: String? = null,
-        rentalBookingItems: List<RentalBookingItemManifest> = emptyList(),
-    ) {
+    private fun openCreate(bootstrap: EventEditorBootstrapQueryDto) {
         setDefaultNavigationDirection()
-        pendingCreateSeed = seed
-        val config = AppConfig.Create(
-            rentalBookingId = rentalBookingId,
-            rentalBookingItems = rentalBookingItems,
-        )
+        val config = AppConfig.Create(bootstrap = bootstrap)
         navigation.pushNew(config)
         _selectedPage.value = config
     }
@@ -1181,22 +1164,17 @@ class RootComponent(
         )
 
         is AppConfig.Create -> {
-            val createSeed = config.seed ?: pendingCreateSeed
-            pendingCreateSeed = null
             Child.Create(
                 _koin.get {
                     parametersOf(
                         componentContext,
                         ::onEventCreated,
-                        createSeed,
-                        config.rentalBookingId,
-                        config.rentalBookingItems,
+                        config.bootstrap,
                     )
                 },
-                _koin.get { parametersOf(componentContext) }
+                _koin.get { parametersOf(componentContext) },
             )
         }
-
         AppConfig.ProfileHome -> Child.Profile(
             _koin.get {
                 parametersOf(

@@ -23,7 +23,6 @@ import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
 import com.razumly.mvp.core.data.repositories.PurchaseIntentTimeSlotContext
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
-import com.razumly.mvp.core.data.repositories.RentalOrderItem
 import com.razumly.mvp.core.data.repositories.RentalOrderPayerMismatchException
 import com.razumly.mvp.core.data.repositories.RentalOrderSelectionRequest
 import com.razumly.mvp.core.data.repositories.RentalOrderTerminalFailureException
@@ -38,7 +37,6 @@ import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
 import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentResult
-import com.razumly.mvp.core.presentation.RentalBookingItemManifest
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
@@ -137,7 +135,6 @@ data class RentalReservationComplete(
     val bookingId: String,
     val billId: String? = null,
     val totalCents: Int,
-    val items: List<RentalBookingItemManifest>,
 )
 
 data class TeamSignatureSyncProgress(
@@ -1246,7 +1243,6 @@ class DefaultOrganizationDetailComponent(
         _completedRentalReservation.value = null
         navigationHandler.navigateToCreateFromRental(
             rentalBookingId = completedReservation.bookingId,
-            rentalBookingItems = completedReservation.items,
         )
     }
 
@@ -1562,19 +1558,10 @@ class DefaultOrganizationDetailComponent(
                 paymentIntentId = pending.paymentIntentId,
                 payerUserId = pending.payerUserId,
             ).onSuccess { result ->
-                val itemManifest = result.items.toRentalBookingItemManifestOrNull()
-                if (itemManifest == null) {
-                    _errorState.value = ErrorMessage(
-                        "Payment was recorded, but the reserved-resource details were incomplete. " +
-                            "Do not submit another payment; contact the organization for assistance.",
-                    )
-                    return@onSuccess
-                }
                 _completedRentalReservation.value = RentalReservationComplete(
                     bookingId = result.bookingId,
                     billId = result.billId,
                     totalCents = result.totalCents,
-                    items = itemManifest,
                 )
                 _message.value = "Resources reserved."
                 activeRentalAvailabilityWindow?.let { window ->
@@ -1658,24 +1645,6 @@ class DefaultOrganizationDetailComponent(
         )
     }
 
-    private fun List<RentalOrderItem>.toRentalBookingItemManifestOrNull(): List<RentalBookingItemManifest>? {
-        if (isEmpty()) return null
-        val manifest = map { item ->
-            val id = item.id.trim().takeIf(String::isNotBlank) ?: return null
-            val fieldId = item.fieldId.trim().takeIf(String::isNotBlank) ?: return null
-            val start = runCatching { Instant.parse(item.start.trim()) }.getOrNull() ?: return null
-            val end = runCatching { Instant.parse(item.end.trim()) }.getOrNull() ?: return null
-            if (end <= start) return null
-            RentalBookingItemManifest(
-                id = id,
-                fieldId = fieldId,
-                start = start.toString(),
-                end = end.toString(),
-            )
-        }
-        if (manifest.map(RentalBookingItemManifest::id).distinct().size != manifest.size) return null
-        return manifest
-    }
 
     private fun String?.toPaymentIntentId(): String? {
         val normalized = this?.trim()?.takeIf(String::isNotBlank) ?: return null

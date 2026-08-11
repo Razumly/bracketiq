@@ -3,7 +3,7 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.repositories.EventStaffState
+import com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome
 import com.razumly.mvp.core.network.userMessage
 
 internal enum class EventScheduleEditAction(
@@ -11,7 +11,6 @@ internal enum class EventScheduleEditAction(
     val logAction: String,
     val successMessage: String,
     val failureMessage: String,
-    val deleteMatchesBeforeSchedule: Boolean,
     val resetBracketMatchesAfterSchedule: Boolean,
 ) {
     RESCHEDULE(
@@ -19,7 +18,6 @@ internal enum class EventScheduleEditAction(
         logAction = "reschedule",
         successMessage = "Event rescheduled.",
         failureMessage = "Failed to reschedule event.",
-        deleteMatchesBeforeSchedule = false,
         resetBracketMatchesAfterSchedule = false,
     ),
     BUILD_BRACKETS(
@@ -27,7 +25,6 @@ internal enum class EventScheduleEditAction(
         logAction = "build_brackets",
         successMessage = "Bracket build completed.",
         failureMessage = "Failed to build bracket(s).",
-        deleteMatchesBeforeSchedule = true,
         resetBracketMatchesAfterSchedule = true,
     ),
     REBUILD_WITHOUT_PLACEHOLDER_TEAMS(
@@ -35,7 +32,6 @@ internal enum class EventScheduleEditAction(
         logAction = "rebuild_without_placeholders",
         successMessage = "Schedule rebuilt without placeholder teams.",
         failureMessage = "Failed to rebuild without placeholder teams.",
-        deleteMatchesBeforeSchedule = true,
         resetBracketMatchesAfterSchedule = true,
     ),
 }
@@ -49,6 +45,7 @@ internal sealed class EventScheduleEditResult {
     data class Failure(
         val throwable: Throwable,
         val fallbackMessage: String,
+        val settingsSaved: Boolean,
     ) : EventScheduleEditResult()
 }
 
@@ -56,7 +53,8 @@ internal sealed class EventSaveActionResult {
     data class Success(
         val finalEvent: Event,
         val staffInvites: List<Invite>,
-        val staffRevision: String,
+        val staffRevision: String?,
+        val staffEmailDelivery: String,
     ) : EventSaveActionResult()
 
     data class Failure(
@@ -92,91 +90,38 @@ internal sealed class EventPublishResult {
 }
 
 internal class EventEditActionCoordinator {
+
     suspend fun runSaveEventAction(
         pendingStaffInvites: List<PendingStaffInviteDraft>,
-        expectedStaffRevision: String?,
         prepareEventForUpdate: () -> PreparedEventForUpdate,
-        updatePreparedEvent: suspend (PreparedEventForUpdate, String) -> Event,
-        refreshStaffState: suspend (Event) -> EventStaffState,
-        reconcileStaffState: suspend (
-            Event,
+        savePreparedEvent: suspend (
+            PreparedEventForUpdate,
             List<PendingStaffInviteDraft>,
-            String,
-        ) -> EventStaffState,
+        ) -> EventEditorSaveOutcome,
         refetchMatchesOfTournament: suspend (String) -> Unit,
         showLoading: (String) -> Unit,
         hideLoading: () -> Unit,
     ): EventSaveActionResult {
         showLoading("Saving event...")
-        var generalUpdateCommitted = false
         return try {
             val prepared = prepareEventForUpdate()
             validatePendingStaffInviteDrafts(pendingStaffInvites).getOrThrow()
-            val staffRevisionSeed = expectedStaffRevision
-                ?.trim()
-                ?.takeIf(String::isNotBlank)
-                ?: error("Reload the event before saving staff changes.")
-            val updated = updatePreparedEvent(prepared, staffRevisionSeed)
-            generalUpdateCommitted = true
-            val currentStaffState = refreshStaffState(updated)
-            val validPositionIds = currentStaffState.event.officialPositions
-                .map { position -> position.id }
-                .toSet()
-            val preparedPositionNameById = prepared.event.officialPositions.associate { position ->
-                position.id to position.name.trim().lowercase()
-            }
-            val currentPositionIdByName = currentStaffState.event.officialPositions.associate { position ->
-                position.name.trim().lowercase() to position.id
-            }
-            val validFieldIds = currentStaffState.event.fieldIds.toSet()
-            val fallbackPositionId = currentStaffState.event.officialPositions.firstOrNull()?.id
-            val desiredOfficials = prepared.event.eventOfficials.mapNotNull { official ->
-                val positionIds = official.positionIds.mapNotNull { positionId ->
-                    when {
-                        positionId in validPositionIds -> positionId
-                        else -> preparedPositionNameById[positionId]?.let(currentPositionIdByName::get)
-                    }
-                }.distinct()
-                    .ifEmpty { fallbackPositionId?.let(::listOf).orEmpty() }
-                if (positionIds.isEmpty()) {
-                    null
-                } else {
-                    official.copy(
-                        positionIds = positionIds,
-                        fieldIds = official.fieldIds.filter(validFieldIds::contains),
-                    )
-                }
-            }
-            val desiredStaffEvent = currentStaffState.event.copy(
-                assistantHostIds = prepared.event.assistantHostIds,
-                eventOfficials = desiredOfficials,
-                officialIds = desiredOfficials.map { official -> official.userId },
-            )
-            val staffState = reconcileStaffState(
-                desiredStaffEvent,
-                pendingStaffInvites,
-                staffRevisionSeed,
-            )
-            val finalEvent = staffState.event
-
+            val outcome = savePreparedEvent(prepared, pendingStaffInvites)
+            val finalEvent = outcome.session.canonicalState.event
             if (finalEvent.eventType == EventType.LEAGUE || finalEvent.eventType == EventType.TOURNAMENT) {
                 refetchMatchesOfTournament(finalEvent.id)
             }
-
             EventSaveActionResult.Success(
                 finalEvent = finalEvent,
-                staffInvites = staffState.staffInvites,
-                staffRevision = staffState.revision,
+                staffInvites = outcome.session.canonicalState.pendingStaffInvites,
+                staffRevision = outcome.session.snapshot.staffRevision,
+                staffEmailDelivery = outcome.staffEmailDelivery,
             )
         } catch (throwable: Throwable) {
             EventSaveActionResult.Failure(
                 throwable = throwable,
-                fallbackMessage = if (generalUpdateCommitted) {
-                    "Event details were saved, but staff changes were not. Review the staff entries and retry."
-                } else {
-                    "Unable to save event."
-                },
-                didSaveEventDetails = generalUpdateCommitted,
+                fallbackMessage = "Unable to save event.",
+                didSaveEventDetails = false,
             )
         } finally {
             hideLoading()
@@ -189,7 +134,6 @@ internal class EventEditActionCoordinator {
         validatePreparedEvent: (PreparedEventForUpdate) -> Unit = {},
         logPreparedFieldOwnership: (String, PreparedEventForUpdate) -> Unit,
         updateEvent: suspend (PreparedEventForUpdate) -> Event,
-        deleteMatchesOfTournament: suspend (String) -> Unit,
         scheduleEvent: suspend (EventScheduleEditAction, Event) -> Event,
         refetchMatchesOfTournament: suspend (String) -> Unit,
         resetBracketMatchesAfterSchedule: suspend (Event) -> Unit,
@@ -198,15 +142,13 @@ internal class EventEditActionCoordinator {
         hideLoading: () -> Unit,
     ): EventScheduleEditResult {
         showLoading(action.loadingMessage)
+        var settingsSaved = false
         return try {
             val prepared = prepareEventForUpdate()
             validatePreparedEvent(prepared)
             logPreparedFieldOwnership(action.logAction, prepared)
             val updated = updateEvent(prepared)
-
-            if (action.deleteMatchesBeforeSchedule) {
-                deleteMatchesOfTournament(updated.id)
-            }
+            settingsSaved = true
 
             val scheduledEvent = scheduleEvent(action, updated)
 
@@ -225,6 +167,7 @@ internal class EventEditActionCoordinator {
             EventScheduleEditResult.Failure(
                 throwable = throwable,
                 fallbackMessage = action.failureMessage,
+                settingsSaved = settingsSaved,
             )
         } finally {
             hideLoading()

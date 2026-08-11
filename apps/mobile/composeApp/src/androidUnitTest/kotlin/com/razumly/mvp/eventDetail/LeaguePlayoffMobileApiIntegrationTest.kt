@@ -20,6 +20,7 @@ import com.razumly.mvp.testing.MobileApiTestSession
 import com.razumly.mvp.testing.mobileApiLoginFixturesReady
 import com.razumly.mvp.testing.runTargetedBackendSeed
 import com.razumly.mvp.testing.shouldAutoSeedBackendFixtures
+import com.razumly.mvp.testing.createEventThroughEditor
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
@@ -45,6 +46,7 @@ class LeaguePlayoffMobileApiIntegrationTest {
     private val testEventId = "mobile_api_league_playoff_$testRunId"
     private val testFieldId = "${testEventId}_field"
     private val testSlotId = "${testEventId}_slot"
+    private var createdEventId: String? = null
     private var hostSession: MobileApiTestSession? = null
     private var participantSession: MobileApiTestSession? = null
 
@@ -70,7 +72,7 @@ class LeaguePlayoffMobileApiIntegrationTest {
 
     @After
     fun tearDown() {
-        runCatching { runBlocking { hostSession?.deleteEvent(testEventId) } }
+        runCatching { runBlocking { hostSession?.deleteEvent(createdEventId ?: testEventId) } }
         hostSession?.close()
         participantSession?.close()
         hostSession = null
@@ -88,11 +90,13 @@ class LeaguePlayoffMobileApiIntegrationTest {
         val hostUser = host.userRepository.login(HOST_EMAIL, HOST_PASSWORD).getOrThrow()
         host.deleteEvent(testEventId)
 
-        val createdEvent = host.eventRepository.createEvent(
-            newEvent = buildLeagueEvent(hostUser.id),
+        val createdEvent = host.createEventThroughEditor(
+            event = buildLeagueEvent(hostUser.id),
             fields = listOf(buildLeagueField()),
             timeSlots = listOf(buildLeagueTimeSlot()),
-        ).getOrThrow()
+            operationId = "mobile-editor-league-playoff-$testRunId",
+        )
+        createdEventId = createdEvent.id
 
         assertEquals(UPLOADED_DOCUMENT_IMAGE_ID, createdEvent.imageId)
         assertTrue(createdEvent.includePlayoffs)
@@ -104,13 +108,12 @@ class LeaguePlayoffMobileApiIntegrationTest {
             invites = staffInvitePayloads(eventId = createdEvent.id, createdBy = hostUser.id),
         ).getOrThrow()
 
-        val scheduledEvent = host.eventRepository.scheduleEvent(createdEvent.id).getOrElse { error ->
-            val responseBody = (error as? ApiException)?.responseBody
+        val scheduledEvent = host.eventRepository.scheduleEventEditor(createdEvent.id).getOrElse { error ->
             throw AssertionError(
-                "Scheduling ${createdEvent.id} failed: ${responseBody ?: error.message}",
+                "Scheduling ${createdEvent.id} failed: ${error.message}",
                 error,
             )
-        }
+        }.event
         val scheduledMatches = host.matchRepository.getMatchesOfTournament(createdEvent.id).getOrThrow()
 
         assertTrue(scheduledEvent.includePlayoffs)

@@ -29,6 +29,7 @@ import com.razumly.mvp.testing.MobileApiTestSession
 import com.razumly.mvp.testing.mobileApiLoginFixturesReady
 import com.razumly.mvp.testing.runTargetedBackendSeed
 import com.razumly.mvp.testing.shouldAutoSeedBackendFixtures
+import com.razumly.mvp.testing.createEventThroughEditor
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -112,16 +113,14 @@ class EventLifecycleMobileApiIntegrationTest {
         val createdEvents = mutableListOf<Event>()
 
         variants.forEach { variant ->
-            host.deleteEvent(variant.event.id)
-            createdEventIds += variant.event.id
 
-            val createdEvent = host.eventRepository.createEvent(
-                newEvent = variant.event,
+            val createdEvent = host.createEventThroughEditor(
+                event = variant.event,
                 fields = variant.fields,
                 timeSlots = variant.timeSlots,
-            ).getOrElse { error ->
-                error("Failed to create ${variant.key}: ${error.backendSummary()}")
-            }
+                operationId = "mobile-editor-lifecycle-${variant.event.id}",
+            )
+            createdEventIds += createdEvent.id
 
             createdEvents += createdEvent
             assertCreatedEventShape(variant = variant, event = createdEvent)
@@ -165,9 +164,9 @@ class EventLifecycleMobileApiIntegrationTest {
             }
 
             if (variant.event.eventType.isSchedulable()) {
-                val scheduledEvent = host.eventRepository.scheduleEvent(createdEvent.id).getOrElse { error ->
+                val scheduledEvent = host.eventRepository.scheduleEventEditor(createdEvent.id).getOrElse { error ->
                     error("Failed to schedule ${variant.key}: ${error.backendSummary()}")
-                }
+                }.event
                 assertCreatedEventShape(variant = variant, event = scheduledEvent)
 
                 val matches = host.matchRepository.getMatchesOfTournament(createdEvent.id).getOrElse { error ->
@@ -452,7 +451,7 @@ class EventLifecycleMobileApiIntegrationTest {
         variant: LifecycleVariant,
         event: Event,
     ) {
-        assertEquals(variant.event.id, event.id)
+        assertTrue(event.id.isNotBlank(), "${variant.key} should receive a canonical event id")
         assertEquals(variant.event.eventType, event.eventType, "${variant.key} event type drifted")
         assertEquals(variant.event.singleDivision, event.singleDivision, "${variant.key} division mode drifted")
         if (variant.isTournamentPoolPlay) {

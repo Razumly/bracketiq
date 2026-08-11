@@ -12,9 +12,8 @@ import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
+import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.razumly.mvp.core.data.repositories.RegistrationQuestionDraft
-import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
-import com.razumly.mvp.core.presentation.RentalBookingItemManifest
 import com.razumly.mvp.eventDetail.EventStaffRole
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
@@ -56,7 +55,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun create_screen_initializes_from_seeded_event_template_draft() = runTest(testDispatcher) {
+    fun create_screen_initializes_from_canonical_create_bootstrap() = runTest(testDispatcher) {
         val seededEvent = com.razumly.mvp.core.data.dataTypes.Event(
             id = "seeded-event",
             name = "Seeded League",
@@ -91,13 +90,14 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             pointsForWin = 3,
         )
         val harness = CreateEventHarness(
-            initialSeed = SeededEventTemplateDraft(
+            bootstrapSession = createEventEditorSession(
                 event = seededEvent,
                 fields = listOf(seededField),
                 timeSlots = listOf(seededSlot),
                 leagueScoringConfig = seededScoring,
             ),
         )
+        advance()
 
         assertEquals("Seeded League", harness.component.newEventState.value.name)
         assertEquals(EventType.LEAGUE, harness.component.currentEventType.value)
@@ -394,7 +394,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun create_event_persists_empty_staff_then_reconciles_the_desired_state_once() = runTest(testDispatcher) {
+    fun create_event_sends_staff_in_the_atomic_editor_command() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
@@ -406,21 +406,15 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        val createPayload = harness.eventRepository.createEventCalls.single().event
-        assertTrue(createPayload.assistantHostIds.isEmpty())
-        assertTrue(createPayload.officialIds.isEmpty())
-        assertTrue(createPayload.eventOfficials.isEmpty())
-        assertEquals(1, harness.eventRepository.getEventStaffStateCalls.size)
-        val reconcile = harness.eventRepository.reconcileEventStaffCalls.single()
-        assertEquals(listOf("assistant-1"), reconcile.event.assistantHostIds)
-        assertEquals(listOf("official-1"), reconcile.event.eventOfficials.map { official -> official.userId })
-        assertEquals("staff-revision-created", reconcile.expectedRevision)
-        assertTrue(reconcile.pendingInvites.isEmpty())
+        val createPayload = harness.eventRepository.createEditorCalls.single().event
+        assertEquals(listOf("assistant-1"), createPayload.assistantHostIds)
+        assertEquals(listOf("official-1"), createPayload.officialIds)
+        assertTrue(harness.eventRepository.createEventEditorCalls.single().draft.staff.pendingInvites.isEmpty())
         assertTrue(harness.userRepository.createInviteCalls.isEmpty())
     }
 
     @Test
-    fun create_event_saves_mobile_registration_questions_after_the_event_exists() = runTest(testDispatcher) {
+    fun create_event_sends_registration_questions_in_the_atomic_editor_command() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
         harness.component.updateEventField { copy(divisions = listOf("Open")) }
@@ -438,13 +432,15 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        val createdEvent = harness.eventRepository.createEventCalls.single().event
-        val saveCall = harness.eventRepository.saveRegistrationQuestionsCalls.single()
-        assertEquals("EVENT", saveCall.scopeType)
-        assertEquals(createdEvent.id, saveCall.scopeId)
-        assertEquals("What position do you play?", saveCall.questions.single().prompt)
-        assertEquals("LONG_TEXT", saveCall.questions.single().answerType)
-        assertTrue(saveCall.questions.single().required)
+        val question = harness.eventRepository.createEventEditorCalls
+            .single()
+            .draft
+            .registration
+            .questions
+            .single()
+        assertEquals("What position do you play?", question.prompt)
+        assertEquals("LONG_TEXT", question.answerType)
+        assertTrue(question.required)
         assertEquals(1, harness.onEventCreatedCount)
     }
 
@@ -464,7 +460,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        assertTrue(harness.eventRepository.createEventCalls.isEmpty())
+        assertTrue(harness.eventRepository.createEditorCalls.isEmpty())
         assertEquals(0, harness.onEventCreatedCount)
         assertTrue(
             harness.component.errorState.value?.message
@@ -475,7 +471,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     @Test
     fun create_event_reports_repository_failure_after_the_loading_overlay_closes() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
-        harness.eventRepository.createEventFailure = IllegalStateException(
+        harness.eventRepository.createEditorFailure = IllegalStateException(
             "Add more slot availability, extend slot windows, or reduce teams.",
         )
         advance()
@@ -494,7 +490,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun create_event_staff_failure_leaves_the_created_event_assignment_free() = runTest(testDispatcher) {
+    fun create_event_reports_staff_delivery_failure_as_a_warning_after_atomic_create() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
         harness.component.updateEventField { copy(divisions = listOf("Open")) }
@@ -506,20 +502,19 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             email = "taylor@example.com",
             roles = setOf(EventStaffRole.OFFICIAL),
         ).getOrThrow()
-        harness.eventRepository.reconcileEventStaffFailure = IllegalStateException("injected staff failure")
+        harness.eventRepository.staffEmailDelivery = "FAILED"
 
         harness.component.createEvent()
         advance()
 
-        val createPayload = harness.eventRepository.createEventCalls.single().event
-        assertTrue(createPayload.assistantHostIds.isEmpty())
-        assertTrue(createPayload.eventOfficials.isEmpty())
-        assertEquals(1, harness.eventRepository.reconcileEventStaffCalls.size)
-        assertEquals(0, harness.onEventCreatedCount)
+        val createPayload = harness.eventRepository.createEditorCalls.single().event
+        assertEquals(listOf("assistant-1"), createPayload.assistantHostIds)
+        assertEquals(emptyList(), createPayload.eventOfficials)
+        assertEquals(1, harness.onEventCreatedCount)
         assertEquals(listOf("taylor@example.com"), harness.component.pendingStaffInvites.value.map { it.email })
-        assertTrue(
-            harness.component.errorState.value?.message
-                ?.contains("created without the requested staff changes", ignoreCase = true) == true,
+        assertEquals(
+            "Event created, but staff invite delivery needs attention.",
+            harness.component.errorState.value?.message,
         )
     }
 
@@ -692,7 +687,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             )
             val harness = CreateEventHarness(
                 sports = listOf(soccer),
-                initialSeed = SeededEventTemplateDraft(
+                bootstrapSession = createEventEditorSession(
                     event = com.razumly.mvp.core.data.dataTypes.Event(
                         eventType = EventType.EVENT,
                         sportIds = listOf(soccer.id),
@@ -831,7 +826,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        val createCall = harness.eventRepository.createEventCalls.single()
+        val createCall = harness.eventRepository.createEditorCalls.single()
         assertEquals(2, createCall.fields.orEmpty().size)
         assertEquals(createCall.fields.orEmpty().map { field -> field.id }, createCall.event.fieldIds)
         assertFalse(createCall.event.noFixedEndDateTime)
@@ -906,8 +901,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         assertEquals(0, harness.billingRepository.purchaseIntentCalls.size)
         assertEquals(0, harness.billingRepository.rentalSignLinksCalls.size)
-        assertEquals(1, harness.eventRepository.createEventCalls.size)
-        val createCall = harness.eventRepository.createEventCalls.single()
+        assertEquals(1, harness.eventRepository.createEditorCalls.size)
+        val createCall = harness.eventRepository.createEditorCalls.single()
         val payloadSlot = createCall.timeSlots.orEmpty().single()
         assertEquals(listOf("field-rental-main"), createCall.event.fieldIds)
         assertEquals(listOf(payloadSlot.id), createCall.event.timeSlotIds)
@@ -976,8 +971,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             )
             val harness = CreateEventHarness(
                 rentalResourceOptions = listOf(firstItem, unrelatedItem, secondItem),
-                initialRentalBookingId = " booking-completed ",
-                initialRentalBookingItems = listOf(firstItem.toManifest(), secondItem.toManifest()),
+                bootstrap = EventEditorBootstrapQueryDto(rentalBookingId = " booking-completed "),
+                canonicalRentalOptions = listOf(firstItem, secondItem),
             )
             advance()
 
@@ -1007,7 +1002,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             harness.component.createEvent()
             advance()
 
-            val createCall = harness.eventRepository.createEventCalls.single()
+            val createCall = harness.eventRepository.createEditorCalls.single()
             assertEquals(
                 setOf("booking-completed"),
                 createCall.timeSlots.orEmpty().mapNotNull(TimeSlot::rentalBookingId).toSet(),
@@ -1052,15 +1047,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             )
             val harness = CreateEventHarness(
                 rentalResourceOptions = listOf(unrelatedItem),
-                initialRentalBookingId = "booking-completed",
-                initialRentalBookingItems = listOf(
-                    RentalBookingItemManifest(
-                        id = "item-1",
-                        fieldId = "field-1",
-                        start = instant(1_700_000_000_000).toString(),
-                        end = instant(1_700_003_600_000).toString(),
-                    ),
-                ),
+                bootstrap = EventEditorBootstrapQueryDto(rentalBookingId = "booking-completed"),
+                canonicalRentalOptions = listOf(unrelatedItem.copy(bookingId = "booking-completed")),
             )
             advance()
 
@@ -1070,7 +1058,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             harness.component.createEvent()
             advance()
 
-            assertEquals(0, harness.eventRepository.createEventCalls.size)
+            assertEquals(0, harness.eventRepository.createEditorCalls.size)
             assertEquals(
                 "We couldn't verify every resource in this reservation. Return to the organization and try again.",
                 harness.component.errorState.value?.message,
@@ -1094,8 +1082,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             )
             val harness = CreateEventHarness(
                 rentalResourceOptions = listOf(firstItem),
-                initialRentalBookingId = "booking-completed",
-                initialRentalBookingItems = listOf(firstItem.toManifest(), secondItem.toManifest()),
+                bootstrap = EventEditorBootstrapQueryDto(rentalBookingId = "booking-completed"),
+                canonicalRentalOptions = listOf(firstItem, secondItem),
             )
             advance()
 
@@ -1103,7 +1091,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             harness.component.createEvent()
             advance()
 
-            assertTrue(harness.eventRepository.createEventCalls.isEmpty())
+            assertTrue(harness.eventRepository.createEditorCalls.isEmpty())
             assertEquals(
                 "We couldn't verify every resource in this reservation. Return to the organization and try again.",
                 harness.component.errorState.value?.message,
@@ -1129,15 +1117,15 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             listOf(changedField, changedTime).forEach { changedOption ->
                 val harness = CreateEventHarness(
                     rentalResourceOptions = listOf(changedOption),
-                    initialRentalBookingId = "booking-completed",
-                    initialRentalBookingItems = listOf(expected.toManifest()),
+                    bootstrap = EventEditorBootstrapQueryDto(rentalBookingId = "booking-completed"),
+                    canonicalRentalOptions = listOf(expected),
                 )
                 advance()
 
                 assertEquals(emptyList(), harness.component.availableRentalResources.value)
                 harness.component.createEvent()
                 advance()
-                assertTrue(harness.eventRepository.createEventCalls.isEmpty())
+                assertTrue(harness.eventRepository.createEditorCalls.isEmpty())
             }
         }
 
@@ -1152,15 +1140,15 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             )
             val harness = CreateEventHarness(
                 rentalResourceOptions = listOf(item),
-                initialRentalBookingId = "booking-completed",
-                initialRentalBookingItems = listOf(item.toManifest(), item.toManifest()),
+                bootstrap = EventEditorBootstrapQueryDto(rentalBookingId = "booking-completed"),
+                canonicalRentalOptions = listOf(item, item),
             )
             advance()
 
             assertEquals(emptyList(), harness.component.availableRentalResources.value)
             harness.component.createEvent()
             advance()
-            assertTrue(harness.eventRepository.createEventCalls.isEmpty())
+            assertTrue(harness.eventRepository.createEditorCalls.isEmpty())
         }
 
     @Test
@@ -1279,7 +1267,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        val createCall = harness.eventRepository.createEventCalls.single()
+        val createCall = harness.eventRepository.createEditorCalls.single()
         val payloadSlot = createCall.timeSlots.orEmpty().single()
         val createdRegularFieldId = createCall.fields.orEmpty()
             .first { field -> field.id != "field-rental-main" }
@@ -1417,7 +1405,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        val createCall = harness.eventRepository.createEventCalls.single()
+        val createCall = harness.eventRepository.createEditorCalls.single()
         val customPayloadSlots = createCall.timeSlots.orEmpty()
             .filterNot { slot -> slot.rentalBookingItemId == "booking-item-1" }
         assertTrue(customPayloadSlots.isNotEmpty())
@@ -1510,7 +1498,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        assertEquals(0, harness.eventRepository.createEventCalls.size)
+        assertEquals(0, harness.eventRepository.createEditorCalls.size)
         assertEquals(0, harness.onEventCreatedCount)
         assertEquals(0, harness.fieldRepository.createdFields.size)
         assertEquals(0, harness.fieldRepository.createdTimeSlots.size)
@@ -1559,7 +1547,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        assertEquals(0, harness.eventRepository.createEventCalls.size)
+        assertEquals(0, harness.eventRepository.createEditorCalls.size)
         assertEquals(
             "Schedule slot 1 needs a start and end time.",
             harness.component.errorState.value?.message,
@@ -1593,7 +1581,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        assertEquals(0, harness.eventRepository.createEventCalls.size)
+        assertEquals(0, harness.eventRepository.createEditorCalls.size)
         assertEquals(
             "Schedule slot 1 needs at least one field.",
             harness.component.errorState.value?.message,
@@ -1626,7 +1614,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        assertEquals(0, harness.eventRepository.createEventCalls.size)
+        assertEquals(0, harness.eventRepository.createEditorCalls.size)
         assertEquals(
             "Schedule slot 1 needs an end date after its start.",
             harness.component.errorState.value?.message,
@@ -1713,7 +1701,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        val createCall = harness.eventRepository.createEventCalls.single()
+        val createCall = harness.eventRepository.createEditorCalls.single()
         val createdFieldIds = createCall.fields.orEmpty().map { field -> field.id }
         val createdSlots = createCall.timeSlots.orEmpty()
 
@@ -1768,7 +1756,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        val createdSlots = harness.eventRepository.createEventCalls.single().timeSlots.orEmpty()
+        val createdSlots = harness.eventRepository.createEditorCalls.single().timeSlots.orEmpty()
         val timezone = TimeZone.currentSystemDefault()
         val expectedDateOnlyEnd = instant(1_700_086_400_000).toLocalDateTime(timezone).date.atStartOfDayIn(timezone)
         assertEquals(1, createdSlots.size)
@@ -1852,7 +1840,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        val createdSlots = harness.eventRepository.createEventCalls.single().timeSlots.orEmpty()
+        val createdSlots = harness.eventRepository.createEditorCalls.single().timeSlots.orEmpty()
         assertEquals(1, createdSlots.size)
         assertEquals(true, createdSlots[0].repeating)
         assertEquals(customSlotStart, createdSlots[0].startDate)
@@ -1906,7 +1894,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        val createdSlots = harness.eventRepository.createEventCalls.single().timeSlots.orEmpty()
+        val createdSlots = harness.eventRepository.createEditorCalls.single().timeSlots.orEmpty()
         assertEquals(1, createdSlots.size)
         assertEquals(false, createdSlots[0].repeating)
         assertEquals(slotStart, createdSlots[0].startDate)
@@ -1954,7 +1942,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        assertEquals(0, harness.eventRepository.createEventCalls.size)
+        assertEquals(0, harness.eventRepository.createEditorCalls.size)
         assertEquals(
             "Add at least one division before creating this event.",
             harness.component.errorState.value?.message,
@@ -1999,7 +1987,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        val createCall = harness.eventRepository.createEventCalls.single()
+        val createCall = harness.eventRepository.createEditorCalls.single()
         val createdSlots = createCall.timeSlots.orEmpty()
         val createdFieldIds = createCall.fields.orEmpty().map { field -> field.id }
         assertEquals(1, createdSlots.size)
@@ -2062,7 +2050,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        val createdSlots = harness.eventRepository.createEventCalls.single().timeSlots.orEmpty()
+        val createdSlots = harness.eventRepository.createEditorCalls.single().timeSlots.orEmpty()
         assertEquals(2, createdSlots.size)
         assertEquals(listOf("division_a"), createdSlots[0].divisions)
         assertEquals(listOf("division_b"), createdSlots[1].divisions)
@@ -2096,12 +2084,12 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        assertEquals(1, harness.eventRepository.createEventCalls.size)
+        assertEquals(1, harness.eventRepository.createEditorCalls.size)
         assertEquals(1, harness.onEventCreatedCount)
         assertEquals(0, harness.fieldRepository.createdFields.size)
         assertEquals(0, harness.fieldRepository.createdTimeSlots.size)
 
-        val createCall = harness.eventRepository.createEventCalls.single()
+        val createCall = harness.eventRepository.createEditorCalls.single()
         assertEquals(1, createCall.fields.orEmpty().size)
         assertEquals(1, createCall.timeSlots.orEmpty().size)
         assertEquals(createCall.timeSlots.orEmpty().map { slot -> slot.id }, createCall.event.timeSlotIds)
@@ -2132,9 +2120,3 @@ private fun completedRentalOption(
     priceCents = 2_500,
 )
 
-private fun RentalResourceOption.toManifest(): RentalBookingItemManifest = RentalBookingItemManifest(
-    id = bookingItemId,
-    fieldId = field.id,
-    start = start.toString(),
-    end = end.toString(),
-)

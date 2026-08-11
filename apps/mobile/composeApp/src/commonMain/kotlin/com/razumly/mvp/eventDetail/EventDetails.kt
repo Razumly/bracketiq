@@ -170,8 +170,22 @@ private val editableHostStaffListHeight = 130.dp * STAFF_LAZY_LIST_VISIBLE_COUNT
 internal fun isEventInclusivePriceReady(
     editView: Boolean,
     manualPaymentsEnabled: Boolean,
+    activePriceCents: Int,
     isQuoteConfirmed: Boolean,
-): Boolean = !editView || manualPaymentsEnabled || isQuoteConfirmed
+): Boolean = !editView || manualPaymentsEnabled || activePriceCents <= 0 || isQuoteConfirmed
+
+internal fun activeInclusivePriceCents(
+    singleDivision: Boolean,
+    eventPriceCents: Int,
+    divisionEditorReady: Boolean,
+    divisionPriceCents: Int,
+): Int = if (singleDivision) {
+    eventPriceCents
+} else if (divisionEditorReady) {
+    divisionPriceCents
+} else {
+    0
+}
 
 private fun kotlin.time.Instant.reinterpretSystemLocalSelectionIn(timeZone: TimeZone): kotlin.time.Instant {
     val local = toLocalDateTime(TimeZone.currentSystemDefault())
@@ -557,6 +571,15 @@ fun EventDetails(
     var divisionEditorDefaults by remember(editEvent.id) {
         mutableStateOf(divisionEditorBaseState)
     }
+    val divisionEditorReady = remember(
+        divisionEditor.gender,
+        divisionEditor.skillDivisionTypeId,
+        divisionEditor.ageDivisionTypeId,
+    ) {
+        divisionEditor.gender.isNotBlank() &&
+            divisionEditor.skillDivisionTypeId.isNotBlank() &&
+            divisionEditor.ageDivisionTypeId.isNotBlank()
+    }
     val inclusivePriceEditorKey = remember(
         editEvent.id,
         editEvent.singleDivision,
@@ -571,10 +594,17 @@ fun EventDetails(
     var confirmedInclusivePriceEditorKey by remember(editEvent.id) {
         mutableStateOf<String?>(null)
     }
+    val activePriceCents = activeInclusivePriceCents(
+        singleDivision = editEvent.singleDivision,
+        eventPriceCents = editEvent.priceCents,
+        divisionEditorReady = divisionEditorReady,
+        divisionPriceCents = divisionEditor.priceCents,
+    )
     val isInclusivePriceQuoteConfirmed = isEventInclusivePriceReady(
         editView = editView,
         manualPaymentsEnabled = editEvent.usesManualRegistrationPayments() ||
             (useSimpleSectionContent && !simplePaidRegistrationEnabled),
+        activePriceCents = activePriceCents,
         isQuoteConfirmed = confirmedInclusivePriceEditorKey == inclusivePriceEditorKey,
     )
     val effectiveIsValid = isValid && isInclusivePriceQuoteConfirmed
@@ -616,15 +646,6 @@ fun EventDetails(
             existingDetails = divisionDetailsForSettings,
             genderTypes = divisionTypeParameters.genders,
         )
-    }
-    val divisionEditorReady = remember(
-        divisionEditor.gender,
-        divisionEditor.skillDivisionTypeId,
-        divisionEditor.ageDivisionTypeId,
-    ) {
-        divisionEditor.gender.isNotBlank() &&
-            divisionEditor.skillDivisionTypeId.isNotBlank() &&
-            divisionEditor.ageDivisionTypeId.isNotBlank()
     }
     fun divisionDefaultsFromEditor(editor: DivisionEditorState): DivisionEditorState {
         return divisionDefaultsFromSavedEditor(editor)

@@ -13,6 +13,7 @@ internal fun Event.applyCreateSelectionRules(): Event {
 
         EventType.WEEKLY_EVENT -> copy(
             eventType = eventType,
+            singleDivision = false,
             noFixedEndDateTime = false,
         )
 

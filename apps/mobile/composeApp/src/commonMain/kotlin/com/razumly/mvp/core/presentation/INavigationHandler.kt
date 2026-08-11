@@ -1,7 +1,7 @@
 package com.razumly.mvp.core.presentation
 
+import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
 
 interface INavigationHandler {
     fun navigateToMatch(matchId: String, eventId: String)
@@ -23,14 +23,13 @@ interface INavigationHandler {
     )
     fun navigateToChat(messageUserId: String? = null, chatId: String? = null)
     fun navigateToCreate()
-    fun navigateToCreate(seed: SeededEventTemplateDraft) {
+    fun navigateToCreate(bootstrap: EventEditorBootstrapQueryDto) {
         navigateToCreate()
     }
-    fun navigateToCreateFromRental(
-        rentalBookingId: String,
-        rentalBookingItems: List<RentalBookingItemManifest>,
-    ) {
-        navigateToCreate()
+    fun navigateToCreateFromRental(rentalBookingId: String) {
+        navigateToCreate(
+            EventEditorBootstrapQueryDto(rentalBookingId = rentalBookingId),
+        )
     }
     fun navigateToSearch()
     fun navigateToEvent(eventId: String)

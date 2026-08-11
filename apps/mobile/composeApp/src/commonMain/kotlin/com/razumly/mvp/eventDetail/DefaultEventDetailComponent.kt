@@ -689,10 +689,11 @@ class DefaultEventDetailComponent(
         selectedEvent = { selectedEvent.value },
         eventWithRelations = { eventWithRelations.value },
         eventFields = { eventFields.value },
-        expectedStaffRevision = { _eventStaffRevision.value },
         setStaffState = { invites, revision ->
             _eventStaffInvites.value = invites
             _eventStaffRevision.value = revision
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
         },
         loadSports = resourceLifecycleHandler::loadSports,
         refreshLeagueStandingsAfterSchedule = resourceLifecycleHandler::refreshLeagueStandingsAfterSchedule,

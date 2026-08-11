@@ -9,6 +9,10 @@ import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
+import com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto
+import com.razumly.mvp.core.network.dto.EventEditorSaveResultDto
+import com.razumly.mvp.core.network.dto.EventEditorSnapshotDto
 import kotlinx.serialization.Serializable
 import kotlin.time.Instant
 
@@ -16,6 +20,46 @@ data class OrganizationEventPage(
     val events: List<Event>,
     val nextOffset: Int,
     val hasMore: Boolean,
+)
+data class EventEditorCanonicalState(
+    val event: Event,
+    val fields: List<Field> = emptyList(),
+    val timeSlots: List<TimeSlot> = emptyList(),
+    val leagueScoringConfig: LeagueScoringConfigDTO? = null,
+    val questions: List<RegistrationQuestionDraft> = emptyList(),
+    val pendingStaffInvites: List<Invite> = emptyList(),
+    val playoffDivisionDetails: List<com.razumly.mvp.core.data.dataTypes.DivisionDetail> = emptyList(),
+    val divisionFieldIds: Map<String, List<String>> = emptyMap(),
+)
+
+data class PendingEventCreate(
+    val command: com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto,
+    val bootstrapSnapshot: com.razumly.mvp.core.network.dto.EventEditorSnapshotDto,
+)
+
+data class EventEditorSession(
+    val snapshot: com.razumly.mvp.core.network.dto.EventEditorSnapshotDto,
+    val canonicalState: EventEditorCanonicalState,
+    val baseline: EventEditorCanonicalState = canonicalState,
+    val createOperationId: String? = null,
+    val pendingCreate: PendingEventCreate? = null,
+)
+
+data class EventEditorMutation(
+    val canonicalState: EventEditorCanonicalState,
+)
+
+data class EventEditorSaveOutcome(
+    val session: EventEditorSession,
+    val questionIdMap: Map<String, String> = emptyMap(),
+    val staffEmailDelivery: String,
+)
+
+data class EventScheduleOutcome(
+    val event: Event,
+    val matches: List<MatchMVP> = emptyList(),
+    val warnings: List<String> = emptyList(),
+    val didRebuildSchedule: Boolean = false,
 )
 
 data class HostEventPage(
@@ -171,6 +215,7 @@ data class RegistrationQuestionAnswerSummary(
 @Serializable
 data class RegistrationQuestionDraft(
     val id: String? = null,
+    val clientId: String? = null,
     val prompt: String = "",
     val answerType: String = "TEXT",
     val required: Boolean = false,

@@ -21,7 +21,12 @@ import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
+import com.razumly.mvp.core.data.repositories.EventEditorCanonicalState
+import com.razumly.mvp.core.data.repositories.EventEditorMutation
+import com.razumly.mvp.core.data.repositories.EventEditorSession
+import com.razumly.mvp.core.data.repositories.EventEditorSessionMapper
 import com.razumly.mvp.core.data.dataTypes.Sport
+import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.addOfficialUser
@@ -43,15 +48,15 @@ import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
 import com.razumly.mvp.core.data.repositories.ChatTermsConsentState
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
+import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
 import com.razumly.mvp.core.data.repositories.IImagesRepository
-import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.RegistrationQuestionDraft
 import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
-import com.razumly.mvp.core.presentation.RentalBookingItemManifest
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.newId
@@ -68,7 +73,8 @@ import com.razumly.mvp.eventDetail.EventStaffRole
 import com.razumly.mvp.eventDetail.PendingStaffInviteDraft
 import com.razumly.mvp.eventDetail.mergePendingStaffInviteDraft
 import com.razumly.mvp.eventDetail.normalizeStaffInviteEmail
-import com.razumly.mvp.eventDetail.reconcileEventStaffState
+import com.razumly.mvp.eventDetail.normalized
+import com.razumly.mvp.eventDetail.toInviteStaffType
 import com.razumly.mvp.eventDetail.resolveEffectiveLeagueSlotDivisionIds
 import com.razumly.mvp.eventDetail.resolveEventMatchRules
 import com.razumly.mvp.eventDetail.validatePendingStaffInviteDrafts
@@ -100,6 +106,8 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val currentEventType: StateFlow<EventType>
     val childStack: Value<ChildStack<Config, Child>>
     val canProceed: StateFlow<Boolean>
+    val isEditorReady: StateFlow<Boolean>
+    val editorBootstrapError: StateFlow<String?>
     val selectedPlace: StateFlow<MVPPlace?>
     val defaultEvent: StateFlow<EventWithRelations>
     val currentUser: StateFlow<UserData?>
@@ -149,6 +157,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     ): Result<Unit>
     fun removePendingStaffInvite(email: String, role: EventStaffRole? = null)
     fun setLoadingHandler(loadingHandler: LoadingHandler)
+    fun retryEditorBootstrap()
     fun createEvent()
     fun nextStep()
     fun previousStep()
@@ -189,12 +198,10 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     sealed class Config {
         @Serializable
         data object EventInfo : Config()
-
         @Serializable
         data object Preview : Config()
     }
 }
-
 class DefaultCreateEventComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
@@ -203,10 +210,8 @@ class DefaultCreateEventComponent(
     private val sportsRepository: ISportsRepository,
     private val billingRepository: IBillingRepository,
     private val imageRepository: IImagesRepository,
-    private val initialSeed: SeededEventTemplateDraft? = null,
-    initialRentalBookingId: String? = null,
-    private val initialRentalBookingItems: List<RentalBookingItemManifest> = emptyList(),
-    val onEventCreated: (Event) -> Unit
+    private val bootstrap: EventEditorBootstrapQueryDto,
+    val onEventCreated: (Event) -> Unit,
 ) : CreateEventComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
@@ -220,8 +225,13 @@ class DefaultCreateEventComponent(
         amountCents = amountCents,
         eventType = eventType,
     )
-    private val initialEventDraft = initialSeed?.event
-        ?: createInitialEventDraft(initialHostId = resolveCurrentUserId())
+    private val _editorSession = MutableStateFlow<EventEditorSession?>(null)
+    private val _isEditorReady = MutableStateFlow(false)
+    override val isEditorReady = _isEditorReady.asStateFlow()
+    private val _editorBootstrapError = MutableStateFlow<String?>(null)
+    override val editorBootstrapError = _editorBootstrapError.asStateFlow()
+    private var pendingCreateCommand: EventEditorCreateCommandDto? = null
+    private val initialEventDraft = createInitialEventDraft(initialHostId = resolveCurrentUserId())
 
     private val _newEventState: MutableStateFlow<Event> = MutableStateFlow(initialEventDraft)
     override val newEventState = _newEventState.asStateFlow()
@@ -230,8 +240,8 @@ class DefaultCreateEventComponent(
         MutableStateFlow(
             EventWithRelations(
                 initialEventDraft,
-                userRepository.currentUser.value.getOrNull() ?: UserData()
-            )
+                userRepository.currentUser.value.getOrNull() ?: UserData(),
+            ),
         )
 
     private val _currentEventType = MutableStateFlow(initialEventDraft.eventType)
@@ -274,31 +284,95 @@ class DefaultCreateEventComponent(
     override val organizationTemplatesLoading = _organizationTemplatesLoading.asStateFlow()
     private val _organizationTemplatesError = MutableStateFlow<String?>(null)
     override val organizationTemplatesError = _organizationTemplatesError.asStateFlow()
-    private val _localFields = MutableStateFlow(initialSeed?.fields.orEmpty())
+    private val _localFields = MutableStateFlow<List<Field>>(emptyList())
     override val localFields = _localFields.asStateFlow()
-    private val _leagueSlots = MutableStateFlow(initialSeed?.timeSlots.orEmpty())
+    private val _leagueSlots = MutableStateFlow<List<TimeSlot>>(emptyList())
     override val leagueSlots = _leagueSlots.asStateFlow()
-    private val _useManualTimeSlots = MutableStateFlow(initialSeed?.timeSlots?.isNotEmpty() == true)
+    private val _useManualTimeSlots = MutableStateFlow(false)
     override val useManualTimeSlots = _useManualTimeSlots.asStateFlow()
     private val _availableRentalResources = MutableStateFlow<List<RentalResourceOption>>(emptyList())
     override val availableRentalResources = _availableRentalResources.asStateFlow()
     private val _selectedRentalResourceIds = MutableStateFlow<Set<String>>(emptySet())
     override val selectedRentalResourceIds = _selectedRentalResourceIds.asStateFlow()
-    private val rentalBookingId = initialRentalBookingId
+    private val rentalBookingId = bootstrap.rentalBookingId
         ?.trim()
         ?.takeIf(String::isNotBlank)
-    private val rentalBookingItems = initialRentalBookingItems
     override val isRentalResourceSelectionLocked: Boolean = rentalBookingId != null
-    private val _leagueScoringConfig = MutableStateFlow(initialSeed?.leagueScoringConfig ?: LeagueScoringConfigDTO())
+    private val _leagueScoringConfig = MutableStateFlow(LeagueScoringConfigDTO())
     override val leagueScoringConfig = _leagueScoringConfig.asStateFlow()
-    private var leagueScoringConfigInitialized = initialSeed?.leagueScoringConfig != null
+    private var leagueScoringConfigInitialized = false
     private val _registrationQuestionDrafts = MutableStateFlow<List<RegistrationQuestionDraft>>(emptyList())
     override val registrationQuestionDrafts = _registrationQuestionDrafts.asStateFlow()
-    private val _fieldCount = MutableStateFlow(initialSeed?.fields?.size ?: 0)
+    private val _fieldCount = MutableStateFlow(0)
     private lateinit var loadingHandler: LoadingHandler
 
     override fun setLoadingHandler(loadingHandler: LoadingHandler) {
         this.loadingHandler = loadingHandler
+    }
+    private fun Invite.toPendingStaffInviteDraft(): PendingStaffInviteDraft {
+        val staffTypes = (staffTypes + type)
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .map(String::uppercase)
+            .toSet()
+        val roles = buildSet {
+            if ("OFFICIAL" in staffTypes) add(EventStaffRole.OFFICIAL)
+            if ("HOST" in staffTypes || "ASSISTANT_HOST" in staffTypes) {
+                add(EventStaffRole.ASSISTANT_HOST)
+            }
+        }
+        return PendingStaffInviteDraft(
+            firstName = firstName.orEmpty(),
+            lastName = lastName.orEmpty(),
+            email = normalizeStaffInviteEmail(email),
+            roles = roles,
+            resolvedUserId = userId,
+        )
+    }
+    override fun retryEditorBootstrap() {
+        loadEditorBootstrap()
+    }
+
+    private fun loadEditorBootstrap() {
+        _isEditorReady.value = false
+        _editorBootstrapError.value = null
+        scope.launch {
+            eventRepository.getEventEditorCreateBootstrap(bootstrap)
+                .onSuccess { session ->
+                    applyEditorSession(session)
+                    _isEditorReady.value = true
+                    loadAvailableRentalResources()
+                }
+                .onFailure { throwable ->
+                    _editorBootstrapError.value = throwable.userMessage(
+                        "Unable to load the event editor.",
+                    )
+                }
+        }
+    }
+
+    private fun applyEditorSession(session: EventEditorSession) {
+        val canonical = session.canonicalState
+        _editorSession.value = session
+        _newEventState.value = canonical.event
+        _currentEventType.value = canonical.event.eventType
+        defaultEvent.value = defaultEvent.value.copy(
+            event = canonical.event,
+        )
+        _localFields.value = canonical.fields
+        _leagueSlots.value = canonical.timeSlots
+        _useManualTimeSlots.value = canonical.timeSlots.isNotEmpty()
+        _fieldCount.value = canonical.fields.size
+        canonical.leagueScoringConfig?.let { config ->
+            _leagueScoringConfig.value = config
+            leagueScoringConfigInitialized = true
+        }
+        _registrationQuestionDrafts.value = canonical.questions
+            .take(20)
+            .mapIndexed { index, question -> question.copy(sortOrder = index) }
+        _pendingStaffInvites.value = canonical.pendingStaffInvites.map { invite ->
+            invite.toPendingStaffInviteDraft()
+        }
     }
 
     override fun onBackClicked() {
@@ -319,7 +393,7 @@ class DefaultCreateEventComponent(
         childStack.subscribe {}
         loadSports()
         loadEventTags()
-        loadAvailableRentalResources()
+        loadEditorBootstrap()
         scope.launch {
             _newEventState
                 .map { draft -> draft.organizationId?.trim().orEmpty() }
@@ -370,6 +444,12 @@ class DefaultCreateEventComponent(
 
     override fun createEvent() {
         scope.launch {
+            if (!_isEditorReady.value) {
+                _errorState.value = ErrorMessage(
+                    _editorBootstrapError.value ?: "The event editor is still loading.",
+                )
+                return@launch
+            }
             validateCompletedRentalContext()?.let { error ->
                 _errorState.value = ErrorMessage(error)
                 return@launch
@@ -983,14 +1063,16 @@ class DefaultCreateEventComponent(
 
         while (resized.size < normalized) {
             val fieldNumber = resized.size + 1
-            resized += Field(
-                fieldNumber = fieldNumber,
-                organizationId = currentEvent.organizationId,
-                id = newId(),
-            ).copy(
-                name = "Field $fieldNumber",
-                divisions = defaultFieldDivisions(currentEvent),
-                location = defaultFieldLocation(currentEvent),
+            resized.add(
+                Field(
+                    fieldNumber = fieldNumber,
+                    organizationId = currentEvent.organizationId,
+                    id = newId(),
+                ).copy(
+                    name = "Field $fieldNumber",
+                    divisions = defaultFieldDivisions(currentEvent),
+                    location = defaultFieldLocation(currentEvent),
+                ),
             )
         }
         _localFields.value = resized
@@ -1057,16 +1139,8 @@ class DefaultCreateEventComponent(
         scope.launch {
             billingRepository.listRentalResourceOptions()
                 .onSuccess { options ->
-                    // Navigation retains the stable booking/item manifest. Mutable presentation
-                    // details still come from the current canonical booking response, but every
-                    // paid item must survive decoding and match before creation can continue.
-                    val availableOptions = if (rentalBookingId != null) {
-                        resolveCompletedRentalOptions(
-                            options.filter { option -> option.bookingId.trim() == rentalBookingId },
-                        )
-                    } else {
-                        options
-                    }
+                    // Match the current booking resources to the canonical bootstrap slots.
+                    val availableOptions = resolveCompletedRentalOptions(options)
                     if (availableOptions == null) {
                         _availableRentalResources.value = emptyList()
                         _selectedRentalResourceIds.value = emptySet()
@@ -1296,104 +1370,70 @@ class DefaultCreateEventComponent(
         var deferredError: ErrorMessage? = null
         loadingOperation.showLoading("Creating event...")
         try {
-            val preparedEvent = prepareEventForCreation(eventDraft).getOrElse { error ->
-                deferredError = ErrorMessage(error.userMessage("Failed to prepare event setup."))
-                return
-            }
-            validatePendingStaffInviteDrafts(_pendingStaffInvites.value).getOrElse { error ->
-                deferredError = ErrorMessage(error.userMessage("Fix the pending staff invites before creating the event."))
-                return
+            val command = pendingCreateCommand ?: run {
+                val session = _editorSession.value
+                    ?: error("The event editor is not ready.")
+                val prepared = prepareEventForCreation(eventDraft).getOrThrow()
+                validatePendingStaffInviteDrafts(_pendingStaffInvites.value).getOrThrow()
+                val mutation = EventEditorMutation(
+                    canonicalState = EventEditorCanonicalState(
+                        event = prepared.event,
+                        fields = prepared.fields,
+                        timeSlots = prepared.timeSlots,
+                        leagueScoringConfig = _leagueScoringConfig.value
+                            .takeIf { prepared.event.eventType == EventType.LEAGUE },
+                        questions = _registrationQuestionDrafts.value,
+                        pendingStaffInvites = _pendingStaffInvites.value.toCanonicalInvites(
+                            eventId = prepared.event.id,
+                        ),
+                        playoffDivisionDetails = session.canonicalState.playoffDivisionDetails,
+                        divisionFieldIds = session.canonicalState.divisionFieldIds,
+                    ),
+                )
+                EventEditorSessionMapper.toCreateCommand(session, mutation)
+                    .command
+                    .also { pendingCreateCommand = it }
             }
 
-            val requiredTemplateIds = preparedEvent.event.requiredTemplateIds
-                .map(String::trim)
-                .filter(String::isNotBlank)
-                .distinct()
-
-            val desiredStaffEvent = preparedEvent.event
-            val assignmentFreeEvent = desiredStaffEvent.copy(
-                assistantHostIds = emptyList(),
-                officialIds = emptyList(),
-                eventOfficials = emptyList(),
-            )
-            eventRepository.createEvent(
-                assignmentFreeEvent,
-                requiredTemplateIds = requiredTemplateIds,
-                leagueScoringConfig = _leagueScoringConfig.value
-                    .takeIf { preparedEvent.event.eventType == EventType.LEAGUE },
-                fields = preparedEvent.fields,
-                timeSlots = preparedEvent.timeSlots,
-            )
-                .onSuccess { createdEvent ->
-                    saveRegistrationQuestions(createdEvent)
-                        .onSuccess {
-                            syncEventStaffAssignments(
-                                createdEvent = createdEvent,
-                                desiredStaffEvent = desiredStaffEvent,
-                            )
-                                .onSuccess { syncedEvent ->
-                                    onEventCreated(syncedEvent)
-                                }
-                                .onFailure { error ->
-                                    deferredError = ErrorMessage(
-                                        "Event was created without the requested staff changes. " +
-                                            "Staff sync failed: ${error.userMessage()}",
-                                    )
-                                }
-                        }
-                        .onFailure { error ->
-                            deferredError = ErrorMessage(
-                                "Event was created, but its registration questions were not saved. " +
-                                    error.userMessage(),
-                            )
-                        }
+            eventRepository.createEventEditor(command)
+                .onSuccess { outcome ->
+                    pendingCreateCommand = null
+                    _editorSession.value = outcome.session
+                    applyEditorSession(outcome.session)
+                    if (
+                        outcome.staffEmailDelivery.isNotBlank() &&
+                        outcome.staffEmailDelivery.uppercase() !in setOf("SENT", "NOT_REQUESTED")
+                    ) {
+                        _errorState.value = ErrorMessage(
+                            "Event created, but staff invite delivery needs attention.",
+                        )
+                    }
+                    onEventCreated(outcome.session.canonicalState.event)
                 }
-                .onFailure {
-                    deferredError = ErrorMessage(it.userMessage())
+                .onFailure { error ->
+                    deferredError = ErrorMessage(error.userMessage("Failed to create event."))
                 }
+        } catch (error: Throwable) {
+            deferredError = ErrorMessage(error.userMessage("Failed to create event."))
         } finally {
             loadingOperation.hideLoading()
             deferredError?.let { error -> _errorState.value = error }
         }
     }
 
-    private suspend fun saveRegistrationQuestions(createdEvent: Event): Result<Unit> {
-        val questions = _registrationQuestionDrafts.value
-        if (questions.isEmpty()) return Result.success(Unit)
-        return eventRepository.saveRegistrationQuestions(
-            scopeType = "EVENT",
-            scopeId = createdEvent.id,
-            questions = questions,
-        ).map { }
-    }
-
-    private suspend fun syncEventStaffAssignments(
-        createdEvent: Event,
-        desiredStaffEvent: Event,
-    ): Result<Event> = runCatching {
-        val shouldSyncStaff = desiredStaffEvent.assistantHostIds.isNotEmpty() ||
-            desiredStaffEvent.eventOfficials.isNotEmpty() ||
-            _pendingStaffInvites.value.isNotEmpty()
-        if (!shouldSyncStaff) {
-            return@runCatching createdEvent
+    private fun List<PendingStaffInviteDraft>.toCanonicalInvites(eventId: String): List<Invite> =
+        map { draft ->
+            val normalized = draft.normalized()
+            Invite(
+                type = "STAFF",
+                email = normalized.email,
+                staffTypes = normalized.roles.map { role -> role.toInviteStaffType() },
+                eventId = eventId,
+                userId = normalized.resolvedUserId,
+                firstName = normalized.firstName,
+                lastName = normalized.lastName,
+            )
         }
-
-        val currentStaffState = eventRepository.getEventStaffState(createdEvent).getOrThrow()
-        val desiredEvent = currentStaffState.event.copy(
-            assistantHostIds = desiredStaffEvent.assistantHostIds,
-            eventOfficials = desiredStaffEvent.eventOfficials,
-            officialIds = desiredStaffEvent.eventOfficials.map { official -> official.userId },
-        )
-        val saveOutcome = reconcileEventStaffState(
-            eventRepository = eventRepository,
-            event = desiredEvent,
-            pendingStaffInvites = _pendingStaffInvites.value,
-            expectedRevision = currentStaffState.revision,
-        ).getOrThrow()
-
-        _pendingStaffInvites.value = emptyList()
-        saveOutcome.event
-    }
 
     private data class PreparedEventForCreation(
         val event: Event,
@@ -1407,8 +1447,8 @@ class DefaultCreateEventComponent(
         } else {
             eventDraft
         }
-        var preparedFields = emptyList<Field>()
-        var preparedTimeSlots = emptyList<TimeSlot>()
+        var preparedFields = _localFields.value
+        var preparedTimeSlots = _leagueSlots.value
 
         val shouldManageLocalFields =
             (
@@ -1426,18 +1466,19 @@ class DefaultCreateEventComponent(
         val fieldIdReplacements = mutableMapOf<String, String>()
         if (shouldManageLocalFields) {
             val existingFields = _localFields.value
-                .filterNot { field -> selectedRentalFieldIdSet.contains(field.id.trim()) }
-                .take((_fieldCount.value - selectedRentalFieldIds.size).coerceAtLeast(0))
             preparedFields = buildFieldDrafts(
                 event = preparedEvent,
                 targetCount = _fieldCount.value,
                 excludedFieldIds = selectedRentalFieldIdSet,
             )
-            existingFields.zip(preparedFields).forEach { (existingField, preparedField) ->
-                if (existingField.id.isNotBlank()) {
-                    fieldIdReplacements[existingField.id] = preparedField.id
+            existingFields
+                .filterNot { field -> field.id.trim() in selectedRentalFieldIdSet }
+                .zip(preparedFields)
+                .forEach { (existingField, preparedField) ->
+                    if (existingField.id.isNotBlank()) {
+                        fieldIdReplacements[existingField.id] = preparedField.id
+                    }
                 }
-            }
             preparedEvent = preparedEvent.copy(
                 fieldIds = selectedRentalFieldIds + preparedFields.map { it.id },
             )
@@ -1506,7 +1547,7 @@ class DefaultCreateEventComponent(
             return "A completed one-time reservation can't be attached to a weekly event. Choose Event, League, or Tournament."
         }
         val rentalSlots = _leagueSlots.value.filter { slot -> slot.isRentalBacked() }
-        if (!completedRentalSlotsMatchManifest(rentalSlots)) {
+        if (!completedRentalSlotsMatchCanonical(rentalSlots)) {
             return "The reserved resources are no longer fully attached. Return to the organization and try again."
         }
         return null
@@ -1515,7 +1556,7 @@ class DefaultCreateEventComponent(
     private fun requireCompletedRentalSlots(preparedTimeSlots: List<TimeSlot>) {
         rentalBookingId ?: return
         val preparedRentalSlots = preparedTimeSlots.filter { slot -> slot.isRentalBacked() }
-        check(completedRentalSlotsMatchManifest(preparedRentalSlots)) {
+        check(completedRentalSlotsMatchCanonical(preparedRentalSlots)) {
             "The reserved resources are no longer fully attached. Return to the organization and try again."
         }
     }
@@ -1524,60 +1565,53 @@ class DefaultCreateEventComponent(
         options: List<RentalResourceOption>,
     ): List<RentalResourceOption>? {
         val bookingId = rentalBookingId ?: return options
-        val manifest = normalizedRentalBookingManifestOrNull() ?: return null
-        if (options.size != manifest.size || options.any { option -> option.bookingId.trim() != bookingId }) {
+        val canonicalSlots = _leagueSlots.value.filter { slot ->
+            slot.isRentalBacked() && slot.rentalBookingId?.trim() == bookingId
+        }
+        val expectedItemIds = canonicalSlots
+            .mapNotNull { slot -> slot.rentalBookingItemId?.trim()?.takeIf(String::isNotBlank) }
+            .distinct()
+        if (expectedItemIds.isEmpty()) return null
+        val optionsByItemId = options
+            .filter { option -> option.bookingId.trim() == bookingId }
+            .groupBy { option -> option.bookingItemId.trim() }
+        if (expectedItemIds.any { itemId -> optionsByItemId[itemId].orEmpty().size != 1 }) {
             return null
         }
-        val optionsByItemId = options.groupBy { option -> option.bookingItemId.trim() }
-        if (optionsByItemId.size != manifest.size || optionsByItemId.values.any { matches -> matches.size != 1 }) {
-            return null
-        }
-        return manifest.map { expected ->
-            val option = optionsByItemId[expected.id]?.singleOrNull() ?: return null
-            if (
-                option.field.id.trim() != expected.fieldId ||
-                option.start.toString() != expected.start ||
-                option.end.toString() != expected.end
-            ) {
-                return null
-            }
-            option
-        }
+        val matched = expectedItemIds.map { itemId -> optionsByItemId[itemId]!!.single() }
+        return matched.takeIf { rentalSlotsMatchOptions(canonicalSlots, it) }
     }
 
-    private fun normalizedRentalBookingManifestOrNull(): List<RentalBookingItemManifest>? {
-        if (rentalBookingItems.isEmpty()) return null
-        val normalized = rentalBookingItems.map { item ->
-            val id = item.id.trim().takeIf(String::isNotBlank) ?: return null
-            val fieldId = item.fieldId.trim().takeIf(String::isNotBlank) ?: return null
-            val start = runCatching { kotlin.time.Instant.parse(item.start.trim()) }.getOrNull() ?: return null
-            val end = runCatching { kotlin.time.Instant.parse(item.end.trim()) }.getOrNull() ?: return null
-            if (end <= start) return null
-            RentalBookingItemManifest(
-                id = id,
-                fieldId = fieldId,
-                start = start.toString(),
-                end = end.toString(),
-            )
-        }
-        if (normalized.map(RentalBookingItemManifest::id).distinct().size != normalized.size) return null
-        return normalized
-    }
-
-    private fun completedRentalSlotsMatchManifest(slots: List<TimeSlot>): Boolean {
+    private fun completedRentalSlotsMatchCanonical(slots: List<TimeSlot>): Boolean {
         val bookingId = rentalBookingId ?: return true
-        val manifest = normalizedRentalBookingManifestOrNull() ?: return false
-        if (slots.size != manifest.size) return false
+        val options = selectedRentalResourceOptions()
+        if (options.isEmpty()) return false
+        return rentalSlotsMatchOptions(
+            slots = slots,
+            options = options.filter { option -> option.bookingId.trim() == bookingId },
+        )
+    }
+
+    private fun rentalSlotsMatchOptions(
+        slots: List<TimeSlot>,
+        options: List<RentalResourceOption>,
+    ): Boolean {
         val slotsByItemId = slots.groupBy { slot -> slot.rentalBookingItemId?.trim().orEmpty() }
-        if (slotsByItemId.size != manifest.size || slotsByItemId.values.any { matches -> matches.size != 1 }) {
+        val optionsByItemId = options.groupBy { option -> option.bookingItemId.trim() }
+        if (
+            slotsByItemId.keys != optionsByItemId.keys ||
+            slotsByItemId.values.any { matches -> matches.size != 1 } ||
+            optionsByItemId.values.any { matches -> matches.size != 1 }
+        ) {
             return false
         }
-        return manifest.all { expected ->
-            val slot = slotsByItemId[expected.id]?.singleOrNull() ?: return@all false
-            slot.rentalBookingId?.trim() == bookingId &&
-                slot.normalizedScheduledFieldIds() == listOf(expected.fieldId) &&
-                slot.startDate.toString() == expected.start &&
-                slot.endDate?.toString() == expected.end
+        return optionsByItemId.all { (itemId, matches) ->
+            val option = matches.single()
+            val slot = slotsByItemId[itemId]?.singleOrNull() ?: return@all false
+            slot.rentalBookingId?.trim() == option.bookingId.trim() &&
+                slot.normalizedScheduledFieldIds() == listOf(option.field.id.trim()) &&
+                slot.startDate == option.start &&
+                slot.endDate == option.end
         }
     }
 

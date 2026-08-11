@@ -9,6 +9,9 @@ import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.repositories.EventRepository
 import com.razumly.mvp.core.data.repositories.FieldRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
@@ -20,6 +23,7 @@ import com.razumly.mvp.core.db.MVPDatabaseService
 import com.razumly.mvp.core.network.DataStoreAuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.createMvpHttpClient
+import com.razumly.mvp.core.network.dto.*
 import com.razumly.mvp.eventDetail.data.MatchRepository
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.flow.Flow
@@ -125,6 +129,233 @@ internal class MobileApiTestSession private constructor(
             )
         }
     }
+}
+
+internal suspend fun MobileApiTestSession.createEventThroughEditor(
+    event: Event,
+    fields: List<Field> = emptyList(),
+    timeSlots: List<TimeSlot> = emptyList(),
+    operationId: String = "mobile-editor-create-${event.id}",
+): Event {
+    val bootstrap = eventRepository.getEventEditorCreateBootstrap(
+        EventEditorBootstrapQueryDto(
+            organizationId = event.organizationId,
+            eventType = event.eventType.name,
+            sportId = event.sportIds.firstOrNull(),
+            start = event.start.toString(),
+        ),
+    ).getOrThrow()
+    val draft = bootstrap.snapshot.draft.toEditorDraft(event, fields, timeSlots)
+    return eventRepository.createEventEditor(
+        EventEditorCreateCommandDto(
+            contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
+            createOperationId = operationId,
+            draft = draft,
+        ),
+    ).getOrThrow().session.canonicalState.event
+}
+
+private fun EventEditorDraftDto.toEditorDraft(
+    event: Event,
+    fields: List<Field>,
+    timeSlots: List<TimeSlot>,
+): EventEditorDraftDto {
+    fun DivisionDetail.toDto(): EventEditorDivisionDetailDto = EventEditorDivisionDetailDto(
+        id = id,
+        sourceDivisionId = sourceDivisionId,
+        key = key,
+        name = name,
+        kind = kind ?: "LEAGUE",
+        divisionTypeId = divisionTypeId,
+        skillDivisionTypeId = skillDivisionTypeId,
+        ageDivisionTypeId = ageDivisionTypeId,
+        divisionTypeName = divisionTypeName,
+        ratingType = ratingType,
+        gender = gender,
+        price = price?.toDouble(),
+        maxParticipants = maxParticipants?.toDouble(),
+        playoffTeamCount = playoffTeamCount?.toDouble(),
+        poolCount = poolCount?.toDouble(),
+        poolTeamCount = poolTeamCount?.toDouble(),
+        allowPaymentPlans = allowPaymentPlans,
+        installmentCount = installmentCount?.toDouble(),
+        installmentDueDates = installmentDueDates,
+        installmentDueRelativeDays = installmentDueRelativeDays,
+        installmentAmounts = installmentAmounts,
+        ageCutoffDate = ageCutoffDate,
+        ageCutoffLabel = ageCutoffLabel,
+        ageCutoffSource = ageCutoffSource,
+        fieldIds = fieldIds,
+        playoffPlacementDivisionIds = playoffPlacementDivisionIds,
+        playoffConfig = null,
+        gamesPerOpponent = gamesPerOpponent?.toDouble(),
+        restTimeMinutes = restTimeMinutes?.toDouble(),
+        usesSets = usesSets,
+        matchDurationMinutes = matchDurationMinutes?.toDouble(),
+        setDurationMinutes = setDurationMinutes?.toDouble(),
+        setsPerMatch = setsPerMatch?.toDouble(),
+        pointsToVictory = pointsToVictory,
+        phaseSettings = null,
+        teamIds = teamIds,
+    )
+
+    return copy(
+        basics = basics.copy(
+            name = event.name,
+            description = event.description,
+            eventType = event.eventType.name,
+            sportIds = event.sportIds,
+            start = event.start.toString(),
+            timeZone = event.timeZone,
+            location = event.location,
+            address = event.address.orEmpty(),
+            coordinates = event.coordinates,
+            affiliateUrl = event.affiliateUrl.orEmpty(),
+            organizationId = event.organizationId,
+            hostId = event.hostId,
+            state = event.state,
+            imageId = event.imageId.takeIf(String::isNotBlank),
+            tags = event.tags.map { tag ->
+                EventEditorTagDto(id = tag.id, slug = tag.slug, name = tag.name)
+            },
+        ),
+        participation = participation.copy(
+            teamSignup = event.teamSignup,
+            singleDivision = event.singleDivision,
+            registrationByDivisionType = event.registrationByDivisionType,
+            teamSizeLimit = event.teamSizeLimit.takeIf { it > 0 },
+            maxParticipants = event.maxParticipants.takeIf { it > 0 },
+            minAge = event.minAge,
+            maxAge = event.maxAge,
+            cancellationRefundHours = event.cancellationRefundHours,
+            registrationCutoffHours = event.registrationCutoffHours,
+            allowTeamSplitDefault = event.allowTeamSplitDefault == true,
+            waitListIds = event.waitListIds,
+            freeAgentIds = event.freeAgentIds,
+        ),
+        registration = registration.copy(
+            payment = registration.payment.copy(
+                mode = event.registrationPaymentMode,
+                priceCents = event.priceCents,
+                manualPaymentInstructions = event.manualPaymentInstructions,
+                manualPaymentLinks = event.manualPaymentLinks.map { link ->
+                    EventEditorManualPaymentLinkDto(
+                        id = link.id.takeIf(String::isNotBlank),
+                        provider = link.provider,
+                        label = link.label,
+                        url = link.url,
+                    )
+                },
+                allowPaymentPlans = event.allowPaymentPlans == true,
+                installmentCount = event.installmentCount,
+                installmentDueDates = event.installmentDueDates,
+                installmentDueRelativeDays = event.installmentDueRelativeDays,
+                installmentAmounts = event.installmentAmounts,
+            ),
+        ),
+        competition = competition.copy(
+            divisionIds = event.divisions,
+            divisionDetails = event.divisionDetails
+                .filterNot { detail -> detail.kind.equals("PLAYOFF", ignoreCase = true) }
+                .map(DivisionDetail::toDto),
+            playoffDivisionDetails = event.divisionDetails
+                .filter { detail -> detail.kind.equals("PLAYOFF", ignoreCase = true) }
+                .map(DivisionDetail::toDto),
+            divisionFieldIds = event.divisionDetails.associate { detail -> detail.id to detail.fieldIds },
+            winnerSetCount = event.winnerSetCount,
+            loserSetCount = event.loserSetCount,
+            doubleElimination = event.doubleElimination,
+            includePlayoffs = event.includePlayoffs,
+            splitLeaguePlayoffDivisions = event.splitLeaguePlayoffDivisions,
+            playoffTeamCount = event.playoffTeamCount,
+            pointsToVictory = event.pointsToVictory,
+            winnerBracketPointsToVictory = event.winnerBracketPointsToVictory,
+            loserBracketPointsToVictory = event.loserBracketPointsToVictory,
+            usesSets = event.usesSets,
+            setsPerMatch = event.setsPerMatch,
+            setDurationMinutes = event.setDurationMinutes?.toDouble(),
+            restTimeMinutes = event.restTimeMinutes?.toDouble(),
+            matchDurationMinutes = event.matchDurationMinutes?.toDouble(),
+            gamesPerOpponent = event.gamesPerOpponent,
+        matchRulesOverride = null,
+        ),
+        schedule = schedule.copy(
+            mode = if (event.noFixedEndDateTime) "GENERATED_END" else "FIXED_END",
+            endConstraint = event.end.toString().takeUnless { event.noFixedEndDateTime },
+            generatedScheduleEnd = event.end.toString().takeIf { event.noFixedEndDateTime },
+        ),
+        resources = EventEditorResourcesDto(
+            fieldIds = fields.map(Field::id),
+            fields = fields.map { field ->
+                EventEditorFieldDto(
+                    id = field.id,
+                    name = field.name,
+                    location = field.location,
+                    lat = field.lat,
+                    long = field.long,
+                    inUse = field.inUse,
+                    rentalSlotIds = field.rentalSlotIds,
+                    organizationId = field.organizationId,
+                    facilityId = field.facilityId,
+                )
+            },
+            timeSlotIds = timeSlots.map(TimeSlot::id),
+            timeSlots = timeSlots.map { slot ->
+                EventEditorTimeSlotDto(
+                    id = slot.id,
+                    dayOfWeek = slot.dayOfWeek,
+                    daysOfWeek = slot.daysOfWeek.orEmpty(),
+                    startTimeMinutes = slot.startTimeMinutes,
+                    endTimeMinutes = slot.endTimeMinutes,
+                    startDate = slot.startDate.toString(),
+                    endDate = slot.endDate?.toString(),
+                    timeZone = slot.timeZone,
+                    scheduledFieldId = slot.scheduledFieldId,
+                    scheduledFieldIds = slot.scheduledFieldIds.orEmpty(),
+                    divisions = slot.divisions.orEmpty(),
+                    requiredTemplateIds = slot.requiredTemplateIds,
+                    hostRequiredTemplateIds = slot.hostRequiredTemplateIds,
+                    repeating = slot.repeating,
+                    price = slot.price?.toDouble(),
+                    sourceType = slot.sourceType,
+                    rentalBookingId = slot.rentalBookingId,
+                    rentalBookingItemId = slot.rentalBookingItemId,
+                    rentalLocked = slot.rentalLocked,
+                )
+            },
+            requiredTemplateIds = event.requiredTemplateIds,
+            rentalBookingId = resources.rentalBookingId,
+            rentalBookingItemId = resources.rentalBookingItemId,
+        ),
+        staff = EventEditorStaffDto(
+            officialSchedulingMode = event.officialSchedulingMode.name,
+            teamOfficialsMaySwap = event.teamOfficialsMaySwap == true,
+            teamCheckInMode = event.teamCheckInMode.name,
+            teamCheckInOpenMinutesBefore = event.teamCheckInOpenMinutesBefore,
+            allowMatchRosterEdits = event.allowMatchRosterEdits,
+            allowTemporaryMatchPlayers = event.allowTemporaryMatchPlayers,
+            autoCreatePointMatchIncidents = event.autoCreatePointMatchIncidents,
+            officialIds = event.officialIds,
+            officialPositions = event.officialPositions.map { position ->
+                EventEditorOfficialPositionDto(
+                    id = position.id,
+                    name = position.name,
+                    count = position.count,
+                    order = position.order,
+                )
+            },
+            eventOfficials = event.eventOfficials.map { official ->
+                EventEditorOfficialDto(
+                    id = official.id,
+                    userId = official.userId,
+                    positionIds = official.positionIds,
+                    fieldIds = official.fieldIds,
+                    isActive = official.isActive,
+                )
+            },
+            assistantHostIds = event.assistantHostIds,
+        ),
+    )
 }
 
 internal fun mobileApiLoginFixturesReady(vararg credentials: Pair<String, String>): Boolean {
