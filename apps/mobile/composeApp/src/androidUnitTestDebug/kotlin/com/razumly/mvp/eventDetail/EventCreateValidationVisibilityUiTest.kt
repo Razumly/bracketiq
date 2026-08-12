@@ -26,6 +26,7 @@ import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.InclusivePriceBreakdown
 import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
 import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
@@ -162,6 +163,125 @@ class EventCreateValidationVisibilityUiTest {
         composeRule.onNodeWithText("Select a gender.").assertIsDisplayed()
         composeRule.onNodeWithText("Select a skill division.").assertIsDisplayed()
         composeRule.onNodeWithText("Select an age division.").assertIsDisplayed()
+    }
+
+    @Test
+    fun split_league_shows_only_division_playoff_count() {
+        val splitLeague = Event(
+            eventType = EventType.LEAGUE,
+            includePlayoffs = true,
+            singleDivision = false,
+            maxParticipants = 8,
+        )
+        val divisionEditor = DivisionEditorState(playoffTeamCount = 4)
+
+        composeRule.setContent {
+            CompositionLocalProvider(localImageScheme provides testImageScheme()) {
+                MaterialTheme {
+                    Column {
+                        EventDetailsDivisionEditorForm(
+                            state = EventDetailsDivisionEditorFormState(
+                                editEvent = splitLeague,
+                                divisionDetails = emptyList(),
+                                selectedDivisions = emptyList(),
+                                divisionEditor = divisionEditor,
+                                divisionEditorDefaults = divisionEditor,
+                                divisionEditorReady = true,
+                                divisionScheduleUsesSets = false,
+                                skillDivisionTypeOptions = emptyList(),
+                                ageDivisionTypeOptions = emptyList(),
+                                genderOptions = emptyList(),
+                                divisionInputsExpanded = true,
+                                hostHasAccount = false,
+                                isNewEvent = false,
+                                showValidationErrors = false,
+                                addSelfToEvent = false,
+                            ),
+                            actions = EventDetailsDivisionEditorFormActions(
+                                onEditEvent = { this },
+                                onDivisionEditorChange = {},
+                                onDivisionEditorDefaultsChange = {},
+                                onUpdateDivisionEditorSelection = { _, _, _ -> },
+                                onNormalizeLeagueConfigWithSportMode = { it },
+                                onUpdateDivisionLeagueConfig = {},
+                                onUpdateDivisionPlayoffConfig = {},
+                                onUpdateDivisionTournamentConfig = {},
+                                onSyncLeagueSlotsForSelectedDivisions = { _, _ -> },
+                                onSetDivisionPaymentPlansEnabled = {},
+                                onSyncDivisionInstallmentCount = {},
+                                onUpdateDivisionInstallmentAmount = { _, _ -> },
+                                onSetDivisionInstallmentDueDatePickerIndex = {},
+                                onAddDivisionInstallmentRow = {},
+                                onRemoveDivisionInstallmentRow = {},
+                                onAddSelfToEventChange = {},
+                                onAddCurrentUser = {},
+                                onDivisionInputsExpandedChange = {},
+                            ),
+                        )
+                        SimpleEventDetailsDivisionEditorForm(
+                            state = EventDetailsDivisionEditorFormState(
+                                editEvent = splitLeague,
+                                divisionDetails = emptyList(),
+                                selectedDivisions = emptyList(),
+                                divisionEditor = divisionEditor,
+                                divisionEditorDefaults = divisionEditor,
+                                divisionEditorReady = true,
+                                divisionScheduleUsesSets = false,
+                                skillDivisionTypeOptions = emptyList(),
+                                ageDivisionTypeOptions = emptyList(),
+                                genderOptions = emptyList(),
+                                divisionInputsExpanded = true,
+                                hostHasAccount = false,
+                                isNewEvent = false,
+                                showValidationErrors = false,
+                                addSelfToEvent = false,
+                            ),
+                            actions = EventDetailsDivisionEditorFormActions(
+                                onEditEvent = { this },
+                                onDivisionEditorChange = {},
+                                onDivisionEditorDefaultsChange = {},
+                                onUpdateDivisionEditorSelection = { _, _, _ -> },
+                                onNormalizeLeagueConfigWithSportMode = { it },
+                                onUpdateDivisionLeagueConfig = {},
+                                onUpdateDivisionPlayoffConfig = {},
+                                onUpdateDivisionTournamentConfig = {},
+                                onSyncLeagueSlotsForSelectedDivisions = { _, _ -> },
+                                onSetDivisionPaymentPlansEnabled = {},
+                                onSyncDivisionInstallmentCount = {},
+                                onUpdateDivisionInstallmentAmount = { _, _ -> },
+                                onSetDivisionInstallmentDueDatePickerIndex = {},
+                                onAddDivisionInstallmentRow = {},
+                                onRemoveDivisionInstallmentRow = {},
+                                onAddSelfToEventChange = {},
+                                onAddCurrentUser = {},
+                                onDivisionInputsExpandedChange = {},
+                            ),
+                        )
+                        EventDetailsDivisionEditorActionsContent(
+                            state = EventDetailsDivisionEditorActionsState(
+                                editEvent = splitLeague,
+                                divisionEditor = divisionEditor,
+                                divisionEditorReady = true,
+                                isSkillLevelValid = true,
+                                isLeaguePlayoffTeamsValid = true,
+                                showValidationErrors = false,
+                                divisionDetails = emptyList(),
+                            ),
+                            actions = EventDetailsDivisionEditorActions(
+                                onDivisionEditorChange = {},
+                                onSaveDivision = {},
+                                onResetDivisionEditor = {},
+                                onEditDivision = {},
+                                onRemoveDivision = {},
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+
+        composeRule.onAllNodesWithText("Event Playoff Team Count *").assertCountEquals(0)
+        composeRule.onAllNodesWithText("Division Playoff Team Count *").assertCountEquals(1)
     }
 
     @Test

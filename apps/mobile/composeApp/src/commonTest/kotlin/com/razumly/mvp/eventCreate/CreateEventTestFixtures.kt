@@ -695,10 +695,10 @@ internal class CreateEvent_FakeEventRepository(
     override suspend fun createEventEditor(
         command: EventEditorCreateCommandDto,
     ): Result<EventEditorSaveOutcome> {
+        createEventEditorCalls += command
         createEditorFailure?.let { failure -> return Result.failure(failure) }
         val bootstrap = createBootstrapSession
             ?: return Result.failure(IllegalStateException("missing test editor bootstrap"))
-        createEventEditorCalls += command
         val snapshot = bootstrap.snapshot.copy(draft = command.draft)
         val session = EventEditorSessionMapper.fromCreateBootstrap(
             EventEditorCreateBootstrapDto(

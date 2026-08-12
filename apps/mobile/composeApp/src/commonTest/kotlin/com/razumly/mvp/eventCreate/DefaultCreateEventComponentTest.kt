@@ -441,6 +441,44 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals("What position do you play?", question.prompt)
         assertEquals("LONG_TEXT", question.answerType)
         assertTrue(question.required)
+        assertEquals(0, question.sortOrder)
+        assertTrue(question.clientId?.isNotBlank() == true)
+        assertEquals(null, question.id)
+        assertEquals(1, harness.onEventCreatedCount)
+    }
+
+    @Test
+    fun create_event_retries_current_command_with_same_question_client_id() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+        harness.component.updateEventField { copy(divisions = listOf("Open")) }
+        harness.component.setRegistrationQuestionDrafts(
+            listOf(
+                RegistrationQuestionDraft(
+                    prompt = "What position do you play?",
+                    answerType = "LONG_TEXT",
+                    required = true,
+                ),
+            ),
+        )
+        advance()
+
+        harness.eventRepository.createEditorFailure = IllegalStateException("Network response lost.")
+        harness.component.createEvent()
+        advance()
+        assertEquals(1, harness.eventRepository.createEventEditorCalls.size)
+        val firstCommand = harness.eventRepository.createEventEditorCalls.single()
+        val firstQuestion = firstCommand.draft.registration.questions.single()
+        assertTrue(firstQuestion.clientId?.isNotBlank() == true)
+
+        harness.eventRepository.createEditorFailure = null
+        harness.component.createEvent()
+        advance()
+
+        assertEquals(2, harness.eventRepository.createEventEditorCalls.size)
+        val retryCommand = harness.eventRepository.createEventEditorCalls.last()
+        assertEquals(firstCommand, retryCommand)
+        assertEquals(firstQuestion.clientId, retryCommand.draft.registration.questions.single().clientId)
         assertEquals(1, harness.onEventCreatedCount)
     }
 
@@ -1765,6 +1803,88 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(600, createdSlots[0].startTimeMinutes)
         assertEquals(660, createdSlots[0].endTimeMinutes)
         assertEquals(expectedDateOnlyEnd, createdSlots[0].endDate)
+    }
+
+    @Test
+    fun failed_league_create_preserves_current_slot_state_for_retry() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        harness.component.setLoadingHandler(harness.loadingHandler)
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        advance()
+        harness.component.selectFieldCount(1)
+        advance()
+        val localFieldId = harness.component.localFields.value.first().id
+        harness.component.setUseManualTimeSlots(true)
+        advance()
+
+        val initialSlotStart = instant(1_700_172_800_000)
+        harness.component.updateEventField {
+            copy(
+                name = "League Retry Slot",
+                organizationId = "org-retry-slot",
+                divisions = listOf("Open"),
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_259_200_000),
+                noFixedEndDateTime = false,
+            )
+        }
+        harness.component.updateLeagueTimeSlot(0) {
+            copy(
+                repeating = true,
+                startDate = initialSlotStart,
+                dayOfWeek = 1,
+                daysOfWeek = listOf(1, 3),
+                startTimeMinutes = 600,
+                endTimeMinutes = 660,
+                scheduledFieldId = localFieldId,
+                scheduledFieldIds = listOf(localFieldId),
+            )
+        }
+        advance()
+
+        val slotBeforeFailure = harness.component.leagueSlots.value.single()
+        harness.eventRepository.createEditorFailure = IllegalStateException("offline")
+        harness.component.createEvent()
+        advance()
+
+        assertEquals(slotBeforeFailure, harness.component.leagueSlots.value.single())
+        assertFalse(harness.loadingHandler.loadingState.value.isLoading)
+        assertEquals(
+            "offline",
+            harness.component.errorState.value?.message,
+        )
+
+        val retrySlotStart = instant(1_700_259_200_000)
+        harness.eventRepository.createEditorFailure = null
+        harness.component.updateLeagueTimeSlot(0) {
+            copy(
+                startDate = retrySlotStart,
+                dayOfWeek = 2,
+                daysOfWeek = listOf(2, 4),
+                startTimeMinutes = 720,
+                endTimeMinutes = 780,
+            )
+        }
+        advance()
+        val slotBeforeRetry = harness.component.leagueSlots.value.single()
+
+        harness.component.createEvent()
+        advance()
+
+        assertEquals(2, harness.eventRepository.createEventEditorCalls.size)
+        assertEquals(1, harness.eventRepository.createEditorCalls.size)
+        assertEquals(
+            harness.eventRepository.createEventEditorCalls[0].createOperationId,
+            harness.eventRepository.createEventEditorCalls[1].createOperationId,
+        )
+        val retrySlot = harness.eventRepository.createEventEditorCalls[1].draft.resources.timeSlots.single()
+        assertEquals(slotBeforeRetry.startDate.toString(), retrySlot.startDate)
+        assertEquals(slotBeforeRetry.daysOfWeek, retrySlot.daysOfWeek)
+        assertEquals(slotBeforeRetry.startTimeMinutes, retrySlot.startTimeMinutes)
+        assertEquals(slotBeforeRetry.endTimeMinutes, retrySlot.endTimeMinutes)
+        assertEquals(listOf(localFieldId), retrySlot.scheduledFieldIds)
     }
 
     @Test

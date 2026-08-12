@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
+import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentUrl
 import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
@@ -323,6 +324,12 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
     val regularDetails = competition.divisionDetails.map(EventEditorDivisionDetailDto::toDomain)
     val playoffDetails = competition.playoffDivisionDetails.map(EventEditorDivisionDetailDto::toDomain)
     val allDetails = regularDetails + playoffDetails
+    val isMultiDivisionLeague = eventType == EventType.LEAGUE && regularDetails.size > 1
+    val eventPlayoffTeamCount = if (isMultiDivisionLeague) {
+        null
+    } else {
+        competition.playoffTeamCount ?: regularDetails.firstOrNull()?.playoffTeamCount
+    }
     return Event(
         id = eventId,
         name = basics.name,
@@ -364,7 +371,7 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
         gamesPerOpponent = competition.gamesPerOpponent,
         includePlayoffs = competition.includePlayoffs,
         splitLeaguePlayoffDivisions = competition.splitLeaguePlayoffDivisions,
-        playoffTeamCount = competition.playoffTeamCount,
+        playoffTeamCount = eventPlayoffTeamCount,
         doubleElimination = competition.doubleElimination,
         winnerSetCount = competition.winnerSetCount ?: 1,
         loserSetCount = competition.loserSetCount ?: 0,
@@ -509,7 +516,8 @@ private fun Event.toPaymentDto(
                 id = link.id.takeIf(String::isNotBlank),
                 provider = link.provider,
                 label = link.label,
-                url = link.url,
+                url = normalizeManualPaymentUrl(link.provider, link.url)
+                    ?: throw IllegalArgumentException("Invalid manual payment URL."),
             )
         }
     } else {
@@ -575,14 +583,47 @@ private fun Event.toCompetitionDto(
     val existingById = (existing.divisionDetails + existing.playoffDivisionDetails).associateBy { it.id }
     val currentRegularDetails = divisionDetails.filterNot { it.kind?.equals("PLAYOFF", ignoreCase = true) == true }
     val baselineRegularDetails = baseline.divisionDetails.filterNot { it.kind?.equals("PLAYOFF", ignoreCase = true) == true }
-    val regularDetailsChanged = currentRegularDetails != baselineRegularDetails
+    val isMultiDivisionLeague = eventType == EventType.LEAGUE && currentRegularDetails.size > 1
+    val currentRegularDetailsForDto = if (
+        includePlayoffs &&
+        !isMultiDivisionLeague &&
+        currentRegularDetails.size == 1 &&
+        playoffTeamCount != null
+    ) {
+        currentRegularDetails.map { detail ->
+            detail.copy(playoffTeamCount = detail.playoffTeamCount ?: playoffTeamCount)
+        }
+    } else {
+        currentRegularDetails
+    }
+    val currentPlayoffTeamCount = if (includePlayoffs) {
+        if (isMultiDivisionLeague) {
+            null
+        } else {
+            playoffTeamCount ?: currentRegularDetailsForDto.firstOrNull()?.playoffTeamCount
+        }
+    } else {
+        playoffTeamCount
+    }
+    val baselineIsMultiDivisionLeague =
+        baseline.eventType == EventType.LEAGUE && baselineRegularDetails.size > 1
+    val baselinePlayoffTeamCount = if (baseline.includePlayoffs) {
+        if (baselineIsMultiDivisionLeague) {
+            null
+        } else {
+            baseline.playoffTeamCount ?: baselineRegularDetails.firstOrNull()?.playoffTeamCount
+        }
+    } else {
+        baseline.playoffTeamCount
+    }
+    val regularDetailsChanged = currentRegularDetailsForDto != baselineRegularDetails
     val currentDivisionIdsChanged = divisions != baseline.divisions
     val currentWinnerSetCountChanged = winnerSetCount != baseline.winnerSetCount
     val currentLoserSetCountChanged = loserSetCount != baseline.loserSetCount
     val currentDoubleEliminationChanged = doubleElimination != baseline.doubleElimination
     val currentIncludePlayoffsChanged = includePlayoffs != baseline.includePlayoffs
     val currentSplitPlayoffsChanged = splitLeaguePlayoffDivisions != baseline.splitLeaguePlayoffDivisions
-    val currentPlayoffTeamCountChanged = playoffTeamCount != baseline.playoffTeamCount
+    val currentPlayoffTeamCountChanged = currentPlayoffTeamCount != baselinePlayoffTeamCount
     val currentPointsToVictoryChanged = pointsToVictory != baseline.pointsToVictory
     val currentWinnerBracketPointsChanged = winnerBracketPointsToVictory != baseline.winnerBracketPointsToVictory
     val currentLoserBracketPointsChanged = loserBracketPointsToVictory != baseline.loserBracketPointsToVictory
@@ -597,7 +638,7 @@ private fun Event.toCompetitionDto(
     return existing.copy(
         divisionIds = if (currentDivisionIdsChanged) divisions else existing.divisionIds,
         divisionDetails = if (regularDetailsChanged) {
-            currentRegularDetails.map { detail -> detail.toDto(existingById[detail.id]) }
+            currentRegularDetailsForDto.map { detail -> detail.toDto(existingById[detail.id]) }
         } else {
             existing.divisionDetails
         },
@@ -616,7 +657,13 @@ private fun Event.toCompetitionDto(
         } else {
             existing.splitLeaguePlayoffDivisions
         },
-        playoffTeamCount = if (currentPlayoffTeamCountChanged) playoffTeamCount else existing.playoffTeamCount,
+        playoffTeamCount = if (includePlayoffs) {
+            currentPlayoffTeamCount
+        } else if (currentPlayoffTeamCountChanged) {
+            playoffTeamCount
+        } else {
+            existing.playoffTeamCount
+        },
         pointsToVictory = if (currentPointsToVictoryChanged) pointsToVictory else existing.pointsToVictory,
         winnerBracketPointsToVictory = if (currentWinnerBracketPointsChanged) {
             winnerBracketPointsToVictory
@@ -802,10 +849,7 @@ private fun Event.toStaffDto(
     )
 }
 private fun Map<String, List<String>>.withFieldDivisionAssignments(fields: List<Field>): Map<String, List<String>> {
-    val currentFieldIds = fields.map { field -> field.id.normalizedId() }.filter(String::isNotBlank).toSet()
-    val next = mapValues { (_, fieldIds) ->
-        fieldIds.filterNot { fieldId -> fieldId.normalizedId() in currentFieldIds }.toMutableList()
-    }.toMutableMap()
+    val next = keys.associateWith { mutableListOf<String>() }.toMutableMap()
     fields.forEach { field ->
         val fieldId = field.id.normalizedId().takeIf(String::isNotBlank) ?: return@forEach
         field.divisions

@@ -245,7 +245,7 @@ internal fun EventDetailsDivisionEditorActionsContent(
                 NumberInputField(
                     modifier = modifier,
                     value = state.divisionEditor.playoffTeamCount?.toString().orEmpty(),
-                    label = "Division Playoff Team Count",
+                    label = "Division Playoff Team Count *",
                     enabled = state.divisionEditorReady,
                     onValueChange = { value ->
                         if (!state.divisionEditorReady) {

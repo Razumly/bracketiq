@@ -83,6 +83,8 @@ class EventEditorRemoteGatewayTest {
             .getValue("divisionDetails").jsonArray.single().jsonObject
         val invite = draft.getValue("staff").jsonObject
             .getValue("pendingInvites").jsonArray.single().jsonObject
+        val question = draft.getValue("registration").jsonObject
+            .getValue("questions").jsonArray.single().jsonObject
 
         assertEquals("SAVED", result.status)
         assertEquals("create-operation-1", body.getValue("createOperationId").jsonPrimitive.content)
@@ -94,6 +96,8 @@ class EventEditorRemoteGatewayTest {
         assertFalse(timeSlot.containsValue(JsonNull))
         assertFalse(division.containsValue(JsonNull))
         assertFalse(invite.containsValue(JsonNull))
+        assertEquals("question-client-1", question.getValue("clientId").jsonPrimitive.content)
+        assertFalse(question.containsKey("id"))
         assertNotNull(body.getValue("draft"))
     }
 }

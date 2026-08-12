@@ -1360,9 +1360,26 @@ class DefaultCreateEventComponent(
     }
 
     override fun setRegistrationQuestionDrafts(questions: List<RegistrationQuestionDraft>) {
+        val previousQuestions = _registrationQuestionDrafts.value
         _registrationQuestionDrafts.value = questions
             .take(20)
-            .mapIndexed { index, question -> question.copy(sortOrder = index) }
+            .mapIndexed { index, question ->
+                val stableId = question.id
+                    ?.trim()
+                    ?.takeIf(String::isNotBlank)
+                val stableClientId = question.clientId
+                    ?.trim()
+                    ?.takeIf(String::isNotBlank)
+                    ?: previousQuestions.getOrNull(index)?.clientId
+                        ?.trim()
+                        ?.takeIf(String::isNotBlank)
+                    ?: newId()
+                question.copy(
+                    id = stableId,
+                    clientId = if (stableId == null) stableClientId else question.clientId,
+                    sortOrder = index,
+                )
+            }
     }
 
     private suspend fun createEventAfterPayment(eventDraft: Event) {
@@ -1370,30 +1387,31 @@ class DefaultCreateEventComponent(
         var deferredError: ErrorMessage? = null
         loadingOperation.showLoading("Creating event...")
         try {
-            val command = pendingCreateCommand ?: run {
-                val session = _editorSession.value
-                    ?: error("The event editor is not ready.")
-                val prepared = prepareEventForCreation(eventDraft).getOrThrow()
-                validatePendingStaffInviteDrafts(_pendingStaffInvites.value).getOrThrow()
-                val mutation = EventEditorMutation(
-                    canonicalState = EventEditorCanonicalState(
-                        event = prepared.event,
-                        fields = prepared.fields,
-                        timeSlots = prepared.timeSlots,
-                        leagueScoringConfig = _leagueScoringConfig.value
-                            .takeIf { prepared.event.eventType == EventType.LEAGUE },
-                        questions = _registrationQuestionDrafts.value,
-                        pendingStaffInvites = _pendingStaffInvites.value.toCanonicalInvites(
-                            eventId = prepared.event.id,
-                        ),
-                        playoffDivisionDetails = session.canonicalState.playoffDivisionDetails,
-                        divisionFieldIds = session.canonicalState.divisionFieldIds,
+            val session = _editorSession.value
+                ?: error("The event editor is not ready.")
+            val prepared = prepareEventForCreation(eventDraft).getOrThrow()
+            validatePendingStaffInviteDrafts(_pendingStaffInvites.value).getOrThrow()
+            val mutation = EventEditorMutation(
+                canonicalState = EventEditorCanonicalState(
+                    event = prepared.event,
+                    fields = prepared.fields,
+                    timeSlots = prepared.timeSlots,
+                    leagueScoringConfig = _leagueScoringConfig.value
+                        .takeIf { prepared.event.eventType == EventType.LEAGUE },
+                    questions = _registrationQuestionDrafts.value,
+                    pendingStaffInvites = _pendingStaffInvites.value.toCanonicalInvites(
+                        eventId = prepared.event.id,
                     ),
-                )
-                EventEditorSessionMapper.toCreateCommand(session, mutation)
-                    .command
-                    .also { pendingCreateCommand = it }
-            }
+                    playoffDivisionDetails = session.canonicalState.playoffDivisionDetails,
+                    divisionFieldIds = session.canonicalState.divisionFieldIds,
+                ),
+            )
+            val nextCommand = EventEditorSessionMapper.toCreateCommand(session, mutation).command
+            val command = pendingCreateCommand
+                ?.createOperationId
+                ?.let { operationId -> nextCommand.copy(createOperationId = operationId) }
+                ?: nextCommand
+            pendingCreateCommand = command
 
             eventRepository.createEventEditor(command)
                 .onSuccess { outcome ->

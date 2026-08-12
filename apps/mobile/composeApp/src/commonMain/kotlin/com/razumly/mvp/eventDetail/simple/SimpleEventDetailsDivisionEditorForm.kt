@@ -331,6 +331,7 @@ private fun DivisionSingleDivisionDefaults(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (
+                    editEvent.singleDivision &&
                     editEvent.includePlayoffs &&
                     editEvent.eventType == EventType.LEAGUE
                 ) {
@@ -338,7 +339,7 @@ private fun DivisionSingleDivisionDefaults(
                     NumberInputField(
                         modifier = Modifier.fillMaxWidth(0.48f),
                         value = editEvent.playoffTeamCount?.toString().orEmpty(),
-                        label = "Playoff Team Count *",
+                        label = "Event Playoff Team Count *",
                         onValueChange = { value ->
                             if (value.isNotEmpty() && !value.all { it.isDigit() }) {
                                 return@NumberInputField
@@ -630,8 +631,8 @@ private fun DivisionInfoFields(
                     state.paidRegistrationEnabled &&
                     divisionEditor.priceCents <= 0,
             )
+            }
         }
-    }
 }
 
 @Composable

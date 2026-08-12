@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.data.repositories
 
+import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.network.dto.EVENT_EDITOR_CONTRACT_VERSION
 import com.razumly.mvp.core.network.dto.EventEditorBasicsDto
 import com.razumly.mvp.core.network.dto.EventEditorCapabilitiesDto
@@ -31,7 +32,9 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 
 private const val TEST_OPERATION_ID = "create-operation-1"
 private const val TEST_START = "2026-09-01T10:00:00Z"
@@ -323,6 +326,132 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
+    fun create_command_maps_division_playoff_count_to_required_competition_field() {
+        val snapshot = editorProtocolSnapshot()
+        val session = EventEditorSessionMapper.fromCreateBootstrap(
+            editorProtocolBootstrap(
+                snapshot = snapshot.copy(
+                    draft = snapshot.draft.copy(
+                        competition = snapshot.draft.competition.copy(playoffTeamCount = null),
+                    ),
+                ),
+            ),
+        )
+        val mutation = EventEditorMutation(
+            canonicalState = session.canonicalState.copy(
+                event = session.canonicalState.event.copy(
+                    playoffTeamCount = null,
+                    divisionDetails = session.canonicalState.event.divisionDetails.map { detail ->
+                        detail.copy(playoffTeamCount = 8)
+                    },
+                ),
+            ),
+        )
+
+        val command = EventEditorSessionMapper.toCreateCommand(session, mutation).command
+
+        assertEquals(8, command.draft.competition.playoffTeamCount)
+        assertEquals(8.0, command.draft.competition.divisionDetails.single().playoffTeamCount)
+    }
+
+    @Test
+    fun multi_division_league_keeps_playoff_counts_on_divisions_only() {
+        val snapshot = editorProtocolSnapshot()
+        val firstDivision = snapshot.draft.competition.divisionDetails.single().copy(
+            playoffTeamCount = 8.0,
+        )
+        val secondDivision = firstDivision.copy(
+            id = "division-2",
+            key = "division-key-2",
+            name = "Advanced",
+            playoffTeamCount = 4.0,
+        )
+        val session = EventEditorSessionMapper.fromCreateBootstrap(
+            editorProtocolBootstrap(
+                snapshot = snapshot.copy(
+                    draft = snapshot.draft.copy(
+                        competition = snapshot.draft.competition.copy(
+                            divisionIds = listOf("division-1", "division-2"),
+                            divisionDetails = listOf(firstDivision, secondDivision),
+                            playoffTeamCount = 8,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        assertNull(session.canonicalState.event.playoffTeamCount)
+
+        val command = EventEditorSessionMapper.toCreateCommand(
+            session = session,
+            mutation = EventEditorMutation(
+                canonicalState = session.canonicalState.copy(
+                    event = session.canonicalState.event.copy(
+                        playoffTeamCount = 8,
+                    ),
+                ),
+            ),
+        ).command
+
+        assertNull(command.draft.competition.playoffTeamCount)
+        assertEquals(
+            listOf(8.0, 4.0),
+            command.draft.competition.divisionDetails.map { detail -> detail.playoffTeamCount },
+        )
+    }
+
+    @Test
+    fun create_command_normalizes_manual_payment_usernames_to_backend_urls() {
+        val session = EventEditorSessionMapper.fromCreateBootstrap(editorProtocolBootstrap())
+        val mutation = EventEditorMutation(
+            canonicalState = session.canonicalState.copy(
+                event = session.canonicalState.event.copy(
+                    manualPaymentLinks = listOf(
+                        ManualPaymentLink(
+                            id = "payment-link-1",
+                            provider = "VENMO",
+                            label = "Venmo",
+                            url = "@camka14",
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val command = EventEditorSessionMapper.toCreateCommand(session, mutation).command
+
+        assertEquals(
+            "https://venmo.com/u/camka14",
+            command.draft.registration.payment.manualPaymentLinks.single().url,
+        )
+    }
+
+    @Test
+    fun create_command_rejects_invalid_manual_payment_urls_before_network_request() {
+        val session = EventEditorSessionMapper.fromCreateBootstrap(editorProtocolBootstrap())
+        val mutation = EventEditorMutation(
+            canonicalState = session.canonicalState.copy(
+                event = session.canonicalState.event.copy(
+                    manualPaymentLinks = listOf(
+                        ManualPaymentLink(
+                            id = "payment-link-1",
+                            provider = "CASH_APP",
+                            label = "Cash App",
+                            url = "\$",
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            EventEditorSessionMapper.toCreateCommand(session, mutation)
+        }
+
+        assertEquals("Invalid manual payment URL.", error.message)
+    }
+
+    @Test
     fun field_division_edits_update_the_canonical_division_field_map() {
         val session = EventEditorSessionMapper.fromCreateBootstrap(editorProtocolBootstrap())
         val mutation = EventEditorMutation(
@@ -334,6 +463,26 @@ class EventEditorSessionMapperTest {
         val command = EventEditorSessionMapper.toCreateCommand(session, mutation).command
 
         assertEquals(emptyList(), command.draft.competition.divisionFieldIds["division-1"])
+    }
+
+    @Test
+    fun replacing_a_field_drops_removed_field_ids_from_division_assignments() {
+        val session = EventEditorSessionMapper.fromCreateBootstrap(editorProtocolBootstrap())
+        val mutation = EventEditorMutation(
+            canonicalState = session.canonicalState.copy(
+                event = session.canonicalState.event.copy(fieldIds = listOf("field-2")),
+                fields = listOf(
+                    session.canonicalState.fields.single().copy(
+                        id = "field-2",
+                        divisions = listOf("division-1"),
+                    ),
+                ),
+            ),
+        )
+        val command = EventEditorSessionMapper.toCreateCommand(session, mutation).command
+
+        assertEquals(listOf("field-2"), command.draft.competition.divisionFieldIds["division-1"])
+        assertEquals(listOf("field-2"), command.draft.resources.fieldIds)
     }
 
     @Test
