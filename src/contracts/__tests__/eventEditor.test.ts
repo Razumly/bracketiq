@@ -118,6 +118,21 @@ describe('event editor contracts', () => {
     });
     expect(parsed.draft.registration.questions[0]).toEqual(expect.objectContaining({ clientId: 'question-client-1' }));
   });
+  it('accepts the supported OFF official scheduling mode', () => {
+    const parsed = createEventEditorCommandSchema.parse({
+      contractVersion: 2,
+      createOperationId: 'create-operation-off',
+      draft: {
+        ...draft,
+        staff: {
+          ...draft.staff,
+          officialSchedulingMode: 'OFF',
+        },
+      },
+    });
+
+    expect(parsed.draft.staff.officialSchedulingMode).toBe('OFF');
+  });
   it('requires the bootstrap operation identity and preserves the selected start', () => {
     const parsed = eventEditorCreateBootstrapSchema.parse({
       contractVersion: 2,

@@ -111,6 +111,13 @@ const draftFromRecord = (
         name: `Field ${index + 1}`,
       }));
   const timeSlots = objectArray(Array.isArray(event.timeSlots) && event.timeSlots.length > 0 ? event.timeSlots : event.leagueSlots);
+  const rawDivisionDetails = objectArray(event.divisionDetails);
+  const regularDivisionDetails = rawDivisionDetails.filter(
+    (detail) => stringValue(detail.kind).trim().toUpperCase() !== 'PLAYOFF',
+  );
+  const isMultiDivisionLeague =
+    stringValue(event.eventType).trim().toUpperCase() === 'LEAGUE' &&
+    regularDivisionDetails.length > 1;
   const rawTimeSlotIds = stringArray(
     Array.isArray(event.timeSlotIds) && event.timeSlotIds.length > 0
       ? event.timeSlotIds
@@ -122,7 +129,9 @@ const draftFromRecord = (
     ? 'TEAM_STAFFING'
     : normalizedSchedulingMode === 'STAFFING'
       ? 'STAFFING'
-      : 'SCHEDULE';
+      : normalizedSchedulingMode === 'OFF'
+        ? 'OFF'
+        : 'SCHEDULE';
   const normalizedOfficialIds = stringArray(event.officialIds);
   const eventOfficials = objectArray(event.eventOfficials).length > 0
     ? objectArray(event.eventOfficials)
@@ -205,7 +214,7 @@ const draftFromRecord = (
     },
     competition: {
       divisionIds: stringArray(event.divisions),
-      divisionDetails: objectArray(event.divisionDetails),
+      divisionDetails: rawDivisionDetails,
       playoffDivisionDetails: objectArray(event.playoffDivisionDetails),
       divisionFieldIds: Object.fromEntries(
         Object.entries(event.divisionFieldIds && typeof event.divisionFieldIds === 'object' ? event.divisionFieldIds : {})
@@ -216,9 +225,11 @@ const draftFromRecord = (
       doubleElimination: booleanValue(event.doubleElimination),
       includePlayoffs: booleanValue(event.includePlayoffs),
       splitLeaguePlayoffDivisions: booleanValue(event.splitLeaguePlayoffDivisions),
-      playoffTeamCount: numberOrNull(event.playoffTeamCount)
-        ?? (objectArray(event.divisionDetails)[0]?.playoffTeamCount as number | undefined)
-        ?? null,
+      playoffTeamCount: isMultiDivisionLeague
+        ? null
+        : numberOrNull(event.playoffTeamCount)
+          ?? (regularDivisionDetails[0]?.playoffTeamCount as number | undefined)
+          ?? null,
       pointsToVictory: Array.isArray(event.pointsToVictory) ? event.pointsToVictory.map(Number).filter(Number.isFinite) : [],
       winnerBracketPointsToVictory: Array.isArray(event.winnerBracketPointsToVictory) ? event.winnerBracketPointsToVictory.map(Number).filter(Number.isFinite) : [],
       loserBracketPointsToVictory: Array.isArray(event.loserBracketPointsToVictory) ? event.loserBracketPointsToVictory.map(Number).filter(Number.isFinite) : [],

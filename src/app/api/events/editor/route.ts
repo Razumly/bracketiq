@@ -17,6 +17,7 @@ import {
   EditorInputError,
   EditorPermissionError,
 } from '@/server/events/eventEditorSave';
+import { isEventFieldConfigurationError } from '@/server/repositories/events';
 import { deliverEventStaffInvitesAfterCommit } from '@/server/events/eventStaffDelivery';
 import { loadCreateEventEditorSnapshot } from '@/server/events/eventEditorSnapshot';
 import {
@@ -55,6 +56,12 @@ const errorResponse = (error: unknown) => {
   }
   if (error instanceof EditorImmutableFieldError) {
     return NextResponse.json({ error: error.message, code: 'EDITOR_IMMUTABLE_FIELD', field: error.fieldName }, { status: 403 });
+  }
+  if (isEventFieldConfigurationError(error)) {
+    return NextResponse.json({
+      error: error instanceof Error ? error.message : 'Select or create at least one field for this event.',
+      code: 'INVALID_EDITOR_INPUT',
+    }, { status: 400 });
   }
   if (error instanceof EditorInputError) {
     return NextResponse.json({ error: error.message, code: 'INVALID_EDITOR_INPUT' }, { status: 400 });

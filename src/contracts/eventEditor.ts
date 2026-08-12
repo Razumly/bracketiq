@@ -223,6 +223,38 @@ const projectNestedRecords = (value: unknown, keys: readonly string[]): unknown 
   });
 };
 
+const nestedIdentifier = (value: unknown): string | null => {
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return value.trim();
+  }
+  if (!isUnknownRecord(value)) {
+    return null;
+  }
+  for (const key of ['$id', 'id']) {
+    const candidate = value[key];
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  return null;
+};
+
+const projectFieldRecords = (value: unknown): unknown => {
+  if (!Array.isArray(value)) return value;
+  return value.map((entry) => {
+    if (!isUnknownRecord(entry)) return entry;
+    const projected = projectNestedRecords([entry], editorNestedRecordKeys.fields);
+    const field = Array.isArray(projected) && isUnknownRecord(projected[0]) ? projected[0] : {};
+    const organizationId = nestedIdentifier(entry.organizationId) ?? nestedIdentifier(entry.organization);
+    const facilityId = nestedIdentifier(entry.facilityId) ?? nestedIdentifier(entry.facility);
+    return {
+      ...field,
+      ...(organizationId ? { organizationId } : {}),
+      ...(facilityId ? { facilityId } : {}),
+    };
+  });
+};
+
 
 /**
  * Removes hydrated UI and relation properties from strict nested editor rows.
@@ -261,7 +293,7 @@ export const projectEventEditorDraftNestedInput = (input: unknown): unknown => {
   const resources = isUnknownRecord(input.resources)
     ? {
       ...input.resources,
-      fields: projectNestedRecords(input.resources.fields, editorNestedRecordKeys.fields),
+      fields: projectFieldRecords(input.resources.fields),
       timeSlots: projectNestedRecords(input.resources.timeSlots, editorNestedRecordKeys.timeSlots),
     }
     : input.resources;
@@ -389,7 +421,7 @@ export const editorResourcesSchema = z.object({
 }).strict();
 
 export const editorStaffSchema = z.object({
-  officialSchedulingMode: z.enum(['SCHEDULE', 'STAFFING', 'TEAM_STAFFING']),
+  officialSchedulingMode: z.enum(['SCHEDULE', 'STAFFING', 'TEAM_STAFFING', 'OFF']),
   teamOfficialsMaySwap: z.boolean(),
   teamCheckInMode: z.enum(['OFF', 'EVENT', 'MATCH']),
   teamCheckInOpenMinutesBefore: z.number().int().nonnegative(),
