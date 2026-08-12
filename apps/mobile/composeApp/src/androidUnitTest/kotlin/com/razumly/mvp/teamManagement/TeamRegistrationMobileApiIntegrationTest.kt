@@ -13,6 +13,7 @@ import com.razumly.mvp.testing.MOBILE_TEST_PARTICIPANT_EMAIL
 import com.razumly.mvp.testing.MOBILE_TEST_PARTICIPANT_PASSWORD
 import com.razumly.mvp.testing.MobileApiTestSession
 import com.razumly.mvp.testing.mobileApiLoginFixturesReady
+import com.razumly.mvp.testing.runBackendSeedThenCheck
 import com.razumly.mvp.testing.runTargetedBackendSeed
 import com.razumly.mvp.testing.shouldAutoSeedBackendFixtures
 import kotlinx.coroutines.runBlocking
@@ -37,13 +38,16 @@ class TeamRegistrationMobileApiIntegrationTest {
 
     @Before
     fun ensureBackendFixtures() {
+        assumeTrue(
+            "Skipping team registration mobile/backend integration test because MVP_TEST_BACKEND_URL is not set.",
+            !System.getenv("MVP_TEST_BACKEND_URL").isNullOrBlank(),
+        )
         if (backendFixturesReady()) return
-
         val fixturesPrepared = if (shouldAutoSeedBackendFixtures()) {
-            runCatching {
-                runTargetedBackendSeed()
-                backendFixturesReady()
-            }.getOrDefault(false)
+            runBackendSeedThenCheck(
+                seed = { runTargetedBackendSeed() },
+                fixturesReady = { backendFixturesReady() },
+            )
         } else {
             false
         }

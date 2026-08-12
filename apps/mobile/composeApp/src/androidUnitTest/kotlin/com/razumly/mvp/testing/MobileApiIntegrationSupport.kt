@@ -12,6 +12,7 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.repositories.EventRepository
 import com.razumly.mvp.core.data.repositories.FieldRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
@@ -213,7 +214,7 @@ private fun EventEditorDraftDto.toEditorDraft(
             affiliateUrl = event.affiliateUrl.orEmpty(),
             organizationId = event.organizationId,
             hostId = event.hostId,
-            state = event.state,
+            state = event.state.takeUnless { it == "DRAFT" } ?: "UNPUBLISHED",
             imageId = event.imageId.takeIf(String::isNotBlank),
             tags = event.tags.map { tag ->
                 EventEditorTagDto(id = tag.id, slug = tag.slug, name = tag.name)
@@ -262,7 +263,7 @@ private fun EventEditorDraftDto.toEditorDraft(
                 .filter { detail -> detail.kind.equals("PLAYOFF", ignoreCase = true) }
                 .map(DivisionDetail::toDto),
             divisionFieldIds = event.divisionDetails.associate { detail -> detail.id to detail.fieldIds },
-            winnerSetCount = event.winnerSetCount.takeIf { it > 0 },
+            winnerSetCount = event.winnerSetCount,
             loserSetCount = event.loserSetCount.takeIf { it > 0 },
             doubleElimination = event.doubleElimination,
             includePlayoffs = event.includePlayoffs,
@@ -328,7 +329,12 @@ private fun EventEditorDraftDto.toEditorDraft(
             rentalBookingItemId = resources.rentalBookingItemId,
         ),
         staff = EventEditorStaffDto(
-            officialSchedulingMode = event.officialSchedulingMode.name,
+            officialSchedulingMode = when (event.officialSchedulingMode) {
+                OfficialSchedulingMode.STAFFING -> "STAFFING"
+                OfficialSchedulingMode.TEAM_STAFFING -> "TEAM_STAFFING"
+                OfficialSchedulingMode.SCHEDULE -> "SCHEDULE"
+                OfficialSchedulingMode.OFF -> "OFF"
+            },
             teamOfficialsMaySwap = event.teamOfficialsMaySwap == true,
             teamCheckInMode = event.teamCheckInMode.name,
             teamCheckInOpenMinutesBefore = event.teamCheckInOpenMinutesBefore,
@@ -369,7 +375,22 @@ internal fun mobileApiLoginFixturesReady(vararg credentials: Pair<String, String
     } finally {
         session.close()
     }
+
 }
+
+internal fun runBackendSeedThenCheck(
+    seed: () -> Unit,
+    fixturesReady: () -> Boolean,
+): Boolean {
+    val seedSucceeded = try {
+        seed()
+        true
+    } catch (_: Exception) {
+        false
+    }
+    return seedSucceeded && fixturesReady()
+}
+
 
 internal fun runTargetedBackendSeed() {
     val backendDir = resolveBackendDir()
@@ -454,14 +475,18 @@ private fun resolveReachableBackendBaseUrl(): String {
     val explicitOverride = System.getenv("MVP_TEST_BACKEND_URL")
         ?.trim()
         ?.takeIf(String::isNotEmpty)
-    val candidates = linkedSetOf<String>().apply {
-        explicitOverride?.let(::add)
-        add("http://127.0.0.1:3000")
-        add("http://127.0.0.1:3010")
-        add("http://localhost:3000")
-        add("http://localhost:3010")
+    if (explicitOverride != null) {
+        return explicitOverride.takeIf(::isReachable)
+            ?: error("Unable to connect to MVP_TEST_BACKEND_URL=$explicitOverride.")
     }
-    return candidates.firstOrNull { baseUrl -> isReachable(baseUrl) }
+
+    val candidates = listOf(
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3010",
+        "http://localhost:3000",
+        "http://localhost:3010",
+    )
+    return candidates.firstOrNull(::isReachable)
         ?: error("Unable to connect to the local mvp-site backend on ports 3000 or 3010.")
 }
 

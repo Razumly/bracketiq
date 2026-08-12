@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_STATUS_AWAITING_PAYMENT
 import com.razumly.mvp.core.data.dataTypes.PENDING_RENTAL_ORDER_STATUS_REJECTED
 import com.razumly.mvp.core.data.dataTypes.PendingRentalOrder
@@ -288,7 +289,7 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<com.razumly.mvp.core.data.dataTypes.EventWithRelations>> = error("unused")
     override fun resetCursor() {}
     override suspend fun getEvent(eventId: String): Result<Event> = error("unused")
-    override suspend fun getEventStaffInvites(eventId: String): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
+    override suspend fun getEventStaffInvites(eventId: String): Result<List<Invite>> = error("unused")
     override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> = error("unused")
     override suspend fun getEventsByOrganization(organizationId: String, limit: Int): Result<List<Event>> = error("unused")
     override suspend fun updateLocalEvent(newEvent: Event): Result<Event> = error("unused")
@@ -369,7 +370,7 @@ private class BillingRepositoryHttp_FakeEventRepository(
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<com.razumly.mvp.core.data.dataTypes.EventWithRelations>> = error("unused")
     override fun resetCursor() {}
     override suspend fun getEvent(eventId: String): Result<Event> = error("unused")
-    override suspend fun getEventStaffInvites(eventId: String): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
+    override suspend fun getEventStaffInvites(eventId: String): Result<List<Invite>> = error("unused")
     override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> =
         getEventsByIdsHandler?.invoke(eventIds) ?: error("unused")
     override suspend fun getEventsByOrganization(organizationId: String, limit: Int): Result<List<Event>> = error("unused")

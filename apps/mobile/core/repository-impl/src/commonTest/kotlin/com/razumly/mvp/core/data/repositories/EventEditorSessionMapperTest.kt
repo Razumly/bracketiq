@@ -486,6 +486,43 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
+    fun partial_field_mutation_preserves_assignments_for_active_baseline_fields() {
+        val snapshot = editorProtocolSnapshot()
+        val secondField = snapshot.draft.resources.fields.single().copy(
+            id = "field-2",
+            name = "Court 2",
+        )
+        val session = EventEditorSessionMapper.fromCreateBootstrap(
+            editorProtocolBootstrap(
+                snapshot = snapshot.copy(
+                    draft = snapshot.draft.copy(
+                        competition = snapshot.draft.competition.copy(
+                            divisionFieldIds = mapOf("division-1" to listOf("field-1", "field-2")),
+                        ),
+                        resources = snapshot.draft.resources.copy(
+                            fieldIds = listOf("field-1", "field-2"),
+                            fields = snapshot.draft.resources.fields + secondField,
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val updatedField = session.canonicalState.fields.single { field -> field.id == "field-2" }
+            .copy(name = "Updated Court 2")
+        val command = EventEditorSessionMapper.toCreateCommand(
+            session = session,
+            mutation = EventEditorMutation(
+                canonicalState = session.canonicalState.copy(fields = listOf(updatedField)),
+            ),
+        ).command
+
+        assertEquals(
+            listOf("field-1", "field-2"),
+            command.draft.competition.divisionFieldIds["division-1"],
+        )
+    }
+
+    @Test
     fun state_only_mutation_preserves_nullable_defaults_and_generated_schedule_text() {
         val session = EventEditorSessionMapper.fromCreateBootstrap(
             editorProtocolBootstrap(

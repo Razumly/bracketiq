@@ -438,6 +438,9 @@ internal class EventEditActionHandler(
     }
 
     private fun prepareEventForUpdate(): PreparedEventForUpdate {
+        val currentFields = editDraftCoordinator.editableFields.value
+        val currentTimeSlots = editDraftCoordinator.editableLeagueTimeSlots.value
+        val baseline = editorSession?.canonicalState
         val result = EventEditPayloadBuilder.prepareForUpdate(
             EventEditPayloadInput(
                 editedEvent = editDraftCoordinator.editedEvent.value.copy(
@@ -445,8 +448,8 @@ internal class EventEditActionHandler(
                         editDraftCoordinator.editedEvent.value.matchRulesOverride,
                     ),
                 ),
-                editableFields = editDraftCoordinator.editableFields.value,
-                editableLeagueTimeSlots = editDraftCoordinator.editableLeagueTimeSlots.value,
+                editableFields = currentFields,
+                editableLeagueTimeSlots = currentTimeSlots,
                 selectedRentalFields = selectedRentalResourceFields(),
                 leagueScoringConfig = editDraftCoordinator.editableLeagueScoringConfig.value,
                 originalEventStart = eventWithRelations().event.start,
@@ -454,6 +457,11 @@ internal class EventEditActionHandler(
                     normalizeRentalSlotResourceSelection(slot, validFieldIds)
                 },
             ),
+        ).omitUnchangedManagedCollections(
+            currentFields = currentFields,
+            baselineFields = baseline?.fields,
+            currentTimeSlots = currentTimeSlots,
+            baselineTimeSlots = baseline?.timeSlots,
         )
         result.editableFields?.let(editDraftCoordinator::applyPreparedEditableFields)
         return result.prepared

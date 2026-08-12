@@ -672,6 +672,8 @@ internal class CreateEvent_FakeEventRepository(
 ) : IEventRepository {
     val createEditorCalls = mutableListOf<CreateEditorCall>()
     val createEventEditorCalls = mutableListOf<EventEditorCreateCommandDto>()
+    val attemptedCreateEventEditorCommands = mutableListOf<EventEditorCreateCommandDto>()
+    val createBootstrapQueries = mutableListOf<EventEditorBootstrapQueryDto>()
     var createBootstrapSession: EventEditorSession? = null
     var createEditorFailure: Throwable? = null
     var staffEmailDelivery: String = "NOT_REQUESTED"
@@ -688,14 +690,16 @@ internal class CreateEvent_FakeEventRepository(
         Result.success(emptyList())
     override suspend fun getEventEditorCreateBootstrap(
         query: EventEditorBootstrapQueryDto,
-    ): Result<EventEditorSession> =
-        createBootstrapSession?.let(Result.Companion::success)
+    ): Result<EventEditorSession> {
+        createBootstrapQueries += query
+        return createBootstrapSession?.let(Result.Companion::success)
             ?: Result.failure(IllegalStateException("missing test editor bootstrap"))
+    }
 
     override suspend fun createEventEditor(
         command: EventEditorCreateCommandDto,
     ): Result<EventEditorSaveOutcome> {
-        createEventEditorCalls += command
+        attemptedCreateEventEditorCommands += command
         createEditorFailure?.let { failure -> return Result.failure(failure) }
         val bootstrap = createBootstrapSession
             ?: return Result.failure(IllegalStateException("missing test editor bootstrap"))
@@ -716,6 +720,7 @@ internal class CreateEvent_FakeEventRepository(
             fields = canonical.fields,
             timeSlots = canonical.timeSlots,
         )
+        createEventEditorCalls += command
         return Result.success(
             EventEditorSaveOutcome(
                 session = session,

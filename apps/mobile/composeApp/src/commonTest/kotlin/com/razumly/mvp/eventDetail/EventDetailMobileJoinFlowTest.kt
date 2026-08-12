@@ -2265,6 +2265,7 @@ private class EventDetailFakeEventRepository(
         return Result.success(staffInvites)
     }
 
+
     override fun observeCurrentUserRegistrationsForEvent(eventId: String): Flow<List<EventRegistrationCacheEntry>> =
         cachedRegistrationsFlow
 
@@ -2764,6 +2765,7 @@ private object NoopNavigationHandler : INavigationHandler {
     override fun navigateToTeams(freeAgents: List<String>, eventId: String?, selectedFreeAgentId: String?) = Unit
     override fun navigateToChat(messageUserId: String?, chatId: String?) = Unit
     override fun navigateToCreate() = Unit
+    override fun navigateToCreate(bootstrap: com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto) = Unit
     override fun navigateToSearch() = Unit
     override fun navigateToEvent(eventId: String) = Unit
     override fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab) = Unit

@@ -70,6 +70,32 @@ class EventEditPayloadBuilderTest {
     }
 
     @Test
+    fun omitUnchangedManagedCollections_drops_fields_and_slots_for_an_unchanged_edit() {
+        val event = leagueEvent()
+        val currentFields = listOf(field(id = "field-1"))
+        val currentTimeSlots = listOf(slot(id = "slot-1", repeating = true))
+        val result = EventEditPayloadBuilder.prepareForUpdate(
+            EventEditPayloadInput(
+                editedEvent = event,
+                editableFields = currentFields,
+                editableLeagueTimeSlots = currentTimeSlots,
+                selectedRentalFields = emptyList(),
+                leagueScoringConfig = LeagueScoringConfigDTO(),
+                originalEventStart = event.start,
+            ),
+        ).omitUnchangedManagedCollections(
+            currentFields = currentFields,
+            baselineFields = currentFields.map { field -> field.copy(fieldNumber = 99) },
+            currentTimeSlots = currentTimeSlots,
+            baselineTimeSlots = currentTimeSlots,
+        )
+
+        assertEquals(null, result.prepared.fields)
+        assertEquals(null, result.prepared.timeSlots)
+        assertEquals(null, result.editableFields)
+    }
+
+    @Test
     fun buildEditableFieldDrafts_defaults_empty_field_divisions_to_event_divisions() {
         val fields = buildEditableFieldDrafts(
             event = leagueEvent(divisions = listOf("division-a")),

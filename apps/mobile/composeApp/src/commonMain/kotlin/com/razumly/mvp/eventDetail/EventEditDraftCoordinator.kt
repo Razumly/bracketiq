@@ -76,15 +76,13 @@ internal class EventEditDraftCoordinator(
         val seededFields = buildEditableFieldDrafts(
             event = event,
             sourceFields = sourceFields,
+            preserveSourceValues = true,
         )
         _editableLeagueScoringConfig.value = leagueScoringConfig
         _editedEvent.value = event.copy(fieldIds = seededFields.map { field -> field.id })
         _editableFields.value = seededFields
         _fieldCount.value = seededFields.size
-        _editableLeagueTimeSlots.value = editableLeagueTimeSlotsForEvent(
-            event = event,
-            timeSlots = timeSlots,
-        )
+        _editableLeagueTimeSlots.value = timeSlots
     }
 
     fun updateEditedEvent(update: (Event) -> Event) {
@@ -113,6 +111,7 @@ internal class EventEditDraftCoordinator(
                 field.copy(
                     id = if (field.id.isBlank()) idFactory() else field.id,
                     fieldNumber = index + 1,
+                    name = field.name?.takeIf(String::isNotBlank) ?: "Field ${index + 1}",
                     divisions = field.divisions
                         .normalizeDivisionIdentifiers()
                         .ifEmpty { defaultFieldDivisions(currentEvent) },

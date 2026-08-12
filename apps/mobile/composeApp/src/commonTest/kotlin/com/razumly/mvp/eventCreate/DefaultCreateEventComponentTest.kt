@@ -15,6 +15,7 @@ import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.razumly.mvp.core.data.repositories.RegistrationQuestionDraft
+import com.razumly.mvp.eventDetail.PendingStaffInviteDraft
 import com.razumly.mvp.eventDetail.EventStaffRole
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
@@ -106,6 +107,91 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(listOf("slot-1"), harness.component.leagueSlots.value.map(TimeSlot::id))
         assertTrue(harness.component.useManualTimeSlots.value)
         assertEquals(3, harness.component.leagueScoringConfig.value.pointsForWin)
+    }
+
+    @Test
+    fun template_bootstrap_preserves_start_resources_questions_and_staff_in_one_create_command() = runTest(testDispatcher) {
+        val templateQuery = EventEditorBootstrapQueryDto(
+            organizationId = "org-1",
+            templateId = "template-1",
+            start = "2026-07-15T10:00:00Z",
+        )
+        val seededEvent = com.razumly.mvp.core.data.dataTypes.Event(
+            id = "template-event",
+            name = "Template League",
+            hostId = "user-1",
+            organizationId = "org-1",
+            eventType = EventType.LEAGUE,
+            sportIds = listOf("Indoor Volleyball"),
+            start = Instant.parse("2026-07-15T10:00:00Z"),
+            end = Instant.parse("2026-07-15T12:00:00Z"),
+            divisions = listOf("open"),
+            fieldIds = listOf("template-field"),
+            timeSlotIds = listOf("template-slot"),
+        )
+        val seededQuestion = RegistrationQuestionDraft(
+            id = "question-1",
+            prompt = "Preferred side?",
+            answerType = "TEXT",
+            required = true,
+            sortOrder = 0,
+        )
+        val seededStaff = PendingStaffInviteDraft(
+            firstName = "Taylor",
+            lastName = "Official",
+            email = "taylor@example.com",
+            roles = setOf(EventStaffRole.OFFICIAL),
+        )
+        val harness = CreateEventHarness(
+            bootstrap = templateQuery,
+            bootstrapSession = createEventEditorSession(
+                event = seededEvent,
+                fields = listOf(
+                    Field(
+                        id = "template-field",
+                        name = "Template Court",
+                        divisions = listOf("open"),
+                    ),
+                ),
+                timeSlots = listOf(
+                    TimeSlot(
+                        id = "template-slot",
+                        dayOfWeek = 3,
+                        startTimeMinutes = 600,
+                        endTimeMinutes = 720,
+                        startDate = seededEvent.start,
+                        endDate = seededEvent.end,
+                        scheduledFieldId = "template-field",
+                        scheduledFieldIds = listOf("template-field"),
+                        divisions = listOf("open"),
+                        repeating = false,
+                        price = null,
+                    ),
+                ),
+                questions = listOf(seededQuestion),
+                pendingStaffInvites = listOf(seededStaff),
+            ),
+        )
+
+        advance()
+
+        assertEquals(listOf(templateQuery), harness.eventRepository.createBootstrapQueries)
+        assertEquals(seededEvent.start, harness.component.newEventState.value.start)
+        assertEquals(listOf("template-field"), harness.component.localFields.value.map(Field::id))
+        assertEquals(listOf("template-slot"), harness.component.leagueSlots.value.map(TimeSlot::id))
+        assertEquals(listOf(seededQuestion), harness.component.registrationQuestionDrafts.value)
+        assertEquals(listOf(seededStaff), harness.component.pendingStaffInvites.value)
+
+        harness.component.createEvent()
+        advance()
+
+        val command = harness.eventRepository.createEventEditorCalls.single()
+        assertEquals(seededEvent.start.toString(), command.draft.basics.start)
+        assertEquals(listOf("template-field"), command.draft.resources.fieldIds)
+        assertEquals(listOf("template-slot"), command.draft.resources.timeSlotIds)
+        assertEquals("Preferred side?", command.draft.registration.questions.single().prompt)
+        assertEquals("taylor@example.com", command.draft.staff.pendingInvites.single().email)
+        assertEquals(1, harness.onEventCreatedCount)
     }
 
     @Test
@@ -467,8 +553,10 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.eventRepository.createEditorFailure = IllegalStateException("Network response lost.")
         harness.component.createEvent()
         advance()
-        assertEquals(1, harness.eventRepository.createEventEditorCalls.size)
-        val firstCommand = harness.eventRepository.createEventEditorCalls.single()
+        assertEquals(1, harness.eventRepository.attemptedCreateEventEditorCommands.size)
+        assertTrue(harness.eventRepository.createEventEditorCalls.isEmpty())
+        assertTrue(harness.eventRepository.createEditorCalls.isEmpty())
+        val firstCommand = harness.eventRepository.attemptedCreateEventEditorCommands.single()
         val firstQuestion = firstCommand.draft.registration.questions.single()
         assertTrue(firstQuestion.clientId?.isNotBlank() == true)
 
@@ -476,10 +564,13 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        assertEquals(2, harness.eventRepository.createEventEditorCalls.size)
-        val retryCommand = harness.eventRepository.createEventEditorCalls.last()
+        assertEquals(2, harness.eventRepository.attemptedCreateEventEditorCommands.size)
+        val retryCommand = harness.eventRepository.attemptedCreateEventEditorCommands.last()
         assertEquals(firstCommand, retryCommand)
         assertEquals(firstQuestion.clientId, retryCommand.draft.registration.questions.single().clientId)
+        assertEquals(1, harness.eventRepository.createEventEditorCalls.size)
+        assertEquals(retryCommand, harness.eventRepository.createEventEditorCalls.single())
+        assertEquals(1, harness.eventRepository.createEditorCalls.size)
         assertEquals(1, harness.onEventCreatedCount)
     }
 
@@ -549,7 +640,6 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         )
         assertEquals(0, harness.onEventCreatedCount)
     }
-
 
     @Test
     fun create_event_reports_staff_delivery_failure_as_a_warning_after_atomic_create() = runTest(testDispatcher) {
@@ -1037,6 +1127,11 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
                 canonicalRentalOptions = listOf(firstItem, secondItem),
             )
             advance()
+
+            assertEquals(
+                listOf(EventEditorBootstrapQueryDto(rentalBookingId = " booking-completed ")),
+                harness.eventRepository.createBootstrapQueries,
+            )
 
             assertTrue(harness.component.isRentalResourceSelectionLocked)
             assertEquals(
@@ -1897,13 +1992,13 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        assertEquals(2, harness.eventRepository.createEventEditorCalls.size)
-        assertEquals(1, harness.eventRepository.createEditorCalls.size)
+        assertEquals(2, harness.eventRepository.attemptedCreateEventEditorCommands.size)
+        assertEquals(1, harness.eventRepository.createEventEditorCalls.size)
         assertEquals(
-            harness.eventRepository.createEventEditorCalls[0].createOperationId,
-            harness.eventRepository.createEventEditorCalls[1].createOperationId,
+            harness.eventRepository.attemptedCreateEventEditorCommands[0].createOperationId,
+            harness.eventRepository.attemptedCreateEventEditorCommands[1].createOperationId,
         )
-        val retrySlot = harness.eventRepository.createEventEditorCalls[1].draft.resources.timeSlots.single()
+        val retrySlot = harness.eventRepository.createEventEditorCalls.single().draft.resources.timeSlots.single()
         assertEquals(slotBeforeRetry.startDate.toString(), retrySlot.startDate)
         assertEquals(slotBeforeRetry.daysOfWeek, retrySlot.daysOfWeek)
         assertEquals(slotBeforeRetry.startTimeMinutes, retrySlot.startTimeMinutes)

@@ -848,10 +848,30 @@ private fun Event.toStaffDto(
         },
     )
 }
-private fun Map<String, List<String>>.withFieldDivisionAssignments(fields: List<Field>): Map<String, List<String>> {
-    val next = keys.associateWith { mutableListOf<String>() }.toMutableMap()
+private fun Map<String, List<String>>.withFieldDivisionAssignments(
+    fields: List<Field>,
+    activeFieldIds: List<String>,
+): Map<String, List<String>> {
+    val activeIds = activeFieldIds
+        .map(String::normalizedId)
+        .filter(String::isNotBlank)
+        .toSet()
+        .ifEmpty {
+            fields.map { field -> field.id.normalizedId() }
+                .filter(String::isNotBlank)
+                .toSet()
+        }
+    val next = mapValues { (_, fieldIds) ->
+        fieldIds
+            .filter { fieldId -> fieldId.normalizedId() in activeIds }
+            .toMutableList()
+    }.toMutableMap()
     fields.forEach { field ->
         val fieldId = field.id.normalizedId().takeIf(String::isNotBlank) ?: return@forEach
+        if (fieldId !in activeIds) return@forEach
+        next.values.forEach { fieldIds ->
+            fieldIds.removeAll { existingFieldId -> existingFieldId.normalizedId() == fieldId }
+        }
         field.divisions
             .map(String::normalizedId)
             .filter(String::isNotBlank)
@@ -875,7 +895,10 @@ private fun EventEditorDraftDto.withMutation(
         fieldsChanged &&
         mutation.divisionFieldIds == baseline.divisionFieldIds
     ) {
-        baseline.divisionFieldIds.withFieldDivisionAssignments(mutation.fields)
+        baseline.divisionFieldIds.withFieldDivisionAssignments(
+            fields = mutation.fields,
+            activeFieldIds = mutation.event.fieldIds,
+        )
     } else {
         mutation.divisionFieldIds
     }
