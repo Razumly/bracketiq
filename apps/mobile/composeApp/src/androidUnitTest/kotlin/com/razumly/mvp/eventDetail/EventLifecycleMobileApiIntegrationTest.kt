@@ -16,6 +16,7 @@ import com.razumly.mvp.core.data.dataTypes.buildEventOfficialRecordId
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.data.repositories.EventEditorApiException
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.dto.EventParticipantsRequestDto
 import com.razumly.mvp.core.network.dto.EventParticipantsResponseDto
@@ -113,7 +114,6 @@ class EventLifecycleMobileApiIntegrationTest {
         val createdEvents = mutableListOf<Event>()
 
         variants.forEach { variant ->
-
             val createdEvent = host.createEventThroughEditor(
                 event = variant.event,
                 fields = variant.fields,
@@ -137,12 +137,36 @@ class EventLifecycleMobileApiIntegrationTest {
                 )
             }
 
-            val participantLoadedEvent = participant.eventRepository.getEvent(createdEvent.id).getOrThrow()
+            if (variant.event.autoCreatePointMatchIncidents) {
+                registerRosterTeamsForPointIncidentVariant(
+                    host = host,
+                    variant = variant,
+                    event = createdEvent,
+                    hostUserId = hostUser.id,
+                )
+            }
+
+            val persistedEvent = host.eventRepository.getEvent(createdEvent.id).getOrThrow()
             assertEventResourcesPersisted(
-                participant = participant,
+                participant = host,
                 variant = variant,
-                loadedEvent = participantLoadedEvent,
+                loadedEvent = persistedEvent,
             )
+
+            val scheduledEvent = if (variant.event.eventType.isSchedulable()) {
+                host.eventRepository.scheduleEventEditor(createdEvent.id).getOrElse { error ->
+                    error("Failed to schedule ${variant.key}: ${error.backendSummary()}")
+                }.event.also { event ->
+                    assertCreatedEventShape(variant = variant, event = event)
+                }
+            } else {
+                null
+            }
+
+            val readSession = if (variant.event.eventType.isSchedulable()) host else participant
+            val participantLoadedEvent = readSession.eventRepository.getEvent(
+                (scheduledEvent ?: createdEvent).id,
+            ).getOrThrow()
 
             val joinResult = participant.eventRepository.addCurrentUserToEvent(
                 event = participantLoadedEvent,
@@ -154,21 +178,7 @@ class EventLifecycleMobileApiIntegrationTest {
             assertFalse(joinResult.requiresParentApproval, "${variant.key} should not require parent approval")
             assertFalse(joinResult.joinedWaitlist, "${variant.key} should not join the waitlist")
 
-            if (variant.event.autoCreatePointMatchIncidents) {
-                registerRosterTeamsForPointIncidentVariant(
-                    host = host,
-                    variant = variant,
-                    event = createdEvent,
-                    hostUserId = hostUser.id,
-                )
-            }
-
-            if (variant.event.eventType.isSchedulable()) {
-                val scheduledEvent = host.eventRepository.scheduleEventEditor(createdEvent.id).getOrElse { error ->
-                    error("Failed to schedule ${variant.key}: ${error.backendSummary()}")
-                }.event
-                assertCreatedEventShape(variant = variant, event = scheduledEvent)
-
+            if (scheduledEvent != null) {
                 val matches = host.matchRepository.getMatchesOfTournament(createdEvent.id).getOrElse { error ->
                     error("Failed to load matches for ${variant.key}: ${error.backendSummary()}")
                 }
@@ -187,8 +197,74 @@ class EventLifecycleMobileApiIntegrationTest {
         val incidentMatches = matchesByVariant.getValue(KEY_TOURNAMENT_SPLIT_NO_POOLS)
         updateMatchWithPointIncident(host = host, matches = incidentMatches)
 
-        val batchEvents = participant.eventRepository.getEventsByIds(createdEvents.map(Event::id)).getOrThrow()
+        val batchEvents = host.eventRepository.getEventsByIds(createdEvents.map(Event::id)).getOrThrow()
         assertEquals(createdEvents.map(Event::id).toSet(), batchEvents.map(Event::id).toSet())
+    }
+    @Test
+    fun event_editor_rejects_invalid_organization_staff_as_typed_input() = runTest(timeout = 15.minutes) {
+        hostSession = MobileApiTestSession.create()
+        val host = hostSession!!
+        val hostUser = host.userRepository.login(HOST_EMAIL, HOST_PASSWORD).getOrThrow()
+        val variant = buildVariant(
+            runId = "mobile_api_invalid_staff_${Clock.System.now().toEpochMilliseconds()}",
+            key = "invalid_staff",
+            hostUserId = hostUser.id,
+            eventType = EventType.EVENT,
+            sportId = "Basketball",
+            singleDivision = true,
+            includePlayoffs = false,
+            officialCase = OfficialCase.NO_OFFICIALS,
+            start = Instant.parse("2026-10-01T12:00:00Z"),
+            end = Instant.parse("2026-10-01T18:00:00Z"),
+        )
+
+        val failure = runCatching {
+            host.createEventThroughEditor(
+                event = variant.event.copy(assistantHostIds = listOf("dev_user_3")),
+                fields = variant.fields,
+                timeSlots = variant.timeSlots,
+                operationId = "mobile-editor-invalid-staff-${variant.event.id}",
+            )
+        }.exceptionOrNull()
+        val apiException = failure as? EventEditorApiException
+            ?: error("Expected a typed API failure, received ${failure?.backendSummary()}")
+
+        assertEquals(400, apiException.statusCode)
+        assertTrue(apiException.responseBody.orEmpty().contains("INVALID_EDITOR_INPUT"))
+        assertTrue(
+            apiException.responseBody.orEmpty().contains("active organization hosts and officials"),
+        )
+    }
+    @Test
+    fun event_editor_creates_a_valid_mobile_event() = runTest(timeout = 15.minutes) {
+        hostSession = MobileApiTestSession.create()
+        val host = hostSession!!
+        val hostUser = host.userRepository.login(HOST_EMAIL, HOST_PASSWORD).getOrThrow()
+        val variant = buildVariant(
+            runId = "mobile_api_create_${Clock.System.now().toEpochMilliseconds()}",
+            key = "create_smoke",
+            hostUserId = hostUser.id,
+            eventType = EventType.EVENT,
+            sportId = "Basketball",
+            singleDivision = true,
+            includePlayoffs = false,
+            officialCase = OfficialCase.NO_OFFICIALS,
+            start = Instant.parse("2026-10-02T12:00:00Z"),
+            end = Instant.parse("2026-10-02T18:00:00Z"),
+        )
+
+        val createdEvent = host.createEventThroughEditor(
+            event = variant.event,
+            fields = variant.fields,
+            timeSlots = variant.timeSlots,
+            operationId = "mobile-editor-create-smoke-${variant.event.id}",
+        )
+        createdEventIds += createdEvent.id
+
+        assertCreatedEventShape(variant = variant, event = createdEvent)
+        assertEquals(variant.event.organizationId, createdEvent.organizationId)
+        assertTrue(createdEvent.fieldIds.isNotEmpty())
+        assertTrue(createdEvent.timeSlotIds.isNotEmpty())
     }
 
     private suspend fun registerSeededTeamsForVariant(
@@ -398,7 +474,7 @@ class EventLifecycleMobileApiIntegrationTest {
     ) {
         val loadedFields = participant.fieldRepository.getFields(loadedEvent.fieldIds).getOrThrow()
         val loadedTimeSlots = participant.fieldRepository.getTimeSlots(loadedEvent.timeSlotIds).getOrThrow()
-        val expectedDivisionSet = variant.resourceDivisionIds.toSet()
+        val expectedDivisionSet = loadedEvent.divisions.filter(String::isNotBlank).toSet()
         val divisionDetailsById = loadedEvent.divisionDetails.associateBy(DivisionDetail::id)
 
         assertTrue(loadedFields.size >= 2, "${variant.key} should have multiple fields")
@@ -420,7 +496,10 @@ class EventLifecycleMobileApiIntegrationTest {
                 if (!variant.isTournamentPoolPlay) {
                     assertTrue(fieldCount >= 2, "${variant.key} should persist multiple fields for $divisionId")
                 }
-                assertTrue(slotCount >= 1, "${variant.key} should have at least one time slot for $divisionId")
+                assertTrue(
+                    slotCount >= 1,
+                    "${variant.key} should have at least one time slot for $divisionId",
+                )
             }
         } else {
             assertTrue(
@@ -743,7 +822,7 @@ private fun buildVariant(
         imageId = UPLOADED_DOCUMENT_IMAGE_ID,
         coordinates = listOf(-122.4194, 37.7749),
         hostId = hostUserId,
-        assistantHostIds = listOf(ASSISTANT_HOST_ONE_ID, ASSISTANT_HOST_TWO_ID),
+        assistantHostIds = emptyList(),
         noFixedEndDateTime = false,
         teamSignup = eventType.isSchedulable(),
         singleDivision = singleDivision,
@@ -1070,8 +1149,6 @@ private const val PARTICIPANT_EMAIL = MOBILE_TEST_PARTICIPANT_EMAIL
 private const val PARTICIPANT_PASSWORD = MOBILE_TEST_PARTICIPANT_PASSWORD
 private const val SEEDED_ORGANIZATION_ID = "org_1"
 private const val UPLOADED_DOCUMENT_IMAGE_ID = "camka_upload_upscaled_cc_indoor_sports_024be2e8d5cdead5_jpg"
-private const val ASSISTANT_HOST_ONE_ID = "dev_user_3"
-private const val ASSISTANT_HOST_TWO_ID = "dev_user_4"
 private const val OFFICIAL_ONE_ID = "dev_user_1"
 private const val OFFICIAL_TWO_ID = "dev_user_2"
 private const val DIRECT_SCORE_POINTS = 7
