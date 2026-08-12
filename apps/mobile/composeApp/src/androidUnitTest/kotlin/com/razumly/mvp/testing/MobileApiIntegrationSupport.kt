@@ -262,8 +262,8 @@ private fun EventEditorDraftDto.toEditorDraft(
                 .filter { detail -> detail.kind.equals("PLAYOFF", ignoreCase = true) }
                 .map(DivisionDetail::toDto),
             divisionFieldIds = event.divisionDetails.associate { detail -> detail.id to detail.fieldIds },
-            winnerSetCount = event.winnerSetCount,
-            loserSetCount = event.loserSetCount,
+            winnerSetCount = event.winnerSetCount.takeIf { it > 0 },
+            loserSetCount = event.loserSetCount.takeIf { it > 0 },
             doubleElimination = event.doubleElimination,
             includePlayoffs = event.includePlayoffs,
             splitLeaguePlayoffDivisions = event.splitLeaguePlayoffDivisions,
