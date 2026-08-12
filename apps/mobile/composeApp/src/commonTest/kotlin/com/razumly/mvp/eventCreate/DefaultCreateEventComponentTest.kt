@@ -12,6 +12,7 @@ import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
+import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.razumly.mvp.core.data.repositories.RegistrationQuestionDraft
 import com.razumly.mvp.eventDetail.EventStaffRole
@@ -526,6 +527,29 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         )
         assertEquals(0, harness.onEventCreatedCount)
     }
+    @Test
+    fun create_event_surfaces_editor_api_failure_message() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        harness.eventRepository.createEditorFailure = ApiException(
+            statusCode = 500,
+            url = "http://10.0.2.2:3000/api/events/editor",
+            responseBody = """{"error":"Unable to save event editor configuration. Database write failed. Reference: request-1.","code":"EDITOR_SAVE_FAILED","details":"Database write failed.","requestId":"request-1"}""",
+        )
+        advance()
+        harness.component.updateEventField { copy(divisions = listOf("Open")) }
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        assertFalse(harness.loadingHandler.loadingState.value.isLoading)
+        assertEquals(
+            "Unable to save event editor configuration. Database write failed. Reference: request-1.",
+            harness.component.errorState.value?.message,
+        )
+        assertEquals(0, harness.onEventCreatedCount)
+    }
+
 
     @Test
     fun create_event_reports_staff_delivery_failure_as_a_warning_after_atomic_create() = runTest(testDispatcher) {

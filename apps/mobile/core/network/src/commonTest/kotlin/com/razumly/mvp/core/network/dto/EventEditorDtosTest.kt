@@ -165,6 +165,7 @@ class EventEditorDtosTest {
                   "field":"createOperationId",
                   "editorRevision":"revision-1",
                   "staffRevision":"staff-revision-1",
+                  "requestId":"request-1",
                   "details":{"operationId":"create-operation-1"}
                 }
             """.trimIndent(),
@@ -174,5 +175,6 @@ class EventEditorDtosTest {
         assertEquals("CREATE_OPERATION_CONFLICT", error.code)
         assertEquals("createOperationId", error.field)
         assertNotNull(error.details)
+        assertEquals("request-1", error.requestId)
     }
 }

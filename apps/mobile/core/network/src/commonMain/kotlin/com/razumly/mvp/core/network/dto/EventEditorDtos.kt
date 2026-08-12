@@ -394,6 +394,7 @@ data class EventEditorErrorDto(
     val field: String? = null,
     val editorRevision: String? = null,
     val staffRevision: String? = null,
+    val requestId: String? = null,
     val details: JsonElement? = null,
 )
 
