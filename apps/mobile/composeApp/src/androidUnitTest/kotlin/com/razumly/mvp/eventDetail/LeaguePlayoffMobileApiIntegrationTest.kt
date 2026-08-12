@@ -8,7 +8,11 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.EventEditorCanonicalState
+import com.razumly.mvp.core.data.repositories.EventEditorMutation
+import com.razumly.mvp.core.data.repositories.EventEditorSessionMapper
 import com.razumly.mvp.core.network.ApiException
+import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.razumly.mvp.core.network.dto.EventParticipantsRequestDto
 import com.razumly.mvp.core.network.dto.EventParticipantsResponseDto
 import com.razumly.mvp.core.network.dto.InviteCreateDto
@@ -18,8 +22,10 @@ import com.razumly.mvp.testing.MOBILE_TEST_PARTICIPANT_EMAIL
 import com.razumly.mvp.testing.MOBILE_TEST_PARTICIPANT_PASSWORD
 import com.razumly.mvp.testing.MobileApiTestSession
 import com.razumly.mvp.testing.mobileApiLoginFixturesReady
+import com.razumly.mvp.testing.runBackendSeedThenCheck
 import com.razumly.mvp.testing.runTargetedBackendSeed
 import com.razumly.mvp.testing.shouldAutoSeedBackendFixtures
+import com.razumly.mvp.testing.createEventThroughEditor
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
@@ -45,18 +51,22 @@ class LeaguePlayoffMobileApiIntegrationTest {
     private val testEventId = "mobile_api_league_playoff_$testRunId"
     private val testFieldId = "${testEventId}_field"
     private val testSlotId = "${testEventId}_slot"
+    private var createdEventId: String? = null
     private var hostSession: MobileApiTestSession? = null
     private var participantSession: MobileApiTestSession? = null
 
     @Before
     fun ensureBackendFixtures() {
+        assumeTrue(
+            "Skipping mobile/backend integration test because MVP_TEST_BACKEND_URL is not set.",
+            !System.getenv("MVP_TEST_BACKEND_URL").isNullOrBlank(),
+        )
         if (backendFixturesReady()) return
-
         val fixturesPrepared = if (shouldAutoSeedBackendFixtures()) {
-            runCatching {
-                runTargetedBackendSeed()
-                backendFixturesReady()
-            }.getOrDefault(false)
+            runBackendSeedThenCheck(
+                seed = { runTargetedBackendSeed() },
+                fixturesReady = { backendFixturesReady() },
+            )
         } else {
             false
         }
@@ -70,7 +80,7 @@ class LeaguePlayoffMobileApiIntegrationTest {
 
     @After
     fun tearDown() {
-        runCatching { runBlocking { hostSession?.deleteEvent(testEventId) } }
+        runCatching { runBlocking { hostSession?.deleteEvent(createdEventId ?: testEventId) } }
         hostSession?.close()
         participantSession?.close()
         hostSession = null
@@ -88,30 +98,61 @@ class LeaguePlayoffMobileApiIntegrationTest {
         val hostUser = host.userRepository.login(HOST_EMAIL, HOST_PASSWORD).getOrThrow()
         host.deleteEvent(testEventId)
 
-        val createdEvent = host.eventRepository.createEvent(
-            newEvent = buildLeagueEvent(hostUser.id),
+        val createdEvent = host.createEventThroughEditor(
+            event = buildLeagueEvent(hostUser.id),
             fields = listOf(buildLeagueField()),
             timeSlots = listOf(buildLeagueTimeSlot()),
-        ).getOrThrow()
+            operationId = "mobile-editor-league-playoff-$testRunId",
+        )
+        createdEventId = createdEvent.id
 
         assertEquals(UPLOADED_DOCUMENT_IMAGE_ID, createdEvent.imageId)
         assertTrue(createdEvent.includePlayoffs)
         assertEquals(TEST_PLAYOFF_TEAM_COUNT, createdEvent.playoffTeamCount)
 
-        registerSeededTeams(host = host, event = createdEvent)
+        val publishedEvent = if (createdEvent.state == "UNPUBLISHED") {
+            val baseline = host.eventRepository.getEventEditor(createdEvent.id).getOrThrow()
+            val publishedState = baseline.canonicalState.copy(
+                event = baseline.canonicalState.event.copy(state = "PUBLISHED"),
+            )
+            val publishCommand = EventEditorSessionMapper.toSaveCommand(
+                session = baseline,
+                mutation = EventEditorMutation(
+                    canonicalState = EventEditorCanonicalState(
+                        event = publishedState.event,
+                        fields = publishedState.fields,
+                        timeSlots = publishedState.timeSlots,
+                        leagueScoringConfig = publishedState.leagueScoringConfig,
+                        questions = publishedState.questions,
+                        pendingStaffInvites = publishedState.pendingStaffInvites,
+                        playoffDivisionDetails = publishedState.playoffDivisionDetails,
+                        divisionFieldIds = publishedState.divisionFieldIds,
+                    ),
+                ),
+            )
+            host.eventRepository.saveEventEditor(
+                eventId = createdEvent.id,
+                command = publishCommand,
+            ).getOrElse { error ->
+                throw AssertionError("Publishing ${createdEvent.id} failed: ${error.message}", error)
+            }.session.canonicalState.event
+        } else {
+            createdEvent
+        }
+
+        registerSeededTeams(host = host, event = publishedEvent)
 
         host.userRepository.createInvites(
-            invites = staffInvitePayloads(eventId = createdEvent.id, createdBy = hostUser.id),
+            invites = staffInvitePayloads(eventId = publishedEvent.id, createdBy = hostUser.id),
         ).getOrThrow()
 
-        val scheduledEvent = host.eventRepository.scheduleEvent(createdEvent.id).getOrElse { error ->
-            val responseBody = (error as? ApiException)?.responseBody
+        val scheduledEvent = host.eventRepository.scheduleEventEditor(publishedEvent.id).getOrElse { error ->
             throw AssertionError(
-                "Scheduling ${createdEvent.id} failed: ${responseBody ?: error.message}",
+                "Scheduling ${publishedEvent.id} failed: ${error.message}",
                 error,
             )
-        }
-        val scheduledMatches = host.matchRepository.getMatchesOfTournament(createdEvent.id).getOrThrow()
+        }.event
+        val scheduledMatches = host.matchRepository.getMatchesOfTournament(publishedEvent.id).getOrThrow()
 
         assertTrue(scheduledEvent.includePlayoffs)
         assertEquals(TEST_PLAYOFF_TEAM_COUNT, scheduledEvent.playoffTeamCount)
@@ -121,7 +162,7 @@ class LeaguePlayoffMobileApiIntegrationTest {
         )
 
         participant.userRepository.login(PARTICIPANT_EMAIL, PARTICIPANT_PASSWORD).getOrThrow()
-        val loadedEvent = participant.eventRepository.getEvent(createdEvent.id).getOrThrow()
+        val loadedEvent = participant.eventRepository.getEvent(publishedEvent.id).getOrThrow()
         val joinResult = participant.eventRepository.addCurrentUserToEvent(
             event = loadedEvent,
             preferredDivisionId = SEEDED_DIVISION_ID,
@@ -130,10 +171,11 @@ class LeaguePlayoffMobileApiIntegrationTest {
         assertFalse(joinResult.requiresParentApproval)
         assertFalse(joinResult.joinedWaitlist)
 
-        val loadedInvites = participant.eventRepository.getEventStaffInvites(createdEvent.id).getOrThrow()
+        val loadedDetail = participant.eventRepository.syncEventDetail(loadedEvent).getOrThrow()
+        val loadedInvites = loadedDetail.staffInvites
         val loadedFields = participant.fieldRepository.getFields(loadedEvent.fieldIds).getOrThrow()
         val loadedTimeSlots = participant.fieldRepository.getTimeSlots(loadedEvent.timeSlotIds).getOrThrow()
-        val loadedMatches = participant.matchRepository.getMatchesOfTournament(createdEvent.id).getOrThrow()
+        val loadedMatches = participant.matchRepository.getMatchesOfTournament(publishedEvent.id).getOrThrow()
         val loadedTeamIds = loadedEvent.teamIds
             .ifEmpty {
                 loadedEvent.divisionDetails
@@ -304,16 +346,27 @@ class LeaguePlayoffMobileApiIntegrationTest {
     }
 
     private fun backendFixturesReady(): Boolean {
+        if (System.getenv("MVP_TEST_BACKEND_URL").isNullOrBlank()) return false
         if (!mobileApiLoginFixturesReady(HOST_EMAIL to HOST_PASSWORD, PARTICIPANT_EMAIL to PARTICIPANT_PASSWORD)) {
             return false
         }
         val session = runCatching { MobileApiTestSession.create() }.getOrElse { return false }
         return try {
             runBlocking {
+                session.userRepository.login(HOST_EMAIL, HOST_PASSWORD).getOrThrow()
                 val sportsReady = session.sportsRepository.getSports()
                     .getOrNull()
                     ?.any { it.id == SEEDED_SPORT_ID } == true
-                sportsReady
+                if (!sportsReady) return@runBlocking false
+
+                session.eventRepository.getEventEditorCreateBootstrap(
+                    EventEditorBootstrapQueryDto(
+                        organizationId = "org_1",
+                        eventType = EventType.LEAGUE.name,
+                        sportId = SEEDED_SPORT_ID,
+                    ),
+                ).getOrThrow()
+                true
             }
         } finally {
             session.close()

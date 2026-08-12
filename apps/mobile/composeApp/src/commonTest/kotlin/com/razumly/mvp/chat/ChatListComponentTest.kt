@@ -147,6 +147,7 @@ private class ChatList_FakeNavigationHandler : INavigationHandler {
 
     override fun navigateToChat(messageUserId: String?, chatId: String?) = Unit
     override fun navigateToCreate() = Unit
+    override fun navigateToCreate(bootstrap: com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto) = Unit
     override fun navigateToSearch() = Unit
     override fun navigateToEvent(eventId: String) = Unit
     override fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab) = Unit

@@ -242,12 +242,29 @@ internal object EventEditPayloadBuilder {
         )
     }
 
+
     private fun Event.shouldPersistManagedFieldsOrSlots(hasRentalBackedSlots: Boolean): Boolean {
         return eventType == EventType.LEAGUE ||
             eventType == EventType.TOURNAMENT ||
             eventType == EventType.WEEKLY_EVENT ||
             hasRentalBackedSlots
     }
+}
+internal fun EventEditPayloadResult.omitUnchangedManagedCollections(
+    currentFields: List<Field>,
+    baselineFields: List<Field>?,
+    currentTimeSlots: List<TimeSlot>,
+    baselineTimeSlots: List<TimeSlot>?,
+): EventEditPayloadResult {
+    val fieldsChanged = baselineFields == null || !editableFieldsMatch(currentFields, baselineFields)
+    val timeSlotsChanged = baselineTimeSlots == null || currentTimeSlots != baselineTimeSlots
+    return copy(
+        prepared = prepared.copy(
+            fields = prepared.fields?.takeIf { fieldsChanged },
+            timeSlots = prepared.timeSlots?.takeIf { timeSlotsChanged },
+        ),
+        editableFields = editableFields?.takeIf { fieldsChanged },
+    )
 }
 
 internal fun editableLeagueTimeSlotsForEvent(
@@ -293,6 +310,7 @@ internal fun buildEditableFieldDrafts(
     event: Event,
     sourceFields: List<Field>,
     idFactory: () -> String = ::newId,
+    preserveSourceValues: Boolean = false,
 ): List<Field> {
     val sourceById = sourceFields.associateBy { field -> field.id.trim() }
     val orderedEventFieldIds = event.fieldIds
@@ -318,6 +336,15 @@ internal fun buildEditableFieldDrafts(
             }
     }
 
+    if (preserveSourceValues) {
+        return baseFields.mapIndexed { index, field ->
+            field.copy(
+                id = field.id.takeIf(String::isNotBlank) ?: idFactory(),
+                fieldNumber = index + 1,
+            )
+        }
+    }
+
     return baseFields.mapIndexed { index, field ->
         field.copy(
             id = field.id.trim().takeIf(String::isNotBlank) ?: idFactory(),
@@ -330,6 +357,13 @@ internal fun buildEditableFieldDrafts(
             organizationId = field.organizationId?.trim()?.takeIf(String::isNotBlank) ?: event.organizationId,
         )
     }
+}
+
+internal fun editableFieldsMatch(left: List<Field>, right: List<Field>): Boolean {
+    return left.size == right.size &&
+        left.zip(right).all { (current, baseline) ->
+            current.copy(fieldNumber = 0) == baseline.copy(fieldNumber = 0)
+        }
 }
 
 internal fun syncEditableFieldsForEvent(

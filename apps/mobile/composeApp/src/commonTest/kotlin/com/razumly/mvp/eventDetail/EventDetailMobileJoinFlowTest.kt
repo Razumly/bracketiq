@@ -51,6 +51,8 @@ import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import com.razumly.mvp.core.data.repositories.TeamJoinRequestContext
 import com.razumly.mvp.core.data.repositories.UserEmailMembershipMatch
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
+import com.razumly.mvp.core.data.repositories.EventEditorSessionMapper
+import com.razumly.mvp.eventCreate.createEventEditorSession
 import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
@@ -187,7 +189,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
         }
 
     @Test
-    fun editing_refetches_event_before_seeding_division_draft() = runTest(testDispatcher) {
+    fun editing_loads_editor_before_seeding_division_draft() = runTest(testDispatcher) {
         val host = mobileUser(id = "edit_host", firstName = "Edit", lastName = "Host")
         val divisionId = "edit_event__division__open"
         val partialEvent = Event(
@@ -238,11 +240,14 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
         component.setLoadingHandler(EventDetailTestLoadingHandler())
         advance()
         eventRepository.refreshedEvent = refreshedEvent
+        eventRepository.refreshRequests.clear()
 
         component.startEditingEvent()
         advance()
 
         assertTrue(component.isEditing.value)
+        assertEquals(listOf(partialEvent.id), eventRepository.editorRequests)
+        assertTrue(eventRepository.refreshRequests.isEmpty())
         assertEquals(listOf(divisionId), component.editedEvent.value.divisions)
         assertEquals(listOf(divisionId), component.editedEvent.value.divisionDetails.map(DivisionDetail::id))
         assertEquals(4, component.editedEvent.value.divisionDetails.single().poolCount)
@@ -2213,6 +2218,7 @@ private class EventDetailFakeEventRepository(
     private val cachedRegistrationsFlow = MutableStateFlow(initialCachedRegistrations)
 
     var refreshedEvent: Event? = null
+    val editorRequests = mutableListOf<String>()
 
     val staffInviteRequests = mutableListOf<String>()
     val refreshRequests = mutableListOf<String>()
@@ -2243,10 +2249,17 @@ private class EventDetailFakeEventRepository(
         return Result.success(refreshedEvent ?: eventFlow.value.getOrThrow().event)
     }
 
-    override suspend fun getEventStaffInvites(eventId: String): Result<List<Invite>> {
-        staffInviteRequests += eventId
-        return Result.success(staffInvites)
+    override suspend fun getEventEditor(eventId: String): Result<com.razumly.mvp.core.data.repositories.EventEditorSession> {
+        editorRequests += eventId
+        val sourceEvent = refreshedEvent ?: eventFlow.value.getOrThrow().event
+        val createSession = createEventEditorSession(event = sourceEvent)
+        return Result.success(
+            EventEditorSessionMapper.fromEditSnapshot(
+                createSession.snapshot.copy(mode = "EDIT"),
+            ),
+        )
     }
+
 
     override fun observeCurrentUserRegistrationsForEvent(eventId: String): Flow<List<EventRegistrationCacheEntry>> =
         cachedRegistrationsFlow
@@ -2747,6 +2760,7 @@ private object NoopNavigationHandler : INavigationHandler {
     override fun navigateToTeams(freeAgents: List<String>, eventId: String?, selectedFreeAgentId: String?) = Unit
     override fun navigateToChat(messageUserId: String?, chatId: String?) = Unit
     override fun navigateToCreate() = Unit
+    override fun navigateToCreate(bootstrap: com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto) = Unit
     override fun navigateToSearch() = Unit
     override fun navigateToEvent(eventId: String) = Unit
     override fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab) = Unit

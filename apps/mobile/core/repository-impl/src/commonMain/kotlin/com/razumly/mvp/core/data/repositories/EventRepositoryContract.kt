@@ -4,15 +4,15 @@ import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
-import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
-import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
-import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
-import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
+import com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleRequestDto
 import dev.icerock.moko.geo.LatLng
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -33,16 +33,27 @@ interface IEventRepository : IMVPRepository {
         getEventWithRelationsFlow(eventId)
     fun resetCursor()
     suspend fun getEvent(eventId: String): Result<Event>
+    suspend fun getEventEditorCreateBootstrap(
+        query: EventEditorBootstrapQueryDto,
+    ): Result<EventEditorSession> =
+        Result.failure(UnsupportedOperationException("Event editor create bootstrap is not supported."))
+    suspend fun createEventEditor(
+        command: EventEditorCreateCommandDto,
+    ): Result<EventEditorSaveOutcome> =
+        Result.failure(UnsupportedOperationException("Event editor create is not supported."))
+    suspend fun getEventEditor(eventId: String): Result<EventEditorSession> =
+        Result.failure(UnsupportedOperationException("Event editor loading is not supported."))
+    suspend fun saveEventEditor(
+        eventId: String,
+        command: EventEditorSaveCommandDto,
+    ): Result<EventEditorSaveOutcome> =
+        Result.failure(UnsupportedOperationException("Event editor save is not supported."))
+    suspend fun scheduleEventEditor(
+        eventId: String,
+        request: EventEditorScheduleRequestDto = EventEditorScheduleRequestDto(),
+    ): Result<EventScheduleOutcome> =
+        Result.failure(UnsupportedOperationException("Event editor scheduling is not supported."))
     suspend fun getLeagueScoringConfig(eventId: String): Result<LeagueScoringConfig?> = Result.success(null)
-    suspend fun getEventStaffInvites(eventId: String): Result<List<Invite>>
-    suspend fun getEventStaffState(event: Event): Result<EventStaffState> =
-        Result.failure(UnsupportedOperationException("Atomic event staff loading is not supported."))
-    suspend fun reconcileEventStaff(
-        event: Event,
-        pendingInvites: List<EventStaffInviteInput>,
-        expectedRevision: String,
-    ): Result<EventStaffState> =
-        Result.failure(UnsupportedOperationException("Atomic event staff reconciliation is not supported."))
     suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>>
     suspend fun getEventsByOrganization(organizationId: String, limit: Int = 200): Result<List<Event>>
     suspend fun getOrganizationEventsPage(
@@ -60,41 +71,6 @@ interface IEventRepository : IMVPRepository {
     }
     suspend fun getRegistrationQuestions(scopeType: String, scopeId: String): Result<List<TeamJoinQuestion>> =
         Result.success(emptyList())
-    suspend fun saveRegistrationQuestions(
-        scopeType: String,
-        scopeId: String,
-        questions: List<RegistrationQuestionDraft>,
-    ): Result<List<TeamJoinQuestion>> = Result.success(emptyList())
-    suspend fun createEvent(
-        newEvent: Event,
-        requiredTemplateIds: List<String> = emptyList(),
-        leagueScoringConfig: LeagueScoringConfigDTO? = null,
-        fields: List<Field>? = null,
-        timeSlots: List<TimeSlot>? = null,
-    ): Result<Event>
-    suspend fun scheduleEvent(
-        eventId: String,
-        participantCount: Int? = null,
-        includePlaceholderTeams: Boolean? = null,
-    ): Result<Event>
-    suspend fun updateEvent(
-        newEvent: Event,
-        fields: List<Field>? = null,
-        timeSlots: List<TimeSlot>? = null,
-        leagueScoringConfig: LeagueScoringConfigDTO? = null,
-    ): Result<Event>
-    suspend fun updateEventPreservingStaff(
-        newEvent: Event,
-        fields: List<Field>? = null,
-        timeSlots: List<TimeSlot>? = null,
-        leagueScoringConfig: LeagueScoringConfigDTO? = null,
-        expectedStaffRevision: String,
-    ): Result<Event> = updateEvent(
-        newEvent = newEvent,
-        fields = fields,
-        timeSlots = timeSlots,
-        leagueScoringConfig = leagueScoringConfig,
-    )
     suspend fun updateLocalEvent(newEvent: Event): Result<Event>
     fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<Event>>>
     suspend fun getEventsInBounds(bounds: Bounds): Result<Pair<List<Event>, Boolean>>
@@ -163,12 +139,6 @@ interface IEventRepository : IMVPRepository {
         flowOf(Result.success(emptyList()))
     suspend fun createEventTemplateFromEvent(sourceEventId: String): Result<EventTemplateSummary> =
         Result.failure(UnsupportedOperationException("Event template creation is not supported."))
-    suspend fun seedEventTemplate(
-        templateId: String,
-        newEventId: String,
-        newStartDate: Instant,
-    ): Result<SeededEventTemplateDraft> =
-        Result.failure(UnsupportedOperationException("Event template seeding is not supported."))
     suspend fun deleteEvent(eventId: String): Result<Unit>
     suspend fun addCurrentUserToEvent(
         event: Event,

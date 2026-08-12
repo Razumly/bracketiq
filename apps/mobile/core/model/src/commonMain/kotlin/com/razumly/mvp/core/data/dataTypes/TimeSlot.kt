@@ -96,7 +96,7 @@ data class TimeSlotDTO(
             timeZone = timeZone,
             repeating = repeating,
             endDate = endDate?.let { parseSlotInstant(it, timeZone) },
-            scheduledFieldId = scheduledFieldIds?.firstOrNull() ?: scheduledFieldId,
+            scheduledFieldId = scheduledFieldId ?: scheduledFieldIds?.firstOrNull(),
             scheduledFieldIds = (scheduledFieldIds ?: scheduledFieldId?.let(::listOf) ?: emptyList())
                 .map(String::trim)
                 .filter(String::isNotBlank)

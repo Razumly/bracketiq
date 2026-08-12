@@ -43,7 +43,6 @@ import com.razumly.mvp.core.data.repositories.TeamRegistrationConsent
 import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
-import com.razumly.mvp.core.presentation.RentalBookingItemManifest
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.eventCreate.CreateEvent_FakeBillingRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeEventRepository
@@ -642,10 +641,6 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
             harness.component.createEventFromCompletedRentalReservation()
 
             assertEquals(listOf("booking-canonical-1"), navigationHandler.rentalBookingIds)
-            assertEquals(
-                listOf("item-1"),
-                navigationHandler.rentalBookingItems.single().map(RentalBookingItemManifest::id),
-            )
             assertNull(harness.component.completedRentalReservation.value)
         }
 
@@ -1507,6 +1502,7 @@ private object NoopNavigationHandler : INavigationHandler {
     override fun navigateToTeams(freeAgents: List<String>, eventId: String?, selectedFreeAgentId: String?) = Unit
     override fun navigateToChat(messageUserId: String?, chatId: String?) = Unit
     override fun navigateToCreate() = Unit
+    override fun navigateToCreate(bootstrap: com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto) = Unit
     override fun navigateToSearch() = Unit
     override fun navigateToEvent(eventId: String) = Unit
     override fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab) = Unit
@@ -1518,14 +1514,9 @@ private object NoopNavigationHandler : INavigationHandler {
 
 private class RecordingNavigationHandler : INavigationHandler by NoopNavigationHandler {
     val rentalBookingIds = mutableListOf<String>()
-    val rentalBookingItems = mutableListOf<List<RentalBookingItemManifest>>()
 
-    override fun navigateToCreateFromRental(
-        rentalBookingId: String,
-        rentalBookingItems: List<RentalBookingItemManifest>,
-    ) {
+    override fun navigateToCreateFromRental(rentalBookingId: String) {
         rentalBookingIds += rentalBookingId
-        this.rentalBookingItems += rentalBookingItems
     }
 }
 

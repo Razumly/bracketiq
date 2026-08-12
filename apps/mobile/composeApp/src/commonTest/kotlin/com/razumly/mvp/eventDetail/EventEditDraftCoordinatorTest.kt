@@ -34,6 +34,41 @@ class EventEditDraftCoordinatorTest {
     }
 
     @Test
+    fun editing_seed_preserves_canonical_field_values_and_slot_order() {
+        val coordinator = EventEditDraftCoordinator(
+            initialEvent = leagueEvent(fieldIds = listOf("field-1")),
+            canEditInitial = true,
+        )
+        val canonicalField = field(
+            id = "field-1",
+            name = null,
+            divisions = emptyList(),
+            location = null,
+        ).copy(
+            lat = 40.7128,
+            long = -74.0060,
+            heading = 12.5,
+            inUse = true,
+            rentalSlotIds = listOf("rental-slot-1"),
+            organizationId = "organization-1",
+        )
+        val canonicalSlots = listOf(
+            slot("slot-2", startDate = Instant.parse("2026-04-20T12:00:00Z")),
+            slot("slot-1", startDate = Instant.parse("2026-04-13T12:00:00Z")),
+        )
+
+        coordinator.seedDraftForEditing(
+            event = leagueEvent(fieldIds = listOf("field-1")),
+            sourceFields = listOf(canonicalField),
+            timeSlots = canonicalSlots,
+            leagueScoringConfig = LeagueScoringConfigDTO(),
+        )
+
+        assertEquals(canonicalField, coordinator.editableFields.value.single())
+        assertEquals(canonicalSlots, coordinator.editableLeagueTimeSlots.value)
+    }
+
+    @Test
     fun select_field_count_resizes_fields_and_prunes_slots_to_remaining_fields() {
         val coordinator = EventEditDraftCoordinator(
             initialEvent = leagueEvent(),

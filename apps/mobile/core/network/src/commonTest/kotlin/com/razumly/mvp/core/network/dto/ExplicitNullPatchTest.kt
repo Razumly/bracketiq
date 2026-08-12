@@ -6,33 +6,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 
 class ExplicitNullPatchTest {
-    @Test
-    fun event_patch_emits_only_requested_changed_nullable_fields_as_json_null() {
-        val previous = encodeExplicitNullPatchObject(
-            serializer = EventUpdateDto.serializer(),
-            value = EventUpdateDto(address = "123 Main St", minAge = 12, affiliateUrl = "https://example.com/event"),
-        )
-        val updated = encodeExplicitNullPatchObject(
-            serializer = EventUpdateDto.serializer(),
-            value = EventUpdateDto(minAge = 12),
-        )
-
-        val clearFields = explicitNullFieldsForPatch(
-            previous = previous,
-            updated = updated,
-            clearableFields = setOf("address", "minAge", "affiliateUrl"),
-        )
-        val payload = encodeExplicitNullPatchObject(
-            serializer = EventUpdateDto.serializer(),
-            value = EventUpdateDto(minAge = 12),
-            explicitNullFields = clearFields,
-        )
-
-        assertEquals(setOf("address", "affiliateUrl"), clearFields)
-        assertEquals(JsonNull, payload["address"])
-        assertEquals(JsonNull, payload["affiliateUrl"])
-        assertFalse("minAge" in payload && payload["minAge"] == JsonNull)
-    }
 
     @Test
     fun team_and_bulk_match_patch_payloads_preserve_requested_null_clears() {

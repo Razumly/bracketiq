@@ -37,6 +37,7 @@ import com.razumly.mvp.core.data.dataTypes.withNotificationSetting
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
+import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequestAction
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.DiscountCode
@@ -67,7 +68,6 @@ import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.LoadingOperation
 import com.razumly.mvp.core.util.Platform
 import com.razumly.mvp.core.util.finishAllLoadingOperations
-import com.razumly.mvp.core.util.newId
 import com.razumly.mvp.core.util.trustedBoldSignSigningUrlOrNull
 import com.razumly.mvp.eventDetail.DiscountCodePromptState
 import io.github.aakira.napier.Napier
@@ -1104,17 +1104,12 @@ class DefaultProfileComponent(
 
         scope.launch {
             withProfileLoading("Starting from template...") {
-                eventRepository.seedEventTemplate(
-                    templateId = templateId,
-                    newEventId = newId(),
-                    newStartDate = newStartDate,
-                ).onSuccess { seed ->
-                    navigationHandler.navigateToCreate(seed)
-                }.onFailure { throwable ->
-                    _errorState.value = ErrorMessage(
-                        throwable.userMessage("Failed to start event from template."),
-                    )
-                }
+                navigationHandler.navigateToCreate(
+                    EventEditorBootstrapQueryDto(
+                        templateId = templateId,
+                        start = newStartDate.toString(),
+                    ),
+                )
             }
         }
     }

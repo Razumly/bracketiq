@@ -6,45 +6,34 @@ import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
-import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
-import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.analytics.AnalyticsEvent
 import com.razumly.mvp.core.analytics.AnalyticsTracker
-import com.razumly.mvp.core.util.jsonMVP
 import dev.icerock.moko.geo.LatLng
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
-import com.razumly.mvp.core.network.dto.CreateEventRequestDto
+import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
+import com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleRequestDto
 import com.razumly.mvp.core.network.dto.CreateEventTemplateRequestDto
-import com.razumly.mvp.core.network.dto.EventApiDto
 import com.razumly.mvp.core.network.dto.EventParticipantsSnapshotResponseDto
-import com.razumly.mvp.core.network.dto.EventResponseDto
-import com.razumly.mvp.core.network.dto.EventStaffPendingInviteDto
-import com.razumly.mvp.core.network.dto.EventStaffPutRequestDto
-import com.razumly.mvp.core.network.dto.EventStaffStateResponseDto
 import com.razumly.mvp.core.network.dto.EventTemplateResponseDto
 import com.razumly.mvp.core.network.dto.ProfileScheduleResponseDto
+import com.razumly.mvp.core.network.dto.toEventsOrThrow
 import com.razumly.mvp.core.network.dto.ProfileScheduleNextActionResponseDto
-import com.razumly.mvp.core.network.dto.ScheduleEventRequestDto
-import com.razumly.mvp.core.network.dto.ScheduleEventResponseDto
-import com.razumly.mvp.core.network.dto.SeedEventTemplateRequestDto
 import com.razumly.mvp.core.network.dto.StandingsConfirmRequestDto
 import com.razumly.mvp.core.network.dto.StandingsConfirmResponseDto
 import com.razumly.mvp.core.network.dto.StandingsPatchRequestDto
 import com.razumly.mvp.core.network.dto.StandingsPointOverrideDto
 import com.razumly.mvp.core.network.dto.StandingsResponseDto
-import com.razumly.mvp.core.network.dto.UpdateEventRequestDto
-import com.razumly.mvp.core.network.dto.toEventsOrThrow
-import com.razumly.mvp.core.network.dto.toUpdateDto
 import io.github.aakira.napier.Napier
 import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.CoroutineDispatcher
@@ -106,6 +95,7 @@ class EventRepository(
 ) : IEventRepository {
     private val roomStore = EventRoomStore(databaseService)
     private val detailRemoteGateway = EventDetailRemoteGateway(api)
+    private val editorRemoteGateway = EventEditorRemoteGateway(api)
     private val participantSyncCoordinator = EventParticipantSyncCoordinator(
         databaseService = databaseService,
         detailRemoteGateway = detailRemoteGateway,
@@ -152,39 +142,6 @@ class EventRepository(
         scopeId: String,
     ): Result<List<TeamJoinQuestion>> = catalogCoordinator.getRegistrationQuestions(scopeType, scopeId)
 
-    override suspend fun saveRegistrationQuestions(
-        scopeType: String,
-        scopeId: String,
-        questions: List<RegistrationQuestionDraft>,
-    ): Result<List<TeamJoinQuestion>> = runCatching {
-        val normalizedScopeType = scopeType.trim().uppercase().takeIf(String::isNotBlank)
-            ?: error("Question scope type is required.")
-        val normalizedScopeId = scopeId.trim().takeIf(String::isNotBlank)
-            ?: error("Question scope id is required.")
-        val normalizedQuestions = questions.mapIndexed { index, question ->
-            question.copy(
-                id = question.id?.trim()?.takeIf(String::isNotBlank),
-                prompt = question.prompt.trim(),
-                answerType = question.answerType.trim().uppercase().takeIf { it == "LONG_TEXT" } ?: "TEXT",
-                sortOrder = index,
-            )
-        }
-        require(normalizedQuestions.all { question -> question.prompt.isNotBlank() }) {
-            "Question prompts cannot be blank."
-        }
-        val response = api.put<SaveRegistrationQuestionsRequestDto, RegistrationQuestionsResponseDto>(
-            path = "api/registration-questions",
-            body = SaveRegistrationQuestionsRequestDto(
-                scopeType = normalizedScopeType,
-                scopeId = normalizedScopeId,
-                questions = normalizedQuestions,
-            ),
-        )
-        if (!response.error.isNullOrBlank()) error(response.error)
-        response.questions
-            .mapNotNull(RegistrationQuestionDto::toTeamJoinQuestionOrNull)
-            .sortedWith(compareBy<TeamJoinQuestion> { it.sortOrder }.thenBy { it.prompt })
-    }
 
     override fun getCachedEventsFlow(): Flow<Result<List<Event>>> =
         sessionCacheCoordinator.observeCachedEvents()
@@ -281,6 +238,75 @@ class EventRepository(
                 expectedEventId = normalizedEventId,
             )
         }
+    override suspend fun getEventEditorCreateBootstrap(
+        query: EventEditorBootstrapQueryDto,
+    ): Result<EventEditorSession> = runCatching {
+        EventEditorSessionMapper.fromCreateBootstrap(editorRemoteGateway.openCreate(query))
+    }
+
+    override suspend fun createEventEditor(
+        command: EventEditorCreateCommandDto,
+    ): Result<EventEditorSaveOutcome> = runCatching {
+        val response = editorRemoteGateway.create(command)
+        val canonical = EventEditorSessionMapper.canonicalState(
+            snapshot = response.snapshot,
+            operationId = command.createOperationId,
+        )
+        EventEditorSaveOutcome(
+            session = EventEditorSession(
+                snapshot = response.snapshot,
+                canonicalState = canonical,
+                baseline = canonical,
+                createOperationId = command.createOperationId,
+            ),
+            questionIdMap = response.questionIdMap,
+            staffEmailDelivery = response.staffEmailDelivery,
+        )
+    }
+
+    override suspend fun getEventEditor(eventId: String): Result<EventEditorSession> = runCatching {
+        EventEditorSessionMapper.fromEditSnapshot(editorRemoteGateway.openEdit(eventId))
+    }
+
+    override suspend fun saveEventEditor(
+        eventId: String,
+        command: EventEditorSaveCommandDto,
+    ): Result<EventEditorSaveOutcome> = runCatching {
+        val response = editorRemoteGateway.save(eventId, command)
+        val canonical = EventEditorSessionMapper.canonicalState(response.snapshot)
+        EventEditorSaveOutcome(
+            session = EventEditorSession(
+                snapshot = response.snapshot,
+                canonicalState = canonical,
+                baseline = canonical,
+            ),
+            questionIdMap = response.questionIdMap,
+            staffEmailDelivery = response.staffEmailDelivery,
+        )
+    }
+
+    override suspend fun scheduleEventEditor(
+        eventId: String,
+        request: EventEditorScheduleRequestDto,
+    ): Result<EventScheduleOutcome> = runCatching {
+        val response = editorRemoteGateway.schedule(eventId, request)
+        val normalizedEventId = eventId.trim()
+        val event = response.event?.toEventOrNull()
+            ?: error("Event editor schedule response missing event")
+        val matches = mergeScheduleMatchProjections(
+            response.matches.mapNotNull { match -> match.toMatchOrNull() },
+        )
+        val persistedEvent = roomStore.cacheAndReadEvent(event, expectedEventId = normalizedEventId)
+        persistBootstrapMatches(normalizedEventId, matches)
+        EventScheduleOutcome(
+            event = persistedEvent,
+            matches = matches,
+            warnings = response.warnings.map { warning ->
+                (warning as? JsonPrimitive)?.content ?: warning.toString()
+            },
+            didRebuildSchedule = response.didRebuildSchedule,
+        )
+    }
 
     override suspend fun syncEventParticipants(
         event: Event,
@@ -421,50 +447,7 @@ class EventRepository(
         }
     }
 
-    override suspend fun getEventStaffInvites(eventId: String): Result<List<Invite>> = runCatching {
-        val normalizedEventId = eventId.trim().takeIf(String::isNotBlank) ?: return@runCatching emptyList()
-        detailRemoteGateway.fetchEventDto(normalizedEventId).staffInvites.orEmpty()
-    }
 
-    override suspend fun getEventStaffState(event: Event): Result<EventStaffState> = runCatching {
-        val eventId = event.id.trim().takeIf(String::isNotBlank)
-            ?: error("Event id is required.")
-        val response = api.get<EventStaffStateResponseDto>("api/events/$eventId/staff")
-        response.toEventStaffState(event).also { state ->
-            cacheEventStaffStateBestEffort(state)
-        }
-    }
-
-    override suspend fun reconcileEventStaff(
-        event: Event,
-        pendingInvites: List<EventStaffInviteInput>,
-        expectedRevision: String,
-    ): Result<EventStaffState> = runCatching {
-        val eventId = event.id.trim().takeIf(String::isNotBlank)
-            ?: error("Event id is required.")
-        val revision = expectedRevision.trim().takeIf(String::isNotBlank)
-            ?: error("Event staff revision is required.")
-        val response = api.put<EventStaffPutRequestDto, EventStaffStateResponseDto>(
-            path = "api/events/$eventId/staff",
-            body = EventStaffPutRequestDto(
-                expectedRevision = revision,
-                assistantHostIds = event.assistantHostIds,
-                eventOfficials = event.eventOfficials,
-                pendingInvites = pendingInvites.map { invite ->
-                    EventStaffPendingInviteDto(
-                        email = invite.email.trim().lowercase(),
-                        firstName = invite.firstName.trim(),
-                        lastName = invite.lastName.trim(),
-                        roles = invite.roles.map(EventStaffAssignmentRole::name).sorted(),
-                        resolvedUserId = invite.resolvedUserId?.trim()?.takeIf(String::isNotBlank),
-                    )
-                },
-            ),
-        )
-        response.toEventStaffState(event).also { state ->
-            cacheEventStaffStateBestEffort(state)
-        }
-    }
 
     override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> =
         catalogCoordinator.getEventsByIds(eventIds)
@@ -481,45 +464,6 @@ class EventRepository(
     ): Result<OrganizationEventPage> =
         catalogCoordinator.getOrganizationEventsPage(organizationId, limit, offset)
 
-    override suspend fun createEvent(
-        newEvent: Event,
-        requiredTemplateIds: List<String>,
-        leagueScoringConfig: LeagueScoringConfigDTO?,
-        fields: List<Field>?,
-        timeSlots: List<TimeSlot>?,
-    ): Result<Event> =
-        singleResponse(networkCall = {
-            val created = api.post<CreateEventRequestDto, EventResponseDto>(
-                path = "api/events",
-                body = CreateEventRequestDto(
-                    id = newEvent.id,
-                    event = newEvent.toUpdateDto(
-                        requiredTemplateIdsOverride = requiredTemplateIds,
-                        leagueScoringConfigOverride = null,
-                        fieldsOverride = null,
-                        timeSlotsOverride = null,
-                        includeOrganizationId = true,
-                        includeFieldObjects = false,
-                        includeTimeSlotObjects = false,
-                        applyEventDefaultsToMissingDivisionDetails = true,
-                    ),
-                    newFields = fields,
-                    timeSlots = timeSlots,
-                    leagueScoringConfig = leagueScoringConfig,
-                ),
-            ).event?.toEventOrNull() ?: error("Create event response missing event")
-            created
-        }, saveCall = { event ->
-            databaseService.getEventDao.upsertEvent(event)
-            participantSyncCoordinator.persistEventRelations(event)
-        }, onReturn = { event ->
-            AnalyticsTracker.capture(
-                AnalyticsEvent.EventCreated,
-                event.analyticsProperties(),
-            )
-            event
-        })
-
     override suspend fun createEventTemplateFromEvent(sourceEventId: String): Result<EventTemplateSummary> = runCatching {
         val normalizedSourceEventId = sourceEventId.trim()
         if (normalizedSourceEventId.isEmpty()) error("Template source event id is required.")
@@ -529,175 +473,6 @@ class EventRepository(
             body = CreateEventTemplateRequestDto(sourceEventId = normalizedSourceEventId),
         )
         response.template?.toEventTemplateSummaryOrNull() ?: error("Create template response missing template")
-    }
-
-    override suspend fun seedEventTemplate(
-        templateId: String,
-        newEventId: String,
-        newStartDate: Instant,
-    ): Result<SeededEventTemplateDraft> = runCatching {
-        val normalizedTemplateId = templateId.trim()
-        val normalizedEventId = newEventId.trim()
-        if (normalizedTemplateId.isEmpty()) error("Template id is required.")
-        if (normalizedEventId.isEmpty()) error("New event id is required.")
-
-        val response = api.post<SeedEventTemplateRequestDto, EventResponseDto>(
-            path = "api/event-templates/${normalizedTemplateId.encodeURLQueryComponent()}/seed",
-            body = SeedEventTemplateRequestDto(
-                newEventId = normalizedEventId,
-                newStartDate = newStartDate.toString(),
-            ),
-        )
-        val eventDto = response.event ?: error("Template seed response missing event")
-        val event = eventDto.toEventOrNull() ?: error("Template seed response included an invalid event")
-        val seededTimeSlots = eventDto.timeSlots.map { slot ->
-            val slotId = slot.id?.trim().orEmpty()
-            if (slotId.isEmpty()) {
-                error("Template seed response included a time slot without an id")
-            }
-            slot.toTimeSlot(slotId)
-        }
-        SeededEventTemplateDraft(
-            event = event,
-            fields = eventDto.fields,
-            timeSlots = seededTimeSlots,
-            leagueScoringConfig = eventDto.leagueScoringConfig,
-        )
-    }
-
-    override suspend fun scheduleEvent(
-        eventId: String,
-        participantCount: Int?,
-        includePlaceholderTeams: Boolean?,
-    ): Result<Event> = runCatching {
-        val normalizedId = eventId.trim()
-        if (normalizedId.isEmpty()) error("Schedule event requires an event id")
-
-        val response = api.post<ScheduleEventRequestDto, ScheduleEventResponseDto>(
-            path = "api/events/$normalizedId/schedule",
-            body = ScheduleEventRequestDto(
-                participantCount = participantCount,
-                includePlaceholderTeams = includePlaceholderTeams,
-            ),
-        )
-        val event = response.event?.toEventOrNull()
-            ?: error("Schedule event response missing event")
-        val matches = response.matches.mapNotNull { match -> match.toMatchOrNull() }
-
-        databaseService.getMatchDao.deleteMatchesOfTournament(event.id)
-        if (matches.isNotEmpty()) {
-            databaseService.getMatchDao.upsertMatches(matches)
-        }
-        databaseService.getEventDao.upsertEvent(event)
-        participantSyncCoordinator.persistEventRelations(event)
-        event
-    }
-
-    override suspend fun updateEvent(
-        newEvent: Event,
-        fields: List<Field>?,
-        timeSlots: List<TimeSlot>?,
-        leagueScoringConfig: LeagueScoringConfigDTO?,
-    ): Result<Event> = updateEventInternal(
-        newEvent = newEvent,
-        fields = fields,
-        timeSlots = timeSlots,
-        leagueScoringConfig = leagueScoringConfig,
-        expectedStaffRevision = null,
-    )
-
-    override suspend fun updateEventPreservingStaff(
-        newEvent: Event,
-        fields: List<Field>?,
-        timeSlots: List<TimeSlot>?,
-        leagueScoringConfig: LeagueScoringConfigDTO?,
-        expectedStaffRevision: String,
-    ): Result<Event> {
-        val revision = expectedStaffRevision.trim()
-        if (revision.isEmpty()) {
-            return Result.failure(IllegalArgumentException("Event staff revision is required."))
-        }
-        return updateEventInternal(
-            newEvent = newEvent,
-            fields = fields,
-            timeSlots = timeSlots,
-            leagueScoringConfig = leagueScoringConfig,
-            expectedStaffRevision = revision,
-        )
-    }
-
-    private suspend fun updateEventInternal(
-        newEvent: Event,
-        fields: List<Field>?,
-        timeSlots: List<TimeSlot>?,
-        leagueScoringConfig: LeagueScoringConfigDTO?,
-        expectedStaffRevision: String?,
-    ): Result<Event> =
-        singleResponse(networkCall = {
-            val eventDto = newEvent.toUpdateDto(
-                leagueScoringConfigOverride = leagueScoringConfig,
-                fieldsOverride = fields,
-                timeSlotsOverride = timeSlots,
-                includeOrganizationId = false,
-                includeFieldObjects = fields != null,
-                includeTimeSlotObjects = timeSlots != null,
-            )
-            val encoded = jsonMVP.encodeToJsonElement(UpdateEventRequestDto(eventDto)).jsonObject
-            val encodedEvent = JsonObject(
-                (encoded["event"] as? JsonObject)
-                    .orEmpty()
-                    .filterKeys { field ->
-                        field !in setOf("assistantHostIds", "eventOfficials", "officialIds")
-                    },
-            )
-            val cachedEvent = databaseService.getEventDao.getEventById(newEvent.id)
-            val clearableFields = cachedEvent
-                ?.let { existing -> newEvent.explicitlyClearedEventPatchFields(existing) }
-                .orEmpty()
-            val eventPatch = JsonObject(
-                encodedEvent + clearableFields
-                    .filterNot(encodedEvent::containsKey)
-                    .associateWith { JsonNull },
-            )
-            val requestBody = buildMap {
-                put("event", eventPatch)
-                expectedStaffRevision?.let { revision ->
-                    put("preserveStaffAssignments", JsonPrimitive(true))
-                    put("expectedStaffRevision", JsonPrimitive(revision))
-                }
-            }
-            val updated = api.patch<JsonObject, EventApiDto>(
-                path = "api/events/${newEvent.id}",
-                body = JsonObject(requestBody),
-            ).toEventOrNull() ?: error("Update event response missing event")
-            updated
-        }, saveCall = { event ->
-            if (expectedStaffRevision == null) {
-                databaseService.getEventDao.upsertEvent(event)
-                participantSyncCoordinator.persistEventRelations(event)
-            } else {
-                cacheUpdatedEventBestEffort(event)
-            }
-        }, onReturn = { event ->
-            event
-        })
-
-    private suspend fun cacheEventStaffStateBestEffort(state: EventStaffState) {
-        runCatching {
-            databaseService.getEventDao.upsertEvent(state.event)
-            participantSyncCoordinator.persistEventRelations(state.event)
-        }.onFailure { error ->
-            Napier.w("Failed to cache event staff state for ${state.event.id}.", error)
-        }
-    }
-
-    private suspend fun cacheUpdatedEventBestEffort(event: Event) {
-        runCatching {
-            databaseService.getEventDao.upsertEvent(event)
-            participantSyncCoordinator.persistEventRelations(event)
-        }.onFailure { error ->
-            Napier.w("Failed to cache staff-preserving event update for ${event.id}.", error)
-        }
     }
 
     override suspend fun updateLocalEvent(newEvent: Event): Result<Event> {

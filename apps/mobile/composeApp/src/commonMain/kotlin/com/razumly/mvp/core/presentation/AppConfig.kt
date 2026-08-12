@@ -1,7 +1,7 @@
 package com.razumly.mvp.core.presentation
 
+import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.repositories.SeededEventTemplateDraft
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 
@@ -57,9 +57,7 @@ sealed class AppConfig {
 
     @Serializable
     data class Create(
-        val seed: SeededEventTemplateDraft? = null,
-        val rentalBookingId: String? = null,
-        val rentalBookingItems: List<RentalBookingItemManifest> = emptyList(),
+        val bootstrap: EventEditorBootstrapQueryDto = EventEditorBootstrapQueryDto(),
     ) : AppConfig()
 
     @Serializable

@@ -20,31 +20,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlin.time.Instant
 
-internal fun Event.explicitlyClearedEventPatchFields(previous: Event): Set<String> = buildSet {
-    if (previous.address != null && address == null) add("address")
-    if (previous.rating != null && rating == null) add("rating")
-    if (previous.cancellationRefundHours != null && cancellationRefundHours == null) add("cancellationRefundHours")
-    if (previous.leagueScoringConfigId != null && leagueScoringConfigId == null) add("leagueScoringConfigId")
-    if (previous.affiliateUrl != null && affiliateUrl == null) add("affiliateUrl")
-    if (previous.scheduleText != null && scheduleText == null) add("scheduleText")
-    if (previous.dateDisplayMode != null && dateDisplayMode == null) add("dateDisplayMode")
-    if (previous.dateDisplayText != null && dateDisplayText == null) add("dateDisplayText")
-    if (previous.manualPaymentInstructions != null && manualPaymentInstructions == null) add("manualPaymentInstructions")
-    if (previous.minAge != null && minAge == null) add("minAge")
-    if (previous.maxAge != null && maxAge == null) add("maxAge")
-    if (previous.gamesPerOpponent != null && gamesPerOpponent == null) add("gamesPerOpponent")
-    if (previous.playoffTeamCount != null && playoffTeamCount == null) add("playoffTeamCount")
-    if (previous.matchDurationMinutes != null && matchDurationMinutes == null) add("matchDurationMinutes")
-    if (previous.setDurationMinutes != null && setDurationMinutes == null) add("setDurationMinutes")
-    if (previous.setsPerMatch != null && setsPerMatch == null) add("setsPerMatch")
-    if (previous.doTeamsOfficiate != null && doTeamsOfficiate == null) add("doTeamsOfficiate")
-    if (previous.teamOfficialsMaySwap != null && teamOfficialsMaySwap == null) add("teamOfficialsMaySwap")
-    if (previous.matchRulesOverride != null && matchRulesOverride == null) add("matchRulesOverride")
-    if (previous.restTimeMinutes != null && restTimeMinutes == null) add("restTimeMinutes")
-    if (previous.allowPaymentPlans != null && allowPaymentPlans == null) add("allowPaymentPlans")
-    if (previous.installmentCount != null && installmentCount == null) add("installmentCount")
-    if (previous.allowTeamSplitDefault != null && allowTeamSplitDefault == null) add("allowTeamSplitDefault")
-}
 
 @Serializable
 internal data class RegistrationQuestionDto(
@@ -61,12 +36,6 @@ internal data class RegistrationQuestionsResponseDto(
     val error: String? = null,
 )
 
-@Serializable
-internal data class SaveRegistrationQuestionsRequestDto(
-    val scopeType: String,
-    val scopeId: String,
-    val questions: List<RegistrationQuestionDraft>,
-)
 
 internal fun RegistrationQuestionDto.toTeamJoinQuestionOrNull(): TeamJoinQuestion? {
     val normalizedId = id.trim().takeIf(String::isNotBlank) ?: return null
