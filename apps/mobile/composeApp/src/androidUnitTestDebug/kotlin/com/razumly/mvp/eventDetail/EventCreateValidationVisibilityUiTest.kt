@@ -12,6 +12,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
@@ -26,6 +30,8 @@ import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_MANUAL
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.InclusivePriceBreakdown
 import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
@@ -383,6 +389,114 @@ class EventCreateValidationVisibilityUiTest {
 
         assertTrue(quoteConfirmed)
         assertEquals(9_876, persistedPriceCents)
+    }
+
+
+    @Test
+    fun editing_single_division_pool_count_allows_null_without_restoring_previous_value() {
+        val detail = DivisionDetail(
+            id = "event-pool-test__division__m_skill_open_age_u18",
+            maxParticipants = 8,
+            playoffTeamCount = 4,
+            poolCount = 3,
+        )
+        val event = Event(
+            id = "event-pool-test",
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            teamSignup = true,
+            singleDivision = true,
+            divisions = listOf(detail.id),
+            divisionDetails = listOf(detail),
+            maxParticipants = 8,
+            playoffTeamCount = 4,
+            registrationPaymentMode = REGISTRATION_PAYMENT_MODE_MANUAL,
+        )
+        val editor = DivisionEditorState(
+            editingId = detail.id,
+            gender = "M",
+            skillDivisionTypeId = "open",
+            ageDivisionTypeId = "u18",
+            name = "Men's Open U18",
+            maxParticipants = 8,
+            playoffTeamCount = 4,
+            poolCount = 3,
+        )
+        var activeEditor = editor
+
+        composeRule.setContent {
+            var renderedEditor by remember { mutableStateOf(editor) }
+            CompositionLocalProvider(localImageScheme provides testImageScheme()) {
+                MaterialTheme {
+                    EventDetailsDivisionEditorForm(
+                        state = EventDetailsDivisionEditorFormState(
+                            editEvent = event,
+                            divisionDetails = listOf(detail),
+                            selectedDivisions = listOf(detail.id),
+                            divisionEditor = renderedEditor,
+                            divisionEditorDefaults = editor.copy(editingId = null),
+                            divisionEditorReady = true,
+                            divisionScheduleUsesSets = false,
+                            skillDivisionTypeOptions = emptyList(),
+                            ageDivisionTypeOptions = emptyList(),
+                            genderOptions = emptyList(),
+                            divisionInputsExpanded = true,
+                            hostHasAccount = false,
+                            isNewEvent = false,
+                            showValidationErrors = true,
+                            addSelfToEvent = false,
+                        ),
+                        actions = EventDetailsDivisionEditorFormActions(
+                            onEditEvent = { this },
+                            onDivisionEditorChange = {
+                                activeEditor = it
+                                renderedEditor = it
+                            },
+                            onDivisionEditorDefaultsChange = {},
+                            onUpdateDivisionEditorSelection = { _, _, _ -> },
+                            onNormalizeLeagueConfigWithSportMode = { it },
+                            onUpdateDivisionLeagueConfig = {},
+                            onUpdateDivisionPlayoffConfig = {},
+                            onUpdateDivisionTournamentConfig = {},
+                            onSyncLeagueSlotsForSelectedDivisions = { _, _ -> },
+                            onSetDivisionPaymentPlansEnabled = {},
+                            onSyncDivisionInstallmentCount = {},
+                            onUpdateDivisionInstallmentAmount = { _, _ -> },
+                            onSetDivisionInstallmentDueDatePickerIndex = {},
+                            onAddDivisionInstallmentRow = {},
+                            onRemoveDivisionInstallmentRow = {},
+                            onAddSelfToEventChange = {},
+                            onAddCurrentUser = {},
+                            onDivisionInputsExpandedChange = {},
+                        ),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Pool Count *").assertIsDisplayed()
+        composeRule.onAllNodes(hasSetTextAction())[3].performTextReplacement("")
+        composeRule.waitForIdle()
+
+        assertEquals(null, activeEditor.poolCount)
+        composeRule.onAllNodes(hasSetTextAction())[3].assert(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.EditableText,
+                AnnotatedString(""),
+            ),
+        )
+        composeRule.onNodeWithText("Required when pool play is enabled.").assertIsDisplayed()
+
+        composeRule.onAllNodes(hasSetTextAction())[3].performTextReplacement("2")
+        composeRule.waitForIdle()
+
+        assertEquals(2, activeEditor.poolCount)
+
+        composeRule.onAllNodes(hasSetTextAction())[3].performTextReplacement("0")
+        composeRule.waitForIdle()
+
+        assertEquals(0, activeEditor.poolCount)
+        composeRule.onNodeWithText("Required when pool play is enabled.").assertIsDisplayed()
     }
 
     private fun assertHiddenInitialEventErrors() {

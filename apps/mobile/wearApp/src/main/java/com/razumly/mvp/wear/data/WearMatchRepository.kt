@@ -875,7 +875,7 @@ class WearMatchRepository(
                 actualEnd = payload["time"].stringOrNull() ?: next.actualEnd,
             )
         }
-        return next.syncLegacyScoresFromSegments()
+        return next.syncScoresFromSegments()
     }
 
     private fun WearMatchDto.applyLocalScoreSet(scoreSet: WearScoreSetDto): WearMatchDto {
@@ -901,7 +901,7 @@ class WearMatchRepository(
         val nextSegments = segments.toMutableList().apply {
             if (targetIndex >= 0) this[targetIndex] = nextSegment else add(nextSegment)
         }
-        return copy(segments = nextSegments.sortedBy { it.sequence }).syncLegacyScoresFromSegments()
+        return copy(segments = nextSegments.sortedBy { it.sequence }).syncScoresFromSegments()
     }
 
     private fun WearMatchDto.applyLocalSegmentOperations(operations: List<JsonObject>): WearMatchDto {
@@ -1045,19 +1045,12 @@ class WearMatchRepository(
         return copy(segments = updated)
     }
 
-    private fun WearMatchDto.syncLegacyScoresFromSegments(): WearMatchDto {
+    private fun WearMatchDto.syncScoresFromSegments(): WearMatchDto {
         val ordered = segments.sortedBy { it.sequence }
         return copy(
             segments = ordered,
             team1Points = ordered.map { segment -> team1Id?.let { segment.scores[it] ?: 0 } ?: 0 },
             team2Points = ordered.map { segment -> team2Id?.let { segment.scores[it] ?: 0 } ?: 0 },
-            setResults = ordered.map { segment ->
-                when (segment.winnerEventTeamId) {
-                    team1Id -> 1
-                    team2Id -> 2
-                    else -> 0
-                }
-            },
         )
     }
 

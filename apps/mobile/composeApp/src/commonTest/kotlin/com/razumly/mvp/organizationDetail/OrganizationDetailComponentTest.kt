@@ -42,6 +42,7 @@ import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.TeamRegistrationConsent
 import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
 import com.razumly.mvp.core.presentation.INavigationHandler
+import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.eventCreate.CreateEvent_FakeBillingRepository
@@ -642,6 +643,21 @@ class OrganizationDetailComponentTest : MainDispatcherTest() {
 
             assertEquals(listOf("booking-canonical-1"), navigationHandler.rentalBookingIds)
             assertNull(harness.component.completedRentalReservation.value)
+        }
+
+    @Test
+    fun organization_create_uses_the_loaded_organization_as_editor_bootstrap_context() =
+        runTest(testDispatcher) {
+            val navigationHandler = RecordingNavigationHandler()
+            val harness = OrganizationDetailHarness(
+                product = createProduct(period = "SINGLE"),
+                navigationHandler = navigationHandler,
+            )
+            advance()
+
+            harness.component.createOrganizationEvent()
+
+            assertEquals(listOf("org-1"), navigationHandler.organizationCreateIds)
         }
 
     @Test
@@ -1513,9 +1529,14 @@ private object NoopNavigationHandler : INavigationHandler {
 
 private class RecordingNavigationHandler : INavigationHandler by NoopNavigationHandler {
     val rentalBookingIds = mutableListOf<String>()
+    val organizationCreateIds = mutableListOf<String>()
 
     override fun navigateToCreateFromRental(rentalBookingId: String) {
         rentalBookingIds += rentalBookingId
+    }
+
+    override fun navigateToCreate(bootstrap: EventEditorBootstrapQueryDto) {
+        bootstrap.organizationId?.let(organizationCreateIds::add)
     }
 }
 

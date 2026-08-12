@@ -290,7 +290,6 @@ data class WearMatchDto(
     val division: String? = null,
     val team1Points: List<Int> = emptyList(),
     val team2Points: List<Int> = emptyList(),
-    val setResults: List<Int> = emptyList(),
     val officialCheckedIn: Boolean? = null,
     val officialIds: List<WearOfficialAssignmentDto> = emptyList(),
     val teamOfficialId: String? = null,

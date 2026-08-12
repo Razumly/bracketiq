@@ -66,7 +66,6 @@ fun LeagueConfigurationFields(
                     }
                 },
                 isError = false,
-                showZero = true,
             )
         },
     )
@@ -275,7 +274,6 @@ fun TournamentConfigurationFields(
                     }
                 },
                 isError = false,
-                showZero = true,
             )
         },
     )

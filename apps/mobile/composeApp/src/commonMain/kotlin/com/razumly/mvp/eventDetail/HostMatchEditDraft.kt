@@ -74,8 +74,7 @@ internal fun buildHostMatchScoreDrafts(
             sequence = sequence,
             team1Score = team1Score.coerceAtLeast(0),
             team2Score = team2Score.coerceAtLeast(0),
-            confirmed = segment?.status?.trim()?.uppercase() == "COMPLETE" ||
-                match.setResults.getOrElse(index) { 0 } in 1..2,
+            confirmed = segment?.status?.trim()?.uppercase() == "COMPLETE",
         )
     }
 }
@@ -341,18 +340,12 @@ internal fun buildHostMatchScorePayload(
     }
     val team1Points = effectiveDrafts.map(HostMatchScoreDraft::team1Score)
     val team2Points = effectiveDrafts.map(HostMatchScoreDraft::team2Score)
-    val setResults = segments.map { segment ->
-        when (segment.winnerEventTeamId) {
-            match.team1Id -> 1
-            match.team2Id -> 2
-            else -> 0
-        }
-    }
+    val segmentWinnerIds = segments.mapNotNull { segment -> segment.winnerEventTeamId }
     val matchComplete = when (rules.scoringModel.trim().uppercase()) {
         "SETS" -> {
             val winsNeeded = ((rules.segmentCount + 1) / 2).coerceAtLeast(1)
-            setResults.count { winner -> winner == 1 } >= winsNeeded ||
-                setResults.count { winner -> winner == 2 } >= winsNeeded
+            segmentWinnerIds.count { winner -> winner == match.team1Id } >= winsNeeded ||
+                segmentWinnerIds.count { winner -> winner == match.team2Id } >= winsNeeded
         }
 
         else -> segments.isNotEmpty() && segments.all { segment -> segment.status == "COMPLETE" }
@@ -360,8 +353,8 @@ internal fun buildHostMatchScorePayload(
     val completedWinner = when {
         !matchComplete -> null
         rules.scoringModel.trim().uppercase() == "SETS" -> {
-            val team1Wins = setResults.count { winner -> winner == 1 }
-            val team2Wins = setResults.count { winner -> winner == 2 }
+            val team1Wins = segmentWinnerIds.count { winner -> winner == match.team1Id }
+            val team2Wins = segmentWinnerIds.count { winner -> winner == match.team2Id }
             when {
                 team1Wins > team2Wins -> match.team1Id
                 team2Wins > team1Wins -> match.team2Id
@@ -425,7 +418,6 @@ internal fun buildHostMatchScorePayload(
         segments = segments,
         team1Points = team1Points,
         team2Points = team2Points,
-        setResults = setResults,
     )
 }
 

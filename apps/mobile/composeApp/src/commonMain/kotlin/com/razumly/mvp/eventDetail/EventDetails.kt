@@ -535,6 +535,11 @@ fun EventDetails(
             null
         }
     }
+    val defaultPoolCount = if (editEvent.isTournamentPoolPlayEnabled()) {
+        divisionDetailsForSettings.firstOrNull()?.poolCount
+    } else {
+        null
+    }
     val divisionEditorBaseState = remember(
         editEvent.priceCents,
         editEvent.maxParticipants,
@@ -547,12 +552,13 @@ fun EventDetails(
         baseLeagueConfig,
         baseTournamentConfig,
         defaultDivisionConfigDetail,
+        defaultPoolCount,
     ) {
         defaultDivisionEditorState(
             defaultPriceCents = editEvent.priceCents,
             defaultMaxParticipants = editEvent.maxParticipants,
             defaultPlayoffTeamCount = editEvent.playoffTeamCount,
-            defaultPoolCount = defaultDivisionConfigDetail?.poolCount,
+            defaultPoolCount = defaultPoolCount,
             defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true,
             defaultInstallmentCount = editEvent.installmentCount,
             defaultInstallmentDueDates = editEvent.installmentDueDates,

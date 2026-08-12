@@ -180,13 +180,6 @@ data class EventTemplateSummary(
     val updatedAt: Instant? = null,
 )
 
-@Serializable
-data class SeededEventTemplateDraft(
-    val event: Event,
-    val fields: List<Field> = emptyList(),
-    val timeSlots: List<TimeSlot> = emptyList(),
-    val leagueScoringConfig: LeagueScoringConfigDTO? = null,
-)
 
 @Serializable
 data class EventComplianceRequiredDocument(

@@ -1,6 +1,7 @@
 package com.razumly.mvp.organizationDetail
 
 import com.razumly.mvp.core.network.userMessage
+import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.lifecycle.doOnDestroy
@@ -256,6 +257,7 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     fun continueFromDiscountCodePrompt(code: String?)
     fun dismissDiscountCodePrompt()
     fun startRentalReservation(context: RentalCreateContext, selections: List<RentalOrderSelectionRequest>)
+    fun createOrganizationEvent()
     fun createEventFromCompletedRentalReservation()
     fun dismissCompletedRentalReservation()
     fun viewEvent(event: Event)
@@ -1243,6 +1245,12 @@ class DefaultOrganizationDetailComponent(
         _completedRentalReservation.value = null
         navigationHandler.navigateToCreateFromRental(
             rentalBookingId = completedReservation.bookingId,
+        )
+    }
+
+    override fun createOrganizationEvent() {
+        navigationHandler.navigateToCreate(
+            EventEditorBootstrapQueryDto(organizationId = organizationId),
         )
     }
 

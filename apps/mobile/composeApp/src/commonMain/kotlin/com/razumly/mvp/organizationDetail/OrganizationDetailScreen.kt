@@ -20,6 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -56,6 +57,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.evergreenDateDisplayLabel
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.dataTypes.canUsePaidBilling
+import com.razumly.mvp.core.data.dataTypes.canManageEventsForViewer
 import com.razumly.mvp.core.data.dataTypes.resolveOrganizationClaimUrl
 import com.razumly.mvp.core.data.util.normalizeDivisionDetail
 import com.razumly.mvp.core.network.stripeRedirectBaseUrl
@@ -156,6 +158,9 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val discountCodePrompt by component.discountCodePrompt.collectAsState()
     val isReservingRental by component.isReservingRental.collectAsState()
     val completedRentalReservation by component.completedRentalReservation.collectAsState()
+    val canCreateOrganizationEvent = organization?.let { currentOrganization ->
+        currentOrganization.canManageEventsForViewer(currentUser.id)
+    } == true
     val claimUrl = remember(
         organization?.id,
         organization?.claimable,
@@ -499,6 +504,14 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                     }
                 },
                 actions = {
+                    if (canCreateOrganizationEvent) {
+                        IconButton(onClick = component::createOrganizationEvent) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Create event",
+                            )
+                        }
+                    }
                     if (selectedTab == OrganizationDetailTab.OVERVIEW) {
                         OrganizationClaimAction(
                             claimUrl = claimUrl,

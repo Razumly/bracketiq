@@ -807,7 +807,6 @@ internal fun resolveMatchCardScoreDisplay(
 
     val matchScoreSetCount = listOf(
         match.segments.size,
-        match.setResults.size,
         match.team1Points.size,
         match.team2Points.size,
     ).maxOrNull() ?: 0

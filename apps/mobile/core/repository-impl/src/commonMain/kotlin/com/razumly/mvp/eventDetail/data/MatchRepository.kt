@@ -279,7 +279,6 @@ class MatchRepository(
             segments = localMatch.segments,
             team1Points = localMatch.team1Points,
             team2Points = localMatch.team2Points,
-            setResults = localMatch.setResults,
         )
     }
 
@@ -1021,7 +1020,6 @@ class MatchRepository(
                 body = MatchUpdateDto(
                     team1Points = sanitizedMatch.team1Points,
                     team2Points = sanitizedMatch.team2Points,
-                    setResults = sanitizedMatch.setResults,
                     segmentOperations = sanitizedMatch.toSegmentOperations(),
                     team1Id = sanitizedMatch.team1Id,
                     team2Id = sanitizedMatch.team2Id,

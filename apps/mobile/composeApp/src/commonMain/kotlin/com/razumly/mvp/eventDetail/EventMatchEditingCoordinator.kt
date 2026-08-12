@@ -188,7 +188,6 @@ internal class EventMatchEditingCoordinator {
             division = defaultDivision,
             team1Points = emptyList(),
             team2Points = emptyList(),
-            setResults = emptyList(),
             side = input.seed?.side,
             losersBracket = input.seed?.losersBracket ?: false,
             winnerNextMatchId = input.seed?.winnerNextMatchId.normalizedToken(),

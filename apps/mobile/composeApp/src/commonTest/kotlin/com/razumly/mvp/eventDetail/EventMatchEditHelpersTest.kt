@@ -185,7 +185,6 @@ class EventMatchEditHelpersTest {
             officialId = "official-1",
             team1Points = listOf(21),
             team2Points = listOf(18),
-            setResults = listOf(1),
             locked = true,
         )
 
@@ -195,7 +194,7 @@ class EventMatchEditHelpersTest {
         assertNull(reset.teamOfficialId)
         assertEquals(emptyList(), reset.team1Points)
         assertEquals(emptyList(), reset.team2Points)
-        assertEquals(emptyList(), reset.setResults)
+        assertEquals(emptyList(), reset.segments)
         assertFalse(reset.locked)
         assertEquals("final", reset.winnerNextMatchId)
     }

@@ -173,7 +173,7 @@ internal fun MatchMVP.toEmptyBracketMatch(): MatchMVP = copy(
     teamOfficialId = null,
     team1Points = emptyList(),
     team2Points = emptyList(),
-    setResults = emptyList(),
+    segments = emptyList(),
     locked = false,
 )
 

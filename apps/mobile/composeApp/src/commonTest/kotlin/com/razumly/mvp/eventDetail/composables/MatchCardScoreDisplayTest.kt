@@ -177,7 +177,6 @@ class MatchCardScoreDisplayTest {
             losersBracket = true,
             team1Points = listOf(15),
             team2Points = listOf(10),
-            setResults = listOf(1),
             resolvedMatchRules = ResolvedMatchRulesMVP(
                 scoringModel = "SETS",
                 segmentCount = 3,
@@ -267,7 +266,6 @@ class MatchCardScoreDisplayTest {
         segments: List<MatchSegmentMVP> = emptyList(),
         team1Points: List<Int> = emptyList(),
         team2Points: List<Int> = emptyList(),
-        setResults: List<Int> = emptyList(),
         resolvedMatchRules: ResolvedMatchRulesMVP? = null,
         losersBracket: Boolean = false,
     ): MatchMVP = MatchMVP(
@@ -278,7 +276,6 @@ class MatchCardScoreDisplayTest {
         segments = segments,
         team1Points = team1Points,
         team2Points = team2Points,
-        setResults = setResults,
         resolvedMatchRules = resolvedMatchRules,
         losersBracket = losersBracket,
         id = "match_1",

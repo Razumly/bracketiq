@@ -231,10 +231,11 @@ private fun DivisionSingleDivisionDefaults(
     AnimatedVisibility(editEvent.singleDivision) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             val singleDivisionTournamentPoolPlayEnabled = editEvent.isTournamentPoolPlayEnabled()
-            val singleDivisionPoolCount =
+            val singleDivisionPoolCount = if (divisionEditor.editingId.isNullOrBlank()) {
                 divisionEditorDefaults.poolCount
-                    ?: state.divisionDetails.firstOrNull()?.poolCount
-                    ?: divisionEditor.poolCount
+            } else {
+                divisionEditor.poolCount
+            }
             val singleDivisionPoolTeamCount = derivePoolTeamCount(
                 maxTeams = editEvent.maxParticipants,
                 poolCount = singleDivisionPoolCount,
@@ -419,6 +420,7 @@ private fun DivisionSingleDivisionDefaults(
                             (playoffTeamCount ?: 0) < 2 ||
                                 (
                                     singleDivisionPoolCount != null &&
+                                        singleDivisionPoolCount > 0 &&
                                         playoffTeamCount != null &&
                                         playoffTeamCount % singleDivisionPoolCount != 0
                                     )
@@ -439,14 +441,12 @@ private fun DivisionSingleDivisionDefaults(
                                     poolCount = parsedPoolCount?.takeIf { count -> count >= 1 },
                                 ),
                             )
-                            if (divisionEditor.editingId.isNullOrBlank()) {
-                                actions.onDivisionEditorChange(
-                                    divisionEditor.copy(
-                                        poolCount = parsedPoolCount,
-                                        error = null,
-                                    ),
-                                )
-                            }
+                            actions.onDivisionEditorChange(
+                                divisionEditor.copy(
+                                    poolCount = parsedPoolCount,
+                                    error = null,
+                                ),
+                            )
                             actions.onEditEvent {
                                 val nextDetails = applySingleDivisionDefaultsToDetails(
                                     details = divisionDetails,
@@ -462,10 +462,15 @@ private fun DivisionSingleDivisionDefaults(
                             (singleDivisionPoolCount ?: 0) < 1 ||
                             (
                                 singleDivisionPoolCount != null &&
+                                    singleDivisionPoolCount > 0 &&
                                     editEvent.maxParticipants % singleDivisionPoolCount != 0
                             )
                         ),
-                        errorMessage = "Max teams must divide evenly by pools.",
+                        errorMessage = if ((singleDivisionPoolCount ?: 0) < 1) {
+                            "Required when pool play is enabled."
+                        } else {
+                            "Max teams must divide evenly by pools."
+                        },
                     )
                     NumberInputField(
                         modifier = Modifier.fillMaxWidth(0.48f),
@@ -759,6 +764,7 @@ private fun DivisionTournamentPoolFields(
                     ((divisionBracketTeamCount ?: 0) < 2 ||
                         (
                             divisionPoolCount != null &&
+                                divisionPoolCount > 0 &&
                                 divisionBracketTeamCount != null &&
                                 divisionBracketTeamCount % divisionPoolCount != 0
                             )),
@@ -787,9 +793,14 @@ private fun DivisionTournamentPoolFields(
                 ((divisionPoolCount ?: 0) < 1 ||
                     (
                         divisionPoolCount != null &&
+                            divisionPoolCount > 0 &&
                             divisionMaxTeams % divisionPoolCount != 0
                         )),
-            errorMessage = "Max teams must divide evenly by pools.",
+            errorMessage = if ((divisionPoolCount ?: 0) < 1) {
+                "Required when pool play is enabled."
+            } else {
+                "Max teams must divide evenly by pools."
+            },
         )
     }
     NumberInputField(
@@ -961,31 +972,3 @@ private fun DivisionPaymentPlanFields(
 
 private fun centsInputValue(cents: Int): String =
     cents.coerceAtLeast(0).takeIf { it > 0 }?.toString().orEmpty()
-
-private fun applySingleDivisionDefaultsToDetails(
-    details: List<DivisionDetail>,
-    defaultPriceCents: Int,
-    defaultMaxParticipants: Int,
-    defaultPlayoffTeamCount: Int?,
-    defaultPoolCount: Int? = null,
-): List<DivisionDetail> {
-    val normalizedPriceCents = defaultPriceCents.coerceAtLeast(0)
-    val normalizedMaxParticipants = defaultMaxParticipants.takeIf { value -> value >= 2 }
-    val normalizedPoolCount = defaultPoolCount?.takeIf { value -> value >= 1 }
-    return details.map { detail ->
-        detail.copy(
-            price = normalizedPriceCents,
-            maxParticipants = normalizedMaxParticipants,
-            playoffTeamCount = defaultPlayoffTeamCount,
-            poolCount = normalizedPoolCount ?: detail.poolCount,
-            poolTeamCount = if (normalizedPoolCount != null && normalizedMaxParticipants != null) {
-                derivePoolTeamCount(
-                    maxTeams = normalizedMaxParticipants,
-                    poolCount = normalizedPoolCount,
-                )
-            } else {
-                detail.poolTeamCount
-            },
-        )
-    }
-}

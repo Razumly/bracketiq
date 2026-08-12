@@ -1025,7 +1025,6 @@ class MatchRepositoryHttpTest {
                         "team2Id": "team_2",
                         "team1Points": [0],
                         "team2Points": [0],
-                        "setResults": [0],
                         "officialCheckedIn": true,
                         "fieldId": "field_remote"
                       }
@@ -1048,7 +1047,6 @@ class MatchRepositoryHttpTest {
             team2Id = "team_2",
             team1Points = listOf(2),
             team2Points = listOf(1),
-            setResults = listOf(1),
             segments = listOf(
                 MatchSegmentMVP(
                     id = "match_1_segment_1",
@@ -1075,7 +1073,6 @@ class MatchRepositoryHttpTest {
         val refreshedMatch = result.getOrThrow()
         assertEquals(listOf(2), refreshedMatch.team1Points)
         assertEquals(listOf(1), refreshedMatch.team2Points)
-        assertEquals(listOf(1), refreshedMatch.setResults)
         assertEquals(2, refreshedMatch.segments.single().scores["team_1"])
         assertEquals(true, refreshedMatch.officialCheckedIn)
         assertEquals("field_remote", refreshedMatch.fieldId)
@@ -1104,7 +1101,6 @@ class MatchRepositoryHttpTest {
                           "team2Id": "team_2",
                           "team1Points": [0],
                           "team2Points": [0],
-                          "setResults": [0],
                           "officialCheckedIn": true,
                           "fieldId": "field_remote"
                         }
@@ -1128,7 +1124,6 @@ class MatchRepositoryHttpTest {
             team2Id = "team_2",
             team1Points = listOf(3),
             team2Points = listOf(2),
-            setResults = listOf(0),
             segments = listOf(
                 MatchSegmentMVP(
                     id = "match_1_segment_1",
@@ -1327,7 +1322,6 @@ class MatchRepositoryHttpTest {
             segments = listOf(completedSegment),
             team1Points = listOf(25),
             team2Points = listOf(3),
-            setResults = listOf(1),
         )
         val repository = MatchRepository(
             api = MvpApiClient(
@@ -1362,7 +1356,6 @@ class MatchRepositoryHttpTest {
                     ),
                     team1Points = listOf(0),
                     team2Points = listOf(0),
-                    setResults = listOf(0),
                 ),
             ),
         )
@@ -1379,7 +1372,6 @@ class MatchRepositoryHttpTest {
         assertEquals(JsonPrimitive("2026-07-31T18:00:00Z"), update["actualStart"])
         assertEquals(JsonArray(listOf(JsonPrimitive(0))), update["team1Points"])
         assertEquals(JsonArray(listOf(JsonPrimitive(0))), update["team2Points"])
-        assertEquals(JsonArray(listOf(JsonPrimitive(0))), update["setResults"])
         val segment = update.getValue("segments").jsonArray.single().jsonObject
         assertEquals(JsonPrimitive("NOT_STARTED"), segment["status"])
         assertEquals(JsonPrimitive(0), segment.getValue("scores").jsonObject["team_1"])

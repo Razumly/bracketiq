@@ -207,7 +207,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
             matchRulesSnapshot = snapshot,
             team1Points = listOf(0, 0),
             team2Points = listOf(0, 0),
-            setResults = listOf(0, 0),
             segments = listOf(
                 createSegment(sequence = 1, team1Score = 0, team2Score = 0).copy(scores = emptyMap()),
                 createSegment(sequence = 2, team1Score = 0, team2Score = 0),
@@ -252,7 +251,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
             ),
             team1Points = listOf(0, 0),
             team2Points = listOf(0, 0),
-            setResults = listOf(0, 0),
             segments = listOf(
                 createSegment(sequence = 1, team1Score = 0, team2Score = 0),
                 createSegment(sequence = 2, team1Score = 0, team2Score = 0),
@@ -543,7 +541,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
             ),
             team1Points = listOf(0, 0),
             team2Points = listOf(0, 0),
-            setResults = listOf(0, 0),
             segments = listOf(
                 createSegment(sequence = 1, team1Score = 0, team2Score = 0).copy(
                     status = "IN_PROGRESS",
@@ -1368,7 +1365,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
             ),
             team1Points = listOf(0),
             team2Points = listOf(0),
-            setResults = listOf(0),
         )
         val harness = MatchDetailHarness(
             event = event,
@@ -1612,7 +1608,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
             actualStart = TEST_ACTUAL_START,
             team1Points = listOf(10),
             team2Points = listOf(24),
-            setResults = listOf(0),
             segments = listOf(createSegment(sequence = 1, team1Score = 10, team2Score = 24)),
         )
         val harness = MatchDetailHarness(
@@ -1711,7 +1706,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
             actualStart = TEST_ACTUAL_START,
             team1Points = listOf(25, 11, 0),
             team2Points = listOf(3, 24, 0),
-            setResults = listOf(1, 0, 0),
             segments = listOf(
                 createSegment(sequence = 1, team1Score = 25, team2Score = 3).copy(status = "COMPLETE"),
                 createSegment(sequence = 2, team1Score = 11, team2Score = 24).copy(status = "IN_PROGRESS"),
@@ -1765,7 +1759,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
             actualStart = TEST_ACTUAL_START,
             team1Points = listOf(20),
             team2Points = listOf(2),
-            setResults = listOf(0),
             segments = listOf(createSegment(sequence = 1, team1Score = 20, team2Score = 2)),
         )
         val harness = MatchDetailHarness(
@@ -1814,7 +1807,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
         ).copy(
             team1Points = listOf(21),
             team2Points = listOf(2),
-            setResults = listOf(0),
             segments = listOf(createSegment(sequence = 1, team1Score = 21, team2Score = 2)),
         )
 
@@ -1871,7 +1863,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
         ).copy(
             team1Points = listOf(20),
             team2Points = listOf(2),
-            setResults = listOf(0),
             segments = listOf(createSegment(sequence = 1, team1Score = 20, team2Score = 2)),
         )
 
@@ -1921,7 +1912,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
         ).copy(
             team1Points = listOf(21),
             team2Points = listOf(18),
-            setResults = listOf(0),
             segments = listOf(createSegment(sequence = 1, team1Score = 21, team2Score = 18)),
             start = Instant.parse("2025-01-01T12:00:00Z"),
             end = Instant.parse("2025-01-01T13:00:00Z"),
@@ -1987,7 +1977,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
         ).copy(
             team1Points = listOf(21, 0, 0),
             team2Points = listOf(18, 0, 0),
-            setResults = listOf(0, 0, 0),
             segments = listOf(
                 createSegment(sequence = 1, team1Score = 21, team2Score = 18),
                 createSegment(sequence = 2, team1Score = 0, team2Score = 0),
@@ -2041,7 +2030,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
             actualStart = TEST_ACTUAL_START,
             team1Points = listOf(3, 2, 1, 3),
             team2Points = listOf(1, 1, 2, 4),
-            setResults = listOf(0, 0, 0, 0),
             segments = listOf(
                 createSegment(sequence = 1, team1Score = 3, team2Score = 1).copy(
                     status = "COMPLETE",
@@ -2123,7 +2111,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
             winnerEventTeamId = "team-b",
             team1Points = listOf(3, 2, 1, 3),
             team2Points = listOf(1, 1, 2, 4),
-            setResults = listOf(0, 0, 0, 0),
             segments = List(4) { index ->
                 createSegment(
                     sequence = index + 1,
@@ -2182,7 +2169,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
         ).copy(
             team1Points = listOf(21, 0, 0),
             team2Points = listOf(18, 0, 0),
-            setResults = listOf(0, 0, 0),
             segments = listOf(
                 createSegment(sequence = 1, team1Score = 21, team2Score = 18),
                 createSegment(sequence = 2, team1Score = 0, team2Score = 0),
@@ -2268,7 +2254,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
             ),
             team1Points = listOf(21),
             team2Points = listOf(18),
-            setResults = listOf(1),
             winnerNextMatchId = "match-2",
             segments = listOf(
                 createSegment(sequence = 1, team1Score = 21, team2Score = 18).copy(
@@ -2324,7 +2309,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
             ),
             team1Points = listOf(0),
             team2Points = listOf(0),
-            setResults = listOf(0),
         )
         val harness = MatchDetailHarness(
             event = event,
@@ -2499,7 +2483,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
             ),
             team1Points = listOf(2, 0),
             team2Points = listOf(1, 0),
-            setResults = listOf(0, 0),
             segments = listOf(
                 createSegment(sequence = 1, team1Score = 2, team2Score = 1),
                 createSegment(sequence = 2, team1Score = 0, team2Score = 0),
@@ -2563,7 +2546,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
             ),
             team1Points = listOf(2, 0),
             team2Points = listOf(1, 0),
-            setResults = listOf(0, 0),
             segments = listOf(
                 createSegment(sequence = 1, team1Score = 2, team2Score = 1),
                 createSegment(sequence = 2, team1Score = 0, team2Score = 0),
@@ -2695,7 +2677,6 @@ class MatchContentComponentTest : MainDispatcherTest() {
                 actualStart = TEST_ACTUAL_START,
                 team1Points = listOf(1, 0),
                 team2Points = listOf(0, 0),
-                setResults = listOf(1, 0),
                 segments = listOf(
                     createSegment(sequence = 1, team1Score = 1, team2Score = 0).copy(status = "COMPLETE"),
                     createSegment(sequence = 2, team1Score = 0, team2Score = 0).copy(
@@ -3559,7 +3540,6 @@ private fun createMatch(
     officialCheckedIn = officialCheckedIn,
     team1Points = listOf(0),
     team2Points = listOf(0),
-    setResults = listOf(0),
     start = Instant.fromEpochMilliseconds(1_700_000_000_000),
 )
 

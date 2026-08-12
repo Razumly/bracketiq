@@ -357,6 +357,42 @@ class EventDetailsDivisionEditorHelpersTest {
     }
 
     @Test
+    fun default_division_editor_state_keeps_missing_default_pool_empty() {
+        val state = defaultDivisionEditorState(
+            defaultPriceCents = 0,
+            defaultMaxParticipants = 12,
+            defaultPlayoffTeamCount = 6,
+            defaultPoolCount = null,
+            defaultAllowPaymentPlans = false,
+            defaultInstallmentCount = null,
+            defaultInstallmentDueDates = emptyList(),
+            defaultInstallmentAmounts = emptyList(),
+        )
+
+        assertNull(state.poolCount)
+    }
+
+    @Test
+    fun apply_single_division_defaults_clears_a_missing_pool_count() {
+        val detail = DivisionDetail(
+            id = "event-1__division__m_skill_open_age_u18",
+            poolCount = 3,
+            poolTeamCount = 4,
+        )
+
+        val updated = applySingleDivisionDefaultsToDetails(
+            details = listOf(detail),
+            defaultPriceCents = 0,
+            defaultMaxParticipants = 12,
+            defaultPlayoffTeamCount = 6,
+            defaultPoolCount = null,
+        ).single()
+
+        assertNull(updated.poolCount)
+        assertNull(updated.poolTeamCount)
+    }
+
+    @Test
     fun resolve_division_editor_schedule_configs_uses_event_values_for_single_division() {
         val event = Event(
             id = "event-single",

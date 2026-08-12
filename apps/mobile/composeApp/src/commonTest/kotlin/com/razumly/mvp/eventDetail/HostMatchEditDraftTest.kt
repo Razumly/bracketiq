@@ -16,7 +16,6 @@ class HostMatchEditDraftTest {
         val match = match().copy(
             team1Points = listOf(21, 16, 13),
             team2Points = listOf(10, 21, 15),
-            setResults = listOf(1, 2, 2),
         )
         val drafts = buildHostMatchScoreDrafts(match, count = 3)
 
@@ -133,7 +132,7 @@ class HostMatchEditDraftTest {
     }
 
     @Test
-    fun given_completed_set_draft_when_payload_builds_then_segments_and_legacy_scores_stay_synchronized() {
+    fun given_completed_set_draft_when_payload_builds_then_segments_and_score_projections_stay_synchronized() {
         val source = match()
         val rules = setRules().copy(segmentCount = 4, setPointTargets = listOf(21, 21, 15, 11))
         val drafts = listOf(
@@ -156,7 +155,6 @@ class HostMatchEditDraftTest {
 
         assertEquals(listOf(21, 16, 15, 0), updated.team1Points)
         assertEquals(listOf(10, 21, 8, 0), updated.team2Points)
-        assertEquals(listOf(1, 2, 1, 0), updated.setResults)
         assertEquals(4, updated.segments.size)
         assertEquals("COMPLETE", updated.status)
         assertEquals("team-a", updated.winnerEventTeamId)
@@ -174,7 +172,6 @@ class HostMatchEditDraftTest {
             winnerEventTeamId = "team-a",
             team1Points = listOf(25, 0, 0),
             team2Points = listOf(3, 0, 0),
-            setResults = listOf(1, 0, 0),
             segments = listOf(
                 MatchSegmentMVP(
                     id = "match-1_segment_1",
@@ -219,7 +216,6 @@ class HostMatchEditDraftTest {
         assertNull(updated.winnerEventTeamId)
         assertEquals(listOf(0, 0, 0), updated.team1Points)
         assertEquals(listOf(0, 0, 0), updated.team2Points)
-        assertEquals(listOf(0, 0, 0), updated.setResults)
         assertEquals("NOT_STARTED", updated.segments.first().status)
         assertNull(updated.segments.first().winnerEventTeamId)
         assertNull(updated.segments.first().startedAt)

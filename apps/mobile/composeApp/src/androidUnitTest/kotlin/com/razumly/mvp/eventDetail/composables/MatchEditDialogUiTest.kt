@@ -123,7 +123,6 @@ class MatchEditDialogUiTest {
             status = "IN_PROGRESS",
             team1Points = listOf(21, 0, 0),
             team2Points = listOf(10, 0, 0),
-            setResults = listOf(0, 0, 0),
             matchRulesSnapshot = ResolvedMatchRulesMVP(
                 scoringModel = "SETS",
                 segmentCount = 3,

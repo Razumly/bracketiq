@@ -57,7 +57,7 @@ internal fun MatchMVP.applyLocalScoreSet(scoreSet: MatchScoreSetDto): MatchMVP {
             add(updatedSegment)
         }
     }.sortedBy { it.sequence }
-    return copy(segments = updatedSegments).syncLegacyScoresFromLocalSegments()
+    return copy(segments = updatedSegments).syncScoresFromLocalSegments()
 }
 
 private fun MatchMVP.applyLocalLifecycle(lifecycle: MatchLifecycleOperationDto?): MatchMVP {
@@ -173,7 +173,7 @@ private fun MatchMVP.applyLocalSegmentOperations(operations: List<MatchSegmentOp
     // configured segment count, completion state, totals, and ties.
     return copy(
         segments = updated.sortedBy { it.sequence },
-    ).syncLegacyScoresFromLocalSegments()
+    ).syncScoresFromLocalSegments()
 }
 
 private fun MatchMVP.applyLocalIncidentOperations(operations: List<MatchIncidentOperationDto>): MatchMVP {
@@ -233,7 +233,7 @@ private fun MatchMVP.applyLocalIncidentOperations(operations: List<MatchIncident
     }
     return next.copy(
         incidents = incidents.sortedWith(compareBy<MatchIncidentMVP> { it.sequence }.thenBy { it.id }),
-    ).syncLegacyScoresFromLocalSegments()
+    ).syncScoresFromLocalSegments()
 }
 
 private fun MatchIncidentOperationDto.toLocalIncident(
@@ -285,18 +285,11 @@ private fun MatchMVP.applyLocalIncidentScoreDelta(
     return copy(segments = updated)
 }
 
-private fun MatchMVP.syncLegacyScoresFromLocalSegments(): MatchMVP {
+private fun MatchMVP.syncScoresFromLocalSegments(): MatchMVP {
     val ordered = segments.sortedBy { it.sequence }
     return copy(
         segments = ordered,
         team1Points = ordered.map { segment -> team1Id?.let { segment.scores[it] ?: 0 } ?: 0 },
         team2Points = ordered.map { segment -> team2Id?.let { segment.scores[it] ?: 0 } ?: 0 },
-        setResults = ordered.map { segment ->
-            when (segment.winnerEventTeamId) {
-                team1Id -> 1
-                team2Id -> 2
-                else -> 0
-            }
-        },
     )
 }

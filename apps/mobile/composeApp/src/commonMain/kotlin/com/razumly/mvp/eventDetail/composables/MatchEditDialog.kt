@@ -211,7 +211,6 @@ private fun MatchEditDialogContent(
                 match.match.segments.size,
                 match.match.team1Points.size,
                 match.match.team2Points.size,
-                match.match.setResults.size,
                 1,
             )
         }

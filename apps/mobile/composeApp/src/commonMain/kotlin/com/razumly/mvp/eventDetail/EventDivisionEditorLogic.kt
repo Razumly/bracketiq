@@ -173,6 +173,34 @@ internal fun defaultDivisionEditorState(
     )
 }
 
+internal fun applySingleDivisionDefaultsToDetails(
+    details: List<DivisionDetail>,
+    defaultPriceCents: Int,
+    defaultMaxParticipants: Int,
+    defaultPlayoffTeamCount: Int?,
+    defaultPoolCount: Int? = null,
+): List<DivisionDetail> {
+    val normalizedPriceCents = defaultPriceCents.coerceAtLeast(0)
+    val normalizedMaxParticipants = defaultMaxParticipants.takeIf { value -> value >= 2 }
+    val normalizedPoolCount = defaultPoolCount?.takeIf { value -> value >= 1 }
+    return details.map { detail ->
+        detail.copy(
+            price = normalizedPriceCents,
+            maxParticipants = normalizedMaxParticipants,
+            playoffTeamCount = defaultPlayoffTeamCount,
+            poolCount = normalizedPoolCount,
+            poolTeamCount = if (normalizedPoolCount != null && normalizedMaxParticipants != null) {
+                derivePoolTeamCount(
+                    maxTeams = normalizedMaxParticipants,
+                    poolCount = normalizedPoolCount,
+                )
+            } else {
+                null
+            },
+        )
+    }
+}
+
 internal fun divisionDefaultsFromSavedEditor(editor: DivisionEditorState): DivisionEditorState {
     return editor.copy(
         editingId = null,

@@ -422,6 +422,67 @@ class EventDetailsValidationTest {
         assertTrue(result.isValid)
     }
 
+    @Test
+    fun given_single_division_tournament_pool_play_when_pool_count_is_set_then_validation_passes() {
+        val detail = singleDivisionTournamentPoolDetail(poolCount = 2)
+        val result = validateEvent(
+            singleDivisionTournamentEvent(detail),
+            divisionDetailsForSettings = listOf(detail),
+        )
+
+        assertTrue(result.isLeaguePlayoffTeamsValid)
+        assertFalse(
+            result.validationErrors.any { error ->
+                error.contains("pool count", ignoreCase = true)
+            },
+        )
+    }
+
+    @Test
+    fun given_single_division_tournament_pool_play_when_pool_count_is_missing_then_validation_fails() {
+        val detail = singleDivisionTournamentPoolDetail(poolCount = null)
+        val result = validateEvent(
+            singleDivisionTournamentEvent(detail),
+            divisionDetailsForSettings = listOf(detail),
+        )
+
+        assertFalse(result.isLeaguePlayoffTeamsValid)
+        assertFalse(result.isValid)
+        assertTrue(
+            result.validationErrors.any { error ->
+                error.contains("pool count", ignoreCase = true)
+            },
+        )
+    }
+
+    private fun singleDivisionTournamentEvent(detail: DivisionDetail): Event {
+        return Event(
+            id = "event-single",
+            name = "Single Division Tournament",
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            teamSignup = true,
+            singleDivision = true,
+            divisions = listOf(detail.id),
+            divisionDetails = listOf(detail),
+            maxParticipants = 8,
+            teamSizeLimit = 2,
+            location = "Main Courts",
+            coordinates = listOf(-122.0, 37.0),
+            imageId = "image-1",
+            matchDurationMinutes = 20,
+        )
+    }
+
+    private fun singleDivisionTournamentPoolDetail(poolCount: Int?): DivisionDetail {
+        return DivisionDetail(
+            id = "event-single__division__m_skill_open_age_u18",
+            maxParticipants = 8,
+            playoffTeamCount = 4,
+            poolCount = poolCount,
+        )
+    }
+
     private fun validateEvent(
         event: Event,
         divisionDetailsForSettings: List<DivisionDetail> = emptyList(),
