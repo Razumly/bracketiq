@@ -538,6 +538,7 @@ export const eventEditorErrorSchema = z.object({
   field: z.string().nullable().optional(),
   editorRevision: z.string().nullable().optional(),
   staffRevision: z.string().nullable().optional(),
+  requestId: id.optional(),
   details: z.unknown().optional(),
 }).strict();
 

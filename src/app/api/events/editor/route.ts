@@ -37,6 +37,15 @@ const queryInput = (request: NextRequest): Record<string, string> => {
       .filter((entry): entry is readonly [string, string] => Boolean(entry[1])),
   );
 };
+const normalizeFailureDetail = (error: unknown): string => {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : '';
+  const normalized = message.replace(/\s+/g, ' ').trim();
+  return normalized.slice(0, 500) || 'The server returned an unexpected error.';
+};
 
 const errorResponse = (error: unknown) => {
   if (error instanceof EventCreateOperationPayloadMismatchError) {
@@ -69,8 +78,16 @@ const errorResponse = (error: unknown) => {
   if (error instanceof EditorCapabilityError) {
     return NextResponse.json({ error: error.message, code: 'EDITOR_CAPABILITY_REQUIRED' }, { status: 400 });
   }
-  console.error('[event-editor] create route failed', error);
-  return NextResponse.json({ error: 'Unable to save event editor configuration.', code: 'EDITOR_SAVE_FAILED' }, { status: 500 });
+  const requestId = createId();
+  const details = normalizeFailureDetail(error);
+  const message = `Unable to save event editor configuration. ${details} Reference: ${requestId}.`;
+  console.error('[event-editor] create route failed', { requestId, error });
+  return NextResponse.json({
+    error: message,
+    code: 'EDITOR_SAVE_FAILED',
+    details,
+    requestId,
+  }, { status: 500 });
 };
 const assertCreateOrganizationPermission = async (
   session: Awaited<ReturnType<typeof requireSession>>,

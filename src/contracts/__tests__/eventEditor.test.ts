@@ -3,6 +3,7 @@ import {
   eventEditorCreateBootstrapSchema,
   eventEditorDraftSchema,
   eventEditorSnapshotSchema,
+  eventEditorErrorSchema,
   saveEventEditorCommandSchema,
   type EventEditorSnapshot,
 } from '@/contracts/eventEditor';
@@ -238,5 +239,16 @@ describe('event editor contracts', () => {
       },
     } as unknown as Event;
     expect(legacyEventToEditorDraft(event).competition.matchDurationMinutes).toBe(35);
+  });
+  it('accepts a diagnostic save failure with a request reference', () => {
+    const parsed = eventEditorErrorSchema.parse({
+      error: 'Unable to save event editor configuration. Database write failed. Reference: request-1.',
+      code: 'EDITOR_SAVE_FAILED',
+      details: 'Database write failed.',
+      requestId: 'request-1',
+    });
+
+    expect(parsed.requestId).toBe('request-1');
+    expect(parsed.details).toBe('Database write failed.');
   });
 });

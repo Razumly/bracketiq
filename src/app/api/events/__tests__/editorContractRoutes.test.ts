@@ -156,6 +156,28 @@ describe('canonical editor routes', () => {
       code: 'INVALID_EDITOR_INPUT',
     });
   });
+  it('returns diagnostic details for unexpected create failures', async () => {
+    const command = {
+      contractVersion: 2,
+      createOperationId: 'create-operation-unexpected-failure',
+      draft: { basics: { name: 'Fixture' } },
+    };
+    parseCreateMock.mockReturnValue(command);
+    createEventEditorMock.mockRejectedValue(new Error('Database write failed.'));
+
+    const response = await createPost(request('http://localhost/api/events/editor', 'POST', command));
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body).toEqual(expect.objectContaining({
+      code: 'EDITOR_SAVE_FAILED',
+      details: 'Database write failed.',
+      requestId: expect.any(String),
+    }));
+    expect(body.error).toContain('Database write failed.');
+    expect(body.error).toContain(body.requestId);
+  });
+
 
 
   it('maps a create payload mismatch to a typed conflict without retrying persistence', async () => {
@@ -233,6 +255,24 @@ describe('canonical editor routes', () => {
     }));
     expect(saveEventEditorMock).toHaveBeenCalledTimes(1);
   });
+  it('returns diagnostic details for unexpected edit failures', async () => {
+    const command = { contractVersion: 1, editorRevision: 'current', staffRevision: 'current', draft: {} };
+    parseSaveMock.mockReturnValue(command);
+    saveEventEditorMock.mockRejectedValue(new Error('Database update failed.'));
+
+    const response = await editPut(request('http://localhost/api/events/event_1/editor', 'PUT', command), editContext());
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body).toEqual(expect.objectContaining({
+      code: 'EDITOR_SAVE_FAILED',
+      details: 'Database update failed.',
+      requestId: expect.any(String),
+    }));
+    expect(body.error).toContain('Database update failed.');
+    expect(body.error).toContain(body.requestId);
+  });
+
 
   it('checks edit permissions before returning the canonical snapshot', async () => {
     canManageEventMock.mockResolvedValue(false);
