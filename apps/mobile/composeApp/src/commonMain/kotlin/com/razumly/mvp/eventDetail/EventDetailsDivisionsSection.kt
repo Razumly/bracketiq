@@ -103,6 +103,49 @@ internal data class EventDetailsDivisionEditorActions(
     val onEditDivision: (String) -> Unit,
     val onRemoveDivision: (String) -> Unit,
 )
+@Composable
+internal fun EventDetailsDivisionEditorValidationContent(
+    state: EventDetailsDivisionEditorActionsState,
+) {
+    if (state.divisionEditor.error != null) {
+        Text(
+            text = state.divisionEditor.error.orEmpty(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+    if (state.showValidationErrors && !state.isSkillLevelValid) {
+        Text(
+            text = "Add at least one division.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+    if (
+        state.editEvent.eventType == EventType.TOURNAMENT &&
+        state.editEvent.includePlayoffs &&
+        state.showValidationErrors && !state.isLeaguePlayoffTeamsValid
+    ) {
+        Text(
+            text = "Pool play requires pool count, bracket team count, and even pool sizing for each division.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+}
+
+@Composable
+internal fun EventDetailsDivisionEditorListContent(
+    state: EventDetailsDivisionEditorActionsState,
+    actions: EventDetailsDivisionEditorActions,
+) {
+    DivisionDetailEditList(
+        event = state.editEvent,
+        divisionDetails = state.divisionDetails,
+        onEditDivision = actions.onEditDivision,
+        onRemoveDivision = actions.onRemoveDivision,
+    )
+}
 
 @Composable
 private fun EventDetailsDivisionsReadOnlyContent(
@@ -231,6 +274,8 @@ private fun EventDetailsDivisionsReadOnlyContent(
 internal fun EventDetailsDivisionEditorActionsContent(
     state: EventDetailsDivisionEditorActionsState,
     actions: EventDetailsDivisionEditorActions,
+    showValidationContent: Boolean = true,
+    showDivisionList: Boolean = true,
 ) {
     val showDivisionPlayoffTeamCount =
         state.editEvent.eventType == EventType.LEAGUE &&
@@ -315,36 +360,10 @@ internal fun EventDetailsDivisionEditorActionsContent(
         }
     }
 
-    if (state.divisionEditor.error != null) {
-        Text(
-            text = state.divisionEditor.error.orEmpty(),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-        )
+    if (showValidationContent) {
+        EventDetailsDivisionEditorValidationContent(state)
     }
-    if (state.showValidationErrors && !state.isSkillLevelValid) {
-        Text(
-            text = "Add at least one division.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-        )
+    if (showDivisionList) {
+        EventDetailsDivisionEditorListContent(state, actions)
     }
-    if (
-        state.editEvent.eventType == EventType.TOURNAMENT &&
-        state.editEvent.includePlayoffs &&
-        state.showValidationErrors && !state.isLeaguePlayoffTeamsValid
-    ) {
-        Text(
-            text = "Pool play requires pool count, bracket team count, and even pool sizing for each division.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-        )
-    }
-
-    DivisionDetailEditList(
-        event = state.editEvent,
-        divisionDetails = state.divisionDetails,
-        onEditDivision = actions.onEditDivision,
-        onRemoveDivision = actions.onRemoveDivision,
-    )
 }

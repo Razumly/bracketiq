@@ -101,13 +101,9 @@ internal data class EventDetailsDivisionEditorFormActions(
 internal fun EventDetailsDivisionEditorForm(
     state: EventDetailsDivisionEditorFormState,
     actions: EventDetailsDivisionEditorFormActions,
+    divisionActionsContent: @Composable () -> Unit = {},
 ) {
     DivisionModeToggle(
-        state = state,
-        actions = actions,
-    )
-
-    DivisionSingleDivisionDefaults(
         state = state,
         actions = actions,
     )
@@ -150,6 +146,11 @@ internal fun EventDetailsDivisionEditorForm(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            DivisionSingleDivisionDefaults(
+                state = state,
+                actions = actions,
+            )
+
             if (!state.editEvent.singleDivision) {
                 DivisionScheduleConfigurationFields(
                     state = state,
@@ -171,6 +172,8 @@ internal fun EventDetailsDivisionEditorForm(
                 state = state,
                 actions = actions,
             )
+
+            divisionActionsContent()
         }
     }
 }

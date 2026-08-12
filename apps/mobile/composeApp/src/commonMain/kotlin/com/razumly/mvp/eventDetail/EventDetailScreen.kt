@@ -138,6 +138,7 @@ fun EventDetailScreen(
 
     val isHost by component.isHost.collectAsState()
     val isEditing by component.isEditing.collectAsState()
+    var editFormIsValid by remember(editedEvent.id, isEditing) { mutableStateOf(false) }
     val isEventFull by component.isEventFull.collectAsState()
     val isUserInEvent by component.isUserInEvent.collectAsState()
     val isRegistrationPaymentPending by component.isRegistrationPaymentPending.collectAsState()
@@ -178,7 +179,7 @@ fun EventDetailScreen(
     val canManageTemplate = accessPresentation.canManageTemplate
     val canEditEventDetails = accessPresentation.canEditEventDetails
     val canDeleteEvent = accessPresentation.canDeleteEvent
-    val canCreateTemplateFromCurrentEvent = accessPresentation.canCreateTemplateFromCurrentEvent
+    val showCreateTemplateFromCurrentEvent = accessPresentation.showCreateTemplateFromCurrentEvent
     val canManageLeagueStandings = accessPresentation.canManageLeagueStandings
     val showOfficialsPanel = accessPresentation.showOfficialsPanel
     val selectedSport = accessPresentation.selectedSport
@@ -577,7 +578,11 @@ fun EventDetailScreen(
                     modifier = Modifier.fillMaxSize(),
                     topBar = {
                         if (isEditing) {
-                            EventEditSetupHeader(onCancel = component::cancelEditingEvent)
+                            EventEditSetupHeader(
+                                isConfirmEnabled = editFormIsValid,
+                                onConfirm = component::updateEvent,
+                                onCancel = component::cancelEditingEvent,
+                            )
                         }
                     },
                 ) { innerPadding ->
@@ -624,7 +629,7 @@ fun EventDetailScreen(
                                 pendingStaffInvites = pendingStaffInvites,
                                 userSuggestions = suggestedUsers,
                                 canEditEventDetails = canEditEventDetails,
-                                canCreateTemplateFromCurrentEvent = canCreateTemplateFromCurrentEvent,
+                                showCreateTemplateFromCurrentEvent = showCreateTemplateFromCurrentEvent,
                                 canShowQrCode = canShowQrCode,
                                 canRequestLeaveOrRefund = canRequestRefundAfterStart || canLeaveEvent,
                                 leaveOrRefundActionLabel = leaveOrRefundActionLabel,
@@ -824,8 +829,7 @@ fun EventDetailScreen(
                                 onLeaveOrRefund = openLeaveOrRefundAction,
                                 onNotifyPlayers = { showNotifyDialog = true },
                                 onDelete = { showDeleteConfirmation = true },
-                                onConfirmEdit = component::updateEvent,
-                                onCancelEdit = component::cancelEditingEvent,
+                                onValidationChange = { isValid -> editFormIsValid = isValid },
                                 onEventStateDropdownChanged = { showEventStateDropdown = it },
                                 onLifecycleStateSelected = { option ->
                                     component.editEventField {

@@ -187,6 +187,18 @@ internal fun activeInclusivePriceCents(
     0
 }
 
+@Composable
+internal fun EventDetailsValidationReporter(
+    editView: Boolean,
+    effectiveIsValid: Boolean,
+    validationErrors: List<String>,
+    onValidationChange: (Boolean, List<String>) -> Unit,
+) {
+    LaunchedEffect(editView, effectiveIsValid, validationErrors) {
+        onValidationChange(effectiveIsValid, validationErrors)
+    }
+}
+
 private fun kotlin.time.Instant.reinterpretSystemLocalSelectionIn(timeZone: TimeZone): kotlin.time.Instant {
     val local = toLocalDateTime(TimeZone.currentSystemDefault())
     return LocalDateTime(local.date, local.time).toInstant(timeZone)
@@ -381,7 +393,7 @@ fun EventDetails(
     var staffEditorError by remember { mutableStateOf<String?>(null) }
     var officialPositionsExpanded by rememberSaveable(editEvent.id, editView) { mutableStateOf(false) }
     var assignedStaffExpanded by rememberSaveable(editEvent.id, editView) { mutableStateOf(false) }
-    var divisionInputsExpanded by rememberSaveable(editEvent.id, editView) { mutableStateOf(true) }
+    var divisionInputsExpanded by rememberSaveable(editEvent.id, editView) { mutableStateOf(false) }
     val sectionExpansionStates = rememberSaveable(
         editEvent.id,
         saver = SectionExpansionStatesSaver,
@@ -615,16 +627,24 @@ fun EventDetails(
     )
     val effectiveIsValid = isValid && isInclusivePriceQuoteConfirmed
     LaunchedEffect(editEvent.id, divisionEditorBaseState) {
-        divisionEditorDefaults = divisionEditorBaseState
         val editorIsIdle = divisionEditor.editingId.isNullOrBlank() &&
             divisionEditor.gender.isBlank() &&
             divisionEditor.skillDivisionTypeId.isBlank() &&
             divisionEditor.ageDivisionTypeId.isBlank() &&
             !divisionEditor.nameTouched
-        if (editorIsIdle) {
-            divisionEditor = divisionEditorBaseState
+        if (
+            shouldSyncDivisionEditorBaseState(
+                singleDivision = editEvent.singleDivision,
+                existingDivisionDetails = divisionDetailsForSettings,
+            )
+        ) {
+            divisionEditorDefaults = divisionEditorBaseState
+            if (editorIsIdle) {
+                divisionEditor = divisionEditorBaseState
+            }
         }
     }
+
     val skillDivisionTypeSelectOptions = remember(
         divisionDetailsForSettings,
         divisionTypeParameters,
@@ -1687,9 +1707,12 @@ fun EventDetails(
         isValid = result.isValid
     }
 
-    LaunchedEffect(effectiveIsValid, validationErrors) {
-        onValidationChange(effectiveIsValid, validationErrors)
-    }
+    EventDetailsValidationReporter(
+        editView = editView,
+        effectiveIsValid = effectiveIsValid,
+        validationErrors = validationErrors,
+        onValidationChange = onValidationChange,
+    )
 
     LaunchedEffect(lazyListState) {
         var lastIndex = 0
@@ -2866,12 +2889,6 @@ fun EventDetails(
                                 }
                             },
                         )
-                        if (useSimpleSectionContent) {
-                            SimpleEventDetailsDivisionEditorForm(divisionFormState, divisionFormActions)
-                        } else {
-                            EventDetailsDivisionEditorForm(divisionFormState, divisionFormActions)
-                        }
-
                         val divisionActionsState = EventDetailsDivisionEditorActionsState(
                             editEvent = editEvent,
                             divisionEditor = divisionEditor,
@@ -2890,16 +2907,34 @@ fun EventDetails(
                             onRemoveDivision = ::handleRemoveDivisionDetail,
                         )
                         if (useSimpleSectionContent) {
-                            SimpleEventDetailsDivisionEditorActionsContent(
-                                divisionActionsState,
-                                divisionActions,
+                            SimpleEventDetailsDivisionEditorForm(
+                                state = divisionFormState,
+                                actions = divisionFormActions,
+                                divisionActionsContent = {
+                                    SimpleEventDetailsDivisionEditorActionsContent(
+                                        state = divisionActionsState,
+                                        actions = divisionActions,
+                                        showValidationContent = false,
+                                        showDivisionList = false,
+                                    )
+                                },
                             )
                         } else {
-                            EventDetailsDivisionEditorActionsContent(
-                                divisionActionsState,
-                                divisionActions,
+                            EventDetailsDivisionEditorForm(
+                                state = divisionFormState,
+                                actions = divisionFormActions,
+                                divisionActionsContent = {
+                                    EventDetailsDivisionEditorActionsContent(
+                                        state = divisionActionsState,
+                                        actions = divisionActions,
+                                        showValidationContent = false,
+                                        showDivisionList = false,
+                                    )
+                                },
                             )
                         }
+                        EventDetailsDivisionEditorValidationContent(divisionActionsState)
+                        EventDetailsDivisionEditorListContent(divisionActionsState, divisionActions)
                     },
                 )
 

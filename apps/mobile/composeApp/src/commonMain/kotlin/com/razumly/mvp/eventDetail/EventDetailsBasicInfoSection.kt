@@ -388,11 +388,8 @@ private fun EventTagsEditor(
             onTagSelected = { option ->
                 onTagsChange((normalizedTags + option).syncEventTypeTagsForEventType(eventType))
             },
-            label = "",
-            placeholder = "Tags",
-            fieldHeight = 56.dp,
-            fieldTextStyle = MaterialTheme.typography.bodyMedium,
-            placeholderTextStyle = MaterialTheme.typography.bodyMedium,
+            label = "Tags",
+            placeholder = "",
             hideSelectedOptions = true,
             allowCustomTag = true,
             onCustomTagAdded = { tag ->

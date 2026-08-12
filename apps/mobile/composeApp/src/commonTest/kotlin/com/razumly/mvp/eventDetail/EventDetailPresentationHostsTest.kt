@@ -38,14 +38,14 @@ class EventDetailPresentationHostsTest {
     }
 
     @Test
-    fun givenTemplateOrOrganizationEvent_whenResolvingEditActions_thenTemplateCreationIsUnavailable() {
+    fun givenTemplateOrOrganizationEvent_whenResolvingEditActions_thenTemplateActionMatchesDisplayPolicy() {
         assertFalse(
             eventEditActionAvailability(
                 event = Event(state = "TEMPLATE"),
                 isHost = true,
             ).canCreateTemplate,
         )
-        assertFalse(
+        assertTrue(
             eventEditActionAvailability(
                 event = Event(state = "PUBLISHED", organizationId = "org-1"),
                 isHost = true,

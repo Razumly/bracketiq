@@ -215,6 +215,11 @@ internal fun divisionDefaultsFromSavedEditor(editor: DivisionEditorState): Divis
     )
 }
 
+internal fun shouldSyncDivisionEditorBaseState(
+    singleDivision: Boolean,
+    existingDivisionDetails: List<DivisionDetail>,
+): Boolean = singleDivision || existingDivisionDetails.isEmpty()
+
 internal fun buildDivisionDropdownOptions(
     existingDetails: List<DivisionDetail>,
     selectedDivisionIds: List<String>,

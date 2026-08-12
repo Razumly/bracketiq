@@ -107,6 +107,143 @@ class EventCreateValidationVisibilityUiTest {
     }
 
     @Test
+    fun division_editor_starts_collapsed_with_fields_and_actions_hidden() {
+        val collapsedState = EventDetailsDivisionEditorFormState(
+            editEvent = Event(),
+            divisionDetails = emptyList(),
+            selectedDivisions = emptyList(),
+            divisionEditor = DivisionEditorState(),
+            divisionEditorDefaults = DivisionEditorState(),
+            divisionEditorReady = true,
+            divisionScheduleUsesSets = false,
+            skillDivisionTypeOptions = emptyList(),
+            ageDivisionTypeOptions = emptyList(),
+            genderOptions = emptyList(),
+            divisionInputsExpanded = false,
+            hostHasAccount = false,
+            isNewEvent = false,
+            showValidationErrors = false,
+            addSelfToEvent = false,
+        )
+        val noOpActions = EventDetailsDivisionEditorFormActions(
+            onEditEvent = { this },
+            onDivisionEditorChange = {},
+            onDivisionEditorDefaultsChange = {},
+            onUpdateDivisionEditorSelection = { _, _, _ -> },
+            onNormalizeLeagueConfigWithSportMode = { it },
+            onUpdateDivisionLeagueConfig = {},
+            onUpdateDivisionPlayoffConfig = {},
+            onUpdateDivisionTournamentConfig = {},
+            onSyncLeagueSlotsForSelectedDivisions = { _, _ -> },
+            onSetDivisionPaymentPlansEnabled = {},
+            onSyncDivisionInstallmentCount = {},
+            onUpdateDivisionInstallmentAmount = { _, _ -> },
+            onSetDivisionInstallmentDueDatePickerIndex = {},
+            onAddDivisionInstallmentRow = {},
+            onRemoveDivisionInstallmentRow = {},
+            onAddSelfToEventChange = {},
+            onAddCurrentUser = {},
+            onDivisionInputsExpandedChange = {},
+        )
+
+        composeRule.setContent {
+            var normalExpanded by remember { mutableStateOf(false) }
+            CompositionLocalProvider(localImageScheme provides testImageScheme()) {
+                MaterialTheme {
+                    EventDetailsDivisionEditorForm(
+                        state = collapsedState.copy(divisionInputsExpanded = normalExpanded),
+                        actions = noOpActions.copy(
+                            onDivisionInputsExpandedChange = { normalExpanded = it },
+                        ),
+                        divisionActionsContent = {
+                            Button(onClick = {}) {
+                                Text("Normal Add Division")
+                            }
+                        },
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("New Division").assertIsDisplayed()
+        composeRule.onNodeWithText("Division Name").assertDoesNotExist()
+        composeRule.onNodeWithText("Normal Add Division").assertDoesNotExist()
+
+        composeRule.onNodeWithText("New Division").performClick()
+        composeRule.onNodeWithText("Division Name").assertIsDisplayed()
+        composeRule.onNodeWithText("Normal Add Division").assertIsDisplayed()
+    }
+
+    @Test
+    fun simple_division_editor_starts_collapsed_and_expands_as_one_section() {
+        val collapsedState = EventDetailsDivisionEditorFormState(
+            editEvent = Event(),
+            divisionDetails = emptyList(),
+            selectedDivisions = emptyList(),
+            divisionEditor = DivisionEditorState(),
+            divisionEditorDefaults = DivisionEditorState(),
+            divisionEditorReady = true,
+            divisionScheduleUsesSets = false,
+            skillDivisionTypeOptions = emptyList(),
+            ageDivisionTypeOptions = emptyList(),
+            genderOptions = emptyList(),
+            divisionInputsExpanded = false,
+            hostHasAccount = false,
+            isNewEvent = false,
+            showValidationErrors = false,
+            addSelfToEvent = false,
+        )
+        val noOpActions = EventDetailsDivisionEditorFormActions(
+            onEditEvent = { this },
+            onDivisionEditorChange = {},
+            onDivisionEditorDefaultsChange = {},
+            onUpdateDivisionEditorSelection = { _, _, _ -> },
+            onNormalizeLeagueConfigWithSportMode = { it },
+            onUpdateDivisionLeagueConfig = {},
+            onUpdateDivisionPlayoffConfig = {},
+            onUpdateDivisionTournamentConfig = {},
+            onUpdateDivisionPhaseSettings = {},
+            onSyncLeagueSlotsForSelectedDivisions = { _, _ -> },
+            onSetDivisionPaymentPlansEnabled = {},
+            onSyncDivisionInstallmentCount = {},
+            onUpdateDivisionInstallmentAmount = { _, _ -> },
+            onSetDivisionInstallmentDueDatePickerIndex = {},
+            onAddDivisionInstallmentRow = {},
+            onRemoveDivisionInstallmentRow = {},
+            onAddSelfToEventChange = {},
+            onAddCurrentUser = {},
+            onDivisionInputsExpandedChange = {},
+        )
+
+        composeRule.setContent {
+            var simpleExpanded by remember { mutableStateOf(false) }
+            CompositionLocalProvider(localImageScheme provides testImageScheme()) {
+                MaterialTheme {
+                    SimpleEventDetailsDivisionEditorForm(
+                        state = collapsedState.copy(divisionInputsExpanded = simpleExpanded),
+                        actions = noOpActions.copy(
+                            onDivisionInputsExpandedChange = { simpleExpanded = it },
+                        ),
+                        divisionActionsContent = {
+                            Button(onClick = {}) {
+                                Text("Simple Add Division")
+                            }
+                        },
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("New Division").assertIsDisplayed()
+        composeRule.onNodeWithText("Division Name *").assertDoesNotExist()
+        composeRule.onNodeWithText("Simple Add Division").assertDoesNotExist()
+
+        composeRule.onNodeWithText("New Division").performClick()
+        composeRule.onNodeWithText("Hide").assertExists()
+        composeRule.onNodeWithText("Division Name *").assertExists()
+        composeRule.onNodeWithText("Simple Add Division").assertExists()
+    }
+    @Test
     fun division_editor_hides_untouched_required_errors_until_validation_is_attempted() {
         composeRule.setContent {
             var showValidationErrors by remember { mutableStateOf(false) }

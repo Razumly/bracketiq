@@ -48,34 +48,8 @@ import com.razumly.mvp.eventDetail.shared.localImageScheme
 internal fun SimpleEventDetailsDivisionEditorForm(
     state: EventDetailsDivisionEditorFormState,
     actions: EventDetailsDivisionEditorFormActions,
+    divisionActionsContent: @Composable () -> Unit = {},
 ) {
-    DivisionSingleDivisionDefaults(
-        state = state,
-        actions = actions,
-    )
-
-    if (state.isNewEvent) {
-        AnimatedVisibility(!state.editEvent.teamSignup) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                Box(modifier = Modifier.weight(1f)) {
-                    LabeledCheckboxRow(
-                        checked = state.addSelfToEvent,
-                        label = "Join as participant",
-                        onCheckedChange = {
-                            actions.onAddSelfToEventChange(it)
-                            actions.onAddCurrentUser(it)
-                        },
-                    )
-                }
-                Box(modifier = Modifier.weight(1f))
-            }
-        }
-    }
-
     val divisionInputsTitle = if (state.divisionEditor.editingId.isNullOrBlank()) {
         "New Division"
     } else {
@@ -92,6 +66,11 @@ internal fun SimpleEventDetailsDivisionEditorForm(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            DivisionSingleDivisionDefaults(
+                state = state,
+                actions = actions,
+            )
+
             if (!state.editEvent.singleDivision) {
                 DivisionScheduleConfigurationFields(
                     state = state,
@@ -113,6 +92,8 @@ internal fun SimpleEventDetailsDivisionEditorForm(
                 state = state,
                 actions = actions,
             )
+
+            divisionActionsContent()
         }
     }
 }

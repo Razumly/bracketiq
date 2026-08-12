@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -47,7 +48,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.materialkolor.scheme.DynamicScheme
@@ -108,7 +111,7 @@ internal data class EventDetailOverviewEditHostState(
     val pendingStaffInvites: List<PendingStaffInviteDraft>,
     val userSuggestions: List<UserData>,
     val canEditEventDetails: Boolean,
-    val canCreateTemplateFromCurrentEvent: Boolean,
+    val showCreateTemplateFromCurrentEvent: Boolean,
     val canShowQrCode: Boolean,
     val canRequestLeaveOrRefund: Boolean,
     val leaveOrRefundActionLabel: String,
@@ -186,8 +189,7 @@ internal data class EventDetailOverviewEditHostActions(
     val onLeaveOrRefund: () -> Unit,
     val onNotifyPlayers: () -> Unit,
     val onDelete: () -> Unit,
-    val onConfirmEdit: () -> Unit,
-    val onCancelEdit: () -> Unit,
+    val onValidationChange: (Boolean) -> Unit,
     val onEventStateDropdownChanged: (Boolean) -> Unit,
     val onLifecycleStateSelected: (EditableLifecycleState) -> Unit,
     val onRescheduleEvent: () -> Unit,
@@ -297,7 +299,7 @@ internal fun eventEditActionAvailability(
         canBuildBrackets = event.eventType == EventType.TOURNAMENT ||
             (event.eventType == EventType.LEAGUE && event.includePlayoffs),
         eventActionEnabled = !isTemplate,
-        canCreateTemplate = isHost && !isTemplate && event.organizationId.isNullOrBlank(),
+        canCreateTemplate = isHost && !isTemplate,
     )
 }
 
@@ -376,6 +378,7 @@ internal fun EventDetailOverviewEditHost(
         onHostUnblockUser = actions.onHostUnblockUser,
         onMapRevealCenterChange = actions.onMapRevealCenterChange,
         onFloatingDockVisibilityChange = actions.onFloatingDockVisibilityChange,
+        onValidationChange = { isValid, _ -> actions.onValidationChange(isValid) },
         organizationTemplates = state.organizationTemplates,
         organizationTemplatesLoading = state.organizationTemplatesLoading,
         organizationTemplatesError = state.organizationTemplatesError,
@@ -397,11 +400,10 @@ internal fun EventDetailOverviewEditHost(
             }
         },
         modifier = modifier,
-    ) { isValid ->
+) { _ ->
         EventDetailOverviewEditFooter(
             state = state,
             actions = actions,
-            isValid = isValid,
         )
     }
 }
@@ -465,7 +467,7 @@ private fun BoxScope.EventDetailOverviewHeaderControls(
                     leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
                 )
             }
-            if (state.canCreateTemplateFromCurrentEvent) {
+            if (state.showCreateTemplateFromCurrentEvent) {
                 DropdownMenuItem(
                     text = { Text("Create Template") },
                     onClick = {
@@ -560,7 +562,6 @@ private fun BoxScope.EventDetailOverviewHeaderControls(
 private fun EventDetailOverviewEditFooter(
     state: EventDetailOverviewEditHostState,
     actions: EventDetailOverviewEditHostActions,
-    isValid: Boolean,
 ) {
     val buttonColors = ButtonColors(
         containerColor = Color(state.imageScheme.primary),
@@ -577,7 +578,6 @@ private fun EventDetailOverviewEditFooter(
             EventDetailEditActions(
                 state = state,
                 actions = actions,
-                isValid = isValid,
                 buttonColors = buttonColors,
             )
         } else {
@@ -603,90 +603,151 @@ private fun EventDetailOverviewEditFooter(
 private fun EventDetailEditActions(
     state: EventDetailOverviewEditHostState,
     actions: EventDetailOverviewEditHostActions,
-    isValid: Boolean,
     buttonColors: ButtonColors,
 ) {
     val availability = eventEditActionAvailability(state.editEvent, state.isHost)
+    var isActionsDropdownExpanded by remember { mutableStateOf(false) }
+    val showStateButton = state.isHost && availability.eventActionEnabled
+    val canCreateTemplate = availability.canCreateTemplate
+    val showActionsButton = availability.canReschedule || canCreateTemplate
+
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = actions.onConfirmEdit, enabled = isValid, colors = buttonColors) {
-                Text("Confirm")
-            }
-            Button(onClick = actions.onCancelEdit, colors = buttonColors) {
-                Text("Cancel")
-            }
-        }
-        if (state.isHost && availability.eventActionEnabled) {
-            val selectedLifecycleState = remember(state.editEvent.state) {
-                state.editEvent.toEditableLifecycleState()
-            }
-            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Button(
-                    onClick = { actions.onEventStateDropdownChanged(true) },
-                    colors = buttonColors,
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(selectedLifecycleState.label)
-                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
-                    }
-                }
-                DropdownMenu(
-                    expanded = state.showEventStateDropdown,
-                    onDismissRequest = { actions.onEventStateDropdownChanged(false) },
-                ) {
-                    EditableLifecycleState.values().forEach { option ->
-                        DropdownMenuItem(
-                            text = { Text(option.label) },
-                            onClick = { actions.onLifecycleStateSelected(option) },
-                            leadingIcon = if (option == selectedLifecycleState) {
-                                { Icon(Icons.Default.Check, contentDescription = null) }
-                            } else {
-                                null
-                            },
-                        )
-                    }
-                }
-            }
-        }
-        if (availability.canReschedule) {
-            Button(
-                onClick = actions.onRescheduleEvent,
-                enabled = availability.eventActionEnabled,
-                colors = buttonColors,
-                modifier = Modifier.fillMaxWidth(),
+        if (showStateButton || showActionsButton) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Reschedule Event")
-            }
-            if (availability.canBuildBrackets) {
-                Button(
-                    onClick = actions.onBuildBrackets,
-                    enabled = availability.eventActionEnabled,
-                    colors = buttonColors,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Rebuild Bracket(s)")
+                if (showStateButton) {
+                    val selectedLifecycleState = remember(state.editEvent.state) {
+                        state.editEvent.toEditableLifecycleState()
+                    }
+                    CenteredEventDropdownMenu(
+                        expanded = state.showEventStateDropdown,
+                        onExpand = { actions.onEventStateDropdownChanged(true) },
+                        onDismissRequest = { actions.onEventStateDropdownChanged(false) },
+                        anchor = { onClick ->
+                            Button(
+                                onClick = onClick,
+                                colors = buttonColors,
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Text("State: ${selectedLifecycleState.label}")
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+                                }
+                            }
+                        },
+                        content = {
+                            EditableLifecycleState.values().forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option.label) },
+                                    onClick = { actions.onLifecycleStateSelected(option) },
+                                    leadingIcon = if (option == selectedLifecycleState) {
+                                        { Icon(Icons.Default.Check, contentDescription = null) }
+                                    } else {
+                                        null
+                                    },
+                                )
+                            }
+                        },
+                    )
+                }
+                if (showActionsButton) {
+                    CenteredEventDropdownMenu(
+                        expanded = isActionsDropdownExpanded,
+                        onExpand = { isActionsDropdownExpanded = true },
+                        onDismissRequest = { isActionsDropdownExpanded = false },
+                        anchor = { onClick ->
+                            Button(
+                                onClick = onClick,
+                                enabled = availability.eventActionEnabled,
+                                colors = buttonColors,
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Text("Actions")
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+                                }
+                            }
+                        },
+                        content = {
+                            if (availability.canReschedule) {
+                                DropdownMenuItem(
+                                    text = { Text("Reschedule Event") },
+                                    onClick = {
+                                        isActionsDropdownExpanded = false
+                                        actions.onRescheduleEvent()
+                                    },
+                                )
+                                if (availability.canBuildBrackets) {
+                                    DropdownMenuItem(
+                                        text = { Text("Rebuild Bracket(s)") },
+                                        onClick = {
+                                            isActionsDropdownExpanded = false
+                                            actions.onBuildBrackets()
+                                        },
+                                    )
+                                }
+                                DropdownMenuItem(
+                                    text = { Text("Rebuild Without Placeholders") },
+                                    onClick = {
+                                        isActionsDropdownExpanded = false
+                                        actions.onRebuildWithoutPlaceholders()
+                                    },
+                                )
+                            }
+                            if (canCreateTemplate) {
+                                DropdownMenuItem(
+                                    text = { Text("Create Template") },
+                                    onClick = {
+                                        isActionsDropdownExpanded = false
+                                        actions.onCreateTemplate()
+                                    },
+                                )
+                            }
+                        },
+                    )
                 }
             }
-            Button(
-                onClick = actions.onRebuildWithoutPlaceholders,
-                enabled = availability.eventActionEnabled,
-                colors = buttonColors,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Rebuild Without Placeholders")
-            }
         }
-        if (availability.canCreateTemplate) {
-            Button(onClick = actions.onCreateTemplate, colors = buttonColors) {
-                Text("Create Template")
-            }
-        }
+    }
+}
+
+@Composable
+private fun CenteredEventDropdownMenu(
+    expanded: Boolean,
+    onExpand: () -> Unit,
+    onDismissRequest: () -> Unit,
+    anchor: @Composable (onClick: () -> Unit) -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    var anchorWidthPx by remember { mutableStateOf(0) }
+    var menuWidthPx by remember { mutableStateOf(0) }
+    val menuOffset = with(LocalDensity.current) {
+        DpOffset(
+            x = ((anchorWidthPx - menuWidthPx) / 2f).toDp(),
+            y = 0.dp,
+        )
+    }
+
+    Box(
+        modifier = Modifier.onSizeChanged { anchorWidthPx = it.width },
+    ) {
+        anchor(onExpand)
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = onDismissRequest,
+            offset = menuOffset,
+            modifier = Modifier.onSizeChanged { menuWidthPx = it.width },
+            content = content,
+        )
     }
 }
 

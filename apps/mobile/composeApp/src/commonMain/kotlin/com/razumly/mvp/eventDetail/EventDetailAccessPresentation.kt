@@ -22,7 +22,7 @@ internal data class EventDetailAccessPresentation(
     val canManageTemplate: Boolean,
     val canEditEventDetails: Boolean,
     val canDeleteEvent: Boolean,
-    val canCreateTemplateFromCurrentEvent: Boolean,
+    val showCreateTemplateFromCurrentEvent: Boolean,
     val canManageLeagueStandings: Boolean,
     val showOfficialsPanel: Boolean,
     val selectedSport: Sport?,
@@ -76,9 +76,7 @@ internal fun buildEventDetailAccessPresentation(
         canManageTemplate = canManageTemplate,
     )
     val canDeleteEvent = if (isTemplateEvent) canManageTemplate else isHost
-    val canCreateTemplateFromCurrentEvent = isHost &&
-        !isTemplateEvent &&
-        event.organizationId.isNullOrBlank()
+    val showCreateTemplateFromCurrentEvent = isHost && !isTemplateEvent
     val canManageLeagueStandings = currentUserId.isNotBlank() && (
         event.hostId.trim() == currentUserId ||
             event.assistantHostIds.any { assistantHostId -> assistantHostId.trim() == currentUserId }
@@ -120,7 +118,7 @@ internal fun buildEventDetailAccessPresentation(
         canManageTemplate = canManageTemplate,
         canEditEventDetails = canEditEventDetails,
         canDeleteEvent = canDeleteEvent,
-        canCreateTemplateFromCurrentEvent = canCreateTemplateFromCurrentEvent,
+        showCreateTemplateFromCurrentEvent = showCreateTemplateFromCurrentEvent,
         canManageLeagueStandings = canManageLeagueStandings,
         showOfficialsPanel = showOfficialsPanel,
         selectedSport = selectedSport,

@@ -506,7 +506,11 @@ class EventDetailsDivisionEditorHelpersTest {
             priceCents = 2500,
             maxParticipants = 12,
             playoffTeamCount = 4,
-            leagueConfig = LeagueConfig(gamesPerOpponent = 2),
+            leagueConfig = LeagueConfig(
+                gamesPerOpponent = 2,
+                restTimeMinutes = 12,
+            ),
+            playoffConfig = TournamentConfig(restTimeMinutes = 8),
             nameTouched = true,
             error = "stale",
         )
@@ -525,6 +529,34 @@ class EventDetailsDivisionEditorHelpersTest {
         assertEquals(2500, next.priceCents)
         assertEquals(12, next.maxParticipants)
         assertEquals(4, next.playoffTeamCount)
-        assertEquals(2, next.leagueConfig.gamesPerOpponent)
+        assertEquals(12, next.leagueConfig.restTimeMinutes)
+        assertEquals(8, next.playoffConfig.restTimeMinutes)
+    }
+
+    @Test
+    fun split_division_editor_keeps_saved_defaults_after_first_division() {
+        val existingDivision = DivisionDetail(
+            id = "event-1__division__m_skill_open_age_u18",
+        )
+
+        assertTrue(
+            shouldSyncDivisionEditorBaseState(
+                singleDivision = false,
+                existingDivisionDetails = emptyList(),
+            ),
+        )
+        assertTrue(
+            shouldSyncDivisionEditorBaseState(
+                singleDivision = true,
+                existingDivisionDetails = listOf(existingDivision),
+            ),
+        )
+        assertEquals(
+            false,
+            shouldSyncDivisionEditorBaseState(
+                singleDivision = false,
+                existingDivisionDetails = listOf(existingDivision),
+            ),
+        )
     }
 }

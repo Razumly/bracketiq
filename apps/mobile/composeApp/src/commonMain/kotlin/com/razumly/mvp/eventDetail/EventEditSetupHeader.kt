@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -17,6 +18,8 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 internal fun EventEditSetupHeader(
+    isConfirmEnabled: Boolean,
+    onConfirm: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -38,8 +41,19 @@ internal fun EventEditSetupHeader(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            TextButton(onClick = onCancel) {
-                Text("Cancel")
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onCancel) {
+                    Text("Cancel")
+                }
+                Button(
+                    onClick = onConfirm,
+                    enabled = isConfirmEnabled,
+                ) {
+                    Text("Confirm")
+                }
             }
         }
     }
