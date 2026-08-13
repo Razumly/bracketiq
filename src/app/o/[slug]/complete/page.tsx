@@ -79,7 +79,6 @@ export default async function PublicCompletionPage({
       <section className={styles.completionSection}>
         <div className={styles.completionPanel}>
           <Image src={organization.logoUrl} alt="" width={76} height={76} className={styles.logo} unoptimized />
-          <p className={styles.eyebrow}>{organization.name}</p>
           <h1 className={styles.completionTitle}>{copy.title}</h1>
           <p className={styles.completionMessage}>{copy.message}</p>
           <p className={styles.completionMessage}>

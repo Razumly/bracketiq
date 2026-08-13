@@ -118,7 +118,6 @@ export default async function PublicEventRegistrationPage({
         <Link href={publicOrganizationPath(result.organization.slug)} className={styles.registrationBrand}>
           <Image src={result.organization.logoUrl} alt="" width={76} height={76} className={styles.logo} unoptimized />
           <div>
-            <p className={styles.eyebrow}>Registration</p>
             <p className={styles.orgName}>{result.organization.name}</p>
           </div>
         </Link>

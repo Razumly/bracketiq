@@ -25,32 +25,22 @@ export function ReadOnlyDetailsGrid({ items }: { items: ReadOnlyDetailField[] })
 }
 
 export function PublicEventSection({
-    eyebrow,
     title,
     children,
     className = '',
 }: {
-    eyebrow?: string;
     title?: string;
     children: ReactNode;
     className?: string;
 }) {
-    const hasHeader = Boolean(eyebrow || title);
 
     return (
         <section className={`border-b border-slate-200 py-7 first:pt-0 last:border-b-0 last:pb-0 ${className}`}>
-            {hasHeader ? (
+            {title ? (
                 <div className="mb-5">
-                    {eyebrow ? (
-                        <Text size="xs" c="dimmed" tt="uppercase" fw={800} className="tracking-normal">
-                            {eyebrow}
-                        </Text>
-                    ) : null}
-                    {title ? (
-                        <h2 className={`${eyebrow ? 'mt-1' : ''} text-xl font-bold leading-tight text-slate-950`}>
-                            {title}
-                        </h2>
-                    ) : null}
+                    <h2 className="text-xl font-bold leading-tight text-slate-950">
+                        {title}
+                    </h2>
                 </div>
             ) : null}
             {children}

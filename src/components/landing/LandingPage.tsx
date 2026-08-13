@@ -43,7 +43,6 @@ import MarketingHeader from '@/components/marketing/MarketingHeader';
 type FeatureSection = {
   id: string;
   title: string;
-  eyebrow: string;
   visualLabel: string;
   storyCopy: string;
   points: string[];
@@ -72,7 +71,6 @@ type LandingPageProps = {
 const featureSections = [
   {
     id: 'scheduling',
-    eyebrow: 'Scheduling',
     visualLabel: 'Live resource board',
     title: 'Schedule courts fast.',
     storyCopy: 'Build court and field blocks for events, leagues, and tournaments, then spot conflicts before the schedule goes live.',
@@ -94,7 +92,6 @@ const featureSections = [
   },
   {
     id: 'registrations',
-    eyebrow: 'Registration',
     visualLabel: 'Roster status view',
     title: 'Rosters stay ready.',
     storyCopy: 'Keep teams, waitlists, attendance, and participant status visible from registration through check-in.',
@@ -116,7 +113,6 @@ const featureSections = [
   },
   {
     id: 'payments',
-    eyebrow: 'Payments',
     visualLabel: 'Checkout summary',
     title: 'Payments, reconciled.',
     storyCopy: 'Collect registration fees online, match payment records, and keep refunds tied to the right team or player.',
@@ -138,7 +134,6 @@ const featureSections = [
   },
   {
     id: 'documents',
-    eyebrow: 'Documents',
     visualLabel: 'Document builder',
     title: 'Documents signed.',
     storyCopy: 'Attach waivers and agreements to registrations so staff can see who is cleared before play starts.',
@@ -155,7 +150,6 @@ const featureSections = [
   },
   {
     id: 'communication',
-    eyebrow: 'Communication',
     visualLabel: 'Event message stream',
     title: 'Updates in context.',
     storyCopy: 'Send announcements and group messages from the same event workspace that holds the schedule.',
@@ -172,7 +166,6 @@ const featureSections = [
   },
   {
     id: 'personal-schedules',
-    eyebrow: 'Personal Schedules',
     visualLabel: 'Participant itinerary',
     title: 'Everyone knows where to be.',
     storyCopy: 'Give players and staff a mobile-ready view of game times, locations, and schedule changes.',
@@ -481,7 +474,6 @@ function FeatureStoryPage({
   const postExit = Math.min(1, end + segment * 0.42);
   const exitDirection = index % 2 === 0 ? -1 : 1;
   const isLastPage = index === storyCount - 1;
-  const Icon = feature.icon;
   const pageProgress: number[] =
     index === 0
       ? [0, shrinkStart, pitchStart, fallStart, end, postExit]
@@ -562,12 +554,8 @@ function FeatureStoryPage({
 
       <div className="relative z-10 mx-auto grid h-full max-w-[1840px] grid-cols-[0.44fr_1.56fr] items-center gap-16 px-12 pb-32 pt-24 2xl:gap-24 2xl:px-16">
         <aside className="min-w-0">
-          <div className="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-2 text-xs font-black uppercase tracking-wide text-white shadow-sm backdrop-blur">
-            <Icon className="h-4 w-4" aria-hidden="true" />
-            {feature.eyebrow}
-          </div>
 
-          <h2 className="mt-5 max-w-2xl text-6xl font-normal leading-[0.94] text-white xl:text-[4.25rem] 2xl:text-7xl">
+          <h2 className="max-w-2xl text-6xl font-normal leading-[0.94] text-white xl:text-[4.25rem] 2xl:text-7xl">
             {feature.title}
           </h2>
 
@@ -577,7 +565,7 @@ function FeatureStoryPage({
 
           <ul
             className="mt-6 grid grid-cols-2 border border-white/18 text-base font-semibold text-white/88 2xl:mt-8"
-            aria-label={`${feature.eyebrow} highlights`}
+            aria-label={`${feature.title} highlights`}
           >
             {feature.points.map((point) => (
               <li key={point} className="flex min-h-[4rem] items-center gap-3 border-r border-white/18 px-5 last:border-r-0 2xl:min-h-[4.75rem] 2xl:px-6">
@@ -814,15 +802,12 @@ function StaticOperationsContent({ landingImageProps }: { landingImageProps: Lan
                     <Icon className="h-5 w-5" aria-hidden="true" />
                   </div>
 
-                  <p className="landing-operation-static-label mt-5 text-xs font-black uppercase tracking-wide text-blue-800">
-                    Round {String(index + 1).padStart(2, '0')} / {feature.eyebrow}
-                  </p>
 
-                  <p className="landing-operation-static-title mt-2 text-3xl font-black text-slate-950">{feature.title}</p>
+                  <p className="landing-operation-static-title mt-5 text-3xl font-black text-slate-950">{feature.title}</p>
                 </div>
               </div>
 
-              <ul className="landing-operation-point-list" aria-label={`${feature.eyebrow} focus`}>
+              <ul className="landing-operation-point-list" aria-label={`${feature.title} focus`}>
                 {feature.points.map((point) => (
                   <li key={point}>{point}</li>
                 ))}

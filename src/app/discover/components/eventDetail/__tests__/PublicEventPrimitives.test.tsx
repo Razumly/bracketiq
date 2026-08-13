@@ -31,12 +31,11 @@ describe('public event primitives', () => {
 
     it('renders section hierarchy and children', () => {
         renderWithMantine(
-            <PublicEventSection eyebrow="Format" title="League rules">
+            <PublicEventSection title="League rules">
                 <p>Best of three</p>
             </PublicEventSection>,
         );
 
-        expect(screen.getByText('Format')).toBeInTheDocument();
         expect(screen.getByRole('heading', { name: 'League rules' })).toBeInTheDocument();
         expect(screen.getByText('Best of three')).toBeInTheDocument();
     });

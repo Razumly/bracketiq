@@ -263,7 +263,6 @@ export default async function PublicOrganizationPage({ params }: PublicOrganizat
           <div className={styles.brandRow}>
             <Image src={organization.logoUrl} alt="" width={76} height={76} className={styles.logo} unoptimized />
             <div>
-              <p className={styles.eyebrow}>BracketIQ</p>
               <p className={styles.orgName}>{organization.name}</p>
             </div>
           </div>

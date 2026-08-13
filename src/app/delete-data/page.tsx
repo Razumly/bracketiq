@@ -51,19 +51,10 @@ const additionalNotes = [
   'If you cannot access the app, contact support@bracket-iq.com from the email address associated with your BracketIQ account.',
 ];
 
-function SectionCard({
-  eyebrow,
-  title,
-  items,
-}: {
-  eyebrow: string;
-  title: string;
-  items: string[];
-}) {
+function SectionCard({ title, items }: { title: string; items: string[] }) {
   return (
     <section className="landing-surface rounded-3xl p-6 sm:p-7">
-      <p className="landing-label text-xs uppercase tracking-[0.16em]">{eyebrow}</p>
-      <h2 className="landing-section-title mt-3 text-2xl font-semibold">{title}</h2>
+      <h2 className="landing-section-title text-2xl font-semibold">{title}</h2>
       <ul className="landing-section-copy mt-4 space-y-3 text-sm sm:text-base">
         {items.map((item) => (
           <li key={item} className="flex gap-3">
@@ -155,10 +146,10 @@ export default function DeleteDataPage() {
       </section>
 
       <section className="container-responsive relative grid gap-6 pb-20 md:grid-cols-2">
-        <SectionCard eyebrow="Deleted" title="Data deleted when the request is processed" items={deletedData} />
-        <SectionCard eyebrow="90-Day Retention" title="Data kept briefly before deletion" items={delayedDeletion} />
-        <SectionCard eyebrow="Retained" title="Data kept for historical, billing, and compliance records" items={retainedRecords} />
-        <SectionCard eyebrow="Notes" title="Additional details" items={additionalNotes} />
+        <SectionCard title="Data deleted when the request is processed" items={deletedData} />
+        <SectionCard title="Data kept briefly before deletion" items={delayedDeletion} />
+        <SectionCard title="Data kept for historical, billing, and compliance records" items={retainedRecords} />
+        <SectionCard title="Additional details" items={additionalNotes} />
       </section>
     </main>
   );

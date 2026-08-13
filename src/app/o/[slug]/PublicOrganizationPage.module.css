@@ -37,16 +37,8 @@
   border: 1px solid rgba(255, 255, 255, 0.35);
 }
 
-.eyebrow {
-  margin: 0;
-  font-size: 0.9rem;
-  font-weight: 700;
-  letter-spacing: 0;
-  color: var(--org-accent);
-}
-
 .orgName {
-  margin: 2px 0 0;
+  margin: 0;
   font-size: clamp(1.1rem, 2vw, 1.4rem);
   font-weight: 800;
 }

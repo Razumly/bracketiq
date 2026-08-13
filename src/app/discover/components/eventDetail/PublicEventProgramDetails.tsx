@@ -227,12 +227,12 @@ export function PublicEventProgramDetails({
             {(eventType === 'LEAGUE' || canViewStaffSection) ? (
                 <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
                     {eventType === 'LEAGUE' ? (
-                        <PublicEventSection eyebrow="Format" title="League Scoring Rules" className="h-full">
+                        <PublicEventSection title="League Scoring Rules" className="h-full">
                             <PublicEventMetaPill label="Scoring profile" value={sportLabel || 'Default'} />
                         </PublicEventSection>
                     ) : null}
                     {canViewStaffSection ? (
-                        <PublicEventSection eyebrow="Operations" title="Staff" className="h-full">
+                        <PublicEventSection title="Staff" className="h-full">
                             <div className="grid grid-cols-1 gap-3">
                                 <PublicEventMetaPill label="Primary host" value={hostedByLabel} />
                                 <PublicEventMetaPill label="Assistant hosts" value={formatReadOnlyValueList(assistantHostNames, 'No assistant hosts assigned')} />
