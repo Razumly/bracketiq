@@ -162,6 +162,28 @@ class EventEditDraftCoordinatorTest {
         assertEquals(4, coordinator.editableLeagueScoringConfig.value.pointsForWin)
     }
 
+    @Test
+    fun participant_immutable_fields_block_event_type_and_registration_mode_changes() {
+        val coordinator = EventEditDraftCoordinator(
+            initialEvent = leagueEvent().copy(teamSignup = false),
+            canEditInitial = true,
+        )
+        coordinator.setControlLocks(setOf("eventType", "teamSignup"))
+
+        coordinator.updateEditedEvent { current ->
+            current.copy(
+                name = "Renamed League",
+                eventType = EventType.EVENT,
+                teamSignup = true,
+            )
+        }
+
+        assertEquals(EventEditorControlLocks(eventType = true, teamSignup = true), coordinator.controlLocks.value)
+        assertEquals("Renamed League", coordinator.editedEvent.value.name)
+        assertEquals(EventType.LEAGUE, coordinator.editedEvent.value.eventType)
+        assertEquals(false, coordinator.editedEvent.value.teamSignup)
+    }
+
     private fun leagueEvent(
         eventType: EventType = EventType.LEAGUE,
         divisions: List<String> = listOf("open"),

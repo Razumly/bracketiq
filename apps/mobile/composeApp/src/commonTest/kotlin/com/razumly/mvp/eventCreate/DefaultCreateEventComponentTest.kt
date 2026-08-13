@@ -25,6 +25,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
@@ -1994,9 +1995,10 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         assertEquals(2, harness.eventRepository.attemptedCreateEventEditorCommands.size)
         assertEquals(1, harness.eventRepository.createEventEditorCalls.size)
-        assertEquals(
+        assertNotEquals(
             harness.eventRepository.attemptedCreateEventEditorCommands[0].createOperationId,
             harness.eventRepository.attemptedCreateEventEditorCommands[1].createOperationId,
+            "A changed draft must use a new create operation ID.",
         )
         val retrySlot = harness.eventRepository.createEventEditorCalls.single().draft.resources.timeSlots.single()
         assertEquals(slotBeforeRetry.startDate.toString(), retrySlot.startDate)

@@ -4,6 +4,11 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome
+import com.razumly.mvp.core.data.repositories.EventScheduleOutcome
+import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeDto
+import com.razumly.mvp.core.network.dto.EventEditorMatchProjectionDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleWarningDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -130,6 +135,10 @@ class EventEditActionCoordinatorTest {
         event: Event,
         staffInvites: List<Invite> = emptyList(),
         delivery: String = "SENT",
+        scheduleOutcome: EventEditorScheduleOutcomeDto = EventEditorScheduleOutcomeDto(
+            status = EventEditorScheduleOutcomeStatus.NOT_REQUESTED,
+            matchCount = 0,
+        ),
     ): EventEditorSaveOutcome {
         val baseline = com.razumly.mvp.eventCreate.createEventEditorSession(event = event)
         val canonical = baseline.canonicalState.copy(pendingStaffInvites = staffInvites)
@@ -139,6 +148,7 @@ class EventEditActionCoordinatorTest {
                 baseline = canonical,
             ),
             staffEmailDelivery = delivery,
+            scheduleOutcome = scheduleOutcome,
         )
     }
 
@@ -161,17 +171,14 @@ class EventEditActionCoordinatorTest {
             },
             updateEvent = { prepared ->
                 events += "update:${prepared.event.id}"
-                updated
+                saveOutcome(updated)
             },
             scheduleEvent = { action, event ->
                 events += "schedule:${action.name}:${event.id}"
-                scheduled
+                EventScheduleOutcome(event = scheduled)
             },
             refetchMatchesOfTournament = { eventId ->
                 events += "refetch:$eventId"
-            },
-            resetBracketMatchesAfterSchedule = { event ->
-                events += "reset:${event.id}"
             },
             refreshLeagueStandingsAfterSchedule = { event ->
                 events += "standings:${event.id}"
@@ -199,7 +206,57 @@ class EventEditActionCoordinatorTest {
     }
 
     @Test
-    fun runScheduleEditAction_builds_brackets_without_deleting_existing_matches_and_resets_after_schedule() = runTest {
+    fun runScheduleEditAction_uses_atomic_build_outcome_and_surfaces_warnings() = runTest {
+        val updated = Event(id = "event-1", name = "Updated", eventType = EventType.LEAGUE)
+        val events = mutableListOf<String>()
+        val result = EventEditActionCoordinator().runScheduleEditAction(
+            action = EventScheduleEditAction.BUILD_SCHEDULE,
+            prepareEventForUpdate = {
+                events += "prepare"
+                PreparedEventForUpdate(event = updated)
+            },
+            logPreparedFieldOwnership = { action, _ -> events += "log:$action" },
+            updateEvent = {
+                events += "save"
+                saveOutcome(
+                    event = updated,
+                    scheduleOutcome = EventEditorScheduleOutcomeDto(
+                        status = EventEditorScheduleOutcomeStatus.BUILT,
+                        matchCount = 1,
+                        matches = listOf(
+                            EventEditorMatchProjectionDto(
+                                id = "match-1",
+                                eventId = updated.id,
+                            ),
+                        ),
+                        warnings = listOf(
+                            EventEditorScheduleWarningDto(
+                                code = "LOCKED_MATCH_OUTSIDE_WINDOW",
+                                message = "A locked match was preserved.",
+                            ),
+                        ),
+                    ),
+                )
+            },
+            scheduleEvent = { _, _ -> error("must not schedule twice") },
+            refetchMatchesOfTournament = { eventId -> events += "refetch:$eventId" },
+            refreshLeagueStandingsAfterSchedule = { event -> events += "standings:${event.id}" },
+            showLoading = { events += "show" },
+            hideLoading = { events += "hide" },
+        )
+
+        val success = assertIs<EventScheduleEditResult.Success>(result)
+        assertEquals("Schedule built.\nA locked match was preserved.", success.message)
+        assertEquals(updated.id, success.scheduledEvent.id)
+        assertEquals(updated.name, success.scheduledEvent.name)
+        assertEquals(
+            listOf("show", "prepare", "log:build_schedule", "save", "refetch:event-1", "standings:event-1", "hide"),
+            events,
+        )
+    }
+
+    @Test
+    fun runScheduleEditAction_rebuilds_the_full_schedule_without_a_second_match_reset() = runTest {
         val coordinator = EventEditActionCoordinator()
         val draft = Event(id = "event-1", maxParticipants = 12)
         val updated = draft.copy(name = "Updated")
@@ -207,7 +264,7 @@ class EventEditActionCoordinatorTest {
         val events = mutableListOf<String>()
 
         val result = coordinator.runScheduleEditAction(
-            action = EventScheduleEditAction.BUILD_BRACKETS,
+            action = EventScheduleEditAction.REBUILD_SCHEDULE,
             prepareEventForUpdate = {
                 events += "prepare"
                 PreparedEventForUpdate(event = draft)
@@ -217,17 +274,14 @@ class EventEditActionCoordinatorTest {
             },
             updateEvent = { prepared ->
                 events += "update:${prepared.event.id}"
-                updated
+                saveOutcome(updated)
             },
             scheduleEvent = { action, event ->
                 events += "schedule:${action.name}:${event.id}"
-                scheduled
+                EventScheduleOutcome(event = scheduled)
             },
             refetchMatchesOfTournament = { eventId ->
                 events += "refetch:$eventId"
-            },
-            resetBracketMatchesAfterSchedule = { event ->
-                events += "reset:${event.id}"
             },
             refreshLeagueStandingsAfterSchedule = { event ->
                 events += "standings:${event.id}"
@@ -237,16 +291,16 @@ class EventEditActionCoordinatorTest {
         )
 
         val success = assertIs<EventScheduleEditResult.Success>(result)
-        assertEquals("Bracket build completed.", success.message)
+        assertEquals("Schedule rebuilt.", success.message)
         assertEquals(scheduled, success.scheduledEvent)
         assertEquals(
             listOf(
-                "show:Building bracket(s)...",
+                "show:Rebuilding schedule...",
                 "prepare",
-                "log:build_brackets:event-1",
+                "log:rebuild_schedule:event-1",
                 "update:event-1",
-                "schedule:BUILD_BRACKETS:event-1",
-                "reset:event-1",
+                "schedule:REBUILD_SCHEDULE:event-1",
+                "refetch:event-1",
                 "standings:event-1",
                 "hide",
             ),
@@ -273,7 +327,7 @@ class EventEditActionCoordinatorTest {
             },
             updateEvent = {
                 events += "update"
-                updated
+                saveOutcome(updated)
             },
             scheduleEvent = { action, event ->
                 events += "schedule:${action.name}:${event.id}"
@@ -281,9 +335,6 @@ class EventEditActionCoordinatorTest {
             },
             refetchMatchesOfTournament = { eventId ->
                 events += "refetch:$eventId"
-            },
-            resetBracketMatchesAfterSchedule = { event ->
-                events += "reset:${event.id}"
             },
             refreshLeagueStandingsAfterSchedule = { event ->
                 events += "standings:${event.id}"

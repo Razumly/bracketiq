@@ -22,6 +22,9 @@ import com.razumly.mvp.core.network.dto.EventEditorResourcesDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveResultDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleDto
 import com.razumly.mvp.core.network.dto.EventEditorSnapshotDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus
+import com.razumly.mvp.core.network.dto.EventEditorScheduleStateDto
 import com.razumly.mvp.core.network.dto.EventEditorStaffDto
 import com.razumly.mvp.core.network.dto.EventEditorStaffInviteDto
 import com.razumly.mvp.core.network.dto.EventEditorTagDto
@@ -265,6 +268,12 @@ internal fun editorProtocolSnapshot(
             fieldNames = listOf("field-immutable-1"),
             rental = true,
             template = true,
+        ),
+        scheduleState = EventEditorScheduleStateDto(
+            sourceType = null,
+            matchCount = 0,
+            revision = if (mode == "CREATE") "new" else "schedule-revision-1",
+            hasProtectedHistory = false,
         ),
     )
 }
@@ -558,6 +567,10 @@ class EventEditorSessionMapperTest {
                 status = "SAVED",
                 snapshot = resultSnapshot,
                 staffEmailDelivery = "NOT_REQUESTED",
+                scheduleOutcome = EventEditorScheduleOutcomeDto(
+                    status = EventEditorScheduleOutcomeStatus.NOT_REQUESTED,
+                    matchCount = 0,
+                ),
             ),
             editSession,
         )

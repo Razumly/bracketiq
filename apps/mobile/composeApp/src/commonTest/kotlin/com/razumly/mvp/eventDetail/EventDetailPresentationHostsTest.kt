@@ -10,20 +10,20 @@ import kotlin.test.assertTrue
 
 class EventDetailPresentationHostsTest {
     @Test
-    fun givenTournament_whenResolvingEditActions_thenSchedulingAndBracketActionsAreAvailable() {
+    fun givenTournament_whenResolvingEditActions_thenScheduleActionsAreAvailable() {
         val availability = eventEditActionAvailability(
             event = Event(eventType = EventType.TOURNAMENT, state = "PUBLISHED"),
             isHost = true,
         )
 
         assertTrue(availability.canReschedule)
-        assertTrue(availability.canBuildBrackets)
+        assertTrue(availability.canBuildSchedule)
         assertTrue(availability.eventActionEnabled)
         assertTrue(availability.canCreateTemplate)
     }
 
     @Test
-    fun givenLeagueWithoutPlayoffs_whenResolvingEditActions_thenBracketActionIsHidden() {
+    fun givenLeagueWithoutPlayoffs_whenResolvingEditActions_thenBuildScheduleIsAvailable() {
         val availability = eventEditActionAvailability(
             event = Event(
                 eventType = EventType.LEAGUE,
@@ -34,7 +34,7 @@ class EventDetailPresentationHostsTest {
         )
 
         assertTrue(availability.canReschedule)
-        assertFalse(availability.canBuildBrackets)
+        assertTrue(availability.canBuildSchedule)
     }
 
     @Test

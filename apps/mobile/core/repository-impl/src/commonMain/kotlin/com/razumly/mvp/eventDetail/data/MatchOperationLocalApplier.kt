@@ -266,11 +266,41 @@ private fun MatchMVP.applyLocalIncidentScoreDelta(
     val delta = incident.linkedPointDelta ?: return this
     if (delta == 0) return this
     val eventTeamId = incident.eventTeamId?.trim()?.takeIf(String::isNotBlank) ?: return this
-    val segmentIndex = segments.indexOfFirst { segment ->
-        segment.id == incident.segmentId
+    val segmentId = incident.segmentId?.trim()?.takeIf(String::isNotBlank) ?: return this
+    var updated = segments.toMutableList()
+    var segmentIndex = updated.indexOfFirst { segment -> segment.id == segmentId }
+    if (segmentIndex < 0) {
+        val prefix = "${id}_segment_"
+        val sequence = segmentId
+            .takeIf { candidate -> candidate.startsWith(prefix) }
+            ?.removePrefix(prefix)
+            ?.toIntOrNull()
+            ?.takeIf { value -> value > 0 }
+            ?: return this
+        val configuredSegmentCount = (matchRulesSnapshot ?: resolvedMatchRules)?.segmentCount ?: 0
+        val availableSegmentCount = maxOf(
+            configuredSegmentCount,
+            segments.size,
+            team1Points.size,
+            team2Points.size,
+            1,
+        )
+        if (sequence > availableSegmentCount) return this
+        val scores = buildMap {
+            team1Id?.let { teamId -> put(teamId, team1Points.getOrNull(sequence - 1) ?: 0) }
+            team2Id?.let { teamId -> put(teamId, team2Points.getOrNull(sequence - 1) ?: 0) }
+        }
+        updated += MatchSegmentMVP(
+            id = segmentId,
+            eventId = eventId,
+            matchId = id,
+            sequence = sequence,
+            status = if (scores.values.any { score -> score > 0 }) "IN_PROGRESS" else "NOT_STARTED",
+            scores = scores,
+        )
+        updated = updated.sortedBy { segment -> segment.sequence }.toMutableList()
+        segmentIndex = updated.indexOfFirst { segment -> segment.id == segmentId }
     }
-    if (segmentIndex < 0) return this
-    val updated = segments.toMutableList()
     val segment = updated[segmentIndex]
     val nextScore = ((segment.scores[eventTeamId] ?: 0) + delta * multiplier).coerceAtLeast(0)
     val nextScores = segment.scores + (eventTeamId to nextScore)

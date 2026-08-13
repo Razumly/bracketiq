@@ -22,7 +22,15 @@ import com.razumly.mvp.eventDetail.data.IMatchRepository
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
+
+data class EventTypeTransitionConfirmation(
+    val message: String,
+    val actionLabel: String,
+    val destinationEventType: EventType,
+)
 internal class EventEditActionHandler(
     private val scope: CoroutineScope,
     private val editActionCoordinator: EventEditActionCoordinator,
@@ -44,6 +52,9 @@ internal class EventEditActionHandler(
 ) {
     private var editStartRequestId = 0L
     private var editorSession: EventEditorSession? = null
+    private val _eventTypeTransitionConfirmation =
+        MutableStateFlow<EventTypeTransitionConfirmation?>(null)
+    val eventTypeTransitionConfirmation = _eventTypeTransitionConfirmation.asStateFlow()
 
     fun toggleEdit() {
         if (editDraftCoordinator.isEditing.value) {
@@ -74,6 +85,7 @@ internal class EventEditActionHandler(
 
     fun cancelEditingEvent() {
         editStartRequestId += 1
+        _eventTypeTransitionConfirmation.value = null
         setEventEditMode(enabled = false)
     }
 
@@ -117,6 +129,11 @@ internal class EventEditActionHandler(
                     ?: eventWithRelations().leagueScoringConfig?.toDto()
                     ?: LeagueScoringConfigDTO(),
             )
+            editDraftCoordinator.setControlLocks(
+                immutableFieldNames = editorSession?.snapshot?.immutable?.fieldNames?.toSet().orEmpty(),
+                eventTypeHasProtectedHistory =
+                    editorSession?.snapshot?.scheduleState?.hasProtectedHistory == true,
+            )
             val changedRentalSelection = rentalResourcesCoordinator.setAttachedResourceSelection(
                 slots = editDraftCoordinator.editableLeagueTimeSlots.value,
                 eventId = seededEvent.id,
@@ -142,6 +159,31 @@ internal class EventEditActionHandler(
     }
 
     fun updateEvent() {
+        requestEventUpdate(transitionConfirmed = false)
+    }
+
+    fun dismissEventTypeTransitionConfirmation() {
+        _eventTypeTransitionConfirmation.value = null
+    }
+
+    fun confirmEventTypeTransition() {
+        val confirmation = _eventTypeTransitionConfirmation.value ?: return
+        if (editDraftCoordinator.editedEvent.value.eventType != confirmation.destinationEventType) {
+            _eventTypeTransitionConfirmation.value = null
+            requestEventUpdate(transitionConfirmed = false)
+            return
+        }
+        _eventTypeTransitionConfirmation.value = null
+        requestEventUpdate(transitionConfirmed = true)
+    }
+
+    private fun requestEventUpdate(transitionConfirmed: Boolean) {
+        if (!transitionConfirmed) {
+            buildEventTypeTransitionConfirmation()?.let { confirmation ->
+                _eventTypeTransitionConfirmation.value = confirmation
+                return
+            }
+        }
         scope.launch {
             val loadingOperation = loadingHandler().newOperation()
             when (val result = editActionCoordinator.runSaveEventAction(
@@ -156,24 +198,72 @@ internal class EventEditActionHandler(
             )) {
                 is EventSaveActionResult.Success -> {
                     setStaffState(result.staffInvites, result.staffRevision)
-                    if (
-                        result.staffEmailDelivery.isNotBlank() &&
-                        result.staffEmailDelivery.uppercase() !in setOf("SENT", "NOT_REQUESTED")
-                    ) {
-                        setError("Event saved, but staff invite delivery needs attention.")
+                    val notices = buildList {
+                        if (
+                            result.staffEmailDelivery.isNotBlank() &&
+                            result.staffEmailDelivery.uppercase() !in setOf("SENT", "NOT_REQUESTED")
+                        ) {
+                            add("Event saved, but staff invite delivery needs attention.")
+                        }
+                        addAll(result.scheduleWarnings)
                     }
                     inviteCoordinator.clearPendingStaffInvites()
                     inviteCoordinator.clearSuggestedUsers()
                     cancelEditingEvent()
+                    if (notices.isNotEmpty()) setError(notices.joinToString("\n"))
                 }
                 is EventSaveActionResult.Failure -> setError(result.userFacingMessage())
             }
         }
     }
 
+    private fun buildEventTypeTransitionConfirmation(): EventTypeTransitionConfirmation? {
+        val session = editorSession ?: return null
+        val previousType = session.baseline.event.eventType
+        val nextType = editDraftCoordinator.editedEvent.value.eventType
+        if (previousType == nextType) return null
+        val previousLabel = previousType.name
+        val nextLabel = nextType.name
+        val matchCount = session.snapshot.scheduleState.matchCount
+        return when {
+            (nextType == EventType.LEAGUE || nextType == EventType.TOURNAMENT) && matchCount > 0 ->
+                EventTypeTransitionConfirmation(
+                    message = "Changing this event from $previousLabel to $nextLabel will rebuild " +
+                        "its $matchCount scheduled matches. Match times, fields, seeds, and " +
+                        "official assignments can change.",
+                    actionLabel = "Change type & rebuild schedule",
+                    destinationEventType = nextType,
+                )
+            nextType == EventType.LEAGUE || nextType == EventType.TOURNAMENT ->
+                EventTypeTransitionConfirmation(
+                    message = "Changing this event from $previousLabel to $nextLabel will build a schedule.",
+                    actionLabel = "Change type & build schedule",
+                    destinationEventType = nextType,
+                )
+            matchCount > 0 ->
+                EventTypeTransitionConfirmation(
+                    message = "Changing this event from $previousLabel to $nextLabel will delete " +
+                        "its $matchCount scheduled matches.",
+                    actionLabel = "Change type & delete schedule",
+                    destinationEventType = nextType,
+                )
+            else -> EventTypeTransitionConfirmation(
+                message = "Changing this event from $previousLabel to $nextLabel will not create a schedule.",
+                actionLabel = "Change type",
+                destinationEventType = nextType,
+            )
+        }
+    }
+
     fun rescheduleEvent() = runScheduleEditAction(EventScheduleEditAction.RESCHEDULE)
 
-    fun buildBrackets() = runScheduleEditAction(EventScheduleEditAction.BUILD_BRACKETS)
+    fun buildSchedule() = runScheduleEditAction(
+        if (eventWithRelations().matches.isEmpty()) {
+            EventScheduleEditAction.BUILD_SCHEDULE
+        } else {
+            EventScheduleEditAction.REBUILD_SCHEDULE
+        },
+    )
 
     fun rebuildWithoutPlaceholderTeams() =
         runScheduleEditAction(EventScheduleEditAction.REBUILD_WITHOUT_PLACEHOLDER_TEAMS)
@@ -189,39 +279,47 @@ internal class EventEditActionHandler(
                     savePreparedEventThroughEditor(
                         prepared = prepared,
                         pendingStaffInvites = inviteCoordinator.pendingStaffInvites.value,
-                    ).session.canonicalState.event
+                    )
                 },
                 scheduleEvent = { scheduleAction, updated ->
+                    val scheduleRevision = editorSession
+                        ?.snapshot
+                        ?.scheduleState
+                        ?.revision
+                        ?.trim()
+                        ?.takeIf(String::isNotBlank)
+                        ?: error("Reload the event before changing its schedule.")
                     val request = when (scheduleAction) {
                         EventScheduleEditAction.RESCHEDULE ->
-                            EventEditorScheduleRequestDto()
-                        EventScheduleEditAction.BUILD_BRACKETS ->
                             EventEditorScheduleRequestDto(
+                                expectedScheduleRevision = scheduleRevision,
+                            )
+                        EventScheduleEditAction.BUILD_SCHEDULE ->
+                            EventEditorScheduleRequestDto(
+                                expectedScheduleRevision = scheduleRevision,
                                 participantCount = updated.maxParticipants.takeIf { it > 0 },
                                 includePlaceholderTeams = true,
                             )
+                        EventScheduleEditAction.REBUILD_SCHEDULE ->
+                            EventEditorScheduleRequestDto(
+                                expectedScheduleRevision = scheduleRevision,
+                                participantCount = updated.maxParticipants.takeIf { it > 0 },
+                                includePlaceholderTeams = true,
+                                replaceExistingMatches = true,
+                            )
                         EventScheduleEditAction.REBUILD_WITHOUT_PLACEHOLDER_TEAMS ->
                             EventEditorScheduleRequestDto(
+                                expectedScheduleRevision = scheduleRevision,
                                 includePlaceholderTeams = false,
+                                replaceExistingMatches = true,
                             )
                     }
-                    eventRepository.scheduleEventEditor(updated.id, request)
-                        .getOrThrow()
-                        .event
+                    val outcome = eventRepository.scheduleEventEditor(updated.id, request).getOrThrow()
+                    editorSession = eventRepository.getEventEditor(updated.id).getOrThrow()
+                    outcome
                 },
                 refetchMatchesOfTournament = { eventId ->
                     matchRepository.getMatchesOfTournament(eventId).getOrThrow()
-                },
-                resetBracketMatchesAfterSchedule = { updated ->
-                    resetBracketMatchesAfterSchedule(
-                        event = updated,
-                        getMatchesOfTournament = { eventId ->
-                            matchRepository.getMatchesOfTournament(eventId).getOrThrow()
-                        },
-                        updateMatchesBulk = { matches ->
-                            matchRepository.updateMatchesBulk(matches).getOrThrow()
-                        },
-                    )
                 },
                 refreshLeagueStandingsAfterSchedule = refreshLeagueStandingsAfterSchedule,
                 showLoading = loadingOperation::showLoading,

@@ -363,6 +363,10 @@ fun CreateEventScreen(
     }
     val actionBackEnabled = previousSimplePageId != null || !isEventInfoStep
     val actionPrimaryLabel = when {
+        !isEventInfoStep && (
+            newEventState.eventType == EventType.LEAGUE ||
+                newEventState.eventType == EventType.TOURNAMENT
+            ) -> "Create event & build schedule"
         !isEventInfoStep -> "Create event"
         setupMode == EventCreateSetupMode.ADVANCED -> "Review"
         nextSimplePageId == null -> "Review"

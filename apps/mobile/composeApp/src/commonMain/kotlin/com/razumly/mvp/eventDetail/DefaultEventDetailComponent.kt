@@ -354,6 +354,9 @@ class DefaultEventDetailComponent(
     )
     override var editedEvent = editDraftCoordinator.editedEvent
     override var isEditing = editDraftCoordinator.isEditing
+    override val eventEditorControlLocks = editDraftCoordinator.controlLocks
+    override val eventTypeTransitionConfirmation
+        get() = eventEditActionHandler.eventTypeTransitionConfirmation
 
     override val editableLeagueTimeSlots = editDraftCoordinator.editableLeagueTimeSlots
     override val editableFields = editDraftCoordinator.editableFields
@@ -1367,10 +1370,15 @@ class DefaultEventDetailComponent(
     }
 
     override fun updateEvent() = eventEditActionHandler.updateEvent()
+    override fun dismissEventTypeTransitionConfirmation() =
+        eventEditActionHandler.dismissEventTypeTransitionConfirmation()
+
+    override fun confirmEventTypeTransition() =
+        eventEditActionHandler.confirmEventTypeTransition()
 
     override fun rescheduleEvent() = eventEditActionHandler.rescheduleEvent()
 
-    override fun buildBrackets() = eventEditActionHandler.buildBrackets()
+    override fun buildSchedule() = eventEditActionHandler.buildSchedule()
 
     override fun rebuildWithoutPlaceholderTeams() =
         eventEditActionHandler.rebuildWithoutPlaceholderTeams()

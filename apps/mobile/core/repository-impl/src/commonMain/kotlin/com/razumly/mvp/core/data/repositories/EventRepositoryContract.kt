@@ -52,7 +52,7 @@ interface IEventRepository : IMVPRepository {
         Result.failure(UnsupportedOperationException("Event editor save is not supported."))
     suspend fun scheduleEventEditor(
         eventId: String,
-        request: EventEditorScheduleRequestDto = EventEditorScheduleRequestDto(),
+        request: EventEditorScheduleRequestDto,
     ): Result<EventScheduleOutcome> =
         Result.failure(UnsupportedOperationException("Event editor scheduling is not supported."))
     suspend fun getLeagueScoringConfig(eventId: String): Result<LeagueScoringConfig?> = Result.success(null)

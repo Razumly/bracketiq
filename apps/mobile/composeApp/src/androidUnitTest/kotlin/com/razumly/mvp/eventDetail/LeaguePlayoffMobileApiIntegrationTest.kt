@@ -13,6 +13,7 @@ import com.razumly.mvp.core.data.repositories.EventEditorMutation
 import com.razumly.mvp.core.data.repositories.EventEditorSessionMapper
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleRequestDto
 import com.razumly.mvp.core.network.dto.EventParticipantsRequestDto
 import com.razumly.mvp.core.network.dto.EventParticipantsResponseDto
 import com.razumly.mvp.core.network.dto.InviteCreateDto
@@ -146,7 +147,18 @@ class LeaguePlayoffMobileApiIntegrationTest {
             invites = staffInvitePayloads(eventId = publishedEvent.id, createdBy = hostUser.id),
         ).getOrThrow()
 
-        val scheduledEvent = host.eventRepository.scheduleEventEditor(publishedEvent.id).getOrElse { error ->
+        val scheduleRevision = host.eventRepository.getEventEditor(publishedEvent.id)
+            .getOrThrow()
+            .snapshot
+            .scheduleState
+            .revision
+        val scheduledEvent = host.eventRepository.scheduleEventEditor(
+            publishedEvent.id,
+            EventEditorScheduleRequestDto(
+                expectedScheduleRevision = scheduleRevision,
+                replaceExistingMatches = true,
+            ),
+        ).getOrElse { error ->
             throw AssertionError(
                 "Scheduling ${publishedEvent.id} failed: ${error.message}",
                 error,

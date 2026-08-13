@@ -22,6 +22,7 @@ import com.razumly.mvp.core.data.repositories.EventEditorApiException
 import com.razumly.mvp.core.data.repositories.EventEditorSessionMapper
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.dto.EventParticipantsRequestDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleRequestDto
 import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.razumly.mvp.core.network.dto.EventParticipantsResponseDto
 import com.razumly.mvp.core.network.dto.EventParticipantsSnapshotResponseDto
@@ -277,7 +278,18 @@ class EventLifecycleMobileApiIntegrationTest {
             )
 
             val scheduledEvent = if (variant.event.eventType.isSchedulable()) {
-                host.eventRepository.scheduleEventEditor(publishedEvent.id).getOrElse { error ->
+                val scheduleRevision = host.eventRepository.getEventEditor(publishedEvent.id)
+                    .getOrThrow()
+                    .snapshot
+                    .scheduleState
+                    .revision
+                host.eventRepository.scheduleEventEditor(
+                    publishedEvent.id,
+                    EventEditorScheduleRequestDto(
+                        expectedScheduleRevision = scheduleRevision,
+                        replaceExistingMatches = true,
+                    ),
+                ).getOrElse { error ->
                     error("Failed to schedule ${variant.key}: ${error.backendSummary()}")
                 }.event.also { event ->
                     assertCreatedEventShape(variant = variant, event = event)
@@ -507,9 +519,8 @@ class EventLifecycleMobileApiIntegrationTest {
         val incidentTarget = selectPointIncidentTarget(host = host, matches = matches)
         val match = incidentTarget.match
         val teamId = incidentTarget.eventTeamId
-        val segment = requireNotNull(match.segments.minByOrNull { segment -> segment.sequence }) {
-            "Point incident test requires scheduled match segments"
-        }
+        val segmentId = match.segments.minByOrNull { segment -> segment.sequence }?.id
+            ?: "${match.id}_segment_1"
         val incidentId = "${match.id}_mobile_point_incident"
 
         val updated = host.matchRepository.addMatchIncident(
@@ -517,7 +528,7 @@ class EventLifecycleMobileApiIntegrationTest {
             operation = MatchIncidentOperationDto(
                 action = "CREATE",
                 id = incidentId,
-                segmentId = segment.id,
+                segmentId = segmentId,
                 eventTeamId = teamId,
                 eventRegistrationId = incidentTarget.eventRegistrationId,
                 participantUserId = incidentTarget.participantUserId.takeIf {

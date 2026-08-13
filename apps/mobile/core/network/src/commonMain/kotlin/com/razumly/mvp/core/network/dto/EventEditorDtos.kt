@@ -9,7 +9,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-const val EVENT_EDITOR_CONTRACT_VERSION: Int = 2
+const val EVENT_EDITOR_CONTRACT_VERSION: Int = 3
 
 @Serializable
 data class EventEditorBootstrapQueryDto(
@@ -30,6 +30,14 @@ data class EventEditorCreateBootstrapDto(
 )
 
 @Serializable
+data class EventEditorScheduleStateDto(
+    val sourceType: String? = null,
+    val matchCount: Int,
+    val revision: String,
+    val hasProtectedHistory: Boolean,
+)
+
+@Serializable
 data class EventEditorSnapshotDto(
     val contractVersion: Int,
     val draft: EventEditorDraftDto,
@@ -40,6 +48,7 @@ data class EventEditorSnapshotDto(
     val capabilities: EventEditorCapabilitiesDto,
     val catalogs: EventEditorCatalogsDto,
     val immutable: EventEditorImmutableDto,
+    val scheduleState: EventEditorScheduleStateDto,
 )
 
 @Serializable
@@ -64,6 +73,118 @@ data class EventEditorImmutableDto(
     val rental: Boolean = false,
     val template: Boolean = false,
 )
+@Serializable
+data class EventEditorMatchProjectionDto(
+    val id: String,
+    val matchId: Int? = null,
+    val eventId: String,
+    val start: String? = null,
+    val end: String? = null,
+    val locked: Boolean = false,
+    val division: String? = null,
+    val fieldId: String? = null,
+    val team1Id: String? = null,
+    val team2Id: String? = null,
+    val team1Seed: Int? = null,
+    val team2Seed: Int? = null,
+    val status: String? = null,
+    val resultStatus: String? = null,
+    val resultType: String? = null,
+    val actualStart: String? = null,
+    val actualEnd: String? = null,
+    val statusReason: String? = null,
+    val winnerEventTeamId: String? = null,
+    val matchRulesSnapshot: JsonObject? = null,
+    val resolvedMatchRules: JsonObject? = null,
+    val segments: List<JsonObject> = emptyList(),
+    val incidents: List<JsonObject> = emptyList(),
+    val officialId: String? = null,
+    val officialIds: List<JsonObject> = emptyList(),
+    val teamOfficialId: String? = null,
+    val team1Points: List<Int> = emptyList(),
+    val team2Points: List<Int> = emptyList(),
+    val losersBracket: Boolean = false,
+    val winnerNextMatchId: String? = null,
+    val loserNextMatchId: String? = null,
+    val previousLeftId: String? = null,
+    val previousRightId: String? = null,
+    val side: String? = null,
+    val officialCheckedIn: Boolean = false,
+)
+
+@Serializable
+data class EventEditorScheduleWarningDto(
+    val code: String,
+    val message: String,
+    val matchIds: List<String>? = null,
+)
+
+@Serializable
+enum class EventEditorCreateCompletionMode {
+    CREATE_ONLY,
+    CREATE_AND_BUILD_SCHEDULE,
+}
+
+@Serializable
+enum class EventEditorScheduleTransitionMode {
+    PRESERVE,
+    BUILD_IF_MISSING,
+    RECONCILE,
+}
+
+@Serializable
+enum class EventEditorScheduleOutcomeStatus {
+    NOT_REQUESTED,
+    BUILT,
+    REBUILT,
+    DELETED,
+}
+
+@Serializable
+data class EventEditorCreateCompletionDto(
+    val mode: EventEditorCreateCompletionMode,
+)
+
+@Serializable
+data class EventEditorSaveScheduleTransitionDto(
+    val mode: EventEditorScheduleTransitionMode,
+    val expectedScheduleRevision: String? = null,
+) {
+    init {
+        if (mode == EventEditorScheduleTransitionMode.PRESERVE) {
+            require(expectedScheduleRevision == null) {
+                "PRESERVE schedule transitions cannot include a schedule revision."
+            }
+        } else {
+            require(!expectedScheduleRevision.isNullOrBlank()) {
+                "Schedule transitions that mutate matches require an expected schedule revision."
+            }
+        }
+    }
+}
+
+@Serializable
+data class EventEditorScheduleOutcomeDto(
+    val status: EventEditorScheduleOutcomeStatus,
+    val matchCount: Int,
+    val matches: List<EventEditorMatchProjectionDto> = emptyList(),
+    val warnings: List<EventEditorScheduleWarningDto> = emptyList(),
+) {
+    init {
+        when (status) {
+            EventEditorScheduleOutcomeStatus.NOT_REQUESTED -> {
+                require(matches.isEmpty() && warnings.isEmpty())
+            }
+            EventEditorScheduleOutcomeStatus.BUILT,
+            EventEditorScheduleOutcomeStatus.REBUILT -> {
+                require(matchCount > 0 && matches.isNotEmpty())
+            }
+            EventEditorScheduleOutcomeStatus.DELETED -> {
+                require(matchCount == 0 && matches.isEmpty() && warnings.isEmpty())
+            }
+        }
+    }
+}
 
 @Serializable
 data class EventEditorDraftDto(
@@ -369,6 +490,7 @@ data class EventEditorCreateCommandDto(
     val contractVersion: Int,
     val createOperationId: String,
     val draft: EventEditorDraftDto,
+    val completion: EventEditorCreateCompletionDto,
 )
 
 @Serializable
@@ -377,6 +499,7 @@ data class EventEditorSaveCommandDto(
     val editorRevision: String,
     val staffRevision: String? = null,
     val draft: EventEditorDraftDto,
+    val scheduleTransition: EventEditorSaveScheduleTransitionDto,
 )
 
 @Serializable
@@ -385,6 +508,7 @@ data class EventEditorSaveResultDto(
     val snapshot: EventEditorSnapshotDto,
     val questionIdMap: Map<String, String> = emptyMap(),
     val staffEmailDelivery: String,
+    val scheduleOutcome: EventEditorScheduleOutcomeDto,
 )
 
 @Serializable
@@ -400,6 +524,7 @@ data class EventEditorErrorDto(
 
 @Serializable
 data class EventEditorScheduleRequestDto(
+    val expectedScheduleRevision: String,
     val participantCount: Int? = null,
     val includePlaceholderTeams: Boolean? = null,
     val replaceExistingMatches: Boolean = false,
@@ -410,7 +535,7 @@ data class EventEditorScheduleResponseDto(
     val preview: Boolean = false,
     val event: EventApiDto? = null,
     val matches: List<MatchApiDto> = emptyList(),
-    val warnings: List<JsonElement> = emptyList(),
+    val warnings: List<EventEditorScheduleWarningDto> = emptyList(),
     val didRebuildSchedule: Boolean = false,
 )
 
@@ -445,7 +570,15 @@ fun encodeEventEditorSaveCommand(command: EventEditorSaveCommandDto): JsonObject
 
 private fun JsonObject.toEventEditorCommandWire(): JsonObject {
     val draft = this["draft"]?.jsonObject ?: return this
+    val transition = this["scheduleTransition"]?.jsonObject?.let { value ->
+        if (value["mode"]?.jsonPrimitive?.content == "PRESERVE") {
+            value.without("expectedScheduleRevision")
+        } else {
+            value.withoutNulls()
+        }
+    }
     return withNullable("draft", draft.toEventEditorDraftWire())
+        .withNullable("scheduleTransition", transition)
 }
 
 private fun JsonObject.toEventEditorDraftWire(): JsonObject {

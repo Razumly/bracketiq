@@ -47,7 +47,9 @@ internal data class EventDetailOverlayHostState(
     val eventRegistrationQuestionDialog: EventRegistrationQuestionDialogState?,
     val paymentPlanPreviewDialog: PaymentPlanPreviewDialogState?,
     val showStandingsConfirmDialog: Boolean,
-    val showBuildBracketConfirmDialog: Boolean,
+    val eventTypeTransitionConfirmation: EventTypeTransitionConfirmation?,
+    val buildScheduleIsRebuild: Boolean,
+    val showBuildScheduleConfirmDialog: Boolean,
     val showRebuildWithoutPlaceholdersConfirmDialog: Boolean,
     val showQrCodeDialog: Boolean,
     val canShowQrCode: Boolean,
@@ -102,8 +104,10 @@ internal data class EventDetailOverlayHostActions(
     val onCancelPaymentPlan: () -> Unit,
     val onDismissStandingsConfirmation: () -> Unit,
     val onConfirmStandings: (Boolean) -> Unit,
-    val onDismissBuildBracketConfirmation: () -> Unit,
-    val onBuildBrackets: () -> Unit,
+    val onDismissEventTypeTransitionConfirmation: () -> Unit,
+    val onConfirmEventTypeTransition: () -> Unit,
+    val onDismissBuildScheduleConfirmation: () -> Unit,
+    val onBuildSchedule: () -> Unit,
     val onDismissRebuildWithoutPlaceholdersConfirmation: () -> Unit,
     val onRebuildWithoutPlaceholders: () -> Unit,
     val onDismissQrCode: () -> Unit,
@@ -304,31 +308,55 @@ internal fun EventDetailOverlayHost(
             },
         )
     }
-    if (state.showBuildBracketConfirmDialog) {
+    state.eventTypeTransitionConfirmation?.let { confirmation ->
         AlertDialog(
-            onDismissRequest = actions.onDismissBuildBracketConfirmation,
-            title = { Text("Rebuild Bracket(s)") },
+            onDismissRequest = actions.onDismissEventTypeTransitionConfirmation,
+            title = { Text("Change event type and update schedule?") },
+            text = { Text(confirmation.message) },
+            confirmButton = {
+                TextButton(onClick = actions.onConfirmEventTypeTransition) {
+                    Text(confirmation.actionLabel)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = actions.onDismissEventTypeTransitionConfirmation) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+    if (state.showBuildScheduleConfirmDialog) {
+        val isRebuild = state.buildScheduleIsRebuild
+        AlertDialog(
+            onDismissRequest = actions.onDismissBuildScheduleConfirmation,
+            title = { Text(if (isRebuild) "Rebuild Schedule" else "Build Schedule") },
             text = {
                 Text(
-                    "This rebuilds playoff/tournament bracket(s) from max participant count. " +
-                        "It will reset the bracket and any playoff/tournament match results.",
+                    if (isRebuild) {
+                        "This deletes and recreates every scheduled match. Match times, fields, " +
+                            "seeds, and official assignments can change."
+                    } else {
+                        "Build a schedule from the current event settings and registered teams?"
+                    },
                 )
             },
             confirmButton = {
-                TextButton(onClick = actions.onBuildBrackets) { Text("Rebuild") }
+                TextButton(onClick = actions.onBuildSchedule) {
+                    Text(if (isRebuild) "Rebuild Schedule" else "Build Schedule")
+                }
             },
             dismissButton = {
-                TextButton(onClick = actions.onDismissBuildBracketConfirmation) { Text("Cancel") }
+                TextButton(onClick = actions.onDismissBuildScheduleConfirmation) { Text("Cancel") }
             },
         )
     }
     if (state.showRebuildWithoutPlaceholdersConfirmDialog) {
         AlertDialog(
             onDismissRequest = actions.onDismissRebuildWithoutPlaceholdersConfirmation,
-            title = { Text("Rebuild Without Placeholders") },
-            text = { Text("This removes empty placeholder teams and rebuilds matches from registered teams only.") },
+            title = { Text("Rebuild Schedule Without Placeholders") },
+            text = { Text("This removes empty placeholder teams and rebuilds the full schedule from registered teams only.") },
             confirmButton = {
-                TextButton(onClick = actions.onRebuildWithoutPlaceholders) { Text("Rebuild") }
+                TextButton(onClick = actions.onRebuildWithoutPlaceholders) { Text("Rebuild Schedule") }
             },
             dismissButton = {
                 TextButton(onClick = actions.onDismissRebuildWithoutPlaceholdersConfirmation) { Text("Cancel") }

@@ -88,6 +88,7 @@ import com.razumly.mvp.core.network.dto.TeamCheckInDto
 import com.razumly.mvp.core.network.dto.TeamCheckInsResponseDto
 import com.razumly.mvp.core.network.MvpUploadFile
 import com.razumly.mvp.core.network.dto.*
+import com.razumly.mvp.core.network.dto.EventEditorScheduleStateDto
 import com.razumly.mvp.core.data.repositories.EventEditorSession
 import com.razumly.mvp.core.data.repositories.EventEditorSessionMapper
 import com.razumly.mvp.core.util.jsonMVP
@@ -172,6 +173,7 @@ internal class CreateEventHarness(
     val loadingHandler = CreateEvent_FakeLoadingHandler()
 
     var onEventCreatedCount = 0
+    var navigatedToSchedule = false
 
     val component: DefaultCreateEventComponent = DefaultCreateEventComponent(
         componentContext = createTestComponentContext(),
@@ -182,7 +184,10 @@ internal class CreateEventHarness(
         billingRepository = billingRepository,
         imageRepository = imageRepository,
         bootstrap = bootstrap,
-        onEventCreated = { onEventCreatedCount += 1 },
+        onEventCreated = { _, scheduleBuilt ->
+            onEventCreatedCount += 1
+            navigatedToSchedule = scheduleBuilt
+        },
     ).also { component ->
         component.setLoadingHandler(loadingHandler)
     }
@@ -461,6 +466,12 @@ internal fun createEventEditorSession(
                 immutable = EventEditorImmutableDto(
                     rental = rentalBookingId != null,
                 ),
+                scheduleState = EventEditorScheduleStateDto(
+                    sourceType = null,
+                    matchCount = 0,
+                    revision = "new",
+                    hasProtectedHistory = false,
+                ),
             ),
         ),
     )
@@ -725,6 +736,10 @@ internal class CreateEvent_FakeEventRepository(
             EventEditorSaveOutcome(
                 session = session,
                 staffEmailDelivery = staffEmailDelivery,
+                scheduleOutcome = EventEditorScheduleOutcomeDto(
+                    status = EventEditorScheduleOutcomeStatus.NOT_REQUESTED,
+                    matchCount = 0,
+                ),
             ),
         )
     }

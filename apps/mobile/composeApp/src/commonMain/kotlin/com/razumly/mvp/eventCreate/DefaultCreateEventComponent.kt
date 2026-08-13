@@ -159,6 +159,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun setLoadingHandler(loadingHandler: LoadingHandler)
     fun retryEditorBootstrap()
     fun createEvent()
+    fun saveAsDraftWithoutSchedule()
     fun nextStep()
     fun previousStep()
     fun onTypeSelected(type: EventType)
@@ -211,7 +212,7 @@ class DefaultCreateEventComponent(
     private val billingRepository: IBillingRepository,
     private val imageRepository: IImagesRepository,
     private val bootstrap: EventEditorBootstrapQueryDto,
-    val onEventCreated: (Event) -> Unit,
+    val onEventCreated: (Event, Boolean) -> Unit,
 ) : CreateEventComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
@@ -470,6 +471,23 @@ class DefaultCreateEventComponent(
                 return@launch
             }
             createEventAfterPayment(eventDraft)
+        }
+    }
+
+    override fun saveAsDraftWithoutSchedule() {
+        scope.launch {
+            val pending = pendingCreateCommand
+            if (pending?.completion?.mode != com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE) {
+                _errorState.value = ErrorMessage("Retry event creation before saving without a schedule.")
+                return@launch
+            }
+            val createOnlyCommand = pending.copy(
+                createOperationId = newId(),
+                completion = com.razumly.mvp.core.network.dto.EventEditorCreateCompletionDto(
+                    mode = com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode.CREATE_ONLY,
+                ),
+            )
+            submitCreateCommand(createOnlyCommand)
         }
     }
 
@@ -1383,12 +1401,12 @@ class DefaultCreateEventComponent(
     }
 
     private suspend fun createEventAfterPayment(eventDraft: Event) {
-        val loadingOperation = loadingHandler.newOperation()
-        var deferredError: ErrorMessage? = null
-        loadingOperation.showLoading("Creating event...")
-        try {
-            val session = _editorSession.value
-                ?: error("The event editor is not ready.")
+        val session = _editorSession.value
+            ?: run {
+                _errorState.value = ErrorMessage("The event editor is not ready.")
+                return
+            }
+        val nextCommand = runCatching {
             val prepared = prepareEventForCreation(eventDraft).getOrThrow()
             validatePendingStaffInviteDrafts(_pendingStaffInvites.value).getOrThrow()
             val mutation = EventEditorMutation(
@@ -1406,36 +1424,99 @@ class DefaultCreateEventComponent(
                     divisionFieldIds = session.canonicalState.divisionFieldIds,
                 ),
             )
-            val nextCommand = EventEditorSessionMapper.toCreateCommand(session, mutation).command
-            val command = pendingCreateCommand
-                ?.createOperationId
-                ?.let { operationId -> nextCommand.copy(createOperationId = operationId) }
-                ?: nextCommand
-            pendingCreateCommand = command
+            EventEditorSessionMapper.toCreateCommand(session, mutation).command
+        }.getOrElse { error ->
+            _errorState.value = ErrorMessage(error.userMessage("Failed to create event."))
+            return
+        }
+        val command = pendingCreateCommand
+            ?.takeIf { pending ->
+                pending.contractVersion == nextCommand.contractVersion &&
+                    pending.draft == nextCommand.draft &&
+                    pending.completion == nextCommand.completion
+            }
+            ?: nextCommand.copy(createOperationId = newId())
+        submitCreateCommand(command)
+    }
 
+    private suspend fun submitCreateCommand(command: EventEditorCreateCommandDto) {
+        val loadingOperation = loadingHandler.newOperation()
+        var deferredError: ErrorMessage? = null
+        loadingOperation.showLoading(
+            if (
+                command.completion.mode ==
+                com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE
+            ) {
+                "Creating event and building schedule..."
+            } else {
+                "Creating event..."
+            },
+        )
+        pendingCreateCommand = command
+        try {
             eventRepository.createEventEditor(command)
                 .onSuccess { outcome ->
                     pendingCreateCommand = null
                     _editorSession.value = outcome.session
                     applyEditorSession(outcome.session)
-                    if (
-                        outcome.staffEmailDelivery.isNotBlank() &&
-                        outcome.staffEmailDelivery.uppercase() !in setOf("SENT", "NOT_REQUESTED")
-                    ) {
-                        _errorState.value = ErrorMessage(
-                            "Event created, but staff invite delivery needs attention.",
-                        )
+                    val notices = buildList {
+                        if (
+                            outcome.staffEmailDelivery.isNotBlank() &&
+                            outcome.staffEmailDelivery.uppercase() !in setOf("SENT", "NOT_REQUESTED")
+                        ) {
+                            add("Event created, but staff invite delivery needs attention.")
+                        }
+                        if (
+                            outcome.scheduleOutcome.status ==
+                            com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.BUILT
+                        ) {
+                            add("Schedule built with ${outcome.scheduleOutcome.matchCount} matches.")
+                        }
+                        addAll(outcome.scheduleOutcome.warnings.map { warning -> warning.message })
                     }
-                    onEventCreated(outcome.session.canonicalState.event)
+                    if (notices.isNotEmpty()) {
+                        _errorState.value = ErrorMessage(notices.joinToString("\n"))
+                    }
+                    onEventCreated(
+                        outcome.session.canonicalState.event,
+                        outcome.scheduleOutcome.status ==
+                            com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.BUILT,
+                    )
                 }
                 .onFailure { error ->
-                    deferredError = ErrorMessage(error.userMessage("Failed to create event."))
+                    deferredError = createEventFailureMessage(error, command)
                 }
         } catch (error: Throwable) {
-            deferredError = ErrorMessage(error.userMessage("Failed to create event."))
+            deferredError = createEventFailureMessage(error, command)
         } finally {
             loadingOperation.hideLoading()
             deferredError?.let { error -> _errorState.value = error }
+        }
+    }
+
+    private fun createEventFailureMessage(
+        error: Throwable,
+        command: EventEditorCreateCommandDto,
+    ): ErrorMessage {
+        val canSaveWithoutSchedule =
+            command.completion.mode ==
+                com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE &&
+                (error as? com.razumly.mvp.core.data.repositories.EventEditorApiException)
+                    ?.payload
+                    ?.code in setOf(
+                        "EDITOR_SCHEDULE_UNSUPPORTED",
+                        "EDITOR_SCHEDULE_INPUT_INVALID",
+                        "EDITOR_SCHEDULE_FAILED",
+                    )
+        return if (canSaveWithoutSchedule) {
+            ErrorMessage(
+                message = error.userMessage("The schedule could not be built. Nothing was saved."),
+                actionLabel = "Save without schedule",
+                action = ::saveAsDraftWithoutSchedule,
+                duration = androidx.compose.material3.SnackbarDuration.Indefinite,
+            )
+        } else {
+            ErrorMessage(error.userMessage("Failed to create event."))
         }
     }
 

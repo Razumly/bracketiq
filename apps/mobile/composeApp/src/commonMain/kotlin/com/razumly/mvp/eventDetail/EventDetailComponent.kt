@@ -88,6 +88,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val validTeams: StateFlow<List<TeamWithPlayers>>
     val isHost: StateFlow<Boolean>
     val isEditing: StateFlow<Boolean>
+    val eventEditorControlLocks: StateFlow<EventEditorControlLocks>
+    val eventTypeTransitionConfirmation: StateFlow<EventTypeTransitionConfirmation?>
     val isUserInEvent: StateFlow<Boolean>
     val isRegistrationPaymentPending: StateFlow<Boolean>
     val isRegistrationPaymentFailed: StateFlow<Boolean>
@@ -189,8 +191,10 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun editEventField(update: Event.() -> Event)
     fun editTournamentField(update: Event.() -> Event)
     fun updateEvent()
+    fun dismissEventTypeTransitionConfirmation()
+    fun confirmEventTypeTransition()
     fun rescheduleEvent()
-    fun buildBrackets()
+    fun buildSchedule()
     fun rebuildWithoutPlaceholderTeams()
     fun createTemplateFromCurrentEvent()
     fun publishEvent()

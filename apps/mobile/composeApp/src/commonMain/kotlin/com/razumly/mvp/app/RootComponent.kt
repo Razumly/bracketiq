@@ -1086,13 +1086,22 @@ class RootComponent(
         _pendingInviteCount.value = count.coerceAtLeast(0)
     }
 
-    private fun onEventCreated(createdEvent: Event) {
+    private fun onEventCreated(createdEvent: Event, scheduleBuilt: Boolean) {
         val eventId = createdEvent.id.trim()
         if (eventId.isEmpty()) return
         setDefaultNavigationDirection()
         navigation.replaceAll(AppConfig.Search())
         _selectedPage.value = AppConfig.Search()
-        navigation.pushNew(AppConfig.EventDetail(eventId))
+        navigation.pushNew(
+            AppConfig.EventDetail(
+                eventId,
+                initialTab = if (scheduleBuilt) {
+                    EventDetailInitialTab.SCHEDULE
+                } else {
+                    EventDetailInitialTab.DEFAULT
+                },
+            ),
+        )
     }
 
     private fun setDefaultNavigationDirection() {

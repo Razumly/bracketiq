@@ -91,6 +91,9 @@ fun EventDetailScreen(
     val participantDivisionWarnings by component.participantDivisionWarnings.collectAsState()
     val eventMatchesLoading by component.eventMatchesLoading.collectAsState()
     val editedEvent by component.editedEvent.collectAsState()
+    val eventEditorControlLocks by component.eventEditorControlLocks.collectAsState()
+    val eventTypeTransitionConfirmation by
+        component.eventTypeTransitionConfirmation.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
     val editableMatches by component.editableMatches.collectAsState()
     val eventFields by component.eventFields.collectAsState()
@@ -211,7 +214,7 @@ fun EventDetailScreen(
     var selectedSchedulePoolDivisionId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedStandingsPoolDivisionId by rememberSaveable { mutableStateOf<String?>(null) }
     var showStandingsConfirmDialog by remember { mutableStateOf(false) }
-    var showBuildBracketConfirmDialog by remember { mutableStateOf(false) }
+    var showBuildScheduleConfirmDialog by remember { mutableStateOf(false) }
     var showRebuildWithoutPlaceholdersConfirmDialog by remember { mutableStateOf(false) }
     var showStickyDockByScroll by remember { mutableStateOf(true) }
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
@@ -606,6 +609,7 @@ fun EventDetailScreen(
                                 navPadding = LocalNavBarPadding.current,
                                 topInset = innerPadding.calculateTopPadding(),
                                 editView = isEditing,
+                                eventEditorControlLocks = eventEditorControlLocks,
                                 showOfficialsPanel = showOfficialsPanel,
                                 showMap = showMap,
                                 imageScheme = imageScheme,
@@ -838,7 +842,7 @@ fun EventDetailScreen(
                                     showEventStateDropdown = false
                                 },
                                 onRescheduleEvent = component::rescheduleEvent,
-                                onBuildBrackets = { showBuildBracketConfirmDialog = true },
+                                onBuildSchedule = { showBuildScheduleConfirmDialog = true },
                                 onRebuildWithoutPlaceholders = {
                                     showRebuildWithoutPlaceholdersConfirmDialog = true
                                 },
@@ -1042,7 +1046,9 @@ fun EventDetailScreen(
                 eventRegistrationQuestionDialog = eventRegistrationQuestionDialog,
                 paymentPlanPreviewDialog = paymentPlanPreviewDialog,
                 showStandingsConfirmDialog = showStandingsConfirmDialog,
-                showBuildBracketConfirmDialog = showBuildBracketConfirmDialog,
+                eventTypeTransitionConfirmation = eventTypeTransitionConfirmation,
+                buildScheduleIsRebuild = selectedEvent.matches.isNotEmpty(),
+                showBuildScheduleConfirmDialog = showBuildScheduleConfirmDialog,
                 showRebuildWithoutPlaceholdersConfirmDialog =
                     showRebuildWithoutPlaceholdersConfirmDialog,
                 showQrCodeDialog = showQrCodeDialog,
@@ -1134,12 +1140,15 @@ fun EventDetailScreen(
                     selectedStandingsDataDivisionId?.let(component::selectDivision)
                     component.confirmLeagueStandings(applyReassignment = applyReassignment)
                 },
-                onDismissBuildBracketConfirmation = {
-                    showBuildBracketConfirmDialog = false
+                onDismissEventTypeTransitionConfirmation =
+                    component::dismissEventTypeTransitionConfirmation,
+                onConfirmEventTypeTransition = component::confirmEventTypeTransition,
+                onDismissBuildScheduleConfirmation = {
+                    showBuildScheduleConfirmDialog = false
                 },
-                onBuildBrackets = {
-                    showBuildBracketConfirmDialog = false
-                    component.buildBrackets()
+                onBuildSchedule = {
+                    showBuildScheduleConfirmDialog = false
+                    component.buildSchedule()
                 },
                 onDismissRebuildWithoutPlaceholdersConfirmation = {
                     showRebuildWithoutPlaceholdersConfirmDialog = false

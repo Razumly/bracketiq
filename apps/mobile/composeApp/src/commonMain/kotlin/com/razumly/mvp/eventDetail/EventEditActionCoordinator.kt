@@ -4,6 +4,8 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome
+import com.razumly.mvp.core.data.repositories.EventScheduleOutcome
+import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus
 import com.razumly.mvp.core.network.userMessage
 
 internal enum class EventScheduleEditAction(
@@ -11,28 +13,30 @@ internal enum class EventScheduleEditAction(
     val logAction: String,
     val successMessage: String,
     val failureMessage: String,
-    val resetBracketMatchesAfterSchedule: Boolean,
 ) {
     RESCHEDULE(
         loadingMessage = "Rescheduling event...",
         logAction = "reschedule",
         successMessage = "Event rescheduled.",
         failureMessage = "Failed to reschedule event.",
-        resetBracketMatchesAfterSchedule = false,
     ),
-    BUILD_BRACKETS(
-        loadingMessage = "Building bracket(s)...",
-        logAction = "build_brackets",
-        successMessage = "Bracket build completed.",
-        failureMessage = "Failed to build bracket(s).",
-        resetBracketMatchesAfterSchedule = true,
+    BUILD_SCHEDULE(
+        loadingMessage = "Building schedule...",
+        logAction = "build_schedule",
+        successMessage = "Schedule built.",
+        failureMessage = "Failed to build schedule.",
+    ),
+    REBUILD_SCHEDULE(
+        loadingMessage = "Rebuilding schedule...",
+        logAction = "rebuild_schedule",
+        successMessage = "Schedule rebuilt.",
+        failureMessage = "Failed to rebuild schedule.",
     ),
     REBUILD_WITHOUT_PLACEHOLDER_TEAMS(
         loadingMessage = "Rebuilding without placeholder teams...",
         logAction = "rebuild_without_placeholders",
         successMessage = "Schedule rebuilt without placeholder teams.",
         failureMessage = "Failed to rebuild without placeholder teams.",
-        resetBracketMatchesAfterSchedule = true,
     ),
 }
 
@@ -55,6 +59,7 @@ internal sealed class EventSaveActionResult {
         val staffInvites: List<Invite>,
         val staffRevision: String?,
         val staffEmailDelivery: String,
+        val scheduleWarnings: List<String>,
     ) : EventSaveActionResult()
 
     data class Failure(
@@ -116,6 +121,7 @@ internal class EventEditActionCoordinator {
                 staffInvites = outcome.session.canonicalState.pendingStaffInvites,
                 staffRevision = outcome.session.snapshot.staffRevision,
                 staffEmailDelivery = outcome.staffEmailDelivery,
+                scheduleWarnings = outcome.scheduleOutcome.warnings.map { warning -> warning.message },
             )
         } catch (throwable: Throwable) {
             EventSaveActionResult.Failure(
@@ -133,10 +139,9 @@ internal class EventEditActionCoordinator {
         prepareEventForUpdate: () -> PreparedEventForUpdate,
         validatePreparedEvent: (PreparedEventForUpdate) -> Unit = {},
         logPreparedFieldOwnership: (String, PreparedEventForUpdate) -> Unit,
-        updateEvent: suspend (PreparedEventForUpdate) -> Event,
-        scheduleEvent: suspend (EventScheduleEditAction, Event) -> Event,
+        updateEvent: suspend (PreparedEventForUpdate) -> EventEditorSaveOutcome,
+        scheduleEvent: suspend (EventScheduleEditAction, Event) -> EventScheduleOutcome,
         refetchMatchesOfTournament: suspend (String) -> Unit,
-        resetBracketMatchesAfterSchedule: suspend (Event) -> Unit,
         refreshLeagueStandingsAfterSchedule: suspend (Event) -> Unit,
         showLoading: (String) -> Unit,
         hideLoading: () -> Unit,
@@ -147,20 +152,38 @@ internal class EventEditActionCoordinator {
             val prepared = prepareEventForUpdate()
             validatePreparedEvent(prepared)
             logPreparedFieldOwnership(action.logAction, prepared)
-            val updated = updateEvent(prepared)
+            val saveOutcome = updateEvent(prepared)
+            val updated = saveOutcome.session.canonicalState.event
             settingsSaved = true
 
-            val scheduledEvent = scheduleEvent(action, updated)
-
-            if (action.resetBracketMatchesAfterSchedule) {
-                resetBracketMatchesAfterSchedule(updated)
+            val saveScheduleOutcome = saveOutcome.scheduleOutcome
+            val useSaveScheduleOutcome =
+                saveScheduleOutcome.status != EventEditorScheduleOutcomeStatus.NOT_REQUESTED &&
+                    action != EventScheduleEditAction.REBUILD_WITHOUT_PLACEHOLDER_TEAMS
+            val scheduledEvent: Event
+            val warnings: List<String>
+            val successMessage: String
+            if (useSaveScheduleOutcome) {
+                scheduledEvent = updated
+                warnings = saveScheduleOutcome.warnings.map { warning -> warning.message }
+                successMessage = when (saveScheduleOutcome.status) {
+                    EventEditorScheduleOutcomeStatus.BUILT -> "Schedule built."
+                    EventEditorScheduleOutcomeStatus.REBUILT -> "Schedule rebuilt."
+                    EventEditorScheduleOutcomeStatus.DELETED -> "Schedule deleted."
+                    EventEditorScheduleOutcomeStatus.NOT_REQUESTED -> action.successMessage
+                }
             } else {
-                refetchMatchesOfTournament(updated.id)
+                val scheduleOutcome = scheduleEvent(action, updated)
+                scheduledEvent = scheduleOutcome.event
+                warnings = scheduleOutcome.warnings
+                successMessage = action.successMessage
             }
+
+            refetchMatchesOfTournament(scheduledEvent.id)
             refreshLeagueStandingsAfterSchedule(scheduledEvent)
 
             EventScheduleEditResult.Success(
-                message = action.successMessage,
+                message = (listOf(successMessage) + warnings).joinToString("\n"),
                 scheduledEvent = scheduledEvent,
             )
         } catch (throwable: Throwable) {

@@ -33,6 +33,9 @@ internal data class SimpleEventDetailsOptionsState(
     val editEvent: Event,
     val paidRegistrationEnabled: Boolean,
     val hostHasAccount: Boolean,
+    val eventTypeLocked: Boolean = false,
+    val eventTypeHasProtectedHistory: Boolean = false,
+    val teamSignupLocked: Boolean = false,
 )
 
 internal data class SimpleEventDetailsOptionsActions(
@@ -70,8 +73,20 @@ internal fun LazyListScope.simpleEventDetailsOptionsSection(
             )
             EventTypeGrid(
                 selectedType = state.editEvent.eventType,
+                enabled = !state.eventTypeLocked,
                 onSelected = actions.onEventTypeSelected,
             )
+            if (state.eventTypeLocked) {
+                Text(
+                    text = if (state.eventTypeHasProtectedHistory) {
+                        "Event type is locked because this event has match history."
+                    } else {
+                        "Event type and registration unit are locked while this event has registered participants."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             OptionsCategory(title = "Participation") {
                 val teamEventCanChange = state.editEvent.eventType == EventType.EVENT ||
@@ -79,12 +94,15 @@ internal fun LazyListScope.simpleEventDetailsOptionsSection(
                 OptionCheckboxRow(
                     checked = state.editEvent.teamSignup,
                     label = "Team event",
-                    description = if (teamEventCanChange) {
-                        "Register teams instead of individual participants."
-                    } else {
-                        "Leagues and tournaments require team registration."
+                    description = when {
+                        state.teamSignupLocked ->
+                            "Participants have joined; registration unit cannot change."
+                        teamEventCanChange ->
+                            "Register teams instead of individual participants."
+                        else ->
+                            "Leagues and tournaments require team registration."
                     },
-                    enabled = teamEventCanChange,
+                    enabled = teamEventCanChange && !state.teamSignupLocked,
                     onCheckedChange = actions.onTeamRegistrationChange,
                 )
                 OptionCheckboxRow(
@@ -214,6 +232,7 @@ internal fun LazyListScope.simpleEventDetailsOptionsSection(
 @Composable
 private fun EventTypeGrid(
     selectedType: EventType,
+    enabled: Boolean = true,
     onSelected: (EventType) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -228,7 +247,8 @@ private fun EventTypeGrid(
                         modifier = Modifier
                             .weight(1f)
                             .aspectRatio(1f)
-                            .clickable { onSelected(eventType) },
+                            .alpha(if (enabled) 1f else 0.55f)
+                            .clickable(enabled = enabled) { onSelected(eventType) },
                         shape = RoundedCornerShape(14.dp),
                         color = if (selected) {
                             MaterialTheme.colorScheme.primaryContainer

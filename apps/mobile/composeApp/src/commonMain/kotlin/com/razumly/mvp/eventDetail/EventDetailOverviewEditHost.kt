@@ -88,6 +88,7 @@ internal data class EventDetailOverviewEditHostState(
     val navPadding: PaddingValues,
     val topInset: Dp,
     val editView: Boolean,
+    val eventEditorControlLocks: EventEditorControlLocks,
     val showOfficialsPanel: Boolean,
     val showMap: Boolean,
     val imageScheme: DynamicScheme,
@@ -193,14 +194,14 @@ internal data class EventDetailOverviewEditHostActions(
     val onEventStateDropdownChanged: (Boolean) -> Unit,
     val onLifecycleStateSelected: (EditableLifecycleState) -> Unit,
     val onRescheduleEvent: () -> Unit,
-    val onBuildBrackets: () -> Unit,
+    val onBuildSchedule: () -> Unit,
     val onRebuildWithoutPlaceholders: () -> Unit,
     val onOpenDetails: () -> Unit,
 )
 
 internal data class EventEditActionAvailability(
     val canReschedule: Boolean,
-    val canBuildBrackets: Boolean,
+    val canBuildSchedule: Boolean,
     val eventActionEnabled: Boolean,
     val canCreateTemplate: Boolean,
 )
@@ -296,8 +297,7 @@ internal fun eventEditActionAvailability(
     val canReschedule = event.eventType == EventType.LEAGUE || event.eventType == EventType.TOURNAMENT
     return EventEditActionAvailability(
         canReschedule = canReschedule,
-        canBuildBrackets = event.eventType == EventType.TOURNAMENT ||
-            (event.eventType == EventType.LEAGUE && event.includePlayoffs),
+        canBuildSchedule = canReschedule,
         eventActionEnabled = !isTemplate,
         canCreateTemplate = isHost && !isTemplate,
     )
@@ -319,6 +319,10 @@ internal fun EventDetailOverviewEditHost(
         topInset = if (state.editView) 0.dp else state.topInset,
         includeStatusBarInsetInStickyHeaders = !state.editView,
         editView = state.editView,
+        eventTypeLocked = state.eventEditorControlLocks.eventType,
+        eventTypeHasProtectedHistory =
+            state.eventEditorControlLocks.eventTypeHasProtectedHistory,
+        teamSignupLocked = state.eventEditorControlLocks.teamSignup,
         showOfficialsPanel = state.showOfficialsPanel,
         isNewEvent = false,
         onOpenLocationMap = actions.onOpenLocationMap,
@@ -686,12 +690,20 @@ private fun EventDetailEditActions(
                                         actions.onRescheduleEvent()
                                     },
                                 )
-                                if (availability.canBuildBrackets) {
+                                if (availability.canBuildSchedule) {
                                     DropdownMenuItem(
-                                        text = { Text("Rebuild Bracket(s)") },
+                                        text = {
+                                            Text(
+                                                if (state.eventWithRelations.matches.isEmpty()) {
+                                                    "Build Schedule"
+                                                } else {
+                                                    "Rebuild Schedule"
+                                                },
+                                            )
+                                        },
                                         onClick = {
                                             isActionsDropdownExpanded = false
-                                            actions.onBuildBrackets()
+                                            actions.onBuildSchedule()
                                         },
                                     )
                                 }

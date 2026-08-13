@@ -12,10 +12,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlin.time.Clock
 import kotlin.time.Instant
 
+data class EventEditorControlLocks(
+    val eventType: Boolean = false,
+    val teamSignup: Boolean = false,
+    val eventTypeHasProtectedHistory: Boolean = false,
+)
+
 internal class EventEditDraftCoordinator(
     initialEvent: Event,
     canEditInitial: Boolean,
 ) {
+    private val _controlLocks = MutableStateFlow(EventEditorControlLocks())
+    val controlLocks = _controlLocks.asStateFlow()
+
     private val _editedEvent = MutableStateFlow(initialEvent)
     val editedEvent = _editedEvent.asStateFlow()
 
@@ -36,12 +45,29 @@ internal class EventEditDraftCoordinator(
 
     fun setEditing(enabled: Boolean) {
         _isEditing.value = enabled
+        if (!enabled) {
+            _controlLocks.value = EventEditorControlLocks()
+        }
     }
+
+    fun setControlLocks(
+        immutableFieldNames: Set<String>,
+        eventTypeHasProtectedHistory: Boolean = false,
+    ) {
+        _controlLocks.value = EventEditorControlLocks(
+            eventType = immutableFieldNames.contains("eventType"),
+            teamSignup = immutableFieldNames.contains("teamSignup"),
+            eventTypeHasProtectedHistory = eventTypeHasProtectedHistory,
+        )
+    }
+
 
     fun forceExitEditing(event: Event) {
         _isEditing.value = false
+        _controlLocks.value = EventEditorControlLocks()
         _editedEvent.value = event
     }
+
 
     fun replaceReadOnlyTimeSlots(event: Event, timeSlots: List<TimeSlot>) {
         if (_isEditing.value) return
@@ -87,7 +113,12 @@ internal class EventEditDraftCoordinator(
 
     fun updateEditedEvent(update: (Event) -> Event) {
         val previous = _editedEvent.value
-        val updated = update(previous)
+        val candidate = update(previous)
+        val locks = _controlLocks.value
+        val updated = candidate.copy(
+            eventType = if (locks.eventType) previous.eventType else candidate.eventType,
+            teamSignup = if (locks.teamSignup) previous.teamSignup else candidate.teamSignup,
+        )
         _editedEvent.value = updated
         _editableFields.value = syncEditableFieldsForEvent(previous, updated, _editableFields.value)
         _editableLeagueTimeSlots.value = syncEditableLeagueSlotBoundaries(

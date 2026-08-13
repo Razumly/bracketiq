@@ -94,6 +94,9 @@ internal data class EventDetailsRegistrationState(
     val enabled: Boolean,
     val isNewEvent: Boolean,
     val rentalTimeLocked: Boolean,
+    val eventTypeLocked: Boolean = false,
+    val eventTypeHasProtectedHistory: Boolean = false,
+    val teamSignupLocked: Boolean = false,
     val event: Event,
     val editEvent: Event,
     val divisionDetails: List<DivisionDetail>,
@@ -196,7 +199,14 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
                                 label = eventType.name.toEnumTitleCase(),
                             )
                         },
-                    label = "Event Type",
+                    label = when {
+                        state.eventTypeLocked && state.eventTypeHasProtectedHistory ->
+                            "Event Type (locked: match history)"
+                        state.eventTypeLocked ->
+                            "Event Type (locked: participants joined)"
+                        else -> "Event Type"
+                    },
+                    enabled = !state.eventTypeLocked,
                     modifier = Modifier.weight(1f),
                 )
                 if (state.editEvent.teamSignup) {
@@ -306,9 +316,15 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
                         } else {
                             true
                         },
-                        label = "Team Event",
-                        enabled = state.editEvent.eventType == EventType.EVENT ||
-                            state.editEvent.eventType == EventType.WEEKLY_EVENT,
+                        label = if (state.teamSignupLocked) {
+                            "Team Event (locked: participants joined)"
+                        } else {
+                            "Team Event"
+                        },
+                        enabled = (
+                            state.editEvent.eventType == EventType.EVENT ||
+                                state.editEvent.eventType == EventType.WEEKLY_EVENT
+                            ) && !state.teamSignupLocked,
                         onCheckedChange = { checked ->
                             if (
                                 state.editEvent.eventType == EventType.EVENT ||

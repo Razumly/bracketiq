@@ -18,7 +18,7 @@ class EventEditorDtosTest {
         val command = jsonMVP.decodeFromString<EventEditorCreateCommandDto>(
             """
                 {
-                  "contractVersion": 2,
+                  "contractVersion": 3,
                   "createOperationId": "create-operation-1",
                   "draft": {
                     "basics": {
@@ -109,13 +109,18 @@ class EventEditorDtosTest {
                       "assistantHostIds":[],
                       "pendingInvites":[]
                     }
-                  }
+                  },
+                  "completion":{"mode":"CREATE_AND_BUILD_SCHEDULE"}
                 }
             """.trimIndent(),
         )
 
         assertEquals(EVENT_EDITOR_CONTRACT_VERSION, command.contractVersion)
         assertEquals("create-operation-1", command.createOperationId)
+        assertEquals(
+            EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE,
+            command.completion.mode,
+        )
         assertEquals("question-client-1", command.draft.registration.questions.first().clientId)
         assertEquals("tag-1", command.draft.basics.tags.single().legacyId)
         val wire = encodeEventEditorCreateCommand(command)

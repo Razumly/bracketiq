@@ -12,6 +12,7 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveResultDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeDto
 import com.razumly.mvp.core.network.dto.EventEditorSnapshotDto
 import kotlinx.serialization.Serializable
 import kotlin.time.Instant
@@ -48,11 +49,11 @@ data class EventEditorSession(
 data class EventEditorMutation(
     val canonicalState: EventEditorCanonicalState,
 )
-
 data class EventEditorSaveOutcome(
     val session: EventEditorSession,
     val questionIdMap: Map<String, String> = emptyMap(),
     val staffEmailDelivery: String,
+    val scheduleOutcome: EventEditorScheduleOutcomeDto,
 )
 
 data class EventScheduleOutcome(

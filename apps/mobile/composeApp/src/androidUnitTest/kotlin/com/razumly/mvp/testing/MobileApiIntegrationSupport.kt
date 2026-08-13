@@ -152,6 +152,13 @@ internal suspend fun MobileApiTestSession.createEventThroughEditor(
             contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
             createOperationId = operationId,
             draft = draft,
+            completion = EventEditorCreateCompletionDto(
+                mode = if (event.eventType.name in setOf("LEAGUE", "TOURNAMENT")) {
+                    EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE
+                } else {
+                    EventEditorCreateCompletionMode.CREATE_ONLY
+                },
+            ),
         ),
     ).getOrThrow().session.canonicalState.event
 }

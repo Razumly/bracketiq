@@ -99,7 +99,7 @@ val componentModule = module {
 
     factory<CreateEventComponent> { (
         componentContext: ComponentContext,
-        onCreatedEvent: (Event) -> Unit,
+        onCreatedEvent: (Event, Boolean) -> Unit,
         bootstrap: com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto,
     ) ->
         DefaultCreateEventComponent(

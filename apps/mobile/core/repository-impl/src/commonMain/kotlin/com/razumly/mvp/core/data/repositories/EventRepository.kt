@@ -267,6 +267,7 @@ class EventRepository(
             ),
             questionIdMap = response.questionIdMap,
             staffEmailDelivery = response.staffEmailDelivery,
+            scheduleOutcome = response.scheduleOutcome,
         )
     }
 
@@ -288,6 +289,7 @@ class EventRepository(
             ),
             questionIdMap = response.questionIdMap,
             staffEmailDelivery = response.staffEmailDelivery,
+            scheduleOutcome = response.scheduleOutcome,
         )
     }
 
@@ -307,9 +309,7 @@ class EventRepository(
         EventScheduleOutcome(
             event = persistedEvent,
             matches = matches,
-            warnings = response.warnings.map { warning ->
-                (warning as? JsonPrimitive)?.content ?: warning.toString()
-            },
+            warnings = response.warnings.map { warning -> warning.message },
             didRebuildSchedule = response.didRebuildSchedule,
         )
     }

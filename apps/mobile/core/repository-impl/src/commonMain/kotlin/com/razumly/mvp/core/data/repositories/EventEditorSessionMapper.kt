@@ -23,6 +23,8 @@ import com.razumly.mvp.core.network.dto.EventEditorBasicsDto
 import com.razumly.mvp.core.network.dto.EventEditorCompetitionDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateBootstrapDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode
+import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionDto
 import com.razumly.mvp.core.network.dto.EventEditorDivisionDetailDto
 import com.razumly.mvp.core.network.dto.EventEditorDraftDto
 import com.razumly.mvp.core.network.dto.EventEditorFieldDto
@@ -35,6 +37,8 @@ import com.razumly.mvp.core.network.dto.EventEditorRegistrationDto
 import com.razumly.mvp.core.network.dto.EventEditorResourcesDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleDto
 import com.razumly.mvp.core.network.dto.EventEditorSnapshotDto
+import com.razumly.mvp.core.network.dto.EventEditorSaveScheduleTransitionDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleTransitionMode
 import com.razumly.mvp.core.network.dto.EventEditorStaffDto
 import com.razumly.mvp.core.network.dto.EventEditorStaffInviteDto
 import com.razumly.mvp.core.network.dto.EventEditorTagDto
@@ -997,16 +1001,22 @@ object EventEditorSessionMapper {
         val canonical = snapshot.toCanonicalState(operationId = null)
         return EventEditorSession(snapshot = snapshot, canonicalState = canonical, baseline = canonical)
     }
-
     fun toCreateCommand(session: EventEditorSession, mutation: EventEditorMutation): PendingEventCreate {
         val operationId = session.createOperationId?.normalizedIdOrNull()
             ?: error("Create editor session did not include an operation ID.")
         require(session.snapshot.mode == "CREATE") { "Create command requires a create editor session." }
         val draft = session.snapshot.draft.withMutation(session.baseline, mutation.canonicalState)
+        val eventType = draft.basics.eventType.trim().uppercase()
+        val completionMode = if (eventType == "LEAGUE" || eventType == "TOURNAMENT") {
+            EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE
+        } else {
+            EventEditorCreateCompletionMode.CREATE_ONLY
+        }
         val command = EventEditorCreateCommandDto(
             contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
             createOperationId = operationId,
             draft = draft,
+            completion = EventEditorCreateCompletionDto(mode = completionMode),
         )
         return PendingEventCreate(command = command, bootstrapSnapshot = session.snapshot)
     }
@@ -1014,11 +1024,25 @@ object EventEditorSessionMapper {
     fun toSaveCommand(session: EventEditorSession, mutation: EventEditorMutation): com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto {
         require(session.snapshot.mode == "EDIT") { "Save command requires an edit editor session." }
         val draft = session.snapshot.draft.withMutation(session.baseline, mutation.canonicalState)
+        val previousEventType = session.baseline.event.eventType.name.trim().uppercase()
+        val nextEventType = draft.basics.eventType.trim().uppercase()
+        val transition = when {
+            previousEventType != nextEventType -> EventEditorSaveScheduleTransitionDto(
+                mode = EventEditorScheduleTransitionMode.RECONCILE,
+                expectedScheduleRevision = session.snapshot.scheduleState.revision,
+            )
+            nextEventType in setOf("LEAGUE", "TOURNAMENT") && session.snapshot.scheduleState.matchCount == 0 -> EventEditorSaveScheduleTransitionDto(
+                mode = EventEditorScheduleTransitionMode.BUILD_IF_MISSING,
+                expectedScheduleRevision = session.snapshot.scheduleState.revision,
+            )
+            else -> EventEditorSaveScheduleTransitionDto(mode = EventEditorScheduleTransitionMode.PRESERVE)
+        }
         return com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto(
             contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
             editorRevision = session.snapshot.editorRevision,
             staffRevision = session.snapshot.staffRevision,
             draft = draft,
+            scheduleTransition = transition,
         )
     }
 

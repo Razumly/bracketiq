@@ -7,6 +7,8 @@ import com.razumly.mvp.core.network.dto.EventEditorBasicsDto
 import com.razumly.mvp.core.network.dto.EventEditorCapabilitiesDto
 import com.razumly.mvp.core.network.dto.EventEditorCatalogsDto
 import com.razumly.mvp.core.network.dto.EventEditorCompetitionDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
 import com.razumly.mvp.core.network.dto.EventEditorDivisionDetailDto
 import com.razumly.mvp.core.network.dto.EventEditorDraftDto
@@ -20,6 +22,9 @@ import com.razumly.mvp.core.network.dto.EventEditorQuestionDto
 import com.razumly.mvp.core.network.dto.EventEditorRegistrationDto
 import com.razumly.mvp.core.network.dto.EventEditorResourcesDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveResultDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus
+import com.razumly.mvp.core.network.dto.EventEditorScheduleStateDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleDto
 import com.razumly.mvp.core.network.dto.EventEditorSnapshotDto
 import com.razumly.mvp.core.network.dto.EventEditorStaffDto
@@ -109,7 +114,7 @@ private object GatewayTestTokenStore : AuthTokenStore {
 }
 
 private fun editorCreateCommand(): EventEditorCreateCommandDto = EventEditorCreateCommandDto(
-    contractVersion = 2,
+    contractVersion = 3,
     createOperationId = "create-operation-1",
     draft = EventEditorDraftDto(
         basics = EventEditorBasicsDto(
@@ -204,12 +209,13 @@ private fun editorCreateCommand(): EventEditorCreateCommandDto = EventEditorCrea
             ),
         ),
     ),
+    completion = EventEditorCreateCompletionDto(EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE),
 )
 
 private fun savedResult(command: EventEditorCreateCommandDto) = EventEditorSaveResultDto(
     status = "SAVED",
     snapshot = EventEditorSnapshotDto(
-        contractVersion = 2,
+        contractVersion = 3,
         draft = command.draft,
         mode = "CREATE",
         eventId = "event-1",
@@ -222,6 +228,16 @@ private fun savedResult(command: EventEditorCreateCommandDto) = EventEditorSaveR
         ),
         catalogs = EventEditorCatalogsDto(),
         immutable = EventEditorImmutableDto(),
+        scheduleState = EventEditorScheduleStateDto(
+            sourceType = null,
+            matchCount = 0,
+            revision = "new",
+            hasProtectedHistory = false,
+        ),
     ),
     staffEmailDelivery = "NOT_REQUESTED",
+    scheduleOutcome = EventEditorScheduleOutcomeDto(
+        status = EventEditorScheduleOutcomeStatus.NOT_REQUESTED,
+        matchCount = 0,
+    ),
 )
