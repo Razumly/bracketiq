@@ -85,7 +85,6 @@ export type ScorePayload = {
   };
   team1Points: number[];
   team2Points: number[];
-  setResults: number[];
   time?: string;
 };
 
@@ -103,7 +102,6 @@ interface ScoreUpdateModalProps {
   tournament: Event;
   participantTeams?: Team[];
   canManage: boolean;
-  onSubmit?: (matchId: string, team1Points: number[], team2Points: number[], setResults: number[]) => Promise<void>;
   onScoreChange?: (payload: ScorePayload) => Promise<void> | void;
   onSetComplete?: (payload: ScorePayload) => Promise<void>;
   onMatchComplete?: (payload: ScorePayload & { eventId: string }) => Promise<void>;
@@ -497,7 +495,6 @@ const existingSegmentCount = (match: Match): number => Math.max(
   Array.isArray(match.segments) ? match.segments.length : 0,
   Array.isArray(match.team1Points) ? match.team1Points.length : 0,
   Array.isArray(match.team2Points) ? match.team2Points.length : 0,
-  Array.isArray(match.setResults) ? match.setResults.length : 0,
   0,
 );
 
@@ -901,23 +898,20 @@ const buildSegments = (match: Match, length: number, team1Id: string | null, tea
   }
   const team1Points = legacyArray(match.team1Points, length);
   const team2Points = legacyArray(match.team2Points, length);
-  const results = legacyArray(match.setResults, length);
   return Array.from({ length }, (_, index) => {
     const sequence = index + 1;
     const scores: Record<string, number> = {};
     if (team1Id) scores[team1Id] = team1Points[index] ?? 0;
     if (team2Id) scores[team2Id] = team2Points[index] ?? 0;
-    const winnerEventTeamId = results[index] === 1 ? team1Id : results[index] === 2 ? team2Id : null;
     return {
       id: `${match.$id}_segment_${sequence}`,
       $id: `${match.$id}_segment_${sequence}`,
       eventId: match.eventId ?? null,
       matchId: match.$id,
       sequence,
-      status: winnerEventTeamId ? 'COMPLETE' : team1Points[index] || team2Points[index] ? 'IN_PROGRESS' : 'NOT_STARTED',
+      status: team1Points[index] || team2Points[index] ? 'IN_PROGRESS' : 'NOT_STARTED',
       scores,
-      winnerEventTeamId,
-      metadata: null,
+      winnerEventTeamId: null,
     };
   });
 };
@@ -1023,7 +1017,6 @@ export default function ScoreUpdateModal({
   tournament,
   participantTeams = [],
   canManage: canManageRequested,
-  onSubmit,
   onScoreChange,
   onSetComplete,
   onMatchComplete,
@@ -1260,8 +1253,7 @@ export default function ScoreUpdateModal({
     segments: match.segments,
     team1Points: match.team1Points,
     team2Points: match.team2Points,
-    setResults: match.setResults,
-  }) as Match, [match.$id, match.eventId, match.segments, match.setResults, match.team1Points, match.team2Points]);
+  }) as Match, [match.$id, match.eventId, match.segments, match.team1Points, match.team2Points]);
   const persistedScoreDataAvailable = useMemo(
     () => hasPersistedScoreData(matchSegmentSnapshot, team1Id, team2Id),
     [matchSegmentSnapshot, team1Id, team2Id],
@@ -1669,18 +1661,7 @@ export default function ScoreUpdateModal({
   const legacyFromSegments = (source: MatchSegment[]) => {
     const team1Points = source.map((segment, index) => scoreForSegment(segment, index, team1Id, match.team1Points));
     const team2Points = source.map((segment, index) => scoreForSegment(segment, index, team2Id, match.team2Points));
-    return {
-      team1Points,
-      team2Points,
-      setResults: source.map((segment, index) => {
-        if (segment.winnerEventTeamId === team1Id) return 1;
-        if (segment.winnerEventTeamId === team2Id) return 2;
-        if (segment.status === 'COMPLETE' && team1Points[index] !== team2Points[index]) {
-          return team1Points[index] > team2Points[index] ? 1 : 2;
-        }
-        return 0;
-      }),
-    };
+    return { team1Points, team2Points };
   };
 
   const payload = (source: MatchSegment[], extra: Partial<ScorePayload>): ScorePayload => ({
@@ -2194,7 +2175,6 @@ export default function ScoreUpdateModal({
     });
     try {
       if (onScoreChange) await onScoreChange(nextPayload);
-      else if (onSubmit) await onSubmit(match.$id, nextPayload.team1Points, nextPayload.team2Points, nextPayload.setResults);
       applyLocalSegmentState(next);
       if (shouldFinalize && onMatchComplete && !onScoreChange) {
         await onMatchComplete({ ...nextPayload, eventId: tournament.$id });

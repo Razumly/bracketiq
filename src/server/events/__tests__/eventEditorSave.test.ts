@@ -26,6 +26,72 @@ jest.mock('../eventStaffReconciliation', () => ({
   EventStaffInputError: class EventStaffInputError extends Error {},
   reconcileEventStaffDesiredState: jest.fn().mockResolvedValue({ emailCandidates: [] }),
 }));
+jest.mock('@/server/scheduler/eventScheduleMutation', () => {
+  class EventScheduleMutationError extends Error {
+    readonly code: string;
+
+    constructor(code: string, message: string) {
+      super(message);
+      this.name = 'EventScheduleMutationError';
+      this.code = code;
+    }
+  }
+
+  class EventScheduleRevisionConflictError extends EventScheduleMutationError {
+    readonly currentRevision: string;
+
+    constructor(currentRevision: string) {
+      super('EDITOR_SCHEDULE_REVISION_CONFLICT', 'The schedule changed.');
+      this.name = 'EventScheduleRevisionConflictError';
+      this.currentRevision = currentRevision;
+    }
+  }
+
+  return {
+    EventScheduleMutationError,
+    EventScheduleRevisionConflictError,
+    reconcileEventSchedule: jest.fn(),
+    editorMatchProjectionsFor: jest.fn((matches: Array<Record<string, unknown>>) => (
+      matches.map((match) => ({
+        id: String(match.id ?? ''),
+        matchId: typeof match.matchId === 'number' ? match.matchId : null,
+        eventId: String(match.eventId ?? 'event-created'),
+        start: null,
+        end: null,
+        locked: false,
+        division: null,
+        fieldId: null,
+        team1Id: null,
+        team2Id: null,
+        team1Seed: null,
+        team2Seed: null,
+        status: null,
+        resultStatus: null,
+        resultType: null,
+        actualStart: null,
+        actualEnd: null,
+        statusReason: null,
+        winnerEventTeamId: null,
+        matchRulesSnapshot: null,
+        resolvedMatchRules: null,
+        segments: [],
+        incidents: [],
+        officialId: null,
+        officialIds: [],
+        teamOfficialId: null,
+        team1Points: [],
+        team2Points: [],
+        losersBracket: false,
+        winnerNextMatchId: null,
+        loserNextMatchId: null,
+        previousLeftId: null,
+        previousRightId: null,
+        side: null,
+        officialCheckedIn: false,
+      }))
+    )),
+  };
+});
 
 import { eventEditorFixtures } from '@/test/eventEditor/fixtures';
 import { prisma } from '@/lib/prisma';
@@ -37,12 +103,15 @@ import {
   EventStaffInputError,
   reconcileEventStaffDesiredState,
 } from '../eventStaffReconciliation';
+import { reconcileEventSchedule } from '@/server/scheduler/eventScheduleMutation';
 import {
   createEventEditor,
   EditorInputError,
   EditorRevisionConflictError,
   saveEventEditor,
 } from '../eventEditorSave';
+ 
+const mockedReconcileEventSchedule = reconcileEventSchedule as jest.Mock;
 
 const txFor = (questionRows: Array<{ id: string }> = []) => {
   const tx: any = {
@@ -64,12 +133,14 @@ const txFor = (questionRows: Array<{ id: string }> = []) => {
 };
 
 const snapshot = (editorRevision = 'revision_1') => ({
-  contractVersion: 1,
+  contractVersion: 3,
   mode: 'EDIT',
   eventId: 'event_1',
   editorRevision,
   staffRevision: 'staff_revision_1',
-  draft: {},
+  draft: {
+    basics: { eventType: 'EVENT' },
+  },
   capabilities: {
     canUseOnlinePayments: true,
     canManageStaff: true,
@@ -78,10 +149,16 @@ const snapshot = (editorRevision = 'revision_1') => ({
   },
   catalogs: { sports: [], organizations: [], fields: [], templates: [] },
   immutable: { fieldNames: [], rental: false, template: false },
+  scheduleState: {
+    sourceType: null,
+    matchCount: 0,
+    revision: 'schedule_revision_1',
+    hasProtectedHistory: false,
+  },
 } as any);
 
 const commandFor = (questions: unknown[]) => ({
-  contractVersion: 1,
+  contractVersion: 3,
   editorRevision: 'revision_1',
   staffRevision: 'staff_revision_1',
   draft: {
@@ -106,14 +183,15 @@ const commandFor = (questions: unknown[]) => ({
     },
     resources: { fieldIds: [], timeSlotIds: [], fields: [], timeSlots: [] },
   },
+  scheduleTransition: { mode: 'PRESERVE' },
 } as any);
 const actualEditorAdapters = jest.requireActual(
   '@/app/events/[id]/schedule/components/eventForm/editorContractAdapters',
 ) as typeof EditorContractAdapters;
 const createDraft = actualEditorAdapters.legacyEventToEditorDraft(eventEditorFixtures[0].event);
-
+const leagueCreateDraft = actualEditorAdapters.legacyEventToEditorDraft(eventEditorFixtures[1].event);
 const createSnapshot = (mode: 'CREATE' | 'EDIT', eventId: string | null) => ({
-  contractVersion: 2,
+  contractVersion: 3,
   mode,
   eventId,
   editorRevision: 'create-editor-revision',
@@ -127,6 +205,12 @@ const createSnapshot = (mode: 'CREATE' | 'EDIT', eventId: string | null) => ({
   },
   catalogs: { sports: [], organizations: [], fields: [], templates: [] },
   immutable: { fieldNames: [], rental: false, template: false },
+  scheduleState: {
+    sourceType: null,
+    matchCount: 0,
+    revision: mode === 'CREATE' ? 'new' : 'schedule_revision_1',
+    hasProtectedHistory: false,
+  },
 });
 
 const createEventEditorTxFor = () => {
@@ -292,9 +376,10 @@ describe('saveEventEditor', () => {
       });
       const onEventCreated = jest.fn().mockResolvedValue(undefined);
       const command = {
-        contractVersion: 2,
+        contractVersion: 3,
         createOperationId: 'concurrent-create-operation',
         draft: createDraft,
+        completion: { mode: 'CREATE_ONLY' },
       } as any;
       const actor = { userId: 'user_fixture_host' };
       const firstPromise = createEventEditor(actor, command, { sendStaffInvites, onEventCreated });
@@ -326,6 +411,47 @@ describe('saveEventEditor', () => {
       jest.useRealTimers();
     }
   });
+  it('builds a League schedule inside the create transaction', async () => {
+    const { tx } = createEventEditorTxFor();
+    (loadCreateEventEditorSnapshot as jest.Mock).mockReset();
+    (loadCreateEventEditorSnapshot as jest.Mock).mockResolvedValue(createSnapshot('CREATE', null));
+    (loadEventEditorSnapshot as jest.Mock).mockReset();
+    (loadEventEditorSnapshot as jest.Mock).mockResolvedValue(createSnapshot('EDIT', 'event-created'));
+    (upsertEventFromPayload as jest.Mock).mockReset();
+    (upsertEventFromPayload as jest.Mock).mockResolvedValue('event-created');
+    (reconcileEventStaffDesiredState as jest.Mock).mockReset();
+    (reconcileEventStaffDesiredState as jest.Mock).mockResolvedValue({ emailCandidates: [] });
+    mockedReconcileEventSchedule.mockReset();
+    mockedReconcileEventSchedule.mockResolvedValue({
+      event: {},
+      matches: [{ id: 'match-created', eventId: 'event-created' }],
+      warnings: [],
+      previousMatchCount: 0,
+      notification: null,
+    });
+
+    const result = await createEventEditor(
+      { userId: 'user_fixture_host' },
+      {
+        contractVersion: 3,
+        createOperationId: 'create-and-build-operation',
+        draft: leagueCreateDraft,
+        completion: { mode: 'CREATE_AND_BUILD_SCHEDULE' },
+      } as any,
+    );
+
+    expect(mockedReconcileEventSchedule).toHaveBeenCalledWith(expect.objectContaining({
+      tx,
+      eventId: expect.any(String),
+      mode: 'BUILD',
+      includePlaceholderTeams: true,
+    }));
+    expect(result.scheduleOutcome).toEqual(expect.objectContaining({
+      status: 'BUILT',
+      matchCount: 1,
+      warnings: [],
+    }));
+  });
   it('rolls back the create receipt with a failed domain transaction', async () => {
     const { rows, tx } = createEventEditorTxFor();
     (loadCreateEventEditorSnapshot as jest.Mock).mockReset();
@@ -344,13 +470,132 @@ describe('saveEventEditor', () => {
     await expect(createEventEditor(
       { userId: 'user_fixture_host' },
       {
-        contractVersion: 2,
+        contractVersion: 3,
         createOperationId: 'failed-create-operation',
         draft: createDraft,
+        completion: { mode: 'CREATE_ONLY' },
       } as any,
     )).rejects.toThrow('domain write failed');
 
     expect(rows.size).toBe(0);
     expect(upsertEventFromPayload).toHaveBeenCalledTimes(1);
+  });
+  it('rebuilds the schedule for an event-type transition inside the save transaction', async () => {
+    const tx = txFor();
+    const current = snapshot();
+    current.draft = { ...current.draft, basics: { eventType: 'EVENT' } };
+    current.scheduleState = {
+      ...current.scheduleState,
+      matchCount: 0,
+      revision: 'schedule_revision_event',
+    };
+    (buildEventEditorSnapshot as jest.Mock).mockResolvedValue(current);
+    (loadEventEditorSnapshot as jest.Mock).mockResolvedValue(current);
+    (upsertEventFromPayload as jest.Mock).mockResolvedValue('event_1');
+    mockedReconcileEventSchedule.mockResolvedValue({
+      event: { id: 'event_1', eventType: 'LEAGUE' },
+      matches: [{ id: 'match_1', eventId: 'event_1' }],
+      warnings: [],
+      previousMatchCount: 0,
+      notification: null,
+    });
+
+    const command = commandFor([]);
+    command.draft.basics.eventType = 'LEAGUE';
+    command.scheduleTransition = {
+      mode: 'RECONCILE',
+      expectedScheduleRevision: 'schedule_revision_event',
+    };
+    const result = await saveEventEditor(
+      { userId: 'host_1' },
+      command,
+      'event_1',
+    );
+
+    expect(mockedReconcileEventSchedule).toHaveBeenCalledWith(expect.objectContaining({
+      tx,
+      eventId: 'event_1',
+      mode: 'BUILD',
+      includePlaceholderTeams: true,
+    }));
+    expect(result.scheduleOutcome).toEqual(expect.objectContaining({
+      status: 'BUILT',
+      matchCount: 1,
+    }));
+  });
+
+  it('deletes the schedule for a transition to a non-schedulable event type', async () => {
+    const tx = txFor();
+    const current = snapshot();
+    current.draft = { ...current.draft, basics: { eventType: 'LEAGUE' } };
+    current.scheduleState = {
+      ...current.scheduleState,
+      matchCount: 3,
+      revision: 'schedule_revision_league',
+    };
+    (buildEventEditorSnapshot as jest.Mock).mockResolvedValue(current);
+    (loadEventEditorSnapshot as jest.Mock).mockResolvedValue(current);
+    (upsertEventFromPayload as jest.Mock).mockResolvedValue('event_1');
+    mockedReconcileEventSchedule.mockResolvedValue({
+      event: { id: 'event_1', eventType: 'EVENT' },
+      matches: [],
+      warnings: [],
+      previousMatchCount: 3,
+      notification: null,
+    });
+
+    const command = commandFor([]);
+    command.draft.basics.eventType = 'EVENT';
+    command.scheduleTransition = {
+      mode: 'RECONCILE',
+      expectedScheduleRevision: 'schedule_revision_league',
+    };
+    const result = await saveEventEditor(
+      { userId: 'host_1' },
+      command,
+      'event_1',
+    );
+
+    expect(mockedReconcileEventSchedule).toHaveBeenCalledWith(expect.objectContaining({
+      tx,
+      eventId: 'event_1',
+      mode: 'DELETE',
+    }));
+    expect(result.scheduleOutcome).toEqual({
+      status: 'DELETED',
+      matchCount: 0,
+      matches: [],
+      warnings: [],
+    });
+  });
+
+  it('rejects a stale schedule revision before persisting an event-type transition', async () => {
+    const tx = txFor();
+    const current = snapshot();
+    current.draft = { ...current.draft, basics: { eventType: 'EVENT' } };
+    current.scheduleState = {
+      ...current.scheduleState,
+      revision: 'schedule_revision_current',
+    };
+    (buildEventEditorSnapshot as jest.Mock).mockResolvedValue(current);
+
+    const command = commandFor([]);
+    command.draft.basics.eventType = 'LEAGUE';
+    command.scheduleTransition = {
+      mode: 'RECONCILE',
+      expectedScheduleRevision: 'schedule_revision_stale',
+    };
+
+    await expect(saveEventEditor(
+      { userId: 'host_1' },
+      command,
+      'event_1',
+    )).rejects.toMatchObject({
+      code: 'EDITOR_SCHEDULE_REVISION_CONFLICT',
+    });
+
+    expect(upsertEventFromPayload).not.toHaveBeenCalled();
+    expect(mockedReconcileEventSchedule).not.toHaveBeenCalled();
+    expect(tx.registrationQuestions.create).not.toHaveBeenCalled();
   });
 });

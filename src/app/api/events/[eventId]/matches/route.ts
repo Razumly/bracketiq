@@ -73,7 +73,6 @@ const bulkMatchUpdateSchema = z.object({
   segments: z.array(bulkMatchSegmentSchema).optional(),
   team1Points: z.array(z.number()).optional(),
   team2Points: z.array(z.number()).optional(),
-  setResults: z.array(z.number()).optional(),
   team1Id: z.string().nullable().optional(),
   team2Id: z.string().nullable().optional(),
   officialId: z.string().nullable().optional(),
@@ -111,7 +110,6 @@ const bulkMatchCreateSchema = z.object({
   segments: z.array(bulkMatchSegmentSchema).optional(),
   team1Points: z.array(z.number()).optional(),
   team2Points: z.array(z.number()).optional(),
-  setResults: z.array(z.number()).optional(),
   team1Id: z.string().nullable().optional(),
   team2Id: z.string().nullable().optional(),
   officialId: z.string().nullable().optional(),
@@ -240,7 +238,6 @@ const applyBulkMatchPolicySnapshot = (
       Array.isArray(target.segments) ? target.segments.length : 0,
       Array.isArray(target.team1Points) ? target.team1Points.length : 0,
       Array.isArray(target.team2Points) ? target.team2Points.length : 0,
-      Array.isArray(target.setResults) ? target.setResults.length : 0,
     ),
   });
   target.matchRulesSnapshot = snapshot;
@@ -297,7 +294,6 @@ const hasProtectedParticipantState = (match: SchedulerMatch): boolean => {
     || Boolean(match.winnerEventTeamId)
     || hasNonZeroScore(match.team1Points)
     || hasNonZeroScore(match.team2Points)
-    || hasNonZeroScore(match.setResults)
     || hasStartedOrScoredSegment(match);
 };
 
@@ -770,7 +766,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
             const fieldId = normalizeOptionalString(entry.fieldId);
             return fieldId ? event.fields[fieldId] ?? null : null;
           })(),
-          setResults: Array.isArray(entry.setResults) ? entry.setResults : [],
           bufferMs: Math.max(event.restTimeMinutes ?? 0, 0) * MINUTE_MS,
           side: sideFrom(entry.side ?? null),
           officialCheckedIn: Boolean(entry.officialCheckedIn),
@@ -820,7 +815,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
           locked: entry.locked,
           team1Points: entry.team1Points,
           team2Points: entry.team2Points,
-          setResults: entry.setResults,
           team1Id: entry.team1Id,
           team2Id: entry.team2Id,
           officialId: entry.officialId,

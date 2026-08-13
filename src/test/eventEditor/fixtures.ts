@@ -18,6 +18,7 @@ const baseEvent = (overrides: FixtureOverrides = {}): Event => ({
   location: 'Main court',
   address: '1 Court Lane',
   coordinates: [40.1, -73.1],
+  sourceType: null,
   affiliateUrl: 'https://example.com/fixture',
   parentEvent: null,
   organizationId: null,

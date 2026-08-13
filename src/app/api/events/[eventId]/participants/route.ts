@@ -20,6 +20,7 @@ import {
   findEventRegistration,
   syncDivisionTeamMembershipFromRegistrations,
   upsertEventRegistration,
+  acquireEventLockAndLoadStructure,
 } from '@/server/events/eventRegistrations';
 import {
   claimOrCreateEventTeamSnapshot,
@@ -1375,32 +1376,70 @@ async function updateParticipants(
         );
       }
 
-      const requestRegistration = await upsertEventRegistration({
-        eventId: event.id,
-        registrantType: 'CHILD',
-        registrantId: userId,
-        parentId: parentLink.parentId,
-        rosterRole: 'PARTICIPANT',
-        status: 'STARTED',
-        ageAtEvent,
-        divisionId: divisionSelection.divisionId,
-        divisionTypeId: divisionSelection.divisionTypeId,
-        divisionTypeKey: divisionSelection.divisionTypeKey,
-        consentStatus: 'guardian_approval_required',
-        createdBy: session.userId,
-        occurrence: resolvedOccurrence,
-      });
-      if (eventAnswersSnapshot.length) {
-        await upsertRegistrationQuestionResponse({
-          scopeType: 'EVENT',
-          scopeId: event.id,
-          subjectType: 'EVENT_REGISTRATION',
-          subjectId: requestRegistration.id,
-          responderUserId: session.userId,
-          registrantUserId: userId,
-          registrantType: 'CHILD',
-          answersSnapshot: eventAnswersSnapshot,
+      let requestRegistration: Awaited<ReturnType<typeof upsertEventRegistration>>;
+      try {
+        requestRegistration = await prisma.$transaction(async (tx) => {
+          await acquireEventLockAndLoadStructure(tx, event.id, {
+            eventType: event.eventType,
+            teamSignup: event.teamSignup,
+          });
+          const existingRequest = await findEventRegistration({
+            eventId: event.id,
+            registrantType: 'CHILD',
+            registrantId: userId,
+            occurrence: resolvedOccurrence,
+          }, tx);
+          if (existingRequest) {
+            return existingRequest;
+          }
+          const registration = await upsertEventRegistration({
+            eventId: event.id,
+            registrantType: 'CHILD',
+            registrantId: userId,
+            parentId: parentLink.parentId,
+            rosterRole: 'PARTICIPANT',
+            status: 'STARTED',
+            ageAtEvent,
+            divisionId: divisionSelection.divisionId,
+            divisionTypeId: divisionSelection.divisionTypeId,
+            divisionTypeKey: divisionSelection.divisionTypeKey,
+            consentStatus: 'guardian_approval_required',
+            createdBy: session.userId,
+            occurrence: resolvedOccurrence,
+          }, tx);
+          if (eventAnswersSnapshot.length) {
+            await upsertRegistrationQuestionResponse({
+              scopeType: 'EVENT',
+              scopeId: event.id,
+              subjectType: 'EVENT_REGISTRATION',
+              subjectId: registration.id,
+              responderUserId: session.userId,
+              registrantUserId: userId,
+              registrantType: 'CHILD',
+              answersSnapshot: eventAnswersSnapshot,
+              client: tx,
+            });
+          }
+          await tx.invites?.deleteMany?.({
+            where: {
+              type: 'EVENT',
+              eventId: event.id,
+              userId: session.userId,
+            },
+          });
+          return registration;
         });
+      } catch (error) {
+        if ((error as { code?: unknown })?.code === 'EVENT_CONFIGURATION_CHANGED') {
+          return NextResponse.json(
+            {
+              error: error instanceof Error ? error.message : 'Event configuration changed. Reload and try again.',
+              code: 'EVENT_CONFIGURATION_CHANGED',
+            },
+            { status: 409 },
+          );
+        }
+        throw error;
       }
 
       await prisma.invites?.deleteMany?.({
@@ -1575,6 +1614,10 @@ async function updateParticipants(
       const result = await (async () => {
         try {
           return await prisma.$transaction(async (tx) => {
+            await acquireEventLockAndLoadStructure(tx, event.id, {
+              eventType: event.eventType,
+              teamSignup: event.teamSignup,
+            });
             const tournamentPoolIds = isTournamentPoolPlayEnabled(event)
               ? await getTournamentPoolIdsForBracket({
                 eventId: event.id,
@@ -1661,14 +1704,20 @@ async function updateParticipants(
             return { bill };
           });
         } catch (error) {
-          if (isTournamentPoolValidationError(error)) {
-            return { error: error.message };
+          if ((error as { code?: unknown })?.code === 'EVENT_CONFIGURATION_CHANGED') {
+            return {
+              error: error instanceof Error ? error.message : 'Event configuration changed. Reload and try again.',
+              status: 409,
+            };
           }
           throw error;
         }
       })();
       if ('error' in result) {
-        return NextResponse.json({ error: result.error }, { status: 409 });
+        return NextResponse.json(
+          { error: result.error, code: 'EVENT_CONFIGURATION_CHANGED' },
+          { status: result.status ?? 409 },
+        );
       }
       const refreshedEvent = await prisma.events.findUnique({ where: { id: event.id } });
       return NextResponse.json({
@@ -1984,64 +2033,85 @@ async function updateParticipants(
       }
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      const registration = await upsertEventRegistration({
-        eventId: event.id,
-        registrantType,
-        registrantId: userId!,
-        parentId,
-        rosterRole: 'PARTICIPANT',
-        status: requiredTemplateIds.length > 0
-          ? 'STARTED'
-          : isManualRegistrationPaymentMode(event.registrationPaymentMode)
-            ? 'PENDING'
-            : 'ACTIVE',
-        ageAtEvent,
-        divisionId: divisionSelection.divisionId,
-        divisionTypeId: divisionSelection.divisionTypeId,
-        divisionTypeKey: divisionSelection.divisionTypeKey,
-        consentDocumentId,
-        consentStatus,
-        createdBy: session.userId,
-        occurrence: resolvedOccurrence,
-      }, tx);
-      if (eventAnswersSnapshot.length) {
-        await upsertRegistrationQuestionResponse({
-          scopeType: 'EVENT',
-          scopeId: event.id,
-          subjectType: 'EVENT_REGISTRATION',
-          subjectId: registration.id,
-          responderUserId: session.userId,
-          registrantUserId: userId!,
-          registrantType,
-          answersSnapshot: eventAnswersSnapshot,
-          client: tx,
+    let result: {
+      registration: Awaited<ReturnType<typeof upsertEventRegistration>>;
+      bill: Awaited<ReturnType<typeof createRegistrationBillForRegistration>> | null;
+    };
+    try {
+      result = await prisma.$transaction(async (tx) => {
+        await acquireEventLockAndLoadStructure(tx, event.id, {
+          eventType: event.eventType,
+          teamSignup: event.teamSignup,
         });
-      }
-
-      await tx.invites?.deleteMany?.({
-        where: {
-          type: 'EVENT',
+        const registration = await upsertEventRegistration({
           eventId: event.id,
-          userId: session.userId,
-        },
-      });
-
-      const bill = !canManageCurrentEvent && registrantType === 'SELF' && requiredTemplateIds.length === 0
-        ? await createRegistrationBillForRegistration({
-          tx,
-          event,
-          ownerType: 'USER',
-          ownerId: userId!,
-          registrationId: registration.id,
-          divisionSelection,
-          occurrence: resolvedOccurrence,
+          registrantType,
+          registrantId: userId!,
+          parentId,
+          rosterRole: 'PARTICIPANT',
+          status: requiredTemplateIds.length > 0
+            ? 'STARTED'
+            : isManualRegistrationPaymentMode(event.registrationPaymentMode)
+              ? 'PENDING'
+              : 'ACTIVE',
+          ageAtEvent,
+          divisionId: divisionSelection.divisionId,
+          divisionTypeId: divisionSelection.divisionTypeId,
+          divisionTypeKey: divisionSelection.divisionTypeKey,
+          consentDocumentId,
+          consentStatus,
           createdBy: session.userId,
-        })
-        : null;
+          occurrence: resolvedOccurrence,
+        }, tx);
+        if (eventAnswersSnapshot.length) {
+          await upsertRegistrationQuestionResponse({
+            scopeType: 'EVENT',
+            scopeId: event.id,
+            subjectType: 'EVENT_REGISTRATION',
+            subjectId: registration.id,
+            responderUserId: session.userId,
+            registrantUserId: userId!,
+            registrantType,
+            answersSnapshot: eventAnswersSnapshot,
+            client: tx,
+          });
+        }
 
-      return { registration, bill };
-    });
+        await tx.invites?.deleteMany?.({
+          where: {
+            type: 'EVENT',
+            eventId: event.id,
+            userId: session.userId,
+          },
+        });
+
+        const bill = !canManageCurrentEvent && registrantType === 'SELF' && requiredTemplateIds.length === 0
+          ? await createRegistrationBillForRegistration({
+            tx,
+            event,
+            ownerType: 'USER',
+            ownerId: userId!,
+            registrationId: registration.id,
+            divisionSelection,
+            occurrence: resolvedOccurrence,
+            createdBy: session.userId,
+          })
+          : null;
+
+        return { registration, bill };
+      });
+    } catch (error) {
+      if ((error as { code?: unknown })?.code === 'EVENT_CONFIGURATION_CHANGED') {
+        return NextResponse.json(
+          {
+            error: error instanceof Error ? error.message : 'Event configuration changed. Reload and try again.',
+            code: 'EVENT_CONFIGURATION_CHANGED',
+          },
+          { status: 409 },
+        );
+      }
+      throw error;
+    }
 
     return NextResponse.json({
       event: await toEventResponse(event),

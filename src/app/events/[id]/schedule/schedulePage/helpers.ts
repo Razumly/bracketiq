@@ -717,7 +717,6 @@ export const toClearedBracketMatchUpdate = (match: Match): Partial<Match> & { $i
   $id: match.$id,
   team1Points: [],
   team2Points: [],
-  setResults: [],
   officialCheckedIn: false,
   locked: false,
 });

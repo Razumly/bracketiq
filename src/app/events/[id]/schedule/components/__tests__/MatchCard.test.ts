@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { screen } from '@testing-library/react';
 
-import type { Match } from '@/types';
+import type { Match, MatchSegment } from '@/types';
 
 import MatchCard, { resolveDivisionLabel } from '../MatchCard';
 import { renderWithMantine } from '../../../../../../../test/utils/renderWithMantine';
@@ -13,7 +13,6 @@ const buildMatch = (overrides: Partial<Match> = {}): Match => ({
   end: '2026-03-01T11:00:00.000Z',
   team1Points: [],
   team2Points: [],
-  setResults: [],
   ...overrides,
 });
 
@@ -51,7 +50,6 @@ describe('MatchCard conflict rendering', () => {
           team2: { $id: 'team_2', name: 'Pine Valley Power' } as Match['team2'],
           team1Points: [21],
           team2Points: [17],
-          setResults: [1],
         }),
         fieldLabel: 'Court 2',
         layout: 'horizontal',
@@ -67,6 +65,142 @@ describe('MatchCard conflict rendering', () => {
     expect(screen.getByText('21')).toBeInTheDocument();
     expect(screen.getByText('17')).toBeInTheDocument();
     expect(screen.getByText('Court 2')).toBeInTheDocument();
+  });
+
+  it('ignores stale winner results when bracket slots have no assigned teams', () => {
+    const previousMatch = buildMatch({
+      $id: 'match_1',
+      matchId: 1,
+    });
+
+    renderWithMantine(
+      createElement(MatchCard, {
+        match: buildMatch({
+          $id: 'match_7',
+          matchId: 7,
+          team1Points: [0, 0],
+          team2Points: [0, 0],
+          previousLeftMatch: previousMatch,
+          previousRightMatch: previousMatch,
+        }),
+      }),
+    );
+
+    const card = screen.getByText('Match #7').closest('.match-card');
+    expect(card).not.toBeNull();
+    const rows = card?.querySelectorAll('.match-card__team-row');
+    expect(rows).toHaveLength(2);
+    expect(rows?.[0]).toHaveClass('bg-gray-100');
+    expect(rows?.[0]).not.toHaveClass('bg-green-50', 'border-green-200');
+    expect(rows?.[1]).toHaveClass('bg-gray-100');
+    expect(rows?.[1]).not.toHaveClass('bg-green-50', 'border-green-200');
+  });
+
+  it('ignores stale winner results when only one bracket slot is assigned', () => {
+    const previousMatch = buildMatch({
+      $id: 'match_1',
+      matchId: 1,
+    });
+
+    renderWithMantine(
+      createElement(MatchCard, {
+        match: buildMatch({
+          $id: 'match_7',
+          matchId: 7,
+          team1Id: 'team_1',
+          team1Points: [0, 0],
+          team2Points: [0, 0],
+          previousLeftMatch: previousMatch,
+          previousRightMatch: previousMatch,
+        }),
+      }),
+    );
+
+    const card = screen.getByText('Match #7').closest('.match-card');
+    expect(card).not.toBeNull();
+    const rows = card?.querySelectorAll('.match-card__team-row');
+    expect(rows).toHaveLength(2);
+    expect(rows?.[0]).toHaveClass('bg-gray-100');
+    expect(rows?.[0]).not.toHaveClass('bg-green-50', 'border-green-200');
+    expect(rows?.[1]).toHaveClass('bg-gray-100');
+    expect(rows?.[1]).not.toHaveClass('bg-green-50', 'border-green-200');
+  });
+
+  it('ignores stale legacy winners when canonical segments exist after both teams are assigned', () => {
+    const corruptedMatch = buildMatch({
+      $id: 'match_7',
+      matchId: 7,
+      team1Points: [0, 0],
+      team2Points: [0, 0],
+      segments: [
+        {
+          id: 'match_7_segment_1',
+          matchId: 'match_7',
+          sequence: 1,
+          status: 'NOT_STARTED',
+          scores: {},
+          winnerEventTeamId: null,
+        },
+        {
+          id: 'match_7_segment_2',
+          matchId: 'match_7',
+          sequence: 2,
+          status: 'NOT_STARTED',
+          scores: {},
+          winnerEventTeamId: null,
+        },
+      ] as MatchSegment[],
+    });
+
+    renderWithMantine(
+      createElement(MatchCard, {
+        match: {
+          ...corruptedMatch,
+          team1Id: 'team_1',
+          team2Id: 'team_2',
+        },
+      }),
+    );
+
+    const card = screen.getByText('Match #7').closest('.match-card');
+    expect(card).not.toBeNull();
+    const rows = card?.querySelectorAll('.match-card__team-row');
+    expect(rows).toHaveLength(2);
+    expect(rows?.[0]).toHaveClass('bg-gray-100');
+    expect(rows?.[0]).not.toHaveClass('bg-green-50', 'border-green-200');
+    expect(rows?.[1]).toHaveClass('bg-gray-100');
+    expect(rows?.[1]).not.toHaveClass('bg-green-50', 'border-green-200');
+  });
+
+  it('uses canonical segment winners for assigned teams', () => {
+    renderWithMantine(
+      createElement(MatchCard, {
+        match: buildMatch({
+          team1Id: 'team_1',
+          team2Id: 'team_2',
+          segments: [
+            {
+              id: 'match_1_segment_1',
+              matchId: 'match_1',
+              sequence: 1,
+              status: 'COMPLETE',
+              scores: {
+                team_1: 10,
+                team_2: 21,
+              },
+              winnerEventTeamId: 'team_2',
+            },
+          ] as MatchSegment[],
+        }),
+      }),
+    );
+
+    const card = screen.getByText('Match #1').closest('.match-card');
+    expect(card).not.toBeNull();
+    const rows = card?.querySelectorAll('.match-card__team-row');
+    expect(rows).toHaveLength(2);
+    expect(rows?.[0]).toHaveClass('bg-gray-100');
+    expect(rows?.[1]).toHaveClass('bg-green-50', 'border-green-200');
   });
 
   it('shows a subtle red border and no inline conflict message when match has a field-time conflict', () => {

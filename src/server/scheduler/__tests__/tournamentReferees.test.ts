@@ -142,7 +142,7 @@ describe('tournament scheduling (officials)', () => {
     expect(semi.teamOfficial).not.toBe(semi.team2);
 
     // Complete the semi: team1 wins.
-    semi.setResults = [1, 1];
+    semi.winnerEventTeamId = semi.team1?.id ?? null;
     semi.team1Points = [21, 21];
     semi.team2Points = [10, 10];
 
@@ -182,7 +182,7 @@ describe('tournament scheduling (officials)', () => {
 
     const finalStart = final.start.getTime();
     const winner = semi.team1 as Team;
-    semi.setResults = [1, 1];
+    semi.winnerEventTeamId = semi.team1?.id ?? null;
     semi.team1Points = [21, 21];
     semi.team2Points = [12, 8];
 
@@ -228,7 +228,7 @@ describe('tournament scheduling (officials)', () => {
 
     const finalStart = final.start.getTime();
     const winner = semi.team1;
-    semi.setResults = [1, 1];
+    semi.winnerEventTeamId = semi.team1?.id ?? null;
     semi.team1Points = [21, 21];
     semi.team2Points = [12, 8];
 
@@ -274,12 +274,12 @@ describe('tournament scheduling (officials)', () => {
     const initialLeftWinner = leftSemi.team1 as Team;
     const rightWinner = rightSemi.team1 as Team;
 
-    leftSemi.setResults = [1, 1];
+    leftSemi.winnerEventTeamId = leftSemi.team1?.id ?? null;
     leftSemi.team1Points = [21, 21];
     leftSemi.team2Points = [10, 10];
     finalizeMatchWithoutRescheduling(tournament, leftSemi, new Date(leftSemi.end));
 
-    rightSemi.setResults = [1, 1];
+    rightSemi.winnerEventTeamId = rightSemi.team1?.id ?? null;
     rightSemi.team1Points = [21, 21];
     rightSemi.team2Points = [10, 10];
     finalizeMatchWithoutRescheduling(tournament, rightSemi, new Date(rightSemi.end));
@@ -354,7 +354,7 @@ describe('tournament scheduling (officials)', () => {
 
     // Extend the match end time by 30 minutes to simulate running long.
     lastSemi.end = new Date(lastSemi.end.getTime() + 30 * 60 * 1000);
-    lastSemi.setResults = [1, 1];
+    lastSemi.winnerEventTeamId = lastSemi.team1?.id ?? null;
     lastSemi.team1Points = [21, 21];
     lastSemi.team2Points = [10, 10];
 
@@ -399,7 +399,7 @@ describe('tournament scheduling (officials)', () => {
     const originalFinalStart = final.start.getTime();
 
     lastSemi.end = new Date(lastSemi.end.getTime() + 30 * 60 * 1000);
-    lastSemi.setResults = [1, 1];
+    lastSemi.winnerEventTeamId = lastSemi.team1?.id ?? null;
     lastSemi.team1Points = [21, 21];
     lastSemi.team2Points = [10, 10];
 

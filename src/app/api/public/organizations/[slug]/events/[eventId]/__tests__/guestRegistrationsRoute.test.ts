@@ -56,6 +56,7 @@ const loadCanonicalTeamByIdMock = jest.fn();
 const claimOrCreateEventTeamSnapshotMock = jest.fn();
 const loadAndBuildRegistrationAnswerSnapshotMock = jest.fn();
 const upsertRegistrationQuestionResponseMock = jest.fn();
+const acquireEventLockAndLoadStructureMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/server/publicGuestRegistration', () => {
@@ -85,6 +86,7 @@ jest.mock('@/server/events/eventRegistrations', () => ({
   buildEventParticipantSnapshot: (...args: unknown[]) => buildEventParticipantSnapshotMock(...args),
   syncDivisionTeamMembershipFromRegistrations: (...args: unknown[]) => syncDivisionTeamMembershipFromRegistrationsMock(...args),
   upsertEventRegistration: (...args: unknown[]) => upsertEventRegistrationMock(...args),
+  acquireEventLockAndLoadStructure: (...args: unknown[]) => acquireEventLockAndLoadStructureMock(...args),
 }));
 jest.mock('@/server/events/weeklyOccurrences', () => ({
   isWeeklyParentEvent: () => false,
@@ -124,6 +126,11 @@ const routeContext = {
 describe('public guest event registration route', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    acquireEventLockAndLoadStructureMock.mockResolvedValue({
+      id: 'event_1',
+      eventType: 'EVENT',
+      teamSignup: true,
+    });
     prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof txMock) => Promise<unknown>) => callback(txMock));
     prismaMock.eventRegistrations.findUnique.mockResolvedValue(null);
     prismaMock.eventRegistrations.update.mockImplementation(async (params) => params.data);

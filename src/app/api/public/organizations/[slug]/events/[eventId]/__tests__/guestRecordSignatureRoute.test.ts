@@ -3,6 +3,7 @@
 import { NextRequest } from 'next/server';
 
 const prismaMock = {
+  $transaction: jest.fn(),
   eventRegistrations: {
     findUnique: jest.fn(),
     findMany: jest.fn(),
@@ -33,8 +34,16 @@ const assertPublicWidgetEventMock = jest.fn();
 const verifyGuestRegistrationTokenMock = jest.fn();
 const syncChildRegistrationConsentStatusMock = jest.fn();
 const resolveEventRegistrationPriceCentsMock = jest.fn();
+const acquireEventLockAndLoadStructureMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
+jest.mock('@/server/events/eventRegistrations', () => {
+  const actual = jest.requireActual('@/server/events/eventRegistrations');
+  return {
+    ...actual,
+    acquireEventLockAndLoadStructure: (...args: unknown[]) => acquireEventLockAndLoadStructureMock(...args),
+  };
+});
 jest.mock('@/server/publicGuestRegistration', () => {
   const actual = jest.requireActual('@/server/publicGuestRegistration');
   return {
@@ -64,6 +73,12 @@ const requestFor = (body: unknown) => new NextRequest(
 describe('public guest record signature route', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => Promise<unknown>) => callback(prismaMock));
+    acquireEventLockAndLoadStructureMock.mockResolvedValue({
+      id: 'event_1',
+      eventType: 'EVENT',
+      teamSignup: false,
+    });
     verifyGuestRegistrationTokenMock.mockReturnValue({
       kind: 'guest_registration',
       organizationId: 'org_1',

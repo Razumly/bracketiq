@@ -573,7 +573,6 @@ export class EventBuilder {
       losersBracket: false,
       division: divisionOverride ?? this.resolveMatchDivision(team1, team2),
       field: null,
-      setResults: Array(setCount).fill(0),
       bufferMs: config.bufferMs,
       side: null,
       officialCheckedIn: false,

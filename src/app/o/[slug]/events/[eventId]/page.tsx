@@ -1,14 +1,14 @@
-import type { Metadata } from 'next';
-import type { CSSProperties } from 'react';
-import Image from 'next/image';
-import Link from 'next/link';
-import { notFound, permanentRedirect, redirect } from 'next/navigation';
-import BlogStructuredData from '@/components/blog/BlogStructuredData';
+import type { Metadata } from "next";
+import type { CSSProperties } from "react";
+import Image from "next/image";
+import Link from "next/link";
+import { notFound, permanentRedirect, redirect } from "next/navigation";
+import BlogStructuredData from "@/components/blog/BlogStructuredData";
 import {
   getDisabledPublicOrganizationRedirectPath,
   getPublicOrganizationEventForRegistration,
   getPublicOrganizationRedirectPath,
-} from '@/server/publicOrganizationCatalog';
+} from "@/server/publicOrganizationCatalog";
 import {
   absoluteUrl,
   createPublicEventMetaDescription,
@@ -16,19 +16,21 @@ import {
   getPublicEventSeoData,
   publicOrganizationPath,
   publicEventPath,
-} from '@/server/publicSearchSeo';
-import styles from '../../PublicOrganizationPage.module.css';
-import EventRegistrationClient from './EventRegistrationClient';
-import type { Event } from '@/types';
+} from "@/server/publicSearchSeo";
+import styles from "../../PublicOrganizationPage.module.css";
+import EventRegistrationClient from "./EventRegistrationClient";
+import type { Event } from "@/types";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 type PublicEventRegistrationPageProps = {
   params: Promise<{ slug: string; eventId: string }>;
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
-export async function generateMetadata({ params }: PublicEventRegistrationPageProps): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+}: PublicEventRegistrationPageProps): Promise<Metadata> {
   const { slug, eventId } = await params;
   const seoData = await getPublicEventSeoData(slug, eventId);
   if (!seoData) {
@@ -36,13 +38,15 @@ export async function generateMetadata({ params }: PublicEventRegistrationPagePr
   }
 
   const seoEventId = seoData.event.id ?? seoData.event.$id ?? eventId;
-  const seoEventName = seoData.event.name ?? 'Event';
+  const seoEventName = seoData.event.name ?? "Event";
   const canonicalPath = publicEventPath(seoData.organization.slug, seoEventId);
   const description = createPublicEventMetaDescription(seoData);
   const title = `${seoEventName} | ${seoData.organization.name} on BracketIQ`;
   const eventImage = seoData.event.imageId
-    ? absoluteUrl(`/api/files/${encodeURIComponent(seoData.event.imageId)}/preview?w=1200&h=675`)
-    : absoluteUrl(seoData.organization.logoUrl ?? '/BIQ_drawing.svg');
+    ? absoluteUrl(
+        `/api/files/${encodeURIComponent(seoData.event.imageId)}/preview?w=1200&h=675`,
+      )
+    : absoluteUrl(seoData.organization.logoUrl ?? "/BIQ_drawing.svg");
 
   return {
     title,
@@ -58,7 +62,7 @@ export async function generateMetadata({ params }: PublicEventRegistrationPagePr
       title,
       description,
       url: absoluteUrl(canonicalPath),
-      type: 'website',
+      type: "website",
       images: [
         {
           url: eventImage,
@@ -69,7 +73,7 @@ export async function generateMetadata({ params }: PublicEventRegistrationPagePr
       ],
     },
     twitter: {
-      card: 'summary_large_image',
+      card: "summary_large_image",
       title,
       description,
       images: [eventImage],
@@ -83,17 +87,21 @@ export default async function PublicEventRegistrationPage({
 }: PublicEventRegistrationPageProps) {
   const { slug, eventId } = await params;
   const query = await searchParams;
-  const slotId = typeof query?.slotId === 'string' ? query.slotId.trim() : '';
-  const occurrenceDate = typeof query?.occurrenceDate === 'string' ? query.occurrenceDate.trim() : '';
-  const selectedOccurrence = slotId && occurrenceDate ? { slotId, occurrenceDate } : null;
+  const slotId = typeof query?.slotId === "string" ? query.slotId.trim() : "";
+  const occurrenceDate =
+    typeof query?.occurrenceDate === "string"
+      ? query.occurrenceDate.trim()
+      : "";
+  const selectedOccurrence =
+    slotId && occurrenceDate ? { slotId, occurrenceDate } : null;
   const occurrenceQuery = new URLSearchParams();
-  if (slotId) occurrenceQuery.set('slotId', slotId);
-  if (occurrenceDate) occurrenceQuery.set('occurrenceDate', occurrenceDate);
+  if (slotId) occurrenceQuery.set("slotId", slotId);
+  if (occurrenceDate) occurrenceQuery.set("occurrenceDate", occurrenceDate);
   const canonicalRedirectPath = await getPublicOrganizationRedirectPath(slug, {
-    suffix: `/events/${encodeURIComponent(eventId)}${occurrenceQuery.toString() ? `?${occurrenceQuery.toString()}` : ''}`,
+    suffix: `/events/${encodeURIComponent(eventId)}${occurrenceQuery.toString() ? `?${occurrenceQuery.toString()}` : ""}`,
   });
   if (canonicalRedirectPath) {
-    if (canonicalRedirectPath.startsWith('/o/')) {
+    if (canonicalRedirectPath.startsWith("/o/")) {
       permanentRedirect(canonicalRedirectPath);
     }
     redirect(canonicalRedirectPath);
@@ -108,15 +116,25 @@ export default async function PublicEventRegistrationPage({
   }
 
   const pageStyle = {
-    '--org-primary': result.organization.brandPrimaryColor,
-    '--org-accent': result.organization.brandAccentColor,
+    "--org-primary": result.organization.brandPrimaryColor,
+    "--org-accent": result.organization.brandAccentColor,
   } as CSSProperties;
 
   return (
     <main className={styles.registrationShell} style={pageStyle}>
       <header className={styles.registrationHeader}>
-        <Link href={publicOrganizationPath(result.organization.slug)} className={styles.registrationBrand}>
-          <Image src={result.organization.logoUrl} alt="" width={76} height={76} className={styles.logo} unoptimized />
+        <Link
+          href={publicOrganizationPath(result.organization.slug)}
+          className={styles.registrationBrand}
+        >
+          <Image
+            src={result.organization.logoUrl}
+            alt=""
+            width={76}
+            height={76}
+            className={styles.logo}
+            unoptimized
+          />
           <div>
             <p className={styles.orgName}>{result.organization.name}</p>
           </div>

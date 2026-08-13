@@ -57,7 +57,6 @@ describe('MatchEditModal', () => {
     team2: teams[1],
     team1Points: [0],
     team2Points: [0],
-    setResults: [0],
     segments: [
       {
         id: 'match_1_segment_1',
@@ -170,7 +169,56 @@ describe('MatchEditModal', () => {
         status: 'SCHEDULED',
         team1Points: [3, 0, 0],
         team2Points: [0, 0, 0],
-        setResults: [0, 0, 0],
+        winnerEventTeamId: null,
+      }),
+    );
+  });
+
+  it('does not mark an unassigned scoreless match as won when saving its schedule', () => {
+    const onSave = jest.fn();
+    const periodRules = {
+      ...pointsOnlyRules,
+      scoringModel: 'PERIODS',
+      segmentCount: 2,
+      segmentLabel: 'Half',
+    } as ResolvedMatchRules;
+    const unassignedMatch = {
+      ...match,
+      status: 'SCHEDULED',
+      team1Id: null,
+      team2Id: null,
+      team1: null,
+      team2: null,
+      team1Points: [0, 0],
+      team2Points: [0, 0],
+      matchRulesSnapshot: periodRules,
+      resolvedMatchRules: periodRules,
+      segments: [1, 2].map((sequence) => ({
+        ...match.segments?.[0],
+        id: `match_1_segment_${sequence}`,
+        sequence,
+        status: 'NOT_STARTED',
+        scores: {},
+        winnerEventTeamId: null,
+      })),
+    } as Match;
+
+    renderModal({
+      targetMatch: unassignedMatch,
+      targetEvent: {
+        ...event,
+        resolvedMatchRules: periodRules,
+      } as Event,
+      onSave,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'SCHEDULED',
+        team1Points: [0, 0],
+        team2Points: [0, 0],
         winnerEventTeamId: null,
       }),
     );
@@ -230,7 +278,6 @@ describe('MatchEditModal', () => {
       actualStart: '2026-03-01T10:00:00.000Z',
       team1Points: [0, 0, 0],
       team2Points: [0, 0, 0],
-      setResults: [0, 0, 0],
       resolvedMatchRules: {
         scoringModel: 'SETS',
         segmentCount: 3,
@@ -266,7 +313,6 @@ describe('MatchEditModal', () => {
       expect.objectContaining({
         team1Points: [0],
         team2Points: [0],
-        setResults: [0],
       }),
     );
   });
@@ -287,7 +333,6 @@ describe('MatchEditModal', () => {
       resolvedMatchRules: setRules,
       team1Points: [25, 0, 0],
       team2Points: [20, 0, 0],
-      setResults: [0, 0, 0],
       segments: [
         {
           id: 'match_1_segment_1',
@@ -372,7 +417,6 @@ describe('MatchEditModal', () => {
       expect.objectContaining({
         team1Points: [4],
         team2Points: [0],
-        setResults: [0],
       }),
     );
     expect(onSave.mock.calls[0][0].segments[0]).toEqual(
@@ -397,7 +441,6 @@ describe('MatchEditModal', () => {
       resolvedMatchRules: halfRules,
       team1Points: [1, 2],
       team2Points: [0, 1],
-      setResults: [1, 1],
       segments: [
         {
           id: 'match_1_segment_1',

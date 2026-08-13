@@ -47,6 +47,9 @@ type ScheduleTabPanelProps = {
   matchConflictsById: Record<string, string[]>;
   scheduleBracketPlaceholderAssignments: Record<string, string>;
   onAddScheduleMatch: () => void;
+  showBuildScheduleAction: boolean;
+  isBuildScheduleActionInFlight: boolean;
+  onBuildSchedule: () => void;
   onMatchEditRequest: (match: Match, context: MatchCreateContext) => void;
   onMatchClick: (match: Match) => void | Promise<void>;
   onMatchCalendarMove: (match: Match, range: { start: Date; end: Date; fieldId?: string | null }) => void;
@@ -90,6 +93,9 @@ export default function ScheduleTabPanel({
   matchConflictsById,
   scheduleBracketPlaceholderAssignments,
   onAddScheduleMatch,
+  showBuildScheduleAction,
+  isBuildScheduleActionInFlight,
+  onBuildSchedule,
   onMatchEditRequest,
   onMatchClick,
   onMatchCalendarMove,
@@ -200,7 +206,19 @@ export default function ScheduleTabPanel({
 
           {activeMatches.length === 0 ? (
             <Paper withBorder radius="md" p="xl" ta="center">
-              <Text>No matches generated yet.</Text>
+              <Stack gap="sm" align="center">
+                <Text>
+                  No schedule has been built. Build a schedule from the current divisions, fields, availability, and team capacity.
+                </Text>
+                {showBuildScheduleAction && (
+                  <Button
+                    onClick={onBuildSchedule}
+                    loading={isBuildScheduleActionInFlight}
+                  >
+                    Build schedule
+                  </Button>
+                )}
+              </Stack>
             </Paper>
           ) : scheduleMatches.length === 0 ? (
             <Paper withBorder radius="md" p="xl" ta="center">

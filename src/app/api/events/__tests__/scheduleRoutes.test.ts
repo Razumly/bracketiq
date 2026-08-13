@@ -97,7 +97,9 @@ jest.mock('@/server/repositories/events', () => ({
   saveMatches: (...args: any[]) => saveMatchesMock(...args),
   upsertEventFromPayload: (...args: any[]) => upsertEventFromPayloadMock(...args),
   deleteMatchesByEvent: (...args: any[]) => deleteMatchesByEventMock(...args),
+  deletePristineScheduleByEvent: (...args: any[]) => deleteMatchesByEventMock(...args),
   isEventFieldConflictError: (...args: any[]) => isEventFieldConflictErrorMock(...args),
+  isEventFieldConfigurationError: () => false,
 }));
 
 jest.mock('@/server/repositories/locks', () => ({
@@ -146,7 +148,6 @@ jest.mock('@/server/eventVisibility', () => ({
   assertCanViewEventSchedule: (...args: any[]) => assertCanViewEventScheduleMock(...args),
 }));
 
-import { POST as schedulePost } from '@/app/api/events/schedule/route';
 import { POST as scheduleByIdPost } from '@/app/api/events/[eventId]/schedule/route';
 import { GET as matchGet, PATCH as matchPatch } from '@/app/api/events/[eventId]/matches/[matchId]/route';
 import { POST as matchIncidentPost } from '@/app/api/events/[eventId]/matches/[matchId]/incidents/route';
@@ -201,7 +202,6 @@ const buildOfficialMobileSetConfirmation = () => {
         officialCheckedIn: true,
         team1Points: [21, 0, 0],
         team2Points: [19, 0, 0],
-        setResults: [0, 0, 0],
         segments: [
           {
             id: 'match_1_segment_1',
@@ -256,7 +256,6 @@ const buildOfficialMobileSetConfirmation = () => {
     mobileConfirmation: {
       team1Points: [21, 0, 0],
       team2Points: [19, 0, 0],
-      setResults: [1, 0, 0],
       officialCheckedIn: true,
       matchRulesSnapshot: mobileSnapshot,
       segmentOperations: [
@@ -491,7 +490,9 @@ describe('schedule routes', () => {
     expect(loadEventWithRelationsMock).not.toHaveBeenCalled();
   });
 
-  it('schedules an event from an event document payload', async () => {
+
+
+  it('schedules an existing event from canonical persisted state', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
     prismaMock.events.findUnique.mockResolvedValue({
       id: 'event_1',
@@ -499,7 +500,6 @@ describe('schedule routes', () => {
       assistantHostIds: [],
       organizationId: null,
     });
-    upsertEventFromPayloadMock.mockResolvedValue('event_1');
     loadEventWithRelationsMock.mockResolvedValue({
       id: 'event_1',
       eventType: 'LEAGUE',
@@ -514,210 +514,15 @@ describe('schedule routes', () => {
     serializeEventMock.mockReturnValue({ id: 'event_1' });
     serializeMatchesMock.mockReturnValue([{ id: 'match_1' }]);
 
-    const res = await schedulePost(jsonRequest('http://localhost/api/events/schedule', {
-      eventDocument: {
-        id: 'event_1',
-        fields: [
-          {
-            id: 'field_inline_1',
-            divisions: ['open'],
-          },
-        ],
-        timeSlots: [
-          {
-            id: 'slot_inline_1',
-            dayOfWeek: 1,
-            daysOfWeek: [1, 3],
-            startTimeMinutes: 600,
-            endTimeMinutes: 660,
-            startDate: '2026-01-01T00:00:00.000Z',
-            repeating: true,
-            scheduledFieldId: 'field_inline_1',
-            scheduledFieldIds: ['field_inline_1'],
-          },
-        ],
-      },
-    }));
-    const json = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(upsertEventFromPayloadMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        fields: [
-          expect.objectContaining({
-            id: 'field_inline_1',
-            divisions: ['open'],
-          }),
-        ],
-        timeSlots: [
-          expect.objectContaining({
-            id: 'slot_inline_1',
-            scheduledFieldId: 'field_inline_1',
-            scheduledFieldIds: ['field_inline_1'],
-          }),
-        ],
-      }),
-      prismaMock,
-    );
-    expect(scheduleEventMock).toHaveBeenCalled();
-    expect(persistScheduledRosterTeamsMock).toHaveBeenCalledWith(
-      {
-        eventId: 'event_1',
-        scheduled: { id: 'event_1' },
-        removeOmittedPlaceholderTeams: true,
-      },
-      prismaMock,
-    );
-    expect(deleteMatchesByEventMock).toHaveBeenCalledWith('event_1', prismaMock);
-    expect(saveMatchesMock).toHaveBeenCalled();
-    expect(refreshBroadcastPresentationForEventMock).toHaveBeenCalledWith({
-      eventId: 'event_1',
-      reason: 'SCHEDULE_CHANGE',
-    });
-    expect(json.event.id).toBe('event_1');
-    expect(json.matches[0].id).toBe('match_1');
-    expect(prismaMock.$transaction).toHaveBeenCalledWith(
-      expect.any(Function),
-      expect.objectContaining({
-        maxWait: 10_000,
-        timeout: 60_000,
-      }),
-    );
-  });
-
-  it('uses the canonical origin when notifying about a schedule-created event', async () => {
-    process.env.PUBLIC_WEB_BASE_URL = 'https://bracket-iq.com';
-    requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
-    prismaMock.events.findUnique
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        id: 'event_1',
-        hostId: 'host_1',
-        assistantHostIds: [],
-        organizationId: null,
-      });
-    upsertEventFromPayloadMock.mockResolvedValue('event_1');
-    loadEventWithRelationsMock.mockResolvedValue({
-      id: 'event_1',
-      name: 'New Scheduled Event',
-      eventType: 'EVENT',
-      hostId: 'host_1',
-      matches: {},
-    });
-    serializeEventMock.mockReturnValue({ id: 'event_1' });
-    serializeMatchesMock.mockReturnValue([]);
-
-    const res = await schedulePost(jsonRequest(
-      'https://internal.service.local/api/events/schedule',
-      {
-        eventDocument: {
-          id: 'event_1',
-          name: 'New Scheduled Event',
-          eventType: 'EVENT',
-        },
-      },
-      {
-        host: 'poisoned-host.example.com',
-        'x-forwarded-proto': 'https',
-        'x-forwarded-host': 'attacker.example.com',
-      },
-    ));
-
-    expect(res.status).toBe(200);
-    expect(sendAdminEventCreatedNotificationMock).toHaveBeenCalledWith({
-      event: expect.objectContaining({
-        id: 'event_1',
-        name: 'New Scheduled Event',
-        hostId: 'host_1',
-      }),
-      baseUrl: 'https://bracket-iq.com',
-    });
-    expect(JSON.stringify(sendAdminEventCreatedNotificationMock.mock.calls)).not.toContain('attacker.example.com');
-    expect(JSON.stringify(sendAdminEventCreatedNotificationMock.mock.calls)).not.toContain('poisoned-host.example.com');
-  });
-
-  it('schedules an existing event id using the provided event document payload', async () => {
-    requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
-    prismaMock.events.findUnique.mockResolvedValue({
-      id: 'event_1',
-      hostId: 'host_1',
-      assistantHostIds: [],
-      organizationId: null,
-    });
-    loadEventWithRelationsMock
-      .mockResolvedValueOnce({
-        id: 'event_1',
-        eventType: 'LEAGUE',
-        hostId: 'host_1',
-        matches: {},
-      })
-      .mockResolvedValueOnce({
-        id: 'event_1',
-        eventType: 'LEAGUE',
-        hostId: 'host_1',
-        matches: {},
-      });
-    upsertEventFromPayloadMock.mockResolvedValue('event_1');
-    scheduleEventMock.mockReturnValue({
-      preview: false,
-      event: { id: 'event_1' },
-      matches: [{ id: 'match_1' }],
-    });
-    serializeEventMock.mockReturnValue({ id: 'event_1' });
-    serializeMatchesMock.mockReturnValue([{ id: 'match_1' }]);
-
     const res = await scheduleByIdPost(
-      jsonRequest('http://localhost/api/events/event_1/schedule', {
-        eventDocument: {
-          maxParticipants: 5,
-          teamIds: [],
-          fields: [
-            {
-              id: 'field_inline_2',
-              divisions: ['open'],
-            },
-          ],
-          timeSlots: [
-            {
-              id: 'slot_inline_2',
-              dayOfWeek: 2,
-              daysOfWeek: [2],
-              startTimeMinutes: 700,
-              endTimeMinutes: 760,
-              startDate: '2026-01-01T00:00:00.000Z',
-              repeating: true,
-              scheduledFieldId: 'field_inline_2',
-              scheduledFieldIds: ['field_inline_2'],
-            },
-          ],
-        },
-      }),
+      jsonRequest('http://localhost/api/events/event_1/schedule', {}),
       { params: Promise.resolve({ eventId: 'event_1' }) },
     );
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(upsertEventFromPayloadMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'event_1',
-        maxParticipants: 5,
-        fields: [
-          expect.objectContaining({
-            id: 'field_inline_2',
-            divisions: ['open'],
-          }),
-        ],
-        timeSlots: [
-          expect.objectContaining({
-            id: 'slot_inline_2',
-            scheduledFieldId: 'field_inline_2',
-            scheduledFieldIds: ['field_inline_2'],
-          }),
-        ],
-      }),
-      prismaMock,
-    );
-    expect(scheduleEventMock).toHaveBeenCalled();
+    expect(upsertEventFromPayloadMock).not.toHaveBeenCalled();
+    expect(scheduleEventMock).toHaveBeenCalledTimes(1);
     expect(persistScheduledRosterTeamsMock).toHaveBeenCalledWith(
       {
         eventId: 'event_1',
@@ -743,91 +548,8 @@ describe('schedule routes', () => {
     );
   });
 
-  it('returns 409 when event field conflicts are raised during scheduling', async () => {
-    requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
-    prismaMock.events.findUnique.mockResolvedValue({
-      id: 'event_1',
-      hostId: 'host_1',
-      assistantHostIds: [],
-      organizationId: null,
-    });
-    const conflictError = {
-      message: 'Selected fields and time range conflict with existing reservations.',
-      conflicts: [
-        {
-          fieldId: 'field_1',
-          parentId: 'event_existing',
-          start: new Date('2026-04-01T13:30:00.000Z'),
-          end: new Date('2026-04-01T15:00:00.000Z'),
-        },
-      ],
-    };
-    upsertEventFromPayloadMock.mockRejectedValue(conflictError);
-    isEventFieldConflictErrorMock.mockImplementation((error: unknown) => error === conflictError);
 
-    const res = await schedulePost(jsonRequest('http://localhost/api/events/schedule', {
-      eventDocument: {
-        id: 'event_1',
-        eventType: 'EVENT',
-      },
-    }));
-    const json = await res.json();
 
-    expect(res.status).toBe(409);
-    expect(String(json.error ?? '')).toContain('conflict');
-    expect(json.conflicts).toEqual([
-      expect.objectContaining({
-        fieldId: 'field_1',
-        parentId: 'event_existing',
-      }),
-    ]);
-  });
-
-  it('returns 500 when schedule upsert fails before persistence work starts', async () => {
-    requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
-    upsertEventFromPayloadMock.mockRejectedValueOnce(new Error('upsert failed'));
-
-    const res = await schedulePost(
-      jsonRequest('http://localhost/api/events/schedule', {
-        eventDocument: { id: 'event_1' },
-      }),
-    );
-    const json = await res.json();
-
-    expect(res.status).toBe(500);
-    expect(json).toEqual(expect.objectContaining({ error: 'Internal Server Error' }));
-    expect(scheduleEventMock).not.toHaveBeenCalled();
-    expect(deleteMatchesByEventMock).not.toHaveBeenCalled();
-    expect(saveMatchesMock).not.toHaveBeenCalled();
-    expect(saveEventScheduleMock).not.toHaveBeenCalled();
-  });
-
-  it('returns 400 when a new event document has no selected or created fields', async () => {
-    requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
-    prismaMock.events.findUnique.mockResolvedValueOnce(null);
-    upsertEventFromPayloadMock.mockRejectedValueOnce(
-      new Error('Select or create at least one field for this event.'),
-    );
-
-    const res = await schedulePost(
-      jsonRequest('http://localhost/api/events/schedule', {
-        eventDocument: {
-          id: 'event_1',
-          organizationId: 'org_1',
-          eventType: 'EVENT',
-        },
-      }),
-    );
-    const json = await res.json();
-
-    expect(res.status).toBe(400);
-    expect(json).toEqual(expect.objectContaining({
-      error: 'Select or create at least one field for this event.',
-    }));
-    expect(scheduleEventMock).not.toHaveBeenCalled();
-    expect(deleteMatchesByEventMock).not.toHaveBeenCalled();
-    expect(saveMatchesMock).not.toHaveBeenCalled();
-  });
 
   it('returns 500 when schedule match persistence fails in eventId schedule route', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
@@ -1132,7 +854,6 @@ describe('schedule routes', () => {
           team2,
           team1Points: [0],
           team2Points: [0],
-          setResults: [0],
           segments: [
             {
               id: 'match_1_segment_1',
@@ -1253,7 +974,6 @@ describe('schedule routes', () => {
           team2,
           team1Points: [0],
           team2Points: [0],
-          setResults: [0],
           segments: [{
             id: 'match_1_segment_1',
             eventId: 'event_1',
@@ -1654,7 +1374,6 @@ describe('schedule routes', () => {
           team2,
           team1Points: [1, 2],
           team2Points: [0, 1],
-          setResults: [1, 0],
           status: 'IN_PROGRESS',
           winnerEventTeamId: null,
           segments: [
@@ -1787,7 +1506,6 @@ describe('schedule routes', () => {
           team2,
           team1Points: [2],
           team2Points: [1],
-          setResults: [0],
           status: 'IN_PROGRESS',
           winnerEventTeamId: null,
           segments: [
@@ -1957,7 +1675,6 @@ describe('schedule routes', () => {
           team2,
           team1Points: [22, 0, 0],
           team2Points: [19, 0, 0],
-          setResults: [0, 0, 0],
           status: 'IN_PROGRESS',
           winnerEventTeamId: null,
           segments: [{
@@ -2120,7 +1837,6 @@ describe('schedule routes', () => {
           team2,
           team1Points: [],
           team2Points: [],
-          setResults: [],
           segments: [],
           incidents: [],
           matchRulesSnapshot: null,
@@ -2224,7 +1940,6 @@ describe('schedule routes', () => {
           team2,
           team1Points: [],
           team2Points: [],
-          setResults: [],
           segments: [],
           incidents: [],
           matchRulesSnapshot: null,
@@ -2354,7 +2069,6 @@ describe('schedule routes', () => {
           team2,
           team1Points: [0, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           segments: [
             {
               id: 'match_1_segment_1',
@@ -2449,7 +2163,6 @@ describe('schedule routes', () => {
           team2,
           team1Points: [21, 0, 0],
           team2Points: [19, 0, 0],
-          setResults: [0, 0, 0],
           segments: [{
             id: 'match_1_segment_1',
             eventId: 'event_1',
@@ -2517,7 +2230,6 @@ describe('schedule routes', () => {
           team2,
           team1Points: [0],
           team2Points: [0],
-          setResults: [0],
           segments: [{
             id: 'match_1_segment_1',
             eventId: 'event_1',
@@ -2588,7 +2300,6 @@ describe('schedule routes', () => {
           team2,
           team1Points: [0],
           team2Points: [0],
-          setResults: [0],
           segments: [{
             id: 'match_1_segment_1',
             eventId: 'event_1',
@@ -2670,7 +2381,6 @@ describe('schedule routes', () => {
           team2,
           team1Points: [0],
           team2Points: [0],
-          setResults: [0],
           segments: [{
             id: 'match_1_segment_1',
             eventId: 'event_1',
@@ -2742,7 +2452,6 @@ describe('schedule routes', () => {
           team2,
           team1Points: [0, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           segments: [
             {
               id: 'match_1_segment_1',
@@ -2865,7 +2574,6 @@ describe('schedule routes', () => {
           team2,
           team1Points: [1, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           segments: [
             {
               id: 'match_1_segment_1',
@@ -3076,7 +2784,6 @@ describe('schedule routes', () => {
           winnerEventTeamId: null,
           team1Points: [0],
           team2Points: [0],
-          setResults: [0],
           segments: [{
             id: 'match_1_segment_1',
             sequence: 1,

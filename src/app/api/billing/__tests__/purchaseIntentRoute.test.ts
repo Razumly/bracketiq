@@ -43,6 +43,7 @@ const prismaMock = {
   },
   $queryRaw: jest.fn(),
   $transaction: jest.fn(),
+  $executeRaw: jest.fn(),
 };
 
 const requireSessionMock = jest.fn();
@@ -146,6 +147,7 @@ const canonicalRentalResult = (options?: {
 describe('POST /api/billing/purchase-intent', () => {
   beforeEach(() => {
     jest.resetAllMocks();
+    prismaMock.$executeRaw.mockResolvedValue(0);
     StripeMock.mockImplementation(() => ({
       paymentIntents: {
         create: (...args: unknown[]) => mockStripePaymentIntentCreate(...args),
@@ -190,6 +192,7 @@ describe('POST /api/billing/purchase-intent', () => {
     prismaMock.$transaction.mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
       const tx = {
         $queryRaw: prismaMock.$queryRaw,
+        $executeRaw: prismaMock.$executeRaw,
         teams: {
           findUnique: prismaMock.teams.findUnique,
         },
@@ -1311,6 +1314,7 @@ describe('POST /api/billing/purchase-intent', () => {
     prismaMock.$transaction.mockImplementation((callback: (tx: any) => Promise<unknown>) => {
       const tx = {
         $queryRaw: prismaMock.$queryRaw,
+        $executeRaw: prismaMock.$executeRaw,
         teams: {
           findUnique: prismaMock.teams.findUnique,
         },
@@ -1509,6 +1513,7 @@ describe('POST /api/billing/purchase-intent', () => {
     prismaMock.$transaction.mockImplementation((callback: (tx: any) => Promise<unknown>) => {
       const tx = {
         $queryRaw: prismaMock.$queryRaw,
+        $executeRaw: prismaMock.$executeRaw,
         teams: {
           findUnique: prismaMock.teams.findUnique,
         },

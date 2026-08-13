@@ -28,7 +28,6 @@ const buildMatch = (overrides: Partial<Match> = {}): Match => ({
   actualStart: '2026-03-01T10:00:00.000Z',
   team1Points: [0, 0, 0],
   team2Points: [0, 0, 0],
-  setResults: [0, 0, 0],
   team1Id: 'team_a',
   team2Id: 'team_b',
   team1: { $id: 'team_a', name: 'Aces' } as Match['team1'],
@@ -214,7 +213,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [0, 0, 0],
           team2Points: [0, 0, 0],
-          setResults: [0, 0, 0],
           matchRulesSnapshot: oneSetRules as Match['matchRulesSnapshot'],
           resolvedMatchRules: oneSetRules as Match['resolvedMatchRules'],
           segments: staleSegments as Match['segments'],
@@ -321,18 +319,17 @@ describe('ScoreUpdateModal', () => {
   });
 
   it('writes a single-set winner when finishing a timed match score', async () => {
-    const onSubmit = jest.fn().mockResolvedValue(undefined);
+    const onScoreChange = jest.fn().mockResolvedValue(undefined);
 
     renderWithMantine(
       <ScoreUpdateModal
         match={buildMatch({
           team1Points: [3, 0, 0],
           team2Points: [1, 0, 0],
-          setResults: [0, 0, 0],
         })}
         tournament={buildEvent()}
         canManage
-        onSubmit={onSubmit}
+        onScoreChange={onScoreChange}
         onClose={jest.fn()}
         isOpen
       />,
@@ -341,7 +338,18 @@ describe('ScoreUpdateModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Finish Match' }));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith('match_1', [3], [1], [1]);
+      expect(onScoreChange).toHaveBeenCalledWith(expect.objectContaining({
+        matchId: 'match_1',
+        segments: expect.arrayContaining([
+          expect.objectContaining({
+            sequence: 1,
+            status: 'COMPLETE',
+            winnerEventTeamId: 'team_a',
+          }),
+        ]),
+        team1Points: [3],
+        team2Points: [1],
+      }));
     });
   });
 
@@ -358,7 +366,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [1, 2],
           team2Points: [0, 1],
-          setResults: [1, 0],
           matchRulesSnapshot: rules,
           segments: [
             {
@@ -482,7 +489,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [0, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           matchRulesSnapshot: rules,
           segments: buildSegments(),
           incidents: [],
@@ -695,7 +701,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [0, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           matchRulesSnapshot: staleMatchRules,
           segments: buildSegments(),
           incidents: [],
@@ -727,7 +732,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [0, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           matchRulesSnapshot: staleRules,
           segments: buildSegments(),
           incidents: [],
@@ -778,7 +782,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [1, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           matchRulesSnapshot: rules,
           segments: buildSegments(1, 0),
           incidents: [{
@@ -834,7 +837,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [1, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           matchRulesSnapshot: rules,
           segments: buildSegments(1, 0),
           incidents: [{
@@ -887,7 +889,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [0, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           matchRulesSnapshot: rules,
           segments: buildSegments(),
           incidents,
@@ -920,7 +921,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [0, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           matchRulesSnapshot: rules,
           segments: buildSegments(),
           incidents: [],
@@ -970,7 +970,6 @@ describe('ScoreUpdateModal', () => {
           division: 'division_open',
           team1Points: [0],
           team2Points: [0],
-          setResults: [0],
           resolvedMatchRules: staleRules as Match['resolvedMatchRules'],
           segments: [],
           incidents: [],
@@ -1018,7 +1017,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [20, 0, 0],
           team2Points: [20, 0, 0],
-          setResults: [0, 0, 0],
           matchRulesSnapshot: rules,
           segments: [{
             id: 'match_1_segment_1',
@@ -1070,7 +1068,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [21, 0, 0],
           team2Points: [19, 0, 0],
-          setResults: [0, 0, 0],
           matchRulesSnapshot: rules,
           segments: [{
             id: 'match_1_segment_1',
@@ -1116,7 +1113,6 @@ describe('ScoreUpdateModal', () => {
           division: 'division_open',
           team1Points: [21],
           team2Points: [10],
-          setResults: [1],
           resolvedMatchRules: staleRules as Match['resolvedMatchRules'],
           segments: [{
             id: 'match_1_segment_1',
@@ -1184,7 +1180,6 @@ describe('ScoreUpdateModal', () => {
           division: 'division_open',
           team1Points: [10, 21],
           team2Points: [21, 10],
-          setResults: [2, 0],
           resolvedMatchRules: staleRules as Match['resolvedMatchRules'],
           segments: [{
             id: 'match_1_segment_1',
@@ -1239,7 +1234,6 @@ describe('ScoreUpdateModal', () => {
     ]);
     expect(onSetComplete.mock.calls[0][0].team1Points).toEqual([10, 21, 0]);
     expect(onSetComplete.mock.calls[0][0].team2Points).toEqual([21, 10, 0]);
-    expect(onSetComplete.mock.calls[0][0].setResults).toEqual([2, 1, 0]);
   });
 
   it('keeps locally incremented score visible when stale match props rerender before the debounced sync fires', async () => {
@@ -1253,7 +1247,6 @@ describe('ScoreUpdateModal', () => {
       team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
       team1Points: [0, 0],
       team2Points: [0, 0],
-      setResults: [0, 0],
       matchRulesSnapshot: rules,
       segments: buildSegments(),
       incidents: [],
@@ -1308,7 +1301,6 @@ describe('ScoreUpdateModal', () => {
       team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
       team1Points: [0, 0],
       team2Points: [0, 0],
-      setResults: [0, 0],
       matchRulesSnapshot: rules,
       segments: buildSegments(),
       incidents: [],
@@ -1341,7 +1333,6 @@ describe('ScoreUpdateModal', () => {
       team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
       team1Points: [1, 0],
       team2Points: [0, 0],
-      setResults: [0, 0],
       matchRulesSnapshot: rules,
       segments: buildSegments(1, 0),
       incidents: [],
@@ -1375,7 +1366,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [0, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           matchRulesSnapshot: rules,
           segments: buildSegments(),
           incidents: [],
@@ -1420,7 +1410,6 @@ describe('ScoreUpdateModal', () => {
       team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
       team1Points: [0, 0],
       team2Points: [0, 0],
-      setResults: [0, 0],
       matchRulesSnapshot: rules,
       segments: buildSegments(),
       incidents: [],
@@ -1483,7 +1472,6 @@ describe('ScoreUpdateModal', () => {
           teamOfficial: { $id: 'team_official', name: 'New test team' } as Match['teamOfficial'],
           team1Points: [1, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           matchRulesSnapshot: rules,
           segments: buildSegments(1, 0),
           officialCheckedIn: true,
@@ -1545,7 +1533,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [0, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           matchRulesSnapshot: rules,
           segments: buildSegments(),
           actualStart: null,
@@ -1602,7 +1589,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [1, 0],
           team2Points: [0, 0],
-          setResults: [1, 0],
           matchRulesSnapshot: rules,
           segments: [
             {
@@ -1743,7 +1729,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [0, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           matchRulesSnapshot: rules,
           segments: [{
             id: 'match_1_segment_1',
@@ -1798,7 +1783,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [0, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           matchRulesSnapshot: buildRules(),
           segments: buildSegments(),
           actualStart: '2026-04-19T10:00:00.000Z',
@@ -1830,7 +1814,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [0, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           matchRulesSnapshot: rules,
           segments: buildSegments(),
           incidents: [{
@@ -1895,7 +1878,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [1, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           matchRulesSnapshot: rules,
           segments: buildSegments(1, 0),
           incidents: [{
@@ -1960,7 +1942,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [0, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           matchRulesSnapshot: rules,
           segments: [
             {
@@ -2052,7 +2033,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [2],
           team2Points: [1],
-          setResults: [1],
           matchRulesSnapshot: rules,
           segments: [
             {
@@ -2087,7 +2067,6 @@ describe('ScoreUpdateModal', () => {
       finalize: true,
       team1Points: [2, 0],
       team2Points: [1, 0],
-      setResults: [1, 0],
     }));
     expect(onSetComplete.mock.calls[0][0].segmentOperations).toEqual([
       expect.objectContaining({
@@ -2118,7 +2097,6 @@ describe('ScoreUpdateModal', () => {
       team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
       team1Points: [0, 0],
       team2Points: [0, 0],
-      setResults: [0, 0],
       matchRulesSnapshot: rules,
       segments: [
         {
@@ -2220,7 +2198,6 @@ describe('ScoreUpdateModal', () => {
           team2: { $id: 'team_b', name: 'Diggers' } as Match['team2'],
           team1Points: [0, 0],
           team2Points: [0, 0],
-          setResults: [0, 0],
           matchRulesSnapshot: rules,
           segments: buildSegments(),
           incidents: [],

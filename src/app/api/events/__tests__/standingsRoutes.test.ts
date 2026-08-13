@@ -92,7 +92,6 @@ const buildLeagueFixture = () => {
     team2,
     team1Points: [0],
     team2Points: [9],
-    setResults: [2],
     matchRulesSnapshot: {
       scoringModel: 'POINTS_ONLY',
       pointIncidentRequiresParticipant: true,
@@ -238,7 +237,6 @@ const buildTournamentPoolFixture = () => {
     team2,
     team1Points: [5],
     team2Points: [3],
-    setResults: [1],
     matchRulesSnapshot: {
       scoringModel: 'POINTS_ONLY',
       pointIncidentRequiresParticipant: true,

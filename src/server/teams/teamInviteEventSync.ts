@@ -1,5 +1,8 @@
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
-import { buildEventRegistrationId } from '@/server/events/eventRegistrations';
+import {
+  acquireEventLockAndLoadStructure,
+  buildEventRegistrationId,
+} from '@/server/events/eventRegistrations';
 import { syncNewCanonicalPlayerIntoMatchRosters } from '@/server/matches/teamCheckIns';
 import {
   getEventTeamsDelegate,
@@ -76,6 +79,17 @@ const registrationSnapshotSelect = {
   consentStatus: true,
   createdBy: true,
 } as const;
+const lockTeamRegistrationEvents = async (
+  tx: PrismaLike,
+  eventIds: Array<string | null | undefined>,
+): Promise<void> => {
+  const normalizedEventIds = uniqueStrings(eventIds.map(normalizeId)).sort();
+  for (const eventId of normalizedEventIds) {
+    await acquireEventLockAndLoadStructure(tx, eventId, {
+      teamSignup: true,
+    });
+  }
+};
 
 const toDate = (value: unknown, fallback: Date): Date => {
   if (value instanceof Date) {
@@ -408,6 +422,10 @@ const propagateAcceptedPlayerToLinkedEventTeams = async (
   if (!linkedEventTeams.length) {
     return;
   }
+  await lockTeamRegistrationEvents(
+    tx,
+    linkedEventTeams.map((eventTeam) => eventTeam.eventId),
+  );
 
   const eventTeamsDelegate = getEventTeamsDelegate(tx);
   const sourceTeamRegistrationId = await findSourceTeamRegistrationId(tx, canonicalTeamId, userId);
@@ -503,6 +521,10 @@ export const acceptTeamInviteEventSyncs = async (
   if (!delegate?.updateMany) {
     return;
   }
+  await lockTeamRegistrationEvents(
+    tx,
+    rows.map((row) => row.eventId),
+  );
 
   const eventTeamsDelegate = getEventTeamsDelegate(tx);
   await Promise.all(rows.map(async (row) => {

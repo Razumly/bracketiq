@@ -5,13 +5,15 @@ jest.mock('../eventStaffReconciliation', () => ({ loadEventStaffSnapshot: jest.f
 import { buildEventEditorSnapshot, loadCreateEventEditorSnapshot } from '../eventEditorSnapshot';
 import { parseSaveEventEditorCommand } from '@/contracts/eventEditor';
 
-const buildClient = (fields: unknown[], timeSlots: unknown[]) => ({
+const buildClient = (fields: unknown[], timeSlots: unknown[], facilities: unknown[] = []) => ({
   fields: { findMany: jest.fn().mockResolvedValue(fields) },
+  facilities: { findMany: jest.fn().mockResolvedValue(facilities) },
   timeSlots: { findMany: jest.fn().mockResolvedValue(timeSlots) },
   sports: { findMany: jest.fn().mockResolvedValue([]) },
   organizations: { findMany: jest.fn().mockResolvedValue([]) },
   eventTemplates: { findMany: jest.fn().mockResolvedValue([]) },
   stripeAccounts: { findFirst: jest.fn().mockResolvedValue(null) },
+  eventRegistrations: { findFirst: jest.fn().mockResolvedValue(null) },
 }) as any;
 
 describe('buildEventEditorSnapshot', () => {
@@ -24,6 +26,7 @@ describe('buildEventEditorSnapshot', () => {
         name: 'Court 1',
         location: 'Main Gym',
         organizationId: null,
+        facilityId: 'facility_1',
         rentalSlotIds: [],
         sportIds: [],
         status: 'ACTIVE',
@@ -44,6 +47,7 @@ describe('buildEventEditorSnapshot', () => {
         rentalLocked: false,
         status: 'ACTIVE',
       }],
+      [{ id: 'facility_1', name: 'Main Facility', location: 'Main Gym' }],
     );
 
     const snapshot = await buildEventEditorSnapshot({
@@ -71,6 +75,14 @@ describe('buildEventEditorSnapshot', () => {
     }));
     expect(snapshot.draft.resources.fields[0]).not.toHaveProperty('createdAt');
     expect(snapshot.draft.resources.fields[0]).not.toHaveProperty('status');
+    expect(snapshot.catalogs.fields[0]).toEqual(expect.objectContaining({
+      id: 'field_1',
+      facility: expect.objectContaining({
+        id: 'facility_1',
+        name: 'Main Facility',
+      }),
+    }));
+    expect(snapshot.draft.resources.fields[0]).not.toHaveProperty('facility');
     expect(snapshot.draft.resources.timeSlots[0]).toEqual(expect.objectContaining({
       id: 'slot_1',
       $id: 'slot_1',
@@ -279,6 +291,7 @@ it('round-trips configured playoff phase rules without treating them as standing
     editorRevision: snapshot.editorRevision,
     staffRevision: snapshot.staffRevision,
     draft: snapshot.draft,
+    scheduleTransition: { mode: 'PRESERVE' },
   });
   expect(command.draft.competition.playoffDivisionDetails).toEqual(
     snapshot.draft.competition.playoffDivisionDetails,

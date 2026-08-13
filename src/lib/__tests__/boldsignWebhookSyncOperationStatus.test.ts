@@ -14,6 +14,7 @@ const prismaMock = {
   },
   eventRegistrations: {
     findFirst: jest.fn(),
+    findMany: jest.fn(),
     updateMany: jest.fn(),
   },
   teamRegistrations: {
@@ -28,15 +29,20 @@ const prismaMock = {
   authUser: {
     findUnique: jest.fn(),
   },
+  $transaction: jest.fn(),
 };
 
 const findLatestBoldSignOperationMock = jest.fn();
 const updateBoldSignOperationByIdMock = jest.fn();
 const createOrUpdateBoldSignOperationMock = jest.fn();
+const acquireEventLockAndLoadStructureMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/childConsentProgress', () => ({
   syncChildRegistrationConsentStatus: jest.fn(),
+}));
+jest.mock('@/server/events/eventRegistrations', () => ({
+  acquireEventLockAndLoadStructure: (...args: any[]) => acquireEventLockAndLoadStructureMock(...args),
 }));
 jest.mock('@/lib/boldsignServer', () => ({
   getDocumentProperties: jest.fn(),
@@ -67,6 +73,7 @@ jest.mock('@/lib/boldsignSyncOperations', () => ({
   updateBoldSignOperationById: (...args: any[]) => updateBoldSignOperationByIdMock(...args),
 }));
 
+
 import {
   parseBoldSignWebhookEvent,
   processBoldSignWebhookEvent,
@@ -93,8 +100,15 @@ describe('boldsignWebhookSync operation status projection', () => {
     prismaMock.signedDocuments.create.mockResolvedValue({ id: 'signed_row_1' });
     prismaMock.events.findMany.mockResolvedValue([]);
     prismaMock.eventRegistrations.findFirst.mockResolvedValue(null);
+    prismaMock.eventRegistrations.findMany.mockResolvedValue([]);
     prismaMock.eventRegistrations.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.teamRegistrations.updateMany.mockResolvedValue({ count: 0 });
+    prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock));
+    acquireEventLockAndLoadStructureMock.mockResolvedValue({
+      id: 'event_1',
+      eventType: 'LEAGUE',
+      teamSignup: false,
+    });
     createOrUpdateBoldSignOperationMock.mockResolvedValue({
       id: 'op_1',
       status: 'PENDING_RECONCILE',
@@ -296,6 +310,50 @@ describe('boldsignWebhookSync operation status projection', () => {
         idempotencyKey: 'webhook-document:doc_manual_1',
         status: 'PENDING_RECONCILE',
         signedDocumentRecordId: 'signed_row_1',
+      }),
+    );
+  });
+
+  it('locks each event before applying signature-driven registration activation', async () => {
+    prismaMock.eventRegistrations.findMany.mockResolvedValue([
+      { id: 'registration_2', eventId: 'event_2' },
+      { id: 'registration_1', eventId: 'event_1' },
+      { id: 'registration_3', eventId: 'event_2' },
+    ]);
+
+    const event = parseBoldSignWebhookEvent({
+      payload: {
+        eventType: 'Completed',
+        documentId: 'doc_1',
+        status: 'Completed',
+      },
+      rawBody: JSON.stringify({ eventType: 'Completed', documentId: 'doc_1' }),
+      headerEventType: 'Completed',
+    });
+
+    await processBoldSignWebhookEvent(event);
+
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(acquireEventLockAndLoadStructureMock).toHaveBeenNthCalledWith(1, prismaMock, 'event_1');
+    expect(acquireEventLockAndLoadStructureMock).toHaveBeenNthCalledWith(2, prismaMock, 'event_2');
+    expect(prismaMock.eventRegistrations.updateMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: {
+          id: { in: ['registration_1'] },
+          eventId: 'event_1',
+        },
+        data: expect.objectContaining({ status: 'ACTIVE' }),
+      }),
+    );
+    expect(prismaMock.eventRegistrations.updateMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: {
+          id: { in: ['registration_2', 'registration_3'] },
+          eventId: 'event_2',
+        },
+        data: expect.objectContaining({ status: 'ACTIVE' }),
       }),
     );
   });

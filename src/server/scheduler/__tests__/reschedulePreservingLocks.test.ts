@@ -36,7 +36,6 @@ const createMatch = (params: {
     losersBracket: false,
     division: params.division,
     field: params.field,
-    setResults: [0, 0, 0],
     bufferMs: 5 * MINUTE_MS,
     side: null,
     officialCheckedIn: false,
@@ -957,7 +956,6 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       team2: teamB,
       eventId: 'event_dependency',
     });
-    lockedMatch.setResults = [1, 1, 1];
 
     const qualifierMatch = createMatch({
       id: 'match_qualifier',
@@ -970,7 +968,6 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       team2: teamD,
       eventId: 'event_dependency',
     });
-    qualifierMatch.setResults = [0, 0, 0];
 
     const dependentMatch = createMatch({
       id: 'match_dependent',
@@ -983,7 +980,6 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       team2: teamB,
       eventId: 'event_dependency',
     });
-    dependentMatch.setResults = [0, 0, 0];
     dependentMatch.team1Seed = 11;
     dependentMatch.team2Seed = 12;
     dependentMatch.previousLeftMatch = qualifierMatch;
@@ -1115,7 +1111,6 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     });
     qualifierMatch.team1Seed = 8;
     qualifierMatch.team2Seed = 9;
-    qualifierMatch.setResults = [0, 0, 0];
 
     const carriedMatch = createMatch({
       id: 'match_carry',
@@ -1134,7 +1129,6 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     carriedMatch.team2Seed = null;
     carriedMatch.previousLeftMatch = qualifierMatch;
     qualifierMatch.winnerNextMatch = carriedMatch;
-    carriedMatch.setResults = [0, 0, 0];
 
     const event = new League({
       id: 'event_playoff_seed_normalization',
@@ -1241,7 +1235,6 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     });
     openQualifier.team1Seed = 8;
     openQualifier.team2Seed = 9;
-    openQualifier.setResults = [0, 0, 0];
 
     const openCarry = createMatch({
       id: 'match_open_carry',
@@ -1260,7 +1253,6 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     openCarry.team2Seed = null;
     openCarry.previousLeftMatch = openQualifier;
     openQualifier.winnerNextMatch = openCarry;
-    openCarry.setResults = [0, 0, 0];
 
     const premierQualifier = createMatch({
       id: 'match_premier_playin',
@@ -1275,7 +1267,6 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     });
     premierQualifier.team1Seed = 8;
     premierQualifier.team2Seed = 9;
-    premierQualifier.setResults = [0, 0, 0];
 
     const premierCarry = createMatch({
       id: 'match_premier_carry',
@@ -1294,7 +1285,6 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     premierCarry.team2Seed = null;
     premierCarry.previousLeftMatch = premierQualifier;
     premierQualifier.winnerNextMatch = premierCarry;
-    premierCarry.setResults = [0, 0, 0];
 
     const event = new League({
       id: 'event_multi_division_playoff_seed_normalization',

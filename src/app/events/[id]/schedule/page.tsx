@@ -88,6 +88,7 @@ import {
   type EventEditorDraft,
   type EventEditorSaveResult,
   type EventEditorSnapshot,
+  type SaveEventEditorCommand,
 } from '@/contracts/eventEditor';
 import type {
   EventTeamComplianceResponse,
@@ -174,9 +175,7 @@ import {
   parseRentalSelectionsQueryParam,
   parseStableIdListKey,
   resolveSelectedWeeklyOccurrenceOption,
-  shouldResetBracketMatchForRebuild,
   startOfDay,
-  toClearedBracketMatchUpdate,
   toLocalIsoDate,
   toStoredEventLifecycleState,
   type DivisionOption,
@@ -253,6 +252,35 @@ const draftMatchesReferenceRemovedFields = (
   });
 };
 
+type EventTypeTransitionConfirmation = {
+  message: string;
+  actionLabel: string;
+  canContinue: boolean;
+};
+
+const EDITOR_SCHEDULE_ERROR_CODES = new Set([
+  'EDITOR_SCHEDULE_UNSUPPORTED',
+  'EDITOR_SCHEDULE_INPUT_INVALID',
+  'EDITOR_SCHEDULE_FAILED',
+]);
+
+const isEditorScheduleCreateFailure = (error: unknown): boolean => {
+  if (!isApiRequestError(error) || !error.data || typeof error.data !== 'object') {
+    return false;
+  }
+  const code = 'code' in error.data ? String(error.data.code) : '';
+  return EDITOR_SCHEDULE_ERROR_CODES.has(code);
+};
+
+const sameCreateRequest = (
+  left: CreateEventEditorCommand,
+  right: CreateEventEditorCommand,
+): boolean => (
+  left.contractVersion === right.contractVersion
+  && left.completion.mode === right.completion.mode
+  && JSON.stringify(left.draft) === JSON.stringify(right.draft)
+);
+
 
 // Main schedule page component that protects access and renders league schedule/bracket content.
 function EventScheduleContent() {
@@ -270,6 +298,7 @@ function EventScheduleContent() {
   const orgIdParam = searchParams?.get('orgId') || undefined;
   const hostOrgIdParam = searchParams?.get('hostOrgId') || undefined;
   const templateIdParam = searchParams?.get('templateId')?.trim() || undefined;
+  const templateStartParam = searchParams?.get('templateStart') || undefined;
   const parentEventIdParam = searchParams?.get('parentEventId')?.trim() || undefined;
   const skipTemplatePromptParam = searchParams?.get('skipTemplatePrompt') === '1';
   const rentalOrgIdParam = searchParams?.get('rentalOrgId') || undefined;
@@ -335,6 +364,10 @@ function EventScheduleContent() {
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [editorDraftEventType, setEditorDraftEventType] = useState<string | null>(null);
+  const [showCreateWithoutScheduleRecovery, setShowCreateWithoutScheduleRecovery] = useState(false);
+  const [eventTypeTransitionConfirmation, setEventTypeTransitionConfirmation] =
+    useState<EventTypeTransitionConfirmation | null>(null);
   const [contentTermsState, setContentTermsState] = useState<ChatTermsConsentState | null>(null);
   const [contentTermsLoading, setContentTermsLoading] = useState(false);
   const [contentTermsModalOpen, setContentTermsModalOpen] = useState(false);
@@ -342,7 +375,7 @@ function EventScheduleContent() {
   const [publishing, setPublishing] = useState(false);
   const [reportingEvent, setReportingEvent] = useState(false);
   const [reschedulingMatches, setReschedulingMatches] = useState(false);
-  const [pendingScheduleAction, setPendingScheduleAction] = useState<'reschedule' | 'rebuild' | 'rebuildNoPlaceholders' | null>(null);
+  const [pendingScheduleAction, setPendingScheduleAction] = useState<'reschedule' | 'buildSchedule' | 'rebuildNoPlaceholders' | null>(null);
   const [selectedLifecycleStatus, setSelectedLifecycleStatus] = useState<EventLifecycleStatus | null>(null);
   const [isPendingChangesPopoverOpen, setIsPendingChangesPopoverOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -545,7 +578,7 @@ function EventScheduleContent() {
     setSelectedTemplateId,
     selectedTemplateStartDate,
     setSelectedTemplateStartDate,
-    templateSeedKey,
+    templateBootstrapKey,
     templateRentalResourcePrompt,
     dismissTemplateRentalResourcePrompt,
     handleApplyTemplate,
@@ -555,12 +588,9 @@ function EventScheduleContent() {
     user,
     isGuest,
     changesEvent,
-    activeEvent,
-    activeMatches,
     hasPendingUnsavedChanges,
-    editorDraftRef,
-    eventFormRef,
     templateIdParam,
+    templateStartParam,
     skipTemplatePromptParam,
     resolvedHostOrgId,
     resolvedRentalOrgId,
@@ -585,38 +615,22 @@ function EventScheduleContent() {
     userLocationLabel,
     userCoordinates,
     setChangesEvent,
-    setHasUnsavedChanges,
-    setFormHasUnsavedChanges,
     setActionError,
+    onTemplateIntentChange: (templateId, startDate) => {
+      const nextSearchParams = new URLSearchParams(searchParams?.toString());
+      nextSearchParams.set('templateId', templateId);
+      nextSearchParams.set('templateStart', formatLocalDateTime(startDate));
+      router.replace(`${pathname}?${nextSearchParams.toString()}`, { scroll: false });
+    },
   });
-  const [dismissedDirectTemplatePromptId, setDismissedDirectTemplatePromptId] = useState<string | null>(null);
-  useEffect(() => {
-    setDismissedDirectTemplatePromptId((current) => (
-      current && current !== templateIdParam ? null : current
-    ));
-  }, [templateIdParam]);
-  useEffect(() => {
-    if (isCreateMode && templateIdParam && !selectedTemplateId) {
-      setSelectedTemplateId(templateIdParam);
-    }
-  }, [isCreateMode, selectedTemplateId, setSelectedTemplateId, templateIdParam]);
-  const effectiveTemplatePromptOpen = templatePromptOpen || Boolean(
-    isCreateMode
-    && templateIdParam
-    && dismissedDirectTemplatePromptId !== templateIdParam
-  );
+  const effectiveTemplatePromptOpen = templatePromptOpen;
   const handleCloseTemplatePrompt = useCallback(() => {
-    if (templateIdParam) {
-      setDismissedDirectTemplatePromptId(templateIdParam);
-    }
     closeTemplatePrompt();
-  }, [closeTemplatePrompt, templateIdParam]);
-  const handleApplyTemplateWithPromptState = useCallback(async () => {
-    const applied = await handleApplyTemplate();
-    if (applied && templateIdParam) {
-      setDismissedDirectTemplatePromptId(templateIdParam);
-    }
-  }, [handleApplyTemplate, templateIdParam]);
+  }, [closeTemplatePrompt]);
+  const handleApplyTemplateWithPromptState = useCallback(
+    () => handleApplyTemplate(),
+    [handleApplyTemplate],
+  );
   const isTemplateEvent = (activeEvent?.state ?? '').toUpperCase() === 'TEMPLATE';
   const isHiddenEvent = HIDDEN_EVENT_STATES.has(String(activeEvent?.state ?? 'PUBLISHED').toUpperCase());
   const activeOrganization = useMemo(() => {
@@ -779,7 +793,6 @@ function EventScheduleContent() {
     handleMatchEditRequest,
     handleMatchEditSave,
     handleScoreChange,
-    handleScoreSubmit,
     handleSetComplete,
     handleToggleLockAllMatches,
     isMatchEditorOpen,
@@ -904,7 +917,6 @@ function EventScheduleContent() {
         locked: isSelected,
         team1Points: [],
         team2Points: [],
-        setResults: [],
         division: occurrence.divisionIds[0] ?? null,
         weeklyOccurrenceMeta: {
           slotId: occurrence.slotId,
@@ -1643,7 +1655,6 @@ function EventScheduleContent() {
       if (
         arrayChanged(before.team1Points, after.team1Points)
         || arrayChanged(before.team2Points, after.team2Points)
-        || arrayChanged(before.setResults, after.setResults)
       ) {
         changedFields.push('score values');
       }
@@ -2821,7 +2832,15 @@ function EventScheduleContent() {
     }
   }, [applyParticipantSnapshot, selectedOccurrence]);
 
-  const createButtonLabel = 'Create Event';
+  const createEventType = (
+    editorDraftEventType
+    ?? editorSnapshot?.draft.basics.eventType
+    ?? changesEvent?.eventType
+    ?? ''
+  ).trim().toUpperCase();
+  const createButtonLabel = ['LEAGUE', 'TOURNAMENT'].includes(createEventType)
+    ? 'Create event & build schedule'
+    : 'Create event';
   const cancelButtonLabel = (() => {
     if (isCreateMode) return 'Cancel';
     if (isEditingEvent) return 'Cancel Manage';
@@ -4244,6 +4263,7 @@ function EventScheduleContent() {
   }, [defaultTab]);
   const handleEditorDraftStateChange = useCallback((state: { draft: EventEditorDraft }) => {
     editorDraftRef.current = cloneValue(state.draft) as EventEditorDraft;
+    setEditorDraftEventType(state.draft.basics.eventType);
   }, []);
   const getDraftFromForm = useCallback(
     async ({ allowCurrentEventFallback = false }: { allowCurrentEventFallback?: boolean } = {}): Promise<EventEditorDraft | null> => {
@@ -4314,7 +4334,11 @@ function EventScheduleContent() {
     setFormHasUnsavedChanges(false);
   }, []);
   const saveEditorConfiguration = useCallback(
-    async (draft: EventEditorDraft, mode: 'CREATE' | 'EDIT'): Promise<Event> => {
+    async (
+      draft: EventEditorDraft,
+      mode: 'CREATE' | 'EDIT',
+      createCompletionMode?: 'CREATE_ONLY' | 'CREATE_AND_BUILD_SCHEDULE',
+    ): Promise<{ event: Event; snapshot: EventEditorSnapshot }> => {
       const contractDraft = isRentalFlow
         ? {
           ...draft,
@@ -4332,57 +4356,71 @@ function EventScheduleContent() {
       if (effectiveMode === 'EDIT' && (!requestEventId || !currentSnapshot || currentSnapshot.mode !== 'EDIT')) {
         throw new Error('The event editor is still loading. Try again.');
       }
-      let command: CreateEventEditorCommand | {
-        contractVersion: typeof EVENT_EDITOR_CONTRACT_VERSION;
-        editorRevision: string;
-        staffRevision: string | null;
-        draft: EventEditorDraft;
-      };
+      let command: CreateEventEditorCommand | SaveEventEditorCommand;
+      const scheduleType = contractDraft.basics.eventType.trim().toUpperCase();
+      const completion = {
+        mode: createCompletionMode ?? (
+          ['LEAGUE', 'TOURNAMENT'].includes(scheduleType)
+            ? 'CREATE_AND_BUILD_SCHEDULE'
+            : 'CREATE_ONLY'
+        ),
+      } as const;
+      const eventTypeChanged = effectiveMode === 'EDIT'
+        && currentSnapshot
+        && currentSnapshot.draft.basics.eventType.trim().toUpperCase() !== scheduleType;
+      const scheduleTransition = effectiveMode === 'EDIT' && currentSnapshot
+        ? eventTypeChanged
+          ? {
+              mode: 'RECONCILE' as const,
+              expectedScheduleRevision: currentSnapshot.scheduleState.revision,
+            }
+          : ['LEAGUE', 'TOURNAMENT'].includes(scheduleType) && currentSnapshot.scheduleState.matchCount === 0
+            ? {
+                mode: 'BUILD_IF_MISSING' as const,
+                expectedScheduleRevision: currentSnapshot.scheduleState.revision,
+              }
+            : { mode: 'PRESERVE' as const }
+        : null;
       if (effectiveMode === 'CREATE') {
         const pending = pendingCreateCommandRef.current;
-        if (pending) {
-          command = pending;
-        } else {
-          const createOperationId = createBootstrap?.createOperationId;
-          if (!createOperationId) {
-            throw new Error('The event editor create session is still loading. Try again.');
-          }
-          command = {
-            contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
-            createOperationId,
-            draft: contractDraft,
-          };
-          pendingCreateCommandRef.current = cloneValue(command) as CreateEventEditorCommand;
+        const bootstrapOperationId = createBootstrap?.createOperationId;
+        if (!pending && !bootstrapOperationId) {
+          throw new Error('The event editor create session is still loading. Try again.');
         }
+        const candidate: CreateEventEditorCommand = {
+          contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
+          createOperationId: pending?.createOperationId ?? (bootstrapOperationId as string),
+          draft: contractDraft,
+          completion,
+        };
+        command = pending && sameCreateRequest(pending, candidate)
+          ? pending
+          : {
+              ...candidate,
+              createOperationId: pending ? createClientId() : candidate.createOperationId,
+            };
+        pendingCreateCommandRef.current = cloneValue(command) as CreateEventEditorCommand;
       } else {
+        if (!scheduleTransition) {
+          throw new Error('The event editor is still loading. Try again.');
+        }
         command = {
           contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
           editorRevision: currentSnapshot?.editorRevision ?? '',
           staffRevision: currentSnapshot?.staffRevision ?? null,
           draft: contractDraft,
+          scheduleTransition,
         };
       }
-      let result: EventEditorSaveResult;
-      try {
-        result = await apiRequest<EventEditorSaveResult>(
-          effectiveMode === 'CREATE'
-            ? '/api/events/editor'
-            : `/api/events/${encodeURIComponent(requestEventId as string)}/editor`,
-          {
-            method: effectiveMode === 'CREATE' ? 'POST' : 'PUT',
-            body: command,
-          },
-        );
-      } catch (error) {
-        if (
-          effectiveMode === 'CREATE'
-          && isApiRequestError(error)
-          && (error.status === 400 || error.status === 403)
-        ) {
-          pendingCreateCommandRef.current = null;
-        }
-        throw error;
-      }
+      const result = await apiRequest<EventEditorSaveResult>(
+        effectiveMode === 'CREATE'
+          ? '/api/events/editor'
+          : `/api/events/${encodeURIComponent(requestEventId as string)}/editor`,
+        {
+          method: effectiveMode === 'CREATE' ? 'POST' : 'PUT',
+          body: command,
+        },
+      );
       if (effectiveMode === 'CREATE') pendingCreateCommandRef.current = null;
       setEditorSnapshot(result.snapshot);
       if (result.staffEmailDelivery === 'FAILED') {
@@ -4391,22 +4429,45 @@ function EventScheduleContent() {
       if (effectiveMode === 'CREATE' && result.snapshot.eventId) {
         createdEditorEventIdRef.current = result.snapshot.eventId;
       }
+      const scheduleWarnings = result.scheduleOutcome.warnings
+        .map((warning) => warning.message)
+        .filter((message) => message.trim().length > 0);
+      if (scheduleWarnings.length) {
+        setWarningMessage((current) => (
+          current ? `${current} ${scheduleWarnings.join(' ')}` : scheduleWarnings.join(' ')
+        ));
+      }
+      if (effectiveMode === 'CREATE' && result.scheduleOutcome.status === 'BUILT') {
+        setInfoMessage(`Schedule built with ${result.scheduleOutcome.matchCount} matches.`);
+      }
+      const scheduleMatches = result.scheduleOutcome.status === 'BUILT'
+        || result.scheduleOutcome.status === 'REBUILT'
+        ? result.scheduleOutcome.matches.map((match) => normalizeApiMatch(match as unknown as Match))
+        : result.scheduleOutcome.status === 'DELETED'
+          ? []
+          : undefined;
       const canonicalProjection = editorDraftToLegacyEvent(
         result.snapshot.draft,
         result.snapshot.eventId,
       ) as unknown as Event;
+      const canonicalMatches = scheduleMatches ?? (
+        effectiveMode === 'EDIT' ? activeMatches : []
+      );
       const canonicalEvent = normalizeApiEvent({
         ...(effectiveMode === 'EDIT' ? (activeEvent ?? event ?? {}) : {}),
         ...canonicalProjection,
+        matches: canonicalMatches,
       } as Event) ?? ({
         ...(effectiveMode === 'EDIT' ? (activeEvent ?? event ?? {}) : {}),
         ...canonicalProjection,
+        matches: canonicalMatches,
       } as Event);
       handlePreviewEventUpdate(canonicalEvent);
       setEventFormResetVersion((version) => version + 1);
-      return canonicalEvent;
+      return { event: canonicalEvent, snapshot: result.snapshot };
     },
     [
+      activeMatches,
       activeEvent,
       createBootstrap,
       editorSnapshot,
@@ -4515,7 +4576,6 @@ function EventScheduleContent() {
       segments: Array.isArray(match.segments) ? match.segments : [],
       team1Points: Array.isArray(match.team1Points) ? match.team1Points : [],
       team2Points: Array.isArray(match.team2Points) ? match.team2Points : [],
-      setResults: Array.isArray(match.setResults) ? match.setResults : [],
       team1Id: resolvePersistableTeamId(match.team1Id, match.team1),
       team2Id: resolvePersistableTeamId(match.team2Id, match.team2),
       officialId: normalizeRelationId(match.officialId) ?? normalizeRelationId(match.official),
@@ -4540,7 +4600,10 @@ function EventScheduleContent() {
   }, []);
 
   const schedulePreview = useCallback(
-    async (draft: EventEditorDraft) => {
+    async (
+      draft: EventEditorDraft,
+      completionMode?: 'CREATE_ONLY' | 'CREATE_AND_BUILD_SCHEDULE',
+    ) => {
       if (!draft) {
         return;
       }
@@ -4549,36 +4612,29 @@ function EventScheduleContent() {
       setError(null);
       setInfoMessage(null);
       setWarningMessage(null);
-      let persistedEventId: string | null = null;
-
+      setShowCreateWithoutScheduleRecovery(false);
 
       try {
-        const persistedEvent = await saveEditorConfiguration(draft, 'CREATE');
-        persistedEventId = persistedEvent.$id ?? null;
+        const { event: persistedEvent } = await saveEditorConfiguration(draft, 'CREATE', completionMode);
+        const persistedEventId = persistedEvent.$id ?? null;
         if (!persistedEventId) {
           throw new Error('Failed to create event.');
         }
-        const result = await eventService.scheduleEvent(undefined, { eventId: persistedEventId });
-        if (!result?.event) {
-          throw new Error('Failed to apply schedule changes.');
+        const params = new URLSearchParams(searchParams?.toString() ?? '');
+        params.delete('create');
+        params.delete('preview');
+        params.set('mode', 'edit');
+        const builtMatchCount = Array.isArray(persistedEvent.matches) ? persistedEvent.matches.length : 0;
+        if (builtMatchCount > 0) {
+          params.set('tab', 'schedule');
+          setActiveTab('schedule');
         }
-        const reconciledEvent = normalizeApiEvent(result.event) ?? result.event;
-        handlePreviewEventUpdate(reconciledEvent);
-
-        if (pathname) {
-          const params = new URLSearchParams(searchParams?.toString() ?? '');
-          params.delete('create');
-          params.delete('preview');
-          params.set('mode', 'edit');
-          const query = params.toString();
-          router.replace(`${pathname}${query ? `?${query}` : ''}`, { scroll: false });
-        }
+        const query = params.toString();
+        router.replace(`/events/${persistedEventId}/schedule${query ? `?${query}` : ''}`, { scroll: false });
       } catch (err) {
-        console.error('Failed to apply schedule changes:', err);
-        const message = persistedEventId
-          ? 'Settings saved, but schedule creation failed. Retry scheduling this event.'
-          : 'Failed to apply schedule changes.';
-        setError(formatActionErrorMessage(message, err));
+        console.error('Failed to create event:', err);
+        setShowCreateWithoutScheduleRecovery(isEditorScheduleCreateFailure(err));
+        setError(formatActionErrorMessage('Failed to create event.', err));
       } finally {
         setPublishing(false);
       }
@@ -4587,7 +4643,10 @@ function EventScheduleContent() {
   );
 
   const scheduleRegularEvent = useCallback(
-    async (draft: EventEditorDraft | Partial<Event>) => {
+    async (
+      draft: EventEditorDraft | Partial<Event>,
+      completionMode?: 'CREATE_ONLY' | 'CREATE_AND_BUILD_SCHEDULE',
+    ) => {
       if (!draft) {
         return null;
       }
@@ -4599,40 +4658,33 @@ function EventScheduleContent() {
       setError(null);
       setInfoMessage(null);
       setWarningMessage(null);
-      let persistedEventId: string | null = null;
+      setShowCreateWithoutScheduleRecovery(false);
 
       try {
-        const persistedEvent = await saveEditorConfiguration(editorDraft, 'CREATE');
-        persistedEventId = persistedEvent.$id ?? null;
+        const { event: persistedEvent } = await saveEditorConfiguration(editorDraft, 'CREATE', completionMode);
+        const persistedEventId = persistedEvent.$id ?? null;
         if (!persistedEventId) {
           throw new Error('Failed to create event.');
         }
-        const result = await eventService.scheduleEvent(undefined, { eventId: persistedEventId });
-        if (!result?.event) {
-          throw new Error('Failed to schedule event.');
+        const params = new URLSearchParams(searchParams?.toString() ?? '');
+        params.delete('create');
+        params.delete('mode');
+        params.delete('preview');
+        const builtMatchCount = Array.isArray(persistedEvent.matches) ? persistedEvent.matches.length : 0;
+        if (builtMatchCount > 0) {
+          params.set('tab', 'schedule');
+          setActiveTab('schedule');
         }
-        const reconciledEvent = normalizeApiEvent(result.event) ?? result.event;
-        handlePreviewEventUpdate(reconciledEvent);
-
-        const nextId = reconciledEvent.$id ?? persistedEventId;
-        if (nextId && pathname) {
-          const params = new URLSearchParams(searchParams?.toString() ?? '');
-          params.delete('create');
-          params.delete('mode');
-          params.delete('preview');
-          const query = params.toString();
-          router.replace(
-            `/events/${nextId}/schedule${query ? `?${query}` : ''}`,
-            { scroll: false },
-          );
-        }
-        return reconciledEvent;
+        const query = params.toString();
+        router.replace(
+          `/events/${persistedEventId}/schedule${query ? `?${query}` : ''}`,
+          { scroll: false },
+        );
+        return persistedEvent;
       } catch (err) {
-        console.error('Failed to schedule event:', err);
-        const message = persistedEventId
-          ? 'Settings saved, but schedule creation failed. Retry scheduling this event.'
-          : 'Failed to create event.';
-        setError(formatActionErrorMessage(message, err));
+        console.error('Failed to create event:', err);
+        setShowCreateWithoutScheduleRecovery(isEditorScheduleCreateFailure(err));
+        setError(formatActionErrorMessage('Failed to create event.', err));
         return null;
       } finally {
         setPublishing(false);
@@ -4640,6 +4692,13 @@ function EventScheduleContent() {
     },
     [handlePreviewEventUpdate, pathname, router, saveEditorConfiguration, searchParams],
   );
+
+  const handleCreateWithoutSchedule = useCallback(async () => {
+    if (publishing) return;
+    const draft = await getDraftFromForm();
+    if (!draft) return;
+    await scheduleRegularEvent(draft, 'CREATE_ONLY');
+  }, [getDraftFromForm, publishing, scheduleRegularEvent]);
 
   const {
     rentalCheckout,
@@ -4662,26 +4721,58 @@ function EventScheduleContent() {
 
   const saveExistingEvent = useCallback(
     async ({
-      postSaveAction = 'none',
+      eventTypeTransitionConfirmed = false,
     }: {
-      postSaveAction?: 'none' | 'reschedule' | 'buildBrackets' | 'rebuildWithoutPlaceholders';
-    } = {}) => {
-      if (!activeEvent) return;
+      eventTypeTransitionConfirmed?: boolean;
+    } = {}): Promise<EventEditorSnapshot | null> => {
+      if (!activeEvent) return null;
       if (!event) {
         setError(`Unable to save ${entityLabel.toLowerCase()} changes without the original event context.`);
-        return;
+        return null;
       }
+      if (eventTypeTransitionConfirmation && !eventTypeTransitionConfirmed) return null;
 
-      const isRescheduleAction = postSaveAction === 'reschedule';
-      const isBuildBracketAction = postSaveAction === 'buildBrackets';
-      const isRebuildWithoutPlaceholdersAction = postSaveAction === 'rebuildWithoutPlaceholders';
-      const hasSchedulingAction = isRescheduleAction || isBuildBracketAction || isRebuildWithoutPlaceholdersAction;
-
-      const draft = await getDraftFromForm({
-        allowCurrentEventFallback: hasSchedulingAction,
-      });
+      const draft = await getDraftFromForm();
       if (!draft) {
-        return;
+        return null;
+      }
+      const previousEventType = (
+        editorSnapshot?.draft.basics.eventType
+        ?? activeEvent.eventType
+        ?? ''
+      ).trim().toUpperCase();
+      const nextEventType = draft.basics.eventType.trim().toUpperCase();
+      if (previousEventType !== nextEventType && !eventTypeTransitionConfirmed) {
+        const previousLabel = previousEventType || 'the current event type';
+        const nextLabel = nextEventType || 'the selected event type';
+        const matchCount = editorSnapshot?.scheduleState.matchCount ?? 0;
+        const nextSupportsSchedule = nextEventType === 'LEAGUE' || nextEventType === 'TOURNAMENT';
+        if (editorSnapshot?.scheduleState.hasProtectedHistory) {
+          setEventTypeTransitionConfirmation({
+            message: `This event has protected match history. Changing it from ${previousLabel} to ${nextLabel} is not allowed.`,
+            actionLabel: 'Close',
+            canContinue: false,
+          });
+          return null;
+        }
+        setEventTypeTransitionConfirmation({
+          message: nextSupportsSchedule
+            ? matchCount > 0
+              ? `Changing this event from ${previousLabel} to ${nextLabel} will rebuild its ${matchCount} scheduled matches. Match times, fields, seeds, and official assignments can change.`
+              : `Changing this event from ${previousLabel} to ${nextLabel} will build a schedule.`
+            : matchCount > 0
+              ? `Changing this event from ${previousLabel} to ${nextLabel} will delete its ${matchCount} scheduled matches.`
+              : `Changing this event from ${previousLabel} to ${nextLabel} will not create a schedule.`,
+          actionLabel: nextSupportsSchedule
+            ? matchCount > 0
+              ? 'Change type & rebuild schedule'
+              : 'Change type & build schedule'
+            : matchCount > 0
+              ? 'Change type & delete schedule'
+              : 'Change type',
+          canContinue: true,
+        });
+        return null;
       }
 
 
@@ -4698,19 +4789,22 @@ function EventScheduleContent() {
           selectedLifecycleStatus ?? getEventLifecycleStatus(lifecycleDraft),
           lifecycleDraft.state,
         );
-      if (matchConflictPairs.length > 0 && !isRescheduleAction) {
+      if (matchConflictPairs.length > 0) {
         showCurrentMatchConflictOverride();
       }
       setPublishing(true);
-      let configurationSaved = false;
       try {
-        const canonicalEvent = await saveEditorConfiguration(
+        const {
+          event: canonicalEvent,
+          snapshot: savedEditorSnapshot,
+        } = await saveEditorConfiguration(
           legacyEventToEditorDraft(lifecycleDraft),
           'EDIT',
         );
-        configurationSaved = true;
         const nextEvent = cloneValue(canonicalEvent) as Event;
-        const nextMatches = cloneValue(activeMatches) as Match[];
+        const nextMatches = Array.isArray(canonicalEvent.matches)
+          ? cloneValue(canonicalEvent.matches) as Match[]
+          : cloneValue(activeMatches) as Match[];
         nextEvent.matches = nextMatches;
 
         if (Array.isArray(nextEvent.fields)) {
@@ -4737,10 +4831,10 @@ function EventScheduleContent() {
           nextEvent.state = toStoredEventLifecycleState(lifecycleStatus, nextEvent.state);
         }
         let updatedEvent = nextEvent;
+        let latestEditorSnapshot = savedEditorSnapshot;
+        let persistedDraftMatches = false;
 
-        const shouldPersistDraftMatches = !isBuildBracketAction
-          && !isRebuildWithoutPlaceholdersAction
-          && !skipDraftMatchPersistenceForRemovedFields;
+        const shouldPersistDraftMatches = !skipDraftMatchPersistenceForRemovedFields;
         const hasDraftMatchChanges = pendingSaveChanges.some((change) => change.category === 'match');
         if (
           updatedEvent.$id
@@ -4752,8 +4846,24 @@ function EventScheduleContent() {
             throw new Error(validation.message);
           }
 
+          const deletePayload = Array.from(
+            new Set(
+              stagedMatchDeletes
+                .map((value) => normalizeIdToken(value))
+                .filter((value): value is string => Boolean(value))
+                .filter((value) => !isClientMatchId(value)),
+            ),
+          );
+          const deleteIdSet = new Set(deletePayload);
           const updatePayload = nextMatches
-            .filter((match) => !isClientMatchId(match.$id))
+            .filter((match) => {
+              const matchId = normalizeIdToken(match.$id);
+              return Boolean(
+                matchId
+                && !isClientMatchId(matchId)
+                && !deleteIdSet.has(matchId),
+              );
+            })
             .map((match) => toBulkMatchUpdatePayload(match));
           const createPayload = nextMatches
             .filter((match) => isClientMatchId(match.$id))
@@ -4769,14 +4879,6 @@ function EventScheduleContent() {
                 ...rest,
               };
             });
-          const deletePayload = Array.from(
-            new Set(
-              stagedMatchDeletes
-                .map((value) => normalizeIdToken(value))
-                .filter((value): value is string => Boolean(value))
-                .filter((value) => !isClientMatchId(value)),
-            ),
-          );
 
           if (updatePayload.length > 0 || createPayload.length > 0 || deletePayload.length > 0) {
             const matchResponse = await apiRequest<{ matches?: Match[]; created?: Record<string, string>; deleted?: string[] }>(
@@ -4790,6 +4892,7 @@ function EventScheduleContent() {
                 },
               },
             );
+            persistedDraftMatches = true;
             const resolvePersistedMatchRef = (value: string | null | undefined): string | undefined => {
               const normalized = normalizeIdToken(value);
               if (!normalized) {
@@ -4838,60 +4941,13 @@ function EventScheduleContent() {
             resetStagedMatchDrafts();
           }
         }
-
-        let scheduleWarningText: string | null = null;
-        if (hasSchedulingAction && updatedEvent.$id) {
-          const scheduleEventId = updatedEvent.$id;
-
-          const scheduleOptions: {
-            eventId: string;
-            participantCount?: number;
-            includePlaceholderTeams?: boolean;
-            replaceExistingMatches?: boolean;
-          } = { eventId: scheduleEventId };
-          if (isBuildBracketAction) {
-            scheduleOptions.replaceExistingMatches = true;
-            const participantCount = typeof updatedEvent.maxParticipants === 'number'
-              ? Math.max(2, Math.trunc(updatedEvent.maxParticipants))
-              : undefined;
-            if (participantCount) {
-              scheduleOptions.participantCount = participantCount;
-            }
-          }
-          if (isRebuildWithoutPlaceholdersAction) {
-            scheduleOptions.includePlaceholderTeams = false;
-          }
-          const scheduled = await eventService.scheduleEvent(undefined, scheduleOptions);
-          if (!scheduled?.event) {
-            throw new Error(
-              isRebuildWithoutPlaceholdersAction
-                ? 'Failed to rebuild without placeholder teams.'
-                : isBuildBracketAction
-                  ? 'Failed to rebuild bracket(s).'
-                  : 'Failed to reschedule matches.',
-            );
-          }
-          if (Array.isArray(scheduled.warnings) && scheduled.warnings.length) {
-            scheduleWarningText = scheduled.warnings
-              .map((warning) => warning.message)
-              .filter((message) => typeof message === 'string' && message.trim().length > 0)
-              .join(' ');
-          }
-          updatedEvent = scheduled.event;
-
-          if (isBuildBracketAction && Array.isArray(updatedEvent.matches) && updatedEvent.matches.length > 0) {
-            const bracketMatchesToClear = updatedEvent.matches
-              .filter((match) => shouldResetBracketMatchForRebuild(updatedEvent, match))
-              .map((match) => toClearedBracketMatchUpdate(match));
-            if (bracketMatchesToClear.length > 0) {
-              const clearedMatches = await tournamentService.updateMatchesBulk(scheduleEventId, bracketMatchesToClear);
-              if (clearedMatches.length > 0) {
-                const clearedById = new Map(clearedMatches.map((match) => [match.$id, match]));
-                updatedEvent.matches = updatedEvent.matches.map((match) => clearedById.get(match.$id) ?? match);
-              }
-            }
-          }
+        if (persistedDraftMatches && updatedEvent.$id) {
+          latestEditorSnapshot = await apiRequest<EventEditorSnapshot>(
+            `/api/events/${encodeURIComponent(updatedEvent.$id)}/editor`,
+          );
+          setEditorSnapshot(latestEditorSnapshot);
         }
+
 
         if (
           !skipDraftMatchPersistenceForRemovedFields
@@ -4915,52 +4971,17 @@ function EventScheduleContent() {
         }
 
         await loadSchedule({ showPageLoader: false, clearMessages: false });
-        if (isRescheduleAction) {
-          setInfoMessage(`${entityLabel} settings saved and matches rescheduled.`);
-          if (scheduleWarningText) {
-            setWarningMessage(scheduleWarningText);
-          }
-        } else if (isBuildBracketAction) {
-          setInfoMessage('Bracket(s) rebuilt and playoff/tournament results reset.');
-          if (scheduleWarningText) {
-            setWarningMessage(scheduleWarningText);
-          }
-        } else if (isRebuildWithoutPlaceholdersAction) {
-          setInfoMessage('Schedule rebuilt without placeholder teams.');
-          if (scheduleWarningText) {
-            setWarningMessage(scheduleWarningText);
-          }
-        } else {
-          setInfoMessage(`${entityLabel} changes saved.`);
-        }
+        setInfoMessage(`${entityLabel} changes saved.`);
+        return latestEditorSnapshot;
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : null;
         console.error(`Failed to save ${entityLabel.toLowerCase()} changes:`, err);
-        const baseMessage = configurationSaved
-          ? (
-            isRebuildWithoutPlaceholdersAction
-              ? 'Settings saved, but schedule rebuild without placeholder teams failed.'
-              : isBuildBracketAction
-                ? 'Settings saved, but bracket rebuild failed.'
-                : isRescheduleAction
-                  ? 'Settings saved, but match rescheduling failed.'
-                  : `${entityLabel} changes saved, but the scheduling action failed.`
-          )
-          : (
-            isRebuildWithoutPlaceholdersAction
-              ? 'Failed to rebuild without placeholder teams.'
-              : isBuildBracketAction
-                ? 'Failed to rebuild bracket(s).'
-                : (
-                  isRescheduleAction
-                    ? `Failed to save ${entityLabel.toLowerCase()} and reschedule matches.`
-                    : `Failed to save ${entityLabel.toLowerCase()} changes.`
-                )
-          );
-        setError(errorMessage ? `${baseMessage} ${errorMessage}` : baseMessage);
+        setError(formatActionErrorMessage(
+          `Failed to save ${entityLabel.toLowerCase()} changes.`,
+          err,
+        ));
+        return null;
       } finally {
         setPublishing(false);
-        setReschedulingMatches(false);
       }
     },
     [
@@ -4972,6 +4993,8 @@ function EventScheduleContent() {
       saveEditorConfiguration,
       loadSchedule,
       matchConflictPairs,
+      editorSnapshot,
+      eventTypeTransitionConfirmation,
       pendingSaveChanges,
       pathname,
       router,
@@ -4986,6 +5009,76 @@ function EventScheduleContent() {
     ],
   );
 
+  const runManualScheduleAction = useCallback(async ({
+    action,
+    participantCount,
+    includePlaceholderTeams,
+    replaceExistingMatches,
+    successMessage,
+    failureMessage,
+  }: {
+    action: 'reschedule' | 'buildSchedule' | 'rebuildNoPlaceholders';
+    participantCount?: number;
+    includePlaceholderTeams?: boolean;
+    replaceExistingMatches?: boolean;
+    successMessage: string;
+    failureMessage: string;
+  }) => {
+    if (publishing || reschedulingMatches || !activeEvent?.$id) return;
+    const scheduleWasMissing = (editorSnapshot?.scheduleState.matchCount ?? activeMatches.length) === 0;
+    let expectedScheduleRevision = editorSnapshot?.scheduleState.revision;
+    if (hasPendingUnsavedChanges) {
+      const savedSnapshot = await saveExistingEvent();
+      if (!savedSnapshot) return;
+      if (action === 'buildSchedule' && scheduleWasMissing && savedSnapshot.scheduleState.matchCount > 0) {
+        setInfoMessage(successMessage);
+        return;
+      }
+      expectedScheduleRevision = savedSnapshot.scheduleState.revision;
+    }
+    setSubmitError(null);
+    setError(null);
+    setInfoMessage(null);
+    setWarningMessage(null);
+    setPendingScheduleAction(action);
+    setReschedulingMatches(true);
+    try {
+      const scheduled = await eventService.reconcileEventSchedule(activeEvent.$id, {
+        expectedScheduleRevision,
+        participantCount,
+        includePlaceholderTeams,
+        replaceExistingMatches,
+      });
+      if (!scheduled.event) {
+        throw new Error(failureMessage);
+      }
+      const warningText = (scheduled.warnings ?? [])
+        .map((warning) => warning.message.trim())
+        .filter(Boolean)
+        .join(' ');
+      await loadSchedule({ showPageLoader: false, clearMessages: false });
+      setInfoMessage(successMessage);
+      if (warningText) {
+        setWarningMessage(warningText);
+      }
+    } catch (scheduleError) {
+      console.error(failureMessage, scheduleError);
+      setError(formatActionErrorMessage(failureMessage, scheduleError));
+    } finally {
+      setPendingScheduleAction((current) => (current === action ? null : current));
+      setReschedulingMatches(false);
+    }
+  }, [
+    activeMatches.length,
+    activeEvent?.$id,
+    editorSnapshot?.scheduleState.revision,
+    hasPendingUnsavedChanges,
+    loadSchedule,
+    publishing,
+    saveExistingEvent,
+    reschedulingMatches,
+  ]);
+
   const handleSaveEvent = useCallback(async () => {
     if (publishing || reschedulingMatches) return;
     setSubmitError(null);
@@ -4993,51 +5086,45 @@ function EventScheduleContent() {
   }, [publishing, reschedulingMatches, saveExistingEvent]);
 
   const handleRescheduleMatches = useCallback(async () => {
-    if (publishing || reschedulingMatches) return;
-    setSubmitError(null);
-    setPendingScheduleAction('reschedule');
-    try {
-      await saveExistingEvent({ postSaveAction: 'reschedule' });
-    } finally {
-      setPendingScheduleAction((current) => (current === 'reschedule' ? null : current));
-    }
-  }, [publishing, reschedulingMatches, saveExistingEvent]);
+    await runManualScheduleAction({
+      action: 'reschedule',
+      successMessage: 'Matches rescheduled.',
+      failureMessage: 'Failed to reschedule matches.',
+    });
+  }, [runManualScheduleAction]);
 
-  const handleBuildBrackets = useCallback(async () => {
-    if (publishing || reschedulingMatches) return;
+  const handleBuildSchedule = useCallback(async () => {
     if (!activeEvent) return;
-    const entityNoun = activeEvent.eventType === 'TOURNAMENT' ? 'tournament' : 'playoff';
+    const isRebuild = activeMatches.length > 0;
     const confirmed = window.confirm(
-      `Build bracket(s)? This will reset the bracket and any match results in the ${entityNoun}.`,
+      isRebuild
+        ? `Rebuild schedule? This deletes and recreates ${activeMatches.length} scheduled matches. Match times, fields, seeds, and official assignments can change.`
+        : 'Build a schedule from the current event settings and registered teams?',
     );
-    if (!confirmed) {
-      return;
-    }
-    setSubmitError(null);
-    setPendingScheduleAction('rebuild');
-    try {
-      await saveExistingEvent({ postSaveAction: 'buildBrackets' });
-    } finally {
-      setPendingScheduleAction((current) => (current === 'rebuild' ? null : current));
-    }
-  }, [activeEvent, publishing, reschedulingMatches, saveExistingEvent]);
+    if (!confirmed) return;
+    await runManualScheduleAction({
+      action: 'buildSchedule',
+      participantCount: typeof activeEvent.maxParticipants === 'number'
+        ? Math.max(2, Math.trunc(activeEvent.maxParticipants))
+        : undefined,
+      replaceExistingMatches: isRebuild,
+      successMessage: isRebuild ? 'Schedule rebuilt.' : 'Schedule built.',
+      failureMessage: isRebuild ? 'Failed to rebuild schedule.' : 'Failed to build schedule.',
+    });
+  }, [activeEvent, activeMatches.length, runManualScheduleAction]);
 
   const handleRebuildWithoutPlaceholders = useCallback(async () => {
-    if (publishing || reschedulingMatches) return;
     const confirmed = window.confirm(
       'Rebuild without placeholder teams? This removes empty placeholder teams and rebuilds matches from registered teams only.',
     );
-    if (!confirmed) {
-      return;
-    }
-    setSubmitError(null);
-    setPendingScheduleAction('rebuildNoPlaceholders');
-    try {
-      await saveExistingEvent({ postSaveAction: 'rebuildWithoutPlaceholders' });
-    } finally {
-      setPendingScheduleAction((current) => (current === 'rebuildNoPlaceholders' ? null : current));
-    }
-  }, [publishing, reschedulingMatches, saveExistingEvent]);
+    if (!confirmed) return;
+    await runManualScheduleAction({
+      action: 'rebuildNoPlaceholders',
+      includePlaceholderTeams: false,
+      successMessage: 'Schedule rebuilt without placeholder teams.',
+      failureMessage: 'Failed to rebuild without placeholder teams.',
+    });
+  }, [runManualScheduleAction]);
 
   const handlePublish = async () => {
     if (publishing || reschedulingMatches) return;
@@ -5787,60 +5874,89 @@ function EventScheduleContent() {
     );
   }
 
-  if (isCreateMode && !activeEvent) {
+  if (isCreateMode && !event) {
     return (
-      <CreateEventScheduleView
-        termsModal={contentTermsModal}
-        pendingChangesOpen={isPendingChangesPopoverOpen}
-        pendingSaveChanges={pendingSaveChanges}
-        onPendingChangesOpenChange={setIsPendingChangesPopoverOpen}
-        hasPendingUnsavedChanges={hasPendingUnsavedChanges}
-        onDiscardChanges={handleDiscardChanges}
-        publishing={publishing}
-        reschedulingMatches={reschedulingMatches}
-        cancelling={cancelling}
-        createButtonLabel={createButtonLabel}
-        cancelButtonLabel={cancelButtonLabel}
-        onPublish={handlePublish}
-        onCancel={handleCancel}
-        submitError={submitError}
-        error={error}
-        warningMessage={warningMessage}
-        infoMessage={infoMessage}
-        templateRentalResourcePrompt={templateRentalResourcePrompt}
-        onSubmitErrorClose={() => setSubmitError(null)}
-        onErrorClose={() => setError(null)}
-        onWarningMessageClose={() => setWarningMessage(null)}
-        onInfoMessageClose={() => setInfoMessage(null)}
-        onTemplateRentalResourcePromptClose={dismissTemplateRentalResourcePrompt}
-        templatePromptOpen={effectiveTemplatePromptOpen}
-        onCloseTemplatePrompt={handleCloseTemplatePrompt}
-        isMobile={Boolean(isMobile)}
-        applyingTemplate={applyingTemplate}
-        templatesError={templatesError}
-        actionError={actionError}
-        templatesLoading={templatesLoading}
-        templateSelectData={templateSelectData}
-        selectedTemplateId={selectedTemplateId}
-        selectedTemplateStartDate={selectedTemplateStartDate}
-        onSelectedTemplateIdChange={setSelectedTemplateId}
-        onSelectedTemplateStartDateChange={setSelectedTemplateStartDate}
-        onApplyTemplate={handleApplyTemplateWithPromptState}
-        user={user}
-        event={changesEvent}
-        editorSnapshot={editorSnapshot}
-        templateSeedKey={templateSeedKey}
-        eventFormRef={eventFormRef}
-        onEventFormClose={() => router.push('/events')}
-        onDirtyStateChange={handleEventFormDirtyStateChange}
-        onDraftStateChange={handleEditorDraftStateChange}
-        defaultLocation={createLocationDefaults}
-        immutableDefaults={rentalImmutableDefaults}
-        rentalPurchase={rentalPurchaseContext}
-        templateOrganizationId={resolvedRentalOrgId ?? organizationForCreate?.$id ?? undefined}
-        formId={createFormId}
-        rentalCheckout={rentalCheckout}
-      />
+      <>
+        <CreateEventScheduleView
+          termsModal={contentTermsModal}
+          pendingChangesOpen={isPendingChangesPopoverOpen}
+          pendingSaveChanges={pendingSaveChanges}
+          onPendingChangesOpenChange={setIsPendingChangesPopoverOpen}
+          hasPendingUnsavedChanges={hasPendingUnsavedChanges}
+          onDiscardChanges={handleDiscardChanges}
+          publishing={publishing}
+          reschedulingMatches={reschedulingMatches}
+          cancelling={cancelling}
+          createButtonLabel={createButtonLabel}
+          cancelButtonLabel={cancelButtonLabel}
+          onPublish={handlePublish}
+          onCancel={handleCancel}
+          submitError={submitError}
+          error={error}
+          warningMessage={warningMessage}
+          infoMessage={infoMessage}
+          templateRentalResourcePrompt={templateRentalResourcePrompt}
+          onSubmitErrorClose={() => setSubmitError(null)}
+          onErrorClose={() => setError(null)}
+          onWarningMessageClose={() => setWarningMessage(null)}
+          onInfoMessageClose={() => setInfoMessage(null)}
+          onTemplateRentalResourcePromptClose={dismissTemplateRentalResourcePrompt}
+          templatePromptOpen={effectiveTemplatePromptOpen}
+          onCloseTemplatePrompt={handleCloseTemplatePrompt}
+          isMobile={Boolean(isMobile)}
+          applyingTemplate={applyingTemplate}
+          templatesError={templatesError}
+          actionError={actionError}
+          templatesLoading={templatesLoading}
+          templateSelectData={templateSelectData}
+          selectedTemplateId={selectedTemplateId}
+          selectedTemplateStartDate={selectedTemplateStartDate}
+          onSelectedTemplateIdChange={setSelectedTemplateId}
+          onSelectedTemplateStartDateChange={setSelectedTemplateStartDate}
+          onApplyTemplate={handleApplyTemplateWithPromptState}
+          user={user}
+          event={changesEvent}
+          editorSnapshot={editorSnapshot}
+          templateBootstrapKey={templateBootstrapKey}
+          eventFormRef={eventFormRef}
+          onEventFormClose={() => router.push('/events')}
+          onDirtyStateChange={handleEventFormDirtyStateChange}
+          onDraftStateChange={handleEditorDraftStateChange}
+          defaultLocation={createLocationDefaults}
+          immutableDefaults={rentalImmutableDefaults}
+          rentalPurchase={rentalPurchaseContext}
+          templateOrganizationId={resolvedRentalOrgId ?? organizationForCreate?.$id ?? undefined}
+          formId={createFormId}
+          rentalCheckout={rentalCheckout}
+        />
+        <Modal
+          opened={showCreateWithoutScheduleRecovery}
+          onClose={() => setShowCreateWithoutScheduleRecovery(false)}
+          title="Schedule could not be built"
+          centered
+        >
+          <Stack gap="md">
+            <Text size="sm">
+              Nothing was saved. Return to the editor to fix the schedule settings and retry, or create the event without a schedule.
+            </Text>
+            <Group justify="flex-end">
+              <Button
+                variant="default"
+                onClick={() => setShowCreateWithoutScheduleRecovery(false)}
+                disabled={publishing}
+              >
+                Return to editor
+              </Button>
+              <Button
+                onClick={() => { void handleCreateWithoutSchedule(); }}
+                loading={publishing}
+              >
+                Save as draft without a schedule
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+      </>
     );
   }
 
@@ -5881,10 +5997,10 @@ function EventScheduleContent() {
   const hasNetworkActionInFlight = publishing || reschedulingMatches || cancelling || creatingTemplate;
   const showEditActionButton = canManageEvent && !isCreateMode && !isTemplateEvent && !isEditingEvent;
   const showSaveActionButton = Boolean(editorSnapshot && (isCreateMode || isEditingEvent));
-  const showRescheduleActionButton = isEditingEvent && (isLeague || isTournament);
-  const showBuildBracketsActionButton = isEditingEvent && (
-    isTournament || (isLeague && Boolean(activeEvent.includePlayoffs))
-  );
+  const showRescheduleActionButton = isEditingEvent
+    && (isLeague || isTournament)
+    && activeMatches.length > 0;
+  const showBuildScheduleActionButton = isEditingEvent && (isLeague || isTournament);
   const showRebuildWithoutPlaceholdersActionButton = isEditingEvent && (isLeague || isTournament);
   const showDeleteTemplateActionButton = isTemplateEvent;
   const showCancelActionButton = (isEditingEvent || isCreateMode) && !isTemplateEvent;
@@ -5900,25 +6016,62 @@ function EventScheduleContent() {
   );
   const showQrCodeActionButton = Boolean(canManageEvent && !isCreateMode && !isTemplateEvent && !isEditingEvent && activeEvent?.$id);
   const showMoreActionsMenu = showRescheduleActionButton
-    || showBuildBracketsActionButton
+    || showBuildScheduleActionButton
     || showRebuildWithoutPlaceholdersActionButton
     || showCancelActionButton
     || showDeleteTemplateActionButton
     || showDeleteEventActionButton
     || showCreateTemplateButton;
   const isRescheduleActionInFlight = reschedulingMatches && pendingScheduleAction === 'reschedule';
-  const isRebuildActionInFlight = reschedulingMatches && pendingScheduleAction === 'rebuild';
+  const isBuildScheduleActionInFlight = reschedulingMatches && pendingScheduleAction === 'buildSchedule';
   const isRebuildWithoutPlaceholdersActionInFlight = reschedulingMatches && pendingScheduleAction === 'rebuildNoPlaceholders';
   const showLifecycleStatusSelect = isEditingEvent && !isTemplateEvent;
   const showDiscardChangesButton = (isEditingEvent || isCreateMode) && hasPendingUnsavedChanges;
   const eventFormRenderKey = isCreateMode
-    ? `create:${activeEvent?.$id ?? eventId ?? 'event'}:${templateSeedKey}:${editorSnapshot?.editorRevision ?? 'loading'}:${eventFormResetVersion}`
+    ? `create:${activeEvent?.$id ?? eventId ?? 'event'}:${templateBootstrapKey}:${editorSnapshot?.editorRevision ?? 'loading'}:${eventFormResetVersion}`
     : `event:${activeEvent?.$id ?? eventId ?? 'event'}:${editorSnapshot?.editorRevision ?? 'loading'}:${eventFormResetVersion}`;
 
   return (
     <div className="min-h-screen bg-gray-50">
       <Navigation />
       {contentTermsModal}
+      <Modal
+        opened={Boolean(eventTypeTransitionConfirmation)}
+        onClose={() => setEventTypeTransitionConfirmation(null)}
+        title={eventTypeTransitionConfirmation?.canContinue
+          ? 'Change event type and rebuild schedule?'
+          : 'Cannot change event type'}
+        centered
+      >
+        <Stack gap="md">
+          <Text size="sm">{eventTypeTransitionConfirmation?.message}</Text>
+          <Group justify="flex-end">
+            {eventTypeTransitionConfirmation?.canContinue && (
+              <Button
+                variant="default"
+                onClick={() => setEventTypeTransitionConfirmation(null)}
+                disabled={publishing}
+              >
+                Cancel
+              </Button>
+            )}
+            <Button
+              onClick={() => {
+                const confirmation = eventTypeTransitionConfirmation;
+                setEventTypeTransitionConfirmation(null);
+                if (confirmation?.canContinue) {
+                  void saveExistingEvent({
+                    eventTypeTransitionConfirmed: true,
+                  });
+                }
+              }}
+              loading={publishing}
+            >
+              {eventTypeTransitionConfirmation?.actionLabel ?? 'Close'}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
       <Container fluid pt="xl" pb={0}>
         <Stack gap="lg">
           <EventScheduleHeader
@@ -5961,9 +6114,10 @@ function EventScheduleContent() {
             showRescheduleAction={showRescheduleActionButton}
             isRescheduleActionInFlight={isRescheduleActionInFlight}
             onRescheduleMatches={handleRescheduleMatches}
-            showBuildBracketsAction={showBuildBracketsActionButton}
-            isRebuildActionInFlight={isRebuildActionInFlight}
-            onBuildBrackets={handleBuildBrackets}
+            showBuildScheduleAction={showBuildScheduleActionButton}
+            buildScheduleIsRebuild={activeMatches.length > 0}
+            isBuildScheduleActionInFlight={isBuildScheduleActionInFlight}
+            onBuildSchedule={handleBuildSchedule}
             showRebuildWithoutPlaceholdersAction={showRebuildWithoutPlaceholdersActionButton}
             isRebuildWithoutPlaceholdersActionInFlight={isRebuildWithoutPlaceholdersActionInFlight}
             onRebuildWithoutPlaceholders={handleRebuildWithoutPlaceholders}
@@ -5996,7 +6150,7 @@ function EventScheduleContent() {
             onActionErrorClose={() => setActionError(null)}
           />
 
-          {isCreateMode && templateIdParam && dismissedDirectTemplatePromptId !== templateIdParam && (
+          {isCreateMode && effectiveTemplatePromptOpen && (
             <Alert color="blue" radius="md" title="Start from template">
               <Stack gap="sm">
                 <Text size="sm">
@@ -6006,7 +6160,7 @@ function EventScheduleContent() {
                   <Select
                     label="Template"
                     placeholder={templatesLoading ? 'Loading templates...' : 'Select a template'}
-                    data={templateSelectData.length > 0 ? templateSelectData : [{ value: templateIdParam, label: 'Selected template' }]}
+                    data={templateSelectData.length > 0 ? templateSelectData : [{ value: templateIdParam ?? '', label: 'Selected template' }]}
                     value={selectedTemplateId ?? templateIdParam}
                     onChange={setSelectedTemplateId}
                     searchable
@@ -6148,6 +6302,14 @@ function EventScheduleContent() {
               showEventOfficialNames={showEventOfficialNames}
               matchConflictsById={matchConflictsById}
               scheduleBracketPlaceholderAssignments={scheduleBracketPlaceholderAssignments}
+              showBuildScheduleAction={
+                canManageEvent
+                && !isCreateMode
+                && !isTemplateEvent
+                && (isLeague || isTournament)
+              }
+              isBuildScheduleActionInFlight={isBuildScheduleActionInFlight}
+              onBuildSchedule={handleBuildSchedule}
               onAddScheduleMatch={handleAddScheduleMatch}
               onMatchEditRequest={handleMatchEditRequest}
               onMatchClick={handleMatchClick}
@@ -6432,7 +6594,6 @@ function EventScheduleContent() {
         onOpenRoster={openRosterForMatch}
         onScoreChange={handleScoreChange}
         onSetComplete={handleSetComplete}
-        onScoreSubmit={handleScoreSubmit}
         onScoreModalClose={closeScoreModal}
         isMatchEditorOpen={isMatchEditorOpen}
         matchBeingEdited={matchBeingEdited}

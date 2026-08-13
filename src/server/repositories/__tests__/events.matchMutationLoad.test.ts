@@ -20,7 +20,6 @@ const createClient = () => {
       end: new Date('2026-04-22T19:00:00.000Z'),
       team1Points: [25],
       team2Points: [21],
-      setResults: [1],
       locked: false,
       losersBracket: false,
       officialCheckedIn: false,
@@ -40,7 +39,6 @@ const createClient = () => {
       end: new Date('2026-04-22T20:00:00.000Z'),
       team1Points: [0],
       team2Points: [0],
-      setResults: [0],
       locked: false,
       losersBracket: false,
       officialCheckedIn: false,
@@ -249,7 +247,6 @@ describe('loadEventForMatchMutation', () => {
       winnerEventTeamId: null,
       team1Points: [19, 28, 0],
       team2Points: [21, 26, 0],
-      setResults: [2, 1, 0],
       matchRulesSnapshot: {
         scoringModel: 'SETS',
         segmentCount: 3,
@@ -301,7 +298,6 @@ describe('loadEventForMatchMutation', () => {
       winnerEventTeamId: null,
       team1Points: [19, 28, 15],
       team2Points: [21, 26, 10],
-      setResults: [2, 1, 1],
       matchRulesSnapshot: {
         scoringModel: 'SETS',
         segmentCount: 3,

@@ -14,7 +14,6 @@ jest.mock('@/lib/paymentService', () => ({
 jest.mock('@/lib/eventService', () => ({
   eventService: {
     getEventById: jest.fn(),
-    updateEventParticipants: jest.fn(),
     removeFreeAgent: jest.fn(),
     removeFromWaitlist: jest.fn(),
   },
@@ -27,7 +26,6 @@ const { paymentService: paymentServiceMock } = jest.requireMock('@/lib/paymentSe
 const { eventService: eventServiceMock } = jest.requireMock('@/lib/eventService') as {
   eventService: {
     getEventById: jest.Mock;
-    updateEventParticipants: jest.Mock;
     removeFreeAgent: jest.Mock;
     removeFromWaitlist: jest.Mock;
   };

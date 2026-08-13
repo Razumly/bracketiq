@@ -436,7 +436,6 @@ const buildOrganizationWithUnifiedFacilityCalendarFeed = () => {
         end: '2026-07-21T12:00:00.000Z',
         team1Points: [],
         team2Points: [],
-        setResults: [],
         officialIds: [
           {
             userId: 'official_2',

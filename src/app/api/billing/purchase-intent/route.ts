@@ -48,6 +48,7 @@ import {
   type CanonicalRentalCheckout,
 } from '@/server/rentalCheckoutAccess';
 import { buildEventRegistrationId } from '@/server/events/eventRegistrations';
+import { acquireEventLock } from '@/server/repositories/locks';
 import {
   findTeamRegistration,
   releaseStartedTeamRegistration,
@@ -345,6 +346,7 @@ const reserveEventRegistrationSlot = async ({
   const cutoff = new Date(now.getTime() - STARTED_REGISTRATION_TTL_MS);
 
   return prisma.$transaction(async (tx) => {
+    await acquireEventLock(tx, eventId);
     const lockedEvents = await tx.$queryRaw<Array<{
       id: string;
       start: Date | string | null;

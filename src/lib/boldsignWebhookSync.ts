@@ -22,6 +22,7 @@ import {
   isBoldSignNotFoundError,
 } from '@/lib/boldsignServer';
 import { normalizeRequiredSignerType } from '@/lib/templateSignerTypes';
+import { acquireEventLockAndLoadStructure } from '@/server/events/eventRegistrations';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -1043,9 +1044,36 @@ const updateRegistrationConsentByDocumentId = async (params: {
     data.status = update.registrationStatus;
   }
 
-  await prisma.eventRegistrations.updateMany({
-    where: { consentDocumentId: params.documentId },
-    data,
+  await prisma.$transaction(async (tx) => {
+    const registrationRows = await tx.eventRegistrations.findMany({
+      where: { consentDocumentId: params.documentId },
+      select: { id: true, eventId: true },
+    });
+    const registrationsByEventId = new Map<string, string[]>();
+    for (const row of registrationRows) {
+      const eventId = row.eventId.trim();
+      if (!eventId) {
+        continue;
+      }
+      const registrationIds = registrationsByEventId.get(eventId) ?? [];
+      registrationIds.push(row.id);
+      registrationsByEventId.set(eventId, registrationIds);
+    }
+
+    for (const eventId of Array.from(registrationsByEventId.keys()).sort()) {
+      await acquireEventLockAndLoadStructure(tx, eventId);
+      const registrationIds = registrationsByEventId.get(eventId) ?? [];
+      if (!registrationIds.length) {
+        continue;
+      }
+      await tx.eventRegistrations.updateMany({
+        where: {
+          id: { in: registrationIds },
+          eventId,
+        },
+        data,
+      });
+    }
   });
 
   await prisma.teamRegistrations.updateMany({

@@ -6,7 +6,7 @@ import { TournamentBracket, Match, UserData, Team } from '@/types';
 
 import MatchCard from './MatchCard';
 
-import ScoreUpdateModal from './ScoreUpdateModal';
+import ScoreUpdateModal, { type ScorePayload } from './ScoreUpdateModal';
 import { Paper, Group, Button, ActionIcon, Text, SegmentedControl, Badge } from '@mantine/core';
 import BracketCanvas from '@/components/bracket/BracketCanvas';
 import { buildBracketCanvasLayout } from '@/lib/bracketCanvasLayout';
@@ -41,7 +41,7 @@ const normalizeMatchRefId = (value: unknown): string => {
 
 interface TournamentBracketViewProps {
     bracket: TournamentBracket;
-    onScoreUpdate?: (matchId: string, team1Points: number[], team2Points: number[], setResults: number[]) => Promise<void>;
+    onScoreUpdate?: (payload: ScorePayload) => Promise<void>;
     currentUser?: UserData;
     childUserIds?: string[];
     viewerTeamIds?: Iterable<string>;
@@ -414,21 +414,6 @@ export default function TournamentBracketView({
         setShowScoreModal(true);
     };
 
-    const handleScoreSubmit = async (
-        matchId: string,
-        team1Points: number[],
-        team2Points: number[],
-        setResults: number[]
-    ) => {
-        if (!onScoreUpdate) {
-            setShowScoreModal(false);
-            setSelectedMatch(null);
-            return;
-        }
-        await onScoreUpdate(matchId, team1Points, team2Points, setResults);
-        setShowScoreModal(false);
-        setSelectedMatch(null);
-    };
 
     const renderResolvedMatchCard = useCallback((match: Match, className: string) => {
         const team1Id = extractEntityId((match as any).team1)
@@ -619,25 +604,9 @@ export default function TournamentBracketView({
                     match={selectedMatch}
                     tournament={bracket.tournament}
                     canManage={canManageMatch(selectedMatch)}
-                    onSubmit={handleScoreSubmit}
-                    onScoreChange={
-                        onScoreUpdate
-                            ? ({ matchId, team1Points, team2Points, setResults }) =>
-                                  onScoreUpdate(matchId, team1Points, team2Points, setResults)
-                            : undefined
-                    }
-                    onSetComplete={
-                        onScoreUpdate
-                            ? async ({ matchId, team1Points, team2Points, setResults }) =>
-                                  onScoreUpdate(matchId, team1Points, team2Points, setResults)
-                            : undefined
-                    }
-                    onMatchComplete={
-                        onScoreUpdate
-                            ? async ({ matchId, team1Points, team2Points, setResults }) =>
-                                  onScoreUpdate(matchId, team1Points, team2Points, setResults)
-                            : undefined
-                    }
+                    onScoreChange={onScoreUpdate}
+                    onSetComplete={onScoreUpdate}
+                    onMatchComplete={onScoreUpdate}
                     onClose={() => {
                         setShowScoreModal(false);
                         setSelectedMatch(null);

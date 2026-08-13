@@ -89,6 +89,7 @@ export const eventEditorCreateRequestHash = (command: CreateEventEditorCommand):
     .update(JSON.stringify(stableJsonSafe({
       contractVersion: command.contractVersion,
       draft: command.draft,
+      completion: command.completion,
     })))
     .digest('hex')
 );

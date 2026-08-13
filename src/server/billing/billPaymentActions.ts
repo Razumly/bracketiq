@@ -5,6 +5,7 @@ import { extractStripePaymentIntentId } from '@/lib/stripeClientSecret';
 import { buildRefundCreateParamsForPaymentIntent } from '@/lib/stripeConnectAccounts';
 import type { AuthContext } from '@/lib/permissions';
 import { canManageEvent, canManageOrganization } from '@/server/accessControl';
+import { acquireEventLockAndLoadStructure } from '@/server/events/eventRegistrations';
 import {
   buildTeamRegistrationId,
   cancelPendingTeamRegistration,
@@ -369,16 +370,26 @@ export const markBillPaymentProcessingForAction = async ({
   }
 
   const reconciledBill = await reconcileBillForPendingPayment(bill.id, now);
-  if (bill.sourceType === 'EVENT_REGISTRATION' && bill.sourceId) {
-    await prisma.eventRegistrations.updateMany({
-      where: {
-        id: bill.sourceId,
-        status: { in: ['PENDING', 'STARTED'] as any[] },
-      },
-      data: {
-        status: reconciledBill?.status === 'PAID' ? 'ACTIVE' as any : 'PENDING' as any,
-        updatedAt: now,
-      },
+  const registrationId = bill.sourceId;
+  const registrationEventId = bill.eventId;
+  if (
+    bill.sourceType === 'EVENT_REGISTRATION'
+    && registrationId
+    && registrationEventId
+    && typeof (prisma as any).eventRegistrations?.updateMany === 'function'
+  ) {
+    await prisma.$transaction(async (tx) => {
+      await acquireEventLockAndLoadStructure(tx, registrationEventId);
+      await tx.eventRegistrations.updateMany({
+        where: {
+          id: registrationId,
+          status: { in: ['PENDING', 'STARTED'] as any[] },
+        },
+        data: {
+          status: reconciledBill?.status === 'PAID' ? 'ACTIVE' as any : 'PENDING' as any,
+          updatedAt: now,
+        },
+      });
     });
   }
 

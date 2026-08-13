@@ -63,10 +63,11 @@ export const applyDivisionPhaseRulesToMatch = (
     previousRightMatch: match.previousRightMatch,
     winnerNextMatch: match.winnerNextMatch,
     loserNextMatch: match.loserNextMatch,
-    existingSegmentCount: match.setResults.length,
-    existingTeam1PointCount: match.team1Points.length,
-    existingTeam2PointCount: match.team2Points.length,
-    existingResultCount: match.setResults.length,
+    existingSegmentCount: Math.max(
+      match.segments.length,
+      match.team1Points.length,
+      match.team2Points.length,
+    ),
   }) ?? phaseRules;
 
   match.resolvedMatchRules = contextualRules;

@@ -31,7 +31,6 @@ export type StandingsMatchLike = {
   team2Id?: string | null;
   team1Points?: unknown;
   team2Points?: unknown;
-  setResults?: unknown;
   segments?: StandingsMatchSegmentLike[] | null;
   incidents?: StandingsMatchIncidentLike[] | null;
   matchRulesSnapshot?: StandingsMatchRulesLike;
@@ -188,9 +187,7 @@ export const deriveStandingsMatchResult = (match: StandingsMatchLike): DerivedSt
   const team1Id = resolveParticipantId(match.team1, match.team1Id);
   const team2Id = resolveParticipantId(match.team2, match.team2Id);
   const usesIncidentScoring = getMatchRules(match)?.pointIncidentRequiresParticipant === true;
-  const segments = usesIncidentScoring
-    ? getCanonicalSegments(match, team1Id, team2Id)
-    : [];
+  const segments = getCanonicalSegments(match, team1Id, team2Id);
 
   let team1Total = 0;
   let team2Total = 0;
@@ -213,10 +210,6 @@ export const deriveStandingsMatchResult = (match: StandingsMatchLike): DerivedSt
       return segment.status === 'COMPLETE';
     });
   } else {
-    const setResults = toNumberArray(match.setResults);
-    team1Wins = setResults.filter((result) => result === 1).length;
-    team2Wins = setResults.filter((result) => result === 2).length;
-    allSegmentsResolved = setResults.length > 0 && setResults.every((result) => result === 1 || result === 2);
     team1Total = sumPoints(toNumberArray(match.team1Points));
     team2Total = sumPoints(toNumberArray(match.team2Points));
   }

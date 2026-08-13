@@ -768,7 +768,6 @@ const getEventScheduleContext = async (
         teamOfficialId: true,
         team1Points: true,
         team2Points: true,
-        setResults: true,
         division: true,
         losersBracket: true,
       },
@@ -903,7 +902,6 @@ const getEventScheduleContext = async (
       teamOfficialName: match.teamOfficialId ? teamNameById.get(match.teamOfficialId) ?? 'Unknown team' : null,
       team1Points: match.team1Points,
       team2Points: match.team2Points,
-      setResults: match.setResults,
       division: match.division,
       losersBracket: match.losersBracket,
     })),
@@ -937,7 +935,6 @@ const updateScoreSchema = z.object({
   matchId: z.string().min(1),
   team1Points: z.array(z.number()).nullable().optional(),
   team2Points: z.array(z.number()).nullable().optional(),
-  setResults: z.array(z.number()).nullable().optional(),
   segmentOperations: z.array(z.record(z.string(), z.unknown())).nullable().optional(),
 }).strict();
 
@@ -1324,7 +1321,6 @@ const executeWriteTool = async (
     const body = {
       ...(Array.isArray(parsed.team1Points) ? { team1Points: parsed.team1Points } : {}),
       ...(Array.isArray(parsed.team2Points) ? { team2Points: parsed.team2Points } : {}),
-      ...(Array.isArray(parsed.setResults) ? { setResults: parsed.setResults } : {}),
       ...(Array.isArray(parsed.segmentOperations) ? { segmentOperations: parsed.segmentOperations } : {}),
     };
     const response = await fetchJsonOrToolError(

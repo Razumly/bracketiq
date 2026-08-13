@@ -17,6 +17,7 @@ jest.mock('stripe', () => StripeMock);
 
 const prismaMock = {
   $transaction: jest.fn(),
+  $executeRaw: jest.fn(),
   events: {
     findUnique: jest.fn(),
     update: jest.fn(),
@@ -98,6 +99,7 @@ const findEventRegistrationMock = jest.fn();
 const upsertEventRegistrationMock = jest.fn();
 const deleteEventRegistrationMock = jest.fn();
 const syncDivisionTeamMembershipFromRegistrationsMock = jest.fn();
+const acquireEventLockAndLoadStructureMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/permissions', () => ({
@@ -114,6 +116,7 @@ jest.mock('@/server/events/eventRegistrations', () => ({
   upsertEventRegistration: (...args: any[]) => upsertEventRegistrationMock(...args),
   deleteEventRegistration: (...args: any[]) => deleteEventRegistrationMock(...args),
   syncDivisionTeamMembershipFromRegistrations: (...args: any[]) => syncDivisionTeamMembershipFromRegistrationsMock(...args),
+  acquireEventLockAndLoadStructure: (...args: any[]) => acquireEventLockAndLoadStructureMock(...args),
 }));
 
 import { DELETE, GET, POST } from '@/app/api/events/[eventId]/participants/route';
@@ -351,6 +354,7 @@ describe('POST /api/events/[eventId]/participants', () => {
       errors: [],
     });
     prismaMock.$transaction.mockImplementation(async (fn: any) => fn(prismaMock));
+    prismaMock.$executeRaw.mockResolvedValue(0);
     prismaMock.events.findUnique.mockResolvedValue({
       id: 'event_1',
       teamSignup: false,
@@ -1518,7 +1522,7 @@ describe('POST /api/events/[eventId]/participants', () => {
       parentId: 'parent_1',
       status: 'STARTED',
       consentStatus: 'guardian_approval_required',
-    }));
+    }), expect.anything());
   });
 
   it('allows event managers to add an unrelated user participant', async () => {

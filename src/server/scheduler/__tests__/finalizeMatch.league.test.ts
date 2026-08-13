@@ -103,7 +103,7 @@ describe('finalizeMatch (league)', () => {
 
     // Match finalization in the route happens after check-in, so the completed match is already locked.
     first.locked = true;
-    first.setResults = [1, 1, 2];
+    first.winnerEventTeamId = first.team1?.id ?? null;
     first.team1Points = [21, 21, 15];
     first.team2Points = [10, 18, 21];
     first.end = new Date(first.end.getTime() + 30 * 60 * 1000);
@@ -160,7 +160,7 @@ describe('finalizeMatch (league)', () => {
     const actualEnd = new Date(first.end.getTime() + 30 * 60 * 1000);
     first.locked = false;
     first.actualStart = actualStart;
-    first.setResults = [1, 1, 2];
+    first.winnerEventTeamId = first.team1?.id ?? null;
     first.team1Points = [21, 21, 15];
     first.team2Points = [10, 18, 21];
 
@@ -215,7 +215,7 @@ describe('finalizeMatch (league)', () => {
 
     first.locked = true;
     second.locked = true;
-    first.setResults = [1, 1, 2];
+    first.winnerEventTeamId = first.team1?.id ?? null;
     first.team1Points = [21, 21, 15];
     first.team2Points = [10, 18, 21];
     first.end = new Date(first.end.getTime() + 30 * 60 * 1000);
@@ -285,7 +285,7 @@ describe('finalizeMatch (league)', () => {
       const teamNum = (team: Team) => Number(team.id.split('_')[1] ?? 0);
       const winnerIsTeam1 = teamNum(team1) > teamNum(team2);
 
-      match.setResults = winnerIsTeam1 ? [1, 1, 2] : [2, 2, 1];
+      match.winnerEventTeamId = winnerIsTeam1 ? team1.id : team2.id;
       match.team1Points = winnerIsTeam1 ? [21, 21, 15] : [10, 10, 21];
       match.team2Points = winnerIsTeam1 ? [10, 10, 21] : [21, 21, 15];
 
@@ -398,7 +398,7 @@ describe('finalizeMatch (league)', () => {
       team2.matches.push(playoffMatch);
     }
 
-    playoffMatch.setResults = [1];
+    playoffMatch.winnerEventTeamId = team1.id;
     playoffMatch.team1Points = [21];
     playoffMatch.team2Points = [19];
     playoffMatch.locked = true;

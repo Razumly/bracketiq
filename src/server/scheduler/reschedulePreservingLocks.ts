@@ -539,12 +539,20 @@ const latestMatchEnd = (matches: Match[]): Date | null => {
 };
 
 const isMatchCompleted = (match: Match): boolean => {
-  if (!Array.isArray(match.setResults) || match.setResults.length === 0) {
+  if (match.status === 'COMPLETE' && Boolean(match.winnerEventTeamId)) {
+    return true;
+  }
+  const segments = Array.isArray(match.segments) ? match.segments : [];
+  if (!segments.length) {
     return false;
   }
-  const team1Wins = match.setResults.filter((result) => result === 1).length;
-  const team2Wins = match.setResults.filter((result) => result === 2).length;
-  const setsToWin = Math.ceil(match.setResults.length / 2);
+  const team1Wins = segments.filter((segment) => (
+    segment.status === 'COMPLETE' && segment.winnerEventTeamId === match.team1?.id
+  )).length;
+  const team2Wins = segments.filter((segment) => (
+    segment.status === 'COMPLETE' && segment.winnerEventTeamId === match.team2?.id
+  )).length;
+  const setsToWin = Math.ceil(segments.length / 2);
   return team1Wins >= setsToWin || team2Wins >= setsToWin;
 };
 

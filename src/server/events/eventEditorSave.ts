@@ -1,44 +1,53 @@
-import type { Prisma } from '@/generated/prisma/client';
-import { prisma } from '@/lib/prisma';
-import { createId } from '@/lib/id';
-import { acquireEventLock } from '@/server/repositories/locks';
-import { upsertEventFromPayload } from '@/server/repositories/events';
-import { hasOrgPermission, canManageEvent } from '@/server/accessControl';
-import { ORG_PERMISSIONS } from '@/lib/organizationPermissions';
+import type { Prisma } from "@/generated/prisma/client";
+import { prisma } from "@/lib/prisma";
+import { createId } from "@/lib/id";
+import { acquireEventLock } from "@/server/repositories/locks";
+import { upsertEventFromPayload } from "@/server/repositories/events";
+import { hasOrgPermission, canManageEvent } from "@/server/accessControl";
+import { ORG_PERMISSIONS } from "@/lib/organizationPermissions";
 import {
   EVENT_STAFF_CONTRACT_VERSION,
   EventStaffInputError,
   reconcileEventStaffDesiredState,
   type EventStaffPutInput,
-} from './eventStaffReconciliation';
+} from "./eventStaffReconciliation";
 import {
   buildEventEditorSnapshot,
   loadCreateEventEditorSnapshot,
   loadEventEditorSnapshot,
   type EditorActor,
   type EditorSnapshotClient,
-} from './eventEditorSnapshot';
-import { editorDraftToLegacyEvent } from '@/app/events/[id]/schedule/components/eventForm/editorContractAdapters';
+} from "./eventEditorSnapshot";
+import { editorDraftToLegacyEvent } from "@/app/events/[id]/schedule/components/eventForm/editorContractAdapters";
 import {
   claimEventEditorCreateOperation,
   completeEventEditorCreateOperation,
   eventEditorCreateRequestHash,
   waitForEventEditorCreateOperation,
   type EventCreateOperationClaim,
-} from './eventCreateOperationReplay';
-import { resolveMatchTimingPolicy } from '@/server/scheduler/matchTimingPolicy';
+} from "./eventCreateOperationReplay";
+import { resolveMatchTimingPolicy } from "@/server/scheduler/matchTimingPolicy";
+import {
+  editorMatchProjectionsFor,
+  EventScheduleMutationError,
+  EventScheduleRevisionConflictError,
+  reconcileEventSchedule,
+} from "@/server/scheduler/eventScheduleMutation";
 import {
   type CreateEventEditorCommand,
   type EventEditorBootstrapQuery,
   type EventEditorDraft,
   type EventEditorSaveResult,
+  type EventEditorScheduleOutcome,
   type EventEditorSnapshot,
   type SaveEventEditorCommand,
-} from '@/contracts/eventEditor';
+} from "@/contracts/eventEditor";
+
+import type { MatchScheduleNotificationPlan } from "@/server/matchScheduleNotifications";
 export class EditorPermissionError extends Error {
-  constructor(message = 'You do not have permission to edit this event.') {
+  constructor(message = "You do not have permission to edit this event.") {
     super(message);
-    this.name = 'EditorPermissionError';
+    this.name = "EditorPermissionError";
   }
 }
 
@@ -47,8 +56,8 @@ export class EditorRevisionConflictError extends Error {
   readonly currentStaffRevision: string | null;
 
   constructor(editorRevision: string, staffRevision: string | null) {
-    super('Event editor data changed. Reload and try again.');
-    this.name = 'EditorRevisionConflictError';
+    super("Event editor data changed. Reload and try again.");
+    this.name = "EditorRevisionConflictError";
     this.currentEditorRevision = editorRevision;
     this.currentStaffRevision = staffRevision;
   }
@@ -59,7 +68,7 @@ export class EditorImmutableFieldError extends Error {
 
   constructor(fieldName: string) {
     super(`Immutable field ${fieldName} cannot be updated.`);
-    this.name = 'EditorImmutableFieldError';
+    this.name = "EditorImmutableFieldError";
     this.fieldName = fieldName;
   }
 }
@@ -67,28 +76,44 @@ export class EditorImmutableFieldError extends Error {
 export class EditorInputError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'EditorInputError';
+    this.name = "EditorInputError";
+  }
+}
+
+export class EditorScheduleIntentError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EditorScheduleIntentError";
   }
 }
 
 export class EditorCapabilityError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'EditorCapabilityError';
+    this.name = "EditorCapabilityError";
   }
 }
 
 export type EditorSaveOptions = {
   client?: EditorSnapshotClient;
-  sendStaffInvites?: (candidates: unknown[], eventId: string) => Promise<'NOT_REQUESTED' | 'QUEUED' | 'FAILED'>;
+  sendStaffInvites?: (
+    candidates: unknown[],
+    eventId: string,
+  ) => Promise<"NOT_REQUESTED" | "QUEUED" | "FAILED">;
   onEventCreated?: (eventId: string, draft: EventEditorDraft) => Promise<void>;
+  onScheduleChanged?: (
+    notification: MatchScheduleNotificationPlan,
+  ) => Promise<void>;
 };
 
 type QuestionRow = {
   id: string;
 };
 
-const staffInputFor = (draft: EventEditorDraft, revision: string): EventStaffPutInput => ({
+const staffInputFor = (
+  draft: EventEditorDraft,
+  revision: string,
+): EventStaffPutInput => ({
   contractVersion: EVENT_STAFF_CONTRACT_VERSION,
   expectedRevision: revision,
   assistantHostIds: draft.staff.assistantHostIds,
@@ -99,24 +124,39 @@ const staffInputFor = (draft: EventEditorDraft, revision: string): EventStaffPut
     order: position.order,
   })),
   eventOfficials: draft.staff.eventOfficials
-    .filter((entry) => typeof entry.userId === 'string' && entry.userId.trim())
+    .filter((entry) => typeof entry.userId === "string" && entry.userId.trim())
     .map((entry) => ({
-      id: typeof entry.id === 'string' ? entry.id : undefined,
+      id: typeof entry.id === "string" ? entry.id : undefined,
       userId: String(entry.userId),
-      positionIds: Array.isArray(entry.positionIds) ? entry.positionIds.filter((id): id is string => typeof id === 'string') : [],
-      fieldIds: Array.isArray(entry.fieldIds) ? entry.fieldIds.filter((id): id is string => typeof id === 'string') : [],
+      positionIds: Array.isArray(entry.positionIds)
+        ? entry.positionIds.filter((id): id is string => typeof id === "string")
+        : [],
+      fieldIds: Array.isArray(entry.fieldIds)
+        ? entry.fieldIds.filter((id): id is string => typeof id === "string")
+        : [],
       isActive: entry.isActive !== false,
     })),
   pendingInvites: draft.staff.pendingInvites
-    .filter((entry) => typeof entry.email === 'string' && typeof entry.firstName === 'string' && typeof entry.lastName === 'string')
+    .filter(
+      (entry) =>
+        typeof entry.email === "string" &&
+        typeof entry.firstName === "string" &&
+        typeof entry.lastName === "string",
+    )
     .map((entry) => ({
       email: String(entry.email),
       firstName: String(entry.firstName),
       lastName: String(entry.lastName),
       roles: Array.isArray(entry.roles)
-        ? entry.roles.filter((role): role is 'OFFICIAL' | 'ASSISTANT_HOST' => role === 'OFFICIAL' || role === 'ASSISTANT_HOST')
-        : ['OFFICIAL'],
-      resolvedUserId: typeof entry.resolvedUserId === 'string' ? entry.resolvedUserId : undefined,
+        ? entry.roles.filter(
+            (role): role is "OFFICIAL" | "ASSISTANT_HOST" =>
+              role === "OFFICIAL" || role === "ASSISTANT_HOST",
+          )
+        : ["OFFICIAL"],
+      resolvedUserId:
+        typeof entry.resolvedUserId === "string"
+          ? entry.resolvedUserId
+          : undefined,
     })),
 });
 
@@ -127,7 +167,7 @@ const reconcileQuestions = async (
   actorUserId: string,
 ): Promise<Record<string, string>> => {
   const existingRows = await tx.registrationQuestions.findMany({
-    where: { scopeType: 'EVENT', scopeId: eventId },
+    where: { scopeType: "EVENT", scopeId: eventId },
     select: { id: true },
   });
   const existingIds = new Set(existingRows.map((row: QuestionRow) => row.id));
@@ -135,10 +175,12 @@ const reconcileQuestions = async (
   const questionIdMap: Record<string, string> = {};
   const now = new Date();
   for (const [index, question] of draft.registration.questions.entries()) {
-    const canonicalId = 'id' in question ? question.id : null;
-    const clientId = 'clientId' in question ? question.clientId : null;
+    const canonicalId = "id" in question ? question.id : null;
+    const clientId = "clientId" in question ? question.clientId : null;
     if (canonicalId && !existingIds.has(canonicalId)) {
-      throw new EditorInputError(`Registration question ${canonicalId} does not belong to this event.`);
+      throw new EditorInputError(
+        `Registration question ${canonicalId} does not belong to this event.`,
+      );
     }
     const id = canonicalId ?? createId();
     const data = {
@@ -156,7 +198,7 @@ const reconcileQuestions = async (
       await tx.registrationQuestions.create({
         data: {
           id,
-          scopeType: 'EVENT',
+          scopeType: "EVENT",
           scopeId: eventId,
           ...data,
           createdBy: actorUserId,
@@ -180,9 +222,18 @@ const reconcileQuestions = async (
   return questionIdMap;
 };
 
-const assertPaymentCapability = async (draft: EventEditorDraft, snapshot: { capabilities: { canUseOnlinePayments: boolean } }) => {
-  if (draft.registration.payment.mode === 'ONLINE' && draft.registration.payment.priceCents > 0 && !snapshot.capabilities.canUseOnlinePayments) {
-    throw new EditorCapabilityError('Online paid registration requires a connected payment account.');
+const assertPaymentCapability = async (
+  draft: EventEditorDraft,
+  snapshot: { capabilities: { canUseOnlinePayments: boolean } },
+) => {
+  if (
+    draft.registration.payment.mode === "ONLINE" &&
+    draft.registration.payment.priceCents > 0 &&
+    !snapshot.capabilities.canUseOnlinePayments
+  ) {
+    throw new EditorCapabilityError(
+      "Online paid registration requires a connected payment account.",
+    );
   }
 };
 
@@ -194,29 +245,31 @@ const assertImmutableFields = (
   const protectedFields = new Set(snapshot.immutable.fieldNames);
   if (snapshot.immutable.rental) {
     [
-      'start',
-      'end',
-      'timeZone',
-      'location',
-      'address',
-      'coordinates',
-      'fields',
-      'fieldIds',
-      'timeSlots',
-      'timeSlotIds',
-      'requiredTemplateIds',
-      'rentalBookingId',
-      'rentalBookingItemId',
+      "start",
+      "end",
+      "timeZone",
+      "location",
+      "address",
+      "coordinates",
+      "fields",
+      "fieldIds",
+      "timeSlots",
+      "timeSlotIds",
+      "requiredTemplateIds",
+      "rentalBookingId",
+      "rentalBookingItemId",
     ].forEach((fieldName) => protectedFields.add(fieldName));
   }
   if (snapshot.immutable.template) {
-    protectedFields.add('requiredTemplateIds');
+    protectedFields.add("requiredTemplateIds");
   }
   if (!protectedFields.size) return;
   const current = editorDraftToLegacyEvent(snapshot.draft, eventId);
   const next = editorDraftToLegacyEvent(draft, eventId);
   for (const fieldName of protectedFields) {
-    if (JSON.stringify(current[fieldName]) !== JSON.stringify(next[fieldName])) {
+    if (
+      JSON.stringify(current[fieldName]) !== JSON.stringify(next[fieldName])
+    ) {
       throw new EditorImmutableFieldError(fieldName);
     }
   }
@@ -228,10 +281,10 @@ const saveWithinTransaction = async (
   draft: EventEditorDraft,
   eventId: string,
   existingSnapshot: EventEditorSnapshot | null,
-): Promise<{ questionIdMap: Record<string, string>; emailCandidates: unknown[] }> => {
-  if (existingSnapshot) {
-    assertImmutableFields(draft, eventId, existingSnapshot);
-  }
+): Promise<{
+  questionIdMap: Record<string, string>;
+  emailCandidates: unknown[];
+}> => {
   if (existingSnapshot) {
     await assertPaymentCapability(draft, existingSnapshot);
   }
@@ -239,25 +292,38 @@ const saveWithinTransaction = async (
   const matchRulesOverride = draft.competition.matchRulesOverride ?? {};
   const timing = resolveMatchTimingPolicy({
     usesSets: draft.competition.usesSets,
-    segmentCount: typeof matchRulesOverride.segmentCount === 'number' ? matchRulesOverride.segmentCount : null,
-    segmentLengthMinutes: typeof matchRulesOverride.segmentLengthMinutes === 'number' ? matchRulesOverride.segmentLengthMinutes : null,
-    segmentBreakMinutes: typeof matchRulesOverride.segmentBreakMinutes === 'number' ? matchRulesOverride.segmentBreakMinutes : null,
+    segmentCount:
+      typeof matchRulesOverride.segmentCount === "number"
+        ? matchRulesOverride.segmentCount
+        : null,
+    segmentLengthMinutes:
+      typeof matchRulesOverride.segmentLengthMinutes === "number"
+        ? matchRulesOverride.segmentLengthMinutes
+        : null,
+    segmentBreakMinutes:
+      typeof matchRulesOverride.segmentBreakMinutes === "number"
+        ? matchRulesOverride.segmentBreakMinutes
+        : null,
     setsPerMatch: draft.competition.setsPerMatch,
     setDurationMinutes: draft.competition.setDurationMinutes,
     matchDurationMinutes: draft.competition.matchDurationMinutes,
     restTimeMinutes: draft.competition.restTimeMinutes,
   });
   if (
-    typeof draft.competition.matchDurationMinutes === 'number'
-    && draft.competition.matchDurationMinutes !== timing.durationMinutes
+    typeof draft.competition.matchDurationMinutes === "number" &&
+    draft.competition.matchDurationMinutes !== timing.durationMinutes
   ) {
-    throw new EditorInputError('matchDurationMinutes is a server-calculated projection of the timing inputs.');
+    throw new EditorInputError(
+      "matchDurationMinutes is a server-calculated projection of the timing inputs.",
+    );
   }
   if (
-    existingSnapshot?.mode === 'CREATE'
-    && ['LEAGUE', 'TOURNAMENT'].includes(draft.basics.eventType.trim().toUpperCase())
+    existingSnapshot?.mode === "CREATE" &&
+    ["LEAGUE", "TOURNAMENT"].includes(
+      draft.basics.eventType.trim().toUpperCase(),
+    )
   ) {
-    eventPayload.state = 'UNPUBLISHED';
+    eventPayload.state = "UNPUBLISHED";
   }
   eventPayload.matchDurationMinutes = timing.durationMinutes;
   delete eventPayload.fields;
@@ -273,30 +339,42 @@ const saveWithinTransaction = async (
   delete eventPayload.rentalBookingId;
   delete eventPayload.rentalBookingItemId;
   eventPayload.hostId = draft.basics.hostId ?? actor.userId;
-  eventPayload.registrationPaymentMode = draft.registration.payment.mode === 'MANUAL' ? 'MANUAL' : 'ONLINE';
+  eventPayload.registrationPaymentMode =
+    draft.registration.payment.mode === "MANUAL" ? "MANUAL" : "ONLINE";
   eventPayload.price = draft.registration.payment.priceCents;
-  await upsertEventFromPayload({
-    ...eventPayload,
-    id: eventId,
-    fieldIds: draft.resources.fieldIds,
-    timeSlotIds: draft.resources.timeSlotIds,
-    fields: draft.resources.fields,
-    timeSlots: draft.resources.timeSlots,
-    divisionDetails: draft.competition.divisionDetails,
-    playoffDivisionDetails: draft.competition.playoffDivisionDetails,
-    divisionFieldIds: draft.competition.divisionFieldIds,
-    tags: draft.basics.tags,
-  }, tx, { preserveOperationalState: true, preserveStaffState: true });
+  await upsertEventFromPayload(
+    {
+      ...eventPayload,
+      id: eventId,
+      fieldIds: draft.resources.fieldIds,
+      timeSlotIds: draft.resources.timeSlotIds,
+      fields: draft.resources.fields,
+      timeSlots: draft.resources.timeSlots,
+      divisionDetails: draft.competition.divisionDetails,
+      playoffDivisionDetails: draft.competition.playoffDivisionDetails,
+      divisionFieldIds: draft.competition.divisionFieldIds,
+      tags: draft.basics.tags,
+    },
+    tx,
+    { preserveOperationalState: true, preserveStaffState: true },
+  );
 
-  const questionIdMap = await reconcileQuestions(tx, eventId, draft, actor.userId);
-  const staffRevision = existingSnapshot?.staffRevision
-    ?? (await loadEventEditorSnapshot(eventId, { actor, client: tx })).staffRevision;
+  const questionIdMap = await reconcileQuestions(
+    tx,
+    eventId,
+    draft,
+    actor.userId,
+  );
+  const staffRevision =
+    existingSnapshot?.staffRevision ??
+    (await loadEventEditorSnapshot(eventId, { actor, client: tx }))
+      .staffRevision;
   let staffResult;
   try {
     staffResult = await reconcileEventStaffDesiredState(
       tx,
       eventId,
-      staffInputFor(draft, staffRevision ?? ''),
+      staffInputFor(draft, staffRevision ?? ""),
       actor.userId,
     );
   } catch (error) {
@@ -317,33 +395,161 @@ export const saveEventEditor = async (
   const client = options.client ?? prisma;
   let emailCandidates: unknown[] = [];
   let questionIdMap: Record<string, string> = {};
+  let savedSnapshot: EventEditorSnapshot | null = null;
+  let scheduleOutcome: EventEditorScheduleOutcome = {
+    status: "NOT_REQUESTED",
+    matchCount: 0,
+    warnings: [],
+  };
+  let scheduleNotification: MatchScheduleNotificationPlan | null = null;
   await client.$transaction(async (tx: Prisma.TransactionClient) => {
     await acquireEventLock(tx, eventId);
     const currentEvent = await tx.events.findUnique({ where: { id: eventId } });
     if (!currentEvent) {
-      throw new Error('Event not found.');
+      throw new Error("Event not found.");
     }
-    if (!await canManageEvent({ ...actor, isAdmin: Boolean(actor.isAdmin) }, currentEvent, tx)) {
+    if (
+      !(await canManageEvent(
+        { ...actor, isAdmin: Boolean(actor.isAdmin) },
+        currentEvent,
+        tx,
+      ))
+    ) {
       throw new EditorPermissionError();
     }
     const currentSnapshot = await buildEventEditorSnapshot(
       currentEvent as unknown as Record<string, unknown>,
-      { client: tx, actor, mode: 'EDIT' },
+      { client: tx, actor, mode: "EDIT" },
     );
-    if (currentSnapshot.editorRevision !== command.editorRevision || currentSnapshot.staffRevision !== command.staffRevision) {
-      throw new EditorRevisionConflictError(currentSnapshot.editorRevision, currentSnapshot.staffRevision);
+    assertImmutableFields(command.draft, eventId, currentSnapshot);
+    if (
+      currentSnapshot.editorRevision !== command.editorRevision ||
+      currentSnapshot.staffRevision !== command.staffRevision
+    ) {
+      throw new EditorRevisionConflictError(
+        currentSnapshot.editorRevision,
+        currentSnapshot.staffRevision,
+      );
     }
-    ({ questionIdMap, emailCandidates } = await saveWithinTransaction(tx, actor, command.draft, eventId, currentSnapshot));
+    const currentEventType = currentSnapshot.draft.basics.eventType
+      .trim()
+      .toUpperCase();
+    const nextEventType = command.draft.basics.eventType.trim().toUpperCase();
+    const eventTypeChanged = currentEventType !== nextEventType;
+    const transition = command.scheduleTransition;
+    if (eventTypeChanged && transition.mode !== "RECONCILE") {
+      throw new EditorScheduleIntentError(
+        "Changing the event type requires schedule reconciliation.",
+      );
+    }
+    if (!eventTypeChanged && transition.mode === "RECONCILE") {
+      throw new EditorScheduleIntentError(
+        "Schedule reconciliation requires an event-type change.",
+      );
+    }
+    if (
+      transition.mode !== "PRESERVE" &&
+      transition.expectedScheduleRevision !==
+        currentSnapshot.scheduleState.revision
+    ) {
+      throw new EventScheduleRevisionConflictError(
+        currentSnapshot.scheduleState.revision,
+      );
+    }
+    if (
+      transition.mode === "BUILD_IF_MISSING" &&
+      (currentSnapshot.scheduleState.matchCount > 0 ||
+        !["LEAGUE", "TOURNAMENT"].includes(nextEventType))
+    ) {
+      throw new EditorScheduleIntentError(
+        "Build-if-missing requires an unscheduled League or Tournament.",
+      );
+    }
+    ({ questionIdMap, emailCandidates } = await saveWithinTransaction(
+      tx,
+      actor,
+      command.draft,
+      eventId,
+      currentSnapshot,
+    ));
+    if (
+      transition.mode === "BUILD_IF_MISSING" ||
+      transition.mode === "RECONCILE"
+    ) {
+      const scheduleMode =
+        transition.mode === "BUILD_IF_MISSING"
+          ? "BUILD"
+          : ["LEAGUE", "TOURNAMENT"].includes(nextEventType)
+            ? currentSnapshot.scheduleState.matchCount > 0
+              ? "REBUILD"
+              : "BUILD"
+            : "DELETE";
+      const mutation = await reconcileEventSchedule({
+        tx,
+        eventId,
+        mode: scheduleMode,
+        includePlaceholderTeams: true,
+      });
+      scheduleNotification = mutation.notification;
+      if (scheduleMode === "DELETE") {
+        scheduleOutcome = {
+          status: "DELETED",
+          matchCount: 0,
+          matches: [],
+          warnings: [],
+        };
+      } else {
+        scheduleOutcome = {
+          status: scheduleMode === "REBUILD" ? "REBUILT" : "BUILT",
+          matchCount: mutation.matches.length,
+          matches: editorMatchProjectionsFor(mutation.matches),
+          warnings: mutation.warnings,
+        };
+      }
+    } else {
+      scheduleOutcome = {
+        status: "NOT_REQUESTED",
+        matchCount: currentSnapshot.scheduleState.matchCount,
+        warnings: [],
+      };
+    }
+    savedSnapshot = await loadEventEditorSnapshot(eventId, {
+      actor,
+      client: tx,
+    });
   });
-  let staffEmailDelivery: EventEditorSaveResult['staffEmailDelivery'] = 'NOT_REQUESTED';
-  if (emailCandidates.length && options.sendStaffInvites) {
-    staffEmailDelivery = await options.sendStaffInvites(emailCandidates, eventId);
+  if (scheduleNotification && options.onScheduleChanged) {
+    try {
+      await options.onScheduleChanged(scheduleNotification);
+    } catch (error) {
+      console.error(
+        "[event-editor] schedule notification failed after save",
+        error,
+      );
+    }
   }
-  const snapshot = await loadEventEditorSnapshot(eventId, { actor, client });
-  return { status: 'SAVED', snapshot, questionIdMap, staffEmailDelivery };
+  let staffEmailDelivery: EventEditorSaveResult["staffEmailDelivery"] =
+    "NOT_REQUESTED";
+  if (emailCandidates.length && options.sendStaffInvites) {
+    staffEmailDelivery = await options.sendStaffInvites(
+      emailCandidates,
+      eventId,
+    );
+  }
+  const snapshot =
+    savedSnapshot ??
+    (await loadEventEditorSnapshot(eventId, { actor, client }));
+  return {
+    status: "SAVED",
+    snapshot,
+    questionIdMap,
+    staffEmailDelivery,
+    scheduleOutcome,
+  };
 };
 
-const draftOrganizationId = (draft: EventEditorDraft): string | null => draft.basics.organizationId?.trim() || null;
+const draftOrganizationId = (draft: EventEditorDraft): string | null =>
+  draft.basics.organizationId?.trim() || null;
 export const createEventEditor = async (
   actor: EditorActor,
   command: CreateEventEditorCommand,
@@ -355,6 +561,12 @@ export const createEventEditor = async (
   let firstClaimResult: EventEditorSaveResult | null = null;
   let questionIdMap: Record<string, string> = {};
   let emailCandidates: unknown[] = [];
+  let scheduleOutcome: EventEditorScheduleOutcome = {
+    status: "NOT_REQUESTED",
+    matchCount: 0,
+    warnings: [],
+  };
+  let scheduleNotification: MatchScheduleNotificationPlan | null = null;
 
   await client.$transaction(async (tx: Prisma.TransactionClient) => {
     const claimed = await claimEventEditorCreateOperation({
@@ -369,7 +581,9 @@ export const createEventEditor = async (
     const organizationId = draftOrganizationId(command.draft);
     const requestedHostId = command.draft.basics.hostId;
     if (!actor.isAdmin && requestedHostId && requestedHostId !== actor.userId) {
-      throw new EditorPermissionError('The selected event host cannot create this event.');
+      throw new EditorPermissionError(
+        "The selected event host cannot create this event.",
+      );
     }
     if (!actor.isAdmin && organizationId) {
       const organization = await tx.organizations.findUnique({
@@ -377,14 +591,26 @@ export const createEventEditor = async (
         select: { id: true, ownerId: true, enabledFeatures: true },
       });
       if (!organization) {
-        throw new EditorCapabilityError('Organization not found.');
+        throw new EditorCapabilityError("Organization not found.");
       }
-      if (!await hasOrgPermission({ ...actor, isAdmin: Boolean(actor.isAdmin) }, organization, ORG_PERMISSIONS.EVENTS_MANAGE, tx)) {
+      if (
+        !(await hasOrgPermission(
+          { ...actor, isAdmin: Boolean(actor.isAdmin) },
+          organization,
+          ORG_PERMISSIONS.EVENTS_MANAGE,
+          tx,
+        ))
+      ) {
         throw new EditorPermissionError();
       }
-      const requiredFeature = command.draft.basics.eventType.toUpperCase() === 'TRYOUT' ? 'CLUB_TEAMS' : 'EVENT_MANAGEMENT';
+      const requiredFeature =
+        command.draft.basics.eventType.toUpperCase() === "TRYOUT"
+          ? "CLUB_TEAMS"
+          : "EVENT_MANAGEMENT";
       if (!organization.enabledFeatures.includes(requiredFeature)) {
-        throw new EditorCapabilityError('Enable event management tools before creating events.');
+        throw new EditorCapabilityError(
+          "Enable event management tools before creating events.",
+        );
       }
     }
     const createQuery: EventEditorBootstrapQuery = {
@@ -396,9 +622,14 @@ export const createEventEditor = async (
       rentalBookingId: command.draft.resources.rentalBookingId ?? undefined,
       start: command.draft.basics.start,
     };
-    const createSnapshot = await loadCreateEventEditorSnapshot(createQuery, { actor, client: tx });
+    const createSnapshot = await loadCreateEventEditorSnapshot(createQuery, {
+      actor,
+      client: tx,
+    });
+    assertImmutableFields(command.draft, claimed.eventId, createSnapshot);
     await assertPaymentCapability(command.draft, createSnapshot);
 
+    await acquireEventLock(tx, claimed.eventId);
     ({ questionIdMap, emailCandidates } = await saveWithinTransaction(
       tx,
       actor,
@@ -406,12 +637,43 @@ export const createEventEditor = async (
       claimed.eventId,
       createSnapshot,
     ));
-    const snapshot = await loadEventEditorSnapshot(claimed.eventId, { actor, client: tx });
+    if (command.completion.mode === "CREATE_AND_BUILD_SCHEDULE") {
+      const eventType = command.draft.basics.eventType.trim().toUpperCase();
+      if (!["LEAGUE", "TOURNAMENT"].includes(eventType)) {
+        throw new EditorScheduleIntentError(
+          "Create-and-build is only supported for League and Tournament events.",
+        );
+      }
+      const mutation = await reconcileEventSchedule({
+        tx,
+        eventId: claimed.eventId,
+        mode: "BUILD",
+        includePlaceholderTeams: true,
+      });
+      if (mutation.matches.length === 0) {
+        throw new EventScheduleMutationError(
+          "EDITOR_SCHEDULE_INPUT_INVALID",
+          "The scheduler did not produce any matches.",
+        );
+      }
+      scheduleNotification = mutation.notification;
+      scheduleOutcome = {
+        status: "BUILT",
+        matchCount: mutation.matches.length,
+        matches: editorMatchProjectionsFor(mutation.matches),
+        warnings: mutation.warnings,
+      };
+    }
+    const snapshot = await loadEventEditorSnapshot(claimed.eventId, {
+      actor,
+      client: tx,
+    });
     firstClaimResult = {
-      status: 'SAVED',
+      status: "SAVED",
       snapshot,
       questionIdMap,
-      staffEmailDelivery: 'NOT_REQUESTED',
+      staffEmailDelivery: "NOT_REQUESTED",
+      scheduleOutcome,
     };
     // Keep the receipt non-replayable until all post-commit hooks finish.
     // The canonical domain result is already durable for recovery.
@@ -419,42 +681,67 @@ export const createEventEditor = async (
       client: tx,
       createOperationId: command.createOperationId,
       result: firstClaimResult,
-      emailDelivery: 'PROCESSING',
+      emailDelivery: "PROCESSING",
     });
   });
 
-  const operationClaim: EventCreateOperationClaim | null = claim as EventCreateOperationClaim | null;
-  if (!operationClaim) throw new Error('The event create operation was not claimed.');
+  const operationClaim: EventCreateOperationClaim | null =
+    claim as EventCreateOperationClaim | null;
+  if (!operationClaim)
+    throw new Error("The event create operation was not claimed.");
   if (operationClaim.firstClaim === false) {
     const replay = operationClaim.result
       ? operationClaim
       : await waitForEventEditorCreateOperation({
-        client,
-        createOperationId: command.createOperationId,
-        actorUserId: actor.userId,
-        requestHash,
-        returnCommittedResultOnTimeout: true,
-      });
-    if (!replay.result) throw new Error('The event create operation has no stored result.');
+          client,
+          createOperationId: command.createOperationId,
+          actorUserId: actor.userId,
+          requestHash,
+          returnCommittedResultOnTimeout: true,
+        });
+    if (!replay.result)
+      throw new Error("The event create operation has no stored result.");
     return replay.result;
   }
-  const canonicalResult: EventEditorSaveResult | null = firstClaimResult as EventEditorSaveResult | null;
-  if (!canonicalResult) throw new Error('The event create operation has no canonical result.');
+  const canonicalResult: EventEditorSaveResult | null =
+    firstClaimResult as EventEditorSaveResult | null;
+  if (!canonicalResult)
+    throw new Error("The event create operation has no canonical result.");
 
-  let staffEmailDelivery: EventEditorSaveResult['staffEmailDelivery'] = 'NOT_REQUESTED';
+  let staffEmailDelivery: EventEditorSaveResult["staffEmailDelivery"] =
+    "NOT_REQUESTED";
   if (emailCandidates.length && options.sendStaffInvites) {
     try {
-      staffEmailDelivery = await options.sendStaffInvites(emailCandidates, operationClaim.eventId);
+      staffEmailDelivery = await options.sendStaffInvites(
+        emailCandidates,
+        operationClaim.eventId,
+      );
     } catch (error) {
-      staffEmailDelivery = 'FAILED';
-      console.error('[event-editor] staff invite delivery failed after create', error);
+      staffEmailDelivery = "FAILED";
+      console.error(
+        "[event-editor] staff invite delivery failed after create",
+        error,
+      );
     }
   }
   if (options.onEventCreated) {
     try {
       await options.onEventCreated(operationClaim.eventId, command.draft);
     } catch (error) {
-      console.error('[event-editor] create notification failed after commit', error);
+      console.error(
+        "[event-editor] create notification failed after commit",
+        error,
+      );
+    }
+  }
+  if (scheduleNotification && options.onScheduleChanged) {
+    try {
+      await options.onScheduleChanged(scheduleNotification);
+    } catch (error) {
+      console.error(
+        "[event-editor] schedule notification failed after create",
+        error,
+      );
     }
   }
   const finalResult = { ...canonicalResult, staffEmailDelivery };
@@ -468,7 +755,10 @@ export const createEventEditor = async (
   } catch (error) {
     // The committed canonical result remains replayable if delivery metadata
     // cannot be updated after the domain transaction.
-    console.error('[event-editor] create delivery metadata update failed', error);
+    console.error(
+      "[event-editor] create delivery metadata update failed",
+      error,
+    );
   }
   return finalResult;
 };
@@ -483,4 +773,5 @@ export const saveEventFromEditor = async (
   command: SaveEventEditorCommand,
   actor: EditorActor,
   options: EditorSaveOptions = {},
-): Promise<EventEditorSaveResult> => saveEventEditor(actor, command, eventId, options);
+): Promise<EventEditorSaveResult> =>
+  saveEventEditor(actor, command, eventId, options);

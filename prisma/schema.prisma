@@ -580,7 +580,6 @@ model Matches {
   division           String?
   team1Points        Int[]
   team2Points        Int[]
-  setResults         Int[]
   side               String?
   matchId            Int
   losersBracket      Boolean?

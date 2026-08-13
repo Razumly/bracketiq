@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { calculateAgeOnDate } from '@/lib/age';
+import {
+  EventConfigurationChangedError,
+  acquireEventLockAndLoadStructure,
+} from '@/server/events/eventRegistrations';
 import { dispatchRequiredEventDocuments } from '@/lib/eventConsentDispatch';
 import {
   acceptTeamInviteWithGuardianRules,
@@ -106,6 +110,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ re
       where: { id: registration.eventId },
       select: {
         id: true,
+        eventType: true,
         teamSignup: true,
         requiredTemplateIds: true,
         organizationId: true,
@@ -154,20 +159,38 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ re
         ? 'send_failed'
         : 'sent';
 
-  const approved = await prisma.eventRegistrations.update({
-    where: { id: registration.id },
-    data: {
-      status: approvedStatus,
-      consentDocumentId: consentDispatch?.firstDocumentId ?? registration.consentDocumentId ?? null,
-      consentStatus: approvedConsentStatus,
-      updatedAt: new Date(),
-    },
-  });
-
-  await prisma.events.update({
-    where: { id: event.id },
-    data: { updatedAt: new Date() },
-  });
+  let approved;
+  try {
+    const applyApproval = async (client: typeof prisma) => {
+      await acquireEventLockAndLoadStructure(client, event.id, {
+        eventType: event.eventType,
+        teamSignup: event.teamSignup,
+      });
+      const updatedRegistration = await (client as any).eventRegistrations.update({
+        where: { id: registration.id },
+        data: {
+          status: approvedStatus,
+          consentDocumentId: consentDispatch?.firstDocumentId ?? registration.consentDocumentId ?? null,
+          consentStatus: approvedConsentStatus,
+          updatedAt: new Date(),
+        },
+      });
+      await (client as any).events.update({
+        where: { id: event.id },
+        data: { updatedAt: new Date() },
+      });
+      return updatedRegistration;
+    };
+    approved = await (prisma as any).$transaction((tx: any) => applyApproval(tx));
+  } catch (error) {
+    if (error instanceof EventConfigurationChangedError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status },
+      );
+    }
+    throw error;
+  }
 
   const childAgeAtEvent = childProfile?.dateOfBirth
     ? calculateAgeOnDate(childProfile.dateOfBirth, event.start)

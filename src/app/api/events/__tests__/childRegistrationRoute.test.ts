@@ -3,6 +3,7 @@
 import { NextRequest } from 'next/server';
 
 const prismaMock = {
+  $transaction: jest.fn(),
   events: {
     findUnique: jest.fn(),
     update: jest.fn(),
@@ -35,6 +36,7 @@ const requireSessionMock = jest.fn();
 const dispatchRequiredEventDocumentsMock = jest.fn();
 const findEventRegistrationMock = jest.fn();
 const upsertEventRegistrationMock = jest.fn();
+const acquireEventLockAndLoadStructureMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/permissions', () => ({ requireSession: requireSessionMock }));
@@ -44,6 +46,7 @@ jest.mock('@/lib/eventConsentDispatch', () => ({
 jest.mock('@/server/events/eventRegistrations', () => ({
   findEventRegistration: (...args: unknown[]) => findEventRegistrationMock(...args),
   upsertEventRegistration: (...args: unknown[]) => upsertEventRegistrationMock(...args),
+  acquireEventLockAndLoadStructure: (...args: unknown[]) => acquireEventLockAndLoadStructureMock(...args),
 }));
 
 import { POST } from '@/app/api/events/[eventId]/registrations/child/route';
@@ -58,6 +61,7 @@ const jsonPost = (url: string, body: unknown) =>
 describe('POST /api/events/[eventId]/registrations/child', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => Promise<unknown>) => callback(prismaMock));
 
     requireSessionMock.mockResolvedValue({ userId: 'parent_1', isAdmin: false });
     dispatchRequiredEventDocumentsMock.mockResolvedValue({
@@ -129,7 +133,7 @@ describe('POST /api/events/[eventId]/registrations/child', () => {
       registrantId: 'child_1',
       status: 'STARTED',
       consentStatus: 'child_email_required',
-    }));
+    }), expect.anything());
   });
 
   it('blocks unverified parents from paid child event registration', async () => {
@@ -217,6 +221,6 @@ describe('POST /api/events/[eventId]/registrations/child', () => {
       registrantType: 'CHILD',
       registrantId: 'child_1',
       status: 'ACTIVE',
-    }));
+    }), expect.anything());
   });
 });

@@ -409,7 +409,6 @@ const isMatchCalendarResource = (value: unknown): value is Match => (
   && (
     typeof value.matchId === 'number'
     || Array.isArray(value.team1Points)
-    || Array.isArray(value.setResults)
   )
 );
 

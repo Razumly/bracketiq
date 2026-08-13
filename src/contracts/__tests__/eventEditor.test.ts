@@ -109,19 +109,29 @@ const draft = {
     pendingInvites: [],
   },
 };
+const createOnlyCompletion = { mode: 'CREATE_ONLY' as const };
+const newScheduleState = {
+  sourceType: null,
+  matchCount: 0,
+  revision: 'new',
+  hasProtectedHistory: false,
+};
+
 
 describe('event editor contracts', () => {
   it('accepts a complete command and preserves new question identity', () => {
     const parsed = createEventEditorCommandSchema.parse({
-      contractVersion: 2,
+      contractVersion: 3,
       createOperationId: 'create-operation-1',
       draft,
+      completion: createOnlyCompletion,
     });
     expect(parsed.draft.registration.questions[0]).toEqual(expect.objectContaining({ clientId: 'question-client-1' }));
   });
+
   it('accepts the supported OFF official scheduling mode', () => {
     const parsed = createEventEditorCommandSchema.parse({
-      contractVersion: 2,
+      contractVersion: 3,
       createOperationId: 'create-operation-off',
       draft: {
         ...draft,
@@ -130,16 +140,17 @@ describe('event editor contracts', () => {
           officialSchedulingMode: 'OFF',
         },
       },
+      completion: createOnlyCompletion,
     });
-
     expect(parsed.draft.staff.officialSchedulingMode).toBe('OFF');
   });
+
   it('requires the bootstrap operation identity and preserves the selected start', () => {
     const parsed = eventEditorCreateBootstrapSchema.parse({
-      contractVersion: 2,
+      contractVersion: 3,
       createOperationId: 'create-operation-1',
       snapshot: {
-        contractVersion: 2,
+        contractVersion: 3,
         mode: 'CREATE',
         eventId: null,
         editorRevision: 'new',
@@ -153,6 +164,7 @@ describe('event editor contracts', () => {
         },
         catalogs: { sports: [], organizations: [], fields: [], templates: [] },
         immutable: { fieldNames: [], rental: false, template: false },
+        scheduleState: newScheduleState,
       },
     });
     expect(parsed.createOperationId).toBe('create-operation-1');
@@ -166,7 +178,7 @@ describe('event editor contracts', () => {
   it('rejects hydrated or computed values at the command boundary', () => {
     expect(() => eventEditorDraftSchema.parse({ ...draft, matches: [] })).toThrow();
     expect(() => saveEventEditorCommandSchema.parse({
-      contractVersion: 2,
+      contractVersion: 3,
       editorRevision: 'rev_1',
       staffRevision: null,
       draft: { ...draft, attendees: [] },
@@ -174,10 +186,16 @@ describe('event editor contracts', () => {
   });
 
   it('requires an end constraint only for fixed-end scheduling', () => {
-    expect(eventEditorDraftSchema.parse({ ...draft, schedule: { mode: 'FIXED_END', endConstraint: '2026-09-01T18:00:00.000Z' } }).schedule.mode).toBe('FIXED_END');
-    expect(() => eventEditorDraftSchema.parse({ ...draft, schedule: { mode: 'FIXED_END', endConstraint: null } })).toThrow();
+    expect(eventEditorDraftSchema.parse({
+      ...draft,
+      schedule: { mode: 'FIXED_END', endConstraint: '2026-09-01T18:00:00.000Z' },
+    }).schedule.mode).toBe('FIXED_END');
+    expect(() => eventEditorDraftSchema.parse({
+      ...draft,
+      schedule: { mode: 'FIXED_END', endConstraint: null },
+    })).toThrow();
     expect(() => eventEditorSnapshotSchema.parse({
-      contractVersion: 2,
+      contractVersion: 3,
       mode: 'CREATE',
       eventId: null,
       editorRevision: 'new',
@@ -188,13 +206,14 @@ describe('event editor contracts', () => {
       immutable: {},
     })).toThrow();
   });
+
   it.each([
     ['FREE', 0],
     ['ONLINE', 7500],
     ['MANUAL', 0],
   ] as const)('round-trips %s payment mode without fabrication', (mode, priceCents) => {
     const snapshot = {
-      contractVersion: 2,
+      contractVersion: 3,
       mode: 'EDIT',
       eventId: 'event_1',
       editorRevision: 'rev_1',
@@ -218,6 +237,7 @@ describe('event editor contracts', () => {
       },
       catalogs: { sports: [], organizations: [], fields: [], templates: [] },
       immutable: { fieldNames: [], rental: false, template: false },
+      scheduleState: { ...newScheduleState, revision: 'rev_1' },
     } as EventEditorSnapshot;
     const formValues = editorSnapshotToFormValues(snapshot);
     const roundTrip = legacyEventToEditorDraft(formValues as unknown as Event).registration.payment;

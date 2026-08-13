@@ -84,10 +84,13 @@ export const isPlayoffMatch = (match: Match): boolean => (
 );
 
 export const isMatchScored = (match: Match): boolean => {
-  if (!match.setResults?.length) {
-    return false;
+  if (match.status === 'COMPLETE' && Boolean(match.winnerEventTeamId)) {
+    return true;
   }
-  return match.setResults.every((result) => result === 1 || result === 2);
+  const segments = Array.isArray(match.segments) ? match.segments : [];
+  return segments.length > 0 && segments.every((segment) => (
+    segment.status === 'COMPLETE' && Boolean(segment.winnerEventTeamId)
+  ));
 };
 
 const resolveLeagueScoringValue = (value: unknown): number => {

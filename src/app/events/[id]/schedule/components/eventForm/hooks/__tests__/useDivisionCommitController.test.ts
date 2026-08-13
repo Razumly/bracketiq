@@ -236,6 +236,46 @@ describe('useDivisionCommitController', () => {
             error: null,
         }));
     });
+    it('retains split-division schedule defaults in the editor after adding a division', async () => {
+        const eventData = buildEventData({
+            eventType: 'LEAGUE',
+            singleDivision: false,
+            leagueData: {
+                ...LEAGUE_CONFIG,
+                includePlayoffs: true,
+            },
+        });
+        const editor = buildEditor({
+            playoffTeamCount: 6,
+            leagueConfig: {
+                ...LEAGUE_CONFIG,
+                includePlayoffs: true,
+                restTimeMinutes: 15,
+            },
+            playoffConfig: buildTournamentConfig({ restTimeMinutes: 20 }),
+        });
+        const { result } = renderHook(() => useDivisionCommitHarness({ editor, eventData }));
+
+        act(() => result.current.handleSaveDivisionDetail());
+
+        await waitFor(() => expect(result.current.formValues.divisionDetails).toHaveLength(1));
+        expect(result.current.formValues.divisionDetails[0]).toEqual(expect.objectContaining({
+            playoffTeamCount: 6,
+            restTimeMinutes: 15,
+            playoffConfig: expect.objectContaining({
+                restTimeMinutes: 20,
+            }),
+        }));
+        expect(result.current.divisionEditor).toEqual(expect.objectContaining({
+            playoffTeamCount: 6,
+            leagueConfig: expect.objectContaining({
+                restTimeMinutes: 15,
+            }),
+            playoffConfig: expect.objectContaining({
+                restTimeMinutes: 20,
+            }),
+        }));
+    });
 
     it('uses event-level price, capacity, and installments for a single-division tournament', async () => {
         const eventData = buildEventData({

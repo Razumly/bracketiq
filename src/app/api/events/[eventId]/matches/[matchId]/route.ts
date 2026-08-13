@@ -45,7 +45,6 @@ import { parseMatchInstantInput } from '@/server/matches/instantPayloads';
 import { assertCanViewEventSchedule } from '@/server/eventVisibility';
 import { findDollarPrefixedFields } from '@/server/requestParsing';
 import {
-  assertLegacySetScoreUpdateAllowed,
   assertSetSegmentOperationsAllowed,
 } from '@/server/matches/setScoringRules';
 import { claimMatchOperationReceipts } from '@/server/matches/clientOperationReplay';
@@ -135,7 +134,6 @@ const updateSchema = z.object({
   locked: z.boolean().optional(),
   team1Points: z.array(z.number()).optional(),
   team2Points: z.array(z.number()).optional(),
-  setResults: z.array(z.number()).optional(),
   lifecycle: lifecycleSchema,
   segmentOperations: z.array(segmentOperationSchema).optional(),
   incidentOperations: z.array(incidentOperationSchema).optional(),
@@ -170,7 +168,7 @@ const startsMatch = (lifecycle: z.infer<typeof lifecycleSchema>): boolean => {
 
 const hasScoreWrite = (update: z.infer<typeof updateSchema>): boolean => {
   const hasLegacyScoreOnlyWrite =
-    (update.team1Points !== undefined || update.team2Points !== undefined || update.setResults !== undefined) &&
+    (update.team1Points !== undefined || update.team2Points !== undefined) &&
     !update.matchAction &&
     !update.officialCheckIn &&
     !update.lifecycle &&
@@ -370,8 +368,7 @@ const resolveDefaultSegmentCount = (match: any): number => {
   const persistedSegmentCount = Array.isArray(match.segments) ? match.segments.length : 0;
   const legacyTeam1Count = Array.isArray(match.team1Points) ? match.team1Points.length : 0;
   const legacyTeam2Count = Array.isArray(match.team2Points) ? match.team2Points.length : 0;
-  const legacyResultCount = Array.isArray(match.setResults) ? match.setResults.length : 0;
-  return Math.max(configuredSegmentCount ?? 0, persistedSegmentCount, legacyTeam1Count, legacyTeam2Count, legacyResultCount, 1);
+  return Math.max(configuredSegmentCount ?? 0, persistedSegmentCount, legacyTeam1Count, legacyTeam2Count, 1);
 };
 
 const resolveMatchTeamId = (match: any, side: 'team1' | 'team2'): string | null => {
@@ -410,12 +407,6 @@ const ensureCanonicalSegmentForIncident = (match: any, segmentId: string | null)
   const team2Id = resolveMatchTeamId(match, 'team2');
   const team1Score = Math.max(0, Math.trunc(Number(match.team1Points?.[sequence - 1] ?? 0)));
   const team2Score = Math.max(0, Math.trunc(Number(match.team2Points?.[sequence - 1] ?? 0)));
-  const result = Number(match.setResults?.[sequence - 1] ?? 0);
-  const winnerEventTeamId = result === 1
-    ? team1Id
-    : result === 2
-      ? team2Id
-      : null;
   const scores: Record<string, number> = {};
   if (team1Id) {
     scores[team1Id] = team1Score;
@@ -429,13 +420,9 @@ const ensureCanonicalSegmentForIncident = (match: any, segmentId: string | null)
     eventId: normalizeIdToken(match.eventId),
     matchId,
     sequence,
-    status: winnerEventTeamId
-      ? 'COMPLETE'
-      : team1Score > 0 || team2Score > 0
-        ? 'IN_PROGRESS'
-        : 'NOT_STARTED',
+    status: team1Score > 0 || team2Score > 0 ? 'IN_PROGRESS' : 'NOT_STARTED',
     scores,
-    winnerEventTeamId,
+    winnerEventTeamId: null,
     startedAt: null,
     endedAt: null,
     resultType: null,
@@ -770,12 +757,6 @@ const syncLegacyArraysFromSegments = (match: any) => {
   const team2Id = normalizeIdToken(match.team2?.id ?? match.team2?.$id);
   match.team1Points = segments.map((segment) => team1Id ? Number(segment.scores?.[team1Id] ?? 0) : 0);
   match.team2Points = segments.map((segment) => team2Id ? Number(segment.scores?.[team2Id] ?? 0) : 0);
-  match.setResults = segments.map((segment) => {
-    const winner = normalizeIdToken(segment.winnerEventTeamId);
-    if (winner && team1Id && winner === team1Id) return 1;
-    if (winner && team2Id && winner === team2Id) return 2;
-    return 0;
-  });
 };
 
 const resolveWinnerEventTeamIdFromSegments = (match: any): string | null => {
@@ -1502,7 +1483,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
         updates = {
           team1Points: matchUpdate.team1Points,
           team2Points: matchUpdate.team2Points,
-          setResults: matchUpdate.setResults,
           officialCheckedIn: matchUpdate.officialCheckedIn,
           officialAssignments: Object.prototype.hasOwnProperty.call(matchUpdate, 'officialIds')
             ? normalizeOfficialAssignmentsOrThrow(matchUpdate.officialIds, {
@@ -1542,7 +1522,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
               Array.isArray(targetMatch.segments) ? targetMatch.segments.length : 0,
               Array.isArray(targetMatch.team1Points) ? targetMatch.team1Points.length : 0,
               Array.isArray(targetMatch.team2Points) ? targetMatch.team2Points.length : 0,
-              Array.isArray(targetMatch.setResults) ? targetMatch.setResults.length : 0,
             ),
           });
           targetMatch.matchRulesSnapshot = snapshot;
@@ -1565,7 +1544,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
       });
 
       assertLegacyScoreArraysAllowed(targetMatch, event, matchUpdate);
-      assertLegacySetScoreUpdateAllowed(event, targetMatch, matchUpdate);
       applyMatchUpdates(event, targetMatch, updates);
       if (matchUpdate.matchAction) {
         applyMatchActionOperation(targetMatch, matchUpdate.matchAction, isHostOrAdmin || isOfficial);
@@ -1589,7 +1567,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
           existingSegmentCount: Array.isArray(targetMatch.segments) ? targetMatch.segments.length : 0,
           existingTeam1PointCount: Array.isArray(targetMatch.team1Points) ? targetMatch.team1Points.length : 0,
           existingTeam2PointCount: Array.isArray(targetMatch.team2Points) ? targetMatch.team2Points.length : 0,
-          existingResultCount: Array.isArray(targetMatch.setResults) ? targetMatch.setResults.length : 0,
         });
         targetMatch.matchRulesSnapshot = contextualMatchRules;
         targetMatch.resolvedMatchRules = contextualMatchRules;

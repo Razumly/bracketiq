@@ -22,7 +22,6 @@ describe('buildFieldCalendarEvents', () => {
       team2Seed: undefined,
       team1Points: [0],
       team2Points: [0],
-      setResults: [0],
       previousLeftId: undefined,
       previousRightId: undefined,
       winnerNextMatchId: undefined,
@@ -81,7 +80,6 @@ describe('buildFieldCalendarEvents', () => {
       team2Seed: undefined,
       team1Points: [0],
       team2Points: [0],
-      setResults: [0],
       previousLeftId: undefined,
       previousRightId: undefined,
       winnerNextMatchId: undefined,
@@ -259,7 +257,6 @@ describe('buildFieldCalendarEvents', () => {
           end: '2026-03-10T14:00:00.000Z',
           team1Points: [],
           team2Points: [],
-          setResults: [],
           officialIds: [
             {
               userId: 'official_2',

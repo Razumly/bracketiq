@@ -3,6 +3,7 @@
 import { NextRequest } from 'next/server';
 
 const prismaMock = {
+  $transaction: jest.fn(),
   eventRegistrations: {
     findMany: jest.fn(),
     findFirst: jest.fn(),
@@ -38,8 +39,16 @@ const dispatchRequiredEventDocumentsMock = jest.fn();
 const listActiveChildIdsForParentMock = jest.fn();
 const acceptTeamInviteWithGuardianRulesMock = jest.fn();
 const declineTeamInviteWithGuardianRulesMock = jest.fn();
+const acquireEventLockAndLoadStructureMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
+jest.mock('@/server/events/eventRegistrations', () => {
+  const actual = jest.requireActual('@/server/events/eventRegistrations');
+  return {
+    ...actual,
+    acquireEventLockAndLoadStructure: (...args: any[]) => acquireEventLockAndLoadStructureMock(...args),
+  };
+});
 jest.mock('@/lib/permissions', () => ({ requireSession: requireSessionMock }));
 jest.mock('@/lib/eventConsentDispatch', () => ({
   dispatchRequiredEventDocuments: (...args: any[]) => dispatchRequiredEventDocumentsMock(...args),
@@ -63,6 +72,12 @@ const jsonPatch = (url: string, body: unknown) =>
 describe('family join requests routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => Promise<unknown>) => callback(prismaMock));
+    acquireEventLockAndLoadStructureMock.mockResolvedValue({
+      id: 'event_1',
+      eventType: 'EVENT',
+      teamSignup: false,
+    });
     requireSessionMock.mockResolvedValue({ userId: 'parent_1', isAdmin: false });
     listActiveChildIdsForParentMock.mockResolvedValue([]);
     acceptTeamInviteWithGuardianRulesMock.mockResolvedValue({ status: 200, body: { ok: true } });

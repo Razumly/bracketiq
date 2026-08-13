@@ -2,7 +2,11 @@ import { randomUUID } from 'crypto';
 import { prisma } from '@/lib/prisma';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { normalizeOptionalName } from '@/lib/nameCase';
-import { upsertEventRegistration, type RegistrationLifecycleStatus } from '@/server/events/eventRegistrations';
+import {
+  acquireEventLockAndLoadStructure,
+  upsertEventRegistration,
+  type RegistrationLifecycleStatus,
+} from '@/server/events/eventRegistrations';
 import {
   TEAM_JOIN_POLICY_CLOSED,
   resolveSerializedTeamJoinPolicy,
@@ -1479,6 +1483,11 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
   registrationStatus?: RegistrationLifecycleStatus;
   upsertRegistration?: boolean;
 }) => {
+  if (params.upsertRegistration !== false) {
+    await acquireEventLockAndLoadStructure(params.tx, params.eventId, {
+      teamSignup: true,
+    });
+  }
   const canonicalTeam = params.canonicalTeam ?? await loadCanonicalTeamById(params.canonicalTeamId, params.tx);
   if (!canonicalTeam) {
     throw new Error('Canonical team not found.');

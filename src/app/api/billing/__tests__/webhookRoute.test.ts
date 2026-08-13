@@ -53,6 +53,14 @@ const prismaMock = {
   $queryRaw: jest.fn(),
   $transaction: jest.fn(),
 };
+const acquireEventLockAndLoadStructureMock = jest.fn();
+jest.mock('@/server/events/eventRegistrations', () => {
+  const actual = jest.requireActual('@/server/events/eventRegistrations');
+  return {
+    ...actual,
+    acquireEventLockAndLoadStructure: (...args: any[]) => acquireEventLockAndLoadStructureMock(...args),
+  };
+});
 
 const sendPurchaseReceiptEmailMock = jest.fn();
 const sendPaymentFailureEmailMock = jest.fn();
@@ -131,6 +139,17 @@ describe('POST /api/billing/webhook', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    acquireEventLockAndLoadStructureMock.mockImplementation(async () => {
+      const rows = await prismaMock.$queryRaw();
+      const event = rows?.[0] as { id?: string; eventType?: string | null; teamSignup?: boolean | null } | undefined;
+      return event
+        ? {
+          id: event.id ?? 'event_1',
+          eventType: event.eventType ?? null,
+          teamSignup: event.teamSignup ?? null,
+        }
+        : null;
+    });
     sendPurchaseReceiptEmailMock.mockResolvedValue({ sent: true });
     sendPaymentFailureEmailMock.mockResolvedValue({ sent: true });
     delete process.env.STRIPE_SECRET_KEY;

@@ -13,6 +13,8 @@ import {
   upsertRegistrationQuestionResponse,
 } from '@/server/registrationQuestions';
 import {
+  EventConfigurationChangedError,
+  acquireEventLockAndLoadStructure,
   findEventRegistration,
   upsertEventRegistration,
 } from '@/server/events/eventRegistrations';
@@ -61,6 +63,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
       organizationId: true,
       price: true,
       eventType: true,
+      teamSignup: true,
       includePlayoffs: true,
       parentEvent: true,
       timeSlotIds: true,
@@ -194,35 +197,96 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
         ? 'send_failed'
         : 'sent';
 
-  const existingRegistration = await findEventRegistration({
-    eventId,
-    registrantType: 'CHILD',
-    registrantId: childId,
-    occurrence: resolvedOccurrence,
-  });
+  let registrationResult: {
+    registration: Awaited<ReturnType<typeof upsertEventRegistration>>;
+    existing: boolean;
+  };
+  try {
+    registrationResult = await prisma.$transaction(async (tx) => {
+      await acquireEventLockAndLoadStructure(tx, eventId, {
+        eventType: event.eventType,
+        teamSignup: event.teamSignup,
+      });
+      const lockedExistingRegistration = await findEventRegistration({
+        eventId,
+        registrantType: 'CHILD',
+        registrantId: childId,
+        occurrence: resolvedOccurrence,
+      }, tx);
+      if (lockedExistingRegistration) {
+        await tx.invites?.deleteMany?.({
+          where: {
+            type: 'EVENT',
+            eventId,
+            userId: childId,
+          },
+        });
+        return { registration: lockedExistingRegistration, existing: true };
+      }
 
-  if (existingRegistration) {
+      const registration = await upsertEventRegistration({
+        eventId,
+        registrantType: 'CHILD',
+        registrantId: childId,
+        parentId: session.userId,
+        rosterRole: 'PARTICIPANT',
+        status: needsConsent ? 'STARTED' : 'ACTIVE',
+        ageAtEvent: childAgeAtEvent,
+        divisionId: divisionSelection.selection.divisionId,
+        divisionTypeId: divisionSelection.selection.divisionTypeId,
+        divisionTypeKey: divisionSelection.selection.divisionTypeKey,
+        consentDocumentId,
+        consentStatus,
+        createdBy: session.userId,
+        occurrence: resolvedOccurrence,
+      }, tx);
+      if (eventAnswersSnapshot.length) {
+        await upsertRegistrationQuestionResponse({
+          scopeType: 'EVENT',
+          scopeId: eventId,
+          subjectType: 'EVENT_REGISTRATION',
+          subjectId: registration.id,
+          responderUserId: session.userId,
+          registrantUserId: childId,
+          registrantType: 'CHILD',
+          answersSnapshot: eventAnswersSnapshot,
+          client: tx,
+        });
+      }
+      await tx.invites?.deleteMany?.({
+        where: {
+          type: 'EVENT',
+          eventId,
+          userId: childId,
+        },
+      });
+      return { registration, existing: false };
+    });
+  } catch (error) {
+    if (error instanceof EventConfigurationChangedError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status },
+      );
+    }
+    throw error;
+  }
+
+  const registration = registrationResult.registration;
+  if (registrationResult.existing) {
     const warnings = [
       ...(!childEmail && childAgeAtEvent < 13
-        ? ['Under-13 child profile is missing email; child signature cannot be completed until email is added.']
+        ? ['Under-13 child profile is missing email; child signature cannot be completed until an email is added.']
         : []),
       ...(consentDispatch?.errors ?? []),
     ].filter((value) => value.trim().length > 0);
 
-    await prisma.invites?.deleteMany?.({
-      where: {
-        type: 'EVENT',
-        eventId,
-        userId: childId,
-      },
-    });
-
     return NextResponse.json({
-      registration: existingRegistration,
+      registration,
       consent: needsConsent
         ? {
-            documentId: existingRegistration.consentDocumentId ?? consentDocumentId ?? null,
-            status: existingRegistration.consentStatus ?? consentStatus ?? 'sent',
+            documentId: registration.consentDocumentId ?? consentDocumentId ?? null,
+            status: registration.consentStatus ?? consentStatus ?? 'sent',
             parentSignLink: null,
             childSignLink: null,
             childEmail: childEmail || null,
@@ -233,35 +297,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
     }, { status: 200 });
   }
 
-  const registration = await upsertEventRegistration({
-    eventId,
-    registrantType: 'CHILD',
-    registrantId: childId,
-    parentId: session.userId,
-    rosterRole: 'PARTICIPANT',
-    status: needsConsent ? 'STARTED' : 'ACTIVE',
-    ageAtEvent: childAgeAtEvent,
-    divisionId: divisionSelection.selection.divisionId,
-    divisionTypeId: divisionSelection.selection.divisionTypeId,
-    divisionTypeKey: divisionSelection.selection.divisionTypeKey,
-    consentDocumentId,
-    consentStatus,
-    createdBy: session.userId,
-    occurrence: resolvedOccurrence,
-  });
-  if (eventAnswersSnapshot.length) {
-    await upsertRegistrationQuestionResponse({
-      scopeType: 'EVENT',
-      scopeId: eventId,
-      subjectType: 'EVENT_REGISTRATION',
-      subjectId: registration.id,
-      responderUserId: session.userId,
-      registrantUserId: childId,
-      registrantType: 'CHILD',
-      answersSnapshot: eventAnswersSnapshot,
-    });
-  }
-
   const warnings = [
     ...(!childEmail && childAgeAtEvent < 13
       ? ['Under-13 child profile is missing email; child signature cannot be completed until email is added.']
@@ -269,13 +304,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
     ...(consentDispatch?.errors ?? []),
   ].filter((value) => value.trim().length > 0);
 
-  await prisma.invites?.deleteMany?.({
-    where: {
-      type: 'EVENT',
-      eventId,
-      userId: childId,
-    },
-  });
   if (registration.status === 'ACTIVE') {
     await sendEventRegistrationHostNotification({
       eventId,

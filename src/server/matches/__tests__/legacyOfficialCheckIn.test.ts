@@ -7,7 +7,6 @@ describe('normalizeLegacyOfficialCheckIn', () => {
         officialCheckedIn: true,
         team1Points: [0, 0, 0],
         team2Points: [0, 0, 0],
-        setResults: [0, 0, 0],
         segmentOperations: [{ sequence: 1, status: 'NOT_STARTED', scores: {} }],
       },
       { isHostOrAdmin: false, isOfficial: true },
@@ -21,7 +20,6 @@ describe('normalizeLegacyOfficialCheckIn', () => {
       officialCheckedIn: true,
       team1Points: [17, 0, 0],
       team2Points: [21, 0, 0],
-      setResults: [2, 0, 0],
       segmentOperations: [{
         sequence: 1,
         status: 'COMPLETE',

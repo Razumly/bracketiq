@@ -64,7 +64,6 @@ import {
   type MatchOfficialAssignment,
 } from '@/server/officials/config';
 import {
-  buildLegacySegments,
   resolveMatchRules,
   resolveMatchRulesForDivisionPhase,
   resolveMatchRulesForContext,
@@ -169,6 +168,18 @@ export class RentalBookingReservationError extends Error {
 export const isRentalBookingReservationError = (
   error: unknown,
 ): error is RentalBookingReservationError => error instanceof RentalBookingReservationError;
+export class EventFieldReferenceError extends Error {
+  constructor(fieldIds: string[]) {
+    super(`The selected field resources were not found: ${fieldIds.join(', ')}.`);
+    this.name = 'EventFieldReferenceError';
+  }
+}
+
+export const isEventFieldConfigurationError = (error: unknown): boolean => {
+  if (error instanceof EventFieldReferenceError) return true;
+  return error instanceof Error && error.message === EVENT_FIELDS_REQUIRED_MESSAGE;
+};
+
 
 const EVENT_FIELDS_REQUIRED_MESSAGE =
   'Select or create at least one field for this event.';
@@ -2859,20 +2870,7 @@ const buildMatches = (
         .sort((left, right) => Number(left.sequence ?? 0) - Number(right.sequence ?? 0))
         .map(serializeMatchSegmentRow)
       : [];
-    const legacySegments = shouldHydrateSegments && !persistedSegments.length
-      ? buildLegacySegments({
-          eventId: row.eventId ?? event.id,
-          matchId: row.id,
-          team1Id: row.team1Id ?? null,
-          team2Id: row.team2Id ?? null,
-          team1Points: ensureArray(row.team1Points),
-          team2Points: ensureArray(row.team2Points),
-          setResults: ensureArray(row.setResults),
-          start,
-          end,
-        })
-      : [];
-    const segments = shouldHydrateSegments ? (persistedSegments.length ? persistedSegments : legacySegments) : [];
+    const segments = shouldHydrateSegments ? persistedSegments : [];
     const hasBracketLinks = Boolean(
       row.losersBracket
       || row.previousLeftId
@@ -2921,7 +2919,6 @@ const buildMatches = (
         existingSegmentCount: segments.length,
         existingTeam1PointCount: ensureArray(row.team1Points).length,
         existingTeam2PointCount: ensureArray(row.team2Points).length,
-        existingResultCount: ensureArray(row.setResults).length,
       });
     const incidents = shouldHydrateIncidents
       ? (incidentRowsByMatchId.get(row.id) ?? [])
@@ -2956,9 +2953,8 @@ const buildMatches = (
       updatedAt: row.updatedAt ?? null,
       losersBracket: Boolean(row.losersBracket),
       division,
-      field: row.fieldId ? fields[row.fieldId] ?? null : null,
-      setResults: ensureArray(row.setResults),
       status: row.status ?? null,
+      field: row.fieldId ? fields[row.fieldId] ?? null : null,
       resultStatus: row.resultStatus ?? null,
       resultType: row.resultType ?? null,
       actualStart: toOptionalDate(row.actualStart),
@@ -3553,7 +3549,6 @@ export const saveMatches = async (
       division: match.division?.id ?? null,
       team1Points: match.team1Points ?? [],
       team2Points: match.team2Points ?? [],
-      setResults: match.setResults ?? [],
       status: match.status ?? null,
       resultStatus: match.resultStatus ?? null,
       resultType: match.resultType ?? null,
@@ -3934,6 +3929,30 @@ export const persistScheduledRosterTeams = async (
   return rosterTeamIds;
 };
 
+export const deletePristineScheduleByEvent = async (
+  eventId: string,
+  client: PrismaLike = prisma,
+): Promise<string[]> => {
+  const matches = await client.matches.findMany({
+    where: { eventId },
+    select: { id: true },
+  });
+  const matchIds = matches
+    .map((match: { id?: unknown }) => match.id)
+    .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0);
+  if (!matchIds.length) return [];
+
+  await client.matchSegments.deleteMany({
+    where: { matchId: { in: matchIds } },
+  });
+  await client.broadcastOverlayStates.updateMany({
+    where: { eventId, activeMatchId: { in: matchIds } },
+    data: { activeMatchId: null, updatedAt: new Date() },
+  });
+  await client.matches.deleteMany({ where: { id: { in: matchIds } } });
+  return matchIds;
+};
+
 export const deleteMatchesByEvent = async (
   eventId: string,
   client: PrismaLike = prisma,
@@ -4168,13 +4187,14 @@ export const syncEventDivisions = async (
     }
   }
 
+  const hasMultipleRegularDivisions = divisionIds.length > 1;
   if (params.includePlayoffs && !tournamentPoolPlayEnabled) {
-    requireExplicitLeaguePlayoffTeamCount(
-      params.defaultPlayoffTeamCount,
-      'Playoff team count must be at least 2 when playoffs are enabled.',
-    );
-
-    if (!params.singleDivision) {
+    if (!hasMultipleRegularDivisions) {
+      requireExplicitLeaguePlayoffTeamCount(
+        params.defaultPlayoffTeamCount,
+        'Playoff team count must be at least 2 when playoffs are enabled.',
+      );
+    } else {
       for (const rawDivisionId of divisionIds) {
         const normalizedDivisionId = normalizeDivisionKey(rawDivisionId) ?? rawDivisionId;
         const detail = detailLookup.get(normalizedDivisionId)
@@ -4866,7 +4886,19 @@ export const upsertEventFromPayload = async (
   const canPersistEventPricing = billingOwnerHasStripeAccount || isManualRegistrationPayment || isAffiliateExternalEvent;
   const existingFieldIds = normalizeFieldIds(existingEvent?.fieldIds ?? []);
   const existingTimeSlotIds = normalizeFieldIds(existingEvent?.timeSlotIds ?? []);
-  const fields = Array.isArray(payload.fields) ? payload.fields : [];
+  const hasExplicitFieldResourcePayload = (
+    Object.prototype.hasOwnProperty.call(payload, 'fields')
+    || Object.prototype.hasOwnProperty.call(payload, 'fieldIds')
+    || Object.prototype.hasOwnProperty.call(payload, 'timeSlots')
+  );
+  const fields = Array.isArray(payload.fields)
+    ? payload.fields.map((field: unknown) => {
+      if (!field || typeof field !== 'object' || Array.isArray(field)) return field;
+      const fieldRecord = field as Record<string, unknown>;
+      const fieldId = normalizeEntityId(fieldRecord.id) ?? normalizeEntityId(fieldRecord.$id);
+      return fieldId ? { ...fieldRecord, id: fieldId } : fieldRecord;
+    })
+    : [];
   const payloadIncludesLocation = Object.prototype.hasOwnProperty.call(payload, 'location');
   const eventLocation = payloadIncludesLocation
     ? payload.location ?? ''
@@ -5043,10 +5075,11 @@ export const upsertEventFromPayload = async (
   const fieldsToPersistIds = fieldsToPersist
     .map((field: any) => field?.id)
     .filter((fieldId: unknown): fieldId is string => typeof fieldId === 'string' && fieldId.length > 0);
+  const fieldsToInspect = Array.from(new Set([...fieldsToPersistIds, ...fieldIds]));
   const existingFieldOwnershipById = new Map<string, { organizationId: string | null; createdBy: string | null }>();
-  if (fieldsToPersistIds.length && typeof (client as any).fields?.findMany === 'function') {
+  if (fieldsToInspect.length && typeof (client as any).fields?.findMany === 'function') {
     const existingFields = await (client as any).fields.findMany({
-      where: { id: { in: fieldsToPersistIds } },
+      where: { id: { in: fieldsToInspect } },
       select: { id: true, organizationId: true, createdBy: true },
     });
     for (const row of existingFields as Array<{ id: string; organizationId?: string | null; createdBy?: string | null }>) {
@@ -5057,6 +5090,15 @@ export const upsertEventFromPayload = async (
           createdBy: normalizeEntityId(row.createdBy) ?? null,
         },
       );
+    }
+  }
+  if (hasExplicitFieldResourcePayload || !existingEvent) {
+    const payloadFieldIdSet = new Set(fieldsToPersistIds);
+    const missingFieldIds = fieldIds.filter((fieldId) => (
+      !existingFieldOwnershipById.has(fieldId) && !payloadFieldIdSet.has(fieldId)
+    ));
+    if (missingFieldIds.length) {
+      throw new EventFieldReferenceError(missingFieldIds);
     }
   }
   const teamIds = Array.isArray(payload.teamIds) && payload.teamIds.length

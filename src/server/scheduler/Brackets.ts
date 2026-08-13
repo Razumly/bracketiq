@@ -691,7 +691,6 @@ export class Brackets {
       losersBracket: isLoser,
       division: this.currentDivision,
       field: null,
-      setResults: Array(multiplier).fill(0),
       bufferMs: this.restBuffer(),
       side,
       officialCheckedIn: false,

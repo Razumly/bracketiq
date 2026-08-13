@@ -29,7 +29,6 @@ export type AggregateMatches = {
 export type MatchesAvgAggregateOutputType = {
   team1Points: number | null
   team2Points: number | null
-  setResults: number | null
   matchId: number | null
   team1Seed: number | null
   team2Seed: number | null
@@ -38,7 +37,6 @@ export type MatchesAvgAggregateOutputType = {
 export type MatchesSumAggregateOutputType = {
   team1Points: number[]
   team2Points: number[]
-  setResults: number[]
   matchId: number | null
   team1Seed: number | null
   team2Seed: number | null
@@ -120,7 +118,6 @@ export type MatchesCountAggregateOutputType = {
   division: number
   team1Points: number
   team2Points: number
-  setResults: number
   side: number
   matchId: number
   losersBracket: number
@@ -153,7 +150,6 @@ export type MatchesCountAggregateOutputType = {
 export type MatchesAvgAggregateInputType = {
   team1Points?: true
   team2Points?: true
-  setResults?: true
   matchId?: true
   team1Seed?: true
   team2Seed?: true
@@ -162,7 +158,6 @@ export type MatchesAvgAggregateInputType = {
 export type MatchesSumAggregateInputType = {
   team1Points?: true
   team2Points?: true
-  setResults?: true
   matchId?: true
   team1Seed?: true
   team2Seed?: true
@@ -244,7 +239,6 @@ export type MatchesCountAggregateInputType = {
   division?: true
   team1Points?: true
   team2Points?: true
-  setResults?: true
   side?: true
   matchId?: true
   losersBracket?: true
@@ -369,7 +363,6 @@ export type MatchesGroupByOutputType = {
   division: string | null
   team1Points: number[]
   team2Points: number[]
-  setResults: number[]
   side: string | null
   matchId: number
   losersBracket: boolean | null
@@ -430,7 +423,6 @@ export type MatchesWhereInput = {
   division?: Prisma.StringNullableFilter<"Matches"> | string | null
   team1Points?: Prisma.IntNullableListFilter<"Matches">
   team2Points?: Prisma.IntNullableListFilter<"Matches">
-  setResults?: Prisma.IntNullableListFilter<"Matches">
   side?: Prisma.StringNullableFilter<"Matches"> | string | null
   matchId?: Prisma.IntFilter<"Matches"> | number
   losersBracket?: Prisma.BoolNullableFilter<"Matches"> | boolean | null
@@ -468,7 +460,6 @@ export type MatchesOrderByWithRelationInput = {
   division?: Prisma.SortOrderInput | Prisma.SortOrder
   team1Points?: Prisma.SortOrder
   team2Points?: Prisma.SortOrder
-  setResults?: Prisma.SortOrder
   side?: Prisma.SortOrderInput | Prisma.SortOrder
   matchId?: Prisma.SortOrder
   losersBracket?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -509,7 +500,6 @@ export type MatchesWhereUniqueInput = Prisma.AtLeast<{
   division?: Prisma.StringNullableFilter<"Matches"> | string | null
   team1Points?: Prisma.IntNullableListFilter<"Matches">
   team2Points?: Prisma.IntNullableListFilter<"Matches">
-  setResults?: Prisma.IntNullableListFilter<"Matches">
   side?: Prisma.StringNullableFilter<"Matches"> | string | null
   matchId?: Prisma.IntFilter<"Matches"> | number
   losersBracket?: Prisma.BoolNullableFilter<"Matches"> | boolean | null
@@ -547,7 +537,6 @@ export type MatchesOrderByWithAggregationInput = {
   division?: Prisma.SortOrderInput | Prisma.SortOrder
   team1Points?: Prisma.SortOrder
   team2Points?: Prisma.SortOrder
-  setResults?: Prisma.SortOrder
   side?: Prisma.SortOrderInput | Prisma.SortOrder
   matchId?: Prisma.SortOrder
   losersBracket?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -593,7 +582,6 @@ export type MatchesScalarWhereWithAggregatesInput = {
   division?: Prisma.StringNullableWithAggregatesFilter<"Matches"> | string | null
   team1Points?: Prisma.IntNullableListFilter<"Matches">
   team2Points?: Prisma.IntNullableListFilter<"Matches">
-  setResults?: Prisma.IntNullableListFilter<"Matches">
   side?: Prisma.StringNullableWithAggregatesFilter<"Matches"> | string | null
   matchId?: Prisma.IntWithAggregatesFilter<"Matches"> | number
   losersBracket?: Prisma.BoolNullableWithAggregatesFilter<"Matches"> | boolean | null
@@ -631,7 +619,6 @@ export type MatchesCreateInput = {
   division?: string | null
   team1Points?: Prisma.MatchesCreateteam1PointsInput | number[]
   team2Points?: Prisma.MatchesCreateteam2PointsInput | number[]
-  setResults?: Prisma.MatchesCreatesetResultsInput | number[]
   side?: string | null
   matchId: number
   losersBracket?: boolean | null
@@ -669,7 +656,6 @@ export type MatchesUncheckedCreateInput = {
   division?: string | null
   team1Points?: Prisma.MatchesCreateteam1PointsInput | number[]
   team2Points?: Prisma.MatchesCreateteam2PointsInput | number[]
-  setResults?: Prisma.MatchesCreatesetResultsInput | number[]
   side?: string | null
   matchId: number
   losersBracket?: boolean | null
@@ -707,7 +693,6 @@ export type MatchesUpdateInput = {
   division?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   team1Points?: Prisma.MatchesUpdateteam1PointsInput | number[]
   team2Points?: Prisma.MatchesUpdateteam2PointsInput | number[]
-  setResults?: Prisma.MatchesUpdatesetResultsInput | number[]
   side?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   matchId?: Prisma.IntFieldUpdateOperationsInput | number
   losersBracket?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -745,7 +730,6 @@ export type MatchesUncheckedUpdateInput = {
   division?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   team1Points?: Prisma.MatchesUpdateteam1PointsInput | number[]
   team2Points?: Prisma.MatchesUpdateteam2PointsInput | number[]
-  setResults?: Prisma.MatchesUpdatesetResultsInput | number[]
   side?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   matchId?: Prisma.IntFieldUpdateOperationsInput | number
   losersBracket?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -783,7 +767,6 @@ export type MatchesCreateManyInput = {
   division?: string | null
   team1Points?: Prisma.MatchesCreateteam1PointsInput | number[]
   team2Points?: Prisma.MatchesCreateteam2PointsInput | number[]
-  setResults?: Prisma.MatchesCreatesetResultsInput | number[]
   side?: string | null
   matchId: number
   losersBracket?: boolean | null
@@ -821,7 +804,6 @@ export type MatchesUpdateManyMutationInput = {
   division?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   team1Points?: Prisma.MatchesUpdateteam1PointsInput | number[]
   team2Points?: Prisma.MatchesUpdateteam2PointsInput | number[]
-  setResults?: Prisma.MatchesUpdatesetResultsInput | number[]
   side?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   matchId?: Prisma.IntFieldUpdateOperationsInput | number
   losersBracket?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -859,7 +841,6 @@ export type MatchesUncheckedUpdateManyInput = {
   division?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   team1Points?: Prisma.MatchesUpdateteam1PointsInput | number[]
   team2Points?: Prisma.MatchesUpdateteam2PointsInput | number[]
-  setResults?: Prisma.MatchesUpdatesetResultsInput | number[]
   side?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   matchId?: Prisma.IntFieldUpdateOperationsInput | number
   losersBracket?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -905,7 +886,6 @@ export type MatchesCountOrderByAggregateInput = {
   division?: Prisma.SortOrder
   team1Points?: Prisma.SortOrder
   team2Points?: Prisma.SortOrder
-  setResults?: Prisma.SortOrder
   side?: Prisma.SortOrder
   matchId?: Prisma.SortOrder
   losersBracket?: Prisma.SortOrder
@@ -936,7 +916,6 @@ export type MatchesCountOrderByAggregateInput = {
 export type MatchesAvgOrderByAggregateInput = {
   team1Points?: Prisma.SortOrder
   team2Points?: Prisma.SortOrder
-  setResults?: Prisma.SortOrder
   matchId?: Prisma.SortOrder
   team1Seed?: Prisma.SortOrder
   team2Seed?: Prisma.SortOrder
@@ -1011,7 +990,6 @@ export type MatchesMinOrderByAggregateInput = {
 export type MatchesSumOrderByAggregateInput = {
   team1Points?: Prisma.SortOrder
   team2Points?: Prisma.SortOrder
-  setResults?: Prisma.SortOrder
   matchId?: Prisma.SortOrder
   team1Seed?: Prisma.SortOrder
   team2Seed?: Prisma.SortOrder
@@ -1025,21 +1003,12 @@ export type MatchesCreateteam2PointsInput = {
   set: number[]
 }
 
-export type MatchesCreatesetResultsInput = {
-  set: number[]
-}
-
 export type MatchesUpdateteam1PointsInput = {
   set?: number[]
   push?: number | number[]
 }
 
 export type MatchesUpdateteam2PointsInput = {
-  set?: number[]
-  push?: number | number[]
-}
-
-export type MatchesUpdatesetResultsInput = {
   set?: number[]
   push?: number | number[]
 }
@@ -1064,7 +1033,6 @@ export type MatchesSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs 
   division?: boolean
   team1Points?: boolean
   team2Points?: boolean
-  setResults?: boolean
   side?: boolean
   matchId?: boolean
   losersBracket?: boolean
@@ -1102,7 +1070,6 @@ export type MatchesSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Exten
   division?: boolean
   team1Points?: boolean
   team2Points?: boolean
-  setResults?: boolean
   side?: boolean
   matchId?: boolean
   losersBracket?: boolean
@@ -1140,7 +1107,6 @@ export type MatchesSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Exten
   division?: boolean
   team1Points?: boolean
   team2Points?: boolean
-  setResults?: boolean
   side?: boolean
   matchId?: boolean
   losersBracket?: boolean
@@ -1178,7 +1144,6 @@ export type MatchesSelectScalar = {
   division?: boolean
   team1Points?: boolean
   team2Points?: boolean
-  setResults?: boolean
   side?: boolean
   matchId?: boolean
   losersBracket?: boolean
@@ -1206,7 +1171,7 @@ export type MatchesSelectScalar = {
   teamOfficialId?: boolean
 }
 
-export type MatchesOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "start" | "end" | "locked" | "division" | "team1Points" | "team2Points" | "setResults" | "side" | "matchId" | "losersBracket" | "status" | "resultStatus" | "resultType" | "actualStart" | "actualEnd" | "statusReason" | "winnerEventTeamId" | "matchRulesSnapshot" | "winnerNextMatchId" | "loserNextMatchId" | "previousRightId" | "previousLeftId" | "officialCheckedIn" | "officialId" | "officialIds" | "team1Id" | "team2Id" | "team1Seed" | "team2Seed" | "eventId" | "fieldId" | "teamOfficialId", ExtArgs["result"]["matches"]>
+export type MatchesOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "start" | "end" | "locked" | "division" | "team1Points" | "team2Points" | "side" | "matchId" | "losersBracket" | "status" | "resultStatus" | "resultType" | "actualStart" | "actualEnd" | "statusReason" | "winnerEventTeamId" | "matchRulesSnapshot" | "winnerNextMatchId" | "loserNextMatchId" | "previousRightId" | "previousLeftId" | "officialCheckedIn" | "officialId" | "officialIds" | "team1Id" | "team2Id" | "team1Seed" | "team2Seed" | "eventId" | "fieldId" | "teamOfficialId", ExtArgs["result"]["matches"]>
 
 export type $MatchesPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "Matches"
@@ -1221,7 +1186,6 @@ export type $MatchesPayload<ExtArgs extends runtime.Types.Extensions.InternalArg
     division: string | null
     team1Points: number[]
     team2Points: number[]
-    setResults: number[]
     side: string | null
     matchId: number
     losersBracket: boolean | null
@@ -1679,7 +1643,6 @@ export interface MatchesFieldRefs {
   readonly division: Prisma.FieldRef<"Matches", 'String'>
   readonly team1Points: Prisma.FieldRef<"Matches", 'Int[]'>
   readonly team2Points: Prisma.FieldRef<"Matches", 'Int[]'>
-  readonly setResults: Prisma.FieldRef<"Matches", 'Int[]'>
   readonly side: Prisma.FieldRef<"Matches", 'String'>
   readonly matchId: Prisma.FieldRef<"Matches", 'Int'>
   readonly losersBracket: Prisma.FieldRef<"Matches", 'Boolean'>

@@ -71,10 +71,14 @@ const normalizeQuestion = (value: unknown, index: number): RegistrationQuestionI
   return clientId ? { ...base, clientId } : { ...base, clientId: `question-client-${index + 1}` };
 };
 
-const normalizePendingInvite = (value: Record<string, unknown>): Record<string, unknown> => ({
-  ...value,
-  roles: stringArray(value.roles ?? value.staffTypes),
-});
+const normalizePendingInvite = (value: Record<string, unknown>): Record<string, unknown> => {
+  const inviteId = nullableString(value.id) ?? nullableString(value.$id);
+  return {
+    ...value,
+    ...(inviteId ? { id: inviteId } : {}),
+    roles: stringArray(value.roles ?? value.staffTypes),
+  };
+};
 
 const normalizeQuestions = (value: unknown): RegistrationQuestionInput[] => (
   objectArray(value).map(normalizeQuestion).filter((entry): entry is RegistrationQuestionInput => Boolean(entry))
@@ -397,4 +401,10 @@ export const emptyEditorSnapshot = (draft: EventEditorDraft, mode: 'CREATE' | 'E
   },
   catalogs: { sports: [], organizations: [], fields: [], templates: [] },
   immutable: { fieldNames: [], rental: false, template: false },
+  scheduleState: {
+    sourceType: null,
+    matchCount: 0,
+    revision: 'new',
+    hasProtectedHistory: false,
+  },
 });

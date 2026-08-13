@@ -13,6 +13,7 @@ import { legacyEventToEditorDraft } from '@/app/events/[id]/schedule/components/
 import { loadEventStaffSnapshot } from './eventStaffReconciliation';
 import { listRegistrationQuestions } from '@/server/registrationQuestions';
 import { buildSeedEventFromTemplate } from '@/server/eventTemplates';
+import { hasJoinedEventParticipant } from './eventRegistrations';
 
 export type EditorActor = {
   userId: string;
@@ -58,6 +59,204 @@ const callFindMany = async (client: EditorSnapshotClient, model: string, args: R
   if (typeof delegate?.findMany !== 'function') return [];
   const rows = await delegate.findMany(args);
   return Array.isArray(rows) ? rows : [];
+};
+export const loadEventScheduleState = async (
+  event: Record<string, unknown>,
+  eventId: string,
+  client: EditorSnapshotClient,
+): Promise<{
+  sourceType: string | null;
+  matchCount: number;
+  revision: string;
+  hasProtectedHistory: boolean;
+}> => {
+  const matches = await callFindMany(client, 'matches', {
+    where: { eventId },
+    select: {
+      id: true,
+      matchId: true,
+      start: true,
+      end: true,
+      locked: true,
+      division: true,
+      fieldId: true,
+      team1Id: true,
+      team2Id: true,
+      team1Seed: true,
+      team2Seed: true,
+      status: true,
+      resultStatus: true,
+      resultType: true,
+      actualStart: true,
+      actualEnd: true,
+      statusReason: true,
+      winnerEventTeamId: true,
+      winnerNextMatchId: true,
+      loserNextMatchId: true,
+      previousLeftId: true,
+      previousRightId: true,
+      side: true,
+      team1Points: true,
+      team2Points: true,
+      updatedAt: true,
+    },
+  });
+  const matchIds = matches
+    .filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object')
+    .map((row) => row.id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
+  const matchWhere = { matchId: { in: matchIds } };
+  const [
+    segments,
+    incidents,
+    receipts,
+    checkIns,
+    rosters,
+    broadcastActions,
+    broadcastStates,
+  ] = await Promise.all([
+    callFindMany(client, 'matchSegments', {
+      where: matchWhere,
+      select: {
+        id: true,
+        matchId: true,
+        sequence: true,
+        status: true,
+        scores: true,
+        winnerEventTeamId: true,
+        startedAt: true,
+        endedAt: true,
+        resultType: true,
+        statusReason: true,
+        updatedAt: true,
+      },
+    }),
+    callFindMany(client, 'matchIncidents', {
+      where: matchWhere,
+      select: { id: true, matchId: true, incidentType: true, sequence: true, updatedAt: true },
+    }),
+    callFindMany(client, 'matchOperationReceipts', {
+      where: matchWhere,
+      select: { clientOperationId: true, matchId: true, operationKind: true, requestHash: true, createdAt: true },
+    }),
+    callFindMany(client, 'teamCheckIns', {
+      where: matchWhere,
+      select: { id: true, matchId: true, eventTeamId: true, scope: true, status: true, checkedInAt: true, updatedAt: true },
+    }),
+    callFindMany(client, 'matchRosterEntries', {
+      where: matchWhere,
+      select: { id: true, matchId: true, eventTeamId: true, userId: true, source: true, status: true, removedAt: true, updatedAt: true },
+    }),
+    callFindMany(client, 'broadcastOverlayActions', {
+      where: { eventId, matchId: { not: null } },
+      select: { id: true, matchId: true, actionType: true, requestId: true, presentationRevision: true, createdAt: true },
+    }),
+    callFindMany(client, 'broadcastOverlayStates', {
+      where: { eventId },
+      select: { id: true, activeMatchId: true, revision: true, updatedAt: true },
+    }),
+  ]);
+
+  const matchRows = matches.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object');
+  const segmentRows = segments.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object');
+  const matchIdSet = new Set(matchIds);
+  const hasNonZeroScores = (value: unknown): boolean => (
+    Array.isArray(value)
+      && value.some((score) => typeof score === 'number' && Number.isFinite(score) && score !== 0)
+  );
+  const protectedMatchIds = new Set<string>();
+  for (const row of matchRows) {
+    const status = typeof row.status === 'string' ? row.status.trim().toUpperCase() : null;
+    if (
+      row.locked === true
+      || (status !== null && status !== '' && status !== 'NOT_STARTED')
+      || row.actualStart != null
+      || row.actualEnd != null
+      || row.resultStatus != null
+      || row.resultType != null
+      || row.statusReason != null
+      || row.winnerEventTeamId != null
+      || hasNonZeroScores(row.team1Points)
+      || hasNonZeroScores(row.team2Points)
+    ) {
+      if (typeof row.id === 'string') protectedMatchIds.add(row.id);
+    }
+  }
+  for (const row of segmentRows) {
+    const status = typeof row.status === 'string' ? row.status.trim().toUpperCase() : null;
+    if (
+      (status !== null && status !== '' && status !== 'NOT_STARTED')
+      || row.startedAt != null
+      || row.endedAt != null
+      || row.resultType != null
+      || row.winnerEventTeamId != null
+      || hasNonZeroScores(row.scores)
+    ) {
+      if (typeof row.matchId === 'string') protectedMatchIds.add(row.matchId);
+    }
+  }
+  const dependentRows = [incidents, receipts, checkIns, rosters, broadcastActions]
+    .flat()
+    .filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object');
+  for (const row of dependentRows) {
+    if (typeof row.matchId === 'string' && matchIdSet.has(row.matchId)) {
+      protectedMatchIds.add(row.matchId);
+    }
+  }
+  for (const row of broadcastStates) {
+    if (!row || typeof row !== 'object') continue;
+    const activeMatchId = (row as Record<string, unknown>).activeMatchId;
+    if (typeof activeMatchId === 'string' && matchIdSet.has(activeMatchId)) {
+      protectedMatchIds.add(activeMatchId);
+    }
+  }
+  const normalizedSourceType = typeof event.sourceType === 'string' && event.sourceType.trim()
+    ? event.sourceType.trim()
+    : null;
+  const revision = editorRevisionFor({
+    event: projectReadRow(event, [
+      'id',
+      'eventType',
+      'sourceType',
+      'start',
+      'end',
+      'scheduleEndConstraint',
+      'generatedScheduleEnd',
+      'noFixedEndDateTime',
+      'fieldIds',
+      'timeSlotIds',
+      'updatedAt',
+    ]),
+    matches: matchRows.sort((left, right) => String(left.id ?? '').localeCompare(String(right.id ?? ''))),
+    segments: segmentRows.sort((left, right) => (
+      `${String(left.matchId ?? '')}:${String(left.sequence ?? '')}`
+        .localeCompare(`${String(right.matchId ?? '')}:${String(right.sequence ?? '')}`)
+    )),
+    incidents: dependentRows
+      .filter((row) => incidents.includes(row))
+      .sort((left, right) => String(left.id ?? '').localeCompare(String(right.id ?? ''))),
+    receipts: dependentRows
+      .filter((row) => receipts.includes(row))
+      .sort((left, right) => String(left.clientOperationId ?? '').localeCompare(String(right.clientOperationId ?? ''))),
+    checkIns: dependentRows
+      .filter((row) => checkIns.includes(row))
+      .sort((left, right) => String(left.id ?? '').localeCompare(String(right.id ?? ''))),
+    rosters: dependentRows
+      .filter((row) => rosters.includes(row))
+      .sort((left, right) => String(left.id ?? '').localeCompare(String(right.id ?? ''))),
+    broadcastActions: dependentRows
+      .filter((row) => broadcastActions.includes(row))
+      .sort((left, right) => String(left.id ?? '').localeCompare(String(right.id ?? ''))),
+    broadcastStates: broadcastStates
+      .filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object')
+      .sort((left, right) => String(left.id ?? '').localeCompare(String(right.id ?? ''))),
+  });
+  return {
+    sourceType: normalizedSourceType,
+    matchCount: matchRows.length,
+    revision,
+    hasProtectedHistory: protectedMatchIds.size > 0,
+  };
 };
 
 const callFindFirst = async (client: EditorSnapshotClient, model: string, args: Record<string, unknown>): Promise<Record<string, unknown> | null> => {
@@ -238,21 +437,46 @@ const divisionDetailFor = (row: Record<string, unknown>, index: number) => ({
 const loadCatalogs = async (client: EditorSnapshotClient, event: Record<string, unknown>, query?: EventEditorBootstrapQuery) => {
   const sportIds = Array.isArray(event.sportIds) ? event.sportIds : query?.sportId ? [query.sportId] : [];
   const organizationId = typeof event.organizationId === 'string' ? event.organizationId : query?.organizationId;
-  const [sports, organizations, templates] = await Promise.all([
+  const [sports, organizations, templates, organizationFields] = await Promise.all([
     sportIds.length ? callFindMany(client, 'sports', { where: { id: { in: sportIds } } }) : Promise.resolve([]),
     organizationId ? callFindMany(client, 'organizations', { where: { id: organizationId } }) : Promise.resolve([]),
     callFindMany(client, 'eventTemplates', { where: { organizationId: organizationId ?? undefined } }),
+    callFindMany(client, 'fields', {
+      where: organizationId ? { organizationId } : { id: { in: [] } },
+    }),
   ]);
-  const fields = await callFindMany(client, 'fields', {
-    where: organizationId ? { organizationId } : { id: { in: [] } },
-  });
   const toRecords = (rows: unknown[]): Record<string, unknown>[] => rows
     .filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object')
     .map(canonicalReadRow);
+  const selectedFields = toRecords(Array.isArray(event.fields) ? event.fields : []);
+  const fieldsById = new Map<string, Record<string, unknown>>();
+  [...selectedFields, ...toRecords(organizationFields)].forEach((field) => {
+    const fieldId = typeof field.id === 'string' ? field.id : typeof field.$id === 'string' ? field.$id : null;
+    if (fieldId) fieldsById.set(fieldId, field);
+  });
+  const fieldRows = Array.from(fieldsById.values());
+  const facilityIds = Array.from(new Set(
+    fieldRows
+      .map((field) => typeof field.facilityId === 'string' ? field.facilityId : null)
+      .filter((facilityId): facilityId is string => Boolean(facilityId)),
+  ));
+  const facilities = facilityIds.length
+    ? toRecords(await callFindMany(client, 'facilities', { where: { id: { in: facilityIds } } }))
+    : [];
+  const facilitiesById = new Map(
+    facilities
+      .map((facility) => [typeof facility.id === 'string' ? facility.id : '', facility] as const)
+      .filter(([facilityId]) => facilityId.length > 0),
+  );
   return {
     sports: toRecords(sports),
     organizations: toRecords(organizations),
-    fields: toRecords(fields),
+    fields: fieldRows.map((field) => {
+      const facility = typeof field.facilityId === 'string'
+        ? facilitiesById.get(field.facilityId)
+        : undefined;
+      return facility ? { ...field, facility } : field;
+    }),
     templates: toRecords(templates),
   };
 };
@@ -476,9 +700,21 @@ export const buildEventEditorSnapshot = async (
   const client = context.client ?? prisma;
   const eventId = typeof event.id === 'string' && event.id.trim().length > 0 ? event.id : null;
   const mode = context.mode ?? (eventId ? 'EDIT' : 'CREATE');
-  const [resources, loadedDivisions] = await Promise.all([
+  const createScheduleState = {
+    sourceType: null,
+    matchCount: 0,
+    revision: 'new',
+    hasProtectedHistory: false,
+  } as const;
+  const [resources, loadedDivisions, scheduleState, hasJoinedParticipant] = await Promise.all([
     loadEventResources(client, event),
     loadEventDivisions(client, eventId),
+    mode === 'CREATE' || !eventId
+      ? Promise.resolve(createScheduleState)
+      : loadEventScheduleState(event, eventId, client),
+    mode === 'EDIT' && eventId
+      ? hasJoinedEventParticipant(eventId, client)
+      : Promise.resolve(false),
   ]);
   const inlineDivisions = [
     ...(Array.isArray(event.divisionDetails) ? event.divisionDetails : []),
@@ -547,6 +783,18 @@ export const buildEventEditorSnapshot = async (
   const revision = mode === 'CREATE'
     ? 'new'
     : editorRevisionFor({ draft });
+  const immutableFieldNames = new Set(
+    Array.isArray(event.immutableFieldNames)
+      ? event.immutableFieldNames.filter((fieldName): fieldName is string => typeof fieldName === 'string')
+      : [],
+  );
+  if (hasJoinedParticipant) {
+    immutableFieldNames.add('eventType');
+    immutableFieldNames.add('teamSignup');
+  }
+  if (scheduleState.hasProtectedHistory) {
+    immutableFieldNames.add('eventType');
+  }
   const snapshot = {
     contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
     mode,
@@ -557,10 +805,11 @@ export const buildEventEditorSnapshot = async (
     capabilities,
     catalogs,
     immutable: {
-      fieldNames: Array.isArray(event.immutableFieldNames) ? event.immutableFieldNames : [],
+      fieldNames: Array.from(immutableFieldNames),
       rental: Boolean(rentalBookingId || rentalSlots.length > 0),
       template: String(event.state ?? '').toUpperCase() === 'TEMPLATE' || Boolean(context.query?.templateId),
     },
+    scheduleState,
   };
   return parseEventEditorSnapshot(snapshot);
 };

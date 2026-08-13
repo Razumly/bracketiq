@@ -32,7 +32,6 @@ describe('saveMatches', () => {
         losersBracket: false,
         team1Points: [25, 18],
         team2Points: [21, 16],
-        setResults: [1, 1],
         segments: [
           {
             id: 'match_1_segment_1',
@@ -74,7 +73,6 @@ describe('saveMatches', () => {
         losersBracket: false,
         team1Points: [],
         team2Points: [],
-        setResults: [],
       },
     ] as any, client as any);
 

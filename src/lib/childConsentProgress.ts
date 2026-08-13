@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { normalizeRequiredSignerType } from '@/lib/templateSignerTypes';
+import { acquireEventLockAndLoadStructure } from '@/server/events/eventRegistrations';
 import { sendEventRegistrationHostNotification } from '@/server/registrationHostNotifications';
 
 const normalizeText = (value: unknown): string | undefined => {
@@ -13,6 +14,28 @@ const normalizeText = (value: unknown): string | undefined => {
 const isSignedDocumentStatus = (value: unknown): boolean => {
   const normalized = normalizeText(value)?.toLowerCase();
   return normalized === 'signed' || normalized === 'completed';
+};
+const updateRegistrationWithEventLock = async (
+  eventId: string,
+  registrationId: string,
+  data: Record<string, unknown>,
+) => {
+  if (
+    typeof (prisma as any).$transaction === 'function'
+    && typeof (prisma as any).eventRegistrations?.update === 'function'
+  ) {
+    return prisma.$transaction(async (tx) => {
+      await acquireEventLockAndLoadStructure(tx, eventId);
+      return tx.eventRegistrations.update({
+        where: { id: registrationId },
+        data,
+      });
+    });
+  }
+  return prisma.eventRegistrations.update({
+    where: { id: registrationId },
+    data,
+  });
 };
 
 export const syncChildRegistrationConsentStatus = async (params: {
@@ -58,13 +81,10 @@ export const syncChildRegistrationConsentStatus = async (params: {
     : [];
 
   if (!requiredTemplateIds.length) {
-    await prisma.eventRegistrations.update({
-      where: { id: registration.id },
-      data: {
-        status: 'ACTIVE',
-        consentStatus: 'completed',
-        updatedAt: new Date(),
-      },
+    await updateRegistrationWithEventLock(eventId, registration.id, {
+      status: 'ACTIVE',
+      consentStatus: 'completed',
+      updatedAt: new Date(),
     });
     if (registration.status !== 'ACTIVE') {
       await sendEventRegistrationHostNotification({
@@ -112,13 +132,10 @@ export const syncChildRegistrationConsentStatus = async (params: {
     ...childTemplateIds,
   ]));
   if (!relevantTemplateIds.length) {
-    await prisma.eventRegistrations.update({
-      where: { id: registration.id },
-      data: {
-        status: 'ACTIVE',
-        consentStatus: 'completed',
-        updatedAt: new Date(),
-      },
+    await updateRegistrationWithEventLock(eventId, registration.id, {
+      status: 'ACTIVE',
+      consentStatus: 'completed',
+      updatedAt: new Date(),
     });
     if (registration.status !== 'ACTIVE') {
       await sendEventRegistrationHostNotification({
@@ -224,13 +241,10 @@ export const syncChildRegistrationConsentStatus = async (params: {
     }
   }
 
-  await prisma.eventRegistrations.update({
-    where: { id: registration.id },
-    data: {
-      status: consentComplete ? 'ACTIVE' : 'STARTED',
-      consentStatus,
-      updatedAt: new Date(),
-    },
+  await updateRegistrationWithEventLock(eventId, registration.id, {
+    status: consentComplete ? 'ACTIVE' : 'STARTED',
+    consentStatus,
+    updatedAt: new Date(),
   });
   if (consentComplete && registration.status !== 'ACTIVE') {
     await sendEventRegistrationHostNotification({

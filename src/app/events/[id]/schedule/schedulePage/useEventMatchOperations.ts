@@ -52,7 +52,6 @@ export type MatchOperationPayload = {
   };
   team1Points: number[];
   team2Points: number[];
-  setResults: number[];
   time?: string;
 };
 
@@ -167,7 +166,6 @@ export default function useEventMatchOperations({
       locked: false,
       team1Points: [],
       team2Points: [],
-      setResults: [],
       losersBracket: Boolean(params.seed?.losersBracket),
       winnerNextMatchId: asBulkMatchRef(params.seed?.winnerNextMatchId as string | undefined),
       loserNextMatchId: asBulkMatchRef(params.seed?.loserNextMatchId as string | undefined),
@@ -435,7 +433,6 @@ export default function useEventMatchOperations({
       matchId,
       team1Points,
       team2Points,
-      setResults,
       scoreSet,
       finalize,
       segmentOperations,
@@ -476,7 +473,7 @@ export default function useEventMatchOperations({
             time,
           });
         } else {
-          updated = await tournamentService.updateMatchScores(targetEventId, matchId, { team1Points, team2Points, setResults });
+          updated = await tournamentService.updateMatchScores(targetEventId, matchId, { team1Points, team2Points });
         }
         applyMatchUpdate(updated as Match);
       } catch (err) {
@@ -492,7 +489,6 @@ export default function useEventMatchOperations({
       matchId,
       team1Points,
       team2Points,
-      setResults,
       finalize,
       segmentOperations,
       incidentOperations,
@@ -511,7 +507,6 @@ export default function useEventMatchOperations({
         : await tournamentService.updateMatchScores(targetEventId, matchId, {
             team1Points,
             team2Points,
-            setResults,
             finalize,
             time,
           });
@@ -520,22 +515,6 @@ export default function useEventMatchOperations({
     [applyMatchUpdate, activeEvent?.$id, eventId],
   );
 
-  const handleScoreSubmit = useCallback(
-    async (matchId: string, team1Points: number[], team2Points: number[], setResults: number[]) => {
-      const targetEventId = activeEvent?.$id ?? eventId;
-      if (!targetEventId) return;
-      try {
-        const updated = await tournamentService.updateMatch(targetEventId, matchId, { team1Points, team2Points, setResults });
-        applyMatchUpdate(updated as Match);
-        setScoreUpdateMatch(null);
-        setIsScoreModalOpen(false);
-      } catch (err) {
-        console.error('Failed to update score:', err);
-        setError('Failed to update score. Please try again.');
-      }
-    },
-    [applyMatchUpdate, activeEvent?.$id, eventId, setError],
-  );
 
   useEffect(() => {
     if (!canEditMatches && isMatchEditorOpen) {
@@ -555,7 +534,6 @@ export default function useEventMatchOperations({
     handleMatchEditRequest,
     handleMatchEditSave,
     handleScoreChange,
-    handleScoreSubmit,
     handleSetComplete,
     handleToggleLockAllMatches,
     isMatchEditorOpen,

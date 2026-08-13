@@ -60,9 +60,10 @@ type EventScheduleHeaderProps = {
   showRescheduleAction: boolean;
   isRescheduleActionInFlight: boolean;
   onRescheduleMatches: () => void;
-  showBuildBracketsAction: boolean;
-  isRebuildActionInFlight: boolean;
-  onBuildBrackets: () => void;
+  showBuildScheduleAction: boolean;
+  buildScheduleIsRebuild: boolean;
+  isBuildScheduleActionInFlight: boolean;
+  onBuildSchedule: () => void;
   showRebuildWithoutPlaceholdersAction: boolean;
   isRebuildWithoutPlaceholdersActionInFlight: boolean;
   onRebuildWithoutPlaceholders: () => void;
@@ -135,9 +136,10 @@ export default function EventScheduleHeader({
   showRescheduleAction,
   isRescheduleActionInFlight,
   onRescheduleMatches,
-  showBuildBracketsAction,
-  isRebuildActionInFlight,
-  onBuildBrackets,
+  showBuildScheduleAction,
+  buildScheduleIsRebuild,
+  isBuildScheduleActionInFlight,
+  onBuildSchedule,
   showRebuildWithoutPlaceholdersAction,
   isRebuildWithoutPlaceholdersActionInFlight,
   onRebuildWithoutPlaceholders,
@@ -300,16 +302,22 @@ export default function EventScheduleHeader({
                           {isRescheduleActionInFlight ? 'Rescheduling...' : 'Reschedule'}
                         </Menu.Item>
                       )}
-                      {showBuildBracketsAction && (
+                      {showBuildScheduleAction && (
                         <Menu.Item
                           color="orange"
-                          onClick={onBuildBrackets}
+                          onClick={onBuildSchedule}
                           disabled={
-                            (hasNetworkActionInFlight && !isRebuildActionInFlight)
+                            (hasNetworkActionInFlight && !isBuildScheduleActionInFlight)
                             || hasSplitDivisionUnassignedTeams
                           }
                         >
-                          {isRebuildActionInFlight ? 'Rebuilding...' : 'Rebuild'}
+                          {isBuildScheduleActionInFlight
+                            ? buildScheduleIsRebuild
+                              ? 'Rebuilding schedule...'
+                              : 'Building schedule...'
+                            : buildScheduleIsRebuild
+                              ? 'Rebuild schedule'
+                              : 'Build schedule'}
                         </Menu.Item>
                       )}
                       {showRebuildWithoutPlaceholdersAction && (

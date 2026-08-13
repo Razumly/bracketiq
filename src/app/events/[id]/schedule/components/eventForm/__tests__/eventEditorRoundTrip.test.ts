@@ -72,9 +72,10 @@ describe('event editor draft round trips', () => {
       playoffDivisionDetails: hydratedDetails(sourceEvent.playoffDivisionDetails),
     } as unknown as Event;
     const parsed = createEventEditorCommandSchema.parse({
-      contractVersion: 2,
+      contractVersion: 3,
       createOperationId: 'create-operation-fixture',
       draft: eventFormValuesToEditorDraft(event as unknown as EventFormValues),
+      completion: { mode: 'CREATE_AND_BUILD_SCHEDULE' },
     });
 
     expect(parsed.draft.competition.divisionDetails[0]).not.toHaveProperty('skillDivisionTypeName');
@@ -109,9 +110,10 @@ describe('event editor draft round trips', () => {
     } as unknown as Event;
 
     const parsed = createEventEditorCommandSchema.parse({
-      contractVersion: 2,
+      contractVersion: 3,
       createOperationId: 'create-operation-hydrated',
       draft: eventFormValuesToEditorDraft(event as unknown as EventFormValues),
+      completion: { mode: 'CREATE_AND_BUILD_SCHEDULE' },
     });
     expect(parsed.draft.basics.tags[0]).not.toHaveProperty('organization');
     expect(parsed.draft.registration.payment.manualPaymentLinks[0]).not.toHaveProperty('event');
@@ -165,9 +167,10 @@ describe('event editor draft round trips', () => {
     });
 
     const parsed = createEventEditorCommandSchema.parse({
-      contractVersion: 2,
+      contractVersion: 3,
       createOperationId: 'create-operation-playoff-fields',
       draft: eventFormValuesToEditorDraft(builtDraft as EventFormValues),
+      completion: { mode: 'CREATE_AND_BUILD_SCHEDULE' },
     });
     expect(parsed.draft.competition.playoffDivisionDetails[0]).toMatchObject({
       skillDivisionTypeId: 'skill_open',

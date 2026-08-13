@@ -1,54 +1,64 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
-import { prisma } from '@/lib/prisma';
-import { requireSession } from '@/lib/permissions';
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { prisma } from "@/lib/prisma";
+import { requireSession } from "@/lib/permissions";
 import {
   resolveEventDivisionSelection,
   validateRegistrantAgeForSelection,
-} from '@/app/api/events/[eventId]/registrationDivisionUtils';
+} from "@/app/api/events/[eventId]/registrationDivisionUtils";
 import {
+  EventConfigurationChangedError,
   findEventRegistration,
   upsertEventRegistration,
-} from '@/server/events/eventRegistrations';
+  acquireEventLockAndLoadStructure,
+} from "@/server/events/eventRegistrations";
 import {
   isWeeklyParentEvent,
   isWeeklyOccurrenceJoinClosed,
   resolveWeeklyOccurrence,
   WEEKLY_OCCURRENCE_JOIN_CLOSED_ERROR,
-} from '@/server/events/weeklyOccurrences';
-import { dispatchRequiredEventDocuments } from '@/lib/eventConsentDispatch';
-import { normalizeRequiredSignerType } from '@/lib/templateSignerTypes';
+} from "@/server/events/weeklyOccurrences";
+import { dispatchRequiredEventDocuments } from "@/lib/eventConsentDispatch";
+import { normalizeRequiredSignerType } from "@/lib/templateSignerTypes";
 import {
   loadAndBuildRegistrationAnswerSnapshot,
   upsertRegistrationQuestionResponse,
-} from '@/server/registrationQuestions';
-import { requireVerifiedEmailForEventRegistrationIfPaid } from '@/server/paidRegistrationGate';
-import { sendEventRegistrationHostNotification } from '@/server/registrationHostNotifications';
+} from "@/server/registrationQuestions";
+import { requireVerifiedEmailForEventRegistrationIfPaid } from "@/server/paidRegistrationGate";
+import { sendEventRegistrationHostNotification } from "@/server/registrationHostNotifications";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
-const schema = z.object({
-  divisionId: z.string().optional(),
-  divisionTypeId: z.string().optional(),
-  divisionTypeKey: z.string().optional(),
-  slotId: z.string().optional(),
-  occurrenceDate: z.string().optional(),
-}).passthrough();
+const schema = z
+  .object({
+    divisionId: z.string().optional(),
+    divisionTypeId: z.string().optional(),
+    divisionTypeKey: z.string().optional(),
+    slotId: z.string().optional(),
+    occurrenceDate: z.string().optional(),
+  })
+  .passthrough();
 
 const isSignedStatus = (value: unknown): boolean => {
-  if (typeof value !== 'string') {
+  if (typeof value !== "string") {
     return false;
   }
   const normalized = value.trim().toLowerCase();
-  return normalized === 'signed' || normalized === 'completed';
+  return normalized === "signed" || normalized === "completed";
 };
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ eventId: string }> }) {
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ eventId: string }> },
+) {
   const session = await requireSession(req);
   const body = await req.json().catch(() => null);
   const parsed = schema.safeParse(body ?? {});
   if (!parsed.success) {
-    return NextResponse.json({ error: 'Invalid input', details: parsed.error.flatten() }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid input", details: parsed.error.flatten() },
+      { status: 400 },
+    );
   }
 
   const { eventId } = await params;
@@ -65,31 +75,40 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
       organizationId: true,
       price: true,
       eventType: true,
+      teamSignup: true,
       includePlayoffs: true,
       parentEvent: true,
       timeSlotIds: true,
     },
   });
   if (!event) {
-    return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+    return NextResponse.json({ error: "Event not found" }, { status: 404 });
   }
 
-  const hasOccurrenceInput = Boolean(parsed.data.slotId || parsed.data.occurrenceDate);
+  const hasOccurrenceInput = Boolean(
+    parsed.data.slotId || parsed.data.occurrenceDate,
+  );
   const occurrence = isWeeklyParentEvent(event)
     ? await resolveWeeklyOccurrence({
-      event,
-      occurrence: parsed.data,
-    })
+        event,
+        occurrence: parsed.data,
+      })
     : null;
   if (occurrence && !occurrence.ok) {
     return NextResponse.json({ error: occurrence.error }, { status: 400 });
   }
   if (!isWeeklyParentEvent(event) && hasOccurrenceInput) {
-    return NextResponse.json({ error: 'Weekly occurrence selection is only valid for weekly events.' }, { status: 400 });
+    return NextResponse.json(
+      { error: "Weekly occurrence selection is only valid for weekly events." },
+      { status: 400 },
+    );
   }
   const resolvedOccurrence = occurrence?.ok ? occurrence.value : null;
   if (resolvedOccurrence && isWeeklyOccurrenceJoinClosed(resolvedOccurrence)) {
-    return NextResponse.json({ error: WEEKLY_OCCURRENCE_JOIN_CLOSED_ERROR }, { status: 409 });
+    return NextResponse.json(
+      { error: WEEKLY_OCCURRENCE_JOIN_CLOSED_ERROR },
+      { status: 409 },
+    );
   }
 
   const user = await prisma.userData.findUnique({
@@ -97,7 +116,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
     select: { dateOfBirth: true },
   });
   if (!user) {
-    return NextResponse.json({ error: 'User profile not found' }, { status: 404 });
+    return NextResponse.json(
+      { error: "User profile not found" },
+      { status: 404 },
+    );
   }
 
   const divisionSelection = await resolveEventDivisionSelection({
@@ -105,18 +127,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
     input: parsed.data,
   });
   if (!divisionSelection.ok) {
-    return NextResponse.json({ error: divisionSelection.error ?? 'Invalid division selection' }, { status: 400 });
+    return NextResponse.json(
+      { error: divisionSelection.error ?? "Invalid division selection" },
+      { status: 400 },
+    );
   }
-  const emailVerificationRequired = await requireVerifiedEmailForEventRegistrationIfPaid({
-    userId: session.userId,
-    event,
-    selection: divisionSelection.selection,
-  });
+  const emailVerificationRequired =
+    await requireVerifiedEmailForEventRegistrationIfPaid({
+      userId: session.userId,
+      event,
+      selection: divisionSelection.selection,
+    });
   if (emailVerificationRequired) {
     return emailVerificationRequired;
   }
   const eventAnswersSnapshot = await loadAndBuildRegistrationAnswerSnapshot({
-    scopeType: 'EVENT',
+    scopeType: "EVENT",
     scopeId: eventId,
     answers: parsed.data.answers,
   });
@@ -126,7 +152,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
     event,
     selection: divisionSelection.selection,
   });
-  if (ageCheck.error === 'Invalid date of birth') {
+  if (ageCheck.error === "Invalid date of birth") {
     return NextResponse.json({ error: ageCheck.error }, { status: 400 });
   }
   if (ageCheck.error) {
@@ -139,10 +165,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
     const parentLink = await prisma.parentChildLinks.findFirst({
       where: {
         childId: session.userId,
-        status: 'ACTIVE',
+        status: "ACTIVE",
       },
       orderBy: {
-        updatedAt: 'desc',
+        updatedAt: "desc",
       },
       select: {
         parentId: true,
@@ -150,24 +176,88 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
     });
     if (!parentLink?.parentId) {
       return NextResponse.json(
-        { error: 'No linked parent/guardian found. Ask a parent to add you first.' },
+        {
+          error:
+            "No linked parent/guardian found. Ask a parent to add you first.",
+        },
         { status: 403 },
       );
     }
+    let childResult: {
+      registration: Awaited<ReturnType<typeof upsertEventRegistration>>;
+      existing: boolean;
+    };
+    try {
+      childResult = await prisma.$transaction(async (tx) => {
+        await acquireEventLockAndLoadStructure(tx, eventId, {
+          eventType: event.eventType,
+          teamSignup: event.teamSignup,
+        });
+        const existingRequest = await findEventRegistration(
+          {
+            eventId,
+            registrantType: "CHILD",
+            registrantId: session.userId,
+            occurrence: resolvedOccurrence,
+          },
+          tx,
+        );
+        if (existingRequest) {
+          return { registration: existingRequest, existing: true };
+        }
 
-    const existingRequest = await findEventRegistration({
-      eventId,
-      registrantType: 'CHILD',
-      registrantId: session.userId,
-      occurrence: resolvedOccurrence,
-    });
-    if (existingRequest) {
+        const registration = await upsertEventRegistration(
+          {
+            eventId,
+            registrantType: "CHILD",
+            registrantId: session.userId,
+            parentId: parentLink.parentId,
+            rosterRole: "PARTICIPANT",
+            status: "STARTED",
+            ageAtEvent,
+            divisionId: divisionSelection.selection.divisionId,
+            divisionTypeId: divisionSelection.selection.divisionTypeId,
+            divisionTypeKey: divisionSelection.selection.divisionTypeKey,
+            consentStatus: "guardian_approval_required",
+            createdBy: session.userId,
+            occurrence: resolvedOccurrence,
+          },
+          tx,
+        );
+        if (eventAnswersSnapshot.length) {
+          await upsertRegistrationQuestionResponse({
+            scopeType: "EVENT",
+            scopeId: eventId,
+            subjectType: "EVENT_REGISTRATION",
+            subjectId: registration.id,
+            responderUserId: session.userId,
+            registrantUserId: session.userId,
+            registrantType: "CHILD",
+            answersSnapshot: eventAnswersSnapshot,
+            client: tx,
+          });
+        }
+        return { registration, existing: false };
+      });
+    } catch (error) {
+      if (error instanceof EventConfigurationChangedError) {
+        return NextResponse.json(
+          { error: error.message, code: error.code },
+          { status: error.status },
+        );
+      }
+      throw error;
+    }
+
+    if (childResult.existing) {
       return NextResponse.json(
         {
-          registration: existingRequest,
+          registration: childResult.registration,
           requiresParentApproval: true,
           consent: {
-            status: existingRequest.consentStatus ?? 'guardian_approval_required',
+            status:
+              childResult.registration.consentStatus ??
+              "guardian_approval_required",
             parentId: parentLink.parentId,
           },
         },
@@ -175,40 +265,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
       );
     }
 
-    const registration = await upsertEventRegistration({
-      eventId,
-      registrantType: 'CHILD',
-      registrantId: session.userId,
-      parentId: parentLink.parentId,
-      rosterRole: 'PARTICIPANT',
-      status: 'STARTED',
-      ageAtEvent,
-      divisionId: divisionSelection.selection.divisionId,
-      divisionTypeId: divisionSelection.selection.divisionTypeId,
-      divisionTypeKey: divisionSelection.selection.divisionTypeKey,
-      consentStatus: 'guardian_approval_required',
-      createdBy: session.userId,
-      occurrence: resolvedOccurrence,
-    });
-    if (eventAnswersSnapshot.length) {
-      await upsertRegistrationQuestionResponse({
-        scopeType: 'EVENT',
-        scopeId: eventId,
-        subjectType: 'EVENT_REGISTRATION',
-        subjectId: registration.id,
-        responderUserId: session.userId,
-        registrantUserId: session.userId,
-        registrantType: 'CHILD',
-        answersSnapshot: eventAnswersSnapshot,
-      });
-    }
+    const registration = childResult.registration;
 
     return NextResponse.json(
       {
         registration: registration,
         requiresParentApproval: true,
         consent: {
-          status: 'guardian_approval_required',
+          status: "guardian_approval_required",
           parentId: parentLink.parentId,
         },
       },
@@ -217,7 +281,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
   }
 
   const requiredTemplateIds = Array.isArray(event.requiredTemplateIds)
-    ? event.requiredTemplateIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    ? event.requiredTemplateIds.filter(
+        (value): value is string =>
+          typeof value === "string" && value.trim().length > 0,
+      )
     : [];
   let participantRequiredTemplateIds = requiredTemplateIds;
   let participantTemplates: Array<{
@@ -234,17 +301,27 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
         signOnce: true,
       },
     });
-    const templateById = new Map(templates.map((template) => [template.id, template]));
-    participantRequiredTemplateIds = requiredTemplateIds.filter((templateId) => {
-      const template = templateById.get(templateId);
-      if (!template) {
-        return false;
-      }
-      return normalizeRequiredSignerType(template.requiredSignerType) === 'PARTICIPANT';
-    });
+    const templateById = new Map(
+      templates.map((template) => [template.id, template]),
+    );
+    participantRequiredTemplateIds = requiredTemplateIds.filter(
+      (templateId) => {
+        const template = templateById.get(templateId);
+        if (!template) {
+          return false;
+        }
+        return (
+          normalizeRequiredSignerType(template.requiredSignerType) ===
+          "PARTICIPANT"
+        );
+      },
+    );
     participantTemplates = participantRequiredTemplateIds
       .map((templateId) => templateById.get(templateId))
-      .filter((template): template is NonNullable<typeof template> => template !== undefined);
+      .filter(
+        (template): template is NonNullable<typeof template> =>
+          template !== undefined,
+      );
   }
 
   let hasAllParticipantSignatures = false;
@@ -256,113 +333,154 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
       .filter((template) => template.signOnce !== true)
       .map((template) => template.id);
 
-    const signedRows = (signOnceTemplateIds.length || eventScopedTemplateIds.length)
-      ? await prisma.signedDocuments.findMany({
-        where: {
-          userId: session.userId,
-          signerRole: 'participant',
-          OR: [
-            ...(signOnceTemplateIds.length
-              ? [{ templateId: { in: signOnceTemplateIds } }]
-              : []),
-            ...(eventScopedTemplateIds.length
-              ? [{ templateId: { in: eventScopedTemplateIds }, eventId }]
-              : []),
-          ],
-        },
-        orderBy: { updatedAt: 'desc' },
-        take: 200,
-        select: {
-          templateId: true,
-          status: true,
-        },
-      })
-      : [];
+    const signedRows =
+      signOnceTemplateIds.length || eventScopedTemplateIds.length
+        ? await prisma.signedDocuments.findMany({
+            where: {
+              userId: session.userId,
+              signerRole: "participant",
+              OR: [
+                ...(signOnceTemplateIds.length
+                  ? [{ templateId: { in: signOnceTemplateIds } }]
+                  : []),
+                ...(eventScopedTemplateIds.length
+                  ? [{ templateId: { in: eventScopedTemplateIds }, eventId }]
+                  : []),
+              ],
+            },
+            orderBy: { updatedAt: "desc" },
+            take: 200,
+            select: {
+              templateId: true,
+              status: true,
+            },
+          })
+        : [];
 
     const signedTemplateIds = new Set(
       signedRows
         .filter((row) => isSignedStatus(row.status))
         .map((row) => row.templateId),
     );
-    hasAllParticipantSignatures = participantRequiredTemplateIds.every((templateId) => (
-      signedTemplateIds.has(templateId)
-    ));
+    hasAllParticipantSignatures = participantRequiredTemplateIds.every(
+      (templateId) => signedTemplateIds.has(templateId),
+    );
   }
 
-  const needsConsent = participantRequiredTemplateIds.length > 0 && !hasAllParticipantSignatures;
+  const needsConsent =
+    participantRequiredTemplateIds.length > 0 && !hasAllParticipantSignatures;
   const consentDispatch = needsConsent
     ? await dispatchRequiredEventDocuments({
-      eventId,
-      organizationId: event.organizationId ?? null,
-      requiredTemplateIds: participantRequiredTemplateIds,
-      participantUserId: session.userId,
-    })
+        eventId,
+        organizationId: event.organizationId ?? null,
+        requiredTemplateIds: participantRequiredTemplateIds,
+        participantUserId: session.userId,
+      })
     : null;
-  const consentStatus = participantRequiredTemplateIds.length === 0
-    ? null
-    : !needsConsent
-      ? 'completed'
-    : (consentDispatch?.errors.length ?? 0) > 0
-      ? 'send_failed'
-      : 'sent';
+  const consentStatus =
+    participantRequiredTemplateIds.length === 0
+      ? null
+      : !needsConsent
+        ? "completed"
+        : (consentDispatch?.errors.length ?? 0) > 0
+          ? "send_failed"
+          : "sent";
 
-  const existingRegistration = await findEventRegistration({
-    eventId,
-    registrantType: 'SELF',
-    registrantId: session.userId,
-    occurrence: resolvedOccurrence,
-  });
-
-  const nextStatus = needsConsent ? 'STARTED' : 'ACTIVE';
-  const nextConsentDocumentId = needsConsent
-    ? (consentDispatch?.firstDocumentId ?? existingRegistration?.consentDocumentId ?? null)
-    : (existingRegistration?.consentDocumentId ?? null);
-  const nextConsentStatus = consentStatus ?? existingRegistration?.consentStatus ?? null;
-
-  const registration = await upsertEventRegistration({
-    eventId,
-    registrantType: 'SELF',
-    registrantId: session.userId,
-    rosterRole: 'PARTICIPANT',
-    status: nextStatus,
-    ageAtEvent,
-    divisionId: divisionSelection.selection.divisionId,
-    divisionTypeId: divisionSelection.selection.divisionTypeId,
-    divisionTypeKey: divisionSelection.selection.divisionTypeKey,
-    consentDocumentId: nextConsentDocumentId,
-    consentStatus: nextConsentStatus,
-    createdBy: session.userId,
-    occurrence: resolvedOccurrence,
-  });
-  if (eventAnswersSnapshot.length) {
-    await upsertRegistrationQuestionResponse({
-      scopeType: 'EVENT',
-      scopeId: eventId,
-      subjectType: 'EVENT_REGISTRATION',
-      subjectId: registration.id,
-      responderUserId: session.userId,
-      registrantUserId: session.userId,
-      registrantType: 'SELF',
-      answersSnapshot: eventAnswersSnapshot,
+  let selfResult: {
+    registration: Awaited<ReturnType<typeof upsertEventRegistration>>;
+    wasActive: boolean;
+  };
+  try {
+    selfResult = await prisma.$transaction(async (tx) => {
+      await acquireEventLockAndLoadStructure(tx, eventId, {
+        eventType: event.eventType,
+        teamSignup: event.teamSignup,
+      });
+      const existingRegistration = await findEventRegistration(
+        {
+          eventId,
+          registrantType: "SELF",
+          registrantId: session.userId,
+          occurrence: resolvedOccurrence,
+        },
+        tx,
+      );
+      const nextStatus = needsConsent ? "STARTED" : "ACTIVE";
+      const nextConsentDocumentId = needsConsent
+        ? (consentDispatch?.firstDocumentId ??
+          existingRegistration?.consentDocumentId ??
+          null)
+        : (existingRegistration?.consentDocumentId ?? null);
+      const nextConsentStatus =
+        consentStatus ?? existingRegistration?.consentStatus ?? null;
+      const registration = await upsertEventRegistration(
+        {
+          eventId,
+          registrantType: "SELF",
+          registrantId: session.userId,
+          rosterRole: "PARTICIPANT",
+          status: nextStatus,
+          ageAtEvent,
+          divisionId: divisionSelection.selection.divisionId,
+          divisionTypeId: divisionSelection.selection.divisionTypeId,
+          divisionTypeKey: divisionSelection.selection.divisionTypeKey,
+          consentDocumentId: nextConsentDocumentId,
+          consentStatus: nextConsentStatus,
+          createdBy: session.userId,
+          occurrence: resolvedOccurrence,
+        },
+        tx,
+      );
+      if (eventAnswersSnapshot.length) {
+        await upsertRegistrationQuestionResponse({
+          scopeType: "EVENT",
+          scopeId: eventId,
+          subjectType: "EVENT_REGISTRATION",
+          subjectId: registration.id,
+          responderUserId: session.userId,
+          registrantUserId: session.userId,
+          registrantType: "SELF",
+          answersSnapshot: eventAnswersSnapshot,
+          client: tx,
+        });
+      }
+      await tx.invites?.deleteMany?.({
+        where: {
+          type: "EVENT",
+          eventId,
+          userId: session.userId,
+        },
+      });
+      return {
+        registration,
+        wasActive: existingRegistration?.status === "ACTIVE",
+      };
     });
+  } catch (error) {
+    if (error instanceof EventConfigurationChangedError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status },
+      );
+    }
+    throw error;
   }
 
-  await prisma.invites?.deleteMany?.({
-    where: {
-      type: 'EVENT',
-      eventId,
-      userId: session.userId,
-    },
-  });
-  if (registration.status === 'ACTIVE' && existingRegistration?.status !== 'ACTIVE') {
+  const registration = selfResult.registration;
+  if (registration.status === "ACTIVE" && !selfResult.wasActive) {
     await sendEventRegistrationHostNotification({
       eventId,
       registrationId: registration.id,
     });
   }
 
-  return NextResponse.json({
-    registration: registration,
-    warnings: consentDispatch?.errors.length ? consentDispatch.errors : undefined,
-  }, { status: 200 });
+  return NextResponse.json(
+    {
+      registration,
+      warnings: consentDispatch?.errors.length
+        ? consentDispatch.errors
+        : undefined,
+    },
+    { status: 200 },
+  );
 }

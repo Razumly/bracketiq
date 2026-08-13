@@ -170,7 +170,6 @@ const statusExistingSegmentCount = (match: Match): number =>
     Array.isArray(match.segments) ? match.segments.length : 0,
     Array.isArray(match.team1Points) ? match.team1Points.length : 0,
     Array.isArray(match.team2Points) ? match.team2Points.length : 0,
-    Array.isArray(match.setResults) ? match.setResults.length : 0,
     0,
   );
 
@@ -239,8 +238,7 @@ const buildStatusSegments = (match: Match, rules: MatchStatusRules, team1Id: str
     const scores: Record<string, number> = {};
     if (team1Id) scores[team1Id] = team1Score;
     if (team2Id) scores[team2Id] = team2Score;
-    const legacyResult = nonNegativeScore(match.setResults?.[index]);
-    const winnerEventTeamId = existing?.winnerEventTeamId ?? (legacyResult === 1 ? team1Id : legacyResult === 2 ? team2Id : null);
+    const winnerEventTeamId = existing?.winnerEventTeamId ?? null;
 
     return {
       id: existing?.id ?? existing?.$id ?? `${matchId}_segment_${sequence}`,
@@ -263,18 +261,7 @@ const buildStatusSegments = (match: Match, rules: MatchStatusRules, team1Id: str
 const statusLegacyFromSegments = (segments: MatchSegment[], team1Id: string | null, team2Id: string | null) => {
   const team1Points = segments.map((segment) => (team1Id ? nonNegativeScore(segment.scores?.[team1Id]) : 0));
   const team2Points = segments.map((segment) => (team2Id ? nonNegativeScore(segment.scores?.[team2Id]) : 0));
-  return {
-    team1Points,
-    team2Points,
-    setResults: segments.map((segment, index) => {
-      if (segment.winnerEventTeamId === team1Id) return 1;
-      if (segment.winnerEventTeamId === team2Id) return 2;
-      if (segment.status === 'COMPLETE' && team1Points[index] !== team2Points[index]) {
-        return team1Points[index] > team2Points[index] ? 1 : 2;
-      }
-      return 0;
-    }),
-  };
+  return { team1Points, team2Points };
 };
 
 const segmentWinnerEventTeamId = (segment: MatchSegment, team1Id: string | null, team2Id: string | null): string | null => {
@@ -1305,7 +1292,6 @@ export default function MatchEditModal({
             segments: current,
             team1Points: legacy.team1Points,
             team2Points: legacy.team2Points,
-            setResults: legacy.setResults,
           },
           {
             ...statusRules,
@@ -1572,7 +1558,6 @@ export default function MatchEditModal({
       updated.segments = statusSegmentsForSave;
       updated.team1Points = legacyStatus.team1Points;
       updated.team2Points = legacyStatus.team2Points;
-      updated.setResults = legacyStatus.setResults;
       const reason = statusReasonValue.trim() || null;
       if (resultTypeIsForfeit) {
         updated.status = 'COMPLETE';
@@ -1722,11 +1707,11 @@ export default function MatchEditModal({
   const previewLegacyScores = statusLegacyFromSegments(statusSegments, statusTeam1Id, statusTeam2Id);
   const previewTeam1Total =
     statusRules?.scoringModel === 'SETS'
-      ? previewLegacyScores.setResults.filter((winner) => winner === 1).length
+      ? statusSegments.filter((segment) => segment.winnerEventTeamId === statusTeam1Id).length
       : previewLegacyScores.team1Points.reduce((total, score) => total + score, 0);
   const previewTeam2Total =
     statusRules?.scoringModel === 'SETS'
-      ? previewLegacyScores.setResults.filter((winner) => winner === 2).length
+      ? statusSegments.filter((segment) => segment.winnerEventTeamId === statusTeam2Id).length
       : previewLegacyScores.team2Points.reduce((total, score) => total + score, 0);
   const draftMatchComplete = Boolean(
     statusRules && matchStartedChecked && statusMatchComplete(statusSegments, statusRules, statusTeam1Id, statusTeam2Id),

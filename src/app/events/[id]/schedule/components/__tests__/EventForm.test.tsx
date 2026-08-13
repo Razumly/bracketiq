@@ -510,6 +510,7 @@ describe('EventForm dirty state', () => {
     if (organization) {
       snapshot.catalogs.organizations = [organization];
     }
+    snapshot.catalogs.fields = Array.isArray(event.fields) ? event.fields : [];
     return renderWithMantine(
       <EventForm
         ref={ref}

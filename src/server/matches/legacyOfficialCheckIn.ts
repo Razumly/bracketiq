@@ -3,7 +3,6 @@ type LegacyOfficialCheckInUpdate = {
   officialCheckedIn?: boolean;
   team1Points?: unknown;
   team2Points?: unknown;
-  setResults?: unknown;
   lifecycle?: unknown;
   segmentOperations?: unknown;
   incidentOperations?: unknown;
@@ -55,7 +54,6 @@ const hasMatchStateMutation = (update: LegacyOfficialCheckInUpdate): boolean => 
   (Array.isArray(update.incidentOperations) && update.incidentOperations.length > 0) ||
   hasNonZeroScore(update.team1Points) ||
   hasNonZeroScore(update.team2Points) ||
-  hasNonZeroScore(update.setResults) ||
   hasSegmentStateMutation(update.segmentOperations)
 );
 

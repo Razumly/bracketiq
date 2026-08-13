@@ -16,6 +16,7 @@ import {
 } from '@/server/discounts/discountCodeResolver';
 import { upsertStripeSubscriptionMirror } from '@/lib/stripeSubscriptions';
 import { buildEventRegistrationId } from '@/server/events/eventRegistrations';
+import { acquireEventLockAndLoadStructure } from '@/server/events/eventRegistrations';
 import {
   activateFailedTeamRegistration,
   activateStartedTeamRegistration,
@@ -280,20 +281,7 @@ const ensureEventRegistrationFromPurchase = async ({
 
   try {
     return await prisma.$transaction(async (tx) => {
-      const lockedEvents = await tx.$queryRaw<Array<{
-        id: string;
-        eventType: string | null;
-        teamSignup: boolean | null;
-      }>>`
-        SELECT
-          "id",
-          "eventType",
-          "teamSignup"
-        FROM "Events"
-        WHERE "id" = ${eventId}
-        FOR UPDATE
-      `;
-      const event = lockedEvents[0] ?? null;
+      const event = await acquireEventLockAndLoadStructure(tx, eventId);
       if (!event) {
         return { applied: false, reason: 'event_not_found' };
       }
@@ -464,6 +452,10 @@ const ensureEventRegistrationFromPurchase = async ({
       return { applied: true, registrationId: effectiveRegistrationId, activated };
     });
   } catch (error) {
+    if (typeof (error as { status?: unknown })?.status === 'number'
+      && Number((error as { status: number }).status) === 404) {
+      return { applied: false, reason: 'event_not_found' };
+    }
     console.error('Failed to apply webhook event registration', {
       purchaseType,
       eventId,

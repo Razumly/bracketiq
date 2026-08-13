@@ -1,7 +1,7 @@
 import { renderWithMantine } from '../../../../../../test/utils/renderWithMantine';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import LeagueSchedulePage from '../page';
-import { apiRequest } from '@/lib/apiClient';
+import { ApiRequestError, apiRequest } from '@/lib/apiClient';
 import { eventService } from '@/lib/eventService';
 import { leagueService } from '@/lib/leagueService';
 import { organizationService } from '@/lib/organizationService';
@@ -40,14 +40,14 @@ jest.mock('@/context/AgentContext', () => ({
   }),
 }));
 
-jest.mock('@/lib/apiClient', () => ({
-  apiRequest: jest.fn(),
-  isApiRequestError: (error: unknown) => (
-    typeof error === 'object' &&
-    error !== null &&
-    'status' in error
-  ),
-}));
+jest.mock('@/lib/apiClient', () => {
+  const actual = jest.requireActual('@/lib/apiClient');
+  return {
+    apiRequest: jest.fn(),
+    ApiRequestError: actual.ApiRequestError,
+    isApiRequestError: actual.isApiRequestError,
+  };
+});
 
 jest.mock('@/components/layout/Navigation', () => {
   function MockNavigation() {
@@ -68,7 +68,7 @@ jest.mock('@/lib/eventService', () => ({
     getEventDetailBootstrap: jest.fn(),
     deleteEvent: jest.fn(),
     deleteEventResult: jest.fn(),
-    scheduleEvent: jest.fn(),
+    reconcileEventSchedule: jest.fn(),
     getEventParticipants: jest.fn(),
   },
 }));
@@ -285,7 +285,7 @@ const buildApiEvent = (overrides: Record<string, any> = {}) => {
   const event = JSON.parse(JSON.stringify(scheduleFixture.event));
   return { ...event, ...overrides };
 };
-type MockRequestOptions = { method?: string; body?: { draft?: unknown } } | undefined;
+type MockRequestOptions = { method?: string; body?: Record<string, any> } | undefined;
 
 let latestEditorEvent: Record<string, any> | null = null;
 
@@ -296,8 +296,9 @@ const buildEditorSnapshot = (
 ) => {
   const { legacyEventToEditorDraft } = require('../components/eventForm/editorContractAdapters');
   const draft = draftOverride ?? legacyEventToEditorDraft(sourceEvent);
+  const matchCount = Array.isArray(sourceEvent.matches) ? sourceEvent.matches.length : 0;
   return {
-    contractVersion: 2,
+    contractVersion: 3,
     eventId: mode === 'CREATE' ? null : (sourceEvent.$id ?? sourceEvent.id ?? 'event_1'),
     mode,
     editorRevision: 'test-editor-revision',
@@ -320,7 +321,39 @@ const buildEditorSnapshot = (
       rental: false,
       template: false,
     },
+    scheduleState: {
+      sourceType: typeof sourceEvent.sourceType === 'string' ? sourceEvent.sourceType : null,
+      matchCount,
+      revision: `test-schedule-revision-${matchCount}`,
+      hasProtectedHistory: false,
+    },
     legacyEvent: sourceEvent,
+  };
+};
+
+const buildEditorScheduleOutcome = (
+  options: MockRequestOptions,
+  sourceEvent: Record<string, any>,
+) => {
+  const completionMode = options?.body?.completion?.mode;
+  const transitionMode = options?.body?.scheduleTransition?.mode;
+  const targetType = String(options?.body?.draft?.basics?.eventType ?? sourceEvent.eventType ?? '').toUpperCase();
+  const targetSupportsSchedule = targetType === 'LEAGUE' || targetType === 'TOURNAMENT';
+  const status = completionMode === 'CREATE_AND_BUILD_SCHEDULE'
+    ? 'BUILT'
+    : transitionMode === 'BUILD_IF_MISSING'
+      ? 'BUILT'
+      : transitionMode === 'RECONCILE'
+        ? (targetSupportsSchedule ? 'REBUILT' : 'DELETED')
+        : 'NOT_REQUESTED';
+  const matches = status === 'BUILT' || status === 'REBUILT'
+    ? [buildApiEvent().matches[0]]
+    : [];
+  return {
+    status,
+    matchCount: matches.length,
+    matches,
+    warnings: [],
   };
 };
 
@@ -382,7 +415,7 @@ const installApiEditorContractMock = () => {
           const snapshot = buildEditorSnapshot(source, mode);
           return editorBootstrapMatch
             ? {
-              contractVersion: 2,
+              contractVersion: 3,
               createOperationId: 'create-operation-test',
               snapshot,
             }
@@ -402,13 +435,23 @@ const installApiEditorContractMock = () => {
           snapshot.eventId = 'event_created';
           snapshot.mode = 'EDIT';
         }
+        const scheduleOutcome = buildEditorScheduleOutcome(options, persistedSource);
+        snapshot.scheduleState = {
+          ...snapshot.scheduleState,
+          matchCount: scheduleOutcome.matchCount || snapshot.scheduleState.matchCount,
+          revision: 'test-schedule-revision-after-save',
+        };
         return response?.snapshot
-          ? response
+          ? {
+            ...response,
+            scheduleOutcome: response.scheduleOutcome ?? scheduleOutcome,
+          }
           : {
             status: 'SAVED',
             snapshot,
             questionIdMap: {},
             staffEmailDelivery: 'NOT_REQUESTED',
+            scheduleOutcome,
           };
       }
       return captureEventResponse(path, response);
@@ -624,7 +667,7 @@ describe('League schedule page', () => {
     (eventService.getEventWithRelations as jest.Mock).mockReset();
     (eventService.getEventDetailBootstrap as jest.Mock).mockReset();
     (eventService.deleteEvent as jest.Mock).mockReset();
-    (eventService.scheduleEvent as jest.Mock).mockReset();
+    (eventService.reconcileEventSchedule as jest.Mock).mockReset();
     apiRequestMock.mockImplementation((path: string, options?: any) => {
       const editorMatch = path.match(/^\/api\/events\/editor(?:\?([^/]*))?$/);
       const editEditorMatch = path.match(/^\/api\/events\/([^/]+)\/editor$/);
@@ -665,14 +708,20 @@ describe('League schedule page', () => {
         }
         if (isCreate && !isWrite) {
           const response = {
-            contractVersion: 2,
+            contractVersion: 3,
             createOperationId: 'create-operation-test',
             snapshot,
           };
           return Promise.resolve(response);
         }
         return Promise.resolve(isWrite
-          ? { status: 'SAVED', snapshot, questionIdMap: {}, staffEmailDelivery: 'NOT_REQUESTED' }
+          ? {
+            status: 'SAVED',
+            snapshot,
+            questionIdMap: {},
+            staffEmailDelivery: 'NOT_REQUESTED',
+            scheduleOutcome: buildEditorScheduleOutcome(options, persistedSource),
+          }
           : snapshot);
       }
       if (path === '/api/chat/terms-consent') {
@@ -902,7 +951,7 @@ describe('League schedule page', () => {
 
     renderWithMantine(<LeagueSchedulePage />);
 
-    expect(await screen.findByText('Create Event')).toBeInTheDocument();
+    expect(await screen.findByText('Create event')).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.queryByText('Agree to the Terms and EULA')).not.toBeInTheDocument();
     });
@@ -1181,7 +1230,6 @@ describe('League schedule page', () => {
       resolvedMatchRules: rules,
       team1Points: [1],
       team2Points: [0],
-      setResults: [0],
       segments: [{
         id: 'match_1_segment_1',
         $id: 'match_1_segment_1',
@@ -1298,7 +1346,6 @@ describe('League schedule page', () => {
       resolvedMatchRules: rules,
       team1Points: [0],
       team2Points: [0],
-      setResults: [0],
       segments: [{
         id: 'match_1_segment_1',
         $id: 'match_1_segment_1',
@@ -1411,7 +1458,7 @@ describe('League schedule page', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Create Event' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Create event' })).toBeEnabled();
     });
   });
 
@@ -2658,7 +2705,7 @@ describe('League schedule page', () => {
       expect(editorSaveCall).toBeDefined();
     });
     const command = editorSaveCall?.[1]?.body;
-    expect(command.contractVersion).toBe(2);
+    expect(command.contractVersion).toBe(3);
     expect(command.draft.basics.state).toBe('UNPUBLISHED');
     expect(command.draft.resources.timeSlots).toHaveLength(1);
     expect(command.draft).not.toHaveProperty('matches');
@@ -2908,6 +2955,98 @@ describe('League schedule page', () => {
     expect(command.draft.competition.usesSets).toBe(true);
   });
 
+  it('builds a dirty unscheduled league only once through the atomic editor save', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => {
+        if (key === 'mode') return 'edit';
+        return null;
+      },
+    });
+    const unscheduledEvent = buildApiEvent({
+      id: 'event_1',
+      $id: 'event_1',
+      eventType: 'LEAGUE',
+      matches: [],
+    });
+    const eventWithoutMatches = { ...unscheduledEvent };
+    delete (eventWithoutMatches as any).matches;
+    latestEditorEvent = { ...unscheduledEvent };
+    mockEventFormDraft = unscheduledEvent;
+    mockEventFormDirtyState = true;
+    apiRequestMock.mockImplementation((path: string) => {
+      if (path === '/api/events/event_1') {
+        return Promise.resolve({ event: eventWithoutMatches });
+      }
+      if (path === '/api/events/event_1/matches') {
+        return Promise.resolve({ matches: [] });
+      }
+      return Promise.resolve({});
+    });
+    (eventService.getEvent as jest.Mock).mockResolvedValue(eventWithoutMatches);
+    (eventService.getEventById as jest.Mock).mockResolvedValue(eventWithoutMatches);
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+
+    renderWithMantine(<LeagueSchedulePage />);
+
+    fireEvent.click(await screen.findByRole('tab', { name: /schedule/i }));
+    const emptyCopy = await screen.findByText(
+      'No schedule has been built. Build a schedule from the current divisions, fields, availability, and team capacity.',
+    );
+    fireEvent.click(within(emptyCopy.parentElement as HTMLElement).getByRole('button', { name: 'Build schedule' }));
+
+    await waitFor(() => {
+      expect(apiRequestMock.mock.calls.filter(([path, options]) => (
+        path === '/api/events/event_1/editor'
+        && (options as { method?: string } | undefined)?.method === 'PUT'
+      ))).toHaveLength(1);
+    });
+    expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
+    expect(await screen.findByText('Schedule built.')).toBeInTheDocument();
+
+    confirmSpy.mockRestore();
+  });
+
+  it('offers Build schedule from the normal view of an unscheduled league', async () => {
+    const unscheduledEvent = buildApiEvent({
+      id: 'event_1',
+      $id: 'event_1',
+      eventType: 'LEAGUE',
+      matches: [],
+    });
+    const eventWithoutMatches = { ...unscheduledEvent };
+    delete (eventWithoutMatches as any).matches;
+    latestEditorEvent = { ...unscheduledEvent };
+    apiRequestMock.mockImplementation((path: string) => {
+      if (path === '/api/events/event_1') {
+        return Promise.resolve({ event: eventWithoutMatches });
+      }
+      if (path === '/api/events/event_1/matches') {
+        return Promise.resolve({ matches: [] });
+      }
+      return Promise.resolve({});
+    });
+    (eventService.getEvent as jest.Mock).mockResolvedValue(eventWithoutMatches);
+    (eventService.getEventById as jest.Mock).mockResolvedValue(eventWithoutMatches);
+    (eventService.reconcileEventSchedule as jest.Mock).mockResolvedValue({
+      event: { ...unscheduledEvent, matches: [buildApiEvent().matches[0]] },
+      warnings: [],
+    });
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+
+    renderWithMantine(<LeagueSchedulePage />);
+
+    fireEvent.click(await screen.findByRole('tab', { name: /schedule/i }));
+    const emptyCopy = await screen.findByText(
+      'No schedule has been built. Build a schedule from the current divisions, fields, availability, and team capacity.',
+    );
+    fireEvent.click(within(emptyCopy.parentElement as HTMLElement).getByRole('button', { name: 'Build schedule' }));
+
+    await waitFor(() => {
+      expect(eventService.reconcileEventSchedule).toHaveBeenCalledTimes(1);
+    });
+    confirmSpy.mockRestore();
+  });
+
   it('reschedules from non-details tabs and surfaces backend warnings', async () => {
     useSearchParamsMock.mockReturnValue({
       get: (key: string) => {
@@ -2918,7 +3057,7 @@ describe('League schedule page', () => {
     });
 
     mockEventFormValidateResult = false;
-    (eventService.scheduleEvent as jest.Mock).mockResolvedValue({
+    (eventService.reconcileEventSchedule as jest.Mock).mockResolvedValue({
       event: buildApiEvent({
         id: 'event_1',
         $id: 'event_1',
@@ -2941,11 +3080,13 @@ describe('League schedule page', () => {
     await clickMoreAction(/^reschedule$/i);
 
     await waitFor(() => {
-      expect(eventService.scheduleEvent).toHaveBeenCalledTimes(1);
+      expect(eventService.reconcileEventSchedule).toHaveBeenCalledTimes(1);
     });
-    expect(eventService.scheduleEvent).toHaveBeenCalledWith(
-      undefined,
-      expect.objectContaining({ eventId: 'event_1' }),
+    expect(eventService.reconcileEventSchedule).toHaveBeenCalledWith(
+      'event_1',
+      expect.objectContaining({
+        expectedScheduleRevision: 'test-schedule-revision-1',
+      }),
     );
     expect(
       await screen.findByText(/Locked match is outside the updated start\/time-slot window and was preserved\./i),
@@ -2998,7 +3139,7 @@ describe('League schedule page', () => {
       return Promise.resolve({});
     });
 
-    (eventService.scheduleEvent as jest.Mock).mockResolvedValue({
+    (eventService.reconcileEventSchedule as jest.Mock).mockResolvedValue({
       event: buildApiEvent({
         id: 'event_1',
         $id: 'event_1',
@@ -3027,7 +3168,7 @@ describe('League schedule page', () => {
     await clickMoreAction(/^reschedule$/i);
 
     await waitFor(() => {
-      expect(eventService.scheduleEvent).toHaveBeenCalledTimes(1);
+      expect(eventService.reconcileEventSchedule).toHaveBeenCalledTimes(1);
     });
 
     const patchCallIndex = apiRequestMock.mock.calls.findIndex(([path, options]) => (
@@ -3047,7 +3188,7 @@ describe('League schedule page', () => {
     );
 
     const patchOrder = apiRequestMock.mock.invocationCallOrder[patchCallIndex];
-    const scheduleOrder = (eventService.scheduleEvent as jest.Mock).mock.invocationCallOrder[0];
+    const scheduleOrder = (eventService.reconcileEventSchedule as jest.Mock).mock.invocationCallOrder[0];
     expect(patchOrder).toBeLessThan(scheduleOrder);
   });
 
@@ -3096,7 +3237,7 @@ describe('League schedule page', () => {
       }
       return Promise.resolve({});
     });
-    (eventService.scheduleEvent as jest.Mock).mockResolvedValue({
+    (eventService.reconcileEventSchedule as jest.Mock).mockResolvedValue({
       event: buildApiEvent({
         id: 'event_1',
         $id: 'event_1',
@@ -3130,7 +3271,7 @@ describe('League schedule page', () => {
     await clickMoreActionElement(rescheduleButton);
 
     await waitFor(() => {
-      expect(eventService.scheduleEvent).toHaveBeenCalledTimes(1);
+      expect(eventService.reconcileEventSchedule).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -3150,9 +3291,9 @@ describe('League schedule page', () => {
     fireEvent.click(publishButton);
 
     await waitFor(() => {
-      expect(eventService.scheduleEvent).not.toHaveBeenCalled();
+      expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
     });
-    expect(eventService.scheduleEvent).not.toHaveBeenCalled();
+    expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
   });
 
   it('shows create event failure details returned by the server', async () => {
@@ -3172,7 +3313,7 @@ describe('League schedule page', () => {
       coordinates: [-83.0, 42.0],
       start: '2026-01-05T09:00:00.000',
       end: '2026-01-05T11:00:00.000',
-      eventType: 'EVENT',
+      eventType: 'LEAGUE',
       sportIds: ['volleyball'],
       price: 0,
       maxParticipants: 8,
@@ -3213,9 +3354,20 @@ describe('League schedule page', () => {
         },
       ],
     };
-    (eventService.scheduleEvent as jest.Mock).mockRejectedValue(
-      new Error('Selected resources and time range conflict with an existing reservation.'),
-    );
+    const defaultImplementation = apiRequestMock.getMockImplementation();
+    apiRequestMock.mockImplementation((path: string, options?: any) => {
+      if (path === '/api/events/editor' && options?.method === 'POST') {
+        return Promise.reject(new ApiRequestError(
+          'Selected resources and time range conflict with an existing reservation.',
+          422,
+          {
+            code: 'EDITOR_SCHEDULE_FAILED',
+            error: 'Selected resources and time range conflict with an existing reservation.',
+          },
+        ));
+      }
+      return defaultImplementation?.(path, options) ?? Promise.resolve({});
+    });
     mockEventFormDirtyState = true;
 
     renderWithMantine(<LeagueSchedulePage />);
@@ -3227,26 +3379,22 @@ describe('League schedule page', () => {
     fireEvent.click(publishButton);
 
     await waitFor(() => {
-      expect(eventService.scheduleEvent).toHaveBeenCalledTimes(1);
+      expect(apiRequestMock.mock.calls.filter(([path, options]) => (
+        path === '/api/events/editor' && options?.method === 'POST'
+      ))).toHaveLength(1);
     });
+    expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
     expect(await screen.findByText(/Selected resources and time range conflict/)).toBeInTheDocument();
     expect(screen.getByTestId('event-form')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Save as draft without a schedule' })).toBeInTheDocument();
   });
-  it('reuses the frozen create command when the first save response is lost', async () => {
+  it('retries an unchanged create command with the same operation ID after the first response is lost', async () => {
     useSearchParamsMock.mockReturnValue({
       get: (key: string) => {
         if (key === 'create') return '1';
         if (key === 'mode') return 'edit';
         return null;
       },
-    });
-    (eventService.scheduleEvent as jest.Mock).mockResolvedValue({
-      event: buildApiEvent({
-        id: 'event_created',
-        $id: 'event_created',
-        state: 'UNPUBLISHED',
-      }),
     });
 
     const defaultImplementation = apiRequestMock.getMockImplementation();
@@ -3275,13 +3423,16 @@ describe('League schedule page', () => {
     await waitFor(() => expect(createCalls()).toHaveLength(1));
     expect(await screen.findByText(/Network response lost/)).toBeInTheDocument();
 
+    await waitFor(() => expect(publishButton).toBeEnabled());
     fireEvent.click(publishButton);
-    await waitFor(() => expect(eventService.scheduleEvent).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(createCalls()).toHaveLength(2));
 
     const calls = createCalls();
     expect(calls).toHaveLength(2);
-    expect(calls[0][1]?.body).toEqual(calls[1][1]?.body);
     expect(calls[0][1]?.body?.createOperationId).toBe('create-operation-test');
+    expect(calls[1][1]?.body?.createOperationId).toBe('create-operation-test');
+    expect(calls[1][1]?.body).toEqual(calls[0][1]?.body);
+    expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
   });
 
   it('normalizes create payload with multi-day slots and slot divisions before schedule preview', async () => {
@@ -3362,15 +3513,6 @@ describe('League schedule page', () => {
       restTimeMinutes: 0,
     };
 
-    (eventService.scheduleEvent as jest.Mock).mockResolvedValue({
-      event: buildApiEvent({
-        id: 'event_create_league',
-        $id: 'event_create_league',
-        eventType: 'LEAGUE',
-        teamCheckInMode: 'EVENT',
-      }),
-      preview: false,
-    });
     mockEventFormDirtyState = true;
 
     renderWithMantine(<LeagueSchedulePage />);
@@ -3382,14 +3524,18 @@ describe('League schedule page', () => {
     fireEvent.click(publishButton);
 
     await waitFor(() => {
-      expect(eventService.scheduleEvent).toHaveBeenCalledTimes(1);
+      expect(apiRequestMock.mock.calls.filter(([path, options]) => (
+        path === '/api/events/editor' && options?.method === 'POST'
+      ))).toHaveLength(1);
     });
+    expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
 
     const editorSaveCall = apiRequestMock.mock.calls.find(([path, options]) => (
       path === '/api/events/editor'
       && (options as { method?: string } | undefined)?.method === 'POST'
     ));
     const command = editorSaveCall?.[1]?.body as Record<string, any> | undefined;
+    expect(command?.completion).toEqual({ mode: 'CREATE_AND_BUILD_SCHEDULE' });
     expect(command?.draft?.resources?.timeSlots?.[0]).toMatchObject({
       dayOfWeek: 1,
       daysOfWeek: [1, 3],
@@ -3470,14 +3616,6 @@ describe('League schedule page', () => {
       restTimeMinutes: 0,
     };
 
-    (eventService.scheduleEvent as jest.Mock).mockResolvedValue({
-      event: buildApiEvent({
-        id: 'event_create_tournament',
-        $id: 'event_create_tournament',
-        eventType: 'TOURNAMENT',
-      }),
-      preview: false,
-    });
     mockEventFormDirtyState = true;
 
     renderWithMantine(<LeagueSchedulePage />);
@@ -3489,14 +3627,22 @@ describe('League schedule page', () => {
     fireEvent.click(publishButton);
 
     await waitFor(() => {
-      expect(eventService.scheduleEvent).toHaveBeenCalledTimes(1);
+      expect(apiRequestMock.mock.calls.filter(([path, options]) => (
+        path === '/api/events/editor' && options?.method === 'POST'
+      ))).toHaveLength(1);
     });
+    expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
+    expect(mockRouter.replace).toHaveBeenCalledWith(
+      expect.stringContaining('/events/event_created/schedule'),
+      { scroll: false },
+    );
 
     const editorSaveCall = apiRequestMock.mock.calls.find(([path, options]) => (
       path === '/api/events/editor'
       && (options as { method?: string } | undefined)?.method === 'POST'
     ));
     const command = editorSaveCall?.[1]?.body as Record<string, any> | undefined;
+    expect(command?.completion).toEqual({ mode: 'CREATE_AND_BUILD_SCHEDULE' });
     expect(command?.draft?.basics?.eventType).toBe('TOURNAMENT');
     expect(command?.draft?.resources?.timeSlots?.[0]).toMatchObject({
       dayOfWeek: 2,
@@ -5137,13 +5283,6 @@ describe('League schedule page', () => {
       name: 'Rental Org',
       fields: [],
     });
-    (eventService.scheduleEvent as jest.Mock).mockResolvedValue({
-      event: buildApiEvent({
-        id: 'event_1',
-        $id: 'event_1',
-      }),
-      warnings: [],
-    });
 
     apiRequestMock.mockImplementation((path: string) => {
       if (path.startsWith('/api/event-templates')) {
@@ -5159,14 +5298,18 @@ describe('League schedule page', () => {
     fireEvent.click(createButton);
 
     await waitFor(() => {
-      expect(eventService.scheduleEvent).toHaveBeenCalled();
+      expect(apiRequestMock.mock.calls.some(([path, options]) => (
+        path === '/api/events/editor' && options?.method === 'POST'
+      ))).toBe(true);
     });
+    expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
 
     const editorSaveCall = apiRequestMock.mock.calls.find(([path, options]) => (
       path === '/api/events/editor'
       && (options as { method?: string } | undefined)?.method === 'POST'
     ));
     const command = editorSaveCall?.[1]?.body as Record<string, any> | undefined;
+    expect(command?.completion).toEqual({ mode: 'CREATE_ONLY' });
     expect(command?.draft?.basics?.organizationId).toBeNull();
     expect(command?.draft).not.toHaveProperty('organization');
   });

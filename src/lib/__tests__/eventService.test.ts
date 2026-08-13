@@ -195,24 +195,14 @@ describe('eventService', () => {
     }));
   });
 
-  it('uses the extended timeout when scheduling an event', async () => {
+  it('uses the extended timeout when reconciling an event schedule', async () => {
     apiRequestMock.mockResolvedValue({
       preview: false,
       event: { ...baseEventRow, id: 'evt_1' },
       matches: [],
     });
 
-    await eventService.scheduleEvent(
-      {
-        id: 'evt_1',
-        name: 'Test Event',
-        eventType: 'LEAGUE',
-        divisions: [],
-        fields: [],
-        timeSlots: [],
-      },
-      { eventId: 'evt_1' },
-    );
+    await eventService.reconcileEventSchedule('evt_1');
 
     expect(apiRequestMock).toHaveBeenCalledWith(
       '/api/events/evt_1/schedule',
@@ -223,108 +213,29 @@ describe('eventService', () => {
     );
   });
 
-  it('sends the no-placeholder scheduling option when requested', async () => {
+  it('sends revision and no-placeholder options when requested', async () => {
     apiRequestMock.mockResolvedValue({
       preview: false,
       event: { ...baseEventRow, id: 'evt_1' },
       matches: [],
     });
 
-    await eventService.scheduleEvent(
-      {
-        id: 'evt_1',
-        name: 'Test Event',
-        eventType: 'LEAGUE',
-        divisions: [],
-        fields: [],
-        timeSlots: [],
-      },
-      { eventId: 'evt_1', includePlaceholderTeams: false },
-    );
+    await eventService.reconcileEventSchedule('evt_1', {
+      expectedScheduleRevision: 'schedule-revision-1',
+      includePlaceholderTeams: false,
+    });
 
     expect(apiRequestMock).toHaveBeenCalledWith(
       '/api/events/evt_1/schedule',
       expect.objectContaining({
         body: expect.objectContaining({
+          expectedScheduleRevision: 'schedule-revision-1',
           includePlaceholderTeams: false,
         }),
       }),
     );
   });
 
-  it('sends schedule payload ids as id only', async () => {
-    apiRequestMock.mockResolvedValue({
-      preview: false,
-      event: { ...baseEventRow, id: 'evt_1' },
-      matches: [],
-    });
-
-    await eventService.scheduleEvent(
-      {
-        id: 'evt_1',
-        name: 'Test Event',
-        eventType: 'LEAGUE',
-        sport: { $id: 'sport_1', name: 'Volleyball' },
-        fields: [
-          {
-            id: 'field_1',
-            name: 'Court A',
-          },
-        ],
-        timeSlots: [
-          {
-            id: 'slot_1',
-            scheduledFieldIds: ['field_1'],
-          },
-        ],
-        matches: [
-          {
-            id: 'match_1',
-            field: { id: 'field_1', name: 'Court A' },
-          },
-        ],
-      },
-      { eventId: 'evt_1' },
-    );
-
-    const scheduleCall = apiRequestMock.mock.calls[0]?.[1];
-    const eventDocument = scheduleCall?.body?.eventDocument as Record<string, any>;
-
-    expect(eventDocument.id).toBe('evt_1');
-    expect(eventDocument.$id).toBeUndefined();
-    expect(eventDocument.sport).toEqual(
-      expect.objectContaining({
-        id: 'sport_1',
-        name: 'Volleyball',
-      }),
-    );
-    expect(eventDocument.sport?.$id).toBeUndefined();
-    expect(eventDocument.fields?.[0]).toEqual(
-      expect.objectContaining({
-        id: 'field_1',
-        name: 'Court A',
-      }),
-    );
-    expect(eventDocument.fields?.[0]?.$id).toBeUndefined();
-    expect(eventDocument.timeSlots?.[0]).toEqual(
-      expect.objectContaining({
-        id: 'slot_1',
-        scheduledFieldIds: ['field_1'],
-      }),
-    );
-    expect(eventDocument.timeSlots?.[0]?.$id).toBeUndefined();
-    expect(eventDocument.matches?.[0]).toEqual(
-      expect.objectContaining({
-        id: 'match_1',
-        field: expect.objectContaining({
-          id: 'field_1',
-          name: 'Court A',
-        }),
-      }),
-    );
-    expect(eventDocument.matches?.[0]?.$id).toBeUndefined();
-    expect(eventDocument.matches?.[0]?.field?.$id).toBeUndefined();
-  });
 
 
   it('maps template rows without sport data using a fallback sport object', async () => {
@@ -606,7 +517,6 @@ describe('eventService', () => {
         end: '2026-04-25T16:20:00.000Z',
         team1Points: [],
         team2Points: [],
-        setResults: [],
         officialId: 'official_1',
         officialIds: [
           {

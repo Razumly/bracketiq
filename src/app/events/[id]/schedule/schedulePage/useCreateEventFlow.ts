@@ -8,15 +8,9 @@ import { formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
 import { getFieldResolvedLocation } from '@/lib/fieldUtils';
 import { createClientId } from '@/lib/clientId';
 import { createId } from '@/lib/id';
-import { normalizeApiEvent } from '@/lib/apiMappers';
 import { organizationService } from '@/lib/organizationService';
 import { paymentService } from '@/lib/paymentService';
 import { signedDocumentService } from '@/lib/signedDocumentService';
-import {
-  buildTemplateRentalResourceHref,
-  getTemplateRentalResourceHintsFromEvent,
-  type TemplateRentalResourceHint,
-} from '@/lib/templateRentalResources';
 import type {
   Event,
   EventState,
@@ -29,15 +23,12 @@ import type {
 } from '@/types';
 
 import type { EventFormHandle, EventFormProps } from '../components/EventForm';
-import type { EventEditorDraft } from '@/contracts/eventEditor';
-import { editorDraftToLegacyEvent } from '../components/eventForm/editorContractAdapters';
 import type { RentalCheckoutModalsProps } from './RentalCheckoutModals';
 import {
   buildScheduleLocationDefaults,
   getFieldCoordinatesForRental,
 } from './locationDefaults';
 import {
-  cloneValue,
   type PendingRentalCheckoutContext,
   type RentalSelectionQuery,
 } from './helpers';
@@ -46,65 +37,12 @@ type TemplateSummary = {
   id: string;
   name: string;
 };
-
-const seedEventTemplate = async (
-  templateId: string,
-  params: {
-    newEventId: string;
-    newStartDate: Date;
-  },
-): Promise<Event> => {
-  const response = await apiRequest<{ event?: Event }>(
-    `/api/event-templates/${encodeURIComponent(templateId)}/seed`,
-    {
-      method: 'POST',
-      body: {
-        newEventId: params.newEventId,
-        newStartDate: formatLocalDateTime(params.newStartDate),
-      },
-    },
-  );
-  if (!response?.event) {
-    throw new Error('Template seed response did not include an event.');
-  }
-  const event = normalizeApiEvent(response.event);
-  if (!event) {
-    throw new Error('Template seed response did not include a valid event.');
-  }
-  return event;
-};
-
 export type TemplateRentalResourcePrompt = {
   message: string;
-  href: string | null;
+  href?: string | null;
 };
 
-const buildTemplateRentalResourcePrompt = (
-  event: Event,
-): TemplateRentalResourcePrompt | null => {
-  const hints = getTemplateRentalResourceHintsFromEvent(event);
-  if (hints.length === 0) {
-    return null;
-  }
-  const labels = hints
-    .map((hint: TemplateRentalResourceHint) => hint.fieldName ?? hint.facilityName ?? hint.location)
-    .filter((label): label is string => Boolean(label));
-  const uniqueLabels = Array.from(new Set(labels));
-  const resourceLabel = uniqueLabels.length > 0
-    ? uniqueLabels.slice(0, 3).join(', ')
-    : hints.length === 1
-      ? 'a rented resource'
-      : 'rented resources';
-  const overflow = uniqueLabels.length > 3 ? ` and ${uniqueLabels.length - 3} more` : '';
-  const href = hints
-    .map(buildTemplateRentalResourceHref)
-    .find((value): value is string => Boolean(value)) ?? null;
 
-  return {
-    message: `This template used ${resourceLabel}${overflow}. Create a new rental for the resource before scheduling this event there.`,
-    href,
-  };
-};
 
 type UseCreateEventFlowParams = {
   isCreateMode: boolean;
@@ -112,12 +50,9 @@ type UseCreateEventFlowParams = {
   user: UserData | null;
   isGuest: boolean;
   changesEvent: Event | null;
-  activeEvent: Event | null;
-  activeMatches: Match[];
   hasPendingUnsavedChanges: boolean;
-  eventFormRef: RefObject<EventFormHandle | null>;
-  editorDraftRef: RefObject<EventEditorDraft | null>;
   templateIdParam?: string;
+  templateStartParam?: string;
   skipTemplatePromptParam: boolean;
   resolvedHostOrgId?: string;
   resolvedRentalOrgId?: string;
@@ -140,11 +75,10 @@ type UseCreateEventFlowParams = {
   rentalPriceParam?: string;
   defaultSport: Event['sport'];
   userLocationLabel: string;
-  userCoordinates: [number, number] | null;
+  userCoordinates?: [number, number] | null;
   setChangesEvent: Dispatch<SetStateAction<Event | null>>;
-  setHasUnsavedChanges: Dispatch<SetStateAction<boolean>>;
-  setFormHasUnsavedChanges: Dispatch<SetStateAction<boolean>>;
   setActionError: Dispatch<SetStateAction<string | null>>;
+  onTemplateIntentChange: (templateId: string, startDate: Date) => void;
 };
 
 export function useCreateEventFlow({
@@ -153,13 +87,10 @@ export function useCreateEventFlow({
   user,
   isGuest,
   changesEvent,
-  activeEvent,
-  activeMatches,
   hasPendingUnsavedChanges,
-  eventFormRef,
-  editorDraftRef,
-  templateIdParam,
   skipTemplatePromptParam,
+  templateIdParam,
+  templateStartParam,
   resolvedHostOrgId,
   resolvedRentalOrgId,
   isRentalFlow,
@@ -183,13 +114,11 @@ export function useCreateEventFlow({
   userLocationLabel,
   userCoordinates,
   setChangesEvent,
-  setHasUnsavedChanges,
-  setFormHasUnsavedChanges,
   setActionError,
+  onTemplateIntentChange,
 }: UseCreateEventFlowParams) {
   const templatePromptResolvedRef = useRef(false);
-  const templateIdSeedResolvedRef = useRef<string | null>(null);
-  const templateRentalResourcePromptDismissedRef = useRef(false);
+  const templateIntentResolvedRef = useRef<string | null>(null);
 
   const [organizationForCreate, setOrganizationForCreate] = useState<Organization | null>(null);
   const [rentalOrganization, setRentalOrganization] = useState<Organization | null>(null);
@@ -200,16 +129,14 @@ export function useCreateEventFlow({
   const [templatePromptOpen, setTemplatePromptOpen] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [selectedTemplateStartDate, setSelectedTemplateStartDate] = useState<Date | null>(null);
-  const [templateSeedKey, setTemplateSeedKey] = useState(0);
-  const [failedTemplateSeedId, setFailedTemplateSeedId] = useState<string | null>(null);
+  const [templateBootstrapKey, setTemplateBootstrapKey] = useState(0);
   const [applyingTemplate, setApplyingTemplate] = useState(false);
-  const [templateRentalResourcePrompt, setTemplateRentalResourcePrompt] = useState<TemplateRentalResourcePrompt | null>(null);
 
   const createLocationDefaults = useMemo(
     () => buildScheduleLocationDefaults({
       organization: organizationForCreate,
       userLocationLabel,
-      userCoordinates,
+      userCoordinates: userCoordinates ?? null,
     }),
     [organizationForCreate, userCoordinates, userLocationLabel],
   );
@@ -458,46 +385,15 @@ export function useCreateEventFlow({
     if (!isCreateMode) {
       return;
     }
-    if (templateIdParam && templateIdSeedResolvedRef.current === templateIdParam) {
-      return;
-    }
+    const requestedStart = templateStartParam ? parseLocalDateTime(templateStartParam) : null;
     templatePromptResolvedRef.current = false;
-    templateIdSeedResolvedRef.current = null;
-    templateRentalResourcePromptDismissedRef.current = false;
-    setTemplatePromptOpen(Boolean(templateIdParam));
+    templateIntentResolvedRef.current = templateIdParam && requestedStart ? templateIdParam : null;
+    setTemplatePromptOpen(Boolean(templateIdParam && !requestedStart && !skipTemplatePromptParam));
     setTemplateSummaries([]);
-    setTemplateRentalResourcePrompt(null);
     setSelectedTemplateId(templateIdParam ?? null);
-    setSelectedTemplateStartDate(null);
+    setSelectedTemplateStartDate(requestedStart);
     setTemplatesError(null);
-    setFailedTemplateSeedId(null);
-  }, [eventId, isCreateMode, resolvedHostOrgId, templateIdParam]);
-
-  useEffect(() => {
-    if (!isCreateMode || !eventId || !user?.$id || !templateIdParam) {
-      return;
-    }
-    if (
-      templateIdSeedResolvedRef.current === templateIdParam
-      || templatePromptResolvedRef.current
-    ) {
-      return;
-    }
-
-    setTemplatesError(null);
-    setActionError(null);
-    setFailedTemplateSeedId(null);
-    setSelectedTemplateId(templateIdParam);
-    setSelectedTemplateStartDate(null);
-    setTemplatePromptOpen(true);
-  }, [
-    eventId,
-    isCreateMode,
-    resolvedHostOrgId,
-    setActionError,
-    templateIdParam,
-    user?.$id,
-  ]);
+  }, [eventId, isCreateMode, resolvedHostOrgId, skipTemplatePromptParam, templateIdParam, templateStartParam]);
 
   const handleApplyTemplate = useCallback(async () => {
     if (!isCreateMode || !user?.$id) {
@@ -523,22 +419,9 @@ export function useCreateEventFlow({
     setActionError(null);
 
     try {
-      const seeded = await seedEventTemplate(selectedTemplateId, {
-        newEventId: eventId,
-        newStartDate: selectedTemplateStartDate,
-      });
-
-      setChangesEvent(seeded);
-      templateRentalResourcePromptDismissedRef.current = false;
-      setTemplateRentalResourcePrompt(
-        buildTemplateRentalResourcePrompt(seeded),
-      );
-      setHasUnsavedChanges(false);
-      setFormHasUnsavedChanges(false);
-      setTemplateSeedKey((prev) => prev + 1);
-      if (selectedTemplateId === templateIdParam) {
-        templateIdSeedResolvedRef.current = selectedTemplateId;
-      }
+      onTemplateIntentChange(selectedTemplateId, selectedTemplateStartDate);
+      templateIntentResolvedRef.current = selectedTemplateId;
+      setTemplateBootstrapKey((previous) => previous + 1);
       closeTemplatePrompt();
       return true;
     } catch (error) {
@@ -552,30 +435,13 @@ export function useCreateEventFlow({
     closeTemplatePrompt,
     eventId,
     isCreateMode,
+    onTemplateIntentChange,
     selectedTemplateId,
     selectedTemplateStartDate,
     setActionError,
-    setChangesEvent,
-    setFormHasUnsavedChanges,
-    setHasUnsavedChanges,
-    templateIdParam,
     user?.$id,
   ]);
 
-  useEffect(() => {
-    if (
-      !isCreateMode
-      || templateRentalResourcePrompt
-      || templateRentalResourcePromptDismissedRef.current
-      || !changesEvent
-    ) {
-      return;
-    }
-    const prompt = buildTemplateRentalResourcePrompt(changesEvent);
-    if (prompt) {
-      setTemplateRentalResourcePrompt(prompt);
-    }
-  }, [changesEvent, isCreateMode, templateRentalResourcePrompt]);
 
   useEffect(() => {
     if (!isCreateMode || !user) return;
@@ -689,12 +555,15 @@ export function useCreateEventFlow({
 
         if (cancelled) return;
         setTemplateSummaries(summaries);
-
-        if ((summaries.length > 0 || templateIdParam) && !templatePromptResolvedRef.current) {
+        if (
+          (summaries.length > 0 || templateIdParam)
+          && !templatePromptResolvedRef.current
+          && !templateStartParam
+        ) {
           setTemplatePromptOpen(true);
           setSelectedTemplateId((prev) => prev ?? templateIdParam ?? null);
           setSelectedTemplateStartDate((prev) => {
-            if (templateIdParam) return prev;
+            if (templateIdParam || templateStartParam) return prev;
             if (prev) return prev;
             const base = changesEvent?.start ? parseLocalDateTime(changesEvent.start) : null;
             const seed = base ?? new Date();
@@ -708,7 +577,7 @@ export function useCreateEventFlow({
       } catch (error) {
         if (cancelled) return;
         setTemplateSummaries([]);
-        setTemplatePromptOpen(Boolean(templateIdParam));
+        setTemplatePromptOpen(Boolean(templateIdParam && !templateStartParam && !skipTemplatePromptParam));
         setSelectedTemplateId((prev) => prev ?? templateIdParam ?? null);
         setTemplatesError(error instanceof Error ? error.message : 'Failed to load templates.');
       } finally {
@@ -724,13 +593,13 @@ export function useCreateEventFlow({
   }, [
     changesEvent?.start,
     eventId,
-    failedTemplateSeedId,
     isCreateMode,
     isGuest,
     isRentalFlow,
     resolvedHostOrgId,
     skipTemplatePromptParam,
     templateIdParam,
+    templateStartParam,
     user?.$id,
   ]);
 
@@ -849,32 +718,6 @@ export function useCreateEventFlow({
     };
   }, [eventId, isCreateMode, resolvedHostOrgId, resolvedRentalOrgId, setChangesEvent]);
 
-  const buildTemplateSourceFromDraft = useCallback((): Event | null => {
-    if (!activeEvent) {
-      return null;
-    }
-    const formDraft = editorDraftRef.current
-      ? editorDraftToLegacyEvent(editorDraftRef.current) as Partial<Event>
-      : null;
-    const merged = {
-      ...(cloneValue(activeEvent) as Event),
-      ...(formDraft ?? {}),
-    } as Event;
-
-    if (!Array.isArray(merged.matches) || merged.matches.length === 0) {
-      merged.matches = Array.isArray(activeMatches)
-        ? (cloneValue(activeMatches) as Match[])
-        : [];
-    }
-    if (!Array.isArray(merged.timeSlots)) {
-      merged.timeSlots = [];
-    }
-    if (typeof merged.$id !== 'string' || merged.$id.trim().length === 0) {
-      merged.$id = activeEvent.$id;
-    }
-
-    return merged;
-  }, [activeEvent, activeMatches, editorDraftRef]);
 
   return {
     organizationForCreate,
@@ -882,31 +725,29 @@ export function useCreateEventFlow({
     formSeedEvent,
     createLocationDefaults,
     rentalImmutableDefaults,
-    rentalPurchaseContext,
-    rentalPurchaseTimeSlot,
-    templateSelectData,
-    templatePromptOpen: templatePromptOpen || Boolean(
-      isCreateMode
-      && templateIdParam
-      && templateIdSeedResolvedRef.current !== templateIdParam
-      && !templatePromptResolvedRef.current,
-    ),
-    closeTemplatePrompt,
-    applyingTemplate,
     templatesError,
     templatesLoading,
     selectedTemplateId,
     setSelectedTemplateId,
     selectedTemplateStartDate,
     setSelectedTemplateStartDate,
-    templateSeedKey,
-    templateRentalResourcePrompt,
-    dismissTemplateRentalResourcePrompt: () => {
-      templateRentalResourcePromptDismissedRef.current = true;
-      setTemplateRentalResourcePrompt(null);
-    },
+    templateBootstrapKey,
+    rentalPurchaseContext,
+    rentalPurchaseTimeSlot,
+    templateSelectData,
+    templatePromptOpen: templatePromptOpen || Boolean(
+      isCreateMode
+      && templateIdParam
+      && !templateStartParam
+      && !skipTemplatePromptParam
+      && templateIntentResolvedRef.current !== templateIdParam
+      && !templatePromptResolvedRef.current,
+    ),
+    closeTemplatePrompt,
+    applyingTemplate,
+    templateRentalResourcePrompt: null,
+    dismissTemplateRentalResourcePrompt: () => {},
     handleApplyTemplate,
-    buildTemplateSourceFromDraft,
   };
 }
 

@@ -42,11 +42,16 @@ const createClient = (initialRows: Array<Record<string, unknown>> = []) => {
 };
 
 const draft = legacyEventToEditorDraft(eventEditorFixtures[0].event);
-const command = { contractVersion: 2 as const, createOperationId: 'create-operation-1', draft };
+const command = {
+  contractVersion: 3 as const,
+  createOperationId: 'create-operation-1',
+  draft,
+  completion: { mode: 'CREATE_ONLY' as const },
+};
 const result = {
   status: 'SAVED' as const,
   snapshot: {
-    contractVersion: 2 as const,
+    contractVersion: 3 as const,
     draft,
     mode: 'EDIT' as const,
     eventId: 'event-1',
@@ -60,9 +65,20 @@ const result = {
     },
     catalogs: { sports: [], organizations: [], fields: [], templates: [] },
     immutable: { fieldNames: [], rental: false, template: false },
+    scheduleState: {
+      sourceType: null,
+      matchCount: 0,
+      revision: 'schedule-revision-1',
+      hasProtectedHistory: false,
+    },
   },
   questionIdMap: {},
   staffEmailDelivery: 'QUEUED' as const,
+  scheduleOutcome: {
+    status: 'NOT_REQUESTED' as const,
+    matchCount: 0,
+    warnings: [],
+  },
 };
 
 const reorderObjectKeys = (value: any): any => {

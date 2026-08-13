@@ -74,7 +74,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           matchId: true,
           team1Points: true,
           team2Points: true,
-          setResults: true,
           previousLeftId: true,
           previousRightId: true,
           winnerNextMatchId: true,

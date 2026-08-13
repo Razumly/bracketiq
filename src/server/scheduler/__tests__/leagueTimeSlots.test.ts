@@ -351,7 +351,6 @@ describe('league scheduling (time slots)', () => {
     expect(playoffMatches.length).toBeGreaterThan(0);
     expect(playoffMatches.every((match) => match.team1Points.length === 1)).toBe(true);
     expect(playoffMatches.every((match) => match.team2Points.length === 1)).toBe(true);
-    expect(playoffMatches.every((match) => match.setResults.length === 1)).toBe(true);
   });
 
   it('rejects schedulable events with fixed end windows when end is not after start', () => {

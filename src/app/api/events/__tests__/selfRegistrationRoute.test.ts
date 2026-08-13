@@ -3,6 +3,8 @@
 import { NextRequest } from 'next/server';
 
 const prismaMock = {
+  $transaction: jest.fn(),
+  $executeRaw: jest.fn(),
   events: {
     findUnique: jest.fn(),
     update: jest.fn(),
@@ -61,6 +63,8 @@ const jsonPost = (url: string, body: unknown) =>
 describe('POST /api/events/[eventId]/registrations/self', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => Promise<unknown>) => callback(prismaMock));
+    prismaMock.$executeRaw.mockResolvedValue(0);
     requireSessionMock.mockResolvedValue({ userId: 'user_1', isAdmin: false });
     dispatchRequiredEventDocumentsMock.mockResolvedValue({
       sentDocumentIds: [],

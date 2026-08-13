@@ -537,7 +537,6 @@ export interface Match {
   start: string | null;
   end: string | null;
   losersBracket?: boolean;
-  setResults: number[];
   side?: string | null;
   officialCheckedIn?: boolean;
   team1Seed?: number | null;

@@ -17,6 +17,7 @@ import {
   buildEventParticipantSnapshot,
   syncDivisionTeamMembershipFromRegistrations,
   upsertEventRegistration,
+  acquireEventLockAndLoadStructure,
   type RegistrationLifecycleStatus,
 } from '@/server/events/eventRegistrations';
 import {
@@ -563,6 +564,13 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      const lockedStructure = await acquireEventLockAndLoadStructure(tx, event.id, {
+        eventType: event.eventType,
+        teamSignup: event.teamSignup,
+      });
+      if (payload.mode === 'team' && !lockedStructure.teamSignup) {
+        throw Object.assign(new Error('Team registration is not available for this event.'), { status: 409 });
+      }
       const now = new Date();
       const pendingDocumentDispatches: PendingEventDocumentDispatch[] = [];
       const parent = await ensureGuestParentIdentity(tx, {
@@ -1216,6 +1224,13 @@ export async function POST(req: NextRequest, context: RouteContext) {
     }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Guest registration failed.';
+    const errorCode = (error as { code?: unknown })?.code;
+    if (errorCode === 'EVENT_CONFIGURATION_CHANGED') {
+      return NextResponse.json(
+        { error: message, code: errorCode },
+        { status: 409 },
+      );
+    }
     const status = typeof (error as { status?: unknown })?.status === 'number'
       ? Number((error as { status: number }).status)
       : 500;

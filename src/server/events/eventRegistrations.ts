@@ -8,6 +8,7 @@ import {
 } from '@/server/events/weeklyOccurrences';
 import { isTournamentPoolPlayEnabled } from '@/server/events/tournamentPools';
 import { withDerivedCanonicalTeamIds } from '@/server/teams/teamMembership';
+import { acquireEventLock } from '@/server/repositories/locks';
 
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
@@ -131,9 +132,88 @@ export type EventParticipantSnapshot = {
   divisionWarnings: EventParticipantDivisionWarning[];
 };
 
-const DISPLAY_MEMBER_STATUSES = new Set<RegistrationLifecycleStatus>(['PENDING', 'ACTIVE', 'BLOCKED']);
-const CAPACITY_HOLDING_STATUSES = new Set<RegistrationLifecycleStatus>(['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED']);
+export const JOINED_EVENT_PARTICIPANT_STATUSES = ['PENDING', 'ACTIVE', 'BLOCKED'] as const;
+const DISPLAY_MEMBER_STATUSES = new Set<RegistrationLifecycleStatus>(JOINED_EVENT_PARTICIPANT_STATUSES);
 
+export type EventRegistrationStructure = {
+  id: string;
+  eventType: string | null;
+  teamSignup: boolean | null;
+};
+
+export class EventConfigurationChangedError extends Error {
+  readonly code = 'EVENT_CONFIGURATION_CHANGED';
+  readonly status = 409;
+
+  constructor() {
+    super('Event configuration changed while the registration was being processed. Reload and try again.');
+    this.name = 'EventConfigurationChangedError';
+  }
+}
+
+const normalizeEventTypeForRegistration = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return value == null ? null : String(value).trim().toUpperCase();
+  }
+  const normalized = value.trim().toUpperCase();
+  return normalized.length ? normalized : null;
+};
+
+export const acquireEventLockAndLoadStructure = async (
+  client: PrismaLike,
+  eventId: string,
+  expected?: Partial<Pick<EventRegistrationStructure, 'eventType' | 'teamSignup'>>,
+): Promise<EventRegistrationStructure> => {
+  await acquireEventLock(client, eventId);
+  const event = await client.events.findUnique({
+    where: { id: eventId },
+    select: {
+      id: true,
+      eventType: true,
+      teamSignup: true,
+    },
+  });
+  if (!event) {
+    throw Object.assign(new Error('Event not found.'), { status: 404 });
+  }
+
+  const expectedEventType = expected && Object.prototype.hasOwnProperty.call(expected, 'eventType')
+    ? normalizeEventTypeForRegistration(expected.eventType)
+    : undefined;
+  const expectedTeamSignup = expected && Object.prototype.hasOwnProperty.call(expected, 'teamSignup')
+    ? Boolean(expected.teamSignup)
+    : undefined;
+  if (
+    (expectedEventType !== undefined && normalizeEventTypeForRegistration(event.eventType) !== expectedEventType)
+    || (expectedTeamSignup !== undefined && Boolean(event.teamSignup) !== expectedTeamSignup)
+  ) {
+    throw new EventConfigurationChangedError();
+  }
+
+  return {
+    id: event.id,
+    eventType: normalizeEventTypeForRegistration(event.eventType),
+    teamSignup: event.teamSignup ?? null,
+  };
+};
+const CAPACITY_HOLDING_STATUSES = new Set<RegistrationLifecycleStatus>(['STARTED', ...JOINED_EVENT_PARTICIPANT_STATUSES]);
+
+export const hasJoinedEventParticipant = async (
+  eventId: string,
+  client: PrismaLike = prisma,
+): Promise<boolean> => {
+  const normalizedEventId = typeof eventId === 'string' ? eventId.trim() : '';
+  if (!normalizedEventId) return false;
+  const row = await client.eventRegistrations.findFirst({
+    where: {
+      eventId: normalizedEventId,
+      rosterRole: 'PARTICIPANT',
+      status: { in: [...JOINED_EVENT_PARTICIPANT_STATUSES] },
+    },
+    select: { id: true },
+  });
+  return Boolean(row);
+};
 const normalizeId = (value: unknown): string | null => {
   if (typeof value !== 'string') {
     return null;

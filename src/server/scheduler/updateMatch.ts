@@ -24,7 +24,6 @@ export type MatchUpdate = {
   locked?: boolean;
   team1Points?: number[];
   team2Points?: number[];
-  setResults?: number[];
   team1Id?: string | null;
   team2Id?: string | null;
   officialId?: string | null;
@@ -141,9 +140,6 @@ export const applyMatchUpdates = (event: Tournament | League, match: Match, upda
   }
   if (update.team2Points) {
     match.team2Points = [...update.team2Points];
-  }
-  if (update.setResults) {
-    match.setResults = [...update.setResults];
   }
   if (update.start) {
     match.start = update.start;
@@ -373,15 +369,6 @@ const segmentScoreTotal = (match: Match, teamId: string): number => (
   }, 0)
 );
 
-const resolveWinnerFromLegacyResults = (match: Match): Team | null => {
-  const teamOne = match.team1;
-  const teamTwo = match.team2;
-  if (!teamOne || !teamTwo) return null;
-  const team1Wins = match.setResults.filter((result) => result === 1).length;
-  const team2Wins = match.setResults.filter((result) => result === 2).length;
-  if (team1Wins === 0 && team2Wins === 0) return null;
-  return team1Wins >= team2Wins ? teamOne : teamTwo;
-};
 
 const resolveMatchWinner = (match: Match): Team | null => {
   const teamOne = match.team1;
@@ -403,7 +390,7 @@ const resolveMatchWinner = (match: Match): Team | null => {
       const configuredSegmentCount = Number(rules.segmentCount);
       const segmentCount = Number.isFinite(configuredSegmentCount) && configuredSegmentCount > 0
         ? Math.trunc(configuredSegmentCount)
-        : Math.max(segments.length, match.setResults.length, 1);
+        : Math.max(segments.length, 1);
       const setsToWin = Math.max(1, Math.ceil(segmentCount / 2));
       if (team1Wins >= setsToWin || team2Wins >= setsToWin) {
         return team1Wins >= team2Wins ? teamOne : teamTwo;
@@ -421,7 +408,7 @@ const resolveMatchWinner = (match: Match): Team | null => {
     }
   }
 
-  return resolveWinnerFromLegacyResults(match);
+  return null;
 };
 
 const isMatchOver = (match: Match | null): boolean => {

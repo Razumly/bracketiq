@@ -462,29 +462,6 @@ class EventService {
     return this.getEvent(id);
   }
 
-  async updateEventParticipants(
-    eventId: string,
-    updates: { userIds: string[]; teamIds: string[] },
-  ): Promise<Event> {
-    try {
-      const response = await apiRequest<any>(`/api/events/${eventId}`, {
-        method: "PATCH",
-        body: { event: updates },
-      });
-
-      const hydrated = await this.getEvent(eventId);
-      if (hydrated) {
-        return hydrated;
-      }
-
-      await this.ensureSportRelationship(response);
-      await this.ensureLeagueScoringConfig(response);
-      return this.mapRowToEvent(response);
-    } catch (error) {
-      console.error("Failed to update event participants:", error);
-      throw error;
-    }
-  }
 
   async getEventParticipants(
     eventId: string,
@@ -667,20 +644,20 @@ class EventService {
   }
 
 
-  async scheduleEvent(
-    eventDocument?: Record<string, any>,
+  async reconcileEventSchedule(
+    eventId: string,
     options: {
+      expectedScheduleRevision?: string;
       participantCount?: number;
-      eventId?: string;
       includePlaceholderTeams?: boolean;
       replaceExistingMatches?: boolean;
     } = {},
   ): Promise<LeagueScheduleResponse> {
     const payload: Record<string, any> = {};
-    if (eventDocument) {
-      payload.eventDocument = normalizePayloadIdentifiers(eventDocument);
-    }
 
+    if (typeof options.expectedScheduleRevision === "string") {
+      payload.expectedScheduleRevision = options.expectedScheduleRevision;
+    }
     if (typeof options.participantCount === "number") {
       payload.participantCount = options.participantCount;
     }
@@ -691,9 +668,7 @@ class EventService {
       payload.replaceExistingMatches = options.replaceExistingMatches;
     }
 
-    const path = options.eventId
-      ? `/api/events/${options.eventId}/schedule`
-      : "/api/events/schedule";
+    const path = `/api/events/${eventId}/schedule`;
     const result = await apiRequest<{
       preview?: boolean;
       event?: Event;
@@ -2513,9 +2488,6 @@ class EventService {
         : [],
       team2Points: Array.isArray(input.team2Points)
         ? (input.team2Points as number[])
-        : [],
-      setResults: Array.isArray(input.setResults)
-        ? (input.setResults as number[])
         : [],
       previousLeftId: input.previousLeftId ?? input.previousLeftMatchId,
       previousRightId: input.previousRightId ?? input.previousRightMatchId,

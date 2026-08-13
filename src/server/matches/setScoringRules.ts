@@ -12,11 +12,6 @@ type SegmentOperationLike = {
   winnerEventTeamId?: string | null;
 };
 
-type LegacySetScoreUpdate = {
-  team1Points?: number[];
-  team2Points?: number[];
-  setResults?: number[];
-};
 
 const normalizeIdToken = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
@@ -221,57 +216,6 @@ export const assertSetSegmentOperationsAllowed = (
     const expectedWinnerId = team1Score > team2Score ? team1Id : team2Score > team1Score ? team2Id : null;
 
     if (!state.isValidFinalScore || !expectedWinnerId || winnerEventTeamId !== expectedWinnerId) {
-      throw invalidSetScoreResponse();
-    }
-  }
-};
-
-export const assertLegacySetScoreUpdateAllowed = (
-  event: any,
-  match: any,
-  update: LegacySetScoreUpdate,
-) => {
-  if (!matchUsesSetScoring(event, match)) {
-    return;
-  }
-
-  const [team1Id, team2Id] = matchTeamIds(match);
-  if (!team1Id || !team2Id) return;
-
-  const nextTeam1Points = Array.isArray(update.team1Points) ? update.team1Points : [];
-  const nextTeam2Points = Array.isArray(update.team2Points) ? update.team2Points : [];
-  const nextSetResults = Array.isArray(update.setResults) ? update.setResults : [];
-  const length = Math.max(nextTeam1Points.length, nextTeam2Points.length, nextSetResults.length);
-  for (let index = 0; index < length; index += 1) {
-    const sequence = index + 1;
-    const target = resolveSetVictoryTargetForMatch(event, match, sequence);
-    if (!target) continue;
-
-    const existing = segmentForSequence(match, sequence);
-    const currentTeam1Score = segmentScore(existing, team1Id, match?.team1Points?.[index]);
-    const currentTeam2Score = segmentScore(existing, team2Id, match?.team2Points?.[index]);
-    const nextTeam1Score = Object.prototype.hasOwnProperty.call(nextTeam1Points, index)
-      ? nonNegativeScore(nextTeam1Points[index])
-      : currentTeam1Score;
-    const nextTeam2Score = Object.prototype.hasOwnProperty.call(nextTeam2Points, index)
-      ? nonNegativeScore(nextTeam2Points[index])
-      : currentTeam2Score;
-
-    if (
-      (nextTeam1Score > currentTeam1Score || nextTeam2Score > currentTeam2Score)
-      && !canIncreaseSetScore(currentTeam1Score, currentTeam2Score, nextTeam1Score, nextTeam2Score, target)
-    ) {
-      throw invalidSetScoreResponse();
-    }
-
-    const result = Number(nextSetResults[index] ?? 0);
-    if (result !== 1 && result !== 2) {
-      continue;
-    }
-
-    const state = getSetScoreState(nextTeam1Score, nextTeam2Score, target);
-    const expectedResult = nextTeam1Score > nextTeam2Score ? 1 : nextTeam2Score > nextTeam1Score ? 2 : 0;
-    if (!state.isValidFinalScore || result !== expectedResult) {
       throw invalidSetScoreResponse();
     }
   }

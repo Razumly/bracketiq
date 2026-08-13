@@ -153,12 +153,6 @@ const syncLegacyArraysFromSegments = (match: any) => {
   const team2Id = normalizeIdToken(match.team2?.id ?? match.team2?.$id);
   match.team1Points = segments.map((segment) => team1Id ? Number(segment.scores?.[team1Id] ?? 0) : 0);
   match.team2Points = segments.map((segment) => team2Id ? Number(segment.scores?.[team2Id] ?? 0) : 0);
-  match.setResults = segments.map((segment) => {
-    const winner = normalizeIdToken(segment.winnerEventTeamId);
-    if (winner && team1Id && winner === team1Id) return 1;
-    if (winner && team2Id && winner === team2Id) return 2;
-    return 0;
-  });
 };
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ eventId: string; matchId: string }> }) {

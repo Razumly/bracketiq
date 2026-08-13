@@ -1021,6 +1021,31 @@ describe('upsertEventFromPayload', () => {
     expect(eventUpsertArg.update.fieldIds.sort()).toEqual(['field_1', 'field_2']);
     expect(eventUpsertArg.create.timeSlotIds).toEqual(['slot_multi']);
   });
+  it('persists client-only fields whose identity arrives as $id', async () => {
+    const client = createMockClient();
+    const payload = {
+      ...baseEventPayload(),
+      fields: [
+        {
+          $id: 'field_client_1',
+          name: 'Generated Court',
+          divisions: ['OPEN'],
+        },
+      ],
+      fieldIds: ['field_client_1'],
+    };
+
+    await upsertEventFromPayload(payload, client as any);
+
+    expect(client.fields.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'field_client_1' },
+        create: expect.objectContaining({ id: 'field_client_1', name: 'Generated Court' }),
+      }),
+    );
+    expect(client.events.upsert.mock.calls[0][0].create.fieldIds).toEqual(['field_client_1']);
+  });
+
 
   it('falls back local field divisions to event divisions when field divisions are omitted', async () => {
     const client = createMockClient();
@@ -1580,7 +1605,7 @@ describe('upsertEventFromPayload', () => {
       ...baseEventPayload(),
       includePlayoffs: true,
       singleDivision: false,
-      playoffTeamCount: 8,
+      playoffTeamCount: null,
       divisions: ['OPEN', 'ADVANCED'],
       divisionDetails: [
         {
@@ -1609,6 +1634,54 @@ describe('upsertEventFromPayload', () => {
       'Playoff team count must be at least 2 for division "Advanced" when playoffs are enabled.',
     );
     expect(client.divisions.upsert).not.toHaveBeenCalled();
+  });
+
+  it('persists multi-division playoff counts without an event-level count', async () => {
+    const client = createMockClient();
+    const openDivisionId = divisionId('open');
+    const advancedDivisionId = divisionId('advanced');
+
+    const payload = {
+      ...baseEventPayload(),
+      includePlayoffs: true,
+      singleDivision: false,
+      playoffTeamCount: null,
+      divisions: ['OPEN', 'ADVANCED'],
+      divisionDetails: [
+        {
+          id: openDivisionId,
+          key: 'open',
+          name: 'Open',
+          divisionTypeId: 'open',
+          divisionTypeName: 'Open',
+          ratingType: 'SKILL',
+          gender: 'C',
+          playoffTeamCount: 8,
+        },
+        {
+          id: advancedDivisionId,
+          key: 'advanced',
+          name: 'Advanced',
+          divisionTypeId: 'advanced',
+          divisionTypeName: 'Advanced',
+          ratingType: 'SKILL',
+          gender: 'C',
+          playoffTeamCount: 4,
+        },
+      ],
+    };
+
+    await upsertEventFromPayload(payload, client as any);
+
+    const eventUpsert = client.events.upsert.mock.calls[0][0];
+    expect(eventUpsert.create.playoffTeamCount).toBeNull();
+    expect(eventUpsert.update.playoffTeamCount).toBeNull();
+
+    const divisionUpserts = client.divisions.upsert.mock.calls
+      .map(([args]) => args)
+      .filter((args) => [openDivisionId, advancedDivisionId].includes(args.where.id));
+    expect(divisionUpserts.map((args) => args.create.playoffTeamCount)).toEqual([8, 4]);
+    expect(divisionUpserts.map((args) => args.update.playoffTeamCount)).toEqual([8, 4]);
   });
 
   it('falls back to event-level payment-plan defaults when division payment fields are omitted', async () => {

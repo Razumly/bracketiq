@@ -250,7 +250,6 @@ export const MatchesScalarFieldEnum = {
   division: 'division',
   team1Points: 'team1Points',
   team2Points: 'team2Points',
-  setResults: 'setResults',
   side: 'side',
   matchId: 'matchId',
   losersBracket: 'losersBracket',

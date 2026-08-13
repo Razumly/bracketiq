@@ -8,7 +8,6 @@ const buildMatch = (id: string, overrides: Partial<Match> = {}): Match => ({
   fieldId: 'field_1',
   team1Points: [],
   team2Points: [],
-  setResults: [],
   ...overrides,
 });
 

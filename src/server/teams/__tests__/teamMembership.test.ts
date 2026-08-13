@@ -1,9 +1,11 @@
 /** @jest-environment node */
 
 const upsertEventRegistrationMock = jest.fn();
+const acquireEventLockAndLoadStructureMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: {} }));
 jest.mock('@/server/events/eventRegistrations', () => ({
+  acquireEventLockAndLoadStructure: (...args: any[]) => acquireEventLockAndLoadStructureMock(...args),
   upsertEventRegistration: (...args: any[]) => upsertEventRegistrationMock(...args),
 }));
 
@@ -833,6 +835,7 @@ describe('claimOrCreateEventTeamSnapshot', () => {
     });
 
     const tx = {
+      $executeRaw: jest.fn(),
       teams: {
         findMany: jest.fn().mockResolvedValue([]),
         create: createMock,
@@ -877,6 +880,9 @@ describe('claimOrCreateEventTeamSnapshot', () => {
       id: 'event_team_1',
     }));
 
+    expect(acquireEventLockAndLoadStructureMock).toHaveBeenCalledWith(tx, 'event_1', {
+      teamSignup: true,
+    });
     expect(createMock).toHaveBeenCalledTimes(1);
     expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'event_team_1' },
@@ -897,6 +903,7 @@ describe('claimOrCreateEventTeamSnapshot', () => {
     const eventRegistrationsFindManyMock = jest.fn().mockResolvedValue([]);
 
     const tx = {
+      $executeRaw: jest.fn(),
       teams: {
         findMany: jest.fn().mockResolvedValue([]),
         create: createMock,
@@ -994,6 +1001,7 @@ describe('claimOrCreateEventTeamSnapshot', () => {
     });
 
     const tx = {
+      $executeRaw: jest.fn(),
       teams: {
         findMany: findManyMock,
         update: updateMock,
@@ -1080,6 +1088,7 @@ describe('claimOrCreateEventTeamSnapshot', () => {
     });
 
     const tx = {
+      $executeRaw: jest.fn(),
       teams: {
         findMany: findManyMock,
         update: updateMock,
@@ -1181,6 +1190,7 @@ describe('claimOrCreateEventTeamSnapshot', () => {
     });
 
     const tx = {
+      $executeRaw: jest.fn(),
       teams: {
         findMany: findManyMock,
         update: updateMock,
@@ -1288,6 +1298,7 @@ describe('claimOrCreateEventTeamSnapshot', () => {
     });
 
     const tx = {
+      $executeRaw: jest.fn(),
       teams: {
         findMany: findManyMock,
         update: updateMock,
@@ -1426,6 +1437,7 @@ describe('claimOrCreateEventTeamSnapshot', () => {
     });
 
     const tx = {
+      $executeRaw: jest.fn(),
       teams: {
         findMany: findManyMock,
         update: updateMock,
@@ -1543,6 +1555,7 @@ describe('claimOrCreateEventTeamSnapshot', () => {
     });
 
     const tx = {
+      $executeRaw: jest.fn(),
       teams: {
         findMany: findManyMock,
         update: updateMock,

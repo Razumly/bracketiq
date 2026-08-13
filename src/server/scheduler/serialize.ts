@@ -123,7 +123,6 @@ const serializeMatch = (match: Match) => ({
   teamOfficialSeed: null,
   team1Points: match.team1Points ?? [],
   team2Points: match.team2Points ?? [],
-  setResults: match.setResults ?? [],
   losersBracket: match.losersBracket ?? false,
   winnerNextMatchId: match.winnerNextMatch?.id ?? null,
   loserNextMatchId: match.loserNextMatch?.id ?? null,

@@ -7,7 +7,6 @@ describe('deriveStandingsMatchResult', () => {
       team2: { $id: 'team_2' },
       team1Points: [9],
       team2Points: [1],
-      setResults: [2],
       resolvedMatchRules: {
         scoringModel: 'POINTS_ONLY',
         pointIncidentRequiresParticipant: true,
@@ -45,7 +44,6 @@ describe('deriveStandingsMatchResult', () => {
       team2: { $id: 'team_2' },
       team1Points: [0],
       team2Points: [3],
-      setResults: [2],
       resolvedMatchRules: {
         scoringModel: 'POINTS_ONLY',
         pointIncidentRequiresParticipant: false,
@@ -81,7 +79,6 @@ describe('deriveStandingsMatchResult', () => {
       team2: { $id: 'team_2' },
       team1Points: [2],
       team2Points: [2],
-      setResults: [0],
       resolvedMatchRules: {
         scoringModel: 'POINTS_ONLY',
         pointIncidentRequiresParticipant: false,

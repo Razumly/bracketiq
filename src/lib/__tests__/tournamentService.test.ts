@@ -14,13 +14,11 @@ describe('tournamentService', () => {
 
   it('normalizes match ids returned by the API', async () => {
     apiRequestMock.mockResolvedValue({
-      match: { id: 'match_1', team1Points: [], team2Points: [], setResults: [] },
     });
 
     const result = await tournamentService.updateMatch('event_1', 'match_1', {
       team1Points: [],
       team2Points: [],
-      setResults: [],
     } as any);
 
     expect(apiRequestMock).toHaveBeenCalledWith(
@@ -34,7 +32,6 @@ describe('tournamentService', () => {
     apiRequestMock.mockResolvedValue({});
 
     await tournamentService.completeMatch('event_1', 'match_1', {
-      setResults: [1, 0],
       team1Points: [25],
       team2Points: [21],
     } as any);

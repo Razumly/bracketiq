@@ -2,6 +2,7 @@
 
 const prismaMock = {
   $transaction: jest.fn(),
+  $executeRaw: jest.fn(),
   affiliateImportCandidates: {
     findUnique: jest.fn(),
     findFirst: jest.fn(),
@@ -142,6 +143,7 @@ describe('affiliate import service', () => {
     jest.resetAllMocks();
     idCounter = 0;
     prismaMock.$transaction.mockImplementation(async (callback: (client: typeof prismaMock) => unknown) => callback(prismaMock));
+    prismaMock.$executeRaw.mockResolvedValue(0);
     geocodeAddressToCoordinatesMock.mockResolvedValue([-122.6765, 45.5231]);
     tryResolveTimeZoneFromCoordinatesMock.mockReturnValue('America/Los_Angeles');
     prismaMock.divisions.findMany.mockResolvedValue([]);
@@ -1883,7 +1885,17 @@ describe('affiliate import service', () => {
     });
     prismaMock.organizations.findUnique.mockResolvedValue({ id: 'org_rose_city_volleyball' });
     prismaMock.sports.findFirst.mockResolvedValue({ id: 'sport_indoor_volleyball' });
-    prismaMock.events.findUnique.mockResolvedValue(null);
+    prismaMock.events.findUnique.mockImplementation(async ({ where }) => (
+      where?.id === 'existing_event'
+        ? {
+          id: 'existing_event',
+          eventType: 'EVENT',
+          sourceType: 'AFFILIATE_IMPORT',
+          sourceId: 'candidate_original',
+          sourceUrl: 'https://example.com/old-source',
+        }
+        : null
+    ));
     prismaMock.events.findFirst
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({

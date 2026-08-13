@@ -1,12 +1,14 @@
 /** @jest-environment node */
 
 const syncNewCanonicalPlayerIntoMatchRostersMock = jest.fn();
+const acquireEventLockAndLoadStructureMock = jest.fn();
 
 jest.mock('@/server/matches/teamCheckIns', () => ({
   syncNewCanonicalPlayerIntoMatchRosters: (...args: unknown[]) => syncNewCanonicalPlayerIntoMatchRostersMock(...args),
 }));
 
 jest.mock('@/server/events/eventRegistrations', () => ({
+  acquireEventLockAndLoadStructure: (...args: unknown[]) => acquireEventLockAndLoadStructureMock(...args),
   buildEventRegistrationId: ({
     eventId,
     registrantType,
@@ -100,6 +102,9 @@ describe('acceptTeamInviteEventSyncs', () => {
         pending: [],
         updatedAt: now,
       },
+    });
+    expect(acquireEventLockAndLoadStructureMock).toHaveBeenCalledWith(tx, 'event_1', {
+      teamSignup: true,
     });
     expect(syncNewCanonicalPlayerIntoMatchRostersMock).toHaveBeenCalledWith(tx, {
       eventId: 'event_1',

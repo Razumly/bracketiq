@@ -487,7 +487,6 @@ export class Match implements SchedulableEvent {
   losersBracket?: boolean | null;
   division: Division;
   field: PlayingField | null;
-  setResults: number[];
   status: MatchLifecycleStatus | string | null;
   resultStatus: MatchResultStatus | string | null;
   resultType: MatchResultType | string | null;
@@ -529,7 +528,6 @@ export class Match implements SchedulableEvent {
     losersBracket?: boolean | null;
     division: Division;
     field?: PlayingField | null;
-    setResults?: number[];
     status?: MatchLifecycleStatus | string | null;
     resultStatus?: MatchResultStatus | string | null;
     resultType?: MatchResultType | string | null;
@@ -570,7 +568,6 @@ export class Match implements SchedulableEvent {
     this.losersBracket = params.losersBracket ?? false;
     this.division = params.division;
     this.field = params.field ?? null;
-    this.setResults = params.setResults ?? [];
     this.status = params.status ?? null;
     this.resultStatus = params.resultStatus ?? null;
     this.resultType = params.resultType ?? null;

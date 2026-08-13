@@ -203,9 +203,21 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(({
                 snapshot.draft,
                 snapshot.eventId ?? (snapshot.mode === 'CREATE' ? 'new-event' : null),
             ) as unknown as Event;
+            const catalogFieldsById = new Map<string, Record<string, unknown>>();
+            snapshot.catalogs.fields.forEach((field) => {
+                const fieldId = normalizeEntityId(field.id ?? field.$id);
+                if (fieldId) {
+                    catalogFieldsById.set(fieldId, field);
+                }
+            });
+            formEvent.fields = (formEvent.fields ?? []).map((field) => {
+                const fieldId = normalizeEntityId(field.$id);
+                const catalogField = fieldId ? catalogFieldsById.get(fieldId) : undefined;
+                return catalogField ? { ...catalogField, ...field } as Field : field;
+            });
             return formEvent;
         },
-        [snapshot.draft, snapshot.eventId, snapshot.mode],
+        [snapshot.catalogs.fields, snapshot.draft, snapshot.eventId, snapshot.mode],
     );
     const snapshotOrganization = snapshot.catalogs.organizations.find(
         (entry) => entry.id === snapshot.draft.basics.organizationId || entry.$id === snapshot.draft.basics.organizationId,
@@ -224,6 +236,18 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(({
         snapshot.draft.resources.rentalBookingItemId,
         snapshot.immutable.fieldNames,
     ]);
+    const eventTypeLocked = snapshot.immutable.fieldNames.includes('eventType');
+    const teamSignupLocked = snapshot.immutable.fieldNames.includes('teamSignup');
+    const editorLockMessages = [
+        eventTypeLocked && snapshot.scheduleState.hasProtectedHistory
+            ? 'Event type is locked because this event has match history.'
+            : eventTypeLocked
+                ? 'Event type is locked while this event has registered participants.'
+                : null,
+        teamSignupLocked
+            ? 'Registration unit is locked while this event has registered participants.'
+            : null,
+    ].filter((message): message is string => Boolean(message));
     const {
         eventTagOptions,
         hydratedOrganization,
@@ -1370,6 +1394,16 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(({
                     <SimpleSetupProgressRail pages={simpleSetupPages} onSelectPage={selectSimpleSetupPage} />
                 ) : null}
             </div>
+            {editorLockMessages.length > 0 ? (
+                <div
+                    role="status"
+                    className="mx-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+                >
+                    {editorLockMessages.map((message) => (
+                        <p key={message}>{message}</p>
+                    ))}
+                </div>
+            ) : null}
             <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
                 {setupMode === 'SIMPLE' && validationErrorIndex.ordered.length > 0 ? (
                     <div

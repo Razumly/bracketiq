@@ -116,6 +116,14 @@ function MatchCard({
         typeof value === 'string' ? value.trim() : ''
     );
 
+    const getAssignedTeamId = (teamId: unknown, team: Match['team1']): string => {
+        const directId = normalizeMatchRefId(teamId);
+        if (directId) return directId;
+        if (!team || typeof team !== 'object') return '';
+        const relation = team as { $id?: unknown; id?: unknown };
+        return normalizeMatchRefId(relation.$id ?? relation.id);
+    };
+
     const getBracketPlaceholder = (
         previousMatch?: Match | null,
         slot?: 'team1' | 'team2',
@@ -189,15 +197,27 @@ function MatchCard({
     };
 
     const getMatchResult = () => {
-        const team1Wins = match.setResults.filter((r) => r === 1).length;
-        const team2Wins = match.setResults.filter((r) => r === 2).length;
+        const team1Id = getAssignedTeamId(match.team1Id, match.team1);
+        const team2Id = getAssignedTeamId(match.team2Id, match.team2);
+        if (!team1Id || !team2Id) return null;
+
+        const canonicalSegments = Array.isArray(match.segments)
+            ? match.segments
+            : [];
+        const team1Wins = canonicalSegments.filter(
+            (segment) => segment.status !== 'VOID' && normalizeMatchRefId(segment.winnerEventTeamId) === team1Id,
+        ).length;
+        const team2Wins = canonicalSegments.filter(
+            (segment) => segment.status !== 'VOID' && normalizeMatchRefId(segment.winnerEventTeamId) === team2Id,
+        ).length;
         if (team1Wins === 0 && team2Wins === 0) return null;
         return { team1Wins, team2Wins, winner: team1Wins > team2Wins ? 1 : team2Wins > team1Wins ? 2 : null };
     };
 
     const result = getMatchResult();
     const isCompleted = result && result.winner !== null;
-    const isInProgress = match.setResults.some((r) => r === 0) && match.setResults.some((r) => r !== 0);
+    const isInProgress = Array.isArray(match.segments)
+        && match.segments.some((segment) => segment.status === 'IN_PROGRESS');
     const divisionLabel = resolveDivisionLabel(match.division);
 
     const formatTime = (timeString?: string | null) => {
@@ -338,14 +358,22 @@ function MatchCard({
                 </div>
                 <div className="match-card__team-score">
                     {points.length > 0 ? (
-                        points.map((value, idx) => (
-                            <span
-                                key={idx}
-                                className={`px-1 ${match.setResults[idx] === (winner ? (reverseScore ? 2 : 1) : (reverseScore ? 1 : 2)) ? 'font-bold text-green-600' : ''}`}
-                            >
-                                {value}
-                            </span>
-                        ))
+                        points.map((value, idx) => {
+                            const segment = match.segments?.find((candidate) => candidate.sequence === idx + 1);
+                            const rowTeamId = getAssignedTeamId(
+                                slot === 'team1' ? match.team1Id : match.team2Id,
+                                team,
+                            );
+                            const isSetWinner = normalizeMatchRefId(segment?.winnerEventTeamId) === rowTeamId;
+                            return (
+                                <span
+                                    key={idx}
+                                    className={`px-1 ${isSetWinner ? 'font-bold text-green-600' : ''}`}
+                                >
+                                    {value}
+                                </span>
+                            );
+                        })
                     ) : (
                         <span className="text-gray-400">-</span>
                     )}

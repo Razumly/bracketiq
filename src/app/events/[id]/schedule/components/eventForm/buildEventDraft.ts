@@ -602,9 +602,12 @@ export function buildEventDraft(input: BuildEventDraftInput): Partial<Event> {
                 kind: 'PLAYOFF' as const,
                 name: division.name,
                 divisionTypeId: division.divisionTypeId,
+                skillDivisionTypeId: division.skillDivisionTypeId,
+                ageDivisionTypeId: division.ageDivisionTypeId,
                 divisionTypeName: division.divisionTypeName,
                 ratingType: division.ratingType,
                 gender: division.gender,
+                fieldIds: Array.isArray(division.fieldIds) ? division.fieldIds : [],
                 sportId: division.sportId,
                 price: Number.isFinite(division.price)
                     ? normalizePriceCents(division.price as number)

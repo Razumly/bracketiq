@@ -125,9 +125,6 @@ class TournamentService {
         if (hasOwn('team2Points') && Array.isArray(match.team2Points)) {
             payload.team2Points = match.team2Points;
         }
-        if (hasOwn('setResults') && Array.isArray(match.setResults)) {
-            payload.setResults = match.setResults;
-        }
 
         if (hasOwn('team1Id')) {
             if (match.team1Id !== undefined) {
@@ -460,7 +457,7 @@ class TournamentService {
     async updateMatchScores(
         eventId: string,
         matchId: string,
-        updates: Pick<Match, 'team1Points' | 'team2Points' | 'setResults'> & {
+        updates: Pick<Match, 'team1Points' | 'team2Points'> & {
             segmentOperations?: MatchSegmentOperation[];
             finalize?: boolean;
             time?: string;
@@ -498,7 +495,7 @@ class TournamentService {
     async completeMatch(
         eventId: string,
         matchId: string,
-        payload: Partial<Pick<Match, 'team1Points' | 'team2Points' | 'setResults'>> & { segmentOperations?: MatchSegmentOperation[] },
+        payload: Partial<Pick<Match, 'team1Points' | 'team2Points'>> & { segmentOperations?: MatchSegmentOperation[] },
     ): Promise<void> {
         try {
             const nowIso = new Date().toISOString();
@@ -507,7 +504,6 @@ class TournamentService {
                 body: {
                     finalize: true,
                     segmentOperations: payload.segmentOperations,
-                    setResults: payload.setResults,
                     team1Points: payload.team1Points,
                     team2Points: payload.team2Points,
                     time: nowIso,

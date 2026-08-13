@@ -466,7 +466,6 @@ export const resolveMatchRulesForContext = (params: {
   existingSegmentCount?: number | null;
   existingTeam1PointCount?: number | null;
   existingTeam2PointCount?: number | null;
-  existingResultCount?: number | null;
 }): ResolvedMatchRules | null => {
   if (!params.baseRules) {
     return null;
@@ -475,7 +474,6 @@ export const resolveMatchRulesForContext = (params: {
     positiveIntOrZero(params.existingSegmentCount),
     positiveIntOrZero(params.existingTeam1PointCount),
     positiveIntOrZero(params.existingTeam2PointCount),
-    positiveIntOrZero(params.existingResultCount),
     1,
   );
 
@@ -601,56 +599,3 @@ export const serializeMatchIncidentRow = (row: any): MatchIncident => ({
   createdAt: isoOrNull(row.createdAt),
   updatedAt: isoOrNull(row.updatedAt),
 });
-
-export const buildLegacySegments = (params: {
-  eventId?: string | null;
-  matchId: string;
-  team1Id?: string | null;
-  team2Id?: string | null;
-  team1Points?: number[] | null;
-  team2Points?: number[] | null;
-  setResults?: number[] | null;
-  start?: Date | null;
-  end?: Date | null;
-}): MatchSegment[] => {
-  const team1Points = Array.isArray(params.team1Points) ? params.team1Points : [];
-  const team2Points = Array.isArray(params.team2Points) ? params.team2Points : [];
-  const setResults = Array.isArray(params.setResults) ? params.setResults : [];
-  const length = Math.max(team1Points.length, team2Points.length, setResults.length, 0);
-  return Array.from({ length }, (_, index) => {
-    const sequence = index + 1;
-    const team1Score = Math.max(0, Math.trunc(Number(team1Points[index] ?? 0)));
-    const team2Score = Math.max(0, Math.trunc(Number(team2Points[index] ?? 0)));
-    const result = Number(setResults[index] ?? 0);
-    const winnerEventTeamId = result === 1
-      ? params.team1Id ?? null
-      : result === 2
-        ? params.team2Id ?? null
-        : null;
-    const scores: Record<string, number> = {};
-    if (params.team1Id) {
-      scores[params.team1Id] = team1Score;
-    }
-    if (params.team2Id) {
-      scores[params.team2Id] = team2Score;
-    }
-    return {
-      id: `${params.matchId}_segment_${sequence}`,
-      eventId: params.eventId ?? null,
-      matchId: params.matchId,
-      sequence,
-      status: winnerEventTeamId
-        ? 'COMPLETE'
-        : team1Score > 0 || team2Score > 0
-          ? 'IN_PROGRESS'
-          : 'NOT_STARTED',
-      scores,
-      winnerEventTeamId,
-      startedAt: team1Score > 0 || team2Score > 0 ? isoOrNull(params.start) : null,
-      endedAt: winnerEventTeamId ? isoOrNull(params.end) : null,
-      resultType: null,
-      statusReason: null,
-      metadata: null,
-    };
-  });
-};

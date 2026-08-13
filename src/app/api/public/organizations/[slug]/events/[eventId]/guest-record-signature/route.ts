@@ -15,6 +15,10 @@ import {
   normalizeRequiredTemplateIds,
   verifyGuestRegistrationToken,
 } from '@/server/publicGuestRegistration';
+import {
+  EventConfigurationChangedError,
+  acquireEventLockAndLoadStructure,
+} from '@/server/events/eventRegistrations';
 import { sendEventRegistrationHostNotification } from '@/server/registrationHostNotifications';
 
 export const dynamic = 'force-dynamic';
@@ -237,25 +241,56 @@ const promoteGuestRegistrationIfComplete = async (params: {
     return;
   }
 
-  const priceCents = await resolveEventRegistrationPriceCents({
-    event: params.event,
-    selection: {
-      divisionId: normalizeGuestText(params.registration.divisionId),
-      divisionTypeId: normalizeGuestText(params.registration.divisionTypeId),
-      divisionTypeKey: normalizeGuestText(params.registration.divisionTypeKey),
-    },
-    client: prisma,
+  let becameActive = false;
+  const update = {
+    consentStatus: 'completed',
+    updatedAt: new Date(),
+  };
+  await prisma.$transaction(async (tx) => {
+    await acquireEventLockAndLoadStructure(tx, params.event.id, {
+      eventType: params.event.eventType,
+      teamSignup: params.event.teamSignup,
+    });
+    const current = await tx.eventRegistrations.findUnique({
+      where: { id: params.registration.id },
+      select: {
+        status: true,
+        divisionId: true,
+        divisionTypeId: true,
+        divisionTypeKey: true,
+      },
+    });
+    const currentStatus = current?.status;
+    if (
+      !current ||
+      (
+        currentStatus !== 'STARTED' &&
+        currentStatus !== 'PENDING' &&
+        currentStatus !== 'ACTIVE'
+      )
+    ) {
+      return;
+    }
+    const priceCents = await resolveEventRegistrationPriceCents({
+      event: params.event,
+      selection: {
+        divisionId: normalizeGuestText(current.divisionId),
+        divisionTypeId: normalizeGuestText(current.divisionTypeId),
+        divisionTypeKey: normalizeGuestText(current.divisionTypeKey),
+      },
+      client: tx,
+    });
+    const guardedNextStatus = priceCents > 0 ? currentStatus : 'ACTIVE';
+    await tx.eventRegistrations.update({
+      where: { id: params.registration.id },
+      data: {
+        ...update,
+        status: guardedNextStatus,
+      },
+    });
+    becameActive = guardedNextStatus === 'ACTIVE' && currentStatus !== 'ACTIVE';
   });
-  const nextStatus = priceCents > 0 ? (params.registration.status ?? 'STARTED') : 'ACTIVE';
-  await (prisma as any).eventRegistrations.update({
-    where: { id: params.registration.id },
-    data: {
-      status: nextStatus,
-      consentStatus: 'completed',
-      updatedAt: new Date(),
-    },
-  });
-  if (nextStatus === 'ACTIVE' && String(params.registration.status ?? '').toUpperCase() !== 'ACTIVE') {
+  if (becameActive) {
     await sendEventRegistrationHostNotification({
       eventId: params.event.id,
       registrationId: params.registration.id,
@@ -409,19 +444,29 @@ export async function POST(req: NextRequest, context: RouteContext) {
     });
   }
 
-  if (scopedChildUserId) {
-    await syncChildRegistrationConsentStatus({
-      eventId: event.id,
-      childUserId: scopedChildUserId,
+  try {
+    if (scopedChildUserId) {
+      await syncChildRegistrationConsentStatus({
+        eventId: event.id,
+        childUserId: scopedChildUserId,
+        parentUserId: token.parentUserId,
+      });
+    }
+    await promoteGuestRegistrationIfComplete({
+      event: event as Record<string, any>,
+      registration: registration as Record<string, any>,
       parentUserId: token.parentUserId,
+      requiredTemplateIds,
     });
+  } catch (error) {
+    if (error instanceof EventConfigurationChangedError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status },
+      );
+    }
+    throw error;
   }
-  await promoteGuestRegistrationIfComplete({
-    event: event as Record<string, any>,
-    registration: registration as Record<string, any>,
-    parentUserId: token.parentUserId,
-    requiredTemplateIds,
-  });
 
   return NextResponse.json({
     ok: true,

@@ -37,7 +37,6 @@ describe('scheduler API serialization', () => {
       team2: null,
       team1Points: [0],
       team2Points: [0],
-      setResults: [0],
       bufferMs: 0,
       eventId: 'event_1',
     });

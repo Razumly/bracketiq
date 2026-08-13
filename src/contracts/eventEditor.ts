@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const EVENT_EDITOR_CONTRACT_VERSION = 2 as const;
+export const EVENT_EDITOR_CONTRACT_VERSION = 3 as const;
 
 const id = z.string().trim().min(1);
 const nullableId = id.nullable();
@@ -468,6 +468,91 @@ export const editorCatalogsSchema = z.object({
   templates: z.array(unknownRecord),
 }).strict();
 
+export const eventEditorScheduleStateSchema = z.object({
+  sourceType: z.string().nullable(),
+  matchCount: z.number().int().nonnegative(),
+  revision: id,
+  hasProtectedHistory: z.boolean(),
+}).strict();
+
+const editorMatchProjectionSchema = z.object({
+  id,
+  matchId: z.number().int().nullable(),
+  eventId: id,
+  start: isoDateTime.nullable(),
+  end: isoDateTime.nullable(),
+  locked: z.boolean(),
+  division: nullableId,
+  fieldId: nullableId,
+  team1Id: nullableId,
+  team2Id: nullableId,
+  team1Seed: z.number().int().nullable(),
+  team2Seed: z.number().int().nullable(),
+  status: z.string().nullable(),
+  resultStatus: z.string().nullable(),
+  resultType: z.string().nullable(),
+  actualStart: isoDateTime.nullable(),
+  actualEnd: isoDateTime.nullable(),
+  statusReason: z.string().nullable(),
+  winnerEventTeamId: nullableId,
+  matchRulesSnapshot: unknownRecord.nullable(),
+  resolvedMatchRules: unknownRecord.nullable(),
+  segments: z.array(unknownRecord),
+  incidents: z.array(unknownRecord),
+  officialId: nullableId,
+  officialIds: z.array(unknownRecord),
+  teamOfficialId: nullableId,
+  team1Points: z.array(z.number()),
+  team2Points: z.array(z.number()),
+  losersBracket: z.boolean(),
+  winnerNextMatchId: nullableId,
+  loserNextMatchId: nullableId,
+  previousLeftId: nullableId,
+  previousRightId: nullableId,
+  side: z.string().nullable(),
+  officialCheckedIn: z.boolean(),
+}).strict();
+
+export const eventEditorScheduleWarningSchema = z.object({
+  code: id,
+  message: z.string().trim().min(1),
+  matchIds: z.array(id).optional(),
+}).strict();
+
+export const eventEditorCreateCompletionSchema = z.object({
+  mode: z.enum(['CREATE_ONLY', 'CREATE_AND_BUILD_SCHEDULE']),
+}).strict();
+
+export const eventEditorSaveScheduleTransitionSchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('PRESERVE'),
+  }).strict(),
+  z.object({
+    mode: z.enum(['BUILD_IF_MISSING', 'RECONCILE']),
+    expectedScheduleRevision: id,
+  }).strict(),
+]);
+
+export const eventEditorScheduleOutcomeSchema = z.discriminatedUnion('status', [
+  z.object({
+    status: z.literal('NOT_REQUESTED'),
+    matchCount: z.number().int().nonnegative(),
+    warnings: z.array(z.never()),
+  }).strict(),
+  z.object({
+    status: z.enum(['BUILT', 'REBUILT']),
+    matchCount: z.number().int().positive(),
+    matches: z.array(editorMatchProjectionSchema),
+    warnings: z.array(eventEditorScheduleWarningSchema),
+  }).strict(),
+  z.object({
+    status: z.literal('DELETED'),
+    matchCount: z.literal(0),
+    matches: z.array(z.never()),
+    warnings: z.array(z.never()),
+  }).strict(),
+]);
+
 export const eventEditorSnapshotSchema = z.object({
   contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
   draft: eventEditorBootstrapDraftSchema,
@@ -482,6 +567,7 @@ export const eventEditorSnapshotSchema = z.object({
     rental: z.boolean(),
     template: z.boolean(),
   }).strict(),
+  scheduleState: eventEditorScheduleStateSchema,
 }).strict();
 export const eventEditorCreateBootstrapSchema = z.object({
   contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
@@ -489,6 +575,12 @@ export const eventEditorCreateBootstrapSchema = z.object({
   snapshot: eventEditorSnapshotSchema,
 }).strict();
 
+export type EventEditorScheduleState = z.infer<typeof eventEditorScheduleStateSchema>;
+export type EventEditorMatchProjection = z.infer<typeof editorMatchProjectionSchema>;
+export type EventEditorScheduleWarning = z.infer<typeof eventEditorScheduleWarningSchema>;
+export type EventEditorCreateCompletion = z.infer<typeof eventEditorCreateCompletionSchema>;
+export type EventEditorSaveScheduleTransition = z.infer<typeof eventEditorSaveScheduleTransitionSchema>;
+export type EventEditorScheduleOutcome = z.infer<typeof eventEditorScheduleOutcomeSchema>;
 export type EventEditorCreateBootstrap = z.infer<typeof eventEditorCreateBootstrapSchema>;
 export const eventEditorBootstrapQuerySchema = z.object({
   organizationId: id.nullish(),
@@ -505,12 +597,14 @@ export const saveEventEditorCommandSchema = z.object({
   editorRevision: id,
   staffRevision: z.string().nullable(),
   draft: eventEditorDraftSchema,
+  scheduleTransition: eventEditorSaveScheduleTransitionSchema,
 }).strict();
 
 export const createEventEditorCommandSchema = z.object({
   contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
   createOperationId: id,
   draft: eventEditorDraftSchema,
+  completion: eventEditorCreateCompletionSchema,
 }).strict();
 
 export const eventEditorSaveResultSchema = z.object({
@@ -518,6 +612,7 @@ export const eventEditorSaveResultSchema = z.object({
   snapshot: eventEditorSnapshotSchema,
   questionIdMap: z.record(z.string(), id),
   staffEmailDelivery: z.enum(['QUEUED', 'FAILED', 'NOT_REQUESTED']),
+  scheduleOutcome: eventEditorScheduleOutcomeSchema,
 }).strict();
 
 export const eventEditorErrorSchema = z.object({
@@ -534,6 +629,12 @@ export const eventEditorErrorSchema = z.object({
     'EDITOR_SAVE_FAILED',
     'CREATE_OPERATION_PAYLOAD_MISMATCH',
     'CREATE_OPERATION_CONFLICT',
+    'EDITOR_SCHEDULE_INTENT_REQUIRED',
+    'EDITOR_SCHEDULE_REVISION_CONFLICT',
+    'EDITOR_PROTECTED_MATCH_HISTORY',
+    'EDITOR_SCHEDULE_UNSUPPORTED',
+    'EDITOR_SCHEDULE_INPUT_INVALID',
+    'EDITOR_SCHEDULE_FAILED',
   ]),
   field: z.string().nullable().optional(),
   editorRevision: z.string().nullable().optional(),

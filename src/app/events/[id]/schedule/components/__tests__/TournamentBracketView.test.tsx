@@ -53,7 +53,6 @@ const buildMatch = (id: string, overrides: Partial<Match> = {}): Match => ({
   end: '2026-03-01T01:00:00.000Z',
   team1Points: [],
   team2Points: [],
-  setResults: [],
   losersBracket: false,
   ...overrides,
 });
