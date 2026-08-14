@@ -2,6 +2,8 @@ import type { Event, OrganizationFeature } from '@/types';
 
 export type EventSetupMode = 'SIMPLE' | 'ADVANCED';
 
+export type EventSetupWorkflow = 'CREATE' | 'EDIT';
+
 export const EVENT_SETUP_PAGE_IDS = [
     'format',
     'basics',
@@ -52,6 +54,7 @@ export interface EventSetupResolverInput {
     hasImmutableRentalResources: boolean;
     organizationFeatures?: OrganizationFeature[] | null;
     choices: EventSetupChoices;
+    workflow?: EventSetupWorkflow;
     currentPageId?: EventSetupPageId;
     completePageIds?: Iterable<EventSetupPageId>;
 }

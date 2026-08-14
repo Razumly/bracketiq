@@ -150,6 +150,7 @@ const makeAffiliateEventFormValues = (overrides: Record<string, unknown> = {}) =
   eventType: 'EVENT',
   parentEvent: null,
   sportId: 'soccer',
+  sportIds: ['soccer'],
   sportConfig: null,
   price: 4500,
   minAge: undefined,
@@ -328,6 +329,20 @@ describe('event form payment helpers', () => {
       singleDivision: false,
       divisionDetails: [{ price: 0 }, { price: '1500' }],
     })).toBe(true);
+  });
+
+  it('requires at least one sport in the shared event schema', () => {
+    const schema = buildEventFormSchema({
+      allowMissingEventImage: true,
+      allowMissingEventDivisions: true,
+    });
+    const result = schema.safeParse(makeAffiliateEventFormValues({ sportIds: [] }));
+
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toContainEqual(expect.objectContaining({
+      path: ['sportIds'],
+      message: 'Sport is required',
+    }));
   });
 
   it('validates manual payment destinations with provider-specific rules', () => {

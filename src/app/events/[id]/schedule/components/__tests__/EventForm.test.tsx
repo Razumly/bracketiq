@@ -279,16 +279,24 @@ jest.mock('@/components/ui/ImageUploader', () => ({
   ImageUploader: function MockImageUploader({
     className,
     previewHeight,
+    onChange,
   }: {
     className?: string;
     previewHeight?: number;
+    onChange?: (fileId: string) => void;
   }) {
     return (
       <div
         data-testid="image-uploader"
         data-class-name={className}
         data-preview-height={previewHeight}
-      />
+      >
+        {onChange ? (
+          <button type="button" onClick={() => onChange('image_recovered')}>
+            Upload test image
+          </button>
+        ) : null}
+      </div>
     );
   },
 }));
@@ -636,6 +644,199 @@ describe('EventForm dirty state', () => {
     expect(screen.queryByRole('heading', { name: 'Schedule' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Collapse' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Options: Complete' })).toBeInTheDocument();
+  });
+
+  it('keeps every used Simple Setup page available while editing', async () => {
+    renderForm(jest.fn(), undefined, {}, null, {
+      initialSetupMode: 'SIMPLE',
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+    const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
+    expect(within(progress).getByRole('button', { name: 'Basics: Available' })).toBeEnabled();
+    expect(within(progress).getByRole('button', { name: 'Divisions: Available' })).toBeEnabled();
+    expect(within(progress).getByRole('button', { name: 'Schedule & Location: Available' })).toBeEnabled();
+    expect(within(progress).getByRole('button', { name: 'Pricing & Registration: Available' })).toBeEnabled();
+    const reviewPage = within(progress).getByRole('button', { name: 'Review & Publish: Available' });
+
+    fireEvent.click(reviewPage);
+
+    expect(await screen.findByRole('heading', { name: 'Review & Publish' })).toBeInTheDocument();
+  });
+
+  it('keeps invalid used pages directly selectable while editing', async () => {
+    renderForm(jest.fn(), undefined, { imageId: '' }, null, {
+      initialSetupMode: 'SIMPLE',
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+    const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
+
+    fireEvent.click(within(progress).getByRole('button', { name: 'Basics: Available' }));
+    expect(await screen.findByRole('heading', { name: 'Basics' })).toBeInTheDocument();
+    expect(within(progress).getByRole('button', { name: 'Options: Available' })).toBeEnabled();
+
+    fireEvent.click(within(progress).getByRole('button', { name: 'Review & Publish: Available' }));
+    expect(await screen.findByRole('heading', { name: 'Review & Publish' })).toBeInTheDocument();
+  });
+
+  it('keeps a normal event on Basics until its required image is added', async () => {
+    renderForm(jest.fn(), undefined, { imageId: '' }, null, {
+      isCreateMode: true,
+      initialSetupMode: 'SIMPLE',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByRole('heading', { name: 'Basics' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByRole('heading', { name: 'Basics' })).toBeInTheDocument();
+    expect(await screen.findByText('Event image is required')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Upload test image' }));
+    await waitFor(() => {
+      expect(screen.queryByText('Event image is required')).not.toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByRole('heading', { name: 'Divisions' })).toBeInTheDocument();
+  });
+
+  it('blocks Options when team registration has no team size', async () => {
+    renderForm(jest.fn(), undefined, { teamSignup: true, teamSizeLimit: null }, null, {
+      initialSetupMode: 'SIMPLE',
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByText('Team size is required')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Options' })).toBeInTheDocument();
+  });
+
+  it('blocks Divisions when the selected division configuration is empty', async () => {
+    renderForm(jest.fn(), undefined, { divisions: [], divisionDetails: [] }, null, {
+      initialSetupMode: 'SIMPLE',
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+    const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
+    fireEvent.click(within(progress).getByRole('button', { name: 'Divisions: Available' }));
+    expect(await screen.findByRole('heading', { name: 'Divisions' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByText('Select at least one division')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Divisions' })).toBeInTheDocument();
+  });
+
+  it('blocks Schedule and Location when a Weekly Event has no repeating timeslot', async () => {
+    renderForm(jest.fn(), undefined, {
+      eventType: 'WEEKLY_EVENT',
+      leagueSlots: [],
+    }, null, {
+      initialSetupMode: 'SIMPLE',
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+    const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
+    fireEvent.click(within(progress).getByRole('button', { name: 'Schedule & Location: Available' }));
+    expect(await screen.findByRole('heading', { name: 'Schedule & Location' })).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    });
+
+    expect(screen.getByRole('heading', { name: 'Schedule & Location' })).toBeInTheDocument();
+    expect(within(progress).getByRole('button', { name: 'Schedule & Location: Current' })).toBeInTheDocument();
+  });
+
+  it('blocks Pricing and Registration on an invalid manual payment destination', async () => {
+    const onDirtyStateChange = jest.fn();
+    renderForm(onDirtyStateChange, undefined, {
+      price: 1_000,
+      registrationPaymentMode: 'MANUAL',
+      manualPaymentLinks: [{
+        id: 'cash_app',
+        provider: 'CASH_APP',
+        label: 'Cash App',
+        url: '$camka14',
+      }],
+    }, null, {
+      initialSetupMode: 'SIMPLE',
+    });
+    await waitFor(() => expect(onDirtyStateChange).toHaveBeenCalledWith(false));
+
+    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+    const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
+    fireEvent.click(within(progress).getByRole('button', { name: 'Pricing & Registration: Available' }));
+    expect(await screen.findByRole('heading', { name: 'Pricing & Registration' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Cash App username'), { target: { value: '$' } });
+    await waitFor(() => expect(screen.getByLabelText('Cash App username')).toHaveValue('$'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    });
+
+    expect(screen.getByRole('heading', { name: 'Pricing & Registration' })).toBeInTheDocument();
+    expect(within(progress).getByRole('button', { name: 'Pricing & Registration: Current' })).toBeInTheDocument();
+  });
+
+  it('blocks Staff and Operations when a custom official position is invalid', async () => {
+    const onDirtyStateChange = jest.fn();
+    renderForm(onDirtyStateChange, undefined, {
+      officialPositions: [{ id: 'custom', name: 'Referee', count: 1, order: 0 }],
+    }, null, {
+      initialSetupMode: 'SIMPLE',
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+    await waitFor(() => expect(onDirtyStateChange).toHaveBeenCalledWith(false));
+    const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
+    fireEvent.click(within(progress).getByRole('button', { name: 'Staff & Operations: Available' }));
+    expect(await screen.findByRole('heading', { name: 'Staff & Operations' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Position'), { target: { value: '' } });
+    await waitFor(() => expect(screen.getByLabelText('Position')).toHaveValue(''));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    });
+    expect(screen.getByRole('heading', { name: 'Staff & Operations' })).toBeInTheDocument();
+    expect(within(progress).getByRole('button', { name: 'Staff & Operations: Current' })).toBeInTheDocument();
+  });
+
+  it('allows a valid Documents and Questions page to advance without false blockers', async () => {
+    renderForm(jest.fn(), undefined, { requiredTemplateIds: ['template_1'] }, null, {
+      initialSetupMode: 'SIMPLE',
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+    const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
+    fireEvent.click(within(progress).getByRole('button', { name: 'Documents & Questions: Available' }));
+    expect(await screen.findByRole('heading', { name: 'Documents & Questions' })).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    });
+
+    expect(within(progress).getByRole('button', { name: 'Staff & Operations: Current' })).toBeInTheDocument();
+  });
+
+  it('allows rental creation to advance from Basics without an event image', async () => {
+    renderForm(jest.fn(), undefined, { imageId: '', divisions: [], divisionDetails: [] }, null, {
+      isCreateMode: true,
+      initialSetupMode: 'SIMPLE',
+      rentalPurchase: {
+        start: '2026-03-12T10:00',
+        end: '2026-03-12T12:00',
+        fieldId: 'field_1',
+        organization: null,
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByRole('heading', { name: 'Basics' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByRole('heading', { name: 'Divisions' })).toBeInTheDocument();
+    expect(screen.queryByText('Event image is required')).not.toBeInTheDocument();
   });
 
   it('renders only the division component on the Simple Setup Divisions page', async () => {

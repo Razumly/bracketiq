@@ -1,225 +1,261 @@
-import type {
-    ComponentProps,
-    Dispatch,
-    SetStateAction,
-} from 'react';
-import {
-    Stack,
-    Text,
-    Title,
-} from '@mantine/core';
-import { motion } from 'motion/react';
-import {
-    type Control,
-} from 'react-hook-form';
+import type { ComponentProps, Dispatch, SetStateAction } from "react";
+import { Stack, Text, Title } from "@mantine/core";
+import { motion } from "motion/react";
+import { type Control } from "react-hook-form";
 
 import type {
-    DivisionCompetitionPhase,
-    DivisionPhaseSettings,
-    DivisionPhaseSettingsMap,
-    Event,
-    LeagueConfig,
-    TournamentConfig,
-} from '@/types';
+  DivisionCompetitionPhase,
+  DivisionPhaseSettings,
+  DivisionPhaseSettingsMap,
+  Event,
+  LeagueConfig,
+  TournamentConfig,
+} from "@/types";
 
-import { DIVISION_LAYOUT_TRANSITION } from '../constants';
-import { DIVISION_FIELD_ROW_CLASS } from '../divisionLayout';
-import type { EventFormValues } from '../formTypes';
-import { SingleDivisionCapacityControls } from './SingleDivisionCapacityControls';
-import { SingleDivisionPaymentPlanControls } from './SingleDivisionPaymentPlanControls';
-import { SingleDivisionPricingControls } from './SingleDivisionPricingControls';
-import { SingleDivisionScheduleControls } from './SingleDivisionScheduleControls';
+import { DIVISION_LAYOUT_TRANSITION } from "../constants";
+import { DIVISION_FIELD_ROW_CLASS } from "../divisionLayout";
+import type { EventFormValues } from "../formTypes";
+import { SingleDivisionCapacityControls } from "./SingleDivisionCapacityControls";
+import { SingleDivisionPaymentPlanControls } from "./SingleDivisionPaymentPlanControls";
+import { SingleDivisionPricingControls } from "./SingleDivisionPricingControls";
+import { SingleDivisionScheduleControls } from "./SingleDivisionScheduleControls";
 
 type SingleDivisionDefaultsPanelProps = {
-    control: Control<EventFormValues>;
-    eventData: EventFormValues;
-    leagueData: LeagueConfig;
-    playoffData: TournamentConfig;
-    tournamentData: TournamentConfig;
-    poolDefaults: ComponentProps<typeof SingleDivisionScheduleControls>['poolDefaults'];
-    phaseSettings?: DivisionPhaseSettingsMap;
-    eventTaxableForPreview: boolean;
-    maxStandardNumber: number;
-    maxPriceCents: number;
-    numberInputStyles?: ComponentProps<typeof SingleDivisionCapacityControls>['numberInputStyles'];
-    hasStripeAccount: boolean;
-    organizerTaxCollectionAllowed: boolean;
-    organizerResponsibilityMessage?: string | null;
-    isOrganizationHostedEvent: boolean;
-    organizerManualTaxSelected: boolean;
-    organizationDefaultEventTaxHandling: ComponentProps<typeof SingleDivisionPricingControls>['organizationDefaultEventTaxHandling'];
-    connectingStripe: boolean;
-    simplifiedPricing?: boolean;
-    showCapacityControls?: boolean;
-    showPricingControls?: boolean;
-    showPaymentPlanControls?: boolean;
-    showScheduleControls?: boolean;
-    title?: string;
-    description?: string;
-    isImmutableField: (field: keyof Event) => boolean;
-    playoffTeamCountError?: string;
-    setLeagueData: Dispatch<SetStateAction<LeagueConfig>>;
-    setPlayoffData: Dispatch<SetStateAction<TournamentConfig>>;
-    setTournamentData: Dispatch<SetStateAction<TournamentConfig>>;
-    onPoolDefaultsChange: ComponentProps<typeof SingleDivisionScheduleControls>['onPoolDefaultsChange'];
-    onPhaseSettingsChange?: (phase: DivisionCompetitionPhase, settings: DivisionPhaseSettings) => void;
-    onConnectStripe: () => void;
-    syncInstallmentCount: (count: number) => void;
-    onAllowPaymentPlansChange: ComponentProps<typeof SingleDivisionPaymentPlanControls>['onAllowPaymentPlansChange'];
-    onInstallmentDueRelativeDayChange: ComponentProps<typeof SingleDivisionPaymentPlanControls>['onInstallmentDueRelativeDayChange'];
-    onInstallmentDueDateChange: ComponentProps<typeof SingleDivisionPaymentPlanControls>['onInstallmentDueDateChange'];
-    onInstallmentAmountChange: ComponentProps<typeof SingleDivisionPaymentPlanControls>['onInstallmentAmountChange'];
-    onRemoveInstallment: ComponentProps<typeof SingleDivisionPaymentPlanControls>['onRemoveInstallment'];
-    onTeamSplitDefaultChange: ComponentProps<typeof SingleDivisionPaymentPlanControls>['onTeamSplitDefaultChange'];
+  control: Control<EventFormValues>;
+  eventData: EventFormValues;
+  leagueData: LeagueConfig;
+  playoffData: TournamentConfig;
+  tournamentData: TournamentConfig;
+  poolDefaults: ComponentProps<
+    typeof SingleDivisionScheduleControls
+  >["poolDefaults"];
+  phaseSettings?: DivisionPhaseSettingsMap;
+  eventTaxableForPreview: boolean;
+  maxStandardNumber: number;
+  maxPriceCents: number;
+  numberInputStyles?: ComponentProps<
+    typeof SingleDivisionCapacityControls
+  >["numberInputStyles"];
+  hasStripeAccount: boolean;
+  organizerTaxCollectionAllowed: boolean;
+  organizerResponsibilityMessage?: string | null;
+  isOrganizationHostedEvent: boolean;
+  organizerManualTaxSelected: boolean;
+  organizationDefaultEventTaxHandling: ComponentProps<
+    typeof SingleDivisionPricingControls
+  >["organizationDefaultEventTaxHandling"];
+  connectingStripe: boolean;
+  simplifiedPricing?: boolean;
+  showCapacityControls?: boolean;
+  showPricingControls?: boolean;
+  showPaymentPlanControls?: boolean;
+  showScheduleControls?: boolean;
+  title?: string;
+  description?: string;
+  isImmutableField: (field: keyof Event) => boolean;
+  playoffTeamCountError?: string;
+  setLeagueData: Dispatch<SetStateAction<LeagueConfig>>;
+  setPlayoffData: Dispatch<SetStateAction<TournamentConfig>>;
+  setTournamentData: Dispatch<SetStateAction<TournamentConfig>>;
+  onPoolDefaultsChange: ComponentProps<
+    typeof SingleDivisionScheduleControls
+  >["onPoolDefaultsChange"];
+  onPhaseSettingsChange?: (
+    phase: DivisionCompetitionPhase,
+    settings: DivisionPhaseSettings,
+  ) => void;
+  onConnectStripe: () => void;
+  syncInstallmentCount: (count: number) => void;
+  onAllowPaymentPlansChange: ComponentProps<
+    typeof SingleDivisionPaymentPlanControls
+  >["onAllowPaymentPlansChange"];
+  onInstallmentDueRelativeDayChange: ComponentProps<
+    typeof SingleDivisionPaymentPlanControls
+  >["onInstallmentDueRelativeDayChange"];
+  onInstallmentDueDateChange: ComponentProps<
+    typeof SingleDivisionPaymentPlanControls
+  >["onInstallmentDueDateChange"];
+  onInstallmentAmountChange: ComponentProps<
+    typeof SingleDivisionPaymentPlanControls
+  >["onInstallmentAmountChange"];
+  onRemoveInstallment: ComponentProps<
+    typeof SingleDivisionPaymentPlanControls
+  >["onRemoveInstallment"];
+  onTeamSplitDefaultChange: ComponentProps<
+    typeof SingleDivisionPaymentPlanControls
+  >["onTeamSplitDefaultChange"];
 };
 
 export const SingleDivisionDefaultsPanel = ({
-    control,
-    eventData,
-    leagueData,
-    playoffData,
-    tournamentData,
-    poolDefaults,
-    phaseSettings = {},
-    eventTaxableForPreview,
-    maxStandardNumber,
-    maxPriceCents,
-    numberInputStyles,
-    hasStripeAccount,
-    organizerTaxCollectionAllowed,
-    organizerResponsibilityMessage,
-    isOrganizationHostedEvent,
-    organizerManualTaxSelected,
-    organizationDefaultEventTaxHandling,
-    connectingStripe,
-    simplifiedPricing = false,
-    showCapacityControls = true,
-    showPricingControls = true,
-    showPaymentPlanControls = true,
-    showScheduleControls = true,
-    title = 'Single Division',
-    description = 'Price, capacity, and payment plans apply to every selected division.',
-    isImmutableField,
-    playoffTeamCountError,
-    setLeagueData,
-    setPlayoffData,
-    setTournamentData,
-    onPoolDefaultsChange,
-    onPhaseSettingsChange = () => undefined,
-    onConnectStripe,
-    syncInstallmentCount,
-    onAllowPaymentPlansChange,
-    onInstallmentDueRelativeDayChange,
-    onInstallmentDueDateChange,
-    onInstallmentAmountChange,
-    onRemoveInstallment,
-    onTeamSplitDefaultChange,
+  control,
+  eventData,
+  leagueData,
+  playoffData,
+  tournamentData,
+  poolDefaults,
+  phaseSettings = {},
+  eventTaxableForPreview,
+  maxStandardNumber,
+  maxPriceCents,
+  numberInputStyles,
+  hasStripeAccount,
+  organizerTaxCollectionAllowed,
+  organizerResponsibilityMessage,
+  isOrganizationHostedEvent,
+  organizerManualTaxSelected,
+  organizationDefaultEventTaxHandling,
+  connectingStripe,
+  simplifiedPricing = false,
+  showCapacityControls = true,
+  showPricingControls = true,
+  showPaymentPlanControls = true,
+  showScheduleControls = true,
+  title = "Single Division",
+  description = "Price, capacity, and payment plans apply to every selected division.",
+  isImmutableField,
+  playoffTeamCountError,
+  setLeagueData,
+  setPlayoffData,
+  setTournamentData,
+  onPoolDefaultsChange,
+  onPhaseSettingsChange = () => undefined,
+  onConnectStripe,
+  syncInstallmentCount,
+  onAllowPaymentPlansChange,
+  onInstallmentDueRelativeDayChange,
+  onInstallmentDueDateChange,
+  onInstallmentAmountChange,
+  onRemoveInstallment,
+  onTeamSplitDefaultChange,
 }: SingleDivisionDefaultsPanelProps) => (
-    <div className="rounded-lg border border-gray-200 bg-white p-4">
-        <Stack gap="md">
-            <div>
-                <Title order={6}>{title}</Title>
-                <Text size="sm" c="dimmed">
-                    {description}
-                </Text>
-            </div>
-            <motion.div
-                id="division-defaults-content"
-                data-testid="division-field-row"
-                layout
-                className={DIVISION_FIELD_ROW_CLASS}
-                transition={DIVISION_LAYOUT_TRANSITION}
-            >
-                {showCapacityControls ? <SingleDivisionCapacityControls
-                    control={control}
-                    singleDivision={Boolean(eventData.singleDivision)}
-                    teamSignup={Boolean(eventData.teamSignup)}
-                    eventType={eventData.eventType}
-                    includePlayoffs={Boolean(leagueData.includePlayoffs)}
-                    playoffTeamCount={leagueData.playoffTeamCount}
-                    maxStandardNumber={maxStandardNumber}
-                    numberInputStyles={numberInputStyles}
-                    maxParticipantsDisabled={isImmutableField('maxParticipants')}
-                    playoffTeamCountDisabled={isImmutableField('playoffTeamCount')}
-                    playoffTeamCountError={playoffTeamCountError}
-                    onPlayoffTeamCountChange={(playoffTeamCount) => {
-                        setLeagueData((prev) => ({
-                            ...prev,
-                            playoffTeamCount,
-                        }));
-                    }}
-                /> : null}
-                {showScheduleControls ? (
-                    <SingleDivisionScheduleControls
-                        singleDivision={Boolean(eventData.singleDivision)}
-                        eventType={eventData.eventType}
-                        includePlayoffs={Boolean(leagueData.includePlayoffs)}
-                        splitLeaguePlayoffDivisions={eventData.splitLeaguePlayoffDivisions}
-                        leagueData={leagueData}
-                        playoffData={playoffData}
-                        tournamentData={tournamentData}
-                        sport={eventData.sportConfig ?? undefined}
-                        phaseSettings={phaseSettings}
-                        eventMatchRulesOverride={eventData.matchRulesOverride}
-                        officialPositions={eventData.officialPositions}
-                        autoCreatePointMatchIncidents={eventData.autoCreatePointMatchIncidents}
-                        participantCount={eventData.maxParticipants ?? undefined}
-                        poolDefaults={poolDefaults}
-                        maxStandardNumber={maxStandardNumber}
-                        numberInputStyles={numberInputStyles}
-                        disabled={isImmutableField('divisions')}
-                        playoffTeamCountError={playoffTeamCountError}
-                        onLeagueDataChange={(updates) => setLeagueData((prev) => ({ ...prev, ...updates }))}
-                        onPlayoffDataChange={setPlayoffData}
-                        onTournamentDataChange={setTournamentData}
-                        onPoolDefaultsChange={onPoolDefaultsChange}
-                        onPhaseSettingsChange={onPhaseSettingsChange}
-                    />
-                ) : null}
-                {showPricingControls ? <SingleDivisionPricingControls
-                    visible={Boolean(eventData.singleDivision) && (!eventData.allowPaymentPlans || !showPaymentPlanControls)}
-                    control={control}
-                    eventType={eventData.eventType}
-                    maxPriceCents={maxPriceCents}
-                    numberInputStyles={numberInputStyles}
-                    hasStripeAccount={hasStripeAccount}
-                    priceImmutable={isImmutableField('price')}
-                    organizerTaxCollectionAllowed={organizerTaxCollectionAllowed}
-                    organizerResponsibilityMessage={organizerResponsibilityMessage}
-                    showTaxHandlingControls={isOrganizationHostedEvent || organizerTaxCollectionAllowed}
-                    organizerManualTaxSelected={organizerManualTaxSelected}
-                    organizationDefaultEventTaxHandling={organizationDefaultEventTaxHandling}
-                    connectingStripe={connectingStripe}
-                    simplePriceInput={simplifiedPricing}
-                    onConnectStripe={onConnectStripe}
-                /> : null}
-                {showPaymentPlanControls ? (
-                    <SingleDivisionPaymentPlanControls
-                        allowPaymentPlans={eventData.allowPaymentPlans}
-                        installmentCount={eventData.installmentCount || 0}
-                        installmentAmounts={eventData.installmentAmounts || []}
-                        installmentDueDates={eventData.installmentDueDates || []}
-                        installmentDueRelativeDays={eventData.installmentDueRelativeDays || []}
-                        teamSignup={eventData.teamSignup}
-                        allowTeamSplitDefault={eventData.allowTeamSplitDefault}
-                        eventType={eventData.eventType}
-                        parentEvent={eventData.parentEvent}
-                        eventStart={eventData.start}
-                        taxable={eventTaxableForPreview}
-                        hasStripeAccount={hasStripeAccount}
-                        maxStandardNumber={maxStandardNumber}
-                        maxPriceCents={maxPriceCents}
-                        onAllowPaymentPlansChange={onAllowPaymentPlansChange}
-                        onInstallmentCountChange={(count) => syncInstallmentCount(count)}
-                        onTeamSplitDefaultChange={onTeamSplitDefaultChange}
-                        onInstallmentDueRelativeDayChange={onInstallmentDueRelativeDayChange}
-                        onInstallmentDueDateChange={onInstallmentDueDateChange}
-                        onInstallmentAmountChange={onInstallmentAmountChange}
-                        onRemoveInstallment={onRemoveInstallment}
-                        onAddInstallment={() => syncInstallmentCount((eventData.installmentAmounts?.length || 0) + 1)}
-                    />
-                ) : null}
-            </motion.div>
-        </Stack>
-    </div>
+  <div className="rounded-lg border border-gray-200 bg-white p-4">
+    <Stack gap="md">
+      <div>
+        <Title order={6}>{title}</Title>
+        <Text size="sm" c="dimmed">
+          {description}
+        </Text>
+      </div>
+      <motion.div
+        id="division-defaults-content"
+        data-testid="division-field-row"
+        layout
+        className={DIVISION_FIELD_ROW_CLASS}
+        transition={DIVISION_LAYOUT_TRANSITION}
+      >
+        {showCapacityControls ? (
+          <SingleDivisionCapacityControls
+            control={control}
+            singleDivision={Boolean(eventData.singleDivision)}
+            teamSignup={Boolean(eventData.teamSignup)}
+            eventType={eventData.eventType}
+            includePlayoffs={Boolean(leagueData.includePlayoffs)}
+            playoffTeamCount={leagueData.playoffTeamCount}
+            maxStandardNumber={maxStandardNumber}
+            numberInputStyles={numberInputStyles}
+            maxParticipantsDisabled={isImmutableField("maxParticipants")}
+            playoffTeamCountDisabled={isImmutableField("playoffTeamCount")}
+            playoffTeamCountError={playoffTeamCountError}
+            onPlayoffTeamCountChange={(playoffTeamCount) => {
+              setLeagueData((prev) => ({
+                ...prev,
+                playoffTeamCount,
+              }));
+            }}
+          />
+        ) : null}
+        {showScheduleControls ? (
+          <SingleDivisionScheduleControls
+            singleDivision={Boolean(eventData.singleDivision)}
+            eventType={eventData.eventType}
+            includePlayoffs={Boolean(leagueData.includePlayoffs)}
+            splitLeaguePlayoffDivisions={eventData.splitLeaguePlayoffDivisions}
+            leagueData={leagueData}
+            playoffData={playoffData}
+            tournamentData={tournamentData}
+            sport={eventData.sportConfig ?? undefined}
+            phaseSettings={phaseSettings}
+            eventMatchRulesOverride={eventData.matchRulesOverride}
+            officialPositions={eventData.officialPositions}
+            autoCreatePointMatchIncidents={
+              eventData.autoCreatePointMatchIncidents
+            }
+            participantCount={eventData.maxParticipants ?? undefined}
+            poolDefaults={poolDefaults}
+            maxStandardNumber={maxStandardNumber}
+            numberInputStyles={numberInputStyles}
+            disabled={isImmutableField("divisionDetails")}
+            playoffTeamCountError={playoffTeamCountError}
+            onLeagueDataChange={(updates) =>
+              setLeagueData((prev) => ({ ...prev, ...updates }))
+            }
+            onPlayoffDataChange={setPlayoffData}
+            onTournamentDataChange={setTournamentData}
+            onPoolDefaultsChange={onPoolDefaultsChange}
+            onPhaseSettingsChange={onPhaseSettingsChange}
+          />
+        ) : null}
+        {showPricingControls ? (
+          <SingleDivisionPricingControls
+            visible={
+              Boolean(eventData.singleDivision) &&
+              (!eventData.allowPaymentPlans || !showPaymentPlanControls)
+            }
+            control={control}
+            eventType={eventData.eventType}
+            maxPriceCents={maxPriceCents}
+            numberInputStyles={numberInputStyles}
+            hasStripeAccount={hasStripeAccount}
+            priceImmutable={isImmutableField("price")}
+            organizerTaxCollectionAllowed={organizerTaxCollectionAllowed}
+            organizerResponsibilityMessage={organizerResponsibilityMessage}
+            showTaxHandlingControls={
+              isOrganizationHostedEvent || organizerTaxCollectionAllowed
+            }
+            organizerManualTaxSelected={organizerManualTaxSelected}
+            organizationDefaultEventTaxHandling={
+              organizationDefaultEventTaxHandling
+            }
+            connectingStripe={connectingStripe}
+            simplePriceInput={simplifiedPricing}
+            onConnectStripe={onConnectStripe}
+          />
+        ) : null}
+        {showPaymentPlanControls ? (
+          <SingleDivisionPaymentPlanControls
+            allowPaymentPlans={eventData.allowPaymentPlans}
+            installmentCount={eventData.installmentCount || 0}
+            installmentAmounts={eventData.installmentAmounts || []}
+            installmentDueDates={eventData.installmentDueDates || []}
+            installmentDueRelativeDays={
+              eventData.installmentDueRelativeDays || []
+            }
+            teamSignup={eventData.teamSignup}
+            allowTeamSplitDefault={eventData.allowTeamSplitDefault}
+            eventType={eventData.eventType}
+            parentEvent={eventData.parentEvent}
+            eventStart={eventData.start}
+            taxable={eventTaxableForPreview}
+            hasStripeAccount={hasStripeAccount}
+            maxStandardNumber={maxStandardNumber}
+            maxPriceCents={maxPriceCents}
+            onAllowPaymentPlansChange={onAllowPaymentPlansChange}
+            onInstallmentCountChange={(count) => syncInstallmentCount(count)}
+            onTeamSplitDefaultChange={onTeamSplitDefaultChange}
+            onInstallmentDueRelativeDayChange={
+              onInstallmentDueRelativeDayChange
+            }
+            onInstallmentDueDateChange={onInstallmentDueDateChange}
+            onInstallmentAmountChange={onInstallmentAmountChange}
+            onRemoveInstallment={onRemoveInstallment}
+            onAddInstallment={() =>
+              syncInstallmentCount(
+                (eventData.installmentAmounts?.length || 0) + 1,
+              )
+            }
+          />
+        ) : null}
+      </motion.div>
+    </Stack>
+  </div>
 );

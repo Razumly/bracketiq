@@ -124,6 +124,8 @@ export const resolveEventSetupPages = (
             status = 'current';
         } else if (completePageIds.has(pageId)) {
             status = 'complete';
+        } else if (input.workflow === 'EDIT') {
+            status = 'available';
         } else if (prerequisitePageId) {
             status = 'locked';
         } else {

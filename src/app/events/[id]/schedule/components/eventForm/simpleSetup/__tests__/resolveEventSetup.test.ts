@@ -96,6 +96,50 @@ describe('resolveEventSetupPages', () => {
         expect(pages.map((page) => page.id)).not.toContain('competition-rules');
     });
 
+    it('keeps sequential prerequisite locks while creating', () => {
+        const pages = resolveEventSetupPages(input({
+            workflow: 'CREATE',
+            currentPageId: 'format',
+        }));
+
+        expect(pages.find((page) => page.id === 'format')?.status).toBe('current');
+        expect(pages.find((page) => page.id === 'basics')?.status).toBe('locked');
+        expect(pages.find((page) => page.id === 'review-publish')?.status).toBe('locked');
+    });
+
+    it('makes every used page directly available while editing', () => {
+        const pages = resolveEventSetupPages(input({
+            workflow: 'EDIT',
+            currentPageId: 'format',
+            choices: {
+                ...input().choices,
+                useRequiredDocuments: true,
+                useStaffAssignments: true,
+            },
+        }));
+
+        expect(pages.find((page) => page.id === 'format')?.status).toBe('current');
+        expect(
+            pages
+                .filter((page) => page.used && page.id !== 'format')
+                .every((page) => page.status === 'available'),
+        ).toBe(true);
+    });
+
+    it('preserves complete and not-used statuses while editing', () => {
+        const pages = resolveEventSetupPages(input({
+            workflow: 'EDIT',
+            currentPageId: 'basics',
+            completePageIds: ['format'],
+        }));
+
+        expect(pages.find((page) => page.id === 'format')?.status).toBe('complete');
+        expect(pages.find((page) => page.id === 'basics')?.status).toBe('current');
+        expect(pages.find((page) => page.id === 'divisions')?.status).toBe('available');
+        expect(pages.find((page) => page.id === 'documents-questions')?.status).toBe('not-used');
+        expect(pages.find((page) => page.id === 'staff-operations')?.status).toBe('not-used');
+    });
+
     it('makes enabled document and staff pages available in order', () => {
         const setup = input({
             eventType: 'LEAGUE',

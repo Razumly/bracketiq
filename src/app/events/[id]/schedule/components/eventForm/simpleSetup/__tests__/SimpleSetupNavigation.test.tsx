@@ -1,113 +1,178 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { MantineProvider } from '@mantine/core';
+import { fireEvent, render, screen } from "@testing-library/react";
+import { MantineProvider } from "@mantine/core";
 
 import {
-    SetupModeControl,
-    SimpleSetupPageFrame,
-    SimpleSetupProgressRail,
-} from '../SimpleSetupNavigation';
-import type { EventSetupPage } from '../types';
+  SetupModeControl,
+  SimpleSetupPageFrame,
+  SimpleSetupProgressRail,
+} from "../SimpleSetupNavigation";
+import type { EventSetupPage } from "../types";
 
-describe('SimpleSetupNavigation', () => {
-    const renderWithProvider = (ui: React.ReactNode) => render(
-        <MantineProvider>{ui}</MantineProvider>,
+describe("SimpleSetupNavigation", () => {
+  const renderWithProvider = (ui: React.ReactNode) =>
+    render(<MantineProvider>{ui}</MantineProvider>);
+
+  it("switches between simple and advanced setup", () => {
+    const onChange = jest.fn();
+    renderWithProvider(<SetupModeControl value="SIMPLE" onChange={onChange} />);
+
+    fireEvent.click(screen.getByText("Advanced Setup"));
+
+    expect(onChange).toHaveBeenCalledWith("ADVANCED");
+  });
+
+  it("renders named progress states and allows page selection", () => {
+    const pages: EventSetupPage[] = [
+      { id: "format", label: "Options", status: "complete", used: true },
+      {
+        id: "basics",
+        label: "Basics",
+        status: "current",
+        used: true,
+      },
+      {
+        id: "staff-operations",
+        label: "Staff & Operations",
+        status: "not-used",
+        used: false,
+        unavailableReason: "Not needed.",
+      },
+    ];
+    const onSelectPage = jest.fn();
+    renderWithProvider(
+      <SimpleSetupProgressRail pages={pages} onSelectPage={onSelectPage} />,
     );
 
-    it('switches between simple and advanced setup', () => {
-        const onChange = jest.fn();
-        renderWithProvider(<SetupModeControl value="SIMPLE" onChange={onChange} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Staff & Operations: Not used" }),
+    );
 
-        fireEvent.click(screen.getByText('Advanced Setup'));
+    expect(onSelectPage).toHaveBeenCalledWith("staff-operations");
+    expect(
+      screen.getByRole("button", { name: "Basics: Current" }),
+    ).toHaveAttribute("aria-current", "step");
+  });
 
-        expect(onChange).toHaveBeenCalledWith('ADVANCED');
+  it("leaves border, radius, and shadow ownership to the outer event form shell", () => {
+    renderWithProvider(
+      <SimpleSetupPageFrame
+        page={{ id: "format", label: "Options", status: "current", used: true }}
+        isFirstUsedPage
+        isLastUsedPage={false}
+        canSubmit={false}
+        onBack={jest.fn()}
+        onNext={jest.fn()}
+        onOpenControllerPage={jest.fn()}
+      >
+        <p>Options content</p>
+      </SimpleSetupPageFrame>,
+    );
+
+    const pageFrame = screen.getByRole("region", { name: "Options" });
+
+    expect(pageFrame).not.toHaveClass("rounded-lg");
+    expect(pageFrame).not.toHaveClass("border");
+    expect(pageFrame).not.toHaveClass("shadow-sm");
+  });
+
+  it("scrolls each newly selected page to the top", () => {
+    const scrollIntoView = jest.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
     });
+    const { rerender } = renderWithProvider(
+      <SimpleSetupPageFrame
+        page={{ id: "format", label: "Options", status: "current", used: true }}
+        isFirstUsedPage
+        isLastUsedPage={false}
+        canSubmit={false}
+        onBack={jest.fn()}
+        onNext={jest.fn()}
+        onOpenControllerPage={jest.fn()}
+      >
+        <p>Options content</p>
+      </SimpleSetupPageFrame>,
+    );
 
-    it('renders named progress states and allows page selection', () => {
-        const pages: EventSetupPage[] = [
-            { id: 'format', label: 'Options', status: 'complete', used: true },
-            {
-                id: 'basics',
-                label: 'Basics',
-                status: 'current',
-                used: true,
-            },
-            {
-                id: 'staff-operations',
-                label: 'Staff & Operations',
-                status: 'not-used',
-                used: false,
-                unavailableReason: 'Not needed.',
-            },
-        ];
-        const onSelectPage = jest.fn();
-        renderWithProvider(<SimpleSetupProgressRail pages={pages} onSelectPage={onSelectPage} />);
+    scrollIntoView.mockClear();
+    rerender(
+      <MantineProvider>
+        <SimpleSetupPageFrame
+          page={{
+            id: "basics",
+            label: "Basics",
+            status: "current",
+            used: true,
+          }}
+          isFirstUsedPage={false}
+          isLastUsedPage={false}
+          canSubmit={false}
+          onBack={jest.fn()}
+          onNext={jest.fn()}
+          onOpenControllerPage={jest.fn()}
+        >
+          <p>Basics content</p>
+        </SimpleSetupPageFrame>
+      </MantineProvider>,
+    );
 
-        fireEvent.click(screen.getByRole('button', { name: 'Staff & Operations: Not used' }));
-
-        expect(onSelectPage).toHaveBeenCalledWith('staff-operations');
-        expect(screen.getByRole('button', { name: 'Basics: Current' })).toHaveAttribute('aria-current', 'step');
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      behavior: "auto",
+      block: "start",
     });
+  });
 
-    it('leaves border, radius, and shadow ownership to the outer event form shell', () => {
-        renderWithProvider(
-            <SimpleSetupPageFrame
-                page={{ id: 'format', label: 'Options', status: 'current', used: true }}
-                isFirstUsedPage
-                isLastUsedPage={false}
-                canSubmit={false}
-                onBack={jest.fn()}
-                onNext={jest.fn()}
-                onOpenControllerPage={jest.fn()}
-            >
-                <p>Options content</p>
-            </SimpleSetupPageFrame>,
-        );
+  it("uses the final action to create the event and disables it until the form is valid", () => {
+    const onSubmit = jest.fn();
+    const { rerender } = renderWithProvider(
+      <SimpleSetupPageFrame
+        page={{
+          id: "review",
+          label: "Review and Publish",
+          status: "current",
+          used: true,
+        }}
+        isFirstUsedPage={false}
+        isLastUsedPage
+        canSubmit={false}
+        onBack={jest.fn()}
+        onNext={jest.fn()}
+        onSubmit={onSubmit}
+        onOpenControllerPage={jest.fn()}
+      >
+        <p>Review content</p>
+      </SimpleSetupPageFrame>,
+    );
 
-        const pageFrame = screen.getByRole('region', { name: 'Options' });
+    expect(
+      screen.queryByRole("button", { name: "Review event" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Event" })).toBeDisabled();
 
-        expect(pageFrame).not.toHaveClass('rounded-lg');
-        expect(pageFrame).not.toHaveClass('border');
-        expect(pageFrame).not.toHaveClass('shadow-sm');
-    });
+    rerender(
+      <MantineProvider>
+        <SimpleSetupPageFrame
+          page={{
+            id: "review",
+            label: "Review and Publish",
+            status: "current",
+            used: true,
+          }}
+          isFirstUsedPage={false}
+          isLastUsedPage
+          canSubmit
+          onBack={jest.fn()}
+          onNext={jest.fn()}
+          onSubmit={onSubmit}
+          onOpenControllerPage={jest.fn()}
+        >
+          <p>Review content</p>
+        </SimpleSetupPageFrame>
+      </MantineProvider>,
+    );
 
-    it('uses the final action to create the event and disables it until the form is valid', () => {
-        const onSubmit = jest.fn();
-        const { rerender } = renderWithProvider(
-            <SimpleSetupPageFrame
-                page={{ id: 'review', label: 'Review and Publish', status: 'current', used: true }}
-                isFirstUsedPage={false}
-                isLastUsedPage
-                canSubmit={false}
-                onBack={jest.fn()}
-                onNext={jest.fn()}
-                onSubmit={onSubmit}
-                onOpenControllerPage={jest.fn()}
-            >
-                <p>Review content</p>
-            </SimpleSetupPageFrame>,
-        );
-
-        expect(screen.queryByRole('button', { name: 'Review event' })).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Create Event' })).toBeDisabled();
-
-        rerender(
-            <MantineProvider>
-                <SimpleSetupPageFrame
-                    page={{ id: 'review', label: 'Review and Publish', status: 'current', used: true }}
-                    isFirstUsedPage={false}
-                    isLastUsedPage
-                    canSubmit
-                    onBack={jest.fn()}
-                    onNext={jest.fn()}
-                    onSubmit={onSubmit}
-                    onOpenControllerPage={jest.fn()}
-                >
-                    <p>Review content</p>
-                </SimpleSetupPageFrame>
-            </MantineProvider>,
-        );
-
-        fireEvent.click(screen.getByRole('button', { name: 'Create Event' }));
-        expect(onSubmit).toHaveBeenCalledTimes(1);
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Create Event" }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
 });
