@@ -35,6 +35,10 @@ type Props = {
   onChange: (value: DivisionDiscoveryFilterValue) => void;
   selectedSports?: string[];
 };
+type DivisionTypeLoadState =
+  | { status: "loading"; types: DivisionTypePayload }
+  | { status: "ready"; types: DivisionTypePayload }
+  | { status: "error"; types: DivisionTypePayload; message: string };
 
 const normalize = (value: string): string => value.trim().toLowerCase();
 
@@ -97,9 +101,10 @@ export default function DivisionDiscoveryFilters({
   onChange,
   selectedSports = [],
 }: Props) {
-  const [types, setTypes] = useState<DivisionTypePayload>({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadState, setLoadState] = useState<DivisionTypeLoadState>({
+    status: "loading",
+    types: {},
+  });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -113,19 +118,24 @@ export default function DivisionDiscoveryFilters({
         if (controller.signal.aborted) {
           return;
         }
-        setTypes(body ?? {});
+        setLoadState({ status: "ready", types: body ?? {} });
       })
       .catch((loadError) => {
         if (controller.signal.aborted || loadError.name === "AbortError") {
           return;
         }
-        setError("Unable to load division filters.");
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
+        setLoadState({
+          status: "error",
+          types: {},
+          message: "Unable to load division filters.",
+        });
       });
     return () => controller.abort();
   }, []);
+
+  const { types } = loadState;
+  const loading = loadState.status === "loading";
+  const error = loadState.status === "error" ? loadState.message : null;
 
   const skillOptions = useMemo(
     () => buildSportSkillFilterOptions(types.sportSkills ?? [], selectedSports),
