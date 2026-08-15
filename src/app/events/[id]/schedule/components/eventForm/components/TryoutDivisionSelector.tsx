@@ -95,8 +95,14 @@ export const TryoutDivisionSelector = ({
     }, [organizationId]);
     const loadIsCurrent = loadedOrganizationId === organizationId;
     const loading = Boolean(organizationId) && !loadIsCurrent;
-    const currentDivisions = loadIsCurrent ? divisions : [];
-    const currentDivisionTypes = loadIsCurrent ? divisionTypes : {};
+    const currentDivisions = useMemo(
+        () => (loadIsCurrent ? divisions : []),
+        [divisions, loadIsCurrent],
+    );
+    const currentDivisionTypes = useMemo(
+        () => (loadIsCurrent ? divisionTypes : {}),
+        [divisionTypes, loadIsCurrent],
+    );
     const currentError = loadIsCurrent ? error : null;
 
     const activeDivisions = useMemo(
