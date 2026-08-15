@@ -209,4 +209,33 @@ describe("TryoutDivisionSelector", () => {
       screen.getByText("Current organization unavailable"),
     ).toBeInTheDocument();
   });
+  it("clears organization-specific UI when no organization is selected", async () => {
+    jest
+      .mocked(organizationService.listOrganizationDivisions)
+      .mockResolvedValue([organizationDivision]);
+    const { rerender } = renderSelector();
+    await screen.findByText("Girls U14 Competitive");
+    const requestCount = jest.mocked(
+      organizationService.listOrganizationDivisions,
+    ).mock.calls.length;
+
+    rerender(
+      <MantineProvider>
+        <TryoutDivisionSelector
+          organizationId={undefined}
+          preferredSportId="soccer"
+          selectedDivisions={[]}
+          maxPriceCents={100000}
+          onChange={jest.fn()}
+          onTryoutPriceChange={jest.fn()}
+        />
+      </MantineProvider>,
+    );
+
+    expect(screen.getByText(/select an organization/i)).toBeInTheDocument();
+    expect(screen.queryByText("Girls U14 Competitive")).not.toBeInTheDocument();
+    expect(organizationService.listOrganizationDivisions).toHaveBeenCalledTimes(
+      requestCount,
+    );
+  });
 });

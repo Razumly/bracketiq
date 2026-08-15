@@ -3,7 +3,9 @@ import { act, renderHook } from "@testing-library/react";
 import { useEventFormSectionNavigation } from "../useEventFormSectionNavigation";
 
 describe("useEventFormSectionNavigation", () => {
-  it("keeps a visible selection and immediately falls back when it disappears", () => {
+  it("preserves selected sections and falls back when selection disappears", () => {
+    document.body.innerHTML = '<div id="section-advanced"></div>';
+    window.scrollTo = jest.fn();
     const { result, rerender } = renderHook(
       ({ visibleItems }) =>
         useEventFormSectionNavigation({
@@ -24,21 +26,18 @@ describe("useEventFormSectionNavigation", () => {
     );
 
     act(() => {
-      result.current.scrollToSection = result.current.scrollToSection;
+      result.current.scrollToSection("section-advanced");
     });
-    expect(result.current.activeSectionId).toBe("section-basic-information");
+    expect(result.current.activeSectionId).toBe("section-advanced");
 
-    rerender({
-      visibleItems: [
-        { id: "section-basic-information" },
-        { id: "section-advanced" },
-        { id: "section-payments" },
-      ],
-    });
-    expect(result.current.activeSectionId).toBe("section-basic-information");
     rerender({
       visibleItems: [{ id: "section-advanced" }, { id: "section-payments" }],
     });
     expect(result.current.activeSectionId).toBe("section-advanced");
+
+    rerender({
+      visibleItems: [{ id: "section-payments" }],
+    });
+    expect(result.current.activeSectionId).toBe("section-payments");
   });
 });
