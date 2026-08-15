@@ -2059,6 +2059,7 @@ export default function FieldsTabContent({
     canManage,
     getFieldIdsForFacilityFilter,
     getPreferredFieldIdsForFacilityFilter,
+    setRentalSelections,
   ]);
   const refreshOrganization = useCallback(async () => {
     if (!organizationId) return;
@@ -2788,7 +2789,7 @@ export default function FieldsTabContent({
       }
       setCalendarDate(new Date(start));
     },
-    [canManage, isBlockedRange, managerCalendarDrafts, stageManagerCalendarDraftUpdate],
+    [canManage, isBlockedRange, managerCalendarDrafts, setRentalSelections, stageManagerCalendarDraftUpdate],
   );
 
   const handleRentalSlotCalendarDrop = useCallback(
@@ -2997,12 +2998,13 @@ export default function FieldsTabContent({
       setRentalSelections((prev) => [nextSelection, ...prev]);
       setCalendarDate(slotStart);
     },
-    [canManage, fields, isBlockedRange, readonlyCalendarFieldIds],
+    [canManage, fields, isBlockedRange, readonlyCalendarFieldIds, setRentalSelections],
   );
 
   const handleEventDrop = useCallback(
     ({ event, start, end, resourceId }: any) => {
-      if (!managerCalendarEditMode) {
+      const isPublicRentalSelection = !canManage && event?.metaType === 'selection';
+      if (!managerCalendarEditMode && !isPublicRentalSelection) {
         return;
       }
       if (event?.metaType === 'rental') {
@@ -3024,12 +3026,13 @@ export default function FieldsTabContent({
         interaction: 'move',
       });
     },
-    [applySelectionWindow, handleRentalSlotCalendarDrop, handleStaffAssignmentCalendarDrop, managerCalendarEditMode],
+    [applySelectionWindow, canManage, handleRentalSlotCalendarDrop, handleStaffAssignmentCalendarDrop, managerCalendarEditMode],
   );
 
   const handleEventResize = useCallback(
     ({ event, start, end }: any) => {
-      if (!managerCalendarEditMode) {
+      const isPublicRentalSelection = !canManage && event?.metaType === 'selection';
+      if (!managerCalendarEditMode && !isPublicRentalSelection) {
         return;
       }
       if (event?.metaType === 'rental') {
@@ -3050,7 +3053,7 @@ export default function FieldsTabContent({
         interaction: 'resize',
       });
     },
-    [applySelectionWindow, handleRentalSlotCalendarDrop, handleStaffAssignmentCalendarDrop, managerCalendarEditMode],
+    [applySelectionWindow, canManage, handleRentalSlotCalendarDrop, handleStaffAssignmentCalendarDrop, managerCalendarEditMode],
   );
 
   useEffect(() => {

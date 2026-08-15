@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Paper, Text } from '@mantine/core';
 
 type RegistrationHoldTimerProps = {
@@ -15,55 +15,51 @@ const formatRemaining = (remainingMs: number): string => {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 };
 
-export default function RegistrationHoldTimer({
-  expiresAt,
+type ActiveRegistrationHoldTimerProps = {
+  expiresAtMs: number;
+  onExpire?: () => void;
+};
+
+function ActiveRegistrationHoldTimer({
+  expiresAtMs,
   onExpire,
-}: RegistrationHoldTimerProps) {
-  const expiresAtMs = useMemo(() => {
-    if (!expiresAt) {
-      return null;
-    }
-    const parsed = new Date(expiresAt).getTime();
-    return Number.isFinite(parsed) ? parsed : null;
-  }, [expiresAt]);
-  const [clockSeed] = useState(() => Date.now());
-  const clockNowRef = useRef(clockSeed);
-  const subscribeToClock = useCallback((onStoreChange: () => void) => {
-    if (!expiresAtMs) {
-      return () => undefined;
-    }
-    const tick = () => {
-      clockNowRef.current = Date.now();
-      onStoreChange();
-    };
-    tick();
-    const interval = window.setInterval(tick, 1000);
-    return () => window.clearInterval(interval);
-  }, [expiresAtMs]);
-  const getClockSnapshot = useCallback(() => clockNowRef.current, []);
-  const getServerClockSnapshot = useCallback(() => clockSeed, [clockSeed]);
-  const nowMs = useSyncExternalStore(
-    subscribeToClock,
-    getClockSnapshot,
-    getServerClockSnapshot,
-  );
-  const remainingMs = expiresAtMs ? expiresAtMs - nowMs : 0;
-
-
-  const notifiedExpiryRef = useRef<number | null>(null);
+}: ActiveRegistrationHoldTimerProps) {
+  const [initialNowMs] = useState(() => Date.now());
+  const [nowMs, setNowMs] = useState(initialNowMs);
+  const wasActiveAtMount = initialNowMs < expiresAtMs;
+  const notifiedExpiryRef = useRef(false);
 
   useEffect(() => {
-    if (!expiresAtMs) {
-      notifiedExpiryRef.current = null;
+    if (!wasActiveAtMount) {
       return;
     }
-    if (remainingMs <= 0 && notifiedExpiryRef.current !== expiresAtMs) {
-      notifiedExpiryRef.current = expiresAtMs;
-      onExpire?.();
-    }
-  }, [expiresAtMs, onExpire, remainingMs]);
 
-  if (!expiresAtMs || remainingMs <= 0) {
+    const interval = window.setInterval(() => {
+      const nextNowMs = Date.now();
+      setNowMs(nextNowMs);
+      if (nextNowMs >= expiresAtMs) {
+        window.clearInterval(interval);
+      }
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [expiresAtMs, wasActiveAtMount]);
+
+  useEffect(() => {
+    if (
+      !wasActiveAtMount ||
+      nowMs < expiresAtMs ||
+      notifiedExpiryRef.current
+    ) {
+      return;
+    }
+
+    notifiedExpiryRef.current = true;
+    onExpire?.();
+  }, [expiresAtMs, nowMs, onExpire, wasActiveAtMount]);
+
+  const remainingMs = expiresAtMs - nowMs;
+  if (!wasActiveAtMount || remainingMs <= 0) {
     return null;
   }
 
@@ -80,5 +76,30 @@ export default function RegistrationHoldTimer({
         Your registration is held for {formatRemaining(remainingMs)}
       </Text>
     </Paper>
+  );
+}
+
+export default function RegistrationHoldTimer({
+  expiresAt,
+  onExpire,
+}: RegistrationHoldTimerProps) {
+  const expiresAtMs = useMemo(() => {
+    if (!expiresAt) {
+      return null;
+    }
+    const parsed = Date.parse(expiresAt);
+    return Number.isFinite(parsed) ? parsed : null;
+  }, [expiresAt]);
+
+  if (expiresAtMs === null) {
+    return null;
+  }
+
+  return (
+    <ActiveRegistrationHoldTimer
+      key={expiresAtMs}
+      expiresAtMs={expiresAtMs}
+      onExpire={onExpire}
+    />
   );
 }

@@ -111,7 +111,9 @@ import {
   CreateBillModal,
   RefundTeamModal,
 } from './schedulePage/EventBillingModals';
-import EventComplianceModal from './schedulePage/EventComplianceModal';
+import EventComplianceModal, {
+  buildEventComplianceContextKey,
+} from './schedulePage/EventComplianceModal';
 import {
   AddParticipantModal,
   AddTeamModal,
@@ -4014,6 +4016,12 @@ function EventScheduleContent() {
   const selectedComplianceSummary = selectedComplianceTeamId
     ? teamComplianceById[selectedComplianceTeamId] ?? null
     : null;
+  const selectedComplianceContextKey = buildEventComplianceContextKey({
+    eventId: normalizeIdToken(activeEvent?.$id ?? eventId),
+    occurrenceSlotId: selectedOccurrence?.slotId ?? null,
+    occurrenceDate: selectedOccurrence?.occurrenceDate ?? null,
+    teamId: selectedComplianceTeamId,
+  });
   const selectedComplianceTeam = useMemo(() => {
     if (!selectedComplianceTeamId) {
       return null;
@@ -6602,6 +6610,7 @@ function EventScheduleContent() {
       />
       <EventComplianceModal
         opened={Boolean(selectedComplianceTeamId)}
+        contextKey={selectedComplianceContextKey}
         fullScreen={Boolean(isMobile)}
         teamName={selectedComplianceTeam?.name}
         summary={selectedComplianceSummary}

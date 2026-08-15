@@ -1,5 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import LandingPage from '../LandingPage';
+
+jest.mock('motion/react', () => ({
+  ...jest.requireActual('motion/react'),
+  useReducedMotion: () => false,
+}));
 
 const pushMock = jest.fn();
 jest.mock('next/navigation', () => ({
@@ -13,16 +18,145 @@ jest.mock('@/app/providers', () => ({
 
 const startGuestSessionMock = jest.fn();
 
+const originalIntersectionObserver = window.IntersectionObserver;
+const originalMatchMedia = window.matchMedia;
+
+type IntersectionObserverHarness = {
+  callback: IntersectionObserverCallback;
+  disconnect: jest.Mock;
+  observe: jest.Mock;
+  options: IntersectionObserverInit | undefined;
+  unobserve: jest.Mock;
+};
+
+const intersectionObservers: IntersectionObserverHarness[] = [];
+
+function installIntersectionObserver() {
+  class IntersectionObserverMock {
+    readonly root = null;
+    readonly rootMargin = '';
+    readonly thresholds = [];
+    readonly callback: IntersectionObserverCallback;
+    readonly options: IntersectionObserverInit | undefined;
+    readonly disconnect = jest.fn();
+    readonly observe = jest.fn();
+    readonly unobserve = jest.fn();
+
+    constructor(
+      callback: IntersectionObserverCallback,
+      options?: IntersectionObserverInit,
+    ) {
+      this.callback = callback;
+      this.options = options;
+      intersectionObservers.push(this);
+    }
+
+    takeRecords() {
+      return [];
+    }
+  }
+
+  Object.defineProperty(window, 'IntersectionObserver', {
+    configurable: true,
+    value: IntersectionObserverMock,
+    writable: true,
+  });
+}
+
+function installMatchMedia(initialMatches: boolean) {
+  let matches = initialMatches;
+  const listeners = new Set<(event: MediaQueryListEvent) => void>();
+  const addEventListener = jest.fn(
+    (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+      listeners.add(listener);
+    },
+  );
+  const removeEventListener = jest.fn(
+    (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+      listeners.delete(listener);
+    },
+  );
+  const media = '(prefers-reduced-motion: reduce)';
+  const mediaQuery = {
+    get matches() {
+      return matches;
+    },
+    media,
+    onchange: null,
+    addEventListener,
+    removeEventListener,
+    addListener: (listener: (event: MediaQueryListEvent) => void) => {
+      listeners.add(listener);
+    },
+    removeListener: (listener: (event: MediaQueryListEvent) => void) => {
+      listeners.delete(listener);
+    },
+    dispatchEvent: () => true,
+  } as unknown as MediaQueryList;
+
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    value: jest.fn(() => mediaQuery),
+    writable: true,
+  });
+
+  return {
+    addEventListener,
+    removeEventListener,
+    setMatches(nextMatches: boolean) {
+      matches = nextMatches;
+      const event = { matches, media } as MediaQueryListEvent;
+      listeners.forEach((listener) => listener(event));
+    },
+  };
+}
+
+function getStaticOperations(container: HTMLElement) {
+  const operations = container.querySelector<HTMLElement>(
+    '.landing-static-operations',
+  );
+  if (!operations) throw new Error('Static operations content was not rendered');
+
+  return {
+    operations,
+    cards: Array.from(
+      operations.querySelectorAll<HTMLElement>(
+        '[data-mobile-feature-card="true"]',
+      ),
+    ),
+  };
+}
+
 describe('LandingPage', () => {
   beforeEach(() => {
     pushMock.mockReset();
     startGuestSessionMock.mockReset();
+    intersectionObservers.splice(0);
+    installMatchMedia(false);
+    Object.defineProperty(window, 'IntersectionObserver', {
+      configurable: true,
+      value: undefined,
+      writable: true,
+    });
     useAppMock.mockReturnValue({
       user: null,
       loading: false,
       isGuest: false,
       isAuthenticated: false,
       startGuestSession: (...args: unknown[]) => startGuestSessionMock(...args),
+    });
+  });
+
+  afterAll(() => {
+    Object.defineProperty(window, 'IntersectionObserver', {
+      configurable: true,
+      value: originalIntersectionObserver,
+      writable: true,
+    });
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: originalMatchMedia,
+      writable: true,
     });
   });
 
@@ -202,6 +336,137 @@ describe('LandingPage', () => {
     expect(screen.getAllByAltText('Web field and scheduling view').length).toBeGreaterThan(0);
     expect(screen.getAllByAltText('Web team management and roster view').length).toBeGreaterThan(0);
     expect(screen.getAllByAltText('Web payment flow and checkout summary').length).toBeGreaterThan(0);
+  });
+
+  it('reveals observed feature cards in progressive order and removes DOM markers on teardown', () => {
+    installIntersectionObserver();
+
+    const { container, unmount } = render(<LandingPage />);
+    const { operations, cards } = getStaticOperations(container);
+    const observer = intersectionObservers[0];
+
+    expect(operations).toHaveClass('is-reveal-ready');
+    expect(cards.length).toBeGreaterThan(3);
+    expect(cards.every((card) => !card.classList.contains('is-visible'))).toBe(
+      true,
+    );
+    expect(intersectionObservers).toHaveLength(1);
+    expect(observer.options).toEqual({
+      rootMargin: '0px 0px -14% 0px',
+      threshold: 0.2,
+    });
+    expect(observer.observe.mock.calls.map(([card]) => card)).toEqual(cards);
+
+    observer.callback(
+      [
+        {
+          isIntersecting: true,
+          target: cards[2],
+        } as IntersectionObserverEntry,
+      ],
+      observer as unknown as IntersectionObserver,
+    );
+
+    expect(
+      cards.slice(0, 3).every((card) => card.classList.contains('is-visible')),
+    ).toBe(true);
+    expect(
+      cards.slice(3).every((card) => !card.classList.contains('is-visible')),
+    ).toBe(true);
+    expect(observer.unobserve.mock.calls.map(([card]) => card)).toEqual(
+      cards.slice(0, 3),
+    );
+
+    unmount();
+
+    expect(observer.disconnect).toHaveBeenCalledTimes(1);
+    expect(operations).not.toHaveClass('is-reveal-ready');
+    expect(cards.every((card) => !card.classList.contains('is-visible'))).toBe(
+      true,
+    );
+
+    const remountedView = render(<LandingPage />);
+    const remounted = getStaticOperations(remountedView.container);
+    const remountedObserver = intersectionObservers[1];
+
+    expect(intersectionObservers).toHaveLength(2);
+    expect(remounted.operations).toHaveClass('is-reveal-ready');
+    expect(
+      remounted.cards.every((card) => !card.classList.contains('is-visible')),
+    ).toBe(true);
+    expect(remountedObserver.observe.mock.calls.map(([card]) => card)).toEqual(
+      remounted.cards,
+    );
+
+    remountedView.unmount();
+    expect(remountedObserver.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('reveals every feature card immediately when reduced motion is preferred', () => {
+    installMatchMedia(true);
+    installIntersectionObserver();
+
+    const { container, unmount } = render(<LandingPage />);
+    const { operations, cards } = getStaticOperations(container);
+
+    expect(operations).toHaveClass('is-reveal-ready');
+    expect(cards.every((card) => card.classList.contains('is-visible'))).toBe(
+      true,
+    );
+    expect(intersectionObservers).toHaveLength(0);
+
+    unmount();
+
+    expect(operations).not.toHaveClass('is-reveal-ready');
+    expect(cards.every((card) => !card.classList.contains('is-visible'))).toBe(
+      true,
+    );
+  });
+
+  it('reveals every feature card immediately without IntersectionObserver', () => {
+    const { container } = render(<LandingPage />);
+    const { operations, cards } = getStaticOperations(container);
+
+    expect(operations).toHaveClass('is-reveal-ready');
+    expect(cards.every((card) => card.classList.contains('is-visible'))).toBe(
+      true,
+    );
+    expect(intersectionObservers).toHaveLength(0);
+  });
+
+  it('stops observation when reduced-motion context changes and cleans the subscription', () => {
+    const reducedMotion = installMatchMedia(false);
+    installIntersectionObserver();
+
+    const { container, unmount } = render(<LandingPage />);
+    const { operations, cards } = getStaticOperations(container);
+    const observer = intersectionObservers[0];
+    const changeListener = reducedMotion.addEventListener.mock.calls[0]?.[1];
+
+    expect(changeListener).toEqual(expect.any(Function));
+    expect(cards.every((card) => !card.classList.contains('is-visible'))).toBe(
+      true,
+    );
+
+    act(() => {
+      reducedMotion.setMatches(true);
+    });
+
+    expect(observer.disconnect).toHaveBeenCalledTimes(1);
+    expect(cards.every((card) => card.classList.contains('is-visible'))).toBe(
+      true,
+    );
+
+    unmount();
+
+    expect(reducedMotion.removeEventListener).toHaveBeenCalledWith(
+      'change',
+      changeListener,
+    );
+    expect(operations).not.toHaveClass('is-reveal-ready');
+    expect(cards.every((card) => !card.classList.contains('is-visible'))).toBe(
+      true,
+    );
   });
 
   it('presents signable document creation for rentals, events, and teams', () => {

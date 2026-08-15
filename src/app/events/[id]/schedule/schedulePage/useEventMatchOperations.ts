@@ -97,12 +97,12 @@ export default function useEventMatchOperations({
   const [scoreUpdateMatch, setScoreUpdateMatch] = useState<Match | null>(null);
   const [isScoreModalOpen, setIsScoreModalOpen] = useState(false);
   const [matchEditorAuthorityToken, setMatchEditorAuthorityToken] = useState<object | null>(null);
-  const activeEventId = activeEvent?.$id;
+  const activeEventId = activeEvent?.$id ?? eventId;
   const activeEventType = activeEvent?.eventType;
   const activeEventFields = activeEvent?.fields;
   const currentMatchEditorAuthorityToken = useMemo<object | null>(
-    () => (canEditMatches ? {} : null),
-    [canEditMatches],
+    () => (canEditMatches && activeEventId ? { eventId: activeEventId } : null),
+    [activeEventId, canEditMatches],
   );
   const matchEditorIsCurrent = currentMatchEditorAuthorityToken !== null
     && matchEditorAuthorityToken === currentMatchEditorAuthorityToken;
@@ -191,7 +191,7 @@ export default function useEventMatchOperations({
     };
 
     setChangesMatches((prev) => {
-      const base = (prev.length ? prev : (cloneValue(matches) as Match[])).map((item) => cloneValue(item) as Match);
+      const base = (prev.length ? prev : (cloneValue(activeMatches) as Match[])).map((item) => cloneValue(item) as Match);
       base.push(cloneValue(draft) as Match);
       return base;
     });
@@ -214,7 +214,7 @@ export default function useEventMatchOperations({
     }
 
     return draft;
-  }, [activeEventId, activeEventType, activeMatches, canEditMatches, currentMatchEditorAuthorityToken, matches, setChangesMatches, setHasUnsavedChanges]);
+  }, [activeEventId, activeEventType, activeMatches, canEditMatches, currentMatchEditorAuthorityToken, setChangesMatches, setHasUnsavedChanges]);
 
   const removeDraftMatch = useCallback((matchId: string, options?: {
     stageDelete?: boolean;
@@ -252,6 +252,9 @@ export default function useEventMatchOperations({
   }, [removeDraftMatch]);
 
   const handleMatchDelete = useCallback((target: Match) => {
+    if (!canEditMatches) {
+      return;
+    }
     const targetId = normalizeIdToken(target.$id);
     if (!targetId) {
       return;
@@ -267,7 +270,7 @@ export default function useEventMatchOperations({
     setIsMatchEditorOpen(false);
     setMatchEditorAuthorityToken(null);
     setMatchBeingEdited(null);
-  }, [pendingCreateMatchId, removeDraftMatch]);
+  }, [canEditMatches, pendingCreateMatchId, removeDraftMatch]);
 
   const handleAddScheduleMatch = useCallback(() => {
     stageMatchCreate({ creationContext: 'schedule', openEditor: true });
@@ -300,6 +303,9 @@ export default function useEventMatchOperations({
   }, [pendingCreateMatchId, removeStagedClientMatch]);
 
   const handleMatchEditSave = useCallback((updated: Match) => {
+    if (!canEditMatches) {
+      return;
+    }
     const base = (changesMatches.length ? changesMatches : (cloneValue(matches) as Match[]))
       .map((item) => cloneValue(item) as Match);
     let replaced = false;
@@ -341,6 +347,7 @@ export default function useEventMatchOperations({
     setMatchBeingEdited(null);
   }, [
     activeEventType,
+    canEditMatches,
     changesMatches,
     matchEditorContext,
     matches,
@@ -387,7 +394,7 @@ export default function useEventMatchOperations({
       : undefined;
 
     setChangesMatches((prev) => {
-      const base = (prev.length ? prev : (cloneValue(matches) as Match[])).map((item) => cloneValue(item) as Match);
+      const base = (prev.length ? prev : (cloneValue(activeMatches) as Match[])).map((item) => cloneValue(item) as Match);
       let changed = false;
       const nextMatches = base.map((match) => {
         if (match.$id !== targetId) {
@@ -406,7 +413,7 @@ export default function useEventMatchOperations({
     });
     onDraftMatchChanged();
     setHasUnsavedChanges(true);
-  }, [activeEventFields, canEditMatches, matches, onDraftMatchChanged, setChangesMatches, setHasUnsavedChanges]);
+  }, [activeEventFields, activeMatches, canEditMatches, onDraftMatchChanged, setChangesMatches, setHasUnsavedChanges]);
 
   const applyMatchUpdate = useCallback((updated: Match) => {
     const cloned = cloneValue(updated) as Match;
@@ -458,7 +465,7 @@ export default function useEventMatchOperations({
       matchAction,
       time,
     }: MatchOperationPayload) => {
-      const targetEventId = activeEventId ?? eventId;
+      const targetEventId = activeEventId;
       if (!targetEventId) return;
       try {
         const hasOperations =
@@ -497,7 +504,7 @@ export default function useEventMatchOperations({
         throw err;
       }
     },
-    [activeEventId, applyMatchUpdate, eventId],
+    [activeEventId, applyMatchUpdate],
   );
 
   const handleSetComplete = useCallback(
@@ -510,7 +517,7 @@ export default function useEventMatchOperations({
       incidentOperations,
       time,
     }: MatchOperationPayload) => {
-      const targetEventId = activeEventId ?? eventId;
+      const targetEventId = activeEventId;
       if (!targetEventId) return;
       const hasOperations = Boolean(segmentOperations?.length) || Boolean(incidentOperations?.length);
       const updated = hasOperations
@@ -528,7 +535,7 @@ export default function useEventMatchOperations({
           });
       applyMatchUpdate(updated as Match);
     },
-    [activeEventId, applyMatchUpdate, eventId],
+    [activeEventId, applyMatchUpdate],
   );
 
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore, type SetStateAction } from "react";
+import { useState, useSyncExternalStore } from "react";
 import {
   Alert,
   Badge,
@@ -19,6 +19,7 @@ import {
 } from "@/server/broadcast/types";
 
 type BroadcastControlRoomState = {
+  id: string;
   revision: number;
   scoringMode: "AUTOMATIC" | "MANUAL_OVERRIDE" | string;
   presentationState: MatchPresentationStateV1;
@@ -95,77 +96,20 @@ const normalizeManualScore = (
   };
 };
 
-export default function BroadcastControlRoom({
-  state,
-  disabled = false,
-  lastActionId,
+type ManualScoreEditorProps = {
+  presentation: MatchPresentationStateV1;
+  disabled: boolean;
+  onCommand: (command: BroadcastCommand) => Promise<string | null>;
+};
+
+const ManualScoreEditor = ({
+  presentation,
+  disabled,
   onCommand,
-}: BroadcastControlRoomProps) {
-  const presentation = state.presentationState;
-  const normalizedPersistedScore = normalizeManualScore(
-    presentation.score,
-    presentation.competition,
+}: ManualScoreEditorProps) => {
+  const [manualScore, setManualScore] = useState(() =>
+    normalizeManualScore(presentation.score, presentation.competition),
   );
-  const persistedRevision = state.revision;
-  const [manualScoreState, setManualScoreState] = useState(() => ({
-    revision: persistedRevision,
-    score: normalizedPersistedScore,
-  }));
-  const manualScore =
-    manualScoreState.revision === persistedRevision
-      ? manualScoreState.score
-      : normalizedPersistedScore;
-  const setManualScore = (
-    nextScore: SetStateAction<MatchPresentationStateV1["score"]>,
-  ) => {
-    setManualScoreState((previous) => {
-      const currentScore =
-        previous.revision === persistedRevision
-          ? previous.score
-          : normalizedPersistedScore;
-      const resolvedScore =
-        typeof nextScore === "function" ? nextScore(currentScore) : nextScore;
-      return {
-        revision: persistedRevision,
-        score: resolvedScore,
-      };
-    });
-  };
-  const obsBridgeAvailable = useSyncExternalStore(
-    subscribeToObsBridge,
-    getObsBridgeAvailable,
-    getServerObsBridgeAvailable,
-  );
-  const [obsNotice, setObsNotice] = useState<string | null>(null);
-
-  const manualOverrideActive = state.scoringMode === "MANUAL_OVERRIDE";
-  const timeouts = presentation.score.timeoutsRemaining;
-  const updateTimeout = (teamId: string, value: string | number) => {
-    void onCommand({
-      type: "SET_TIMEOUT_STATE",
-      timeoutsRemaining: { ...timeouts, [teamId]: asNonNegativeInteger(value) },
-    });
-  };
-
-  const saveReplayBuffer = async () => {
-    const save = window.obsstudio?.saveReplayBuffer;
-    if (typeof save !== "function") {
-      setObsNotice(
-        "OBS replay controls are unavailable outside a permitted OBS Browser Dock.",
-      );
-      return;
-    }
-    setObsNotice(null);
-    try {
-      await Promise.resolve(save());
-      await onCommand({ type: "SET_REPLAY_STATE", replayState: "SAVED" });
-      setObsNotice("OBS accepted the replay-buffer save request.");
-    } catch {
-      setObsNotice(
-        "OBS could not save the replay buffer. Check that Replay Buffer is running and this dock has BASIC permission.",
-      );
-    }
-  };
 
   const applyManualPoints = async () => {
     await onCommand({
@@ -253,6 +197,168 @@ export default function BroadcastControlRoom({
       };
     });
   };
+
+  return (
+    <Stack gap="xs">
+      <Alert color="orange">
+        Manual override is on-air only. Official scoring remains in the
+        established match score workflow.
+      </Alert>
+      <SimpleGrid cols={2}>
+        <NumberInput
+          label={`${presentation.teams[0].displayName} points`}
+          min={0}
+          value={manualScore.points[0]}
+          disabled={disabled}
+          onChange={(value) => updateManualCurrentPoints(0, value)}
+        />
+        <NumberInput
+          label={`${presentation.teams[1].displayName} points`}
+          min={0}
+          value={manualScore.points[1]}
+          disabled={disabled}
+          onChange={(value) => updateManualCurrentPoints(1, value)}
+        />
+      </SimpleGrid>
+      <SimpleGrid cols={{ base: 1, sm: 3 }}>
+        <NumberInput
+          label="Current set"
+          min={1}
+          max={presentation.competition.bestOf}
+          value={manualScore.currentSet}
+          disabled={disabled}
+          onChange={setManualCurrentSet}
+        />
+        <NumberInput
+          label={`${presentation.teams[0].displayName} sets won`}
+          min={0}
+          max={presentation.competition.bestOf}
+          value={manualScore.setsWon[0]}
+          disabled={disabled}
+          onChange={(value) =>
+            setManualScore((current) => ({
+              ...current,
+              setsWon: [asNonNegativeInteger(value), current.setsWon[1]],
+            }))
+          }
+        />
+        <NumberInput
+          label={`${presentation.teams[1].displayName} sets won`}
+          min={0}
+          max={presentation.competition.bestOf}
+          value={manualScore.setsWon[1]}
+          disabled={disabled}
+          onChange={(value) =>
+            setManualScore((current) => ({
+              ...current,
+              setsWon: [current.setsWon[0], asNonNegativeInteger(value)],
+            }))
+          }
+        />
+      </SimpleGrid>
+      {manualScore.sets.length ? (
+        <Stack gap="xs">
+          <Text size="sm" fw={600}>
+            Set scores
+          </Text>
+          {manualScore.sets.map((set) => (
+            <SimpleGrid key={set.sequence} cols={{ base: 1, sm: 3 }}>
+              <Text size="sm" pt="sm">
+                Set {set.sequence}
+              </Text>
+              <NumberInput
+                label={`Set ${set.sequence} ${presentation.teams[0].displayName}`}
+                min={0}
+                value={set.team1Points}
+                disabled={disabled}
+                onChange={(value) =>
+                  updateManualSetScore(set.sequence, 0, value)
+                }
+              />
+              <NumberInput
+                label={`Set ${set.sequence} ${presentation.teams[1].displayName}`}
+                min={0}
+                value={set.team2Points}
+                disabled={disabled}
+                onChange={(value) =>
+                  updateManualSetScore(set.sequence, 1, value)
+                }
+              />
+            </SimpleGrid>
+          ))}
+        </Stack>
+      ) : null}
+      <Group grow>
+        <Button
+          color="orange"
+          disabled={disabled}
+          onClick={() => void applyManualPoints()}
+        >
+          Apply presentation scores
+        </Button>
+        <Button
+          color="green"
+          disabled={disabled}
+          onClick={() => {
+            if (
+              window.confirm(
+                "Resume automatic presentation from the latest official score?",
+              )
+            ) {
+              void onCommand({ type: "RESUME_AUTOMATIC" });
+            }
+          }}
+        >
+          Resume automatic
+        </Button>
+      </Group>
+    </Stack>
+  );
+};
+
+export default function BroadcastControlRoom({
+  state,
+  disabled = false,
+  lastActionId,
+  onCommand,
+}: BroadcastControlRoomProps) {
+  const presentation = state.presentationState;
+  const obsBridgeAvailable = useSyncExternalStore(
+    subscribeToObsBridge,
+    getObsBridgeAvailable,
+    getServerObsBridgeAvailable,
+  );
+  const [obsNotice, setObsNotice] = useState<string | null>(null);
+
+  const manualOverrideActive = state.scoringMode === "MANUAL_OVERRIDE";
+  const timeouts = presentation.score.timeoutsRemaining;
+  const updateTimeout = (teamId: string, value: string | number) => {
+    void onCommand({
+      type: "SET_TIMEOUT_STATE",
+      timeoutsRemaining: { ...timeouts, [teamId]: asNonNegativeInteger(value) },
+    });
+  };
+
+  const saveReplayBuffer = async () => {
+    const save = window.obsstudio?.saveReplayBuffer;
+    if (typeof save !== "function") {
+      setObsNotice(
+        "OBS replay controls are unavailable outside a permitted OBS Browser Dock.",
+      );
+      return;
+    }
+    setObsNotice(null);
+    try {
+      await Promise.resolve(save());
+      await onCommand({ type: "SET_REPLAY_STATE", replayState: "SAVED" });
+      setObsNotice("OBS accepted the replay-buffer save request.");
+    } catch {
+      setObsNotice(
+        "OBS could not save the replay buffer. Check that Replay Buffer is running and this dock has BASIC permission.",
+      );
+    }
+  };
+
 
   return (
     <Paper withBorder p="md" radius="md">
@@ -393,120 +499,12 @@ export default function BroadcastControlRoom({
             Enter manual override
           </Button>
         ) : (
-          <Stack gap="xs">
-            <Alert color="orange">
-              Manual override is on-air only. Official scoring remains in the
-              established match score workflow.
-            </Alert>
-            <SimpleGrid cols={2}>
-              <NumberInput
-                label={`${presentation.teams[0].displayName} points`}
-                min={0}
-                value={manualScore.points[0]}
-                disabled={disabled}
-                onChange={(value) => updateManualCurrentPoints(0, value)}
-              />
-              <NumberInput
-                label={`${presentation.teams[1].displayName} points`}
-                min={0}
-                value={manualScore.points[1]}
-                disabled={disabled}
-                onChange={(value) => updateManualCurrentPoints(1, value)}
-              />
-            </SimpleGrid>
-            <SimpleGrid cols={{ base: 1, sm: 3 }}>
-              <NumberInput
-                label="Current set"
-                min={1}
-                max={presentation.competition.bestOf}
-                value={manualScore.currentSet}
-                disabled={disabled}
-                onChange={setManualCurrentSet}
-              />
-              <NumberInput
-                label={`${presentation.teams[0].displayName} sets won`}
-                min={0}
-                max={presentation.competition.bestOf}
-                value={manualScore.setsWon[0]}
-                disabled={disabled}
-                onChange={(value) =>
-                  setManualScore((current) => ({
-                    ...current,
-                    setsWon: [asNonNegativeInteger(value), current.setsWon[1]],
-                  }))
-                }
-              />
-              <NumberInput
-                label={`${presentation.teams[1].displayName} sets won`}
-                min={0}
-                max={presentation.competition.bestOf}
-                value={manualScore.setsWon[1]}
-                disabled={disabled}
-                onChange={(value) =>
-                  setManualScore((current) => ({
-                    ...current,
-                    setsWon: [current.setsWon[0], asNonNegativeInteger(value)],
-                  }))
-                }
-              />
-            </SimpleGrid>
-            {manualScore.sets.length ? (
-              <Stack gap="xs">
-                <Text size="sm" fw={600}>
-                  Set scores
-                </Text>
-                {manualScore.sets.map((set) => (
-                  <SimpleGrid key={set.sequence} cols={{ base: 1, sm: 3 }}>
-                    <Text size="sm" pt="sm">
-                      Set {set.sequence}
-                    </Text>
-                    <NumberInput
-                      label={`Set ${set.sequence} ${presentation.teams[0].displayName}`}
-                      min={0}
-                      value={set.team1Points}
-                      disabled={disabled}
-                      onChange={(value) =>
-                        updateManualSetScore(set.sequence, 0, value)
-                      }
-                    />
-                    <NumberInput
-                      label={`Set ${set.sequence} ${presentation.teams[1].displayName}`}
-                      min={0}
-                      value={set.team2Points}
-                      disabled={disabled}
-                      onChange={(value) =>
-                        updateManualSetScore(set.sequence, 1, value)
-                      }
-                    />
-                  </SimpleGrid>
-                ))}
-              </Stack>
-            ) : null}
-            <Group grow>
-              <Button
-                color="orange"
-                disabled={disabled}
-                onClick={() => void applyManualPoints()}
-              >
-                Apply presentation scores
-              </Button>
-              <Button
-                color="green"
-                disabled={disabled}
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      "Resume automatic presentation from the latest official score?",
-                    )
-                  ) {
-                    void onCommand({ type: "RESUME_AUTOMATIC" });
-                  }
-                }}
-              >
-                Resume automatic
-              </Button>
-            </Group>
-          </Stack>
+          <ManualScoreEditor
+            key={`${state.id}:${state.revision}`}
+            presentation={presentation}
+            disabled={disabled}
+            onCommand={onCommand}
+          />
         )}
 
         <Text size="xs" c="dimmed">

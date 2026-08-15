@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, useEffect, useId, useRef, useState } from 'react';
+import { ChangeEvent, useId, useLayoutEffect, useRef } from 'react';
 import { IMAGE_UPLOAD_ACCEPT, isSupportedImageUpload } from '@/lib/imageUploadPolicy';
 
 interface ProfileImageUploadFieldProps {
@@ -14,6 +14,46 @@ interface ProfileImageUploadFieldProps {
 
 const MAX_PROFILE_IMAGE_BYTES = 10 * 1024 * 1024;
 
+function SelectedProfileImagePreview({ file }: { file: File }) {
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
+
+  useLayoutEffect(() => {
+    const imageElement = imageRef.current;
+    if (!imageElement) {
+      return;
+    }
+
+    const previousObjectUrl = objectUrlRef.current;
+    const nextObjectUrl = URL.createObjectURL(file);
+    imageElement.src = nextObjectUrl;
+    objectUrlRef.current = nextObjectUrl;
+
+    if (previousObjectUrl) {
+      URL.revokeObjectURL(previousObjectUrl);
+    }
+  }, [file]);
+
+  useLayoutEffect(
+    () => () => {
+      if (!objectUrlRef.current) {
+        return;
+      }
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    },
+    [],
+  );
+
+  return (
+    <img
+      ref={imageRef}
+      alt="Profile preview"
+      className="h-full w-full object-cover"
+    />
+  );
+}
+
 export function ProfileImageUploadField({
   file,
   onFileChange,
@@ -24,25 +64,6 @@ export function ProfileImageUploadField({
 }: ProfileImageUploadFieldProps) {
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
-  const previewImageRef = useRef<HTMLImageElement>(null);
-
-  useEffect(() => {
-    const imageElement = previewImageRef.current;
-    if (!imageElement) {
-      return undefined;
-    }
-    if (!file) {
-      imageElement.src = currentImageUrl;
-      return undefined;
-    }
-
-    const objectUrl = URL.createObjectURL(file);
-    imageElement.src = objectUrl;
-    return () => {
-      URL.revokeObjectURL(objectUrl);
-      imageElement.src = currentImageUrl;
-    };
-  }, [currentImageUrl, file]);
 
   const hasSelectedImage = Boolean(file || currentImageUrl);
 
@@ -78,10 +99,11 @@ export function ProfileImageUploadField({
     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <div className="flex items-center gap-4">
         <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-white text-sm font-semibold text-slate-500">
-          {hasSelectedImage ? (
+          {file ? (
+            <SelectedProfileImagePreview file={file} />
+          ) : currentImageUrl ? (
             <img
-              ref={previewImageRef}
-              src={file ? undefined : currentImageUrl}
+              src={currentImageUrl}
               alt="Profile preview"
               className="h-full w-full object-cover"
             />

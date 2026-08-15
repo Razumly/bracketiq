@@ -384,18 +384,22 @@ export default function FacilityCalendarPanel({
           eventPropGetter={eventPropGetter}
           slotPropGetter={slotPropGetter}
           draggableAccessor={(event: CalendarEventData) => {
+            const isPublicRentalSelection = !contextValue.canManage
+              && event.metaType === 'selection';
             const isEditableStaffEvent = event.metaType === 'facility-feed'
               && (event.feedType === 'staff_assignment' || event.feedType === 'official_assignment');
-            return (
+            return isPublicRentalSelection || (
               contextValue.canManage
               && contextValue.managerCalendarEditMode
               && (event.metaType === 'selection' || event.metaType === 'rental' || isEditableStaffEvent)
             );
           }}
           resizableAccessor={(event: CalendarEventData) => {
+            const isPublicRentalSelection = !contextValue.canManage
+              && event.metaType === 'selection';
             const isEditableStaffEvent = event.metaType === 'facility-feed'
               && (event.feedType === 'staff_assignment' || event.feedType === 'official_assignment');
-            return (
+            return isPublicRentalSelection || (
               contextValue.canManage
               && contextValue.managerCalendarEditMode
               && (event.metaType === 'selection' || event.metaType === 'rental' || isEditableStaffEvent)

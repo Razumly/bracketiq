@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useState } from 'react';
 import {
   Badge,
   Button,
@@ -16,12 +16,35 @@ import type { TeamComplianceSummary } from '@/lib/eventTeamCompliance';
 
 type EventComplianceModalProps = {
   opened: boolean;
+  contextKey: string | null;
   fullScreen: boolean;
   teamName?: string | null;
   summary: TeamComplianceSummary | null;
   loading: boolean;
   onClose: () => void;
 };
+
+export type EventComplianceContextIdentity = {
+  eventId: string | null;
+  occurrenceSlotId: string | null;
+  occurrenceDate: string | null;
+  teamId: string | null;
+};
+
+export function buildEventComplianceContextKey(
+  identity: EventComplianceContextIdentity,
+): string | null {
+  if (!identity.teamId) {
+    return null;
+  }
+
+  return JSON.stringify({
+    eventId: identity.eventId ?? '',
+    occurrenceSlotId: identity.occurrenceSlotId ?? '',
+    occurrenceDate: identity.occurrenceDate ?? '',
+    teamId: identity.teamId,
+  });
+}
 
 function formatCompliancePaymentLabel(payment: TeamComplianceSummary['payment']) {
   if (!payment.hasBill) {
@@ -54,7 +77,7 @@ function formatCompliancePaymentLabel(payment: TeamComplianceSummary['payment'])
   return `${prefix}: ${formatBillPaidProgress(payment) ?? formatBillTotalBreakdown(payment)}`;
 }
 
-export default function EventComplianceModal({
+function EventComplianceModalContent({
   opened,
   fullScreen,
   teamName,
@@ -62,27 +85,16 @@ export default function EventComplianceModal({
   loading,
   onClose,
 }: EventComplianceModalProps) {
-  const expansionContext = useMemo<object>(
-    () => ({}),
-    [opened, summary?.teamId],
-  );
-  const [expansionState, setExpansionState] = useState<{
-    context: object | null;
-    userIds: string[];
-  }>({ context: null, userIds: [] });
-  const expandedUserIds = expansionState.context === expansionContext
-    ? expansionState.userIds
-    : [];
+  const [expandedUserIds, setExpandedUserIds] = useState<string[]>([]);
 
   const title = `${teamName || summary?.teamName || 'Team'} users`;
 
   const toggleUserExpanded = (userId: string) => {
-    setExpansionState({
-      context: expansionContext,
-      userIds: expandedUserIds.includes(userId)
-        ? expandedUserIds.filter((value) => value !== userId)
-        : [...expandedUserIds, userId],
-    });
+    setExpandedUserIds((current) => (
+      current.includes(userId)
+        ? current.filter((value) => value !== userId)
+        : [...current, userId]
+    ));
   };
 
   return (
@@ -258,4 +270,9 @@ export default function EventComplianceModal({
       </Stack>
     </Modal>
   );
+}
+
+export default function EventComplianceModal(props: EventComplianceModalProps) {
+  const contextKey = `${props.opened ? 'open' : 'closed'}:${props.contextKey ?? ''}`;
+  return <EventComplianceModalContent key={contextKey} {...props} />;
 }

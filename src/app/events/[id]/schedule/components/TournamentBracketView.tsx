@@ -87,9 +87,6 @@ export default function TournamentBracketView({
 }: TournamentBracketViewProps) {
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [showScoreModal, setShowScoreModal] = useState(false);
-  const [scoreModalAuthorityToken, setScoreModalAuthorityToken] = useState<
-    object | null
-  >(null);
   // Zoom state - using CSS zoom instead of transform
   const [zoomLevel, setZoomLevel] = useState(1);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -175,22 +172,10 @@ export default function TournamentBracketView({
     () => Object.values(bracket.matches).some((match) => match.losersBracket),
     [bracket.matches],
   );
-  const bracketStructureKey = useMemo(
-    () =>
-      Object.values(bracket.matches)
-        .map((match) => `${match.$id}:${match.losersBracket ? "l" : "w"}`)
-        .sort()
-        .join("|"),
-    [bracket.matches],
-  );
-  const [bracketViewState, setBracketViewState] = useState({
-    structureKey: bracketStructureKey,
-    isLosersBracket: false,
-  });
-  const isLosersBracket =
-    bracketViewState.structureKey === bracketStructureKey &&
-    hasLoserMatches &&
-    bracketViewState.isLosersBracket;
+  const [isLosersBracket, setIsLosersBracket] = useState(false);
+  if (isLosersBracket && !hasLoserMatches) {
+    setIsLosersBracket(false);
+  }
 
   const bracketLayout = useMemo(
     () => buildBracketCanvasLayout(matchesById, { isLosersBracket }),
@@ -204,16 +189,11 @@ export default function TournamentBracketView({
         .filter((match): match is Match => Boolean(match)),
     [bracketLayout.unplacedMatchIds, bracketLayout.viewById],
   );
-  const unplacedMatchSignature = unplacedMatches
-    .map((match) => match.$id)
-    .join("|");
-  const [unplacedDockState, setUnplacedDockState] = useState({
-    matchSignature: unplacedMatchSignature,
-    collapsed: false,
-  });
-  const isUnplacedDockCollapsed =
-    unplacedDockState.matchSignature === unplacedMatchSignature &&
-    unplacedDockState.collapsed;
+  const [isUnplacedDockCollapsed, setIsUnplacedDockCollapsed] =
+    useState(false);
+  if (isUnplacedDockCollapsed && unplacedMatches.length === 0) {
+    setIsUnplacedDockCollapsed(false);
+  }
 
   const canvasMatchIds = useMemo(
     () => Object.keys(bracketLayout.positionById),
@@ -302,10 +282,6 @@ export default function TournamentBracketView({
     !!onScoreUpdate && !isPreview && !hasExternalMatchClick;
   const currentUserId =
     typeof currentUser?.$id === "string" ? currentUser.$id.trim() : "";
-  const currentScoreAuthorityToken = useMemo<object | null>(
-    () => (allowScoreUpdates ? {} : null),
-    [allowScoreUpdates, bracket.canManage, bracket.isHost, currentUserId],
-  );
   const trackedUserIds = useMemo(() => {
     const ids = new Set<string>();
     if (currentUserId) {
@@ -485,19 +461,22 @@ export default function TournamentBracketView({
   const currentSelectedMatch = selectedMatch
     ? (matchesById[selectedMatch.$id] ?? null)
     : null;
-  const scoreModalIsCurrent =
-    currentScoreAuthorityToken !== null &&
-    scoreModalAuthorityToken === currentScoreAuthorityToken &&
-    currentSelectedMatch !== null &&
-    canManageMatch(currentSelectedMatch);
+  const scoreModalIsCurrent = Boolean(
+    allowScoreUpdates &&
+      currentSelectedMatch &&
+      canManageMatch(currentSelectedMatch),
+  );
+  if (selectedMatch && !scoreModalIsCurrent) {
+    setSelectedMatch(null);
+    setShowScoreModal(false);
+  }
 
   const handleMatchClick = (match: Match) => {
     if (hasExternalMatchClick) {
       onMatchClick?.(match);
       return;
     }
-    if (!canManageMatch(match) || !currentScoreAuthorityToken) return;
-    setScoreModalAuthorityToken(currentScoreAuthorityToken);
+    if (!canManageMatch(match)) return;
     setSelectedMatch(match);
     setShowScoreModal(true);
   };
@@ -653,10 +632,7 @@ export default function TournamentBracketView({
               <SegmentedControl
                 value={isLosersBracket ? "losers" : "winners"}
                 onChange={(value: string) => {
-                  setBracketViewState({
-                    structureKey: bracketStructureKey,
-                    isLosersBracket: value === "losers",
-                  });
+                  setIsLosersBracket(value === "losers");
                 }}
                 data={[
                   { label: "Winners Bracket", value: "winners" },
@@ -739,10 +715,9 @@ export default function TournamentBracketView({
                       : "Collapse unplaced matches"
                   }
                   onClick={() => {
-                    setUnplacedDockState({
-                      matchSignature: unplacedMatchSignature,
-                      collapsed: !isUnplacedDockCollapsed,
-                    });
+                    setIsUnplacedDockCollapsed(
+                      (isCollapsed) => !isCollapsed,
+                    );
                   }}
                 >
                   {isUnplacedDockCollapsed ? "<<" : ">>"}
@@ -781,7 +756,6 @@ export default function TournamentBracketView({
             onClose={() => {
               setShowScoreModal(false);
               setSelectedMatch(null);
-              setScoreModalAuthorityToken(null);
             }}
             isOpen={scoreModalIsCurrent && showScoreModal}
             team1Placeholder={

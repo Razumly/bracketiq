@@ -35,6 +35,7 @@ jest.mock('react-big-calendar', () => {
     onEventResize,
     onSelectEvent,
     draggableAccessor,
+    onSelectSlot,
     resizableAccessor,
   }: any) => {
     const resolvedDate = date instanceof Date ? date : new Date(date);
@@ -78,6 +79,15 @@ jest.mock('react-big-calendar', () => {
           Next Week
         </button>
         <div data-testid="calendar-date">{resolvedDate.toISOString()}</div>
+        <button
+          type="button"
+          onClick={() => onSelectSlot?.({
+            start: new Date('2030-06-12T10:00:00.000Z'),
+            end: new Date('2030-06-12T11:00:00.000Z'),
+          })}
+        >
+          Select Empty Rental Slot
+        </button>
         <div data-testid="calendar-resource-count">{Array.isArray(resources) ? resources.length : 'none'}</div>
         <div ref={contentRef} className="rbc-time-content" data-testid="calendar-drop-zone">
           {Array.from({ length: 7 }, (_, index) => (
@@ -103,10 +113,18 @@ jest.mock('react-big-calendar', () => {
                 type="button"
                 disabled={!canDrag}
                 onClick={() => {
+                  const isRentalSelection = event.resource?.type === 'selection'
+                    && event.selectionMode === undefined;
+                  const movedStart = isRentalSelection
+                    ? new Date(event.start.getTime() + 30 * 60 * 1000)
+                    : new Date('2026-03-11T12:00:00.000Z');
+                  const movedEnd = isRentalSelection
+                    ? new Date(event.end.getTime() + 30 * 60 * 1000)
+                    : new Date('2026-03-11T13:00:00.000Z');
                   onEventDrop?.({
                     event,
-                    start: new Date('2026-03-11T12:00:00.000Z'),
-                    end: new Date('2026-03-11T13:00:00.000Z'),
+                    start: movedStart,
+                    end: movedEnd,
                     resourceId: event.resourceId,
                   });
                   if (shouldSelectAfterMutation) {
@@ -723,6 +741,140 @@ describe('FieldsTabContent calendar navigation', () => {
 
     const selectionScopedCallsAfterNavigation = getSelectionScopedCalls().length;
     expect(selectionScopedCallsAfterNavigation).toBe(selectionScopedCallsBeforeNavigation);
+  });
+
+  it('routes every rental selection callback to the active organization context', async () => {
+    const firstOrganization = buildOrganizationWithFutureFacilityRentals();
+    const selectionStart = new Date(firstOrganization.fields[0].rentalSlots[0].startDate);
+    const availabilityEnd = new Date(selectionStart.getTime() + 2 * 60 * 60 * 1000);
+    firstOrganization.fields.forEach((field: any) => {
+      field.rentalSlots[0] = {
+        ...field.rentalSlots[0],
+        startDate: selectionStart.toISOString(),
+        endDate: availabilityEnd.toISOString(),
+      };
+    });
+    const northFacility = {
+      $id: 'facility_north',
+      organizationId: 'org_first',
+      name: 'North Annex',
+      location: '200 North Way',
+      address: '200 North Way, Portland, OR 97201, USA',
+      coordinates: [-122.67, 45.53],
+      isDefault: false,
+      sortOrder: 1,
+    };
+    firstOrganization.facilities.push(northFacility);
+    firstOrganization.fields[1] = {
+      ...firstOrganization.fields[1],
+      facilityId: northFacility.$id,
+      facility: northFacility,
+    };
+    firstOrganization.$id = 'org_first';
+    const secondOrganization = {
+      ...firstOrganization,
+      $id: 'org_second',
+      name: 'Second organization',
+    };
+    const selectionReadyMock = jest.fn();
+    getNextRentalOccurrenceMock.mockImplementation((slot: any) => new Date(slot.startDate));
+    const pendingHydration = new Promise<any>(() => undefined);
+    getFieldEventsMatchesMock.mockImplementation(
+      async (field: any, _range: unknown, options?: unknown) => (
+        options
+          ? { ...field, events: [], matches: [] }
+          : pendingHydration
+      ),
+    );
+    const user = userEvent.setup();
+    const view = render(
+      <MantineProvider>
+        <FieldsTabContent
+          organization={firstOrganization}
+          organizationId="org_first"
+          currentUser={{ $id: 'user_2' } as any}
+          onRentalSelectionReady={selectionReadyMock}
+        />
+      </MantineProvider>,
+    );
+
+    expect(await screen.findByText('Selection 1')).toBeInTheDocument();
+    const firstContextOccurrenceCalls = getNextRentalOccurrenceMock.mock.calls.length;
+
+    view.rerender(
+      <MantineProvider>
+        <FieldsTabContent
+          organization={secondOrganization}
+          organizationId="org_second"
+          currentUser={{ $id: 'user_2' } as any}
+          onRentalSelectionReady={selectionReadyMock}
+        />
+      </MantineProvider>,
+    );
+    await waitFor(() => {
+      expect(getNextRentalOccurrenceMock.mock.calls.length).toBeGreaterThan(
+        firstContextOccurrenceCalls,
+      );
+    });
+    const bookingAccountSelect = screen
+      .getAllByLabelText('Book rental as')
+      .find((element) => element.tagName === 'INPUT');
+    const rentalFacilitySelect = screen
+      .getAllByLabelText('Facility')
+      .filter((element) => element.tagName === 'INPUT')
+      .find((element) => (
+        bookingAccountSelect
+        && Boolean(
+          bookingAccountSelect.compareDocumentPosition(element)
+          & Node.DOCUMENT_POSITION_FOLLOWING,
+        )
+      ));
+    if (!rentalFacilitySelect) {
+      throw new Error('Rental selection facility input was not rendered');
+    }
+    await user.click(rentalFacilitySelect);
+    const facilityListboxId = rentalFacilitySelect.getAttribute('aria-controls');
+    const facilityListbox = facilityListboxId
+      ? document.getElementById(facilityListboxId)
+      : null;
+    if (!facilityListbox) {
+      throw new Error('Rental selection facility listbox was not rendered');
+    }
+    fireEvent.click(
+      within(facilityListbox).getByRole('option', {
+        name: 'North Annex',
+        hidden: true,
+      }),
+    );
+    const reserveResourcesButton = screen.getByRole('button', {
+      name: 'Reserve resources',
+    });
+    await waitFor(() => expect(reserveResourcesButton).toBeEnabled());
+    await user.click(reserveResourcesButton);
+    await waitFor(() => expect(selectionReadyMock).toHaveBeenCalledTimes(1));
+    expect(selectionReadyMock.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        organizationId: 'org_second',
+        fieldIds: ['field_2'],
+        primaryFieldId: 'field_2',
+      }),
+    );
+
+    selectionReadyMock.mockClear();
+    await user.click(screen.getByRole('button', { name: 'Drag Selection 1' }));
+    await waitFor(() => expect(reserveResourcesButton).toBeEnabled());
+    await user.click(reserveResourcesButton);
+    await waitFor(() => expect(selectionReadyMock).toHaveBeenCalledTimes(1));
+    const movedPayload = selectionReadyMock.mock.calls[0]?.[0];
+    expect(new Date(movedPayload.rentalStart).getTime()).toBe(
+      selectionStart.getTime() + 30 * 60 * 1000,
+    );
+    expect(movedPayload.fieldIds).toEqual(['field_2']);
+
+    await user.click(
+      screen.getByRole('button', { name: 'Select Empty Rental Slot' }),
+    );
+    expect(await screen.findByText('Selection 2')).toBeInTheDocument();
   });
 
   it('uses the field filter to show and hide readonly rental slots on one calendar', async () => {

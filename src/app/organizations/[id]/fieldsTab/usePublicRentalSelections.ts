@@ -44,6 +44,16 @@ const EMPTY_SELECTION_CONFLICT_STATE: Record<
   string,
   RentalSelectionConflictState
 > = {};
+const EMPTY_RENTAL_SELECTIONS: RentalDraftSelection[] = [];
+type SelectionConflictStorage = Map<
+  object,
+  Record<string, RentalSelectionConflictState>
+>;
+
+const buildSelectionConflictStorageKey = (
+  key: string,
+  signature: string,
+): string => `${key}\u0000${signature}`;
 
 type UsePublicRentalSelectionsOptions = {
   canManage: boolean;
@@ -306,100 +316,98 @@ export function usePublicRentalSelections({
     if (canManage) {
       return [];
     }
-    const firstField = fields[0];
-    if (!firstField?.$id) {
+    const firstListing = rentalListings[0];
+    if (!firstListing?.nextOccurrence || !firstListing.field?.$id) {
       return [];
     }
 
-    const fallbackStart = getNextSelectableRentalStart();
-    const fallbackEnd = new Date(
-      fallbackStart.getTime() + PUBLIC_RENTAL_MIN_SELECTION_MS,
-    );
-    const firstListing = rentalListings[0];
-    const firstRentalField = firstListing?.field ?? firstField;
-    if (firstListing?.nextOccurrence && firstRentalField?.$id) {
-      const start = new Date(firstListing.nextOccurrence.getTime());
-      const endMinutes =
-        typeof firstListing.slot.endTimeMinutes === "number"
-          ? firstListing.slot.endTimeMinutes
-          : (firstListing.slot.startTimeMinutes ??
-            start.getHours() * 60 + start.getMinutes() + 60);
-      const end = minutesToDate(start, endMinutes);
-      return [
-        buildSelectionFromCalendarRange(
-          start,
-          end > start
-            ? end
-            : new Date(start.getTime() + PUBLIC_RENTAL_MIN_SELECTION_MS),
-          firstRentalField.$id,
-        ),
-      ];
-    }
-
+    const start = new Date(firstListing.nextOccurrence.getTime());
+    const endMinutes =
+      typeof firstListing.slot.endTimeMinutes === "number"
+        ? firstListing.slot.endTimeMinutes
+        : (firstListing.slot.startTimeMinutes ??
+          start.getHours() * 60 + start.getMinutes() + 60);
+    const end = minutesToDate(start, endMinutes);
     return [
       buildSelectionFromCalendarRange(
-        fallbackStart,
-        fallbackEnd,
-        firstField.$id,
+        start,
+        end > start
+          ? end
+          : new Date(start.getTime() + PUBLIC_RENTAL_MIN_SELECTION_MS),
+        firstListing.field.$id,
       ),
     ];
-  }, [canManage, fields, rentalListings]);
-  const conflictScope = useMemo<object>(
-    () => ({}),
-    [canManage, selectionContextKey],
+  }, [canManage, rentalListings]);
+  const [rentalSelectionsByContext, setRentalSelectionsByContext] = useState<
+    Map<string, RentalDraftSelection[]>
+  >(() => new Map());
+  const storedRentalSelections =
+    rentalSelectionsByContext.get(selectionContextKey);
+  if (
+    !canManage &&
+    !rentalSelectionsByContext.has(selectionContextKey) &&
+    defaultRentalSelections.length
+  ) {
+    setRentalSelectionsByContext((previous) => {
+      if (previous.has(selectionContextKey)) {
+        return previous;
+      }
+      const next = new Map(previous);
+      next.set(selectionContextKey, defaultRentalSelections);
+      return next;
+    });
+  }
+  const rentalSelections = useMemo(
+    () =>
+      canManage
+        ? EMPTY_RENTAL_SELECTIONS
+        : (storedRentalSelections ?? defaultRentalSelections),
+    [canManage, defaultRentalSelections, storedRentalSelections],
   );
-  const [rentalSelectionState, setRentalSelectionState] = useState<{
-    contextKey: string;
-    selections: RentalDraftSelection[];
-  } | null>(null);
-  const rentalSelections =
-    rentalSelectionState?.contextKey === selectionContextKey
-      ? rentalSelectionState.selections
-      : defaultRentalSelections;
+
   const setRentalSelections = useCallback<
     Dispatch<SetStateAction<RentalDraftSelection[]>>
   >(
     (nextSelections) => {
-      setRentalSelectionState((previous) => {
+      setRentalSelectionsByContext((previous) => {
         const currentSelections =
-          previous?.contextKey === selectionContextKey
-            ? previous.selections
-            : defaultRentalSelections;
-        return {
-          contextKey: selectionContextKey,
-          selections:
-            typeof nextSelections === "function"
-              ? nextSelections(currentSelections)
-              : nextSelections,
-        };
+          previous.get(selectionContextKey) ?? defaultRentalSelections;
+        const next = new Map(previous);
+        next.set(
+          selectionContextKey,
+          typeof nextSelections === "function"
+            ? nextSelections(currentSelections)
+            : nextSelections,
+        );
+        return next;
       });
     },
     [defaultRentalSelections, selectionContextKey],
   );
-  const [selectionConflictState, setSelectionConflictState] = useState<{
-    scope: object;
-    byKey: Record<string, RentalSelectionConflictState>;
-  }>({ scope: conflictScope, byKey: {} });
-  const selectionConflictStateByKey =
-    selectionConflictState.scope === conflictScope
-      ? selectionConflictState.byKey
-      : EMPTY_SELECTION_CONFLICT_STATE;
-  const setSelectionConflictStateByKey = useCallback<
+  const conflictScope = useMemo(
+    () => ({ canManage, selectionContextKey }),
+    [canManage, selectionContextKey],
+  );
+  const [selectionConflictStorage, setSelectionConflictStorage] =
+    useState<SelectionConflictStorage>(() => new Map());
+  const selectionConflictStorageByRequestKey =
+    selectionConflictStorage.get(conflictScope) ??
+    EMPTY_SELECTION_CONFLICT_STATE;
+  const setSelectionConflictStorageByRequestKey = useCallback<
     Dispatch<SetStateAction<Record<string, RentalSelectionConflictState>>>
   >(
     (nextState) => {
-      setSelectionConflictState((previous) => {
+      setSelectionConflictStorage((previous) => {
         const currentState =
-          previous.scope === conflictScope
-            ? previous.byKey
-            : EMPTY_SELECTION_CONFLICT_STATE;
-        return {
-          scope: conflictScope,
-          byKey:
-            typeof nextState === "function"
-              ? nextState(currentState)
-              : nextState,
-        };
+          previous.get(conflictScope) ?? EMPTY_SELECTION_CONFLICT_STATE;
+        const next = new Map(previous);
+        next.set(
+          conflictScope,
+          typeof nextState === "function"
+            ? nextState(currentState)
+            : nextState,
+        );
+        return next;
       });
     },
     [conflictScope],
@@ -425,6 +433,22 @@ export function usePublicRentalSelections({
     () => new Map(selectionConflictInputs.map((input) => [input.key, input])),
     [selectionConflictInputs],
   );
+  const selectionConflictStateByKey = useMemo(() => {
+    const current: Record<string, RentalSelectionConflictState> = {};
+    selectionConflictInputs.forEach((input) => {
+      if (!input.signature) {
+        return;
+      }
+      const stored =
+        selectionConflictStorageByRequestKey[
+          buildSelectionConflictStorageKey(input.key, input.signature)
+        ];
+      if (stored) {
+        current[input.key] = stored;
+      }
+    });
+    return current;
+  }, [selectionConflictInputs, selectionConflictStorageByRequestKey]);
 
   useEffect(() => {
     if (canManage) {
@@ -537,16 +561,12 @@ export function usePublicRentalSelections({
       if (cancelled) {
         return;
       }
-      setSelectionConflictStateByKey((previous) => {
-        const next: Record<string, RentalSelectionConflictState> = {};
-        selectionConflictInputs.forEach((input) => {
-          const existing = previous[input.key];
-          if (existing?.signature === input.signature) {
-            next[input.key] = existing;
-          }
-        });
+      setSelectionConflictStorageByRequestKey((previous) => {
+        const next = { ...previous };
         results.forEach((result) => {
-          next[result.key] = {
+          next[
+            buildSelectionConflictStorageKey(result.key, result.signature)
+          ] = {
             signature: result.signature,
             conflictCount: result.conflictCount,
             loading: false,
@@ -566,6 +586,7 @@ export function usePublicRentalSelections({
     fields,
     selectionConflictInputs,
     selectionConflictStateByKey,
+    setSelectionConflictStorageByRequestKey,
   ]);
 
   const conflictCountsBySelectionKey = useMemo(() => {

@@ -25,15 +25,21 @@ jest.mock('../MatchCard', () => ({
     matchHighlight,
     team1Placeholder,
     team2Placeholder,
+    onClick,
   }: {
     match: Match;
     highlightCurrentUser?: boolean;
     matchHighlight?: 'participant' | 'official';
     team1Placeholder?: string;
     team2Placeholder?: string;
+    onClick?: () => void;
   }) => (
     <div>
-      <span>{`match-${match.$id}`}</span>
+      {onClick ? (
+        <button type="button" onClick={onClick}>{`match-${match.$id}`}</button>
+      ) : (
+        <span>{`match-${match.$id}`}</span>
+      )}
       <span>{matchHighlight || highlightCurrentUser ? `highlight-${matchHighlight ?? 'participant'}-${match.$id}` : `normal-${match.$id}`}</span>
       {team1Placeholder ? <span>{team1Placeholder}</span> : null}
       {team2Placeholder ? <span>{team2Placeholder}</span> : null}
@@ -43,7 +49,8 @@ jest.mock('../MatchCard', () => ({
 
 jest.mock('../ScoreUpdateModal', () => ({
   __esModule: true,
-  default: () => null,
+  default: ({ match, isOpen }: { match: Match; isOpen: boolean }) =>
+    isOpen ? <div role="dialog">{`score-modal-${match.$id}`}</div> : null,
 }));
 
 const buildMatch = (id: string, overrides: Partial<Match> = {}): Match => ({
@@ -729,6 +736,166 @@ function BracketDivisionSwitchHarness() {
   );
 }
 
+const buildBracketWithUnplacedMatches = (
+  includeUnplacedMatches: boolean,
+): TournamentBracket => {
+  const treeLeft = buildMatch('t1', {
+    matchId: 101,
+    winnerNextMatchId: 't3',
+  });
+  const treeRight = buildMatch('t2', {
+    matchId: 102,
+    winnerNextMatchId: 't3',
+  });
+  const treeRoot = buildMatch('t3', {
+    matchId: 303,
+    previousLeftId: 't1',
+    previousRightId: 't2',
+  });
+  const disconnectedLeaf = buildMatch('u1', {
+    matchId: 11,
+    winnerNextMatchId: 'u2',
+  });
+  const disconnectedRoot = buildMatch('u2', {
+    matchId: 12,
+    previousLeftId: 'u1',
+  });
+
+  return {
+    tournament: {
+      doubleElimination: false,
+    } as TournamentBracket['tournament'],
+    matches: {
+      [treeLeft.$id]: treeLeft,
+      [treeRight.$id]: treeRight,
+      [treeRoot.$id]: treeRoot,
+      ...(includeUnplacedMatches
+        ? {
+            [disconnectedLeaf.$id]: disconnectedLeaf,
+            [disconnectedRoot.$id]: disconnectedRoot,
+          }
+        : {}),
+    },
+    teams: [],
+    isHost: false,
+    canManage: false,
+  };
+};
+
+const buildScoreAuthorityBracket = ({
+  officialId = 'score-user',
+  isHost = false,
+  canManage = true,
+  team1Points = [],
+}: {
+  officialId?: string;
+  isHost?: boolean;
+  canManage?: boolean;
+  team1Points?: number[];
+} = {}): TournamentBracket => {
+  const scoreMatch = buildMatch('score1', {
+    officialId,
+    team1Points,
+    winnerNextMatchId: 'score2',
+  });
+  const scoreRoot = buildMatch('score2', {
+    officialId,
+    previousLeftId: scoreMatch.$id,
+  });
+
+  return {
+    tournament: {
+      doubleElimination: false,
+    } as TournamentBracket['tournament'],
+    matches: {
+      [scoreMatch.$id]: scoreMatch,
+      [scoreRoot.$id]: scoreRoot,
+    },
+    teams: [],
+    isHost,
+    canManage,
+  };
+};
+
+function LosersMatchesChangeHarness() {
+  const [hasExtraLosersMatch, setHasExtraLosersMatch] = useState(false);
+  const bracket = buildBracketWithLosers();
+  if (hasExtraLosersMatch) {
+    const updatedLosersRoot = buildMatch('l3', {
+      losersBracket: true,
+      previousLeftId: 'l2',
+    });
+    bracket.matches = {
+      ...bracket.matches,
+      l2: {
+        ...bracket.matches.l2,
+        winnerNextMatchId: updatedLosersRoot.$id,
+      },
+      [updatedLosersRoot.$id]: updatedLosersRoot,
+    };
+  }
+
+  return (
+    <>
+      <button type="button" onClick={() => setHasExtraLosersMatch(true)}>
+        Add losers match
+      </button>
+      <TournamentBracketView bracket={bracket} />
+    </>
+  );
+}
+
+function ScoreAuthorityHarness({
+  authorityRemains,
+}: {
+  authorityRemains: boolean;
+}) {
+  const [hasAuthorityInput, setHasAuthorityInput] = useState(true);
+  const bracket = authorityRemains
+    ? buildScoreAuthorityBracket({
+        isHost: true,
+        canManage: hasAuthorityInput,
+        team1Points: hasAuthorityInput ? [] : [1],
+      })
+    : buildScoreAuthorityBracket({
+        officialId: hasAuthorityInput ? 'score-user' : 'another-user',
+      });
+
+  return (
+    <>
+      <button type="button" onClick={() => setHasAuthorityInput(false)}>
+        Change score authority
+      </button>
+      <button type="button" onClick={() => setHasAuthorityInput(true)}>
+        Restore score authority
+      </button>
+      <TournamentBracketView
+        bracket={bracket}
+        currentUser={{ $id: 'score-user' } as any}
+        onScoreUpdate={async () => undefined}
+      />
+    </>
+  );
+}
+
+function UnplacedDockAvailabilityHarness() {
+  const [hasUnplacedMatches, setHasUnplacedMatches] = useState(true);
+
+  return (
+    <>
+      <button type="button" onClick={() => setHasUnplacedMatches(false)}>
+        Remove unplaced matches
+      </button>
+      <button type="button" onClick={() => setHasUnplacedMatches(true)}>
+        Restore unplaced matches
+      </button>
+      <TournamentBracketView
+        bracket={buildBracketWithUnplacedMatches(hasUnplacedMatches)}
+      />
+    </>
+  );
+}
+
 const getMatchNodeTop = (matchId: string): string => {
   const label = screen.getByText(`match-${matchId}`);
   const wrapper = label.closest('div.absolute');
@@ -739,24 +906,69 @@ const getMatchNodeTop = (matchId: string): string => {
 };
 
 describe('TournamentBracketView', () => {
-  it('falls back to winners when switching to a division without loser matches', async () => {
+  it('falls back to winners during the render that removes the last losers match', () => {
     renderWithMantine(<BracketDivisionSwitchHarness />);
 
     expect(screen.getByText('match-w1')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Losers Bracket'));
-    await waitFor(() => {
-      expect(screen.getByText('match-l1')).toBeInTheDocument();
-    });
+    expect(screen.getByText('match-l1')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Switch division' }));
 
-    await waitFor(() => {
-      expect(screen.getByText('match-w3')).toBeInTheDocument();
-    });
-
+    expect(screen.getByText('match-w3')).toBeInTheDocument();
     expect(screen.queryByText('match-l1')).not.toBeInTheDocument();
     expect(screen.queryByText('Losers Bracket')).not.toBeInTheDocument();
+  });
+
+  it('keeps losers navigation selected when losers matches change but remain available', () => {
+    renderWithMantine(<LosersMatchesChangeHarness />);
+
+    fireEvent.click(screen.getByText('Losers Bracket'));
+    expect(screen.getByText('match-l1')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add losers match' }));
+
+    expect(screen.getByText('match-l1')).toBeInTheDocument();
+    expect(screen.getByText('match-l3')).toBeInTheDocument();
+  });
+
+  it('removes score controls and clears the modal target in the render that revokes authority', () => {
+    renderWithMantine(<ScoreAuthorityHarness authorityRemains={false} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'match-score1' }));
+    expect(screen.getByText('score-modal-score1')).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Change score authority' }),
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'match-score1' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('score-modal-score1')).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Restore score authority' }),
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'match-score1' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('score-modal-score1')).not.toBeInTheDocument();
+  });
+
+  it('preserves the selected score target while effective authority remains', () => {
+    renderWithMantine(<ScoreAuthorityHarness authorityRemains />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'match-score1' }));
+    expect(screen.getByText('score-modal-score1')).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Change score authority' }),
+    );
+
+    expect(screen.getByText('score-modal-score1')).toBeInTheDocument();
   });
 
   it('uses split-league playoff mappings for empty first-round placeholders', () => {
@@ -967,44 +1179,11 @@ describe('TournamentBracketView', () => {
   });
 
   it('renders disconnected matches in a collapsible unplaced dock', () => {
-    const treeLeft = buildMatch('t1', {
-      matchId: 101,
-      winnerNextMatchId: 't3',
-    });
-    const treeRight = buildMatch('t2', {
-      matchId: 102,
-      winnerNextMatchId: 't3',
-    });
-    const treeRoot = buildMatch('t3', {
-      matchId: 303,
-      previousLeftId: 't1',
-      previousRightId: 't2',
-    });
-
-    const disconnectedLeaf = buildMatch('u1', {
-      matchId: 11,
-      winnerNextMatchId: 'u2',
-    });
-    const disconnectedRoot = buildMatch('u2', {
-      matchId: 12,
-      previousLeftId: 'u1',
-    });
-
-    const bracket: TournamentBracket = {
-      tournament: { doubleElimination: false } as TournamentBracket['tournament'],
-      matches: {
-        [treeLeft.$id]: treeLeft,
-        [treeRight.$id]: treeRight,
-        [treeRoot.$id]: treeRoot,
-        [disconnectedLeaf.$id]: disconnectedLeaf,
-        [disconnectedRoot.$id]: disconnectedRoot,
-      },
-      teams: [],
-      isHost: false,
-      canManage: false,
-    };
-
-    renderWithMantine(<TournamentBracketView bracket={bracket} />);
+    renderWithMantine(
+      <TournamentBracketView
+        bracket={buildBracketWithUnplacedMatches(true)}
+      />,
+    );
 
     expect(screen.getByText('Unplaced Matches (2)')).toBeInTheDocument();
     expect(screen.getByText('match-u1').closest('div.absolute')).toBeNull();
@@ -1015,6 +1194,28 @@ describe('TournamentBracketView', () => {
 
     fireEvent.click(screen.getByLabelText('Expand unplaced matches'));
     expect(screen.getByText('Unplaced Matches (2)')).toBeInTheDocument();
+  });
+
+  it('expands a collapsed unplaced dock when its matches disappear', () => {
+    renderWithMantine(<UnplacedDockAvailabilityHarness />);
+
+    fireEvent.click(screen.getByLabelText('Collapse unplaced matches'));
+    expect(screen.getByLabelText('Expand unplaced matches')).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Remove unplaced matches' }),
+    );
+    expect(
+      screen.queryByLabelText('Expand unplaced matches'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Restore unplaced matches' }),
+    );
+    expect(screen.getByText('Unplaced Matches (2)')).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Collapse unplaced matches'),
+    ).toBeInTheDocument();
   });
 
   it('builds losers view from tournament root and only gates traversal by child bracket type', async () => {

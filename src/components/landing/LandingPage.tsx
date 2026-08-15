@@ -840,10 +840,23 @@ function StaticOperationsContent({
     );
     if (!cards.length) return;
 
-    operationsElement.classList.add("is-reveal-ready");
+    let observer: IntersectionObserver | null = null;
+    const reducedMotionQuery =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia("(prefers-reduced-motion: reduce)")
+        : null;
 
     const showCard = (card: HTMLElement) => {
       card.classList.add("is-visible");
+    };
+
+    const showAllCards = () => {
+      cards.forEach(showCard);
+    };
+
+    const stopObserving = () => {
+      observer?.disconnect();
+      observer = null;
     };
 
     const showCardsThrough = (visibleCard: Element) => {
@@ -852,35 +865,50 @@ function StaticOperationsContent({
 
       cards.slice(0, visibleIndex + 1).forEach((card) => {
         showCard(card);
-        observer.unobserve(card);
+        observer?.unobserve(card);
       });
     };
 
-    const prefersReducedMotion =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const handleReducedMotionChange = (event: MediaQueryListEvent) => {
+      if (!event.matches) return;
+      stopObserving();
+      showAllCards();
+    };
 
-    if (
-      prefersReducedMotion ||
-      typeof window.IntersectionObserver === "undefined"
-    ) {
-      cards.forEach(showCard);
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting) return;
-          showCardsThrough(entry.target);
-        });
-      },
-      { rootMargin: "0px 0px -14% 0px", threshold: 0.2 },
+    operationsElement.classList.add("is-reveal-ready");
+    reducedMotionQuery?.addEventListener(
+      "change",
+      handleReducedMotionChange,
     );
 
-    cards.forEach((card) => observer.observe(card));
+    if (
+      reducedMotionQuery?.matches ||
+      typeof window.IntersectionObserver === "undefined"
+    ) {
+      showAllCards();
+    } else {
+      observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (!entry.isIntersecting) return;
+            showCardsThrough(entry.target);
+          });
+        },
+        { rootMargin: "0px 0px -14% 0px", threshold: 0.2 },
+      );
 
-    return () => observer.disconnect();
+      cards.forEach((card) => observer?.observe(card));
+    }
+
+    return () => {
+      reducedMotionQuery?.removeEventListener(
+        "change",
+        handleReducedMotionChange,
+      );
+      stopObserving();
+      operationsElement.classList.remove("is-reveal-ready");
+      cards.forEach((card) => card.classList.remove("is-visible"));
+    };
   }, []);
 
   return (

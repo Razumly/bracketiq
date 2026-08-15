@@ -172,20 +172,22 @@ describe("TryoutDivisionSelector", () => {
       expect(onChange).toHaveBeenCalledWith([organizationDivision]),
     );
   });
-  it("does not show divisions or errors from a previous organization", async () => {
-    const oldOrganization = deferred<Division[]>();
-    const currentOrganization = deferred<Division[]>();
+  it("ignores stale results across rapid organization changes", async () => {
+    const firstOrganization = deferred<Division[]>();
+    const secondOrganization = deferred<Division[]>();
+    const thirdOrganization = deferred<Division[]>();
+    const thirdDivision: Division = {
+      ...organizationDivision,
+      id: "organization_division_3",
+      name: "Current Organization Division",
+      organizationId: "organization_3",
+    };
     jest
       .mocked(organizationService.listOrganizationDivisions)
-      .mockReturnValueOnce(oldOrganization.promise)
-      .mockReturnValueOnce(currentOrganization.promise);
+      .mockReturnValueOnce(firstOrganization.promise)
+      .mockReturnValueOnce(secondOrganization.promise)
+      .mockReturnValueOnce(thirdOrganization.promise);
     const view = renderSelector();
-
-    await act(async () => {
-      oldOrganization.resolve([organizationDivision]);
-      await Promise.resolve();
-    });
-    expect(screen.getByText("Girls U14 Competitive")).toBeInTheDocument();
 
     view.rerender(
       <MantineProvider>
@@ -199,15 +201,47 @@ describe("TryoutDivisionSelector", () => {
         />
       </MantineProvider>,
     );
+    view.rerender(
+      <MantineProvider>
+        <TryoutDivisionSelector
+          organizationId="organization_3"
+          preferredSportId="soccer"
+          selectedDivisions={[]}
+          maxPriceCents={100000}
+          onChange={jest.fn()}
+          onTryoutPriceChange={jest.fn()}
+        />
+      </MantineProvider>,
+    );
 
-    expect(screen.queryByText("Girls U14 Competitive")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        organizationService.listOrganizationDivisions,
+      ).toHaveBeenCalledTimes(3),
+    );
     await act(async () => {
-      currentOrganization.reject(new Error("Current organization unavailable"));
-      await Promise.resolve();
+      thirdOrganization.resolve([thirdDivision]);
+      await thirdOrganization.promise;
     });
     expect(
-      screen.getByText("Current organization unavailable"),
+      screen.getByText("Current Organization Division"),
     ).toBeInTheDocument();
+
+    await act(async () => {
+      secondOrganization.reject(new Error("Stale organization unavailable"));
+      firstOrganization.resolve([organizationDivision]);
+      await Promise.resolve();
+    });
+
+    expect(
+      screen.getByText("Current Organization Division"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Girls U14 Competitive"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Stale organization unavailable"),
+    ).not.toBeInTheDocument();
   });
   it("clears organization-specific UI when no organization is selected", async () => {
     jest

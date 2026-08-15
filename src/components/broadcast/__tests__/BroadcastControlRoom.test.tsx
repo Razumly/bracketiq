@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import BroadcastControlRoom from "../BroadcastControlRoom";
 import type { MatchPresentationStateV1 } from "@/server/broadcast/types";
@@ -78,7 +78,7 @@ describe("BroadcastControlRoom", () => {
     render(
       <MantineProvider>
         <BroadcastControlRoom
-          state={{ revision: 3, scoringMode: "AUTOMATIC", presentationState }}
+          state={{ id: "state_1", revision: 3, scoringMode: "AUTOMATIC", presentationState }}
           onCommand={onCommand}
         />
       </MantineProvider>,
@@ -134,6 +134,7 @@ describe("BroadcastControlRoom", () => {
       <MantineProvider>
         <BroadcastControlRoom
           state={{
+            id: "state_1",
             revision: 3,
             scoringMode: "MANUAL_OVERRIDE",
             presentationState: manualState,
@@ -149,16 +150,27 @@ describe("BroadcastControlRoom", () => {
     fireEvent.change(screen.getByLabelText("Harbor Strikers sets won"), {
       target: { value: "1" },
     });
-    // Simulate the parent polling the same persisted score with a fresh object.
+    // Simulate a background poll returning a conflicting score for the same
+    // persisted revision. The producer's uncommitted draft remains authoritative.
     rerender(
       <MantineProvider>
         <BroadcastControlRoom
           state={{
+            id: "state_1",
             revision: 3,
             scoringMode: "MANUAL_OVERRIDE",
             presentationState: {
               ...manualState,
-              score: { ...manualState.score },
+              score: {
+                ...manualState.score,
+                points: [2, 1],
+                setsWon: [0, 0],
+                sets: manualState.score.sets.map((set) =>
+                  set.sequence === 2
+                    ? { ...set, team1Points: 2, team2Points: 1 }
+                    : set,
+                ),
+              },
             },
           }}
           onCommand={onCommand}
@@ -214,6 +226,7 @@ describe("BroadcastControlRoom", () => {
       <MantineProvider>
         <BroadcastControlRoom
           state={{
+            id: "state_1",
             revision: 3,
             scoringMode: "MANUAL_OVERRIDE",
             presentationState: firstState,
@@ -230,6 +243,7 @@ describe("BroadcastControlRoom", () => {
       <MantineProvider>
         <BroadcastControlRoom
           state={{
+            id: "state_1",
             revision: 4,
             scoringMode: "MANUAL_OVERRIDE",
             presentationState: {
@@ -256,6 +270,70 @@ describe("BroadcastControlRoom", () => {
     );
 
     expect(screen.getByLabelText("Set 1 Summit United")).toHaveValue("19");
+
+    rerender(
+      <MantineProvider>
+        <BroadcastControlRoom
+          state={{
+            id: "state_1",
+            revision: 4,
+            scoringMode: "MANUAL_OVERRIDE",
+            presentationState: {
+              ...firstState,
+              score: {
+                ...firstState.score,
+                points: [12, 10],
+                sets: [
+                  {
+                    sequence: 1,
+                    team1Points: 12,
+                    team2Points: 10,
+                    target: 21,
+                    complete: false,
+                    winnerTeamId: null,
+                  },
+                ],
+              },
+            },
+          }}
+          onCommand={onCommand}
+        />
+      </MantineProvider>,
+    );
+
+    expect(screen.getByLabelText("Set 1 Summit United")).toHaveValue("19");
+
+    rerender(
+      <MantineProvider>
+        <BroadcastControlRoom
+          state={{
+            id: "state_2",
+            revision: 4,
+            scoringMode: "MANUAL_OVERRIDE",
+            presentationState: {
+              ...firstState,
+              score: {
+                ...firstState.score,
+                points: [12, 10],
+                sets: [
+                  {
+                    sequence: 1,
+                    team1Points: 12,
+                    team2Points: 10,
+                    target: 21,
+                    complete: false,
+                    winnerTeamId: null,
+                  },
+                ],
+              },
+            },
+          }}
+          onCommand={onCommand}
+        />
+      </MantineProvider>,
+    );
+
+    expect(screen.getByLabelText("Set 1 Summit United")).toHaveValue("12");
   });
 
   it("shows every configured set when an existing manual override only has completed-set rows", () => {
@@ -285,6 +363,7 @@ describe("BroadcastControlRoom", () => {
       <MantineProvider>
         <BroadcastControlRoom
           state={{
+            id: "state_1",
             revision: 3,
             scoringMode: "MANUAL_OVERRIDE",
             presentationState: incompleteManualState,
@@ -338,7 +417,7 @@ describe("BroadcastControlRoom", () => {
     render(
       <MantineProvider>
         <BroadcastControlRoom
-          state={{ revision: 3, scoringMode: "AUTOMATIC", presentationState }}
+          state={{ id: "state_1", revision: 3, scoringMode: "AUTOMATIC", presentationState }}
           onCommand={onCommand}
         />
       </MantineProvider>,
@@ -383,6 +462,53 @@ describe("BroadcastControlRoom", () => {
       });
     } else {
       delete window.obsstudio;
+    }
+  });
+
+  it("saves a replay through the OBS bridge available at render time", async () => {
+    const onCommand = jest.fn().mockResolvedValue(null);
+    const saveReplayBuffer = jest.fn().mockResolvedValue(undefined);
+    const previousBridge = window.obsstudio;
+
+    Object.defineProperty(window, "obsstudio", {
+      configurable: true,
+      value: { saveReplayBuffer },
+    });
+
+    try {
+      render(
+        <MantineProvider>
+          <BroadcastControlRoom
+            state={{ id: "state_1", revision: 3, scoringMode: "AUTOMATIC", presentationState }}
+            onCommand={onCommand}
+          />
+        </MantineProvider>,
+      );
+
+      expect(screen.getByText("OBS dock ready")).toBeInTheDocument();
+      fireEvent.click(
+        screen.getByRole("button", { name: "Save Replay Buffer" }),
+      );
+
+      await waitFor(() => {
+        expect(saveReplayBuffer).toHaveBeenCalledTimes(1);
+        expect(onCommand).toHaveBeenCalledWith({
+          type: "SET_REPLAY_STATE",
+          replayState: "SAVED",
+        });
+      });
+      expect(
+        screen.getByText("OBS accepted the replay-buffer save request."),
+      ).toBeInTheDocument();
+    } finally {
+      if (previousBridge) {
+        Object.defineProperty(window, "obsstudio", {
+          configurable: true,
+          value: previousBridge,
+        });
+      } else {
+        delete window.obsstudio;
+      }
     }
   });
 });
