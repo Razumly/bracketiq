@@ -2495,6 +2495,9 @@ describe('League schedule page', () => {
 
     renderWithMantine(<LeagueSchedulePage />);
 
+    await waitFor(() => {
+      expect(screen.getByText('Test League')).toBeInTheDocument();
+    });
     await clickMoreAction(/create template/i);
 
     await waitFor(() => {
