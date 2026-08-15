@@ -327,6 +327,13 @@ export type WidgetEventSearchPickerProps = {
   selectedEvents: WidgetEventSelection[];
   onChange: (events: WidgetEventSelection[]) => void;
 };
+type WidgetEventSearchState = {
+  searchKey: string;
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  results: WidgetEventSelection[];
+  error: string | null;
+};
+
 
 export function WidgetEventSearchPicker({
   label,
@@ -337,23 +344,31 @@ export function WidgetEventSearchPicker({
   onChange,
 }: WidgetEventSearchPickerProps) {
   const [query, setQuery] = useState('');
-  const [resolvedSearchKey, setResolvedSearchKey] = useState('');
-  const [results, setResults] = useState<WidgetEventSelection[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [searchState, setSearchState] = useState<WidgetEventSearchState>({
+    searchKey: '',
+    status: 'idle',
+    results: [],
+    error: null,
+  });
 
   const normalizedQuery = query.trim();
-  const selectedIds = useMemo(() => new Set(selectedEvents.map((event) => event.id)), [selectedEvents]);
+  const selectedIds = useMemo(
+    () => new Set(selectedEvents.map((event) => event.id)),
+    [selectedEvents],
+  );
   const eventTypesKey = eventTypes.join(',');
   const searchKey = organizationId && normalizedQuery
     ? `${organizationId}:${eventTypesKey}:${normalizedQuery}`
     : '';
-  const searchStateIsCurrent = Boolean(searchKey) && resolvedSearchKey === searchKey;
+  const searchStateIsCurrent = Boolean(searchKey) && searchState.searchKey === searchKey;
   const visibleResults = searchStateIsCurrent
-    ? results.filter((event) => !selectedIds.has(event.id))
+    ? searchState.results.filter((event) => !selectedIds.has(event.id))
     : [];
-  const visibleLoading = Boolean(searchKey) && (!searchStateIsCurrent || loading);
-  const visibleError = searchStateIsCurrent ? error : null;
+  const visibleLoading = Boolean(searchKey)
+    && (!searchStateIsCurrent || searchState.status === 'loading');
+  const visibleError = searchStateIsCurrent && searchState.status === 'error'
+    ? searchState.error
+    : null;
 
   useEffect(() => {
     if (!searchKey) {
@@ -362,10 +377,12 @@ export function WidgetEventSearchPicker({
 
     let cancelled = false;
     const timeoutId = window.setTimeout(() => {
-      setResolvedSearchKey(searchKey);
-      setResults([]);
-      setLoading(true);
-      setError(null);
+      setSearchState({
+        searchKey,
+        status: 'loading',
+        results: [],
+        error: null,
+      });
       eventService
         .getEventsPaginated(
           {
@@ -381,23 +398,36 @@ export function WidgetEventSearchPicker({
           if (cancelled) {
             return;
           }
-          setResults(
-            events
-              .map((event) => toWidgetEventSelection(event))
-              .filter((event): event is WidgetEventSelection => Boolean(event)),
-          );
+          const nextResults = events
+            .map((event) => toWidgetEventSelection(event))
+            .filter((event): event is WidgetEventSelection => Boolean(event));
+          setSearchState((current) => (
+            current.searchKey === searchKey
+              ? {
+                searchKey,
+                status: 'ready',
+                results: nextResults,
+                error: null,
+              }
+              : current
+          ));
         })
         .catch((searchError) => {
           if (cancelled) {
             return;
           }
-          setResults([]);
-          setError(searchError instanceof Error ? searchError.message : 'Failed to search events.');
-        })
-        .finally(() => {
-          if (!cancelled) {
-            setLoading(false);
-          }
+          setSearchState((current) => (
+            current.searchKey === searchKey
+              ? {
+                searchKey,
+                status: 'error',
+                results: [],
+                error: searchError instanceof Error
+                  ? searchError.message
+                  : 'Failed to search events.',
+              }
+              : current
+          ));
         });
     }, 250);
 
