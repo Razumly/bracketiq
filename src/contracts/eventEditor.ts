@@ -458,6 +458,20 @@ export const editorCapabilitiesSchema = z.object({
   canUseOnlinePayments: z.boolean(),
   canManageStaff: z.boolean(),
   canEdit: z.boolean(),
+  canDelegateHost: z.boolean(),
+  readOnly: z.boolean(),
+  readOnlyReason: z.enum([
+    'AUTHENTICATION_REQUIRED',
+    'MANAGEMENT_AUTHORITY_UNVERIFIED',
+    'NOT_AUTHORIZED',
+  ]).nullable(),
+  managementAuthority: z.object({
+    type: z.literal('ORGANIZATION'),
+    organizationId: id,
+    ownerUserId: id,
+  }).strict().nullable(),
+  eventHostId: nullableId,
+  viewerIsEventHost: z.boolean(),
   supportsTeamStaffing: z.boolean(),
 }).strict();
 
@@ -600,9 +614,16 @@ export const saveEventEditorCommandSchema = z.object({
   scheduleTransition: eventEditorSaveScheduleTransitionSchema,
 }).strict();
 
+export const eventEditorExpectedCreateRevisionsSchema = z.object({
+  editorRevision: id,
+  staffRevision: z.string().nullable(),
+  scheduleRevision: id,
+}).strict();
+
 export const createEventEditorCommandSchema = z.object({
   contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
   createOperationId: id,
+  expectedRevisions: eventEditorExpectedCreateRevisionsSchema,
   draft: eventEditorDraftSchema,
   completion: eventEditorCreateCompletionSchema,
 }).strict();
@@ -613,6 +634,13 @@ export const eventEditorSaveResultSchema = z.object({
   questionIdMap: z.record(z.string(), id),
   staffEmailDelivery: z.enum(['QUEUED', 'FAILED', 'NOT_REQUESTED']),
   scheduleOutcome: eventEditorScheduleOutcomeSchema,
+}).strict();
+
+export const eventEditorCreateResultSchema = eventEditorSaveResultSchema.extend({
+  createOperationId: id,
+  editorRevision: id,
+  staffRevision: z.string().nullable(),
+  scheduleRevision: id,
 }).strict();
 
 export const eventEditorErrorSchema = z.object({
@@ -635,10 +663,14 @@ export const eventEditorErrorSchema = z.object({
     'EDITOR_SCHEDULE_UNSUPPORTED',
     'EDITOR_SCHEDULE_INPUT_INVALID',
     'EDITOR_SCHEDULE_FAILED',
+    'INVALID_TIME_SLOT',
   ]),
   field: z.string().nullable().optional(),
   editorRevision: z.string().nullable().optional(),
   staffRevision: z.string().nullable().optional(),
+  scheduleRevision: z.string().nullable().optional(),
+  slotIds: z.array(id).optional(),
+  createOperationId: id.optional(),
   requestId: id.optional(),
   details: z.unknown().optional(),
 }).strict();
@@ -649,10 +681,13 @@ export type EventEditorDraft = z.infer<typeof eventEditorDraftSchema>;
 export type EventEditorBootstrapDraft = z.infer<typeof eventEditorBootstrapDraftSchema>;
 export type SaveEventEditorCommand = z.infer<typeof saveEventEditorCommandSchema>;
 export type CreateEventEditorCommand = z.infer<typeof createEventEditorCommandSchema>;
+export type EventEditorExpectedCreateRevisions = z.infer<typeof eventEditorExpectedCreateRevisionsSchema>;
 export type EventEditorSaveResult = z.infer<typeof eventEditorSaveResultSchema>;
+export type EventEditorCreateResult = z.infer<typeof eventEditorCreateResultSchema>;
 export type EventEditorError = z.infer<typeof eventEditorErrorSchema>;
 export type RegistrationQuestionInput = z.infer<typeof registrationQuestionInputSchema>;
 
 export const parseEventEditorSnapshot = (input: unknown): EventEditorSnapshot => eventEditorSnapshotSchema.parse(input);
 export const parseSaveEventEditorCommand = (input: unknown): SaveEventEditorCommand => saveEventEditorCommandSchema.parse(input);
 export const parseCreateEventEditorCommand = (input: unknown): CreateEventEditorCommand => createEventEditorCommandSchema.parse(input);
+export const parseEventEditorCreateResult = (input: unknown): EventEditorCreateResult => eventEditorCreateResultSchema.parse(input);

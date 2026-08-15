@@ -1,19 +1,30 @@
 "use client";
 
-import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { notifications } from '@mantine/notifications';
-import type { Field, TimeSlot, UserData } from '@/types';
-import { formatDisplayDateTime, formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
-import { createId } from '@/lib/id';
-import { fieldService } from '@/lib/fieldService';
-import { getFacilityScopedFieldDisplayName } from '@/lib/fieldUtils';
-import { buildFieldCalendarEvents } from '../fieldCalendar';
-import { normalizeDaysOfWeek, normalizeFieldIds } from './facilityFormUtils';
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import { notifications } from "@mantine/notifications";
+import type { Field, TimeSlot, UserData } from "@/types";
+import {
+  formatDisplayDateTime,
+  formatLocalDateTime,
+  parseLocalDateTime,
+} from "@/lib/dateUtils";
+import { createId } from "@/lib/id";
+import { fieldService } from "@/lib/fieldService";
+import { getFacilityScopedFieldDisplayName } from "@/lib/fieldUtils";
+import { buildFieldCalendarEvents } from "../fieldCalendar";
+import { normalizeDaysOfWeek, normalizeFieldIds } from "./facilityFormUtils";
 import type {
   RentalDraftSelection,
   RentalSelectionConflictState,
   RentalSelectionValidation,
-} from './facilityCalendarTypes';
+} from "./facilityCalendarTypes";
 
 export const PUBLIC_RENTAL_MIN_SELECTION_MS = 60 * 60 * 1000;
 
@@ -29,6 +40,10 @@ type SelectionConflictInput = {
   fieldIds: string[];
   dateRange: { start: Date; end: Date } | null;
 };
+const EMPTY_SELECTION_CONFLICT_STATE: Record<
+  string,
+  RentalSelectionConflictState
+> = {};
 
 type UsePublicRentalSelectionsOptions = {
   canManage: boolean;
@@ -36,11 +51,16 @@ type UsePublicRentalSelectionsOptions = {
   fields: Field[];
   facilityFilteredFields: Field[];
   rentalListings: RentalListing[];
-  setCalendarDate: Dispatch<SetStateAction<Date>>;
-  compareRanges: (startA: Date, endA: Date, startB: Date, endB: Date) => boolean;
+  selectionContextKey: string;
+  compareRanges: (
+    startA: Date,
+    endA: Date,
+    startB: Date,
+    endB: Date,
+  ) => boolean;
 };
 
-const mondayDayOf = (date: Date): number => ((date.getDay() + 6) % 7);
+const mondayDayOf = (date: Date): number => (date.getDay() + 6) % 7;
 
 const minutesToDate = (date: Date, minutes: number): Date => {
   const next = new Date(date.getTime());
@@ -49,28 +69,51 @@ const minutesToDate = (date: Date, minutes: number): Date => {
   return next;
 };
 
-export const isPastRentalRangeStart = (start: Date, reference: Date = new Date()): boolean => (
-  start.getTime() < reference.getTime()
-);
+export const isPastRentalRangeStart = (
+  start: Date,
+  reference: Date = new Date(),
+): boolean => start.getTime() < reference.getTime();
 
-export const getNextSelectableRentalStart = (reference: Date = new Date(), slotStepMinutes = 30): Date => {
+export const getNextSelectableRentalStart = (
+  reference: Date = new Date(),
+  slotStepMinutes = 30,
+): Date => {
   const next = new Date(reference.getTime());
-  const hasSubMinuteOffset = next.getSeconds() > 0 || next.getMilliseconds() > 0;
+  const hasSubMinuteOffset =
+    next.getSeconds() > 0 || next.getMilliseconds() > 0;
   next.setSeconds(0, 0);
   const minutes = next.getMinutes();
   const remainder = minutes % slotStepMinutes;
   if (remainder > 0 || hasSubMinuteOffset) {
-    next.setMinutes(minutes + (remainder > 0 ? slotStepMinutes - remainder : slotStepMinutes), 0, 0);
+    next.setMinutes(
+      minutes + (remainder > 0 ? slotStepMinutes - remainder : slotStepMinutes),
+      0,
+      0,
+    );
   }
   return next;
 };
 
 export const resolveSelectionDateRange = (
-  selection: Pick<RentalDraftSelection, 'dayOfWeek' | 'daysOfWeek' | 'startTimeMinutes' | 'endTimeMinutes' | 'startDate' | 'endDate' | 'repeating'>,
+  selection: Pick<
+    RentalDraftSelection,
+    | "dayOfWeek"
+    | "daysOfWeek"
+    | "startTimeMinutes"
+    | "endTimeMinutes"
+    | "startDate"
+    | "endDate"
+    | "repeating"
+  >,
 ): { start: Date; end: Date } | null => {
   const explicitStart = parseLocalDateTime(selection.startDate ?? null);
   const explicitEnd = parseLocalDateTime(selection.endDate ?? null);
-  if (selection.repeating === false && explicitStart && explicitEnd && explicitEnd.getTime() > explicitStart.getTime()) {
+  if (
+    selection.repeating === false &&
+    explicitStart &&
+    explicitEnd &&
+    explicitEnd.getTime() > explicitStart.getTime()
+  ) {
     return { start: explicitStart, end: explicitEnd };
   }
 
@@ -80,8 +123,14 @@ export const resolveSelectionDateRange = (
   if (!startBoundary || day === null) {
     return null;
   }
-  const startMinutes = typeof selection.startTimeMinutes === 'number' ? selection.startTimeMinutes : null;
-  const endMinutes = typeof selection.endTimeMinutes === 'number' ? selection.endTimeMinutes : null;
+  const startMinutes =
+    typeof selection.startTimeMinutes === "number"
+      ? selection.startTimeMinutes
+      : null;
+  const endMinutes =
+    typeof selection.endTimeMinutes === "number"
+      ? selection.endTimeMinutes
+      : null;
   if (startMinutes === null || endMinutes === null) {
     return null;
   }
@@ -98,7 +147,10 @@ export const resolveSelectionDateRange = (
   })();
   const start = minutesToDate(baseDay, startMinutes);
   const endCandidate = minutesToDate(baseDay, endMinutes);
-  const end = endCandidate > start ? endCandidate : new Date(start.getTime() + PUBLIC_RENTAL_MIN_SELECTION_MS);
+  const end =
+    endCandidate > start
+      ? endCandidate
+      : new Date(start.getTime() + PUBLIC_RENTAL_MIN_SELECTION_MS);
   return { start, end };
 };
 
@@ -114,7 +166,7 @@ export const buildSelectionConflictSignature = (
   if (!fieldIds.length || !dateRange) {
     return { signature: null, fieldIds, dateRange };
   }
-  const signature = `${fieldIds.join(',')}|${dateRange.start.toISOString()}|${dateRange.end.toISOString()}`;
+  const signature = `${fieldIds.join(",")}|${dateRange.start.toISOString()}|${dateRange.end.toISOString()}`;
   return { signature, fieldIds, dateRange };
 };
 
@@ -125,7 +177,10 @@ export const buildSelectionFromCalendarRange = (
 ): RentalDraftSelection => {
   const startDate = new Date(start.getTime());
   const endDate = new Date(end.getTime());
-  if (endDate.getTime() - startDate.getTime() < PUBLIC_RENTAL_MIN_SELECTION_MS) {
+  if (
+    endDate.getTime() - startDate.getTime() <
+    PUBLIC_RENTAL_MIN_SELECTION_MS
+  ) {
     endDate.setTime(startDate.getTime() + PUBLIC_RENTAL_MIN_SELECTION_MS);
   }
   const dayOfWeek = mondayDayOf(startDate);
@@ -149,7 +204,10 @@ export const updateSelectionWithCalendarRange = (
 ): RentalDraftSelection => {
   const startDate = new Date(start.getTime());
   const endDate = new Date(end.getTime());
-  if (endDate.getTime() - startDate.getTime() < PUBLIC_RENTAL_MIN_SELECTION_MS) {
+  if (
+    endDate.getTime() - startDate.getTime() <
+    PUBLIC_RENTAL_MIN_SELECTION_MS
+  ) {
     endDate.setTime(startDate.getTime() + PUBLIC_RENTAL_MIN_SELECTION_MS);
   }
   const dayOfWeek = mondayDayOf(startDate);
@@ -179,19 +237,30 @@ const rentalSlotCoversDraftDay = (
     if (!slotStart || !slotEnd || slotEnd.getTime() <= slotStart.getTime()) {
       return false;
     }
-    return params.selectionStart.getTime() >= slotStart.getTime() && params.selectionEnd.getTime() <= slotEnd.getTime();
+    return (
+      params.selectionStart.getTime() >= slotStart.getTime() &&
+      params.selectionEnd.getTime() <= slotEnd.getTime()
+    );
   }
 
   const dayOfWeek = mondayDayOf(params.selectionStart);
-  const startTimeMinutes = params.selectionStart.getHours() * 60 + params.selectionStart.getMinutes();
-  const endTimeMinutes = params.selectionEnd.getHours() * 60 + params.selectionEnd.getMinutes();
+  const startTimeMinutes =
+    params.selectionStart.getHours() * 60 + params.selectionStart.getMinutes();
+  const endTimeMinutes =
+    params.selectionEnd.getHours() * 60 + params.selectionEnd.getMinutes();
   const slotDays = normalizeDaysOfWeek(slot.daysOfWeek, slot.dayOfWeek);
   if (!slotDays.includes(dayOfWeek)) {
     return false;
   }
-  const slotStartMinutes = typeof slot.startTimeMinutes === 'number' ? slot.startTimeMinutes : null;
-  const slotEndMinutes = typeof slot.endTimeMinutes === 'number' ? slot.endTimeMinutes : null;
-  if (slotStartMinutes === null || slotEndMinutes === null || slotEndMinutes <= slotStartMinutes) {
+  const slotStartMinutes =
+    typeof slot.startTimeMinutes === "number" ? slot.startTimeMinutes : null;
+  const slotEndMinutes =
+    typeof slot.endTimeMinutes === "number" ? slot.endTimeMinutes : null;
+  if (
+    slotStartMinutes === null ||
+    slotEndMinutes === null ||
+    slotEndMinutes <= slotStartMinutes
+  ) {
     return false;
   }
   if (startTimeMinutes < slotStartMinutes || endTimeMinutes > slotEndMinutes) {
@@ -201,14 +270,24 @@ const rentalSlotCoversDraftDay = (
   const slotStartBoundary = parseLocalDateTime(slot.startDate ?? null);
   const slotEndBoundary = parseLocalDateTime(slot.endDate ?? null);
 
-  const normalizeDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
-  if (slotStartBoundary && normalizeDay(params.selectionStart) < normalizeDay(slotStartBoundary)) {
+  const normalizeDay = (date: Date) =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+  if (
+    slotStartBoundary &&
+    normalizeDay(params.selectionStart) < normalizeDay(slotStartBoundary)
+  ) {
     return false;
   }
-  if (slotEndBoundary && normalizeDay(params.selectionStart) > normalizeDay(slotEndBoundary)) {
+  if (
+    slotEndBoundary &&
+    normalizeDay(params.selectionStart) > normalizeDay(slotEndBoundary)
+  ) {
     return false;
   }
-  if (slotEndBoundary && normalizeDay(params.selectionEnd) > normalizeDay(slotEndBoundary)) {
+  if (
+    slotEndBoundary &&
+    normalizeDay(params.selectionEnd) > normalizeDay(slotEndBoundary)
+  ) {
     return false;
   }
   return true;
@@ -220,68 +299,127 @@ export function usePublicRentalSelections({
   fields,
   facilityFilteredFields,
   rentalListings,
-  setCalendarDate,
+  selectionContextKey,
   compareRanges,
 }: UsePublicRentalSelectionsOptions) {
-  const [rentalSelections, setRentalSelections] = useState<RentalDraftSelection[]>([]);
-  const [selectionConflictStateByKey, setSelectionConflictStateByKey] = useState<Record<string, RentalSelectionConflictState>>({});
-  const selectionConflictStateRef = useRef<Record<string, RentalSelectionConflictState>>({});
-
-  useEffect(() => {
-    selectionConflictStateRef.current = selectionConflictStateByKey;
-  }, [selectionConflictStateByKey]);
-
-  useEffect(() => {
+  const defaultRentalSelections = useMemo<RentalDraftSelection[]>(() => {
     if (canManage) {
-      return;
-    }
-    if (!fields.length || rentalSelections.length > 0) {
-      return;
+      return [];
     }
     const firstField = fields[0];
     if (!firstField?.$id) {
-      return;
+      return [];
     }
 
     const fallbackStart = getNextSelectableRentalStart();
-    const fallbackEnd = new Date(fallbackStart.getTime() + PUBLIC_RENTAL_MIN_SELECTION_MS);
-
+    const fallbackEnd = new Date(
+      fallbackStart.getTime() + PUBLIC_RENTAL_MIN_SELECTION_MS,
+    );
     const firstListing = rentalListings[0];
     const firstRentalField = firstListing?.field ?? firstField;
     if (firstListing?.nextOccurrence && firstRentalField?.$id) {
       const start = new Date(firstListing.nextOccurrence.getTime());
-      const endMinutes = typeof firstListing.slot.endTimeMinutes === 'number'
-        ? firstListing.slot.endTimeMinutes
-        : (firstListing.slot.startTimeMinutes ?? (start.getHours() * 60 + start.getMinutes() + 60));
+      const endMinutes =
+        typeof firstListing.slot.endTimeMinutes === "number"
+          ? firstListing.slot.endTimeMinutes
+          : (firstListing.slot.startTimeMinutes ??
+            start.getHours() * 60 + start.getMinutes() + 60);
       const end = minutesToDate(start, endMinutes);
-      setRentalSelections([
-        buildSelectionFromCalendarRange(start, end > start ? end : new Date(start.getTime() + PUBLIC_RENTAL_MIN_SELECTION_MS), firstRentalField.$id),
-      ]);
-      setCalendarDate(new Date(start));
-      return;
+      return [
+        buildSelectionFromCalendarRange(
+          start,
+          end > start
+            ? end
+            : new Date(start.getTime() + PUBLIC_RENTAL_MIN_SELECTION_MS),
+          firstRentalField.$id,
+        ),
+      ];
     }
 
-    setRentalSelections([
-      buildSelectionFromCalendarRange(fallbackStart, fallbackEnd, firstField.$id),
-    ]);
-    setCalendarDate(new Date(fallbackStart));
-  }, [canManage, fields, rentalListings, rentalSelections.length, setCalendarDate]);
-
+    return [
+      buildSelectionFromCalendarRange(
+        fallbackStart,
+        fallbackEnd,
+        firstField.$id,
+      ),
+    ];
+  }, [canManage, fields, rentalListings]);
+  const conflictScope = useMemo<object>(
+    () => ({}),
+    [canManage, selectionContextKey],
+  );
+  const [rentalSelectionState, setRentalSelectionState] = useState<{
+    contextKey: string;
+    selections: RentalDraftSelection[];
+  } | null>(null);
+  const rentalSelections =
+    rentalSelectionState?.contextKey === selectionContextKey
+      ? rentalSelectionState.selections
+      : defaultRentalSelections;
+  const setRentalSelections = useCallback<
+    Dispatch<SetStateAction<RentalDraftSelection[]>>
+  >(
+    (nextSelections) => {
+      setRentalSelectionState((previous) => {
+        const currentSelections =
+          previous?.contextKey === selectionContextKey
+            ? previous.selections
+            : defaultRentalSelections;
+        return {
+          contextKey: selectionContextKey,
+          selections:
+            typeof nextSelections === "function"
+              ? nextSelections(currentSelections)
+              : nextSelections,
+        };
+      });
+    },
+    [defaultRentalSelections, selectionContextKey],
+  );
+  const [selectionConflictState, setSelectionConflictState] = useState<{
+    scope: object;
+    byKey: Record<string, RentalSelectionConflictState>;
+  }>({ scope: conflictScope, byKey: {} });
+  const selectionConflictStateByKey =
+    selectionConflictState.scope === conflictScope
+      ? selectionConflictState.byKey
+      : EMPTY_SELECTION_CONFLICT_STATE;
+  const setSelectionConflictStateByKey = useCallback<
+    Dispatch<SetStateAction<Record<string, RentalSelectionConflictState>>>
+  >(
+    (nextState) => {
+      setSelectionConflictState((previous) => {
+        const currentState =
+          previous.scope === conflictScope
+            ? previous.byKey
+            : EMPTY_SELECTION_CONFLICT_STATE;
+        return {
+          scope: conflictScope,
+          byKey:
+            typeof nextState === "function"
+              ? nextState(currentState)
+              : nextState,
+        };
+      });
+    },
+    [conflictScope],
+  );
   const selectionConflictInputs = useMemo<SelectionConflictInput[]>(
-    () => (
+    () =>
       canManage
         ? []
         : rentalSelections.map((selectionItem) => {
-          const resolved = buildSelectionConflictSignature(selectionItem);
-          return {
-            key: selectionItem.key,
-            signature: resolved.signature,
-            fieldIds: resolved.fieldIds,
-            dateRange: resolved.dateRange,
-          };
-        })
-    ),
-    [canManage, rentalSelections],
+            const resolved = buildSelectionConflictSignature(selectionItem);
+            return {
+              key: selectionItem.key,
+              signature: resolved.signature
+                ? `${selectionContextKey}:${resolved.signature}`
+                : null,
+              fieldIds: resolved.fieldIds,
+              dateRange: resolved.dateRange,
+            };
+          }),
+    [canManage, rentalSelections, selectionContextKey],
   );
   const selectionConflictInputByKey = useMemo(
     () => new Map(selectionConflictInputs.map((input) => [input.key, input])),
@@ -290,96 +428,58 @@ export function usePublicRentalSelections({
 
   useEffect(() => {
     if (canManage) {
-      if (Object.keys(selectionConflictStateRef.current).length > 0) {
-        setSelectionConflictStateByKey({});
-      }
-      return;
+      return undefined;
     }
 
     const fieldsById = new Map(fields.map((field) => [field.$id, field]));
-    const previousState = selectionConflictStateRef.current;
-    const toFetch: Array<{
-      key: string;
-      signature: string;
-      fieldIds: string[];
-      dateRange: { start: Date; end: Date };
-    }> = [];
-    const nextState: Record<string, RentalSelectionConflictState> = {};
-
-    selectionConflictInputs.forEach((input) => {
-      if (!input.signature || !input.dateRange || !input.fieldIds.length) {
-        return;
-      }
-
-      const existing = previousState[input.key];
-      if (existing && existing.signature === input.signature && !existing.loading) {
-        nextState[input.key] = existing;
-        return;
-      } else {
-        nextState[input.key] = {
-          signature: input.signature,
-          conflictCount: 0,
-          loading: true,
-          error: null,
-        };
-        toFetch.push({
-          key: input.key,
-          signature: input.signature,
-          fieldIds: input.fieldIds,
-          dateRange: input.dateRange,
-        });
-      }
-    });
-
-    const stateChanged = (() => {
-      const previousKeys = Object.keys(previousState);
-      const nextKeys = Object.keys(nextState);
-      if (previousKeys.length !== nextKeys.length) {
-        return true;
-      }
-      return nextKeys.some((key) => {
-        const previous = previousState[key];
-        const next = nextState[key];
-        return (
-          !previous
-          || previous.signature !== next.signature
-          || previous.conflictCount !== next.conflictCount
-          || previous.loading !== next.loading
-          || previous.error !== next.error
-        );
-      });
-    })();
-
-    if (stateChanged) {
-      setSelectionConflictStateByKey(nextState);
-    }
-
+    const toFetch = selectionConflictInputs
+      .filter(
+        (input) =>
+          Boolean(input.signature) &&
+          Boolean(input.dateRange) &&
+          input.fieldIds.length > 0 &&
+          (selectionConflictStateByKey[input.key]?.signature !==
+            input.signature ||
+            selectionConflictStateByKey[input.key]?.loading),
+      )
+      .map((input) => ({
+        key: input.key,
+        signature: input.signature!,
+        fieldIds: input.fieldIds,
+        dateRange: input.dateRange!,
+      }));
     if (!toFetch.length) {
-      return;
+      return undefined;
     }
 
     let cancelled = false;
     const fieldRequestCache = new Map<string, Promise<Field | null>>();
-
     const getFieldInSelectionWindow = (
       fieldId: string,
       range: { start: Date; end: Date },
     ): Promise<Field | null> => {
       const cacheKey = `${fieldId}:${range.start.toISOString()}:${range.end.toISOString()}`;
       if (!fieldRequestCache.has(cacheKey)) {
-        fieldRequestCache.set(cacheKey, (async () => {
-          const sourceField = fieldsById.get(fieldId);
-          if (!sourceField) {
-            return null;
-          }
-          return fieldService.getFieldEventsMatches(sourceField, {
-            start: range.start.toISOString(),
-            end: range.end.toISOString(),
-          }, {
-            rentalOverlapOnly: true,
-            includeMatches: false,
-          });
-        })());
+        fieldRequestCache.set(
+          cacheKey,
+          (async () => {
+            const sourceField = fieldsById.get(fieldId);
+            if (!sourceField) {
+              return null;
+            }
+            return fieldService.getFieldEventsMatches(
+              sourceField,
+              {
+                start: range.start.toISOString(),
+                end: range.end.toISOString(),
+              },
+              {
+                rentalOverlapOnly: true,
+                includeMatches: false,
+              },
+            );
+          })(),
+        );
       }
       return fieldRequestCache.get(cacheKey)!;
     };
@@ -390,26 +490,31 @@ export function usePublicRentalSelections({
           let conflictCount = 0;
           await Promise.all(
             input.fieldIds.map(async (fieldId) => {
-              const hydratedField = await getFieldInSelectionWindow(fieldId, input.dateRange);
+              const hydratedField = await getFieldInSelectionWindow(
+                fieldId,
+                input.dateRange,
+              );
               if (!hydratedField) {
                 return;
               }
-              const blockers = buildFieldCalendarEvents([hydratedField], input.dateRange)
-                .filter((entry) => entry.metaType === 'booked');
-              const hasConflict = blockers.some((blocker) => (
-                compareRanges(
-                  input.dateRange.start,
-                  input.dateRange.end,
-                  blocker.start,
-                  blocker.end,
+              const blockers = buildFieldCalendarEvents(
+                [hydratedField],
+                input.dateRange,
+              ).filter((entry) => entry.metaType === "booked");
+              if (
+                blockers.some((blocker) =>
+                  compareRanges(
+                    input.dateRange.start,
+                    input.dateRange.end,
+                    blocker.start,
+                    blocker.end,
+                  ),
                 )
-              ));
-              if (hasConflict) {
+              ) {
                 conflictCount += 1;
               }
             }),
           );
-
           return {
             key: input.key,
             signature: input.signature,
@@ -421,7 +526,10 @@ export function usePublicRentalSelections({
             key: input.key,
             signature: input.signature,
             conflictCount: 0,
-            error: error instanceof Error ? error.message : 'Failed to load conflict data.',
+            error:
+              error instanceof Error
+                ? error.message
+                : "Failed to load conflict data.",
           };
         }
       }),
@@ -429,13 +537,15 @@ export function usePublicRentalSelections({
       if (cancelled) {
         return;
       }
-      setSelectionConflictStateByKey((prev) => {
-        const next = { ...prev };
-        results.forEach((result) => {
-          const current = next[result.key];
-          if (!current || current.signature !== result.signature) {
-            return;
+      setSelectionConflictStateByKey((previous) => {
+        const next: Record<string, RentalSelectionConflictState> = {};
+        selectionConflictInputs.forEach((input) => {
+          const existing = previous[input.key];
+          if (existing?.signature === input.signature) {
+            next[input.key] = existing;
           }
+        });
+        results.forEach((result) => {
           next[result.key] = {
             signature: result.signature,
             conflictCount: result.conflictCount,
@@ -450,7 +560,13 @@ export function usePublicRentalSelections({
     return () => {
       cancelled = true;
     };
-  }, [canManage, compareRanges, fields, selectionConflictInputs]);
+  }, [
+    canManage,
+    compareRanges,
+    fields,
+    selectionConflictInputs,
+    selectionConflictStateByKey,
+  ]);
 
   const conflictCountsBySelectionKey = useMemo(() => {
     const counts = new Map<string, number>();
@@ -462,7 +578,11 @@ export function usePublicRentalSelections({
         return;
       }
       const conflictState = selectionConflictStateByKey[input.key];
-      if (!conflictState || conflictState.signature !== input.signature || conflictState.loading) {
+      if (
+        !conflictState ||
+        conflictState.signature !== input.signature ||
+        conflictState.loading
+      ) {
         return;
       }
       if (conflictState.conflictCount > 0) {
@@ -481,19 +601,25 @@ export function usePublicRentalSelections({
         return false;
       }
       const conflictState = selectionConflictStateByKey[input.key];
-      return !conflictState
-        || conflictState.signature !== input.signature
-        || conflictState.loading;
+      return (
+        !conflictState ||
+        conflictState.signature !== input.signature ||
+        conflictState.loading
+      );
     });
   }, [canManage, selectionConflictInputs, selectionConflictStateByKey]);
 
-  const rentalSelectionValidations = useMemo<RentalSelectionValidation[]>(() => {
+  const rentalSelectionValidations = useMemo<
+    RentalSelectionValidation[]
+  >(() => {
     if (canManage) {
       return [];
     }
     const fieldsById = new Map(fields.map((field) => [field.$id, field]));
     return rentalSelections.map((selectionItem) => {
-      const normalizedFieldIds = normalizeFieldIds(selectionItem.scheduledFieldIds);
+      const normalizedFieldIds = normalizeFieldIds(
+        selectionItem.scheduledFieldIds,
+      );
       const dateRange = resolveSelectionDateRange(selectionItem);
       const errors: string[] = [];
       const requiredTemplateIds = new Set<string>();
@@ -501,19 +627,21 @@ export function usePublicRentalSelections({
       let totalCents = 0;
 
       if (!normalizedFieldIds.length) {
-        errors.push('Select at least one resource.');
+        errors.push("Select at least one resource.");
       }
       if (!dateRange) {
-        errors.push('Select a valid start and end date/time.');
+        errors.push("Select a valid start and end date/time.");
       }
       if (dateRange && isPastRentalRangeStart(dateRange.start)) {
-        errors.push('Rental selections must start in the future.');
+        errors.push("Rental selections must start in the future.");
       }
 
       if (!errors.length && dateRange) {
         const durationMinutes = Math.max(
           1,
-          Math.round((dateRange.end.getTime() - dateRange.start.getTime()) / (60 * 1000)),
+          Math.round(
+            (dateRange.end.getTime() - dateRange.start.getTime()) / (60 * 1000),
+          ),
         );
         normalizedFieldIds.forEach((fieldId) => {
           const field = fieldsById.get(fieldId);
@@ -521,27 +649,34 @@ export function usePublicRentalSelections({
             errors.push(`Resource ${fieldId} is unavailable.`);
             return;
           }
-          const matchedRentalSlot = (field.rentalSlots || []).find((slot) => rentalSlotCoversDraftDay(slot, {
-            selectionStart: dateRange.start,
-            selectionEnd: dateRange.end,
-          }));
+          const matchedRentalSlot = (field.rentalSlots || []).find((slot) =>
+            rentalSlotCoversDraftDay(slot, {
+              selectionStart: dateRange.start,
+              selectionEnd: dateRange.end,
+            }),
+          );
           if (!matchedRentalSlot) {
             errors.push(
               `${getFacilityScopedFieldDisplayName(field)} is unavailable for ${formatDisplayDateTime(dateRange.start)} - ${formatDisplayDateTime(dateRange.end)}.`,
             );
             return;
           }
-          if (typeof matchedRentalSlot.price === 'number' && matchedRentalSlot.price > 0) {
-            totalCents += Math.round((matchedRentalSlot.price * durationMinutes) / 60);
+          if (
+            typeof matchedRentalSlot.price === "number" &&
+            matchedRentalSlot.price > 0
+          ) {
+            totalCents += Math.round(
+              (matchedRentalSlot.price * durationMinutes) / 60,
+            );
           }
           (matchedRentalSlot.requiredTemplateIds || []).forEach((id) => {
-            const normalized = String(id ?? '').trim();
+            const normalized = String(id ?? "").trim();
             if (normalized.length > 0) {
               requiredTemplateIds.add(normalized);
             }
           });
           (matchedRentalSlot.hostRequiredTemplateIds || []).forEach((id) => {
-            const normalized = String(id ?? '').trim();
+            const normalized = String(id ?? "").trim();
             if (normalized.length > 0) {
               hostRequiredTemplateIds.add(normalized);
             }
@@ -549,28 +684,41 @@ export function usePublicRentalSelections({
         });
       }
 
-      const conflictCount = conflictCountsBySelectionKey.get(selectionItem.key) ?? 0;
+      const conflictCount =
+        conflictCountsBySelectionKey.get(selectionItem.key) ?? 0;
       const conflictState = selectionConflictStateByKey[selectionItem.key];
       const conflictInput = selectionConflictInputByKey.get(selectionItem.key);
       const isConflictCheckPending = Boolean(
-        conflictInput?.signature
-        && (
-          !conflictState
-          || conflictState.signature !== conflictInput.signature
-          || conflictState.loading
-        ),
+        conflictInput?.signature &&
+          (!conflictState ||
+            conflictState.signature !== conflictInput.signature ||
+            conflictState.loading),
       );
       if (conflictCount > 0) {
-        errors.push('Selection overlaps an existing event or match on at least one resource.');
+        errors.push(
+          "Selection overlaps an existing event or match on at least one resource.",
+        );
       }
-      if (conflictState?.error && conflictInput?.signature && conflictState.signature === conflictInput.signature) {
-        errors.push('Unable to verify conflicts for this selection right now. Try again.');
+      if (
+        conflictState?.error &&
+        conflictInput?.signature &&
+        conflictState.signature === conflictInput.signature
+      ) {
+        errors.push(
+          "Unable to verify conflicts for this selection right now. Try again.",
+        );
       }
 
       return {
         selection: selectionItem,
         totalCents,
-        totalHours: dateRange ? Math.max(0, (dateRange.end.getTime() - dateRange.start.getTime()) / (60 * 60 * 1000)) : 0,
+        totalHours: dateRange
+          ? Math.max(
+              0,
+              (dateRange.end.getTime() - dateRange.start.getTime()) /
+                (60 * 60 * 1000),
+            )
+          : 0,
         requiredTemplateIds: Array.from(requiredTemplateIds),
         hostRequiredTemplateIds: Array.from(hostRequiredTemplateIds),
         conflictCount,
@@ -578,24 +726,55 @@ export function usePublicRentalSelections({
         errors,
       };
     });
-  }, [canManage, conflictCountsBySelectionKey, fields, rentalSelections, selectionConflictInputByKey, selectionConflictStateByKey]);
+  }, [
+    canManage,
+    conflictCountsBySelectionKey,
+    fields,
+    rentalSelections,
+    selectionConflictInputByKey,
+    selectionConflictStateByKey,
+  ]);
 
   const rentalSelectionValidationByKey = useMemo(
-    () => new Map(rentalSelectionValidations.map((validation) => [validation.selection.key, validation])),
+    () =>
+      new Map(
+        rentalSelectionValidations.map((validation) => [
+          validation.selection.key,
+          validation,
+        ]),
+      ),
     [rentalSelectionValidations],
   );
 
   const totalRentalCents = useMemo(
-    () => rentalSelectionValidations.reduce((sum, validation) => sum + validation.totalCents, 0),
+    () =>
+      rentalSelectionValidations.reduce(
+        (sum, validation) => sum + validation.totalCents,
+        0,
+      ),
     [rentalSelectionValidations],
   );
 
   const rentalRequiredTemplateIds = useMemo(
-    () => Array.from(new Set(rentalSelectionValidations.flatMap((validation) => validation.requiredTemplateIds))),
+    () =>
+      Array.from(
+        new Set(
+          rentalSelectionValidations.flatMap(
+            (validation) => validation.requiredTemplateIds,
+          ),
+        ),
+      ),
     [rentalSelectionValidations],
   );
   const rentalHostRequiredTemplateIds = useMemo(
-    () => Array.from(new Set(rentalSelectionValidations.flatMap((validation) => validation.hostRequiredTemplateIds))),
+    () =>
+      Array.from(
+        new Set(
+          rentalSelectionValidations.flatMap(
+            (validation) => validation.hostRequiredTemplateIds,
+          ),
+        ),
+      ),
     [rentalSelectionValidations],
   );
 
@@ -609,43 +788,75 @@ export function usePublicRentalSelections({
     if (!rentalSelections.length || !rentalSelectionValidations.length) {
       return false;
     }
-    return rentalSelectionValidations.every((validation) => validation.errors.length === 0);
-  }, [canManage, currentUser, hasPendingConflictChecks, rentalSelectionValidations, rentalSelections.length]);
+    return rentalSelectionValidations.every(
+      (validation) => validation.errors.length === 0,
+    );
+  }, [
+    canManage,
+    currentUser,
+    hasPendingConflictChecks,
+    rentalSelectionValidations,
+    rentalSelections.length,
+  ]);
 
   const updateRentalSelection = useCallback(
-    (selectionKey: string, updater: (selectionItem: RentalDraftSelection) => RentalDraftSelection) => {
-      setRentalSelections((prev) => prev.map((selectionItem) => (
-        selectionItem.key === selectionKey ? updater(selectionItem) : selectionItem
-      )));
+    (
+      selectionKey: string,
+      updater: (selectionItem: RentalDraftSelection) => RentalDraftSelection,
+    ) => {
+      setRentalSelections((prev) =>
+        prev.map((selectionItem) =>
+          selectionItem.key === selectionKey
+            ? updater(selectionItem)
+            : selectionItem,
+        ),
+      );
     },
-    [],
+    [setRentalSelections],
   );
 
   const handleAddRentalSelection = useCallback(() => {
     const seedSelection = rentalSelections[0];
     const fallbackFieldId = seedSelection
       ? normalizeFieldIds(seedSelection.scheduledFieldIds)[0]
-      : facilityFilteredFields[0]?.$id ?? fields[0]?.$id;
+      : (facilityFilteredFields[0]?.$id ?? fields[0]?.$id);
     if (!fallbackFieldId) {
-      notifications.show({ color: 'red', message: 'No resources available for rental selection.' });
+      notifications.show({
+        color: "red",
+        message: "No resources available for rental selection.",
+      });
       return;
     }
 
-    const seedRange = seedSelection ? resolveSelectionDateRange(seedSelection) : null;
+    const seedRange = seedSelection
+      ? resolveSelectionDateRange(seedSelection)
+      : null;
     const defaultStart = getNextSelectableRentalStart();
     const durationMs = seedRange
-      ? Math.max(PUBLIC_RENTAL_MIN_SELECTION_MS, seedRange.end.getTime() - seedRange.start.getTime())
+      ? Math.max(
+          PUBLIC_RENTAL_MIN_SELECTION_MS,
+          seedRange.end.getTime() - seedRange.start.getTime(),
+        )
       : PUBLIC_RENTAL_MIN_SELECTION_MS;
-    const nextStart = seedRange && seedRange.end.getTime() > defaultStart.getTime()
-      ? new Date(seedRange.end.getTime())
-      : defaultStart;
+    const nextStart =
+      seedRange && seedRange.end.getTime() > defaultStart.getTime()
+        ? new Date(seedRange.end.getTime())
+        : defaultStart;
     const nextEnd = new Date(nextStart.getTime() + durationMs);
-    setRentalSelections((prev) => [buildSelectionFromCalendarRange(nextStart, nextEnd, fallbackFieldId), ...prev]);
-  }, [facilityFilteredFields, fields, rentalSelections]);
+    setRentalSelections((prev) => [
+      buildSelectionFromCalendarRange(nextStart, nextEnd, fallbackFieldId),
+      ...prev,
+    ]);
+  }, [facilityFilteredFields, fields, rentalSelections, setRentalSelections]);
 
-  const handleRemoveRentalSelection = useCallback((selectionKey: string) => {
-    setRentalSelections((prev) => prev.filter((selectionItem) => selectionItem.key !== selectionKey));
-  }, []);
+  const handleRemoveRentalSelection = useCallback(
+    (selectionKey: string) => {
+      setRentalSelections((prev) =>
+        prev.filter((selectionItem) => selectionItem.key !== selectionKey),
+      );
+    },
+    [setRentalSelections],
+  );
 
   return {
     rentalSelections,

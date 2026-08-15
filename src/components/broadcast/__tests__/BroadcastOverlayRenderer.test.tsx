@@ -69,4 +69,70 @@ describe('BroadcastOverlayRenderer', () => {
     expect(state.clock.elapsedBeforePauseMs).toBe(0);
     jest.useRealTimers();
   });
+
+  it('scales preview output with the viewport while live output stays full-size', () => {
+    const originalWidth = window.innerWidth;
+    const originalHeight = window.innerHeight;
+    const setViewport = (width: number, height: number) => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+    };
+
+    try {
+      setViewport(960, 540);
+      const { rerender } = render(
+        <BroadcastOverlayRenderer
+          config={DEFAULT_BROADCAST_OVERLAY_CONFIG}
+          state={buildState()}
+          preview
+        />,
+      );
+      expect(screen.getByTestId('broadcast-preview-viewport').firstElementChild).toHaveStyle(
+        'transform: scale(0.5)',
+      );
+
+      setViewport(1920, 1080);
+      act(() => {
+        window.dispatchEvent(new Event('resize'));
+      });
+      expect(screen.getByTestId('broadcast-preview-viewport').firstElementChild).toHaveStyle(
+        'transform: scale(1)',
+      );
+
+      rerender(
+        <BroadcastOverlayRenderer
+          config={DEFAULT_BROADCAST_OVERLAY_CONFIG}
+          state={buildState()}
+        />,
+      );
+      const liveCanvas = screen.getByTestId('broadcast-overlay-canvas');
+      expect(liveCanvas).toHaveAttribute('data-preview', 'false');
+      expect(liveCanvas).not.toHaveAttribute('style');
+    } finally {
+      setViewport(originalWidth, originalHeight);
+    }
+  });
+
+  it('disables score animation when reduced motion is enabled', () => {
+    const state = buildState();
+    const event = { type: 'POINT_AWARDED' as const, animate: true };
+    const reducedMotionConfig = {
+      ...DEFAULT_BROADCAST_OVERLAY_CONFIG,
+      motion: {
+        ...DEFAULT_BROADCAST_OVERLAY_CONFIG.motion,
+        entrance: 'SLIDE' as const,
+        reducedMotion: true,
+      },
+    };
+
+    render(
+      <BroadcastOverlayRenderer
+        config={reducedMotionConfig}
+        state={state}
+        event={event}
+      />,
+    );
+
+    expect(screen.getByTestId('compact-scorebug')).not.toHaveStyle('opacity: 0');
+  });
 });

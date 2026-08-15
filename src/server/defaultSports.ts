@@ -4,6 +4,7 @@ import {
   getSkillDivisionTypeOptionsForSport,
   normalizeDivisionTypeParameterOptions,
 } from '@/lib/divisionTypes';
+import { getDefaultSportResourceLabels } from '@/lib/sportResourceLabels';
 import {
   dedupeCanonicalSports,
   normalizeCanonicalSportName,
@@ -12,6 +13,8 @@ import {
 
 type SportRow = CanonicalSportRow & {
   name?: string | null;
+  resourceLabelSingular?: string | null;
+  resourceLabelPlural?: string | null;
   skillDivisionTypes?: unknown;
   matchRulesTemplate?: unknown;
   officialPositionTemplates?: unknown;
@@ -564,7 +567,7 @@ const OFFICIAL_POSITION_TEMPLATES_BY_SPORT: Record<string, SportOfficialPosition
   ],
 };
 
-export const DEFAULT_SPORTS: Prisma.SportsCreateManyInput[] = [
+const DEFAULT_SPORT_CONFIGS: Prisma.SportsCreateManyInput[] = [
   {
     id: 'Indoor Volleyball',
     name: 'Indoor Volleyball',
@@ -864,6 +867,10 @@ export const DEFAULT_SPORTS: Prisma.SportsCreateManyInput[] = [
     usePointsPerGoalConceded: false,
   },
 ];
+export const DEFAULT_SPORTS: Prisma.SportsCreateManyInput[] = DEFAULT_SPORT_CONFIGS.map((sport) => ({
+  ...sport,
+  ...getDefaultSportResourceLabels(sport.name),
+}));
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)

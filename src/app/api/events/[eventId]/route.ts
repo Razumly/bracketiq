@@ -4,7 +4,10 @@ import { prisma } from '@/lib/prisma';
 import { getOptionalSession, requireSession } from '@/lib/permissions';
 import { buildRefundCreateParamsForPaymentIntent } from '@/lib/stripeConnectAccounts';
 import { parseDateInput } from '@/server/requestParsing';
-import { canManageEvent } from '@/server/accessControl';
+import {
+  canManageEvent,
+  projectEventAuthorityCapabilities,
+} from '@/server/accessControl';
 import { protectAffiliateRow, withAffiliateOutboundAction } from '@/server/affiliateOutbound';
 import {
   buildEventDivisionId,
@@ -101,6 +104,44 @@ const toEventResponse = (row: any) => {
       ? Boolean((response as any).allowTemporaryMatchPlayers)
       : false;
   return response;
+};
+
+const PUBLIC_EVENT_FIELDS = [
+  'id', 'name', 'description', 'eventType', 'state', 'start', 'end',
+  'noFixedEndDateTime', 'timeZone', 'location', 'address', 'coordinates',
+  'imageId', 'sportIds', 'organizationId', 'organization', 'tags',
+  'teamSignup', 'price', 'maxParticipants', 'minAge', 'maxAge', 'gender',
+  'registrationCutoffHours', 'cancellationRefundHours', 'affiliateUrl',
+  'fieldIds', 'timeSlotIds', 'leagueScoringConfigId', 'divisionFieldIds',
+  'divisionDetails', 'playoffDivisionDetails', 'divisions',
+  'includePlayoffsOrPools', 'parentEvent', 'requiredTemplateIds',
+  'allowTeamSplitDefault', 'usesSets', 'setsPerMatch', 'pointsToVictory',
+  'winBy', 'maxPoints', 'matchDurationMinutes', 'setDurationMinutes',
+  'restTimeMinutes', 'matchRulesOverride', 'resolvedMatchRules',
+  'teamCheckInMode', 'teamCheckInOpenMinutesBefore', 'allowMatchRosterEdits',
+  'allowTemporaryMatchPlayers',
+] as const;
+
+const toPublicEventResponse = (response: Record<string, unknown>): Record<string, unknown> => {
+  const projected: Record<string, unknown> = {};
+  for (const fieldName of PUBLIC_EVENT_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(response, fieldName)) {
+      projected[fieldName] = response[fieldName];
+    }
+  }
+  const organization = projected.organization;
+  if (organization && typeof organization === 'object') {
+    const row = organization as Record<string, unknown>;
+    projected.organization = {
+      id: row.id,
+      name: row.name,
+      logoId: row.logoId,
+      website: row.website,
+      publicSlug: row.publicSlug,
+      publicPageEnabled: row.publicPageEnabled === true,
+    };
+  }
+  return projected;
 };
 
 const getEventTagsForResponse = async (eventId: string) => {
@@ -1028,6 +1069,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ eve
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
   }
+  const optionalSession = await getOptionalSession(_req);
+  const capabilities = await projectEventAuthorityCapabilities(optionalSession, event);
   const [divisionKeys, playoffDivisionKeys] = await Promise.all([
     getVisibleDivisionKeysForEventResponse(eventId, event),
     getDivisionKeysForEventKind(eventId, 'PLAYOFF'),
@@ -1062,11 +1105,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ eve
       installmentDueRelativeDays: (event as any).installmentDueRelativeDays,
       installmentAmounts: event.installmentAmounts,
     }),
-    prisma.invites.findMany({
-      where: { eventId, type: 'STAFF' },
-      orderBy: { createdAt: 'desc' },
-    }),
-    getEventParticipantIdsForEvent(eventId),
+    capabilities.canEdit
+      ? prisma.invites.findMany({
+          where: { eventId, type: 'STAFF' },
+          orderBy: { createdAt: 'desc' },
+        })
+      : Promise.resolve([]),
+    capabilities.canEdit ? getEventParticipantIdsForEvent(eventId) : Promise.resolve({}),
     getEventTagsForResponse(eventId),
     event.organizationId
       ? prisma.organizations.findUnique({
@@ -1087,11 +1132,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ eve
         })
       : Promise.resolve(null),
   ]);
-  const officialResponse = await buildEventOfficialResponse(event);
-  const optionalSession = await getOptionalSession(_req);
-  const canExposeAffiliateDestination = optionalSession
-    ? await canManageEvent(optionalSession, event)
-    : false;
+  const officialResponse = capabilities.canEdit
+    ? await buildEventOfficialResponse(event)
+    : {};
+  const canExposeAffiliateDestination = capabilities.canEdit;
   const response = toEventResponse({
     ...event,
     organization: organization
@@ -1110,10 +1154,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ eve
     tags,
     staffInvites: staffInvites.map((invite) => invite),
   });
+  const authorityResponse = capabilities.canEdit
+    ? response
+    : toPublicEventResponse(response);
+  const protectedResponse = canExposeAffiliateDestination
+    ? withAffiliateOutboundAction(authorityResponse, 'event')
+    : protectAffiliateRow(authorityResponse, 'event');
   return NextResponse.json(
-    canExposeAffiliateDestination
-      ? withAffiliateOutboundAction(response, 'event')
-      : protectAffiliateRow(response, 'event'),
+    { ...protectedResponse, capabilities },
     { status: 200 },
   );
 }

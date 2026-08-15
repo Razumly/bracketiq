@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createId } from "@/lib/id";
+import { TimeSlotValidationError } from "@/lib/timeSlotAvailability";
 import { getRequestOrigin } from "@/lib/requestOrigin";
 import { requireSession } from "@/lib/permissions";
-import { canManageEvent } from "@/server/accessControl";
 import { parseSaveEventEditorCommand } from "@/contracts/eventEditor";
 import { loadEventEditorSnapshot } from "@/server/events/eventEditorSnapshot";
 import {
@@ -109,6 +109,12 @@ const errorResponse = (error: unknown) => {
       { status },
     );
   }
+  if (error instanceof TimeSlotValidationError) {
+    return NextResponse.json(
+      { error: error.message, code: "INVALID_TIME_SLOT" },
+      { status: 400 },
+    );
+  }
   if (error instanceof ScheduleError) {
     return NextResponse.json(
       { error: error.message, code: "EDITOR_SCHEDULE_FAILED" },
@@ -145,15 +151,6 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       { error: "Event not found.", code: "EDITOR_NOT_FOUND" },
       { status: 404 },
     );
-  if (!(await canManageEvent(session, event))) {
-    return NextResponse.json(
-      {
-        error: "You do not have permission to edit this event.",
-        code: "EDITOR_PERMISSION_DENIED",
-      },
-      { status: 403 },
-    );
-  }
   try {
     const snapshot = await loadEventEditorSnapshot(eventId, { actor: session });
     return NextResponse.json(snapshot, { status: 200 });

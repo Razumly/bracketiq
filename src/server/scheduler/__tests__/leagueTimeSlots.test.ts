@@ -487,10 +487,10 @@ describe('league scheduling (time slots)', () => {
     const division = buildDivision();
     const field = buildField(division);
     const teams = buildTeams(2, division);
-    const eventStart = new Date(2026, 0, 3, 8, 0, 0);
-    const eventEnd = new Date(2026, 0, 3, 20, 0, 0);
-    const slotStart = new Date(2026, 0, 3, 10, 0, 0);
-    const slotEnd = new Date(2026, 0, 3, 12, 0, 0);
+    const eventStart = new Date('2026-01-03T08:00:00.000Z');
+    const eventEnd = new Date('2026-01-03T20:00:00.000Z');
+    const slotStart = new Date('2026-01-03T10:00:00.000Z');
+    const slotEnd = new Date('2026-01-03T12:00:00.000Z');
 
     const league = new League({
       id: 'league_non_repeating_window_fit',
@@ -514,7 +514,7 @@ describe('league scheduling (time slots)', () => {
           repeating: false,
           startTimeMinutes: 10 * 60,
           endTimeMinutes: 12 * 60,
-          timeZone: 'America/Los_Angeles',
+          timeZone: 'UTC',
         }),
       ],
       doTeamsOfficiate: false,
@@ -605,10 +605,10 @@ describe('league scheduling (time slots)', () => {
     const division = buildDivision();
     const field = buildField(division);
     const teams = buildTeams(2, division);
-    const eventStart = new Date(2026, 0, 3, 8, 0, 0);
-    const eventEnd = new Date(2026, 0, 3, 20, 0, 0);
-    const slotStart = new Date(2026, 0, 3, 10, 0, 0);
-    const slotEnd = new Date(2026, 0, 3, 12, 0, 0);
+    const eventStart = new Date('2026-01-03T08:00:00.000Z');
+    const eventEnd = new Date('2026-01-03T20:00:00.000Z');
+    const slotStart = new Date('2026-01-03T10:00:00.000Z');
+    const slotEnd = new Date('2026-01-03T12:00:00.000Z');
 
     field.rentalSlots = [
       new TimeSlot({
@@ -619,7 +619,7 @@ describe('league scheduling (time slots)', () => {
         repeating: false,
         startTimeMinutes: 10 * 60,
         endTimeMinutes: 12 * 60,
-        timeZone: 'America/Los_Angeles',
+        timeZone: 'UTC',
         field: field.id,
         fieldIds: [field.id],
         divisions: [division],
@@ -648,7 +648,7 @@ describe('league scheduling (time slots)', () => {
           repeating: false,
           startTimeMinutes: 10 * 60,
           endTimeMinutes: 12 * 60,
-          timeZone: 'America/Los_Angeles',
+          timeZone: 'UTC',
           field: field.id,
           fieldIds: [field.id],
           divisions: [division],
@@ -677,10 +677,10 @@ describe('league scheduling (time slots)', () => {
     const division = buildDivision();
     const field = buildField(division);
     const teams = buildTeams(4, division);
-    const eventStart = new Date(2026, 0, 3, 8, 0, 0);
-    const eventEnd = new Date(2026, 0, 3, 20, 0, 0);
-    const slotStart = new Date(2026, 0, 3, 10, 0, 0);
-    const slotEnd = new Date(2026, 0, 3, 12, 0, 0);
+    const eventStart = new Date('2026-01-03T08:00:00.000Z');
+    const eventEnd = new Date('2026-01-03T20:00:00.000Z');
+    const slotStart = new Date('2026-01-03T10:00:00.000Z');
+    const slotEnd = new Date('2026-01-03T12:00:00.000Z');
 
     const league = new League({
       id: 'league_non_repeating_window_overflow',
@@ -704,7 +704,7 @@ describe('league scheduling (time slots)', () => {
           repeating: false,
           startTimeMinutes: 10 * 60,
           endTimeMinutes: 12 * 60,
-          timeZone: 'America/Los_Angeles',
+          timeZone: 'UTC',
         }),
       ],
       doTeamsOfficiate: false,
@@ -2123,8 +2123,8 @@ describe('league scheduling (time slots)', () => {
     const league = new League({
       id: 'league_without_placeholders',
       name: 'No Placeholder League',
-      start: new Date(2026, 0, 5, 8, 0, 0),
-      end: new Date(2026, 0, 5, 12, 0, 0),
+      start: new Date('2026-01-05T08:00:00.000Z'),
+      end: new Date('2026-01-05T12:00:00.000Z'),
       maxParticipants: 4,
       teamSignup: true,
       eventType: 'LEAGUE',
@@ -2137,7 +2137,7 @@ describe('league scheduling (time slots)', () => {
         new TimeSlot({
           id: 'slot_registered_only',
           dayOfWeek: 0,
-          startDate: new Date(2026, 0, 5),
+          startDate: new Date('2026-01-05T00:00:00.000Z'),
           repeating: false,
           startTimeMinutes: 8 * 60,
           endTimeMinutes: 12 * 60,
@@ -2188,8 +2188,8 @@ describe('league scheduling (time slots)', () => {
     const league = new League({
       id: 'league_without_enough_registered_teams',
       name: 'Not Enough Registered Teams',
-      start: new Date(2026, 0, 5, 8, 0, 0),
-      end: new Date(2026, 0, 5, 12, 0, 0),
+      start: new Date('2026-01-05T08:00:00.000Z'),
+      end: new Date('2026-01-05T12:00:00.000Z'),
       maxParticipants: 2,
       teamSignup: true,
       eventType: 'LEAGUE',
@@ -2202,7 +2202,7 @@ describe('league scheduling (time slots)', () => {
         new TimeSlot({
           id: 'slot_clear_placeholders',
           dayOfWeek: 0,
-          startDate: new Date(2026, 0, 5),
+          startDate: new Date('2026-01-05T00:00:00.000Z'),
           repeating: false,
           startTimeMinutes: 8 * 60,
           endTimeMinutes: 12 * 60,

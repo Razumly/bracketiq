@@ -349,7 +349,11 @@ export const fieldHasOrganization = (field?: Field | null): boolean => Boolean(g
 
 export const isEventLocalField = (field?: Field | null): boolean => !fieldHasOrganization(field);
 
-export const isGeneratedLocalFieldPlaceholder = (field?: Field | null, index?: number): boolean => {
+export const isGeneratedLocalFieldPlaceholder = (
+    field?: Field | null,
+    index?: number,
+    resourceSingular = 'Field',
+): boolean => {
     if (!field) {
         return false;
     }
@@ -357,10 +361,17 @@ export const isGeneratedLocalFieldPlaceholder = (field?: Field | null, index?: n
     if (!name) {
         return true;
     }
+    const normalizedResourceSingular = resourceSingular.toLocaleLowerCase();
+    const isPlaceholderPrefix = (value: string): boolean => (
+        value === 'field' || value === normalizedResourceSingular
+    );
     if (typeof index === 'number') {
-        return name === `Field ${index + 1}`;
+        const suffix = ` ${index + 1}`;
+        return name.toLocaleLowerCase().endsWith(suffix)
+            && isPlaceholderPrefix(name.slice(0, -suffix.length).toLocaleLowerCase());
     }
-    return /^Field\s+\d+$/i.test(name);
+    const match = /^(.+)\s+\d+$/.exec(name);
+    return Boolean(match && isPlaceholderPrefix(match[1].toLocaleLowerCase()));
 };
 
 export const withOrganizationFieldOwner = (field: Field, organizationId: string): Field => {

@@ -23,6 +23,7 @@ import {
 } from '@mantine/core';
 import { DateTimePicker } from '@mantine/dates';
 import { apiRequest } from '@/lib/apiClient';
+import { GENERIC_RESOURCE_LABELS, getSportResourceLabels } from '@/lib/sportResourceLabels';
 import {
   CalendarDays,
   ChevronDown,
@@ -1030,6 +1031,14 @@ export default function ScoreUpdateModal({
   defaultShowDetails = false,
   hideStatusControls = false,
 }: ScoreUpdateModalProps) {
+  const tournamentSport = tournament.sport && typeof tournament.sport === 'object'
+    ? tournament.sport
+    : null;
+  const resourceLabels = tournament.sportIds?.length === 1
+    && typeof tournamentSport?.resourceLabelSingular === 'string'
+    && typeof tournamentSport.resourceLabelPlural === 'string'
+    ? getSportResourceLabels(tournamentSport)
+    : GENERIC_RESOURCE_LABELS;
   const [segments, setSegments] = useState<MatchSegment[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -2472,7 +2481,7 @@ export default function ScoreUpdateModal({
   const activeSegmentLabel = activeSegment
     ? labelForSegment(rules, activeSegment.sequence)
     : labelForSegment(rules, 1);
-  const fieldName = match.field?.name?.trim() || "Field location";
+  const fieldName = match.field?.name?.trim() || `${resourceLabels.singular} location`;
   const venueName =
     match.field?.location?.trim() || tournament.location?.trim() || "";
   const fieldTitle =
@@ -3443,7 +3452,7 @@ export default function ScoreUpdateModal({
               disabled={!mapEmbedSrc}
               onClick={() => setShowFieldMap((value) => !value)}
             >
-              {showFieldMap ? "Hide Field Location" : "View Field Location"}
+              {showFieldMap ? `Hide ${resourceLabels.singular} Location` : `View ${resourceLabels.singular} Location`}
             </Button>
           </Group>
         </Group>
@@ -3483,7 +3492,7 @@ export default function ScoreUpdateModal({
             style={{ aspectRatio: "16 / 9" }}
           >
             <iframe
-              title="Match field location preview"
+              title={`Match ${resourceLabels.singular.toLocaleLowerCase()} location preview`}
               src={mapEmbedSrc}
               className="h-full w-full"
               loading="lazy"

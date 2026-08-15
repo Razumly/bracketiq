@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Paper, Text } from '@mantine/core';
 
 type RegistrationHoldTimerProps = {
@@ -26,23 +26,39 @@ export default function RegistrationHoldTimer({
     const parsed = new Date(expiresAt).getTime();
     return Number.isFinite(parsed) ? parsed : null;
   }, [expiresAt]);
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [clockSeed] = useState(() => Date.now());
+  const clockNowRef = useRef(clockSeed);
+  const subscribeToClock = useCallback((onStoreChange: () => void) => {
+    if (!expiresAtMs) {
+      return () => undefined;
+    }
+    const tick = () => {
+      clockNowRef.current = Date.now();
+      onStoreChange();
+    };
+    tick();
+    const interval = window.setInterval(tick, 1000);
+    return () => window.clearInterval(interval);
+  }, [expiresAtMs]);
+  const getClockSnapshot = useCallback(() => clockNowRef.current, []);
+  const getServerClockSnapshot = useCallback(() => clockSeed, [clockSeed]);
+  const nowMs = useSyncExternalStore(
+    subscribeToClock,
+    getClockSnapshot,
+    getServerClockSnapshot,
+  );
+  const remainingMs = expiresAtMs ? expiresAtMs - nowMs : 0;
+
+
+  const notifiedExpiryRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!expiresAtMs) {
-      return undefined;
+      notifiedExpiryRef.current = null;
+      return;
     }
-    setNowMs(Date.now());
-    const interval = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, 1000);
-    return () => window.clearInterval(interval);
-  }, [expiresAtMs]);
-
-  const remainingMs = expiresAtMs ? expiresAtMs - nowMs : 0;
-
-  useEffect(() => {
-    if (expiresAtMs && remainingMs <= 0) {
+    if (remainingMs <= 0 && notifiedExpiryRef.current !== expiresAtMs) {
+      notifiedExpiryRef.current = expiresAtMs;
       onExpire?.();
     }
   }, [expiresAtMs, onExpire, remainingMs]);

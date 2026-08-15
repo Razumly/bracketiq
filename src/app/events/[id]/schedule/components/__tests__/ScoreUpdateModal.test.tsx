@@ -423,7 +423,7 @@ describe('ScoreUpdateModal', () => {
     ]);
   });
 
-  it('shows a field location toggle and expands the embedded map', () => {
+  it('shows a Resource location toggle and expands the embedded map', () => {
     renderWithMantine(
       <ScoreUpdateModal
         match={buildMatch({
@@ -445,9 +445,9 @@ describe('ScoreUpdateModal', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'View Field Location' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'View Field Location' }));
-    expect(screen.getByTitle('Match field location preview')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View Resource Location' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'View Resource Location' }));
+    expect(screen.getByTitle('Match resource location preview')).toBeInTheDocument();
   });
 
   it('can render inline with match details expanded for the edit modal', () => {

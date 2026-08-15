@@ -26,6 +26,7 @@ type SessionLike = {
 type OrganizationAccessRecord = {
   id?: string | null | undefined;
   ownerId: string | null | undefined;
+  ownershipStatus?: string | null | undefined;
 };
 
 type EventAccessRecord = {
@@ -49,6 +50,7 @@ type OrganizationLookupClient = {
     findUnique: (args: any) => Promise<{
       id?: string | null;
       ownerId: string | null;
+      ownershipStatus?: string | null;
     } | null>;
   };
   staffMembers?: {
@@ -306,25 +308,204 @@ export const canManageEventDirectly = (
   return normalizeIdList(event.assistantHostIds).includes(session.userId);
 };
 
+const hasVerifiedOrganizationAuthority = (
+  organization: OrganizationAccessRecord,
+): boolean => (
+  organization.ownershipStatus?.trim().toUpperCase() === 'CLAIMED'
+);
+
+const loadEventOrganization = async (
+  event: EventAccessRecord | null | undefined,
+  client: OrganizationLookupClient,
+): Promise<OrganizationAccessRecord | null> => {
+  const organizationId = event?.organizationId ?? null;
+  if (!organizationId) {
+    return null;
+  }
+  return client.organizations.findUnique({
+    where: { id: organizationId },
+    select: { id: true, ownerId: true, ownershipStatus: true },
+  });
+};
+
+
+type EffectiveOrganizationEventHosts = {
+  eventHostId: string | null;
+  viewerIsAssignedHost: boolean;
+};
+
+export const resolveEffectiveOrganizationEventHosts = async (
+  session: SessionLike | null,
+  event: EventAccessRecord,
+  organization: OrganizationAccessRecord,
+  client: OrganizationLookupClient = prisma,
+): Promise<EffectiveOrganizationEventHosts> => {
+  const organizationId = organization.id?.trim() || null;
+  const ownerId = organization.ownerId?.trim() || null;
+  const storedHostId = typeof event.hostId === 'string' ? event.hostId.trim() || null : null;
+  const assignedIds = new Set([
+    ...(storedHostId ? [storedHostId] : []),
+    ...normalizeIdList(event.assistantHostIds),
+  ]);
+  const isEligibleHost = async (userId: string | null): Promise<boolean> => {
+    if (!userId) return false;
+    if (userId === ownerId) return true;
+    if (!client.staffMembers?.findUnique || !organizationId) return false;
+    const membership = await client.staffMembers.findUnique({
+      where: { organizationId_userId: { organizationId, userId } },
+      select: { organizationId: true, userId: true, types: true, roleId: true },
+    });
+    return Boolean(
+      membership
+      && normalizeStaffMemberTypes(membership.types).includes('HOST'),
+    );
+  };
+  const storedHostIsEligible = await isEligibleHost(storedHostId);
+  const viewerId = session?.userId ?? null;
+  const viewerIsAssignedHost = Boolean(
+    viewerId
+    && assignedIds.has(viewerId)
+    && await isEligibleHost(viewerId),
+  );
+  return {
+    eventHostId: storedHostIsEligible ? storedHostId : ownerId,
+    viewerIsAssignedHost,
+  };
+};
 export const canManageEvent = async (
   session: SessionLike,
   event: EventAccessRecord | null | undefined,
   client: OrganizationLookupClient = prisma,
 ): Promise<boolean> => {
-  if (canManageEventDirectly(session, event)) {
+  if (!event) {
+    return false;
+  }
+  if (session.isAdmin) {
     return true;
   }
-  const organizationId = event?.organizationId ?? null;
-  if (!organizationId) {
+  if (!event.organizationId) {
+    if (canManageEventDirectly(session, event)) {
+      return true;
+    }
     return hasRazumlyAdminAccess(session, client);
   }
-  const organization = await client.organizations.findUnique({
-    where: { id: organizationId },
-    select: { id: true, ownerId: true },
-  });
-  if (!organization) {
+  const organization = await loadEventOrganization(event, client);
+  if (!organization || !hasVerifiedOrganizationAuthority(organization)) {
     return hasRazumlyAdminAccess(session, client);
+  }
+  const effectiveHosts = await resolveEffectiveOrganizationEventHosts(
+    session,
+    event,
+    organization,
+    client,
+  );
+  if (effectiveHosts.viewerIsAssignedHost) {
+    return true;
   }
   return hasOrgPermission(session, organization, ORG_PERMISSIONS.EVENTS_MANAGE, client);
+};
+
+export type EventAuthorityCapabilities = {
+  canEdit: boolean;
+  canManageStaff: boolean;
+  canDelegateHost: boolean;
+  readOnly: boolean;
+  readOnlyReason: 'AUTHENTICATION_REQUIRED' | 'MANAGEMENT_AUTHORITY_UNVERIFIED' | 'NOT_AUTHORIZED' | null;
+  managementAuthority: {
+    type: 'ORGANIZATION';
+    organizationId: string;
+    ownerUserId: string;
+  } | null;
+  eventHostId: string | null;
+  viewerIsEventHost: boolean;
+};
+
+export const projectEventAuthorityCapabilities = async (
+  session: SessionLike | null | undefined,
+  event: EventAccessRecord | null | undefined,
+  client: OrganizationLookupClient = prisma,
+): Promise<EventAuthorityCapabilities> => {
+  const organization = await loadEventOrganization(event, client);
+  const hasVerifiedAuthority = Boolean(
+    organization && hasVerifiedOrganizationAuthority(organization),
+  );
+  const organizationId = typeof organization?.id === 'string'
+    ? organization.id
+    : event?.organizationId ?? null;
+  const ownerUserId = typeof organization?.ownerId === 'string'
+    ? organization.ownerId
+    : null;
+  const storedHostId = typeof event?.hostId === 'string' && event.hostId.trim().length > 0
+    ? event.hostId.trim()
+    : null;
+  const effectiveHosts = (
+    event && organization && hasVerifiedAuthority
+      ? await resolveEffectiveOrganizationEventHosts(session ?? null, event, organization, client)
+      : null
+  );
+  const eventHostId = effectiveHosts?.eventHostId
+    ?? (event?.organizationId ? null : storedHostId);
+  const managementAuthority = (
+    hasVerifiedAuthority && organizationId && ownerUserId
+      ? {
+          type: 'ORGANIZATION' as const,
+          organizationId,
+          ownerUserId,
+        }
+      : null
+  );
+
+  if (!session) {
+    return {
+      canEdit: false,
+      canManageStaff: false,
+      canDelegateHost: false,
+      readOnly: true,
+      readOnlyReason: organizationId && !hasVerifiedAuthority
+        ? 'MANAGEMENT_AUTHORITY_UNVERIFIED'
+        : 'AUTHENTICATION_REQUIRED',
+      managementAuthority,
+      eventHostId,
+      viewerIsEventHost: false,
+    };
+  }
+
+  const canEdit = await canManageEvent(session, event, client);
+  const isDirectEventHost = effectiveHosts
+    ? effectiveHosts.viewerIsAssignedHost
+    : event?.hostId === session.userId
+      || normalizeIdList(event?.assistantHostIds).includes(session.userId);
+  const isAuthorityOwner = Boolean(
+    hasVerifiedAuthority && ownerUserId === session.userId,
+  );
+  let canDelegateHost = false;
+  if (organizationId && hasVerifiedAuthority && organization) {
+    canDelegateHost = await hasOrgPermission(
+      session,
+      organization,
+      ORG_PERMISSIONS.ORGANIZATION_MANAGE,
+      client,
+    );
+  } else if (!organizationId && event?.hostId === session.userId) {
+    canDelegateHost = true;
+  } else {
+    canDelegateHost = session.isAdmin || await hasRazumlyAdminAccess(session, client);
+  }
+  const readOnlyReason = canEdit
+    ? null
+    : organizationId && !hasVerifiedAuthority
+      ? 'MANAGEMENT_AUTHORITY_UNVERIFIED'
+      : 'NOT_AUTHORIZED';
+
+  return {
+    canEdit,
+    canManageStaff: canEdit,
+    canDelegateHost,
+    readOnly: !canEdit,
+    readOnlyReason,
+    managementAuthority,
+    eventHostId,
+    viewerIsEventHost: Boolean(isDirectEventHost || isAuthorityOwner),
+  };
 };
 

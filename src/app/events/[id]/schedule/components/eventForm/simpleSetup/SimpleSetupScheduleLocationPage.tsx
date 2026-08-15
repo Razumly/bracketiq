@@ -2,6 +2,7 @@
 
 import { NumberInput, Stack, Text, Title } from "@mantine/core";
 
+import { resolveEventResourceLabels } from "@/lib/sportResourceLabels";
 import { deriveScheduleParticipantCount } from "../divisionForm";
 import { coordinatesAreSet } from "../locationHelpers";
 import { EventDetailsLocationControls } from "../sections/EventDetailsLocationControls";
@@ -42,6 +43,7 @@ export const SimpleSetupScheduleLocationPage = ({
 }: SimpleSetupScheduleLocationPageProps) => {
   const {
     configurationActions,
+    catalog,
     control,
     defaultCoordinates,
     divisionOptions,
@@ -90,9 +92,13 @@ export const SimpleSetupScheduleLocationPage = ({
     handleUpdateSlot,
   } = slotController;
   const { setLeagueData } = fieldWriters;
+  const resourceLabels = resolveEventResourceLabels({
+    sportIds: eventData.sportIds,
+    sportsById: catalog.sportsById,
+  });
   const localFieldCreationControl = showLocalFieldCreationControls ? (
     <NumberInput
-      label="Count"
+      label={`${resourceLabels.singular} Count`}
       min={isOrganizationHostedEvent ? 0 : 1}
       max={12}
       value={fieldCount}
@@ -119,7 +125,7 @@ export const SimpleSetupScheduleLocationPage = ({
       <div>
         <Title order={4}>Timing and location</Title>
         <Text size="sm" c="dimmed">
-          Set the event window, address, and resources available to the
+          Set the event window, address, and {resourceLabels.plural.toLocaleLowerCase()} available to the
           schedule.
         </Text>
       </div>
@@ -189,6 +195,7 @@ export const SimpleSetupScheduleLocationPage = ({
               fieldNamesCollapsed={fieldNamesCollapsed}
               setFieldNamesCollapsed={setFieldNamesCollapsed}
               maxResourceNameLength={MAX_MEDIUM_TEXT_LENGTH}
+              resourceLabels={resourceLabels}
               embedded
               showLocalFieldNameControls={false}
               onLocalFieldNameChange={handleLocalFieldNameChange}
@@ -211,6 +218,7 @@ export const SimpleSetupScheduleLocationPage = ({
               setFieldNamesCollapsed={setFieldNamesCollapsed}
               maxResourceNameLength={MAX_MEDIUM_TEXT_LENGTH}
               embedded
+              resourceLabels={resourceLabels}
               showOrganizationResourceControls={false}
               localFieldCreationControl={localFieldCreationControl}
               onLocalFieldNameChange={handleLocalFieldNameChange}
@@ -227,7 +235,7 @@ export const SimpleSetupScheduleLocationPage = ({
           <Title order={4}>Schedule</Title>
           <Text size="sm" c="dimmed" mb="md">
             {scheduleStyle === "FIXED_WINDOW"
-              ? "Assign resources and divisions. The timeslot follows the event start and end automatically."
+              ? `Assign ${resourceLabels.plural.toLocaleLowerCase()} and divisions. The timeslot follows the event start and end automatically.`
               : "Configure the timeslots the match generator can use."}
           </Text>
           <ScheduleConfigBody
@@ -252,6 +260,7 @@ export const SimpleSetupScheduleLocationPage = ({
               maxParticipants: eventData.maxParticipants,
               divisionDetails: eventData.divisionDetails,
             })}
+            resourceLabels={resourceLabels}
             leagueSlots={eventData.leagueSlots}
             leagueFieldOptions={leagueFieldOptions}
             divisionOptions={divisionOptions}

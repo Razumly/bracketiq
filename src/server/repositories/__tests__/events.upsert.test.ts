@@ -145,6 +145,78 @@ describe('upsertEventFromPayload', () => {
     expect(client.timeSlots.upsert).not.toHaveBeenCalled();
   });
 
+  it('rejects conflicting One-Time Time Slots authoritatively before persistence', async () => {
+    const client = createMockClient();
+    const payload = {
+      ...baseEventPayload(),
+      divisions: ['OPEN'],
+      timeSlots: [
+        {
+          id: 'slot_1',
+          divisions: ['OPEN'],
+          startTimeMinutes: 9 * 60,
+          endTimeMinutes: 10 * 60,
+          repeating: false,
+          scheduledFieldId: 'field_1',
+          scheduledFieldIds: ['field_1'],
+          startDate: '2026-01-05T09:00:00.000Z',
+          endDate: '2026-01-05T10:00:00.000Z',
+          timeZone: 'UTC',
+        },
+        {
+          id: 'slot_2',
+          divisions: ['OPEN'],
+          startTimeMinutes: 9 * 60 + 30,
+          endTimeMinutes: 10 * 60 + 30,
+          repeating: false,
+          scheduledFieldId: 'field_1',
+          scheduledFieldIds: ['field_1'],
+          startDate: '2026-01-05T09:30:00.000Z',
+          endDate: '2026-01-05T10:30:00.000Z',
+          timeZone: 'UTC',
+        },
+      ],
+    };
+
+    await expect(upsertEventFromPayload(
+      payload,
+      client as unknown as Parameters<typeof upsertEventFromPayload>[1],
+    )).rejects.toThrow(
+      /Resource \"field_1\".*2026-01-05 09:00–10:00.*2026-01-05 09:30–10:30/,
+    );
+    expect(client.events.upsert).not.toHaveBeenCalled();
+    expect(client.timeSlots.upsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects a One-Time Time Slot outside fixed Event bounds instead of clipping it', async () => {
+    const client = createMockClient();
+    const payload = {
+      ...baseEventPayload(),
+      divisions: ['OPEN'],
+      timeSlots: [{
+        id: 'slot_before_event',
+        divisions: ['OPEN'],
+        startTimeMinutes: 8 * 60,
+        endTimeMinutes: 10 * 60,
+        repeating: false,
+        scheduledFieldId: 'field_1',
+        scheduledFieldIds: ['field_1'],
+        startDate: '2026-01-05T08:00:00.000Z',
+        endDate: '2026-01-05T10:00:00.000Z',
+        timeZone: 'UTC',
+      }],
+    };
+
+    await expect(upsertEventFromPayload(
+      payload,
+      client as unknown as Parameters<typeof upsertEventFromPayload>[1],
+    )).rejects.toThrow(
+      /outside the Event boundary.*rejected rather than clipped/,
+    );
+    expect(client.events.upsert).not.toHaveBeenCalled();
+    expect(client.timeSlots.upsert).not.toHaveBeenCalled();
+  });
+
   it('persists repeating and fixed timeslots for a mixed Weekly Event schedule', async () => {
     const client = createMockClient();
     const payload = {
@@ -285,6 +357,7 @@ describe('upsertEventFromPayload', () => {
           scheduledFieldId: 'field_1',
           startDate: '2026-05-01T09:00:00',
           endDate: '2026-05-01T21:00:00',
+          timeZone: 'America/Los_Angeles',
         },
       ],
     };
@@ -327,7 +400,7 @@ describe('upsertEventFromPayload', () => {
     const payload = {
       ...baseEventPayload(),
       start: '2026-05-01T09:00:00',
-      end: '2026-05-01T21:00:00',
+      end: '2026-05-02T00:00:00',
       timeZone: 'America/New_York',
       noFixedEndDateTime: false,
       divisions: ['OPEN'],

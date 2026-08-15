@@ -128,7 +128,7 @@ describe('tournament scheduling (time slots)', () => {
     const teams = buildTeams(8, division);
 
     const slotStart = new Date('2026-03-08T16:00:00.000Z');
-    const slotEnd = new Date('2026-03-09T02:00:00.000Z');
+    const slotEnd = new Date('2026-03-08T20:00:00.000Z');
     const nonRepeatingSlot = new TimeSlot({
       id: 'slot_non_repeating',
       dayOfWeek: 6,
@@ -136,8 +136,8 @@ describe('tournament scheduling (time slots)', () => {
       startDate: slotStart,
       endDate: slotEnd,
       repeating: false,
-      startTimeMinutes: 9 * 60,
-      endTimeMinutes: 19 * 60,
+      startTimeMinutes: 16 * 60,
+      endTimeMinutes: 20 * 60,
       field: field.id,
       fieldIds: [field.id],
       divisions: [division],
@@ -225,7 +225,7 @@ describe('tournament scheduling (time slots)', () => {
     expect(scheduled.matches[0].end.toISOString()).toBe('2026-07-11T20:20:00.000Z');
   });
 
-  it('expands a stale fixed event window to cover explicit non-repeating slots', () => {
+  it('rejects stale fixed Event bounds atomically instead of expanding them', () => {
     const division = buildDivision();
     const field = buildField(division);
     const teams = buildTeams(4, division);
@@ -266,12 +266,11 @@ describe('tournament scheduling (time slots)', () => {
       restTimeMinutes: 0,
     });
 
-    const scheduled = scheduleEvent({ event: tournament }, context);
-
-    expect(scheduled.event.start.toISOString()).toBe('2026-07-11T16:00:00.000Z');
-    expect(scheduled.event.end.toISOString()).toBe('2026-07-11T19:00:00.000Z');
-    expect(scheduled.matches.length).toBeGreaterThan(0);
-    expect(scheduled.matches[0].start.toISOString()).toBe('2026-07-11T16:00:00.000Z');
+    expect(() => scheduleEvent({ event: tournament }, context))
+      .toThrow(/outside the Event boundary.*rejected rather than clipped/);
+    expect(tournament.start.toISOString()).toBe('2026-07-10T11:00:00.000Z');
+    expect(tournament.end.toISOString()).toBe('2026-07-10T22:00:00.000Z');
+    expect(Object.values(tournament.matches)).toEqual([]);
   });
 
   it('lets generated pool divisions inherit bracket time slots and use pool division schedule config', () => {

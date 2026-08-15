@@ -56,7 +56,6 @@ const useInviteHarness = ({
     const controller = useStaffInviteController({
         activeEditingEvent: { $id: 'event_1' } as Event,
         assignedUserIdsByRole,
-        getValues: form.getValues,
         isOrganizationHostedEvent,
         setPendingStaffInvites,
     });
@@ -142,7 +141,9 @@ describe('useStaffInviteController', () => {
         let thrown: Error | null = null;
         await act(async () => {
             try {
-                await result.current.validatePendingStaffAssignments();
+                await result.current.validatePendingStaffAssignments(
+                    result.current.formValues.pendingStaffInvites,
+                );
             } catch (error) {
                 thrown = error as Error;
             }

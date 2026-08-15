@@ -83,8 +83,8 @@ describe('GET /api/sports', () => {
     prismaMock.sports.findMany
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
-        { id: 'Indoor Soccer', name: 'Indoor Soccer' },
-        { id: 'Indoor Volleyball', name: 'Indoor Volleyball' },
+        { id: 'Indoor Soccer', name: 'Indoor Soccer', resourceLabelSingular: 'Field', resourceLabelPlural: 'Fields' },
+        { id: 'Indoor Volleyball', name: 'Indoor Volleyball', resourceLabelSingular: 'Court', resourceLabelPlural: 'Courts' },
       ]);
 
     const response = await GET(new NextRequest('http://localhost/api/sports'));
@@ -101,6 +101,9 @@ describe('GET /api/sports', () => {
       : null;
     const volleyball = Array.isArray(createPayload?.data)
       ? createPayload.data.find((row: any) => row.id === 'Indoor Volleyball')
+      : null;
+    const soccer = Array.isArray(createPayload?.data)
+      ? createPayload.data.find((row: { id?: string }) => row.id === 'Indoor Soccer')
       : null;
     const baseball = Array.isArray(createPayload?.data)
       ? createPayload.data.find((row: any) => row.id === 'Baseball')
@@ -141,6 +144,14 @@ describe('GET /api/sports', () => {
       }),
     );
     expect(basketball?.officialPositionTemplates).toEqual(basketballOfficialPositionTemplates);
+    expect(volleyball).toEqual(expect.objectContaining({
+      resourceLabelSingular: 'Court',
+      resourceLabelPlural: 'Courts',
+    }));
+    expect(soccer).toEqual(expect.objectContaining({
+      resourceLabelSingular: 'Field',
+      resourceLabelPlural: 'Fields',
+    }));
     expect(volleyball?.matchRulesTemplate).toEqual(
       expect.objectContaining({
         supportsOvertime: false,
@@ -229,12 +240,16 @@ describe('GET /api/sports', () => {
       {
         id: 'sport_indoor_volleyball_duplicate',
         name: ' indoor volleyball ',
+        resourceLabelSingular: 'Court',
+        resourceLabelPlural: 'Courts',
         createdAt: new Date('2025-01-01T00:00:00.000Z'),
         matchRulesTemplate: { scoringModel: 'SETS' },
       },
       {
         id: 'Indoor Volleyball',
         name: 'Indoor Volleyball',
+        resourceLabelSingular: 'Court',
+        resourceLabelPlural: 'Courts',
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
         matchRulesTemplate: null,
       },
@@ -254,17 +269,17 @@ describe('GET /api/sports', () => {
 
   it('remaps legacy references and removes deprecated sports', async () => {
     const seededSports = [
-      { id: 'Soccer', name: 'Soccer' },
-      { id: 'Volleyball', name: 'Volleyball' },
-      { id: 'Indoor Soccer', name: 'Indoor Soccer' },
-      { id: 'Indoor Volleyball', name: 'Indoor Volleyball' },
+      { id: 'Soccer', name: 'Soccer', resourceLabelSingular: 'Field', resourceLabelPlural: 'Fields' },
+      { id: 'Volleyball', name: 'Volleyball', resourceLabelSingular: 'Court', resourceLabelPlural: 'Courts' },
+      { id: 'Indoor Soccer', name: 'Indoor Soccer', resourceLabelSingular: 'Field', resourceLabelPlural: 'Fields' },
+      { id: 'Indoor Volleyball', name: 'Indoor Volleyball', resourceLabelSingular: 'Court', resourceLabelPlural: 'Courts' },
     ];
     prismaMock.sports.findMany
       .mockResolvedValueOnce(seededSports)
       .mockResolvedValueOnce(seededSports)
       .mockResolvedValueOnce([
-        { id: 'Indoor Soccer', name: 'Indoor Soccer' },
-        { id: 'Indoor Volleyball', name: 'Indoor Volleyball' },
+        { id: 'Indoor Soccer', name: 'Indoor Soccer', resourceLabelSingular: 'Field', resourceLabelPlural: 'Fields' },
+        { id: 'Indoor Volleyball', name: 'Indoor Volleyball', resourceLabelSingular: 'Court', resourceLabelPlural: 'Courts' },
       ]);
     prismaMock.organizations.findMany.mockResolvedValueOnce([
       { id: 'org_1', sports: ['Soccer', 'Volleyball', 'Basketball'] },
@@ -307,6 +322,8 @@ describe('GET /api/sports', () => {
       {
         id: 'Basketball',
         name: 'Basketball',
+        resourceLabelSingular: 'Court',
+        resourceLabelPlural: 'Courts',
         skillDivisionTypes: basketballSkillDivisionTypes,
         officialPositionTemplates: basketballOfficialPositionTemplates,
         matchRulesTemplate: basketballMatchRulesTemplate,
@@ -361,6 +378,8 @@ describe('GET /api/sports', () => {
       {
         id: 'Basketball',
         name: 'Basketball',
+        resourceLabelSingular: 'Court',
+        resourceLabelPlural: 'Courts',
         skillDivisionTypes: basketballSkillDivisionTypes,
         officialPositionTemplates: basketballOfficialPositionTemplates,
         matchRulesTemplate: basketballMatchRulesTemplate,
@@ -407,6 +426,8 @@ describe('GET /api/sports', () => {
       {
         id: 'Basketball',
         name: 'Basketball',
+        resourceLabelSingular: 'Court',
+        resourceLabelPlural: 'Courts',
         skillDivisionTypes: basketballSkillDivisionTypes,
         officialPositionTemplates: null,
         matchRulesTemplate: basketballMatchRulesTemplate,
@@ -447,6 +468,8 @@ describe('GET /api/sports', () => {
       {
         id: 'Baseball',
         name: 'Baseball',
+        resourceLabelSingular: 'Diamond',
+        resourceLabelPlural: 'Diamonds',
         skillDivisionTypes: baseballSkillDivisionTypes,
         officialPositionTemplates: [
           { name: 'Plate Umpire', count: 1 },

@@ -95,6 +95,7 @@ jest.mock('@/server/scheduler/eventScheduleMutation', () => {
 
 import { eventEditorFixtures } from '@/test/eventEditor/fixtures';
 import { prisma } from '@/lib/prisma';
+import type { CreateEventEditorCommand } from '@/contracts/eventEditor';
 import type * as EditorContractAdapters from '@/app/events/[id]/schedule/components/eventForm/editorContractAdapters';
 import { acquireEventLock } from '@/server/repositories/locks';
 import { upsertEventFromPayload } from '@/server/repositories/events';
@@ -107,6 +108,7 @@ import { reconcileEventSchedule } from '@/server/scheduler/eventScheduleMutation
 import {
   createEventEditor,
   EditorInputError,
+  EditorPermissionError,
   EditorRevisionConflictError,
   saveEventEditor,
 } from '../eventEditorSave';
@@ -145,6 +147,12 @@ const snapshot = (editorRevision = 'revision_1') => ({
     canUseOnlinePayments: true,
     canManageStaff: true,
     canEdit: true,
+    canDelegateHost: true,
+    readOnly: false,
+    readOnlyReason: null,
+    managementAuthority: null,
+    eventHostId: 'host_1',
+    viewerIsEventHost: true,
     supportsTeamStaffing: true,
   },
   catalogs: { sports: [], organizations: [], fields: [], templates: [] },
@@ -190,6 +198,11 @@ const actualEditorAdapters = jest.requireActual(
 ) as typeof EditorContractAdapters;
 const createDraft = actualEditorAdapters.legacyEventToEditorDraft(eventEditorFixtures[0].event);
 const leagueCreateDraft = actualEditorAdapters.legacyEventToEditorDraft(eventEditorFixtures[1].event);
+const expectedCreateRevisions = {
+  editorRevision: 'create-editor-revision',
+  staffRevision: 'create-staff-revision',
+  scheduleRevision: 'new',
+};
 const createSnapshot = (mode: 'CREATE' | 'EDIT', eventId: string | null) => ({
   contractVersion: 3,
   mode,
@@ -201,6 +214,12 @@ const createSnapshot = (mode: 'CREATE' | 'EDIT', eventId: string | null) => ({
     canUseOnlinePayments: true,
     canManageStaff: true,
     canEdit: true,
+    canDelegateHost: true,
+    readOnly: false,
+    readOnlyReason: null,
+    managementAuthority: null,
+    eventHostId: 'host_1',
+    viewerIsEventHost: true,
     supportsTeamStaffing: true,
   },
   catalogs: { sports: [], organizations: [], fields: [], templates: [] },
@@ -236,6 +255,15 @@ const createEventEditorTxFor = () => {
     events: {
       findUnique: jest.fn().mockResolvedValue({ id: 'event-source', hostId: 'host_1' }),
     },
+    organizations: {
+      findUnique: jest.fn(),
+    },
+    staffMembers: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    invites: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     registrationQuestions: {
       findMany: jest.fn().mockResolvedValue(questionRows),
       create: jest.fn().mockImplementation(async ({ data }: any) => {
@@ -247,8 +275,21 @@ const createEventEditorTxFor = () => {
     },
   };
   (prisma as any).eventEditorCreateOperations = operations;
-  (prisma as any).$transaction = jest.fn(async (callback: (client: any) => unknown) => callback(tx));
-  return { operations, rows, tx };
+  (prisma as any).$transaction = jest.fn(async (callback: (client: unknown) => unknown) => {
+    const rowsBefore = new Map(
+      Array.from(rows.entries()).map(([key, value]) => [key, { ...value }]),
+    );
+    const questionsBefore = questionRows.map((row) => ({ ...row }));
+    try {
+      return await callback(tx);
+    } catch (error) {
+      rows.clear();
+      rowsBefore.forEach((value, key) => rows.set(key, value));
+      questionRows.splice(0, questionRows.length, ...questionsBefore);
+      throw error;
+    }
+  });
+  return { operations, questionRows, rows, tx };
 };
 
 
@@ -378,9 +419,10 @@ describe('saveEventEditor', () => {
       const command = {
         contractVersion: 3,
         createOperationId: 'concurrent-create-operation',
+        expectedRevisions: expectedCreateRevisions,
         draft: createDraft,
         completion: { mode: 'CREATE_ONLY' },
-      } as any;
+      } satisfies CreateEventEditorCommand;
       const actor = { userId: 'user_fixture_host' };
       const firstPromise = createEventEditor(actor, command, { sendStaffInvites, onEventCreated });
       await deliveryStarted;
@@ -435,9 +477,10 @@ describe('saveEventEditor', () => {
       {
         contractVersion: 3,
         createOperationId: 'create-and-build-operation',
+        expectedRevisions: expectedCreateRevisions,
         draft: leagueCreateDraft,
         completion: { mode: 'CREATE_AND_BUILD_SCHEDULE' },
-      } as any,
+      } satisfies CreateEventEditorCommand,
     );
 
     expect(mockedReconcileEventSchedule).toHaveBeenCalledWith(expect.objectContaining({
@@ -472,9 +515,10 @@ describe('saveEventEditor', () => {
       {
         contractVersion: 3,
         createOperationId: 'failed-create-operation',
+        expectedRevisions: expectedCreateRevisions,
         draft: createDraft,
         completion: { mode: 'CREATE_ONLY' },
-      } as any,
+      } satisfies CreateEventEditorCommand,
     )).rejects.toThrow('domain write failed');
 
     expect(rows.size).toBe(0);
@@ -597,5 +641,238 @@ describe('saveEventEditor', () => {
     expect(upsertEventFromPayload).not.toHaveBeenCalled();
     expect(mockedReconcileEventSchedule).not.toHaveBeenCalled();
     expect(tx.registrationQuestions.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('createEventEditor', () => {
+  // The Prisma mock is intentionally narrowed to the transaction seam used by this suite.
+  const prismaTransactionMock = prisma as { $transaction: jest.Mock };
+  const createActor = { userId: 'user_fixture_host' };
+  const command = () => ({
+    contractVersion: 3 as const,
+    createOperationId: 'create-operation-1',
+    expectedRevisions: {
+      editorRevision: 'create-editor-revision',
+      staffRevision: 'create-staff-revision',
+      scheduleRevision: 'new',
+    },
+    draft: createDraft,
+    completion: { mode: 'CREATE_ONLY' as const },
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (upsertEventFromPayload as jest.Mock).mockResolvedValue(undefined);
+    (loadCreateEventEditorSnapshot as jest.Mock).mockResolvedValue(
+      createSnapshot('CREATE', null),
+    );
+    (loadEventEditorSnapshot as jest.Mock).mockImplementation(
+      async (eventId: string) => createSnapshot('EDIT', eventId),
+    );
+    (reconcileEventStaffDesiredState as jest.Mock).mockResolvedValue({
+      emailCandidates: [],
+    });
+  });
+
+  it('returns the operation identity and every canonical revision', async () => {
+    createEventEditorTxFor();
+
+    const result = await createEventEditor(createActor, command());
+
+    expect(result).toEqual(expect.objectContaining({
+      createOperationId: 'create-operation-1',
+      editorRevision: 'create-editor-revision',
+      staffRevision: 'create-staff-revision',
+      scheduleRevision: 'schedule_revision_1',
+    }));
+    expect(result.editorRevision).toBe(result.snapshot.editorRevision);
+    expect(result.staffRevision).toBe(result.snapshot.staffRevision);
+    expect(result.scheduleRevision).toBe(result.snapshot.scheduleState.revision);
+  });
+
+  it('defaults a claimed Organization Event created by non-Host staff to the current owner', async () => {
+    const { tx } = createEventEditorTxFor();
+    tx.organizations.findUnique.mockResolvedValue({
+      id: 'org_1',
+      ownerId: 'owner_1',
+      ownershipStatus: 'CLAIMED',
+      enabledFeatures: ['EVENT_MANAGEMENT'],
+    });
+    tx.staffMembers.findMany.mockResolvedValue([{
+      organizationId: 'org_1',
+      userId: 'user_fixture_host',
+      types: ['STAFF'],
+    }]);
+    const organizationCommand = command();
+    organizationCommand.draft = {
+      ...organizationCommand.draft,
+      basics: {
+        ...organizationCommand.draft.basics,
+        organizationId: 'org_1',
+        hostId: null,
+      },
+    };
+
+    await createEventEditor(createActor, organizationCommand);
+
+    expect(upsertEventFromPayload).toHaveBeenCalledWith(
+      expect.objectContaining({ hostId: 'owner_1' }),
+      tx,
+      expect.objectContaining({ preserveStaffState: true }),
+    );
+    expect(reconcileEventStaffDesiredState).toHaveBeenCalledWith(
+      tx,
+      expect.any(String),
+      expect.objectContaining({ assistantHostIds: [] }),
+      'user_fixture_host',
+    );
+  });
+
+  it('rejects a requested claimed Organization host who is not owner or active Host staff', async () => {
+    const { tx } = createEventEditorTxFor();
+    tx.organizations.findUnique.mockResolvedValue({
+      id: 'org_1',
+      ownerId: 'owner_1',
+      ownershipStatus: 'CLAIMED',
+      enabledFeatures: ['EVENT_MANAGEMENT'],
+    });
+    tx.staffMembers.findMany.mockResolvedValue([{
+      organizationId: 'org_1',
+      userId: 'user_fixture_host',
+      types: ['STAFF'],
+    }]);
+    const organizationCommand = command();
+    organizationCommand.draft = {
+      ...organizationCommand.draft,
+      basics: {
+        ...organizationCommand.draft.basics,
+        organizationId: 'org_1',
+        hostId: 'user_fixture_host',
+      },
+    };
+
+    await expect(createEventEditor(createActor, organizationCommand)).rejects.toBeInstanceOf(
+      EditorPermissionError,
+    );
+    expect(upsertEventFromPayload).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stale create revision before Event-owned persistence', async () => {
+    const { rows } = createEventEditorTxFor();
+    const staleCommand = command();
+    staleCommand.expectedRevisions.editorRevision = 'stale-editor-revision';
+
+    await expect(
+      createEventEditor(createActor, staleCommand),
+    ).rejects.toMatchObject({
+      currentEditorRevision: 'create-editor-revision',
+      currentStaffRevision: 'create-staff-revision',
+      currentScheduleRevision: 'new',
+    });
+
+    expect(upsertEventFromPayload).not.toHaveBeenCalled();
+    expect(reconcileEventStaffDesiredState).not.toHaveBeenCalled();
+    expect(rows.size).toBe(0);
+  });
+
+  it('rolls back all Event-owned state and emits no effects when creation fails', async () => {
+    const { questionRows, rows, tx } = createEventEditorTxFor();
+    const persistedEventIds: string[] = [];
+    const createWithQuestion = command();
+    createWithQuestion.draft = {
+      ...createWithQuestion.draft,
+      registration: {
+        ...createWithQuestion.draft.registration,
+        questions: [{
+          clientId: 'question-client-1',
+          prompt: 'Emergency contact',
+          answerType: 'TEXT',
+          required: true,
+          sortOrder: 0,
+        }],
+      },
+    };
+    (upsertEventFromPayload as jest.Mock).mockImplementation(
+      async (payload: { id: string }) => {
+        persistedEventIds.push(payload.id);
+      },
+    );
+    (reconcileEventStaffDesiredState as jest.Mock).mockImplementation(async () => {
+      persistedEventIds.push('partial-staff-write');
+      throw new Error('staff persistence failed');
+    });
+    prismaTransactionMock.$transaction = jest.fn(
+      async (callback: (client: unknown) => unknown) => {
+        const rowsBefore = new Map(
+          Array.from(rows.entries()).map(([key, value]) => [key, { ...value }]),
+        );
+        const questionsBefore = questionRows.map((row) => ({ ...row }));
+        const eventsBefore = [...persistedEventIds];
+        try {
+          return await callback(tx);
+        } catch (error) {
+          rows.clear();
+          rowsBefore.forEach((value, key) => rows.set(key, value));
+          questionRows.splice(0, questionRows.length, ...questionsBefore);
+          persistedEventIds.splice(0, persistedEventIds.length, ...eventsBefore);
+          throw error;
+        }
+      },
+    );
+    const sendStaffInvites = jest.fn();
+    const onEventCreated = jest.fn();
+    const onScheduleChanged = jest.fn();
+
+    await expect(createEventEditor(
+      createActor,
+      createWithQuestion,
+      { sendStaffInvites, onEventCreated, onScheduleChanged },
+    )).rejects.toThrow('staff persistence failed');
+
+    expect(rows.size).toBe(0);
+    expect(questionRows).toHaveLength(0);
+    expect(persistedEventIds).toHaveLength(0);
+    expect(sendStaffInvites).not.toHaveBeenCalled();
+    expect(onEventCreated).not.toHaveBeenCalled();
+    expect(onScheduleChanged).not.toHaveBeenCalled();
+  });
+
+  it('emits invitations and creation notifications after commit at most once on exact retry', async () => {
+    const { tx } = createEventEditorTxFor();
+    let committed = false;
+    prismaTransactionMock.$transaction = jest.fn(
+      async (callback: (client: unknown) => unknown) => {
+        const result = await callback(tx);
+        committed = true;
+        return result;
+      },
+    );
+    (reconcileEventStaffDesiredState as jest.Mock).mockResolvedValue({
+      emailCandidates: [{ email: 'official@example.com' }],
+    });
+    const sendStaffInvites = jest.fn(async () => {
+      expect(committed).toBe(true);
+      return 'QUEUED' as const;
+    });
+    const onEventCreated = jest.fn(async () => {
+      expect(committed).toBe(true);
+    });
+    const unchangedCommand = command();
+
+    const first = await createEventEditor(
+      createActor,
+      unchangedCommand,
+      { sendStaffInvites, onEventCreated },
+    );
+    const replay = await createEventEditor(
+      createActor,
+      unchangedCommand,
+      { sendStaffInvites, onEventCreated },
+    );
+
+    expect(replay).toEqual(first);
+    expect(upsertEventFromPayload).toHaveBeenCalledTimes(1);
+    expect(sendStaffInvites).toHaveBeenCalledTimes(1);
+    expect(onEventCreated).toHaveBeenCalledTimes(1);
   });
 });

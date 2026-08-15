@@ -17,6 +17,7 @@ describe('default sports', () => {
     const seededBeachVolleyball = createMany.mock.calls[0][0].data.find((sport: any) => sport.id === 'Beach Volleyball');
     const seededGrassVolleyball = createMany.mock.calls[0][0].data.find((sport: any) => sport.id === 'Grass Volleyball');
     const seededIndoorVolleyball = createMany.mock.calls[0][0].data.find((sport: any) => sport.id === 'Indoor Volleyball');
+    const seededIndoorSoccer = createMany.mock.calls[0][0].data.find((sport: { id?: string }) => sport.id === 'Indoor Soccer');
     expect(seededBeachVolleyball.matchRulesTemplate).toMatchObject({
       scoringModel: 'SETS',
       segmentCount: 3,
@@ -40,6 +41,14 @@ describe('default sports', () => {
       'select',
       'developmental',
     ]);
+    expect(seededIndoorVolleyball).toEqual(expect.objectContaining({
+      resourceLabelSingular: 'Court',
+      resourceLabelPlural: 'Courts',
+    }));
+    expect(seededIndoorSoccer).toEqual(expect.objectContaining({
+      resourceLabelSingular: 'Field',
+      resourceLabelPlural: 'Fields',
+    }));
   });
 
   it('seeds Racquetball with game scoring, skill divisions, and an official template', async () => {

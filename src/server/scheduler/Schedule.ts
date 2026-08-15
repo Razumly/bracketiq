@@ -4,6 +4,10 @@ import {
   normalizeTimeZone,
   zonedTimeToUtcDate,
 } from '@/lib/dateUtils';
+import {
+  assertOneTimeTimeSlotWithinEventBounds,
+  resolveOneTimeTimeSlot,
+} from '@/lib/timeSlotAvailability';
 
 type SlotWindow = {
   start: Date;
@@ -13,9 +17,8 @@ type SlotWindow = {
 
 const NOT_ENOUGH_TIME_ALLOTTED_MESSAGE = 'Not enough time is allotted in the configured time slots to schedule this event.';
 
-const overlaps = (startA: Date, endA: Date, startB: Date, endB: Date): boolean => {
-  return !(startA >= endB && endA > endB) && !(startA < startB && endA <= startB);
-};
+const overlaps = (startA: Date, endA: Date, startB: Date, endB: Date): boolean =>
+  startA.getTime() < endB.getTime() && endA.getTime() > startB.getTime();
 
 const pad2 = (value: number): string => String(value).padStart(2, '0');
 
@@ -44,41 +47,6 @@ export const dateWithMinutesInTimeZone = (
   );
 };
 
-const parseSlotDate = (value: unknown): Date | null => {
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value;
-  }
-  if (typeof value === 'string' || typeof value === 'number') {
-    const parsed = new Date(value);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  }
-  return null;
-};
-
-export const explicitTimeSlotWindow = (slot: any): [Date, Date] | null => {
-  const explicitStart = parseSlotDate(slot?.startDate);
-  const explicitEnd = parseSlotDate(slot?.endDate);
-  if (!explicitStart) {
-    return null;
-  }
-  const startMinutesRaw = slot.startTimeMinutes ?? slot.start_time_minutes;
-  const endMinutesRaw = slot.endTimeMinutes ?? slot.end_time_minutes;
-  const startMinutes = Number(startMinutesRaw);
-  const endMinutes = Number(endMinutesRaw);
-  if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes) || endMinutes <= startMinutes) {
-    return explicitEnd && explicitEnd.getTime() > explicitStart.getTime()
-      ? [explicitStart, explicitEnd]
-      : null;
-  }
-  const slotTimeZone = normalizeTimeZone(slot.timeZone ?? slot.time_zone, 'UTC');
-  const start = dateWithMinutesInTimeZone(explicitStart, startMinutes, slotTimeZone);
-  const endBaseDate = endMinutes > startMinutes ? explicitStart : (explicitEnd ?? explicitStart);
-  const end = dateWithMinutesInTimeZone(endBaseDate, endMinutes, slotTimeZone);
-  if (!start || !end || end.getTime() <= start.getTime()) {
-    return null;
-  }
-  return [start, end];
-};
 
 const isLockedEvent = (event: SchedulableEvent): boolean => {
   return (event as { locked?: boolean }).locked === true;
@@ -107,10 +75,11 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
     this.participants = new Map();
     const allResources = Object.values(resources);
     for (const group of groups) {
-      this.resources.set(
-        group,
-        allResources,
-      );
+      const eligibleResources = allResources.filter((resource) => {
+        const resourceGroups = resource.getGroups();
+        return resourceGroups.length === 0 || resourceGroups.some((candidate) => candidate.id === group.id);
+      });
+      this.resources.set(group, eligibleResources);
       this.participants.set(
         group,
         Object.values(participants).filter((par) => par.getGroups().some((g) => g.id === group.id)),
@@ -451,9 +420,9 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
 
     for (const slot of timeSlots) {
       if (slot?.repeating === false) {
-        for (const [slotStart, slotEnd] of this.slotRanges(slot, reference)) {
-          this.addSlotWindow(slot, slotStart, slotEnd);
-        }
+        const resolved = resolveOneTimeTimeSlot(slot, slot.timeZone);
+        assertOneTimeTimeSlotWithinEventBounds(resolved, this.startTime, this.endTime);
+        this.addSlotWindow(slot, resolved.start, resolved.end);
         continue;
       }
       repeatingSlots.push(slot);
@@ -533,10 +502,7 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
       return null;
     };
 
-    if (slot?.repeating === false) {
-      const window = explicitTimeSlotWindow(slot);
-      return window ? [window] : [];
-    }
+
 
     const normalizedDays: number[] = Array.from(
       new Set(

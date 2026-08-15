@@ -160,12 +160,13 @@ jest.mock('react-big-calendar/lib/addons/dragAndDrop/styles.css', () => ({}));
 jest.mock('@/components/ui/CreateFieldModal', () => () => null);
 jest.mock('@/components/ui/CreateRentalSlotModal', () => {
   const React = require('react');
-  return (props: any) => {
+  function CreateRentalSlotModalMock(props: any) {
     mockCreateRentalSlotModalProps = props;
     return props.opened
       ? React.createElement('div', { 'data-testid': 'create-rental-slot-modal' })
       : null;
-  };
+  }
+  return CreateRentalSlotModalMock;
 });
 jest.mock('@/components/location/LocationSelector', () => {
   const React = require('react');

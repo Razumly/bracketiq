@@ -1,4 +1,5 @@
 import { calculateTimedMatchDurationMinutes } from '@/lib/divisionPhaseSettings';
+import { GENERIC_RESOURCE_LABELS, getSportResourceLabels } from '@/lib/sportResourceLabels';
 import type { Event, EventOfficial, EventOfficialPosition, Field, TimeSlot } from '@/types';
 import type { EventFormValues } from './formTypes';
 import {
@@ -101,6 +102,15 @@ const draftFromRecord = (
   const generatedEnd = explicitScheduleEndConstraint
     ? false
     : explicitGeneratedScheduleEnd !== null || booleanValue(event.noFixedEndDateTime, false);
+  const sportIds = stringArray(event.sportIds);
+  const sportConfig = event.sportConfig && typeof event.sportConfig === 'object'
+    ? event.sportConfig as Record<string, unknown>
+    : null;
+  const hasResourceLabels = typeof sportConfig?.resourceLabelSingular === 'string'
+    && typeof sportConfig.resourceLabelPlural === 'string';
+  const resourceLabels = sportIds.length === 1 && hasResourceLabels
+    ? getSportResourceLabels(sportConfig)
+    : GENERIC_RESOURCE_LABELS;
   const rawFields = objectArray(event.fields);
   const rawFieldIds = stringArray(
     Array.isArray(event.fieldIds) && event.fieldIds.length > 0 ? event.fieldIds : event.selectedFieldIds,
@@ -112,7 +122,7 @@ const draftFromRecord = (
       ? []
       : Array.from({ length: fieldCount }, (_, index) => ({
         $id: `field-client-${index + 1}`,
-        name: `Field ${index + 1}`,
+        name: `${resourceLabels.singular} ${index + 1}`,
       }));
   const timeSlots = objectArray(Array.isArray(event.timeSlots) && event.timeSlots.length > 0 ? event.timeSlots : event.leagueSlots);
   const rawDivisionDetails = objectArray(event.divisionDetails);
@@ -397,6 +407,12 @@ export const emptyEditorSnapshot = (draft: EventEditorDraft, mode: 'CREATE' | 'E
     canUseOnlinePayments: false,
     canManageStaff: false,
     canEdit: true,
+    canDelegateHost: false,
+    readOnly: false,
+    readOnlyReason: null,
+    managementAuthority: null,
+    eventHostId: draft.basics.hostId ?? null,
+    viewerIsEventHost: false,
     supportsTeamStaffing: false,
   },
   catalogs: { sports: [], organizations: [], fields: [], templates: [] },

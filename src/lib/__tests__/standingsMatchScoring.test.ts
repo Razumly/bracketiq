@@ -38,7 +38,7 @@ describe('deriveStandingsMatchResult', () => {
     expect(result.outcome).toBe('team1');
   });
 
-  it('falls back to legacy arrays when incident-driven scoring is disabled', () => {
+  it('uses persisted segment scoring when incident-driven scoring is disabled', () => {
     const result = deriveStandingsMatchResult({
       team1: { $id: 'team_1' },
       team2: { $id: 'team_2' },
@@ -48,25 +48,23 @@ describe('deriveStandingsMatchResult', () => {
         scoringModel: 'POINTS_ONLY',
         pointIncidentRequiresParticipant: false,
       },
-      segments: [
-        {
-          id: 'segment_1',
-          sequence: 1,
-          status: 'COMPLETE',
-          winnerEventTeamId: 'team_1',
-          scores: {
-            team_1: 0,
-            team_2: 0,
-          },
+      segments: [{
+        id: 'segment_1',
+        sequence: 1,
+        status: 'COMPLETE',
+        winnerEventTeamId: 'team_2',
+        scores: {
+          team_1: 2,
+          team_2: 3,
         },
-      ],
+      }],
       incidents: [
         { segmentId: 'segment_1', eventTeamId: 'team_1', linkedPointDelta: 2, sequence: 1 },
       ],
     });
 
     expect(result.usesIncidentScoring).toBe(false);
-    expect(result.team1Total).toBe(0);
+    expect(result.team1Total).toBe(2);
     expect(result.team2Total).toBe(3);
     expect(result.team1Wins).toBe(0);
     expect(result.team2Wins).toBe(1);

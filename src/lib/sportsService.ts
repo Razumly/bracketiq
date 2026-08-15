@@ -1,7 +1,8 @@
 import { apiRequest } from '@/lib/apiClient';
+import { getSportResourceLabels } from '@/lib/sportResourceLabels';
 import type { MatchRulesConfig, Sport, SportOfficialPositionTemplate } from '@/types';
 
-const CACHE_KEY = 'sports-cache-v4';
+const CACHE_KEY = 'sports-cache-v5';
 // Sports rarely change; keep cache long-lived and refresh opportunistically.
 const CACHE_DURATION_MS = 1000 * 60 * 60 * 24; // 24h
 
@@ -96,10 +97,13 @@ const mapRowToSport = (row: any): Sport => {
   if (!row) {
     throw new Error('Unable to map sport from empty record.');
   }
+  const resourceLabels = getSportResourceLabels(row);
 
   return {
     $id: String(row.id ?? row.$id ?? ''),
     name: String(row.name ?? ''),
+    resourceLabelSingular: resourceLabels.singular,
+    resourceLabelPlural: resourceLabels.plural,
     officialPositionTemplates: normalizeOfficialPositionTemplates(row.officialPositionTemplates),
     matchRulesTemplate: normalizeMatchRulesTemplate(row.matchRulesTemplate),
     usePointsForWin: Boolean(row.usePointsForWin),

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import {
   Badge,
   Button,
@@ -62,20 +62,27 @@ export default function EventComplianceModal({
   loading,
   onClose,
 }: EventComplianceModalProps) {
-  const [expandedUserIds, setExpandedUserIds] = useState<string[]>([]);
-
-  useEffect(() => {
-    setExpandedUserIds([]);
-  }, [opened, summary?.teamId]);
+  const expansionContext = useMemo<object>(
+    () => ({}),
+    [opened, summary?.teamId],
+  );
+  const [expansionState, setExpansionState] = useState<{
+    context: object | null;
+    userIds: string[];
+  }>({ context: null, userIds: [] });
+  const expandedUserIds = expansionState.context === expansionContext
+    ? expansionState.userIds
+    : [];
 
   const title = `${teamName || summary?.teamName || 'Team'} users`;
 
   const toggleUserExpanded = (userId: string) => {
-    setExpandedUserIds((current) => (
-      current.includes(userId)
-        ? current.filter((value) => value !== userId)
-        : [...current, userId]
-    ));
+    setExpansionState({
+      context: expansionContext,
+      userIds: expandedUserIds.includes(userId)
+        ? expandedUserIds.filter((value) => value !== userId)
+        : [...expandedUserIds, userId],
+    });
   };
 
   return (

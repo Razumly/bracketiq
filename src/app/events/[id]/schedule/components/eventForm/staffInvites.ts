@@ -506,13 +506,20 @@ export const buildAssignedHostCards = ({
 
 export const normalizeInviteEmail = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
-export const normalizePendingStaffInvite = (invite: PendingStaffInvite): PendingStaffInvite => ({
-    firstName: invite.firstName.trim(),
-    lastName: invite.lastName.trim(),
+type PendingStaffInviteInput = {
+    firstName?: unknown;
+    lastName?: unknown;
+    email?: unknown;
+    roles?: unknown;
+};
+
+export const normalizePendingStaffInvite = (invite: PendingStaffInviteInput): PendingStaffInvite => ({
+    firstName: typeof invite.firstName === 'string' ? invite.firstName.trim() : '',
+    lastName: typeof invite.lastName === 'string' ? invite.lastName.trim() : '',
     email: normalizeInviteEmail(invite.email),
-    roles: Array.from(new Set((invite.roles || []).filter((role): role is StaffAssignmentRole => (
-        role === 'OFFICIAL' || role === 'ASSISTANT_HOST'
-    )))),
+    roles: Array.from(new Set((Array.isArray(invite.roles) ? invite.roles : []).filter(
+        (role): role is StaffAssignmentRole => role === 'OFFICIAL' || role === 'ASSISTANT_HOST',
+    ))),
 });
 
 export const removePendingStaffInviteRoleByEmail = (

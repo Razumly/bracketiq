@@ -101,6 +101,7 @@ const useResourceHarness = ({
         previousEventFieldLocationRef,
         previousEventTypeRef,
         resolvedOrganization: organization,
+        resourceLabelSingular: 'Court',
         setHydratedOrganization,
         setValue: form.setValue as unknown as (
             name: string,
@@ -133,8 +134,8 @@ describe('useEventResourceController', () => {
         }));
 
         await waitFor(() => expect(result.current.formValues.fields).toEqual([
-            expect.objectContaining({ name: 'Field 1', location: 'Initial Gym' }),
-            expect.objectContaining({ name: 'Field 2', location: 'Initial Gym' }),
+            expect.objectContaining({ name: 'Court 1', location: 'Initial Gym' }),
+            expect.objectContaining({ name: 'Court 2', location: 'Initial Gym' }),
         ]));
         expect(result.current.showLocalFieldCreationControls).toBe(true);
 
@@ -145,7 +146,7 @@ describe('useEventResourceController', () => {
         act(() => result.current.setValue('location', 'Updated Gym', { shouldDirty: true }));
         await waitFor(() => expect(result.current.formValues.fields).toEqual([
             expect.objectContaining({ name: 'Championship Court', location: 'Updated Gym' }),
-            expect.objectContaining({ name: 'Field 2', location: 'Updated Gym' }),
+            expect.objectContaining({ name: 'Court 2', location: 'Updated Gym' }),
         ]));
     });
 
@@ -165,8 +166,8 @@ describe('useEventResourceController', () => {
         }));
 
         await waitFor(() => expect(result.current.formValues.fields).toEqual([
-            expect.objectContaining({ name: 'Field 1', location: 'Initial Gym' }),
-            expect.objectContaining({ name: 'Field 2', location: 'Initial Gym' }),
+            expect.objectContaining({ name: 'Court 1', location: 'Initial Gym' }),
+            expect.objectContaining({ name: 'Court 2', location: 'Initial Gym' }),
         ]));
         expect(result.current.showLocalFieldCreationControls).toBe(true);
     });

@@ -17,6 +17,12 @@ export type RentalPurchaseContext = {
     requiredTemplateIds?: string[];
 };
 
+export type CapturedEventConfiguration = {
+    draft: EventEditorDraft;
+    eventType: Event['eventType'] | null;
+    validationErrors: Array<{ path: string; message: string }>;
+};
+
 export interface EventFormProps {
     isOpen?: boolean;
     onClose?: () => void;
@@ -38,10 +44,11 @@ export interface EventFormProps {
     onSubmitRequest?: () => void;
 }
 export type EventFormHandle = {
+    captureCurrentEventConfiguration: () => CapturedEventConfiguration;
     getRegistrationQuestionDrafts: () => RegistrationQuestionDraft[];
-    validate: () => Promise<boolean>;
+    validate: (configuration?: CapturedEventConfiguration) => Promise<boolean>;
     getValidationErrors: () => Array<{ path: string; message: string }>;
-    validatePendingStaffAssignments: () => Promise<void>;
+    validatePendingStaffAssignments: (configuration?: CapturedEventConfiguration) => Promise<void>;
     commitDirtyBaseline: () => void;
     applyCanonicalStaffState: (snapshot: EventStaffSnapshot) => void;
 };

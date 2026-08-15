@@ -16,7 +16,6 @@ export const useStaffOfficialController = (params: UseStaffOfficialControllerPar
     const invitations = useStaffInviteController({
         activeEditingEvent: params.activeEditingEvent,
         assignedUserIdsByRole: roster.assignedUserIdsByRole,
-        getValues: params.getValues,
         isOrganizationHostedEvent: params.isOrganizationHostedEvent,
         setPendingStaffInvites: params.setPendingStaffInvites,
     });

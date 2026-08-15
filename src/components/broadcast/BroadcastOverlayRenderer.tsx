@@ -1,7 +1,7 @@
 'use client';
 
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import type {
   BroadcastOverlayConfigV1,
   BroadcastOverlayRealtimeEvent,
@@ -15,6 +15,13 @@ export type BroadcastOverlayRendererProps = {
   event?: BroadcastOverlayRealtimeEvent | null;
   preview?: boolean;
 };
+const subscribeToViewport = (onStoreChange: () => void) => {
+  window.addEventListener('resize', onStoreChange);
+  return () => window.removeEventListener('resize', onStoreChange);
+};
+const getViewportScale = () => Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+const getServerViewportScale = () => 1;
+
 
 const anchorStyle = (config: BroadcastOverlayConfigV1): React.CSSProperties => {
   const anchor = config.transform.anchor;
@@ -114,7 +121,12 @@ const SetRow = ({ state }: { state: MatchPresentationStateV1 }) => (
 
 export default function BroadcastOverlayRenderer({ config, state, event, preview = false }: BroadcastOverlayRendererProps) {
   const [now, setNow] = useState(() => Date.now());
-  const [previewScale, setPreviewScale] = useState<number | null>(preview ? null : 1);
+  const viewportScale = useSyncExternalStore(
+    subscribeToViewport,
+    getViewportScale,
+    getServerViewportScale,
+  );
+  const previewScale = preview ? viewportScale : 1;
 
   useEffect(() => {
     if (!config.display.showTimer || state.clock.mode !== 'RUNNING') return undefined;
@@ -122,18 +134,6 @@ export default function BroadcastOverlayRenderer({ config, state, event, preview
     return () => window.clearInterval(interval);
   }, [config.display.showTimer, state.clock.mode, state.clock.startedAt]);
 
-  useEffect(() => {
-    if (!preview) {
-      setPreviewScale(1);
-      return undefined;
-    }
-    const updatePreviewScale = () => {
-      setPreviewScale(Math.min(window.innerWidth / 1920, window.innerHeight / 1080));
-    };
-    updatePreviewScale();
-    window.addEventListener('resize', updatePreviewScale);
-    return () => window.removeEventListener('resize', updatePreviewScale);
-  }, [preview]);
 
   const clock = formatClock(state, now);
   const shouldAnimateScore = event?.type === 'POINT_AWARDED' && event.animate && !config.motion.reducedMotion;
@@ -201,8 +201,8 @@ export default function BroadcastOverlayRenderer({ config, state, event, preview
       <div
         className={styles.previewStage}
         style={{
-          transform: `scale(${previewScale ?? 1})`,
-          visibility: previewScale === null ? 'hidden' : 'visible',
+          transform: `scale(${previewScale})`,
+          visibility: 'visible',
         }}
       >
         {canvas}

@@ -770,7 +770,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     );
     const field = new PlayingField({
       id: 'field_tournament_pool_reschedule',
-      divisions: [bracketDivision],
+      divisions: [bracketDivision, poolDivision],
       matches: [],
       events: [],
       rentalSlots: [],

@@ -27,7 +27,6 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 type UseStaffInviteControllerParams = Pick<
     UseStaffOfficialControllerParams,
     | 'activeEditingEvent'
-    | 'getValues'
     | 'isOrganizationHostedEvent'
     | 'setPendingStaffInvites'
 > & {
@@ -37,7 +36,6 @@ type UseStaffInviteControllerParams = Pick<
 export const useStaffInviteController = ({
     activeEditingEvent,
     assignedUserIdsByRole,
-    getValues,
     isOrganizationHostedEvent,
     setPendingStaffInvites,
 }: UseStaffInviteControllerParams) => {
@@ -127,12 +125,12 @@ export const useStaffInviteController = ({
         return membershipByEmail;
     }, [findPendingStaffInviteConflictMessage, isOrganizationHostedEvent, lookupPendingStaffInviteMembership]);
 
-    const validatePendingStaffAssignments = useCallback(async () => {
-        const pendingInvites = normalizeDirtyTrackedPendingStaffInvites(
-            (getValues('pendingStaffInvites') as PendingStaffInvite[] | undefined) ?? [],
-        );
-        await validatePendingStaffInvites(pendingInvites);
-    }, [getValues, validatePendingStaffInvites]);
+    const validatePendingStaffAssignments = useCallback(
+        async (pendingInvites: PendingStaffInvite[]) => {
+            await validatePendingStaffInvites(pendingInvites);
+        },
+        [validatePendingStaffInvites],
+    );
 
     const handleInviteFieldChange = useCallback((field: 'firstName' | 'lastName' | 'email', value: string) => {
         setNewStaffInvite((previous) => ({ ...previous, [field]: value }));

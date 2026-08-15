@@ -1,23 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import type { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
-import { canManageEvent } from '@/server/accessControl';
+import { projectEventAuthorityCapabilities } from '@/server/accessControl';
+import {
+  assertEventHostTransition,
+  EventHostDelegationError,
+} from '@/server/events/eventHostDelegation';
 import { acquireEventLock } from '@/server/repositories/locks';
 
 export const dynamic = 'force-dynamic';
 
 const updateHostSchema = z.object({
-  hostId: z.string().trim().min(1),
+  hostId: z.string().trim().min(1).nullable(),
 }).strict();
 
-const loadEventAccess = async (client: any, eventId: string) => client.events.findUnique({
+const loadEventAccess = async (client: Prisma.TransactionClient, eventId: string) => client.events.findUnique({
   where: { id: eventId },
   select: {
     id: true,
     hostId: true,
     assistantHostIds: true,
     organizationId: true,
+    updatedAt: true,
   },
 });
 
@@ -37,37 +43,44 @@ export async function PUT(
       );
     }
 
-    const event = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       await acquireEventLock(tx, eventId);
       const existing = await loadEventAccess(tx, eventId);
       if (!existing) {
         throw new Response('Not found', { status: 404 });
       }
-      if (!(await canManageEvent(session, existing, tx))) {
-        throw new Response('Forbidden', { status: 403 });
-      }
-      const host = await tx.authUser.findUnique({
-        where: { id: parsed.data.hostId },
-        select: { id: true },
+      const nextHostId = await assertEventHostTransition({
+        client: tx,
+        actor: session,
+        event: existing,
+        nextHostId: parsed.data.hostId,
       });
-      if (!host) {
-        throw new Response('Host user not found', { status: 404 });
-      }
-      return tx.events.update({
-        where: { id: eventId },
-        data: { hostId: parsed.data.hostId, updatedAt: new Date() },
-        select: {
-          id: true,
-          hostId: true,
-          organizationId: true,
-          updatedAt: true,
-        },
-      });
+      const event = existing.hostId === nextHostId
+        ? existing
+        : await tx.events.update({
+            where: { id: eventId },
+            data: { hostId: nextHostId, updatedAt: new Date() },
+            select: {
+              id: true,
+              hostId: true,
+              assistantHostIds: true,
+              organizationId: true,
+              updatedAt: true,
+            },
+          });
+      const capabilities = await projectEventAuthorityCapabilities(session, event, tx);
+      return { event, capabilities };
     });
-    return NextResponse.json({ event }, { status: 200 });
+    return NextResponse.json(result, { status: 200 });
   } catch (error) {
     if (error instanceof Response) {
       return error;
+    }
+    if (error instanceof EventHostDelegationError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status },
+      );
     }
     console.error('Update event host failed', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });

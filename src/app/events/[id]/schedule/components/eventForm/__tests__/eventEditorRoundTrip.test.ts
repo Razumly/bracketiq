@@ -13,6 +13,12 @@ import {
 } from '../editorContractAdapters';
 import { eventEditorFixtures } from '@/test/eventEditor/fixtures';
 
+const expectedCreateRevisions = {
+  editorRevision: 'new',
+  staffRevision: null,
+  scheduleRevision: 'new',
+};
+
 describe('event editor draft round trips', () => {
   it.each(eventEditorFixtures)('preserves editable values for $name', ({ event }) => {
     const initialDraft = legacyEventToEditorDraft(event);
@@ -74,6 +80,7 @@ describe('event editor draft round trips', () => {
     const parsed = createEventEditorCommandSchema.parse({
       contractVersion: 3,
       createOperationId: 'create-operation-fixture',
+      expectedRevisions: expectedCreateRevisions,
       draft: eventFormValuesToEditorDraft(event as unknown as EventFormValues),
       completion: { mode: 'CREATE_AND_BUILD_SCHEDULE' },
     });
@@ -112,6 +119,7 @@ describe('event editor draft round trips', () => {
     const parsed = createEventEditorCommandSchema.parse({
       contractVersion: 3,
       createOperationId: 'create-operation-hydrated',
+      expectedRevisions: expectedCreateRevisions,
       draft: eventFormValuesToEditorDraft(event as unknown as EventFormValues),
       completion: { mode: 'CREATE_AND_BUILD_SCHEDULE' },
     });
@@ -169,6 +177,7 @@ describe('event editor draft round trips', () => {
     const parsed = createEventEditorCommandSchema.parse({
       contractVersion: 3,
       createOperationId: 'create-operation-playoff-fields',
+      expectedRevisions: expectedCreateRevisions,
       draft: eventFormValuesToEditorDraft(builtDraft as EventFormValues),
       completion: { mode: 'CREATE_AND_BUILD_SCHEDULE' },
     });
@@ -177,5 +186,63 @@ describe('event editor draft round trips', () => {
       ageDivisionTypeId: 'age_open',
       fieldIds: ['field_fixture'],
     });
+  });
+  it('carries normalized captured staff invitations into non-affiliate commands only', () => {
+    const sourceEvent = eventEditorFixtures[0].event;
+    const formValues: EventFormValues = {
+      ...editorSnapshotToFormValues(
+        emptyEditorSnapshot(legacyEventToEditorDraft(sourceEvent), 'CREATE'),
+      ),
+      pendingStaffInvites: [{
+        firstName: ' Casey ',
+        lastName: ' Ref ',
+        email: ' CASEY@EXAMPLE.COM ',
+        roles: ['OFFICIAL', 'OFFICIAL'],
+      }],
+    };
+    const build = (source: EventFormValues) => buildEventDraft({
+      activeEditingEvent: null,
+      currentUser: { $id: sourceEvent.hostId } as UserData,
+      fieldCount: source.fieldCount,
+      fields: source.fields,
+      fieldsReferencedInSlots: [],
+      hasImmutableTimeSlots: false,
+      hasRestrictedImmutableFields: false,
+      hasStripeAccount: false,
+      immutableFields: [],
+      immutableTimeSlots: [],
+      isEditMode: false,
+      isOrganizationHostedEvent: false,
+      isOrganizationManagedEvent: false,
+      joinAsParticipant: false,
+      organizationHostedEventId: '',
+      organizationOfficialsById: new Map(),
+      previousEventFieldLocation: source.location,
+      rentalLockedSlotsForDraft: [],
+      resolvedOrganization: null,
+      selectedRentedFieldIds: [],
+      shouldManageLocalFields: false,
+      shouldProvisionFields: false,
+      source,
+      sportsById: new Map(),
+    });
+
+    const builtDraft = build(formValues);
+    expect(builtDraft.pendingStaffInvites).toEqual([{
+      firstName: 'Casey',
+      lastName: 'Ref',
+      email: 'casey@example.com',
+      roles: ['OFFICIAL'],
+    }]);
+    expect(eventFormValuesToEditorDraft(builtDraft as EventFormValues).staff.pendingInvites)
+      .toEqual(builtDraft.pendingStaffInvites);
+
+    const affiliateDraft = build({
+      ...formValues,
+      isAffiliateEvent: true,
+      eventType: 'AFFILIATE',
+      affiliateUrl: 'https://example.com/external-event',
+    });
+    expect(affiliateDraft.pendingStaffInvites).toEqual([]);
   });
 });

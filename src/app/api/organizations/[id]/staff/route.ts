@@ -93,6 +93,25 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data.roleId = await resolveDefaultOrganizationRoleIdForStaffTypes(prisma, id, nextTypes);
   }
 
+  if (parsed.data.userId !== org.ownerId && !nextTypes.includes('HOST')) {
+    const delegatedEvent = await prisma.events.findFirst({
+      where: {
+        organizationId: id,
+        OR: [
+          { hostId: parsed.data.userId },
+          { assistantHostIds: { has: parsed.data.userId } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (delegatedEvent) {
+      return NextResponse.json(
+        { error: 'Assign a replacement Event Host before removing this Organization Host role.' },
+        { status: 409 },
+      );
+    }
+  }
+
   const updated = await prisma.staffMembers.update({
     where: { id: existing.id },
     data,
@@ -119,6 +138,25 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   }
   if (!(await hasOrgPermission(session, org, ORG_PERMISSIONS.STAFF_MANAGE))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  if (parsed.data.userId !== org.ownerId) {
+    const delegatedEvent = await prisma.events.findFirst({
+      where: {
+        organizationId: id,
+        OR: [
+          { hostId: parsed.data.userId },
+          { assistantHostIds: { has: parsed.data.userId } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (delegatedEvent) {
+      return NextResponse.json(
+        { error: 'Assign a replacement Event Host before removing this Organization Host.' },
+        { status: 409 },
+      );
+    }
   }
 
   await prisma.$transaction(async (tx) => {

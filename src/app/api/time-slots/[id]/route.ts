@@ -6,6 +6,11 @@ import { findDollarPrefixedFields } from '@/server/requestParsing';
 import { findPresentKeys, findUnknownKeys, parseStrictEnvelope } from '@/server/http/strictPatch';
 import { normalizeRentalTaxHandling } from '@/lib/taxPolicy';
 import {
+  assertValidOneTimeTimeSlots,
+  resolveOneTimeTimeSlot,
+  TimeSlotValidationError,
+} from '@/lib/timeSlotAvailability';
+import {
   localDatePartsInTimeZone,
   parseDateInputInTimeZone,
   resolveTimeZone,
@@ -13,6 +18,7 @@ import {
 } from '@/server/timeZones';
 import { deleteOrArchiveTimeSlot, toDeleteOrArchiveResponse } from '@/server/deletion/archivePolicy';
 import { canManageScheduledFields, canManageTimeSlot } from '@/server/timeSlotAccess';
+import { acquireEventLock } from '@/server/repositories/locks';
 
 export const dynamic = 'force-dynamic';
 
@@ -148,36 +154,6 @@ const normalizeTemplateIds = (value: unknown): string[] => {
   );
 };
 
-const isMissingTimeSlotDivisionsColumnError = (error: unknown): boolean => {
-  const message = error instanceof Error ? error.message : String(error ?? '');
-  const normalized = message.toLowerCase();
-  return normalized.includes('timeslots')
-    && normalized.includes('divisions')
-    && normalized.includes('does not exist');
-};
-
-const persistTimeSlotDivisions = async (
-  slotId: string,
-  divisions: string[],
-  updatedAt: Date,
-): Promise<void> => {
-  if (typeof (prisma as any).$executeRaw !== 'function') {
-    return;
-  }
-  try {
-    await prisma.$executeRaw`
-      UPDATE "TimeSlots"
-      SET "divisions" = ${divisions}::TEXT[],
-          "updatedAt" = ${updatedAt}
-      WHERE "id" = ${slotId}
-    `;
-  } catch (error) {
-    if (isMissingTimeSlotDivisionsColumnError(error)) {
-      return;
-    }
-    throw error;
-  }
-};
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession(req);
@@ -208,6 +184,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       repeating: true,
       scheduledFieldId: true,
       scheduledFieldIds: true,
+      startTimeMinutes: true,
+      endTimeMinutes: true,
+      divisions: true,
     },
   });
   if (!existingSlot) {
@@ -320,6 +299,33 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       true,
       effectiveTimeZone,
     );
+  } else {
+    try {
+      const resolved = resolveOneTimeTimeSlot({
+        ...existingSlot,
+        ...payload,
+        id,
+        repeating: false,
+        startDate: effectiveStartDate,
+        endDate: endDateCandidate,
+        timeZone: effectiveTimeZone,
+        scheduledFieldIds: effectiveScheduledFieldIds,
+        divisions: payloadDivisions ?? existingSlot.divisions,
+      }, effectiveTimeZone);
+      payload.startDate = resolved.start;
+      payload.endDate = resolved.end;
+      payload.startTimeMinutes = resolved.startTimeMinutes;
+      payload.endTimeMinutes = resolved.endTimeMinutes;
+      payload.timeZone = resolved.timeZone;
+    } catch (error) {
+      if (error instanceof TimeSlotValidationError) {
+        return NextResponse.json(
+          { error: error.message, code: 'INVALID_TIME_SLOT', slotIds: error.slotIds },
+          { status: 400 },
+        );
+      }
+      throw error;
+    }
   }
 
   const updatedAt = new Date();
@@ -345,31 +351,157 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       updateData[key] = payload[key];
     }
   }
-
-  const updated = await prisma.timeSlots.update({
-    where: { id },
-    data: updateData as any,
-  });
   if (payloadDivisions !== null) {
-    await persistTimeSlotDivisions(id, payloadDivisions, updatedAt);
+    updateData.divisions = payloadDivisions;
   }
-  const normalizedDays = normalizeDaysOfWeek({
-    dayOfWeek: updated.dayOfWeek ?? undefined,
-    daysOfWeek: (updated as any).daysOfWeek ?? undefined,
-  });
-  const normalizedFieldIds = normalizeFieldIds(
-    (updated as any).scheduledFieldIds
-      ?? (updated.scheduledFieldId ? [updated.scheduledFieldId] : []),
-  );
-  const normalizedDivisions = payloadDivisions ?? normalizeDivisionKeys((updated as any).divisions);
-  return NextResponse.json({
-    ...updated,
-    dayOfWeek: normalizedDays[0] ?? updated.dayOfWeek ?? null,
-    daysOfWeek: normalizedDays,
-    scheduledFieldId: normalizedFieldIds[0] ?? null,
-    scheduledFieldIds: normalizedFieldIds,
-    divisions: normalizedDivisions,
-  } as any, { status: 200 });
+
+  try {
+    const updated = await prisma.$transaction(async (tx) => {
+      const lockedEventIds = new Set<string>();
+      while (true) {
+        const references = await tx.events.findMany({
+          where: { timeSlotIds: { has: id }, archivedAt: null },
+          select: { id: true },
+        });
+        const unlockedEventIds = references
+          .map((event) => event.id)
+          .filter((eventId) => !lockedEventIds.has(eventId))
+          .sort();
+        if (!unlockedEventIds.length) break;
+        for (const eventId of unlockedEventIds) {
+          await acquireEventLock(tx, eventId);
+          lockedEventIds.add(eventId);
+        }
+      }
+
+      const referencingEvents = await tx.events.findMany({
+        where: { timeSlotIds: { has: id }, archivedAt: null },
+        select: {
+          id: true,
+          start: true,
+          end: true,
+          noFixedEndDateTime: true,
+          timeZone: true,
+          fieldIds: true,
+          timeSlotIds: true,
+        },
+      });
+      if (referencingEvents.length) {
+        const allSlotIds = Array.from(new Set(
+          referencingEvents.flatMap((event) => event.timeSlotIds),
+        ));
+        const [persistedSlots, divisionRows] = await Promise.all([
+          tx.timeSlots.findMany({
+            where: { id: { in: allSlotIds }, archivedAt: null },
+          }),
+          tx.divisions.findMany({
+            where: { eventId: { in: referencingEvents.map((event) => event.id) } },
+            select: { eventId: true, id: true, key: true },
+          }),
+        ]);
+        const candidateSlot: Record<string, unknown> = {
+          ...existingSlot,
+          ...updateData,
+          id,
+          divisions: payloadDivisions ?? existingSlot.divisions,
+        };
+        const persistedSlotById = new Map<string, Record<string, unknown>>(
+          persistedSlots.map((slot) => [slot.id, { ...slot }]),
+        );
+        persistedSlotById.set(id, candidateSlot);
+
+        for (const event of referencingEvents) {
+          const eligibleResourceIds = new Set(event.fieldIds);
+          const eventDivisions = divisionRows.filter((division) => division.eventId === event.id);
+          const divisionIdByReference = new Map<string, string>();
+          eventDivisions.forEach((division) => {
+            divisionIdByReference.set(division.id.trim().toLowerCase(), division.id);
+            if (division.key?.trim()) {
+              divisionIdByReference.set(division.key.trim().toLowerCase(), division.id);
+            }
+          });
+          const canonicalSlots = event.timeSlotIds.map((slotId) => {
+            const slot = persistedSlotById.get(slotId);
+            if (!slot) {
+              throw new TimeSlotValidationError(
+                'INVALID_ONE_TIME_SLOT',
+                `Event "${event.id}" references unavailable Time Slot "${slotId}".`,
+                { slotIds: [slotId] },
+              );
+            }
+            const resourceIds = normalizeFieldIds([
+              ...(Array.isArray(slot.scheduledFieldIds) ? slot.scheduledFieldIds : []),
+              ...(typeof slot.scheduledFieldId === 'string' ? [slot.scheduledFieldId] : []),
+            ]);
+            const unknownResourceId = resourceIds.find((resourceId) => !eligibleResourceIds.has(resourceId));
+            if (unknownResourceId) {
+              throw new TimeSlotValidationError(
+                'INVALID_ONE_TIME_SLOT',
+                `One-Time Time Slot "${slotId}" references unavailable Resource "${unknownResourceId}".`,
+                { slotIds: [slotId] },
+              );
+            }
+            const divisionIds = normalizeDivisionKeys(slot.divisions).map((divisionReference) => {
+              const divisionId = divisionIdByReference.get(divisionReference);
+              if (!divisionId) {
+                throw new TimeSlotValidationError(
+                  'INVALID_ONE_TIME_SLOT',
+                  `One-Time Time Slot "${slotId}" references unavailable Division "${divisionReference}".`,
+                  { slotIds: [slotId] },
+                );
+              }
+              return divisionId;
+            });
+            return {
+              ...slot,
+              scheduledFieldId: resourceIds[0] ?? null,
+              scheduledFieldIds: resourceIds,
+              divisions: divisionIds,
+            };
+          });
+          assertValidOneTimeTimeSlots({
+            slots: canonicalSlots,
+            fallbackTimeZone: event.timeZone,
+            eventStart: event.start,
+            eventEnd: event.noFixedEndDateTime ? null : event.end,
+            eligibleResourceIds: event.fieldIds,
+            eligibleDivisionIds: eventDivisions.map((division) => division.id),
+          });
+        }
+      }
+
+      // `updateData` is assembled only from the route's explicit mutable-field allowlist.
+      return tx.timeSlots.update({
+        where: { id },
+        data: updateData as unknown as Parameters<typeof tx.timeSlots.update>[0]['data'],
+      });
+    });
+    const normalizedDays = normalizeDaysOfWeek({
+      dayOfWeek: updated.dayOfWeek ?? undefined,
+      daysOfWeek: updated.daysOfWeek ?? undefined,
+    });
+    const normalizedFieldIds = normalizeFieldIds(
+      updated.scheduledFieldIds
+        ?? (updated.scheduledFieldId ? [updated.scheduledFieldId] : []),
+    );
+    const normalizedDivisions = payloadDivisions ?? normalizeDivisionKeys(updated.divisions);
+    return NextResponse.json({
+      ...updated,
+      dayOfWeek: normalizedDays[0] ?? updated.dayOfWeek ?? null,
+      daysOfWeek: normalizedDays,
+      scheduledFieldId: normalizedFieldIds[0] ?? null,
+      scheduledFieldIds: normalizedFieldIds,
+      divisions: normalizedDivisions,
+    }, { status: 200 });
+  } catch (error) {
+    if (error instanceof TimeSlotValidationError) {
+      return NextResponse.json(
+        { error: error.message, code: 'INVALID_TIME_SLOT', slotIds: error.slotIds },
+        { status: 400 },
+      );
+    }
+    throw error;
+  }
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

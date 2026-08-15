@@ -9,7 +9,6 @@ import type {
     SetStateAction,
 } from 'react';
 import type {
-    FieldErrors,
     UseFormGetValues,
     UseFormTrigger,
 } from 'react-hook-form';
@@ -18,16 +17,16 @@ import type { EventStaffSnapshot } from '@/lib/eventStaffService';
 import type { Event, RegistrationQuestionDraft } from '@/types';
 import { buildEventDraft } from '../buildEventDraft';
 import type { EventFormValues } from '../formTypes';
+import { eventFormValuesToEditorDraft } from '../editorContractAdapters';
 import { supportsScheduleSlotsForEvent } from '../eventRules';
+import type { CapturedEventConfiguration, EventFormHandle } from '../types';
 import type { buildEventFormSchema } from '../schema';
 import {
     normalizePendingStaffInvite,
     type PendingStaffInvite,
 } from '../staffInvites';
-import type { EventFormHandle } from '../types';
 import {
     dedupeValidationErrors,
-    flattenFormErrors,
     flattenZodIssues,
     type FlattenedFormError,
 } from '../validationErrors';
@@ -42,7 +41,6 @@ type EventFormStateSetter<T> = (
 type UseEventFormSubmissionControllerParams = EventDraftContext & {
     assignedActiveOfficialsForStaffing: number;
     commitDirtyBaseline: () => void;
-    errors: FieldErrors<EventFormValues>;
     eventData: EventFormValues;
     eventValidationSchema: ReturnType<typeof buildEventFormSchema>;
     formRef: ForwardedRef<EventFormHandle>;
@@ -54,7 +52,7 @@ type UseEventFormSubmissionControllerParams = EventDraftContext & {
     requiredOfficialSlotsPerMatch: number;
     setEventData: EventFormStateSetter<EventFormValues>;
     trigger: UseFormTrigger<EventFormValues>;
-    validatePendingStaffAssignments: () => Promise<void>;
+    validatePendingStaffAssignments: (pendingInvites: PendingStaffInvite[]) => Promise<void>;
     onValidationResult?: (
         errors: FlattenedFormError[],
         source: 'FORM' | 'EXTERNAL' | 'CLEAR',
@@ -66,7 +64,6 @@ export const useEventFormSubmissionController = ({
     assignedActiveOfficialsForStaffing,
     commitDirtyBaseline,
     currentUser,
-    errors,
     eventData,
     eventValidationSchema,
     fieldCount,
@@ -180,39 +177,75 @@ export const useEventFormSubmissionController = ({
             .filter((question) => question.prompt.length > 0);
     }, [isAffiliateEvent, registrationQuestionDrafts]);
 
-    const validateDraft = useCallback(async () => {
-        const isFormValid = await trigger();
-        if (!isFormValid) {
-            const currentValues = getValues();
-            const schemaResult = eventValidationSchema.safeParse(currentValues);
-            const flattenedErrors = dedupeValidationErrors([
-                ...(schemaResult.success ? [] : flattenZodIssues(schemaResult.error.issues)),
-                ...flattenFormErrors(errors),
-            ]);
+    const captureCurrentEventConfiguration = useCallback((): CapturedEventConfiguration => {
+        const currentValues = getValues();
+        const schemaResult = eventValidationSchema.safeParse(currentValues);
+        const validationErrors = dedupeValidationErrors([
+            ...(schemaResult.success ? [] : flattenZodIssues(schemaResult.error.issues)),
+            ...(!isAffiliateEvent && officialStaffingCoverageError
+                ? [{
+                    path: 'officialSchedulingMode',
+                    message: officialStaffingCoverageError,
+                }]
+                : []),
+        ]);
+        const eventConfiguration = buildDraftEvent(currentValues);
+        return {
+            eventType: schemaResult.success ? schemaResult.data.eventType : null,
+            draft: eventFormValuesToEditorDraft(
+                eventConfiguration as EventFormValues,
+                getRegistrationQuestionDrafts(),
+            ),
+            validationErrors,
+        };
+    }, [
+        buildDraftEvent,
+        eventValidationSchema,
+        getRegistrationQuestionDrafts,
+        getValues,
+        isAffiliateEvent,
+        officialStaffingCoverageError,
+    ]);
+
+    const validateDraft = useCallback(async (
+        capturedConfiguration: CapturedEventConfiguration = captureCurrentEventConfiguration(),
+    ) => {
+        // Keep React Hook Form's visible error state current, but decide from
+        // the configuration captured before this asynchronous validation starts.
+        await trigger();
+        const flattenedErrors = capturedConfiguration.validationErrors;
+        if (flattenedErrors.length > 0) {
             lastValidationErrorsRef.current = flattenedErrors;
-            onValidationResult?.(flattenedErrors, 'FORM');
-            console.warn('Event form validation failed.', {
-                errorCount: flattenedErrors.length,
-                errors: flattenedErrors,
-            });
+            const hasStaffingCoverageError = flattenedErrors.some(
+                (error) => error.path === 'officialSchedulingMode'
+                    && error.message === officialStaffingCoverageError,
+            );
+            onValidationResult?.(
+                flattenedErrors,
+                hasStaffingCoverageError ? 'EXTERNAL' : 'FORM',
+            );
+            if (hasStaffingCoverageError) {
+                console.warn('Event form submission blocked by official staffing requirements.', {
+                    requiredOfficialSlotsPerMatch,
+                    assignedActiveOfficialsForStaffing,
+                    mode: capturedConfiguration.draft.staff.officialSchedulingMode,
+                });
+            } else {
+                console.warn('Event form validation failed.', {
+                    errorCount: flattenedErrors.length,
+                    errors: flattenedErrors,
+                });
+            }
             return false;
         }
 
-        if (!isAffiliateEvent && officialStaffingCoverageError) {
-            lastValidationErrorsRef.current = [{
-                path: 'officialSchedulingMode',
-                message: officialStaffingCoverageError,
-            }];
-            onValidationResult?.(lastValidationErrorsRef.current, 'EXTERNAL');
-            console.warn('Event form submission blocked by official staffing requirements.', {
-                requiredOfficialSlotsPerMatch,
-                assignedActiveOfficialsForStaffing,
-                mode: eventData.officialSchedulingMode,
-            });
-            return false;
-        }
-
-        if (!supportsScheduleSlotsForEvent(eventData.eventType, eventData.parentEvent)) {
+        if (
+            !capturedConfiguration.eventType
+            || !supportsScheduleSlotsForEvent(
+                capturedConfiguration.eventType,
+                capturedConfiguration.draft.basics.parentEvent,
+            )
+        ) {
             lastValidationErrorsRef.current = [];
             onValidationResult?.([], 'CLEAR');
             return true;
@@ -223,25 +256,22 @@ export const useEventFormSubmissionController = ({
         return true;
     }, [
         assignedActiveOfficialsForStaffing,
-        errors,
-        eventData.eventType,
-        eventData.officialSchedulingMode,
-        eventData.parentEvent,
-        eventValidationSchema,
-        getValues,
-        isAffiliateEvent,
+        captureCurrentEventConfiguration,
         officialStaffingCoverageError,
         onValidationResult,
         requiredOfficialSlotsPerMatch,
         trigger,
     ]);
-
-    const validatePendingStaffAssignmentsForSubmit = useCallback(async () => {
+    const validatePendingStaffAssignmentsForSubmit = useCallback(async (
+        capturedConfiguration: CapturedEventConfiguration = captureCurrentEventConfiguration(),
+    ) => {
         if (isAffiliateEvent) {
             return;
         }
-        await validatePendingStaffAssignments();
-    }, [isAffiliateEvent, validatePendingStaffAssignments]);
+        const pendingInvites = capturedConfiguration.draft.staff.pendingInvites
+            .map((invite) => normalizePendingStaffInvite(invite));
+        await validatePendingStaffAssignments(pendingInvites);
+    }, [captureCurrentEventConfiguration, isAffiliateEvent, validatePendingStaffAssignments]);
 
     const applyCanonicalStaffState = useCallback((snapshot: EventStaffSnapshot) => {
         setEventData((previous: EventFormValues) => ({
@@ -261,6 +291,7 @@ export const useEventFormSubmissionController = ({
     useImperativeHandle(
         formRef,
         () => ({
+            captureCurrentEventConfiguration,
             getRegistrationQuestionDrafts,
             validate: validateDraft,
             getValidationErrors: () => lastValidationErrorsRef.current,
@@ -268,7 +299,14 @@ export const useEventFormSubmissionController = ({
             commitDirtyBaseline,
             applyCanonicalStaffState,
         }),
-        [applyCanonicalStaffState, commitDirtyBaseline, getRegistrationQuestionDrafts, validateDraft, validatePendingStaffAssignmentsForSubmit],
+        [
+            applyCanonicalStaffState,
+            captureCurrentEventConfiguration,
+            commitDirtyBaseline,
+            getRegistrationQuestionDrafts,
+            validateDraft,
+            validatePendingStaffAssignmentsForSubmit,
+        ],
     );
 
     return { buildDraftEvent };

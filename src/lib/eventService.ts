@@ -59,6 +59,7 @@ import {
   normalizeOrganizationOriginType,
   normalizeOrganizationOwnershipStatus,
 } from "@/lib/organizationOwnership";
+import type { EventAuthorityCapabilities } from "@/server/accessControl";
 
 const readApiEntityId = (value: unknown): string | undefined => {
   if (!value || typeof value !== "object") {
@@ -142,6 +143,47 @@ export type EventParticipantsResponse = {
 };
 
 export type EventParticipantDivisionWarning = EventParticipantsResponse["divisionWarnings"][number];
+const normalizeEventAuthorityCapabilities = (
+  value: unknown,
+): EventAuthorityCapabilities => {
+  const row = value && typeof value === "object"
+    ? value as Record<string, unknown>
+    : {};
+  const rawAuthority = row.managementAuthority;
+  const authorityRow = rawAuthority && typeof rawAuthority === "object"
+    ? rawAuthority as Record<string, unknown>
+    : null;
+  const managementAuthority = (
+    authorityRow?.type === "ORGANIZATION"
+    && typeof authorityRow.organizationId === "string"
+    && typeof authorityRow.ownerUserId === "string"
+  )
+    ? {
+        type: "ORGANIZATION" as const,
+        organizationId: authorityRow.organizationId,
+        ownerUserId: authorityRow.ownerUserId,
+      }
+    : null;
+  const rawReason = row.readOnlyReason;
+  const readOnlyReason = (
+    rawReason === "AUTHENTICATION_REQUIRED"
+    || rawReason === "MANAGEMENT_AUTHORITY_UNVERIFIED"
+    || rawReason === "NOT_AUTHORIZED"
+  )
+    ? rawReason
+    : null;
+  return {
+    canEdit: row.canEdit === true,
+    canManageStaff: row.canManageStaff === true,
+    canDelegateHost: row.canDelegateHost === true,
+    readOnly: row.readOnly !== false,
+    readOnlyReason,
+    managementAuthority,
+    eventHostId: typeof row.eventHostId === "string" ? row.eventHostId : null,
+    viewerIsEventHost: row.viewerIsEventHost === true,
+  };
+};
+
 
 export type EventDetailBootstrapResponse = {
   event: Event;
@@ -154,6 +196,7 @@ export type EventDetailBootstrapResponse = {
   staffRevision: string | null;
   teamCompliance: EventTeamComplianceResponse | null;
   userCompliance: EventUserComplianceResponse | null;
+  capabilities: EventAuthorityCapabilities;
 };
 
 export interface LeagueGenerationMatchResult {
@@ -433,6 +476,7 @@ class EventService {
           : null,
         teamCompliance: response?.teamCompliance ?? null,
         userCompliance: response?.userCompliance ?? null,
+        capabilities: normalizeEventAuthorityCapabilities(response?.capabilities),
       };
     } catch (error) {
       console.error("Failed to fetch event detail bootstrap:", error);

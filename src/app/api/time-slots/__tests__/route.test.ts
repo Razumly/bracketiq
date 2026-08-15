@@ -22,6 +22,7 @@ const prismaMock = {
   },
   events: {
     count: jest.fn(),
+    findMany: jest.fn().mockResolvedValue([]),
   },
   bills: {
     findMany: jest.fn(),

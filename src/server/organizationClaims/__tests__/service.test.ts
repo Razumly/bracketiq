@@ -245,6 +245,16 @@ describe('organization claim service', () => {
       organizationClaimEvents: {
         create: jest.fn().mockResolvedValue({}),
       },
+      events: {
+        update: jest.fn(),
+        updateMany: jest.fn(),
+      },
+      matches: {
+        updateMany: jest.fn(),
+      },
+      timeSlots: {
+        updateMany: jest.fn(),
+      },
     };
     const acceptedClaim = {
       ...approvedClaim,
@@ -302,6 +312,10 @@ describe('organization claim service', () => {
       transactionClient,
       'org_1',
     );
+    expect(transactionClient.events.update).not.toHaveBeenCalled();
+    expect(transactionClient.events.updateMany).not.toHaveBeenCalled();
+    expect(transactionClient.matches.updateMany).not.toHaveBeenCalled();
+    expect(transactionClient.timeSlots.updateMany).not.toHaveBeenCalled();
   });
 
   it('emails the claimant after an administrator decision commits', async () => {

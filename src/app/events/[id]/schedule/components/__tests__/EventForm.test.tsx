@@ -301,7 +301,13 @@ jest.mock('@/components/ui/ImageUploader', () => ({
   },
 }));
 
-const mockSport = { $id: 'volleyball', id: 'volleyball', name: 'Volleyball' };
+const mockSport = {
+  $id: 'volleyball',
+  id: 'volleyball',
+  name: 'Volleyball',
+  resourceLabelSingular: 'Court',
+  resourceLabelPlural: 'Courts',
+};
 type MockUseSportsState = {
   sports: any[];
   sportsById: Map<string, any>;
@@ -411,8 +417,8 @@ describe('EventForm dirty state', () => {
     state: 'DRAFT',
     eventType: 'EVENT',
     sportIds: ['volleyball'],
-    sport: { $id: 'volleyball', name: 'Volleyball' },
-    sportConfig: { $id: 'volleyball', name: 'Volleyball' },
+    sport: { ...mockSport },
+    sportConfig: { ...mockSport },
     price: 0,
     minAge: 0,
     maxAge: 99,
@@ -600,6 +606,7 @@ describe('EventForm dirty state', () => {
 
     expect(Object.keys(formRef.current!).sort()).toEqual([
       'applyCanonicalStaffState',
+      'captureCurrentEventConfiguration',
       'commitDirtyBaseline',
       'getRegistrationQuestionDrafts',
       'getValidationErrors',
@@ -872,8 +879,8 @@ describe('EventForm dirty state', () => {
     expect(screen.getByText('Use the same selected weekdays and times each week during the event.')).toBeInTheDocument();
     expect(screen.getByText('Add individual dates and times that do not repeat.')).toBeInTheDocument();
     expect(screen.getByText('Combine weekly availability with one-time dates or exceptions.')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Resource source')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Custom resource count')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Court source')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Custom court count')).not.toBeInTheDocument();
     expect(screen.queryByText('Division assignment')).not.toBeInTheDocument();
   });
 
@@ -2073,7 +2080,7 @@ describe('EventForm dirty state', () => {
 
     expect(isValid).toBe(true);
     expect(formRef.current?.getValidationErrors()).toEqual([]);
-    expect(screen.getByText(/Timeslot field conflicts are warnings/i)).toBeInTheDocument();
+    expect(screen.getByText(/Timeslot court conflicts are warnings/i)).toBeInTheDocument();
   });
 
   it('does not treat rental slots as external timeslot field conflicts', async () => {
@@ -2136,7 +2143,7 @@ describe('EventForm dirty state', () => {
 
     expect(isValid).toBe(true);
     expect(formRef.current?.getValidationErrors()).toEqual([]);
-    expect(screen.queryByText(/Timeslot field conflicts are warnings/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Timeslot court conflicts are warnings/i)).not.toBeInTheDocument();
   });
 
   it('does not display a fixed end input in generated-end mode', async () => {
@@ -2506,11 +2513,19 @@ describe('EventForm dirty state', () => {
     await waitFor(() => {
       expect(onDirtyStateChange).toHaveBeenCalledWith(false);
     });
+    const capturedConfiguration = formRef.current!.captureCurrentEventConfiguration();
+    expect(capturedConfiguration.draft.staff.pendingInvites).toEqual([{
+      firstName: 'Alex',
+      lastName: 'Host',
+      email: 'assistant@example.com',
+      roles: ['ASSISTANT_HOST'],
+    }]);
+
 
     let thrown: Error | null = null;
     await act(async () => {
       try {
-        await formRef.current?.validatePendingStaffAssignments();
+        await formRef.current?.validatePendingStaffAssignments(capturedConfiguration);
       } catch (error) {
         thrown = error as Error;
       }
@@ -3891,8 +3906,8 @@ describe('EventForm dirty state', () => {
 
     expect(eventDetailsSection).not.toBeNull();
     expect(eventDetailsSection?.textContent).toContain('Required Documents');
-    expect(eventDetailsSection?.textContent).toContain('Resources');
-    expect(divisionSettingsSection?.textContent).not.toContain('Resources');
+    expect(eventDetailsSection?.textContent).toContain('Courts');
+    expect(divisionSettingsSection?.textContent).not.toContain('Courts');
   });
 
   it('shows organization resource selection with zero default resource count for organization events with resources', async () => {
@@ -3927,9 +3942,9 @@ describe('EventForm dirty state', () => {
       expect(onDirtyStateChange).toHaveBeenCalledWith(false);
     });
 
-    expect(screen.getByRole('group', { name: 'Resources' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Count')).toHaveValue('0');
-    expect(screen.getByText('Custom Resources')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Courts' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Court Count')).toHaveValue('0');
+    expect(screen.getByText('Custom Courts')).toBeInTheDocument();
   });
 
   it('defaults organization event creation to host only without assigning officials', async () => {
@@ -4173,7 +4188,7 @@ describe('EventForm dirty state', () => {
     });
 
     expect(apiRequest).toHaveBeenCalledWith('/api/rentals/bookings?organizationId=org_1');
-    expect(screen.getByLabelText('Count')).toHaveValue('0');
+    expect(screen.getByLabelText('Court Count')).toHaveValue('0');
     const firstRentalResource = screen.getByLabelText(/Rental Court - Mar 12, 2026/i);
     const secondRentalResource = screen.getByLabelText(/Rental Court - Mar 13, 2026/i);
     expect(screen.queryByLabelText('Rental Court')).not.toBeInTheDocument();
@@ -4560,7 +4575,7 @@ describe('EventForm dirty state', () => {
       expect(apiRequest).toHaveBeenCalledWith('/api/rentals/bookings?organizationId=org_1');
     });
 
-    expect(screen.getByLabelText('Count')).toBeInTheDocument();
+    expect(screen.getByLabelText('Court Count')).toBeInTheDocument();
 
     await waitFor(() => {
       const scheduleProps = [...mockLeagueFieldsProps].reverse().find((props) => (
@@ -4611,8 +4626,8 @@ describe('EventForm dirty state', () => {
       expect(onDirtyStateChange).toHaveBeenCalledWith(false);
     });
 
-    expect(screen.getByRole('group', { name: 'Resources' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Count')).toHaveValue('1');
+    expect(screen.getByRole('group', { name: 'Courts' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Court Count')).toHaveValue('1');
     expect(screen.getByLabelText('Required Documents')).toBeInTheDocument();
   });
 
@@ -4638,7 +4653,7 @@ describe('EventForm dirty state', () => {
       expect(onDirtyStateChange).toHaveBeenCalledWith(false);
     });
 
-    expect(screen.getByLabelText('Count')).toHaveValue('1');
+    expect(screen.getByLabelText('Court Count')).toHaveValue('1');
   });
 
   it.each(['EVENT', 'LEAGUE', 'TOURNAMENT'] as const)(
@@ -4658,7 +4673,7 @@ describe('EventForm dirty state', () => {
         expect(onDirtyStateChange).toHaveBeenCalledWith(false);
       });
 
-      expect(screen.getByLabelText('Count')).toHaveValue('1');
+      expect(screen.getByLabelText('Court Count')).toHaveValue('1');
     },
   );
 
@@ -4678,8 +4693,8 @@ describe('EventForm dirty state', () => {
     });
 
     const registrationQuestionsHeading = screen.getByText('Registration questions');
-    const customResourcesHeading = screen.getByText('Custom Resources');
-    const resourceCountInput = screen.getByLabelText('Count');
+    const customResourcesHeading = screen.getByText('Custom Courts');
+    const resourceCountInput = screen.getByLabelText('Court Count');
 
     expect(
       Boolean(registrationQuestionsHeading.compareDocumentPosition(customResourcesHeading) & Node.DOCUMENT_POSITION_FOLLOWING),
@@ -4722,7 +4737,7 @@ describe('EventForm dirty state', () => {
         expect(onDirtyStateChange).toHaveBeenCalledWith(false);
       });
 
-      expect(screen.getByLabelText('Count')).toHaveValue('0');
+      expect(screen.getByLabelText('Court Count')).toHaveValue('0');
     },
   );
 
@@ -4746,7 +4761,7 @@ describe('EventForm dirty state', () => {
         expect(onDirtyStateChange).toHaveBeenCalledWith(false);
       });
 
-      expect(screen.getByLabelText('Count')).toHaveValue('1');
+      expect(screen.getByLabelText('Court Count')).toHaveValue('1');
     },
   );
 
@@ -4781,7 +4796,7 @@ describe('EventForm dirty state', () => {
         expect(onDirtyStateChange).toHaveBeenCalledWith(false);
       });
 
-      expect(screen.getByLabelText('Count')).toHaveValue('1');
+      expect(screen.getByLabelText('Court Count')).toHaveValue('1');
 
       fireEvent.change(screen.getByLabelText('Event Type'), {
         target: { value: eventType },
@@ -4789,7 +4804,7 @@ describe('EventForm dirty state', () => {
 
       await waitFor(() => {
         expect(screen.getByLabelText('Event Type')).toHaveValue(eventType);
-        expect(screen.getByLabelText('Count')).toHaveValue('1');
+        expect(screen.getByLabelText('Court Count')).toHaveValue('1');
         expect(getLegacyDraft(formRef).fields).toEqual([
           expect.objectContaining({
             $id: 'local_field_1',

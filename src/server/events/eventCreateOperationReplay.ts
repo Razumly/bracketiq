@@ -2,9 +2,9 @@ import { createHash } from 'crypto';
 import { createId } from '@/lib/id';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import {
-  eventEditorSaveResultSchema,
+  eventEditorCreateResultSchema,
   type CreateEventEditorCommand,
-  type EventEditorSaveResult,
+  type EventEditorCreateResult,
 } from '@/contracts/eventEditor';
 
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
@@ -40,7 +40,7 @@ export type EventCreateOperationClaim =
   })
   | (EventCreateOperationClaimBase & {
     firstClaim: false;
-    result: EventEditorSaveResult | null;
+    result: EventEditorCreateResult | null;
   });
 
 export class EventCreateOperationPayloadMismatchError extends Error {
@@ -88,6 +88,7 @@ export const eventEditorCreateRequestHash = (command: CreateEventEditorCommand):
   createHash('sha256')
     .update(JSON.stringify(stableJsonSafe({
       contractVersion: command.contractVersion,
+      expectedRevisions: command.expectedRevisions,
       draft: command.draft,
       completion: command.completion,
     })))
@@ -112,11 +113,11 @@ const loadOperation = async (
   select: selectOperation,
 });
 
-const parseStoredResult = (row: CreateOperationRow): EventEditorSaveResult => {
+const parseStoredResult = (row: CreateOperationRow): EventEditorCreateResult => {
   if (row.responseJson == null) {
     throw new EventCreateOperationIncompleteError();
   }
-  return eventEditorSaveResultSchema.parse(row.responseJson);
+  return eventEditorCreateResultSchema.parse(row.responseJson);
 };
 
 const assertReplayIdentity = (
@@ -192,10 +193,10 @@ export const claimEventEditorCreateOperation = async (params: {
 export const completeEventEditorCreateOperation = async (params: {
   client: PrismaLike;
   createOperationId: string;
-  result: EventEditorSaveResult;
+  result: EventEditorCreateResult;
   emailDelivery: string;
 }): Promise<void> => {
-  const parsed = eventEditorSaveResultSchema.parse(params.result);
+  const parsed = eventEditorCreateResultSchema.parse(params.result);
   await operationsFor(params.client).update({
     where: { createOperationId: params.createOperationId },
     data: {

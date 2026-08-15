@@ -10,6 +10,7 @@ import {
     hasWeeklyRepeatingTimeSlot,
     WEEKLY_REPEATING_TIME_SLOT_REQUIRED_MESSAGE,
 } from '@/lib/eventScheduling';
+import type { SportResourceLabels } from '@/lib/sportResourceLabels';
 import type { Event, Field, LeagueConfig, Sport } from '@/types';
 
 import type { EventFormValues } from '../formTypes';
@@ -37,6 +38,7 @@ type ScheduleConfigBodyProps = {
     leagueData: LeagueConfig;
     sport?: Sport;
     participantCount: number;
+    resourceLabels: SportResourceLabels;
     leagueSlots: LeagueSlotForm[];
     leagueFieldOptions?: LeagueFieldOption[];
     divisionOptions: DivisionOption[];
@@ -70,6 +72,7 @@ export const ScheduleConfigBody = ({
     leagueData,
     sport,
     participantCount,
+    resourceLabels,
     leagueSlots,
     leagueFieldOptions,
     divisionOptions,
@@ -110,9 +113,10 @@ export const ScheduleConfigBody = ({
                     control={control}
                     render={({ field, fieldState }) => (
                         <FacilityResourceSelector
-                            label="Session Resources"
-                            description="Choose which resources this weekly child session can use."
-                            placeholder={resourceSelectorLoading ? 'Loading resources...' : 'Select one or more resources'}
+                            label={`Session ${resourceLabels.plural}`}
+                            description={`Choose which ${resourceLabels.plural.toLocaleLowerCase()} this weekly child session can use.`}
+                            placeholder={resourceSelectorLoading ? `Loading ${resourceLabels.plural.toLocaleLowerCase()}...` : `Select one or more ${resourceLabels.plural.toLocaleLowerCase()}`}
+                            resourceSingular={resourceLabels.singular}
                             fields={selectedFields}
                             value={Array.isArray(field.value) ? field.value : []}
                             disabled={resourceSelectorLoading || isImmutableField('fieldIds')}
@@ -133,7 +137,7 @@ export const ScheduleConfigBody = ({
             <div className="space-y-4">
                 <AnimatedSection in={isOrganizationManagedEvent}>
                     <Text size="xs" c="dimmed">
-                        Select event resources directly inside each timeslot.
+                        Select event {resourceLabels.plural.toLocaleLowerCase()} directly inside each timeslot.
                     </Text>
                 </AnimatedSection>
 
@@ -141,6 +145,7 @@ export const ScheduleConfigBody = ({
                     leagueData={leagueData}
                     sport={sport}
                     participantCount={participantCount}
+                    resourceLabels={resourceLabels}
                     onLeagueDataChange={onLeagueDataChange}
                     slots={leagueSlots}
                     onAddSlot={onAddSlot}
@@ -162,7 +167,7 @@ export const ScheduleConfigBody = ({
                     showLeagueConfiguration={false}
                     unstyled={Boolean(timeslotMode)}
                     emptyFieldsMessage={isOrganizationManagedEvent
-                        ? 'No resources found. Create a resource on the Organizations page first, then return here to attach weekly availability.'
+                        ? `No ${resourceLabels.plural.toLocaleLowerCase()} found. Create a ${resourceLabels.singular.toLocaleLowerCase()} on the Organizations page first, then return here to attach weekly availability.`
                         : undefined}
                 />
                 {requiresWeeklyRepeatingSlot && !hasWeeklyRepeatingTimeSlot(leagueSlots) ? (

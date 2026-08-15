@@ -4,7 +4,6 @@ import {
     useRef,
 } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import type { FieldErrors } from 'react-hook-form';
 import { useForm } from 'react-hook-form';
 
 import type { EventStaffSnapshot } from '@/lib/eventStaffService';
@@ -17,13 +16,13 @@ import type {
 import { buildEventDraft } from '../../buildEventDraft';
 import type { EventFormValues } from '../../formTypes';
 import type { buildEventFormSchema } from '../../schema';
+import type { PendingStaffInvite } from '../../staffInvites';
 import type { EventFormHandle } from '../../types';
 import { useEventFormSubmissionController } from '../useEventFormSubmissionController';
 
 jest.mock('../../buildEventDraft', () => ({
     buildEventDraft: jest.fn(({ previousEventFieldLocation, source }) => ({
-        $id: source.$id,
-        name: source.name,
+        ...source,
         location: previousEventFieldLocation,
     })),
 }));
@@ -58,7 +57,6 @@ const successfulSchema = {
 
 type HarnessProps = {
     commitDirtyBaseline?: jest.Mock;
-    errors?: FieldErrors<EventFormValues>;
     eventData?: EventFormValues;
     eventValidationSchema?: ReturnType<typeof buildEventFormSchema>;
     formRef: React.RefObject<EventFormHandle | null>;
@@ -71,7 +69,6 @@ type HarnessProps = {
 
 const useSubmissionHarness = ({
     commitDirtyBaseline = jest.fn(),
-    errors = {},
     eventData = buildEventData(),
     eventValidationSchema = successfulSchema,
     formRef,
@@ -104,7 +101,6 @@ const useSubmissionHarness = ({
         assignedActiveOfficialsForStaffing: 1,
         commitDirtyBaseline,
         currentUser: CURRENT_USER,
-        errors,
         eventData: formValues,
         eventValidationSchema,
         fieldCount: 0,
@@ -172,17 +168,18 @@ describe('useEventFormSubmissionController', () => {
 
         expect(Object.keys(formRef.current!).sort()).toEqual([
             'applyCanonicalStaffState',
+            'captureCurrentEventConfiguration',
             'commitDirtyBaseline',
             'getRegistrationQuestionDrafts',
             'getValidationErrors',
             'validate',
             'validatePendingStaffAssignments',
         ]);
-        expect(result.current.buildDraftEvent()).toEqual({
+        expect(result.current.buildDraftEvent()).toEqual(expect.objectContaining({
             $id: 'event_1',
             name: 'Summer Event',
             location: 'Previous Gym',
-        });
+        }));
         expect(mockedBuildEventDraft).toHaveBeenLastCalledWith(expect.objectContaining({
             previousEventFieldLocation: 'Previous Gym',
             source: result.current.formValues,
@@ -194,6 +191,17 @@ describe('useEventFormSubmissionController', () => {
             required: true,
             sortOrder: 4,
         }]);
+        const captured = formRef.current!.captureCurrentEventConfiguration();
+        expect(captured.eventType).toBe('EVENT');
+        expect(captured.draft).toEqual(expect.objectContaining({
+            basics: expect.objectContaining({ name: 'Summer Event' }),
+            registration: expect.objectContaining({
+                questions: [expect.objectContaining({
+                    id: VALID_QUESTION.id,
+                    prompt: 'Emergency contact',
+                })],
+            }),
+        }));
 
         formRef.current?.commitDirtyBaseline();
         await formRef.current?.validatePendingStaffAssignments();
@@ -201,42 +209,58 @@ describe('useEventFormSubmissionController', () => {
         expect(validatePendingStaffAssignments).toHaveBeenCalledTimes(1);
     });
 
-    it('deduplicates schema and React Hook Form failures for the imperative validation report', async () => {
-        const warningSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    it('validates captured staff invitations when live form values mutate during the async check', async () => {
         const formRef = createRef<EventFormHandle>();
-        const eventValidationSchema = {
-            safeParse: jest.fn(() => ({
-                success: false as const,
-                error: {
-                    issues: [{ code: 'custom', path: ['name'], message: 'Name required' }],
-                },
-            })),
-        } as unknown as ReturnType<typeof buildEventFormSchema>;
-        renderHook(() => useSubmissionHarness({
-            errors: {
-                name: { type: 'manual', message: 'Name required' },
-                location: { type: 'manual', message: 'Location required' },
-            },
-            eventValidationSchema,
+        let finishValidation = () => {};
+        const validationPending = new Promise<void>((resolve) => {
+            finishValidation = resolve;
+        });
+        const validatePendingStaffAssignments = jest.fn(() => validationPending);
+        const initialInvite: PendingStaffInvite = {
+            firstName: 'Casey',
+            lastName: 'Ref',
+            email: 'casey@example.com',
+            roles: ['OFFICIAL'],
+        };
+        const { result } = renderHook(() => useSubmissionHarness({
+            eventData: buildEventData({ pendingStaffInvites: [initialInvite] }),
             formRef,
-            trigger: jest.fn().mockResolvedValue(false),
+            validatePendingStaffAssignments,
+        }));
+        const captured = formRef.current!.captureCurrentEventConfiguration();
+
+        const validation = formRef.current!.validatePendingStaffAssignments(captured);
+        act(() => {
+            result.current.setValue('pendingStaffInvites', [{
+                firstName: 'Later',
+                lastName: 'Value',
+                email: 'later@example.com',
+                roles: ['ASSISTANT_HOST'],
+            }]);
+        });
+        finishValidation();
+        await validation;
+
+        expect(validatePendingStaffAssignments).toHaveBeenCalledWith([initialInvite]);
+    });
+
+    it('validates captured current values even when React Hook Form trigger still reports a stale failure', async () => {
+        const formRef = createRef<EventFormHandle>();
+        const trigger = jest.fn().mockResolvedValue(false);
+        renderHook(() => useSubmissionHarness({
+            eventValidationSchema: successfulSchema,
+            formRef,
+            trigger,
         }));
 
-        let valid = true;
+        let valid = false;
         await act(async () => {
             valid = await formRef.current!.validate();
         });
 
-        expect(valid).toBe(false);
-        expect(formRef.current?.getValidationErrors()).toEqual([
-            { path: 'name', message: 'Name required' },
-            { path: 'location', message: 'Location required' },
-        ]);
-        expect(warningSpy).toHaveBeenCalledWith('Event form validation failed.', {
-            errorCount: 2,
-            errors: formRef.current?.getValidationErrors(),
-        });
-        warningSpy.mockRestore();
+        expect(trigger).toHaveBeenCalledTimes(1);
+        expect(valid).toBe(true);
+        expect(formRef.current?.getValidationErrors()).toEqual([]);
     });
 
     it('blocks insufficient official staffing and clears the report after a valid rerender', async () => {

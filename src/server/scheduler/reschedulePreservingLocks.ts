@@ -1,5 +1,5 @@
 import { dateWithMinutesInTimeZone, Schedule } from './Schedule';
-import { ensureEventWindowCoversExplicitTimeSlots } from './scheduleEvent';
+import { assertCanonicalSchedulerTimeSlots } from './timeSlotAvailability';
 import { normalizeTimeZone } from '@/lib/dateUtils';
 import {
   Division,
@@ -738,6 +738,7 @@ const assignMissingTeamOfficials = (
 export const rescheduleEventMatchesPreservingLocks = (
   event: SchedulerEvent,
 ): LockedPreservingRescheduleResult => {
+  assertCanonicalSchedulerTimeSlots(event);
   const allMatches = Object.values(event.matches);
   if (!allMatches.length) {
     return { event, matches: [], warnings: [] };
@@ -748,9 +749,6 @@ export const rescheduleEventMatchesPreservingLocks = (
     event.end = event.scheduleEndConstraint ?? event.end;
   }
   ensureSplitPlayoffTimeSlotCoverage(event);
-  ensureEventWindowCoversExplicitTimeSlots(event, {
-    allowExpansion: openEndedSchedule || !event.scheduleEndConstraint,
-  });
   const schedulingDivisions = schedulingDivisionsForEvent(event);
   const rescheduleEndTime = resolveRescheduleEndTime(event);
 

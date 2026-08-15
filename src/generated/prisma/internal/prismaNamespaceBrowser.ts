@@ -2627,6 +2627,8 @@ export const SportsScalarFieldEnum = {
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
   name: 'name',
+  resourceLabelSingular: 'resourceLabelSingular',
+  resourceLabelPlural: 'resourceLabelPlural',
   usePointsForWin: 'usePointsForWin',
   usePointsForDraw: 'usePointsForDraw',
   usePointsForLoss: 'usePointsForLoss',

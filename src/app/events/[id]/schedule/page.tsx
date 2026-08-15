@@ -83,8 +83,10 @@ import type {
 import { createLeagueScoringConfig } from '@/types/defaults';
 import {
   EVENT_EDITOR_CONTRACT_VERSION,
+  parseCreateEventEditorCommand,
   type CreateEventEditorCommand,
   type EventEditorCreateBootstrap,
+  type EventEditorCreateResult,
   type EventEditorDraft,
   type EventEditorSaveResult,
   type EventEditorSnapshot,
@@ -278,6 +280,7 @@ const sameCreateRequest = (
 ): boolean => (
   left.contractVersion === right.contractVersion
   && left.completion.mode === right.completion.mode
+  && JSON.stringify(left.expectedRevisions) === JSON.stringify(right.expectedRevisions)
   && JSON.stringify(left.draft) === JSON.stringify(right.draft)
 );
 
@@ -351,6 +354,7 @@ function EventScheduleContent() {
   const defaultSport = DEFAULT_SPORT;
 
   const [event, setEvent] = useState<Event | null>(null);
+  const [sportCatalog, setSportCatalog] = useState<Sport[]>([]);
   const [editorSnapshot, setEditorSnapshot] = useState<EventEditorSnapshot | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
   const [changesEvent, setChangesEvent] = useState<Event | null>(null);
@@ -433,6 +437,9 @@ function EventScheduleContent() {
   const [isQrCodeModalOpen, setIsQrCodeModalOpen] = useState(false);
   const isMobile = useMediaQuery('(max-width: 36em)');
   const eventFormRef = useRef<EventFormHandle>(null);
+  const [eventAuthorityCapabilities, setEventAuthorityCapabilities] = useState<
+    EventDetailBootstrapResponse['capabilities'] | null
+  >(null);
   const editorDraftRef = useRef<EventEditorDraft | null>(null);
   const createdEditorEventIdRef = useRef<string | null>(null);
   const [createBootstrap, setCreateBootstrap] = useState<EventEditorCreateBootstrap | null>(null);
@@ -669,22 +676,30 @@ function EventScheduleContent() {
   const isEventOfficial = Boolean(
     user?.$id && eventOfficialIds.includes(user.$id),
   );
+  const hasVerifiedManagementAuthority = (
+    String(activeOrganization?.ownershipStatus ?? '').trim().toUpperCase() === 'CLAIMED'
+  );
   const isOrganizationManager = Boolean(
-    activeOrganization?.viewerCanManageOrganization
-      || (
-        user?.$id
-          && activeOrganization
-          && (
-            activeOrganization.ownerId === user.$id
-            || (activeOrganization.staffMembers ?? []).some((staffMember) => (
-              staffMember.userId === user.$id
-                && !staffMember.invite
-                && hasStaffMemberType(staffMember, ['HOST', 'STAFF'])
-            ))
-          )
+    hasVerifiedManagementAuthority
+      && (
+        activeOrganization?.viewerCanManageOrganization
+        || (
+          user?.$id
+            && activeOrganization
+            && (
+              activeOrganization.ownerId === user.$id
+              || (activeOrganization.staffMembers ?? []).some((staffMember) => (
+                staffMember.userId === user.$id
+                  && !staffMember.invite
+                  && hasStaffMemberType(staffMember, ['HOST', 'STAFF'])
+              ))
+            )
+        )
       ),
   );
-  const canManageEvent = Boolean(isPrimaryHost || isAssistantHost || isOrganizationManager || isRazumlyAdmin);
+  const canManageEvent = eventAuthorityCapabilities?.canEdit ?? Boolean(
+    isPrimaryHost || isAssistantHost || isOrganizationManager || isRazumlyAdmin
+  );
   const isEditingEvent = isTemplateEvent || ((isPreview || isEditParam) && canManageEvent);
   const canEditMatches = Boolean(canManageEvent && isEditingEvent);
   useEffect(() => {
@@ -2777,6 +2792,7 @@ function EventScheduleContent() {
     targetEventId: string,
     normalizedEvent: Event,
   ) => {
+    setEventAuthorityCapabilities(bootstrap.capabilities);
     staffRevisionRef.current = bootstrap.staffRevision;
     applyParticipantSnapshot(
       targetEventId,
@@ -3097,6 +3113,7 @@ function EventScheduleContent() {
     } catch (sportsError) {
       console.error('Failed to pre-load sports for event form:', sportsError);
     }
+    setSportCatalog(sports);
 
     const sportsById = new Map<string, Sport>(
       sports
@@ -4282,7 +4299,8 @@ function EventScheduleContent() {
         setSubmitError('Form is not ready to submit.');
         return null;
       }
-      const isValid = await formApi.validate();
+      const capturedConfiguration = formApi.captureCurrentEventConfiguration();
+      const isValid = await formApi.validate(capturedConfiguration);
       if (!isValid) {
         const validationMessages = Array.from(
           new Set(
@@ -4300,18 +4318,14 @@ function EventScheduleContent() {
         return null;
       }
       try {
-        await formApi.validatePendingStaffAssignments();
+        await formApi.validatePendingStaffAssignments(capturedConfiguration);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Please fix the staff assignments before submitting.';
         setSubmitError(message);
         return null;
       }
 
-      return editorDraftRef.current
-        ? cloneValue(editorDraftRef.current) as EventEditorDraft
-        : editorSnapshot
-          ? cloneValue(editorSnapshot.draft) as EventEditorDraft
-          : null;
+      return cloneValue(capturedConfiguration.draft) as EventEditorDraft;
     },
     [activeTab, editorDraftRef, editorSnapshot, eventFormRef, setSubmitError],
   );
@@ -4383,22 +4397,30 @@ function EventScheduleContent() {
         : null;
       if (effectiveMode === 'CREATE') {
         const pending = pendingCreateCommandRef.current;
-        const bootstrapOperationId = createBootstrap?.createOperationId;
-        if (!pending && !bootstrapOperationId) {
+        const createOperationId = pending?.createOperationId ?? createBootstrap?.createOperationId;
+        const expectedRevisions = createBootstrap?.snapshot
+          ? {
+              editorRevision: createBootstrap.snapshot.editorRevision,
+              staffRevision: createBootstrap.snapshot.staffRevision,
+              scheduleRevision: createBootstrap.snapshot.scheduleState.revision,
+            }
+          : pending?.expectedRevisions;
+        if (!createOperationId || !expectedRevisions) {
           throw new Error('The event editor create session is still loading. Try again.');
         }
-        const candidate: CreateEventEditorCommand = {
+        const candidate = parseCreateEventEditorCommand({
           contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
-          createOperationId: pending?.createOperationId ?? (bootstrapOperationId as string),
+          createOperationId,
+          expectedRevisions,
           draft: contractDraft,
           completion,
-        };
+        });
         command = pending && sameCreateRequest(pending, candidate)
           ? pending
-          : {
+          : parseCreateEventEditorCommand({
               ...candidate,
               createOperationId: pending ? createClientId() : candidate.createOperationId,
-            };
+            });
         pendingCreateCommandRef.current = cloneValue(command) as CreateEventEditorCommand;
       } else {
         if (!scheduleTransition) {
@@ -4412,7 +4434,7 @@ function EventScheduleContent() {
           scheduleTransition,
         };
       }
-      const result = await apiRequest<EventEditorSaveResult>(
+      const result = await apiRequest<EventEditorCreateResult | EventEditorSaveResult>(
         effectiveMode === 'CREATE'
           ? '/api/events/editor'
           : `/api/events/${encodeURIComponent(requestEventId as string)}/editor`,
@@ -5138,10 +5160,6 @@ function EventScheduleContent() {
       }
 
       const completeCreateDraft = editorDraftToLegacyEvent(editorDraft) as unknown as Event;
-      setChangesEvent((prev) => {
-        const base = prev ?? ({} as Event);
-        return { ...base, ...completeCreateDraft };
-      });
 
       const normalizedAffiliateUrl = typeof completeCreateDraft.affiliateUrl === 'string'
         ? completeCreateDraft.affiliateUrl.trim()
@@ -6149,6 +6167,15 @@ function EventScheduleContent() {
             actionError={actionError}
             onActionErrorClose={() => setActionError(null)}
           />
+          {!isCreateMode && eventAuthorityCapabilities?.readOnly ? (
+            <Alert color="gray" title="Read-only event">
+              {eventAuthorityCapabilities.readOnlyReason === 'AUTHENTICATION_REQUIRED'
+                ? 'Sign in with an Event Host or Management Authority account to make changes.'
+                : eventAuthorityCapabilities.readOnlyReason === 'MANAGEMENT_AUTHORITY_UNVERIFIED'
+                  ? 'No verified Management Authority is available. You can view event details, but event operations cannot be changed.'
+                  : 'You can view this event, but only its Event Host or Management Authority can make changes.'}
+            </Alert>
+          ) : null}
 
           {isCreateMode && effectiveTemplatePromptOpen && (
             <Alert color="blue" radius="md" title="Start from template">
@@ -6585,6 +6612,7 @@ function EventScheduleContent() {
       />
       <EventMatchModals
         activeEvent={activeEvent}
+        sportCatalog={sportCatalog}
         activeMatches={activeMatches}
         participantTeams={participantTeams}
         scoreUpdateMatch={scoreUpdateMatch}

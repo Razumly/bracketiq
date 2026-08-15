@@ -23,6 +23,7 @@ import { Trash2, X } from 'lucide-react';
 
 import { parseLocalDateTime } from '@/lib/dateUtils';
 import { getFieldDisplayName } from '@/lib/fieldUtils';
+import { resolveEventResourceLabels } from '@/lib/sportResourceLabels';
 import { getSetScoreState, resolveSetVictoryTarget } from '@/lib/matchSetScoring';
 import { filterValidNextMatchCandidates, validateAndNormalizeBracketGraph, type BracketNode } from '@/server/matches/bracketGraph';
 
@@ -32,6 +33,7 @@ import type {
   EventOfficial,
   EventOfficialPosition,
   Field,
+  Sport,
   Match,
   MatchOfficialAssignment,
   MatchSegment,
@@ -44,6 +46,7 @@ type MatchStatusRules = Pick<ResolvedMatchRules, 'scoringModel' | 'segmentCount'
 
 const EMPTY_MATCHES: Match[] = [];
 const EMPTY_FIELDS: Field[] = [];
+const EMPTY_SPORTS: Sport[] = [];
 const EMPTY_DIVISIONS: Division[] = [];
 const EMPTY_TEAMS: Team[] = [];
 const EMPTY_USERS: UserData[] = [];
@@ -63,6 +66,7 @@ interface MatchEditModalProps {
   tournament?: Event | null;
   allMatches?: Match[];
   fields?: Field[];
+  sports?: Sport[];
   divisions?: Division[];
   teams?: Team[];
   officials?: UserData[];
@@ -507,6 +511,7 @@ export default function MatchEditModal({
   tournament = null,
   allMatches = EMPTY_MATCHES,
   fields = EMPTY_FIELDS,
+  sports = EMPTY_SPORTS,
   divisions = EMPTY_DIVISIONS,
   teams = EMPTY_TEAMS,
   officials = EMPTY_USERS,
@@ -524,11 +529,30 @@ export default function MatchEditModal({
   onSave,
   onDelete,
 }: MatchEditModalProps) {
+  const tournamentSport = tournament?.sport && typeof tournament.sport === 'object'
+    ? tournament.sport
+    : null;
+  const sportsById = useMemo(() => {
+    const catalog = new Map<string, Sport>();
+    sports.forEach((sport) => {
+      if (sport.$id) catalog.set(sport.$id, sport);
+    });
+    // Include an embedded Sport when the modal is rendered without a preloaded catalog.
+    if (tournamentSport?.$id) catalog.set(tournamentSport.$id, tournamentSport);
+    return catalog;
+  }, [sports, tournamentSport]);
   const [startValue, setStartValue] = useState<Date | null>(null);
   const [endValue, setEndValue] = useState<Date | null>(null);
   const [actualStartValue, setActualStartValue] = useState<Date | null>(null);
   const [actualEndValue, setActualEndValue] = useState<Date | null>(null);
   const [fieldId, setFieldId] = useState<string | null>(null);
+  const selectedResourceField = fields.find((field) => getEntityId(field) === fieldId)
+    ?? (match?.field && typeof match.field === 'object' ? match.field : null);
+  const resourceLabels = resolveEventResourceLabels({
+    sportIds: tournament?.sportIds,
+    sportsById,
+    resourceSportIds: selectedResourceField?.sportIds,
+  });
   const [divisionId, setDivisionId] = useState<string | null>(null);
   const [team1Id, setTeam1Id] = useState<string | null>(null);
   const [team2Id, setTeam2Id] = useState<string | null>(null);
@@ -595,7 +619,7 @@ export default function MatchEditModal({
     setEndValue(coerceDate(match.end));
     setActualStartValue(coerceInstantDate(match.actualStart));
     setActualEndValue(coerceInstantDate(match.actualEnd));
-    setFieldId(getEntityId(match.field));
+    setFieldId(normalizeOptionalId(match.fieldId) ?? getEntityId(match.field));
     setDivisionId(typeof match.division === 'string' ? normalizeOptionalId(match.division) : getEntityId(match.division));
     const initialTeam1Id = resolveMatchTeamId(match, 'team1');
     const initialTeam2Id = resolveMatchTeamId(match, 'team2');
@@ -862,17 +886,22 @@ export default function MatchEditModal({
   const fieldOptions = useMemo(
     () =>
       fields.reduce<Array<{ value: string; label: string }>>((acc, field) => {
-        const fieldId = getEntityId(field);
-        if (!fieldId) {
+        const optionFieldId = getEntityId(field);
+        if (!optionFieldId) {
           return acc;
         }
+        const optionLabels = resolveEventResourceLabels({
+          sportIds: tournament?.sportIds,
+          sportsById,
+          resourceSportIds: field.sportIds,
+        });
         acc.push({
-          value: fieldId,
-          label: getFieldDisplayName(field),
+          value: optionFieldId,
+          label: getFieldDisplayName(field, optionLabels.singular),
         });
         return acc;
       }, []),
-    [fields],
+    [fields, sportsById, tournament?.sportIds],
   );
 
   const divisionOptions = useMemo(() => {
@@ -1386,7 +1415,7 @@ export default function MatchEditModal({
 
     if (requiresScheduleFields) {
       if (!fieldId || !startValue || !endValue) {
-        setError('Field, start, and end are required for schedule-created matches.');
+        setError(`${resourceLabels.singular}, start, and end are required for schedule-created matches.`);
         return;
       }
       if (endValue.getTime() <= startValue.getTime()) {
@@ -1737,7 +1766,9 @@ export default function MatchEditModal({
           : draftStatusLabel === 'Cancelled' || draftStatusLabel === 'Forfeit'
             ? 'red'
             : 'gray';
-  const previewFieldLabel = selectedField ? getFieldDisplayName(selectedField) : 'Field not set';
+  const previewFieldLabel = selectedField
+    ? getFieldDisplayName(selectedField, `${resourceLabels.singular} not set`)
+    : `${resourceLabels.singular} not set`;
   const previewSegmentSummary = statusSegments
     .map((segment) => {
       const team1Score = statusTeam1Id ? nonNegativeScore(segment.scores?.[statusTeam1Id]) : 0;
@@ -2029,13 +2060,13 @@ export default function MatchEditModal({
                     </FieldRow>
                   )}
                   {fieldOptions.length > 0 && (
-                    <FieldRow label="Field" required={requiresScheduleFields}>
+                    <FieldRow label={resourceLabels.singular} required={requiresScheduleFields}>
                       <Select
-                        aria-label="Field"
+                        aria-label={resourceLabels.singular}
                         data={fieldOptions}
                         value={fieldId}
                         onChange={setFieldId}
-                        placeholder="Select field"
+                        placeholder={`Select ${resourceLabels.singular.toLocaleLowerCase()}`}
                         clearable
                         size="sm"
                       />

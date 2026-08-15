@@ -1651,7 +1651,7 @@ export default function FieldsTabContent({
     fields,
     facilityFilteredFields,
     rentalListings,
-    setCalendarDate,
+    selectionContextKey: org?.$id ?? '',
     compareRanges,
   });
 

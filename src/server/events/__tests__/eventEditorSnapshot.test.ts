@@ -94,28 +94,36 @@ describe('buildEventEditorSnapshot', () => {
   });
 });
   it('hydrates rental booking slots as immutable create resources', async () => {
+    const rentalItem = {
+      id: 'booking_item_1',
+      bookingId: 'booking_1',
+      organizationId: 'org_1',
+      fieldId: 'field_1',
+      start: new Date('2026-08-09T09:00:00.000Z'),
+      end: new Date('2026-08-09T10:00:00.000Z'),
+      timeZone: 'UTC',
+      requiredTemplateIds: ['template_1'],
+      hostRequiredTemplateIds: [],
+    };
     const client = {
       rentalBookings: {
         findUnique: jest.fn().mockResolvedValue({ id: 'booking_1', organizationId: 'org_1' }),
       },
       rentalBookingItems: {
-        findMany: jest.fn().mockResolvedValue([{
-          id: 'booking_item_1',
-          bookingId: 'booking_1',
-          organizationId: 'org_1',
-          fieldId: 'field_1',
-          start: new Date('2026-08-09T09:00:00.000Z'),
-          end: new Date('2026-08-09T10:00:00.000Z'),
-          timeZone: 'UTC',
-          requiredTemplateIds: ['template_1'],
-          hostRequiredTemplateIds: [],
-        }]),
+        findMany: jest.fn().mockResolvedValue([rentalItem]),
       },
       fields: {
         findMany: jest.fn().mockResolvedValue([{ id: 'field_1', name: 'Court 1', organizationId: 'org_1' }]),
       },
       sports: { findMany: jest.fn().mockResolvedValue([]) },
-      organizations: { findMany: jest.fn().mockResolvedValue([]) },
+      organizations: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'org_1',
+          ownerId: 'owner_1',
+          ownershipStatus: 'CLAIMED',
+        }),
+      },
       eventTemplates: { findMany: jest.fn().mockResolvedValue([]) },
       stripeAccounts: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any;
@@ -135,24 +143,35 @@ describe('buildEventEditorSnapshot', () => {
         scheduledFieldIds: ['field_1'],
       }),
     ]);
+    client.rentalBookingItems.findMany.mockResolvedValue([{
+      ...rentalItem,
+      end: new Date('2026-08-09T10:30:00.000Z'),
+    }]);
+    const changedRentalSnapshot = await loadCreateEventEditorSnapshot({
+      organizationId: 'org_1',
+      rentalBookingId: 'booking_1',
+    }, { client });
+    expect(changedRentalSnapshot.editorRevision).not.toBe(snapshot.editorRevision);
+    expect(changedRentalSnapshot.scheduleState.revision).not.toBe(snapshot.scheduleState.revision);
   });
 
   it('hydrates template source values and resources in create snapshots', async () => {
+    const templateSource = {
+      id: 'template_1',
+      name: 'Template event',
+      description: 'Template description',
+      eventType: 'EVENT',
+      organizationId: 'org_1',
+      location: 'Main Gym',
+      timeZone: 'UTC',
+      noFixedEndDateTime: false,
+      endOffsetMinutesFromEventStart: 60,
+      price: 0,
+      maxParticipants: 4,
+    };
     const client = {
       eventTemplates: {
-        findUnique: jest.fn().mockResolvedValue({
-          id: 'template_1',
-          name: 'Template event',
-          description: 'Template description',
-          eventType: 'EVENT',
-          organizationId: 'org_1',
-          location: 'Main Gym',
-          timeZone: 'UTC',
-          noFixedEndDateTime: false,
-          endOffsetMinutesFromEventStart: 60,
-          price: 0,
-          maxParticipants: 4,
-        }),
+        findUnique: jest.fn().mockResolvedValue(templateSource),
         findMany: jest.fn().mockResolvedValue([]),
       },
       eventTemplateResources: {
@@ -177,7 +196,14 @@ describe('buildEventEditorSnapshot', () => {
       fields: { findMany: jest.fn().mockResolvedValue([]) },
       timeSlots: { findMany: jest.fn().mockResolvedValue([]) },
       sports: { findMany: jest.fn().mockResolvedValue([]) },
-      organizations: { findMany: jest.fn().mockResolvedValue([]) },
+      organizations: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'org_1',
+          ownerId: 'owner_1',
+          ownershipStatus: 'CLAIMED',
+        }),
+      },
       stripeAccounts: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any;
 
@@ -193,6 +219,19 @@ describe('buildEventEditorSnapshot', () => {
       expect.objectContaining({ name: 'Court 1' }),
     ]);
     expect(snapshot.draft.resources.timeSlots).toHaveLength(1);
+    expect(snapshot.editorRevision).not.toBe('new');
+    expect(snapshot.scheduleState.revision).not.toBe('new');
+
+    client.eventTemplates.findUnique.mockResolvedValue({
+      ...templateSource,
+      description: 'Template description changed at the source',
+    });
+    const changedSourceSnapshot = await loadCreateEventEditorSnapshot({
+      organizationId: 'org_1',
+      templateId: 'template_1',
+    }, { client });
+    expect(changedSourceSnapshot.editorRevision).not.toBe(snapshot.editorRevision);
+    expect(changedSourceSnapshot.scheduleState.revision).not.toBe(snapshot.scheduleState.revision);
   });
 
 it('round-trips configured playoff phase rules without treating them as standings overrides', async () => {

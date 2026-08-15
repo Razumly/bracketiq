@@ -74,6 +74,7 @@ type DefaultFieldStateOptions = {
     resolvedOrganizationFields?: Field[] | null;
     resolvedOrganizationId?: string | null;
     isCreateMode: boolean;
+    resourceLabelSingular: string;
 };
 
 type DefaultFieldState = {
@@ -92,6 +93,7 @@ export const buildDefaultFieldState = ({
     resolvedOrganizationFields,
     resolvedOrganizationId,
     isCreateMode,
+    resourceLabelSingular,
 }: DefaultFieldStateOptions): DefaultFieldState => {
     const hostedOrganizationId = (
         (resolvedOrganizationId ?? '')
@@ -135,7 +137,9 @@ export const buildDefaultFieldState = ({
         || (activeEditingEvent?.timeSlots ?? []).some(isRentalLockedTimeSlot)
     );
     const activeLocalFieldsAreOnlyPlaceholders = activeEventLocalFields.length > 0
-        && activeEventLocalFields.every((field, index) => isGeneratedLocalFieldPlaceholder(field, index));
+        && activeEventLocalFields.every((field, index) => (
+            isGeneratedLocalFieldPlaceholder(field, index, resourceLabelSingular)
+        ));
     const shouldKeepActiveLocalFieldDefaults = activeEventLocalFields.length > 0 && (
         !hostedOrganizationId
         || !isCreateMode
@@ -189,7 +193,7 @@ export const buildDefaultFieldState = ({
         if ((allowsDefaultLocalFields || !hostedOrganizationId) && defaultFieldCount > 0) {
             return Array.from({ length: defaultFieldCount }, (_, idx) => ({
                 $id: createClientId(),
-                name: `Field ${idx + 1}`,
+                name: `${resourceLabelSingular} ${idx + 1}`,
                 location: defaultFieldLocation,
             } as Field));
         }

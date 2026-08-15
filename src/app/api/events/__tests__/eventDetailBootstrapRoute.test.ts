@@ -22,19 +22,15 @@ const getEventMock = jest.fn();
 const getParticipantsMock = jest.fn();
 const getTeamComplianceMock = jest.fn();
 const getUserComplianceMock = jest.fn();
-const getOptionalSessionMock = jest.fn();
-const canManageEventMock = jest.fn();
 const loadLockedEventStaffSnapshotMock = jest.fn();
+const assertCanViewEventScheduleMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
-jest.mock('@/lib/permissions', () => ({
-  getOptionalSession: (...args: unknown[]) => getOptionalSessionMock(...args),
-}));
-jest.mock('@/server/accessControl', () => ({
-  canManageEvent: (...args: unknown[]) => canManageEventMock(...args),
-}));
 jest.mock('@/server/events/eventStaffReconciliation', () => ({
   loadLockedEventStaffSnapshot: (...args: unknown[]) => loadLockedEventStaffSnapshotMock(...args),
+}));
+jest.mock('@/server/eventVisibility', () => ({
+  assertCanViewEventSchedule: (...args: unknown[]) => assertCanViewEventScheduleMock(...args),
 }));
 jest.mock('@/server/repositories/events', () => ({
   loadEventWithRelations: (...args: unknown[]) => loadEventWithRelationsMock(...args),
@@ -64,6 +60,7 @@ const requestFor = (query = '') => new NextRequest(`http://localhost/api/events/
 describe('GET /api/events/[eventId]/detail', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    assertCanViewEventScheduleMock.mockResolvedValue(undefined);
     getEventMock.mockResolvedValue(okJson({
       id: 'event_1',
       name: 'Event One',
@@ -77,6 +74,16 @@ describe('GET /api/events/[eventId]/detail', () => {
       staffInvites: [{ id: 'invite_1', eventId: 'event_1', type: 'STAFF' }],
       assistantHostIds: [],
       organizationId: null,
+      capabilities: {
+        canEdit: true,
+        canManageStaff: true,
+        canDelegateHost: true,
+        readOnly: false,
+        readOnlyReason: null,
+        managementAuthority: null,
+        eventHostId: 'host_1',
+        viewerIsEventHost: true,
+      },
     }));
     getParticipantsMock.mockResolvedValue(okJson({
       participants: {
@@ -104,8 +111,6 @@ describe('GET /api/events/[eventId]/detail', () => {
       teams: [{ teamId: 'team_1', teamName: 'Team One' }],
     }));
     getUserComplianceMock.mockResolvedValue(okJson({ users: [] }));
-    getOptionalSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
-    canManageEventMock.mockResolvedValue(true);
     loadLockedEventStaffSnapshotMock.mockResolvedValue({
       revision: 'staff_revision_1',
       staffInvites: [{ id: 'invite_1', eventId: 'event_1', type: 'STAFF' }],
@@ -165,6 +170,10 @@ describe('GET /api/events/[eventId]/detail', () => {
     expect(payload.timeSlots.map((slot: any) => slot.id)).toEqual(['slot_1']);
     expect(payload.leagueScoringConfig.id).toBe('league_config_1');
     expect(payload.staffInvites).toHaveLength(1);
+    expect(payload.capabilities).toEqual(expect.objectContaining({
+      canEdit: true,
+      readOnly: false,
+    }));
     expect(payload.staffRevision).toBe('staff_revision_1');
     expect(payload.event).toEqual(expect.objectContaining({
       assistantHostIds: ['assistant_canonical'],
@@ -194,17 +203,49 @@ describe('GET /api/events/[eventId]/detail', () => {
     expect(getUserComplianceMock).not.toHaveBeenCalled();
   });
 
-  it('auto-loads management data only when the viewer can manage the event', async () => {
-    canManageEventMock.mockResolvedValueOnce(false);
+  it('projects read-only capabilities and omits management data when the viewer lacks authority', async () => {
+    getEventMock.mockResolvedValueOnce(okJson({
+      id: 'event_1',
+      name: 'Event One',
+      hostId: 'host_1',
+      assistantHostIds: [],
+      organizationId: 'org_1',
+      teamSignup: true,
+      fieldIds: ['field_2', 'field_1'],
+      timeSlotIds: ['slot_1'],
+      leagueScoringConfigId: 'league_config_1',
+      staffInvites: [{ id: 'invite_private', email: 'staff@example.com', type: 'STAFF' }],
+      capabilities: {
+        canEdit: false,
+        canManageStaff: false,
+        canDelegateHost: false,
+        readOnly: true,
+        readOnlyReason: 'NOT_AUTHORIZED',
+        managementAuthority: {
+          type: 'ORGANIZATION',
+          organizationId: 'org_1',
+          ownerUserId: 'owner_1',
+        },
+        eventHostId: 'host_1',
+        viewerIsEventHost: false,
+      },
+    }));
 
     const response = await GET(requestFor('?manage=auto'), { params: Promise.resolve({ eventId: 'event_1' }) });
     const payload = await response.json();
 
     expect(response.status).toBe(200);
+    expect(payload.capabilities).toEqual(expect.objectContaining({
+      canEdit: false,
+      readOnly: true,
+      readOnlyReason: 'NOT_AUTHORIZED',
+    }));
     expect(payload.teamCompliance).toBeNull();
-    expect(getParticipantsMock).toHaveBeenCalledTimes(1);
+    expect(payload.staffInvites).toEqual([]);
+    expect(payload.event).not.toHaveProperty('staffInvites');
     expect(getParticipantsMock.mock.calls[0][0].nextUrl.searchParams.get('manage')).toBeNull();
     expect(getTeamComplianceMock).not.toHaveBeenCalled();
+    expect(loadLockedEventStaffSnapshotMock).not.toHaveBeenCalled();
   });
 
   it.each(['PRIVATE', 'DRAFT', 'UNPUBLISHED', 'TEMPLATE'])(
@@ -231,7 +272,7 @@ describe('GET /api/events/[eventId]/detail', () => {
         assistantHostIds: [],
         organizationId: null,
       });
-      getOptionalSessionMock.mockResolvedValueOnce(null);
+      assertCanViewEventScheduleMock.mockRejectedValueOnce(new Response('Forbidden', { status: 403 }));
 
       const response = await GET(requestFor(), { params: Promise.resolve({ eventId: 'event_1' }) });
       const payload = await response.json();

@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import { Button, Group, Paper, Select, Stack, Tabs, Text, type SelectProps } from '@mantine/core';
 import type { View } from 'react-big-calendar';
 
+import { GENERIC_RESOURCE_LABELS, getSportResourceLabels } from '@/lib/sportResourceLabels';
 import type { Event, Field, Match, Team, UserData } from '@/types';
 import LeagueCalendarView from '../components/LeagueCalendarView';
 import {
@@ -110,6 +111,14 @@ export default function ScheduleTabPanel({
     ? participantTeams
     : (Array.isArray(activeEvent?.teams) ? activeEvent.teams as Team[] : []);
   const officials = Array.isArray(activeEvent?.officials) ? activeEvent.officials as UserData[] : [];
+  const eventSport = activeEvent?.sport && typeof activeEvent.sport === 'object'
+    ? activeEvent.sport
+    : null;
+  const resourceLabels = activeEvent?.sportIds?.length === 1
+    && typeof eventSport?.resourceLabelSingular === 'string'
+    && typeof eventSport.resourceLabelPlural === 'string'
+    ? getSportResourceLabels(eventSport)
+    : GENERIC_RESOURCE_LABELS;
 
   return (
     <Tabs.Panel value="schedule" pt="md">
@@ -134,6 +143,7 @@ export default function ScheduleTabPanel({
             matches={weeklyOccurrenceMatches}
             teams={[]}
             fields={fields}
+            resourceLabels={resourceLabels}
             officials={[]}
             eventStart={activeEvent?.start}
             eventEnd={activeEvent?.end ?? undefined}
@@ -208,7 +218,7 @@ export default function ScheduleTabPanel({
             <Paper withBorder radius="md" p="xl" ta="center">
               <Stack gap="sm" align="center">
                 <Text>
-                  No schedule has been built. Build a schedule from the current divisions, fields, availability, and team capacity.
+                  No schedule has been built. Build a schedule from the current divisions, {resourceLabels.plural.toLocaleLowerCase()}, availability, and team capacity.
                 </Text>
                 {showBuildScheduleAction && (
                   <Button
@@ -229,6 +239,7 @@ export default function ScheduleTabPanel({
               matches={scheduleMatchesForDisplay}
               teams={teams}
               fields={fields}
+              resourceLabels={resourceLabels}
               officials={officials}
               eventStart={activeEvent?.start}
               eventEnd={activeEvent?.end ?? undefined}

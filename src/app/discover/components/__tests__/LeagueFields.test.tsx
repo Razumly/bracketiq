@@ -1,18 +1,18 @@
-import { fireEvent, screen } from '@testing-library/react';
-import LeagueFields, { LeagueSlotForm } from '../LeagueFields';
-import { renderWithMantine } from '../../../../../test/utils/renderWithMantine';
-import type { Field } from '@/types';
+import { fireEvent, screen } from "@testing-library/react";
+import LeagueFields, { LeagueSlotForm } from "../LeagueFields";
+import { renderWithMantine } from "../../../../../test/utils/renderWithMantine";
+import type { Field } from "@/types";
 
 const field: Field = {
-  $id: 'field_1',
-  name: 'Court A',
-  location: '',
+  $id: "field_1",
+  name: "Court A",
+  location: "",
   lat: 0,
   long: 0,
 };
 
 const baseSlot: LeagueSlotForm = {
-  key: 'slot-1',
+  key: "slot-1",
   scheduledFieldId: field.$id,
   dayOfWeek: 1,
   daysOfWeek: [1],
@@ -26,15 +26,17 @@ const baseSlot: LeagueSlotForm = {
 const noop = () => {};
 
 const getLabeledInput = (label: RegExp): HTMLElement => {
-  const input = screen.getAllByLabelText(label).find((element) => element.tagName === 'INPUT');
+  const input = screen
+    .getAllByLabelText(label)
+    .find((element) => element.tagName === "INPUT");
   if (!input) {
     throw new Error(`Expected an input for label ${String(label)}.`);
   }
   return input as HTMLElement;
 };
 
-describe('LeagueFields', () => {
-  it('converts selected start time option to minutes when updating slot', () => {
+describe("LeagueFields", () => {
+  it("converts selected start time option to minutes when updating slot", () => {
     const onUpdateSlot = jest.fn();
 
     renderWithMantine(
@@ -58,12 +60,15 @@ describe('LeagueFields', () => {
 
     const startTimeInput = getLabeledInput(/Start Time/i);
     fireEvent.click(startTimeInput);
-    fireEvent.click(screen.getAllByText('10:15 AM')[0]);
+    fireEvent.click(screen.getAllByText("10:15 AM")[0]);
 
-    expect(onUpdateSlot).toHaveBeenCalledWith(0, expect.objectContaining({ startTimeMinutes: 615 }));
+    expect(onUpdateSlot).toHaveBeenCalledWith(
+      0,
+      expect.objectContaining({ startTimeMinutes: 615 }),
+    );
   });
 
-  it('updates days of week as a multi-select', () => {
+  it("updates days of week as a multi-select", () => {
     const onUpdateSlot = jest.fn();
 
     renderWithMantine(
@@ -87,7 +92,7 @@ describe('LeagueFields', () => {
 
     const daysInput = getLabeledInput(/Days of Week/i);
     fireEvent.click(daysInput);
-    fireEvent.click(screen.getByText('Thursday'));
+    fireEvent.click(screen.getByText("Thursday"));
 
     expect(onUpdateSlot).toHaveBeenCalledWith(
       0,
@@ -95,7 +100,7 @@ describe('LeagueFields', () => {
     );
   });
 
-  it('toggles repeating flag via switch', () => {
+  it("toggles repeating flag via switch", () => {
     const onUpdateSlot = jest.fn();
 
     renderWithMantine(
@@ -120,21 +125,29 @@ describe('LeagueFields', () => {
     const switchInput = screen.getByLabelText(/Repeats weekly/i);
     fireEvent.click(switchInput);
 
-    expect(onUpdateSlot).toHaveBeenCalledWith(0, expect.objectContaining({ repeating: false }));
+    expect(onUpdateSlot).toHaveBeenCalledWith(
+      0,
+      expect.objectContaining({ repeating: false }),
+    );
   });
 
-  it('renders only the slot type owned by a single-style Simple Setup page', () => {
+  it("renders only the slot type owned by a single-style Simple Setup page", () => {
     const fixedSlot: LeagueSlotForm = {
       ...baseSlot,
-      key: 'slot-2',
+      key: "slot-2",
       repeating: false,
-      startDate: '2026-08-10T09:00:00',
-      endDate: '2026-08-10T10:00:00',
+      startDate: "2026-08-10T09:00:00",
+      endDate: "2026-08-10T10:00:00",
     };
 
     const { unmount } = renderWithMantine(
       <LeagueFields
-        leagueData={{ gamesPerOpponent: 1, includePlayoffs: false, usesSets: false, restTimeMinutes: 0 }}
+        leagueData={{
+          gamesPerOpponent: 1,
+          includePlayoffs: false,
+          usesSets: false,
+          restTimeMinutes: 0,
+        }}
         onLeagueDataChange={noop}
         slots={[baseSlot, fixedSlot]}
         onAddSlot={noop}
@@ -147,15 +160,22 @@ describe('LeagueFields', () => {
       />,
     );
 
-    expect(screen.getByRole('heading', { name: 'Weekly Timeslots' })).toBeInTheDocument();
-    expect(screen.getByText('Timeslot #1')).toBeInTheDocument();
-    expect(screen.queryByText('Timeslot #2')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Repeats weekly')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Weekly Timeslots" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Timeslot #1")).toBeInTheDocument();
+    expect(screen.queryByText("Timeslot #2")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Repeats weekly")).not.toBeInTheDocument();
 
     unmount();
     renderWithMantine(
       <LeagueFields
-        leagueData={{ gamesPerOpponent: 1, includePlayoffs: false, usesSets: false, restTimeMinutes: 0 }}
+        leagueData={{
+          gamesPerOpponent: 1,
+          includePlayoffs: false,
+          usesSets: false,
+          restTimeMinutes: 0,
+        }}
         onLeagueDataChange={noop}
         slots={[baseSlot, fixedSlot]}
         onAddSlot={noop}
@@ -168,25 +188,32 @@ describe('LeagueFields', () => {
       />,
     );
 
-    expect(screen.getByRole('heading', { name: 'One-time Timeslots' })).toBeInTheDocument();
-    expect(screen.queryByText('Timeslot #1')).not.toBeInTheDocument();
-    expect(screen.getByText('Timeslot #2')).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "One-time Timeslots" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Timeslot #1")).not.toBeInTheDocument();
+    expect(screen.getByText("Timeslot #2")).toBeInTheDocument();
   });
 
-  it('groups mixed timeslots and creates the requested slot type', () => {
+  it("groups mixed timeslots and creates the requested slot type", () => {
     const onAddSlot = jest.fn();
     renderWithMantine(
       <LeagueFields
-        leagueData={{ gamesPerOpponent: 1, includePlayoffs: false, usesSets: false, restTimeMinutes: 0 }}
+        leagueData={{
+          gamesPerOpponent: 1,
+          includePlayoffs: false,
+          usesSets: false,
+          restTimeMinutes: 0,
+        }}
         onLeagueDataChange={noop}
         slots={[
           baseSlot,
           {
             ...baseSlot,
-            key: 'slot-2',
+            key: "slot-2",
             repeating: false,
-            startDate: '2026-08-10T09:00:00',
-            endDate: '2026-08-10T10:00:00',
+            startDate: "2026-08-10T09:00:00",
+            endDate: "2026-08-10T10:00:00",
           },
         ]}
         onAddSlot={onAddSlot}
@@ -199,25 +226,36 @@ describe('LeagueFields', () => {
       />,
     );
 
-    expect(screen.getByText('Weekly repeating timeslots')).toBeInTheDocument();
-    expect(screen.getByText('One-time timeslots')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Add Weekly Timeslot' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add One-time Timeslot' }));
+    expect(screen.getByText("Weekly repeating timeslots")).toBeInTheDocument();
+    expect(screen.getByText("One-time timeslots")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add Weekly Timeslot" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add One-time Timeslot" }),
+    );
     expect(onAddSlot).toHaveBeenNthCalledWith(1, true);
     expect(onAddSlot).toHaveBeenNthCalledWith(2, false);
   });
 
-  it('shows fixed-window resource assignment without editable time controls or an outer paper', () => {
+  it("shows fixed-window resource assignment without editable time controls or an outer paper", () => {
     const { container } = renderWithMantine(
       <LeagueFields
-        leagueData={{ gamesPerOpponent: 1, includePlayoffs: false, usesSets: false, restTimeMinutes: 0 }}
+        leagueData={{
+          gamesPerOpponent: 1,
+          includePlayoffs: false,
+          usesSets: false,
+          restTimeMinutes: 0,
+        }}
         onLeagueDataChange={noop}
-        slots={[{
-          ...baseSlot,
-          repeating: false,
-          startDate: '2026-08-10T09:00:00',
-          endDate: '2026-08-10T10:00:00',
-        }]}
+        slots={[
+          {
+            ...baseSlot,
+            repeating: false,
+            startDate: "2026-08-10T09:00:00",
+            endDate: "2026-08-10T10:00:00",
+          },
+        ]}
         onAddSlot={noop}
         onUpdateSlot={noop}
         onRemoveSlot={noop}
@@ -228,15 +266,23 @@ describe('LeagueFields', () => {
       />,
     );
 
-    expect(screen.getByRole('heading', { name: 'Fixed event window' })).toBeInTheDocument();
-    expect(screen.getByText(/updates automatically when the event date or time changes/i)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Add .*Timeslot/i })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Repeats weekly')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Start Date')).not.toBeInTheDocument();
-    expect(container.querySelectorAll('.mantine-Paper-root')).toHaveLength(0);
+    expect(
+      screen.getByRole("heading", { name: "Fixed event window" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /updates automatically when the event date or time changes/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Add .*Timeslot/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Repeats weekly")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Start Date")).not.toBeInTheDocument();
+    expect(container.querySelectorAll(".mantine-Paper-root")).toHaveLength(0);
   });
 
-  it('renders conflict warning when conflicts are present', () => {
+  it("renders conflict warning when conflicts are present", () => {
     renderWithMantine(
       <LeagueFields
         leagueData={{
@@ -253,14 +299,14 @@ describe('LeagueFields', () => {
             conflicts: [
               {
                 schedule: {
-                  $id: 'slot-1',
+                  $id: "slot-1",
                   repeating: true,
-                  startDate: '2026-03-18T00:00:00',
-                  endDate: '2026-03-25T00:00:00',
+                  startDate: "2026-03-18T00:00:00",
+                  endDate: "2026-03-25T00:00:00",
                   startTimeMinutes: 9 * 60,
                   endTimeMinutes: 17 * 60,
                 } as any,
-                event: { $id: 'evt_1', name: 'Other Event' } as any,
+                event: { $id: "evt_1", name: "Other Event" } as any,
               },
             ],
           },
@@ -273,36 +319,40 @@ describe('LeagueFields', () => {
       />,
     );
 
-    expect(screen.getByText(/Field conflict warning/i)).toBeInTheDocument();
-    expect(screen.getByText(/scheduler will avoid the overlap/i)).toBeInTheDocument();
+    expect(screen.getByText(/Resource conflict warning/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/scheduler will avoid the overlap/i),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Other Event/)).toBeInTheDocument();
-    expect(screen.getByText(/9:00 AM-5:00 PM overlaps this slot/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/9:00 AM-5:00 PM overlaps this slot/i),
+    ).toBeInTheDocument();
   });
 
-  it('groups weekly slot resources by facility and lets managers select another resource', () => {
+  it("groups weekly slot resources by facility and lets managers select another resource", () => {
     const onUpdateSlot = jest.fn();
     const annexField: Field = {
-      $id: 'field_2',
-      name: 'Annex Court',
-      location: 'Annex Gym',
+      $id: "field_2",
+      name: "Annex Court",
+      location: "Annex Gym",
       lat: 0,
       long: 0,
-      facilityId: 'facility_annex',
+      facilityId: "facility_annex",
       facility: {
-        $id: 'facility_annex',
-        organizationId: 'org_1',
-        name: 'Annex Facility',
-        location: 'Annex Gym',
+        $id: "facility_annex",
+        organizationId: "org_1",
+        name: "Annex Facility",
+        location: "Annex Gym",
       } as any,
     };
     const mainField: Field = {
       ...field,
-      facilityId: 'facility_main',
+      facilityId: "facility_main",
       facility: {
-        $id: 'facility_main',
-        organizationId: 'org_1',
-        name: 'Main Facility',
-        location: 'Main Gym',
+        $id: "facility_main",
+        organizationId: "org_1",
+        name: "Main Facility",
+        location: "Main Gym",
       } as any,
     };
 
@@ -316,7 +366,9 @@ describe('LeagueFields', () => {
           restTimeMinutes: 0,
         }}
         onLeagueDataChange={noop}
-        slots={[{ ...baseSlot, scheduledFieldId: undefined, scheduledFieldIds: [] }]}
+        slots={[
+          { ...baseSlot, scheduledFieldId: undefined, scheduledFieldIds: [] },
+        ]}
         onAddSlot={noop}
         onUpdateSlot={onUpdateSlot}
         onRemoveSlot={noop}
@@ -325,374 +377,32 @@ describe('LeagueFields', () => {
       />,
     );
 
-    expect(screen.getByText('Main Facility')).toBeInTheDocument();
-    expect(screen.getByText('Annex Facility')).toBeInTheDocument();
+    expect(screen.getByText("Main Facility")).toBeInTheDocument();
+    expect(screen.getByText("Annex Facility")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Annex Court/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Annex Court/i }));
 
     expect(onUpdateSlot).toHaveBeenCalledWith(
       0,
       expect.objectContaining({
-        scheduledFieldId: 'field_2',
-        scheduledFieldIds: ['field_2'],
+        scheduledFieldId: "field_2",
+        scheduledFieldIds: ["field_2"],
       }),
     );
   });
 
-  it('shows an error when a selected rental does not match a non-empty timeslot window', () => {
+  it("shows an error when a selected rental does not match a non-empty timeslot window", () => {
     const onUpdateSlot = jest.fn();
     const rentalField: Field = {
       ...field,
-      $id: 'rental_field_1',
-      name: 'Example Club Court 1',
-      facilityId: 'facility_rental',
+      $id: "rental_field_1",
+      name: "Example Club Court 1",
+      facilityId: "facility_rental",
       facility: {
-        $id: 'facility_rental',
-        organizationId: 'rental_org',
-        name: 'Example Clubhouse',
-        location: '800 Waterfront Way',
-      } as any,
-    };
-
-    renderWithMantine(
-      <LeagueFields
-        leagueData={{
-          gamesPerOpponent: 1,
-          includePlayoffs: false,
-          usesSets: false,
-          matchDurationMinutes: 60,
-          restTimeMinutes: 0,
-        }}
-        onLeagueDataChange={noop}
-        slots={[{
-          ...baseSlot,
-          scheduledFieldId: field.$id,
-          scheduledFieldIds: [field.$id],
-          repeating: true,
-        }]}
-        onAddSlot={noop}
-        onUpdateSlot={onUpdateSlot}
-        onRemoveSlot={noop}
-        fields={[field, rentalField]}
-        fieldsLoading={false}
-        fieldOptions={[{
-          value: 'rental:booking_item_1',
-          fieldId: 'rental_field_1',
-          label: 'Example Club Court 1 - Jun 24, 2026 5:30 AM-11:00 AM',
-          rentalBookingId: 'rental_booking_1',
-          rentalBookingItemId: 'booking_item_1',
-          rentalStart: '2026-06-24T05:30:00',
-          rentalEnd: '2026-06-24T11:00:00',
-          rentalTimeZone: 'America/Los_Angeles',
-          rentalPriceCents: 27500,
-        }]}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: /Example Club Court 1 - Jun 24/i }));
-
-    expect(onUpdateSlot).toHaveBeenCalledWith(
-      0,
-      expect.objectContaining({
-        error: expect.stringContaining('This rental resource is only available for 06/24/2026 5:30 AM - 11:00 AM'),
-      }),
-    );
-    expect(onUpdateSlot).not.toHaveBeenCalledWith(
-      0,
-      expect.objectContaining({
-        scheduledFieldId: 'rental_field_1',
-        sourceType: 'RENTAL_BOOKING',
-      }),
-    );
-  });
-
-  it('sets an empty timeslot to the rental window when selecting a rental resource', () => {
-    const onUpdateSlot = jest.fn();
-    const rentalField: Field = {
-      ...field,
-      $id: 'rental_field_1',
-      name: 'Example Club Court 1',
-      facilityId: 'facility_rental',
-      facility: {
-        $id: 'facility_rental',
-        organizationId: 'rental_org',
-        name: 'Example Clubhouse',
-        location: '800 Waterfront Way',
-      } as any,
-    };
-
-    renderWithMantine(
-      <LeagueFields
-        leagueData={{
-          gamesPerOpponent: 1,
-          includePlayoffs: false,
-          usesSets: false,
-          matchDurationMinutes: 60,
-          restTimeMinutes: 0,
-        }}
-        onLeagueDataChange={noop}
-        slots={[{
-          ...baseSlot,
-          scheduledFieldId: undefined,
-          scheduledFieldIds: [],
-          repeating: true,
-        }]}
-        onAddSlot={noop}
-        onUpdateSlot={onUpdateSlot}
-        onRemoveSlot={noop}
-        fields={[rentalField]}
-        fieldsLoading={false}
-        fieldOptions={[{
-          value: 'rental:booking_item_1',
-          fieldId: 'rental_field_1',
-          label: 'Example Club Court 1 - Jun 24, 2026 5:30 AM-11:00 AM',
-          rentalBookingId: 'rental_booking_1',
-          rentalBookingItemId: 'booking_item_1',
-          rentalStart: '2026-06-24T05:30:00',
-          rentalEnd: '2026-06-24T11:00:00',
-          rentalTimeZone: 'America/Los_Angeles',
-          rentalPriceCents: 27500,
-        }]}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: /Example Club Court 1 - Jun 24/i }));
-
-    expect(onUpdateSlot).toHaveBeenCalledWith(
-      0,
-      expect.objectContaining({
-        scheduledFieldId: 'rental_field_1',
-        scheduledFieldIds: ['rental_field_1'],
-        sourceType: 'RENTAL_BOOKING',
-        rentalBookingId: 'rental_booking_1',
-        rentalBookingItemId: 'booking_item_1',
-        rentalLocked: true,
-        repeating: false,
-        dayOfWeek: 2,
-        daysOfWeek: [2],
-        startDate: '2026-06-24T05:30:00',
-        endDate: '2026-06-24T11:00:00',
-        startTimeMinutes: 330,
-        endTimeMinutes: 660,
-        price: 27500,
-      }),
-    );
-    expect(onUpdateSlot).not.toHaveBeenCalledWith(
-      0,
-      expect.objectContaining({
-        error: expect.stringContaining('This rental resource is only available'),
-      }),
-    );
-  });
-
-  it('shows rental window mismatch errors next to the resource picker', () => {
-    const rentalMismatchError = 'This rental resource is only available for 06/24/2026 5:30 AM - 11:00 AM. Update this timeslot to match the rental before selecting it.';
-
-    renderWithMantine(
-      <LeagueFields
-        leagueData={{
-          gamesPerOpponent: 1,
-          includePlayoffs: false,
-          usesSets: false,
-          matchDurationMinutes: 60,
-          restTimeMinutes: 0,
-        }}
-        onLeagueDataChange={noop}
-        slots={[{
-          ...baseSlot,
-          scheduledFieldId: undefined,
-          scheduledFieldIds: [],
-          error: rentalMismatchError,
-        }]}
-        onAddSlot={noop}
-        onUpdateSlot={noop}
-        onRemoveSlot={noop}
-        fields={[field]}
-        fieldsLoading={false}
-      />,
-    );
-
-    expect(screen.getAllByText(rentalMismatchError)).toHaveLength(1);
-  });
-
-  it('locks a matching one-time slot to the selected rental booking item window', () => {
-    const onUpdateSlot = jest.fn();
-    const rentalField: Field = {
-      ...field,
-      $id: 'rental_field_1',
-      name: 'Example Club Court 1',
-      facilityId: 'facility_rental',
-      facility: {
-        $id: 'facility_rental',
-        organizationId: 'rental_org',
-        name: 'Example Clubhouse',
-        location: '800 Waterfront Way',
-      } as any,
-    };
-
-    renderWithMantine(
-      <LeagueFields
-        leagueData={{
-          gamesPerOpponent: 1,
-          includePlayoffs: false,
-          usesSets: false,
-          matchDurationMinutes: 60,
-          restTimeMinutes: 0,
-        }}
-        onLeagueDataChange={noop}
-        slots={[{
-          ...baseSlot,
-          scheduledFieldId: undefined,
-          scheduledFieldIds: [],
-          repeating: false,
-          dayOfWeek: 2,
-          daysOfWeek: [2],
-          startDate: '2026-06-24T05:30:00',
-          endDate: '2026-06-24T11:00:00',
-          startTimeMinutes: 330,
-          endTimeMinutes: 660,
-        }]}
-        onAddSlot={noop}
-        onUpdateSlot={onUpdateSlot}
-        onRemoveSlot={noop}
-        fields={[rentalField]}
-        fieldsLoading={false}
-        fieldOptions={[{
-          value: 'rental:booking_item_1',
-          fieldId: 'rental_field_1',
-          label: 'Example Club Court 1 - Jun 24, 2026 5:30 AM-11:00 AM',
-          rentalBookingId: 'rental_booking_1',
-          rentalBookingItemId: 'booking_item_1',
-          rentalStart: '2026-06-24T05:30:00',
-          rentalEnd: '2026-06-24T11:00:00',
-          rentalTimeZone: 'America/Los_Angeles',
-          rentalPriceCents: 27500,
-        }]}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: /Example Club Court 1 - Jun 24/i }));
-
-    expect(onUpdateSlot).toHaveBeenCalledWith(
-      0,
-      expect.objectContaining({
-        scheduledFieldId: 'rental_field_1',
-        scheduledFieldIds: ['rental_field_1'],
-        sourceType: 'RENTAL_BOOKING',
-        rentalBookingId: 'rental_booking_1',
-        rentalBookingItemId: 'booking_item_1',
-        rentalLocked: true,
-        repeating: false,
-        dayOfWeek: 2,
-        daysOfWeek: [2],
-        startDate: '2026-06-24T05:30:00',
-        endDate: '2026-06-24T11:00:00',
-        startTimeMinutes: 330,
-        endTimeMinutes: 660,
-        price: 27500,
-      }),
-    );
-  });
-
-  it('allows adding resources to a rental-locked readonly slot when resource edits are explicitly allowed', () => {
-    const onUpdateSlot = jest.fn();
-    const rentalField: Field = {
-      ...field,
-      $id: 'rental_field_1',
-      name: 'Example Club Court 1',
-      facilityId: 'facility_rental',
-      facility: {
-        $id: 'facility_rental',
-        organizationId: 'rental_org',
-        name: 'Example Clubhouse',
-        location: '800 Waterfront Way',
-      } as any,
-    };
-    const extraField: Field = {
-      ...field,
-      $id: 'field_2',
-      name: 'Court B',
-    };
-
-    renderWithMantine(
-      <LeagueFields
-        leagueData={{
-          gamesPerOpponent: 1,
-          includePlayoffs: false,
-          usesSets: false,
-          matchDurationMinutes: 60,
-          restTimeMinutes: 0,
-        }}
-        onLeagueDataChange={noop}
-        slots={[{
-          ...baseSlot,
-          scheduledFieldId: 'rental_field_1',
-          scheduledFieldIds: ['rental_field_1'],
-          repeating: false,
-          dayOfWeek: 2,
-          daysOfWeek: [2],
-          startDate: '2026-06-24T05:30:00',
-          endDate: '2026-06-24T11:00:00',
-          startTimeMinutes: 330,
-          endTimeMinutes: 660,
-          sourceType: 'RENTAL_BOOKING',
-          rentalBookingId: 'rental_booking_1',
-          rentalBookingItemId: 'booking_item_1',
-          rentalLocked: true,
-        }]}
-        onAddSlot={noop}
-        onUpdateSlot={onUpdateSlot}
-        onRemoveSlot={noop}
-        fields={[rentalField, extraField]}
-        fieldsLoading={false}
-        readOnly
-        allowResourceEditsWhenReadOnly
-        fieldOptions={[
-          {
-            value: 'rental:booking_item_1',
-            fieldId: 'rental_field_1',
-            label: 'Example Club Court 1 - Jun 24, 2026 5:30 AM-11:00 AM',
-            rentalBookingId: 'rental_booking_1',
-            rentalBookingItemId: 'booking_item_1',
-            rentalStart: '2026-06-24T05:30:00',
-            rentalEnd: '2026-06-24T11:00:00',
-            rentalTimeZone: 'America/Los_Angeles',
-            rentalPriceCents: 27500,
-          },
-          {
-            value: 'field_2',
-            fieldId: 'field_2',
-            label: 'Court B',
-          },
-        ]}
-      />,
-    );
-
-    expect(screen.getByPlaceholderText('Search resources...')).not.toBeDisabled();
-    expect(screen.getByLabelText(/Repeats weekly/i)).toBeDisabled();
-
-    fireEvent.click(screen.getByRole('button', { name: /Court B/i }));
-
-    expect(onUpdateSlot).toHaveBeenCalledWith(
-      0,
-      expect.objectContaining({
-        scheduledFieldId: 'rental_field_1',
-        scheduledFieldIds: ['rental_field_1', 'field_2'],
-      }),
-    );
-  });
-
-  it('does not offer a rental booking item on another timeslot once it is selected', () => {
-    const rentalField: Field = {
-      ...field,
-      $id: 'rental_field_1',
-      name: 'Example Club Court 1',
-      facilityId: 'facility_rental',
-      facility: {
-        $id: 'facility_rental',
-        organizationId: 'rental_org',
-        name: 'Example Clubhouse',
-        location: '800 Waterfront Way',
+        $id: "facility_rental",
+        organizationId: "rental_org",
+        name: "Example Clubhouse",
+        location: "800 Waterfront Way",
       } as any,
     };
 
@@ -709,31 +419,402 @@ describe('LeagueFields', () => {
         slots={[
           {
             ...baseSlot,
-            key: 'slot-1',
-            scheduledFieldId: 'rental_field_1',
-            scheduledFieldIds: ['rental_field_1'],
-            repeating: false,
-            dayOfWeek: 2,
-            daysOfWeek: [2],
-            startDate: '2026-06-24T05:30:00',
-            endDate: '2026-06-24T11:00:00',
-            startTimeMinutes: 330,
-            endTimeMinutes: 660,
-            sourceType: 'RENTAL_BOOKING',
-            rentalBookingId: 'rental_booking_1',
-            rentalBookingItemId: 'booking_item_1',
-            rentalLocked: true,
+            scheduledFieldId: field.$id,
+            scheduledFieldIds: [field.$id],
+            repeating: true,
           },
+        ]}
+        onAddSlot={noop}
+        onUpdateSlot={onUpdateSlot}
+        onRemoveSlot={noop}
+        fields={[field, rentalField]}
+        fieldsLoading={false}
+        fieldOptions={[
+          {
+            value: "rental:booking_item_1",
+            fieldId: "rental_field_1",
+            label: "Example Club Court 1 - Jun 24, 2026 5:30 AM-11:00 AM",
+            rentalBookingId: "rental_booking_1",
+            rentalBookingItemId: "booking_item_1",
+            rentalStart: "2026-06-24T05:30:00",
+            rentalEnd: "2026-06-24T11:00:00",
+            rentalTimeZone: "America/Los_Angeles",
+            rentalPriceCents: 27500,
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Example Club Court 1 - Jun 24/i }),
+    );
+
+    expect(onUpdateSlot).toHaveBeenCalledWith(
+      0,
+      expect.objectContaining({
+        error: expect.stringContaining(
+          "This rental resource is only available for 06/24/2026 5:30 AM - 11:00 AM",
+        ),
+      }),
+    );
+    expect(onUpdateSlot).not.toHaveBeenCalledWith(
+      0,
+      expect.objectContaining({
+        scheduledFieldId: "rental_field_1",
+        sourceType: "RENTAL_BOOKING",
+      }),
+    );
+  });
+
+  it("sets an empty timeslot to the rental window when selecting a rental resource", () => {
+    const onUpdateSlot = jest.fn();
+    const rentalField: Field = {
+      ...field,
+      $id: "rental_field_1",
+      name: "Example Club Court 1",
+      facilityId: "facility_rental",
+      facility: {
+        $id: "facility_rental",
+        organizationId: "rental_org",
+        name: "Example Clubhouse",
+        location: "800 Waterfront Way",
+      } as any,
+    };
+
+    renderWithMantine(
+      <LeagueFields
+        leagueData={{
+          gamesPerOpponent: 1,
+          includePlayoffs: false,
+          usesSets: false,
+          matchDurationMinutes: 60,
+          restTimeMinutes: 0,
+        }}
+        onLeagueDataChange={noop}
+        slots={[
           {
             ...baseSlot,
-            key: 'slot-2',
+            scheduledFieldId: undefined,
+            scheduledFieldIds: [],
+            repeating: true,
+          },
+        ]}
+        onAddSlot={noop}
+        onUpdateSlot={onUpdateSlot}
+        onRemoveSlot={noop}
+        fields={[rentalField]}
+        fieldsLoading={false}
+        fieldOptions={[
+          {
+            value: "rental:booking_item_1",
+            fieldId: "rental_field_1",
+            label: "Example Club Court 1 - Jun 24, 2026 5:30 AM-11:00 AM",
+            rentalBookingId: "rental_booking_1",
+            rentalBookingItemId: "booking_item_1",
+            rentalStart: "2026-06-24T05:30:00",
+            rentalEnd: "2026-06-24T11:00:00",
+            rentalTimeZone: "America/Los_Angeles",
+            rentalPriceCents: 27500,
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Example Club Court 1 - Jun 24/i }),
+    );
+
+    expect(onUpdateSlot).toHaveBeenCalledWith(
+      0,
+      expect.objectContaining({
+        scheduledFieldId: "rental_field_1",
+        scheduledFieldIds: ["rental_field_1"],
+        sourceType: "RENTAL_BOOKING",
+        rentalBookingId: "rental_booking_1",
+        rentalBookingItemId: "booking_item_1",
+        rentalLocked: true,
+        repeating: false,
+        dayOfWeek: 2,
+        daysOfWeek: [2],
+        startDate: "2026-06-24T05:30:00",
+        endDate: "2026-06-24T11:00:00",
+        startTimeMinutes: 330,
+        endTimeMinutes: 660,
+        price: 27500,
+      }),
+    );
+    expect(onUpdateSlot).not.toHaveBeenCalledWith(
+      0,
+      expect.objectContaining({
+        error: expect.stringContaining(
+          "This rental resource is only available",
+        ),
+      }),
+    );
+  });
+
+  it("shows rental window mismatch errors next to the resource picker", () => {
+    const rentalMismatchError =
+      "This rental resource is only available for 06/24/2026 5:30 AM - 11:00 AM. Update this timeslot to match the rental before selecting it.";
+
+    renderWithMantine(
+      <LeagueFields
+        leagueData={{
+          gamesPerOpponent: 1,
+          includePlayoffs: false,
+          usesSets: false,
+          matchDurationMinutes: 60,
+          restTimeMinutes: 0,
+        }}
+        onLeagueDataChange={noop}
+        slots={[
+          {
+            ...baseSlot,
+            scheduledFieldId: undefined,
+            scheduledFieldIds: [],
+            error: rentalMismatchError,
+          },
+        ]}
+        onAddSlot={noop}
+        onUpdateSlot={noop}
+        onRemoveSlot={noop}
+        fields={[field]}
+        fieldsLoading={false}
+      />,
+    );
+
+    expect(screen.getAllByText(rentalMismatchError)).toHaveLength(1);
+  });
+
+  it("locks a matching one-time slot to the selected rental booking item window", () => {
+    const onUpdateSlot = jest.fn();
+    const rentalField: Field = {
+      ...field,
+      $id: "rental_field_1",
+      name: "Example Club Court 1",
+      facilityId: "facility_rental",
+      facility: {
+        $id: "facility_rental",
+        organizationId: "rental_org",
+        name: "Example Clubhouse",
+        location: "800 Waterfront Way",
+      } as any,
+    };
+
+    renderWithMantine(
+      <LeagueFields
+        leagueData={{
+          gamesPerOpponent: 1,
+          includePlayoffs: false,
+          usesSets: false,
+          matchDurationMinutes: 60,
+          restTimeMinutes: 0,
+        }}
+        onLeagueDataChange={noop}
+        slots={[
+          {
+            ...baseSlot,
             scheduledFieldId: undefined,
             scheduledFieldIds: [],
             repeating: false,
             dayOfWeek: 2,
             daysOfWeek: [2],
-            startDate: '2026-06-24T12:00:00',
-            endDate: '2026-06-24T13:00:00',
+            startDate: "2026-06-24T05:30:00",
+            endDate: "2026-06-24T11:00:00",
+            startTimeMinutes: 330,
+            endTimeMinutes: 660,
+          },
+        ]}
+        onAddSlot={noop}
+        onUpdateSlot={onUpdateSlot}
+        onRemoveSlot={noop}
+        fields={[rentalField]}
+        fieldsLoading={false}
+        fieldOptions={[
+          {
+            value: "rental:booking_item_1",
+            fieldId: "rental_field_1",
+            label: "Example Club Court 1 - Jun 24, 2026 5:30 AM-11:00 AM",
+            rentalBookingId: "rental_booking_1",
+            rentalBookingItemId: "booking_item_1",
+            rentalStart: "2026-06-24T05:30:00",
+            rentalEnd: "2026-06-24T11:00:00",
+            rentalTimeZone: "America/Los_Angeles",
+            rentalPriceCents: 27500,
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Example Club Court 1 - Jun 24/i }),
+    );
+
+    expect(onUpdateSlot).toHaveBeenCalledWith(
+      0,
+      expect.objectContaining({
+        scheduledFieldId: "rental_field_1",
+        scheduledFieldIds: ["rental_field_1"],
+        sourceType: "RENTAL_BOOKING",
+        rentalBookingId: "rental_booking_1",
+        rentalBookingItemId: "booking_item_1",
+        rentalLocked: true,
+        repeating: false,
+        dayOfWeek: 2,
+        daysOfWeek: [2],
+        startDate: "2026-06-24T05:30:00",
+        endDate: "2026-06-24T11:00:00",
+        startTimeMinutes: 330,
+        endTimeMinutes: 660,
+        price: 27500,
+      }),
+    );
+  });
+
+  it("allows adding resources to a rental-locked readonly slot when resource edits are explicitly allowed", () => {
+    const onUpdateSlot = jest.fn();
+    const rentalField: Field = {
+      ...field,
+      $id: "rental_field_1",
+      name: "Example Club Court 1",
+      facilityId: "facility_rental",
+      facility: {
+        $id: "facility_rental",
+        organizationId: "rental_org",
+        name: "Example Clubhouse",
+        location: "800 Waterfront Way",
+      } as any,
+    };
+    const extraField: Field = {
+      ...field,
+      $id: "field_2",
+      name: "Court B",
+    };
+
+    renderWithMantine(
+      <LeagueFields
+        leagueData={{
+          gamesPerOpponent: 1,
+          includePlayoffs: false,
+          usesSets: false,
+          matchDurationMinutes: 60,
+          restTimeMinutes: 0,
+        }}
+        onLeagueDataChange={noop}
+        slots={[
+          {
+            ...baseSlot,
+            scheduledFieldId: "rental_field_1",
+            scheduledFieldIds: ["rental_field_1"],
+            repeating: false,
+            dayOfWeek: 2,
+            daysOfWeek: [2],
+            startDate: "2026-06-24T05:30:00",
+            endDate: "2026-06-24T11:00:00",
+            startTimeMinutes: 330,
+            endTimeMinutes: 660,
+            sourceType: "RENTAL_BOOKING",
+            rentalBookingId: "rental_booking_1",
+            rentalBookingItemId: "booking_item_1",
+            rentalLocked: true,
+          },
+        ]}
+        onAddSlot={noop}
+        onUpdateSlot={onUpdateSlot}
+        onRemoveSlot={noop}
+        fields={[rentalField, extraField]}
+        fieldsLoading={false}
+        readOnly
+        allowResourceEditsWhenReadOnly
+        fieldOptions={[
+          {
+            value: "rental:booking_item_1",
+            fieldId: "rental_field_1",
+            label: "Example Club Court 1 - Jun 24, 2026 5:30 AM-11:00 AM",
+            rentalBookingId: "rental_booking_1",
+            rentalBookingItemId: "booking_item_1",
+            rentalStart: "2026-06-24T05:30:00",
+            rentalEnd: "2026-06-24T11:00:00",
+            rentalTimeZone: "America/Los_Angeles",
+            rentalPriceCents: 27500,
+          },
+          {
+            value: "field_2",
+            fieldId: "field_2",
+            label: "Court B",
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByPlaceholderText("Search resources..."),
+    ).not.toBeDisabled();
+    expect(screen.getByLabelText(/Repeats weekly/i)).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Court B/i }));
+
+    expect(onUpdateSlot).toHaveBeenCalledWith(
+      0,
+      expect.objectContaining({
+        scheduledFieldId: "rental_field_1",
+        scheduledFieldIds: ["rental_field_1", "field_2"],
+      }),
+    );
+  });
+
+  it("does not offer a rental booking item on another timeslot once it is selected", () => {
+    const rentalField: Field = {
+      ...field,
+      $id: "rental_field_1",
+      name: "Example Club Court 1",
+      facilityId: "facility_rental",
+      facility: {
+        $id: "facility_rental",
+        organizationId: "rental_org",
+        name: "Example Clubhouse",
+        location: "800 Waterfront Way",
+      } as any,
+    };
+
+    renderWithMantine(
+      <LeagueFields
+        leagueData={{
+          gamesPerOpponent: 1,
+          includePlayoffs: false,
+          usesSets: false,
+          matchDurationMinutes: 60,
+          restTimeMinutes: 0,
+        }}
+        onLeagueDataChange={noop}
+        slots={[
+          {
+            ...baseSlot,
+            key: "slot-1",
+            scheduledFieldId: "rental_field_1",
+            scheduledFieldIds: ["rental_field_1"],
+            repeating: false,
+            dayOfWeek: 2,
+            daysOfWeek: [2],
+            startDate: "2026-06-24T05:30:00",
+            endDate: "2026-06-24T11:00:00",
+            startTimeMinutes: 330,
+            endTimeMinutes: 660,
+            sourceType: "RENTAL_BOOKING",
+            rentalBookingId: "rental_booking_1",
+            rentalBookingItemId: "booking_item_1",
+            rentalLocked: true,
+          },
+          {
+            ...baseSlot,
+            key: "slot-2",
+            scheduledFieldId: undefined,
+            scheduledFieldIds: [],
+            repeating: false,
+            dayOfWeek: 2,
+            daysOfWeek: [2],
+            startDate: "2026-06-24T12:00:00",
+            endDate: "2026-06-24T13:00:00",
             startTimeMinutes: 720,
             endTimeMinutes: 780,
           },
@@ -743,24 +824,28 @@ describe('LeagueFields', () => {
         onRemoveSlot={noop}
         fields={[rentalField]}
         fieldsLoading={false}
-        fieldOptions={[{
-          value: 'rental:booking_item_1',
-          fieldId: 'rental_field_1',
-          label: 'Example Club Court 1 - Jun 24, 2026 5:30 AM-11:00 AM',
-          rentalBookingId: 'rental_booking_1',
-          rentalBookingItemId: 'booking_item_1',
-          rentalStart: '2026-06-24T05:30:00',
-          rentalEnd: '2026-06-24T11:00:00',
-          rentalTimeZone: 'America/Los_Angeles',
-          rentalPriceCents: 27500,
-        }]}
+        fieldOptions={[
+          {
+            value: "rental:booking_item_1",
+            fieldId: "rental_field_1",
+            label: "Example Club Court 1 - Jun 24, 2026 5:30 AM-11:00 AM",
+            rentalBookingId: "rental_booking_1",
+            rentalBookingItemId: "booking_item_1",
+            rentalStart: "2026-06-24T05:30:00",
+            rentalEnd: "2026-06-24T11:00:00",
+            rentalTimeZone: "America/Los_Angeles",
+            rentalPriceCents: 27500,
+          },
+        ]}
       />,
     );
 
-    expect(screen.getAllByRole('button', { name: /Example Club Court 1 - Jun 24/i })).toHaveLength(1);
+    expect(
+      screen.getAllByRole("button", { name: /Example Club Court 1 - Jun 24/i }),
+    ).toHaveLength(1);
   });
 
-  it('shows the first actual overlap date for recurring conflicts', () => {
+  it("shows the first actual overlap date for recurring conflicts", () => {
     renderWithMantine(
       <LeagueFields
         leagueData={{
@@ -776,23 +861,23 @@ describe('LeagueFields', () => {
             ...baseSlot,
             dayOfWeek: 5,
             daysOfWeek: [5, 6],
-            startDate: '2026-05-04T00:00:00',
+            startDate: "2026-05-04T00:00:00",
             startTimeMinutes: 9 * 60,
             endTimeMinutes: 21 * 60,
             conflicts: [
               {
                 schedule: {
-                  $id: 'slot-1',
+                  $id: "slot-1",
                   repeating: true,
                   dayOfWeek: 5,
                   daysOfWeek: [5],
-                  startDate: '2026-04-20T00:00:00',
+                  startDate: "2026-04-20T00:00:00",
                   startTimeMinutes: 9 * 60,
                   endTimeMinutes: 17 * 60,
                   scheduledFieldId: field.$id,
                   scheduledFieldIds: [field.$id],
                 } as any,
-                event: { $id: 'evt_1', name: 'TEST DOC' } as any,
+                event: { $id: "evt_1", name: "TEST DOC" } as any,
               },
             ],
           },
@@ -806,10 +891,12 @@ describe('LeagueFields', () => {
       />,
     );
 
-    expect(screen.getByText(/05\/09\/2026, 9:00 AM-5:00 PM overlaps this slot/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/05\/09\/2026, 9:00 AM-5:00 PM overlaps this slot/i),
+    ).toBeInTheDocument();
   });
 
-  it('allows auto-resolving a conflicted slot', () => {
+  it("allows auto-resolving a conflicted slot", () => {
     const onAutoResolveSlotConflict = jest.fn();
 
     renderWithMantine(
@@ -827,8 +914,8 @@ describe('LeagueFields', () => {
             ...baseSlot,
             conflicts: [
               {
-                schedule: { $id: 'slot-1' } as any,
-                event: { $id: 'evt_1', name: 'Other Event' } as any,
+                schedule: { $id: "slot-1" } as any,
+                event: { $id: "evt_1", name: "Other Event" } as any,
               },
             ],
           },
@@ -842,11 +929,11 @@ describe('LeagueFields', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /Auto Resolve/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Auto Resolve/i }));
     expect(onAutoResolveSlotConflict).toHaveBeenCalledWith(0);
   });
 
-  it('requires playoff team count when playoffs are enabled', () => {
+  it("requires playoff team count when playoffs are enabled", () => {
     renderWithMantine(
       <LeagueFields
         leagueData={{
@@ -867,11 +954,13 @@ describe('LeagueFields', () => {
       />,
     );
 
-    expect(screen.getByLabelText('Playoff Team Count')).toHaveValue('');
-    expect(screen.getByText('At least 2 teams need to be in the bracket.')).toBeInTheDocument();
+    expect(screen.getByLabelText("Playoff Team Count")).toHaveValue("");
+    expect(
+      screen.getByText("At least 2 teams need to be in the bracket."),
+    ).toBeInTheDocument();
   });
 
-  it('does not show a standalone match duration for timed sports', () => {
+  it("does not show a standalone match duration for timed sports", () => {
     renderWithMantine(
       <LeagueFields
         leagueData={{
@@ -892,10 +981,12 @@ describe('LeagueFields', () => {
     );
 
     expect(screen.queryByLabelText(/Match Duration/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Match duration should be greater than 0/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Match duration should be greater than 0/i),
+    ).not.toBeInTheDocument();
   });
 
-  it('allows zero and blank set duration values while warning', () => {
+  it("allows zero and blank set duration values while warning", () => {
     const onLeagueDataChange = jest.fn();
 
     const warningRender = renderWithMantine(
@@ -920,7 +1011,9 @@ describe('LeagueFields', () => {
       />,
     );
 
-    expect(screen.getByText(/Set duration should be greater than 0/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Set duration should be greater than 0/i),
+    ).toBeInTheDocument();
     warningRender.unmount();
 
     renderWithMantine(
@@ -946,14 +1039,18 @@ describe('LeagueFields', () => {
     );
 
     const setDurationInput = getLabeledInput(/Set Duration \(minutes\)/i);
-    fireEvent.change(setDurationInput, { target: { value: '0' } });
-    expect(onLeagueDataChange).toHaveBeenLastCalledWith({ setDurationMinutes: 0 });
+    fireEvent.change(setDurationInput, { target: { value: "0" } });
+    expect(onLeagueDataChange).toHaveBeenLastCalledWith({
+      setDurationMinutes: 0,
+    });
 
-    fireEvent.change(setDurationInput, { target: { value: '' } });
-    expect(onLeagueDataChange).toHaveBeenLastCalledWith({ setDurationMinutes: undefined });
+    fireEvent.change(setDurationInput, { target: { value: "" } });
+    expect(onLeagueDataChange).toHaveBeenLastCalledWith({
+      setDurationMinutes: undefined,
+    });
   });
 
-  it('defaults playoff team count from participants each time playoffs are enabled', () => {
+  it("defaults playoff team count from participants each time playoffs are enabled", () => {
     const onLeagueDataChange = jest.fn();
     const participantCount = 12;
 
@@ -1045,7 +1142,7 @@ describe('LeagueFields', () => {
     });
   });
 
-  it('locks slot divisions when single division mode is enabled', () => {
+  it("locks slot divisions when single division mode is enabled", () => {
     const onUpdateSlot = jest.fn();
 
     renderWithMantine(
@@ -1058,18 +1155,18 @@ describe('LeagueFields', () => {
           restTimeMinutes: 0,
         }}
         onLeagueDataChange={noop}
-        slots={[{ ...baseSlot, divisions: ['beginner'] }]}
+        slots={[{ ...baseSlot, divisions: ["beginner"] }]}
         onAddSlot={noop}
         onUpdateSlot={onUpdateSlot}
         onRemoveSlot={noop}
         fields={[field]}
         fieldsLoading={false}
         divisionOptions={[
-          { value: 'beginner', label: 'Beginner' },
-          { value: 'advanced', label: 'Advanced' },
+          { value: "beginner", label: "Beginner" },
+          { value: "advanced", label: "Advanced" },
         ]}
         lockSlotDivisions
-        lockedDivisionKeys={['beginner', 'advanced']}
+        lockedDivisionKeys={["beginner", "advanced"]}
       />,
     );
 
@@ -1077,7 +1174,7 @@ describe('LeagueFields', () => {
     expect(divisionsInput).toBeDisabled();
   });
 
-  it('shows selected division labels instead of raw ids', () => {
+  it("shows selected division labels instead of raw ids", () => {
     renderWithMantine(
       <LeagueFields
         leagueData={{
@@ -1088,24 +1185,27 @@ describe('LeagueFields', () => {
           restTimeMinutes: 0,
         }}
         onLeagueDataChange={noop}
-        slots={[{ ...baseSlot, divisions: ['DIVISION_ABC_123'] }]}
+        slots={[{ ...baseSlot, divisions: ["DIVISION_ABC_123"] }]}
         onAddSlot={noop}
         onUpdateSlot={noop}
         onRemoveSlot={noop}
         fields={[field]}
         fieldsLoading={false}
         divisionOptions={[
-          { value: 'division_abc_123', label: 'Grass Volleyball - Beginner' },
+          { value: "division_abc_123", label: "Grass Volleyball - Beginner" },
         ]}
       />,
     );
 
-    expect(screen.getAllByText('Grass Volleyball - Beginner').length).toBeGreaterThan(0);
-    expect(screen.queryByText('DIVISION_ABC_123')).not.toBeInTheDocument();
+    expect(
+      screen.getAllByText("Grass Volleyball - Beginner").length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText("DIVISION_ABC_123")).not.toBeInTheDocument();
   });
 
-  it('renders a custom empty-fields message when provided', () => {
-    const customMessage = 'No fields found. Create a field on the Organizations page first, then return here to attach weekly availability.';
+  it("renders a custom empty-fields message when provided", () => {
+    const customMessage =
+      "No fields found. Create a field on the Organizations page first, then return here to attach weekly availability.";
 
     renderWithMantine(
       <LeagueFields
@@ -1129,4 +1229,48 @@ describe('LeagueFields', () => {
 
     expect(screen.getByText(customMessage)).toBeInTheDocument();
   });
+
+  it.each([
+    [
+      { singular: "Court", plural: "Courts" },
+      "Courts",
+      'Court "field_1" is unavailable.',
+    ],
+    [
+      { singular: "Field", plural: "Fields" },
+      "Fields",
+      'Field "field_1" is unavailable.',
+    ],
+    [
+      { singular: "Resource", plural: "Resources" },
+      "Resources",
+      'Resource "field_1" is unavailable.',
+    ],
+  ] as const)(
+    "renders scoped and generic Sport Resource terminology",
+    (resourceLabels, pluralLabel, diagnostic) => {
+      renderWithMantine(
+        <LeagueFields
+          leagueData={{
+            gamesPerOpponent: 1,
+            includePlayoffs: false,
+            usesSets: false,
+            matchDurationMinutes: 60,
+            restTimeMinutes: 0,
+          }}
+          onLeagueDataChange={noop}
+          slots={[{ ...baseSlot, error: 'Resource "field_1" is unavailable.' }]}
+          onAddSlot={noop}
+          onUpdateSlot={noop}
+          onRemoveSlot={noop}
+          fields={[field]}
+          fieldsLoading={false}
+          resourceLabels={resourceLabels}
+        />,
+      );
+
+      expect(screen.getByText(pluralLabel)).toBeInTheDocument();
+      expect(screen.getByText(diagnostic)).toBeInTheDocument();
+    },
+  );
 });

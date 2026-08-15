@@ -441,6 +441,8 @@ export interface TeamJoinRequest {
 export interface Sport {
   $id: string;
   name: string;
+  resourceLabelSingular: string;
+  resourceLabelPlural: string;
   officialPositionTemplates?: SportOfficialPositionTemplate[];
   matchRulesTemplate?: MatchRulesConfig | null;
   usePointsForWin: boolean;

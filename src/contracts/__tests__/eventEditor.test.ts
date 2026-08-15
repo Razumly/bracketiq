@@ -1,5 +1,6 @@
 import {
   createEventEditorCommandSchema,
+  eventEditorCreateResultSchema,
   eventEditorCreateBootstrapSchema,
   eventEditorDraftSchema,
   eventEditorSnapshotSchema,
@@ -110,6 +111,11 @@ const draft = {
   },
 };
 const createOnlyCompletion = { mode: 'CREATE_ONLY' as const };
+const expectedCreateRevisions = {
+  editorRevision: 'new',
+  staffRevision: null,
+  scheduleRevision: 'new',
+};
 const newScheduleState = {
   sourceType: null,
   matchCount: 0,
@@ -123,6 +129,7 @@ describe('event editor contracts', () => {
     const parsed = createEventEditorCommandSchema.parse({
       contractVersion: 3,
       createOperationId: 'create-operation-1',
+      expectedRevisions: expectedCreateRevisions,
       draft,
       completion: createOnlyCompletion,
     });
@@ -133,6 +140,7 @@ describe('event editor contracts', () => {
     const parsed = createEventEditorCommandSchema.parse({
       contractVersion: 3,
       createOperationId: 'create-operation-off',
+      expectedRevisions: expectedCreateRevisions,
       draft: {
         ...draft,
         staff: {
@@ -160,6 +168,12 @@ describe('event editor contracts', () => {
           canUseOnlinePayments: true,
           canManageStaff: true,
           canEdit: true,
+          canDelegateHost: true,
+          readOnly: false,
+          readOnlyReason: null,
+          managementAuthority: null,
+          eventHostId: 'host_1',
+          viewerIsEventHost: true,
           supportsTeamStaffing: false,
         },
         catalogs: { sports: [], organizations: [], fields: [], templates: [] },
@@ -233,6 +247,12 @@ describe('event editor contracts', () => {
         canUseOnlinePayments: true,
         canManageStaff: true,
         canEdit: true,
+        canDelegateHost: true,
+        readOnly: false,
+        readOnlyReason: null,
+        managementAuthority: null,
+        eventHostId: 'host_1',
+        viewerIsEventHost: true,
         supportsTeamStaffing: false,
       },
       catalogs: { sports: [], organizations: [], fields: [], templates: [] },
@@ -259,6 +279,84 @@ describe('event editor contracts', () => {
       },
     } as unknown as Event;
     expect(legacyEventToEditorDraft(event).competition.matchDurationMinutes).toBe(35);
+  });
+  it('returns the operation identity with actionable canonical revisions after create', () => {
+    const parsed = eventEditorCreateResultSchema.parse({
+      status: 'SAVED',
+      createOperationId: 'create-operation-1',
+      editorRevision: 'editor-revision-2',
+      staffRevision: 'staff-revision-2',
+      scheduleRevision: 'schedule-revision-2',
+      snapshot: {
+        contractVersion: 3,
+        mode: 'EDIT',
+        eventId: 'event-1',
+        editorRevision: 'editor-revision-2',
+        staffRevision: 'staff-revision-2',
+        draft,
+        capabilities: {
+          canUseOnlinePayments: true,
+          canManageStaff: true,
+          canEdit: true,
+          canDelegateHost: true,
+          readOnly: false,
+          readOnlyReason: null,
+          managementAuthority: null,
+          eventHostId: 'host_1',
+          viewerIsEventHost: true,
+          supportsTeamStaffing: false,
+        },
+        catalogs: { sports: [], organizations: [], fields: [], templates: [] },
+        immutable: { fieldNames: [], rental: false, template: false },
+        scheduleState: {
+          ...newScheduleState,
+          revision: 'schedule-revision-2',
+        },
+      },
+      questionIdMap: {},
+      staffEmailDelivery: 'NOT_REQUESTED',
+      scheduleOutcome: {
+        status: 'NOT_REQUESTED',
+        matchCount: 0,
+        warnings: [],
+      },
+    });
+
+    expect(parsed).toEqual(expect.objectContaining({
+      createOperationId: 'create-operation-1',
+      editorRevision: parsed.snapshot.editorRevision,
+      staffRevision: parsed.snapshot.staffRevision,
+      scheduleRevision: parsed.snapshot.scheduleState.revision,
+    }));
+  });
+  it('accepts typed stale-revision and authority failures with canonical revisions', () => {
+    const stale = eventEditorErrorSchema.parse({
+      error: 'Event editor data changed. Reload and try again.',
+      code: 'EDITOR_REVISION_CONFLICT',
+      editorRevision: 'editor-current',
+      staffRevision: 'staff-current',
+      scheduleRevision: 'schedule-current',
+    });
+    const authority = eventEditorErrorSchema.parse({
+      error: 'You do not have permission to create this Event.',
+      code: 'EDITOR_PERMISSION_DENIED',
+    });
+
+    expect(stale).toEqual(expect.objectContaining({
+      editorRevision: 'editor-current',
+      staffRevision: 'staff-current',
+      scheduleRevision: 'schedule-current',
+    }));
+    expect(authority.code).toBe('EDITOR_PERMISSION_DENIED');
+  });
+  it('accepts typed Time Slot input failures with actionable slot evidence', () => {
+    const parsed = eventEditorErrorSchema.parse({
+      error: 'The selected Time Slots overlap.',
+      code: 'INVALID_TIME_SLOT',
+      slotIds: ['slot_1', 'slot_2'],
+    });
+
+    expect(parsed.slotIds).toEqual(['slot_1', 'slot_2']);
   });
   it('accepts a diagnostic save failure with a request reference', () => {
     const parsed = eventEditorErrorSchema.parse({

@@ -4,6 +4,10 @@ import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { normalizeRentalTaxHandling } from '@/lib/taxPolicy';
 import {
+  resolveOneTimeTimeSlot,
+  TimeSlotValidationError,
+} from '@/lib/timeSlotAvailability';
+import {
   localDatePartsInTimeZone,
   parseDateInputInTimeZone,
   resolveTimeZone,
@@ -402,9 +406,39 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
   const slotTimeZone = await resolveSlotTimeZone(scheduledFieldIds, data.timeZone);
-  const startDate = parseDateInputInTimeZone(data.startDate, slotTimeZone) ?? new Date();
-  const endDate = data.endDate === null ? null : parseDateInputInTimeZone(data.endDate, slotTimeZone);
-  const normalizedEndDate = normalizeRepeatingEndDate(startDate, endDate, repeating, slotTimeZone);
+  let startDate = parseDateInputInTimeZone(data.startDate, slotTimeZone) ?? new Date();
+  const parsedEndDate = data.endDate === null ? null : parseDateInputInTimeZone(data.endDate, slotTimeZone);
+  let endDate = normalizeRepeatingEndDate(startDate, parsedEndDate, repeating, slotTimeZone);
+  let startTimeMinutes = data.startTimeMinutes ?? null;
+  let endTimeMinutes = data.endTimeMinutes ?? null;
+  if (!repeating) {
+    try {
+      const resolved = resolveOneTimeTimeSlot({
+        ...data,
+        id: data.id,
+        repeating: false,
+        startDate,
+        endDate,
+        startTimeMinutes,
+        endTimeMinutes,
+        timeZone: slotTimeZone,
+        scheduledFieldId,
+        scheduledFieldIds,
+      }, slotTimeZone);
+      startDate = resolved.start;
+      endDate = resolved.end;
+      startTimeMinutes = resolved.startTimeMinutes;
+      endTimeMinutes = resolved.endTimeMinutes;
+    } catch (error) {
+      if (error instanceof TimeSlotValidationError) {
+        return NextResponse.json(
+          { error: error.message, code: 'INVALID_TIME_SLOT', slotIds: error.slotIds },
+          { status: 400 },
+        );
+      }
+      throw error;
+    }
+  }
   const divisions = normalizeDivisionKeys(data.divisions);
   const now = new Date();
 
@@ -414,11 +448,11 @@ export async function POST(req: NextRequest) {
         id: data.id,
         dayOfWeek: normalizedDays[0] ?? data.dayOfWeek ?? null,
         daysOfWeek: normalizedDays,
-        startTimeMinutes: data.startTimeMinutes ?? null,
-        endTimeMinutes: data.endTimeMinutes ?? null,
+        startTimeMinutes,
+        endTimeMinutes,
         startDate,
         timeZone: slotTimeZone,
-        endDate: normalizedEndDate,
+        endDate,
         repeating,
         scheduledFieldId,
         scheduledFieldIds,

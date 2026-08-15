@@ -1,6 +1,13 @@
 import type { Event } from '@/types';
 import type { LeagueSlotForm } from '@/app/discover/components/LeagueFields';
-import { parseLocalDateTime } from '@/lib/dateUtils';
+import {
+    assertOneTimeTimeSlotWithinEventBounds,
+    describeOneTimeTimeSlotConflict,
+    findOneTimeTimeSlotConflicts,
+    resolveOneTimeTimeSlot,
+    TimeSlotValidationError,
+    type ResolvedOneTimeTimeSlot,
+} from '@/lib/timeSlotAvailability';
 
 import { supportsScheduleSlotsForEvent } from './eventRules';
 import { normalizeSlotFieldIds, normalizeWeekdays } from './slotForm';
@@ -37,32 +44,29 @@ export const computeSlotError = (
 
     const isRepeating = slot.repeating !== false;
     if (!isRepeating) {
-        const slotStart = parseLocalDateTime(slot.startDate ?? null);
-        const slotEnd = parseLocalDateTime(slot.endDate ?? null);
-        if (!slotStart || !slotEnd) {
-            return undefined;
-        }
-        if (slotEnd.getTime() <= slotStart.getTime()) {
-            return 'Timeslot must end after it starts.';
+        let resolvedSlot: ResolvedOneTimeTimeSlot;
+        try {
+            resolvedSlot = resolveOneTimeTimeSlot(slot, slot.timeZone);
+        } catch (error) {
+            return error instanceof TimeSlotValidationError ? error.message : 'Timeslot cannot be resolved.';
         }
 
-        const hasOverlap = slots.some((other, otherIndex) => {
-            if (otherIndex === index || other.repeating !== false) {
-                return false;
+        const resolvedSlots = slots.flatMap((candidate) => {
+            if (candidate.repeating !== false) {
+                return [];
             }
-            const otherFieldIds = normalizeSlotFieldIds(other);
-            if (!otherFieldIds.length || !otherFieldIds.some((fieldId) => slotFieldIds.includes(fieldId))) {
-                return false;
+            try {
+                return [resolveOneTimeTimeSlot(candidate, candidate.timeZone)];
+            } catch {
+                return [];
             }
-            const otherStart = parseLocalDateTime(other.startDate ?? null);
-            const otherEnd = parseLocalDateTime(other.endDate ?? null);
-            if (!otherStart || !otherEnd) {
-                return false;
-            }
-            return slotDateTimeRangesOverlap(slotStart, slotEnd, otherStart, otherEnd);
         });
-
-        return hasOverlap ? 'Overlaps with another timeslot in this form.' : undefined;
+        const conflict = findOneTimeTimeSlotConflicts(resolvedSlots)
+            .find((evidence) => (
+                evidence.first.slotId === resolvedSlot.slotId ||
+                evidence.second.slotId === resolvedSlot.slotId
+            ));
+        return conflict ? describeOneTimeTimeSlotConflict(conflict) : undefined;
     }
 
     const slotDays = normalizeWeekdays(slot);
@@ -102,6 +106,23 @@ export const computeSlotError = (
     });
 
     return hasOverlap ? 'Overlaps with another timeslot in this form.' : undefined;
+};
+
+export const computeOneTimeSlotBoundsError = (options: {
+    slot: LeagueSlotForm;
+    eventStart: Date | null;
+    eventEnd: Date | null;
+}): string | undefined => {
+    if (options.slot.repeating !== false || !options.eventStart) {
+        return undefined;
+    }
+    try {
+        const resolved = resolveOneTimeTimeSlot(options.slot, options.slot.timeZone);
+        assertOneTimeTimeSlotWithinEventBounds(resolved, options.eventStart, options.eventEnd);
+        return undefined;
+    } catch (error) {
+        return error instanceof TimeSlotValidationError ? error.message : 'Timeslot cannot be resolved.';
+    }
 };
 
 // Resets conflict bookkeeping and assigns slot errors so UI can block submission when overlaps exist.

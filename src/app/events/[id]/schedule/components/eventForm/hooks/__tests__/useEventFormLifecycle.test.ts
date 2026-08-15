@@ -14,6 +14,8 @@ import {
 const volleyball = {
   $id: "volleyball",
   name: "Volleyball",
+  resourceLabelSingular: "Court",
+  resourceLabelPlural: "Courts",
 } as Sport;
 const sportsById = new Map([[volleyball.$id, volleyball]]);
 const resolver: Resolver<EventFormValues> = async (values) => ({

@@ -19,11 +19,16 @@ export const useEventFormSectionNavigation = ({
     defaultSectionId,
     scrollOffset,
 }: UseEventFormSectionNavigationParams) => {
-    const [activeSectionId, setActiveSectionId] = useState<string>(visibleItems[0]?.id ?? defaultSectionId);
+    const [requestedActiveSectionId, setRequestedActiveSectionId] = useState<string>(
+        visibleItems[0]?.id ?? defaultSectionId,
+    );
     const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>(collapseDefaults);
     const [fieldNamesCollapsed, setFieldNamesCollapsed] = useState(false);
     const sectionNavTargetRef = useRef<string | null>(null);
     const sectionNavSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const activeSectionId = visibleItems.some((item) => item.id === requestedActiveSectionId)
+        ? requestedActiveSectionId
+        : (visibleItems[0]?.id ?? defaultSectionId);
 
     const toggleSectionCollapse = useCallback((sectionId: string) => {
         setCollapsedSections((previous) => ({
@@ -40,13 +45,6 @@ export const useEventFormSectionNavigation = ({
         ));
     }, []);
 
-    useEffect(() => {
-        const firstVisibleSection = visibleItems[0]?.id;
-        if (!firstVisibleSection) return;
-        if (!visibleItems.some((item) => item.id === activeSectionId)) {
-            setActiveSectionId(firstVisibleSection);
-        }
-    }, [activeSectionId, visibleItems]);
 
     useEffect(() => {
         if (!open || typeof window === 'undefined') return;
@@ -63,7 +61,7 @@ export const useEventFormSectionNavigation = ({
                         return;
                     }
                 }
-                setActiveSectionId((previous) => (previous === pendingTarget ? previous : pendingTarget));
+                setRequestedActiveSectionId((previous) => (previous === pendingTarget ? previous : pendingTarget));
                 return;
             }
             const viewportMiddle = window.innerHeight / 2;
@@ -89,7 +87,7 @@ export const useEventFormSectionNavigation = ({
             }
             const nextActiveSection = currentSection ?? closestSection;
             if (nextActiveSection) {
-                setActiveSectionId((previous) => (previous === nextActiveSection ? previous : nextActiveSection));
+                setRequestedActiveSectionId((previous) => (previous === nextActiveSection ? previous : nextActiveSection));
             }
         };
 
@@ -114,7 +112,7 @@ export const useEventFormSectionNavigation = ({
             clearTimeout(sectionNavSettleTimerRef.current);
         }
         sectionNavTargetRef.current = sectionId;
-        setActiveSectionId(sectionId);
+        setRequestedActiveSectionId(sectionId);
         const nextTop = target.getBoundingClientRect().top + window.scrollY - scrollOffset;
         const scrollTop = Math.max(nextTop, 0);
         const settleMs = Math.min(1600, Math.max(700, Math.abs(window.scrollY - scrollTop) * 0.9));

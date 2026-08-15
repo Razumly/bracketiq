@@ -6,6 +6,7 @@ import type {
 } from 'react';
 import type { Control } from 'react-hook-form';
 
+import type { SportResourceLabels } from '@/lib/sportResourceLabels';
 import type {
     Event,
     Field,
@@ -35,6 +36,7 @@ type EventDetailsPanelProps = {
     todaysDate: Date;
     maxStandardNumber: number;
     maxResourceNameLength: number;
+    resourceLabels: SportResourceLabels;
     selectStyles?: ComponentProps<typeof EventDetailsTypeControls>['selectStyles'];
     numberInputStyles?: ComponentProps<typeof EventDetailsTypeControls>['numberInputStyles'];
     dateTimePickerStyles?: ComponentProps<typeof EventDetailsTimingControls>['dateTimePickerStyles'];
@@ -100,6 +102,7 @@ export const EventDetailsPanel = ({
     todaysDate,
     maxStandardNumber,
     maxResourceNameLength,
+    resourceLabels,
     selectStyles,
     numberInputStyles,
     dateTimePickerStyles,
@@ -238,6 +241,7 @@ export const EventDetailsPanel = ({
                     fieldNamesCollapsed={fieldNamesCollapsed}
                     setFieldNamesCollapsed={setFieldNamesCollapsed}
                     maxResourceNameLength={maxResourceNameLength}
+                    resourceLabels={resourceLabels}
                     embedded
                     showLocalFieldNameControls={false}
                     onLocalFieldNameChange={onLocalFieldNameChange}
@@ -257,6 +261,7 @@ export const EventDetailsPanel = ({
                     fieldNamesCollapsed={fieldNamesCollapsed}
                     setFieldNamesCollapsed={setFieldNamesCollapsed}
                     maxResourceNameLength={maxResourceNameLength}
+                    resourceLabels={resourceLabels}
                     embedded
                     showOrganizationResourceControls={false}
                     localFieldCreationControl={localFieldCreationControl}

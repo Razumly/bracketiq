@@ -102,6 +102,7 @@ jest.mock('@/lib/eventStaffService', () => {
 let capturedEventFormProps: any = null;
 let mockEventFormDraft: any = null;
 let mockEventFormValidateResult = true;
+let mockEventFormValidationEffect: (() => void | Promise<void>) | null = null;
 let mockEventFormReportedValidity: boolean | null = null;
 let mockEventFormDirtyState = false;
 let mockEventFormValidationErrors: Array<{ path: string; message: string }> = [];
@@ -151,8 +152,21 @@ jest.mock('../components/EventForm', () => {
       props.onDirtyStateChange?.(false);
     }, [props]);
     useImperativeHandle(ref, () => ({
-
-      validate: async () => mockEventFormValidateResult,
+      captureCurrentEventConfiguration: () => {
+        const draft = mockEventFormDraft
+          ?? (props.snapshot?.draft
+            ? require('../components/eventForm/editorContractAdapters').editorDraftToLegacyEvent(props.snapshot.draft)
+            : props.event ?? {});
+        const { legacyEventToEditorDraft } = require('../components/eventForm/editorContractAdapters');
+        return {
+          draft: legacyEventToEditorDraft(draft),
+          validationErrors: mockEventFormValidationErrors,
+        };
+      },
+      validate: async () => {
+        await mockEventFormValidationEffect?.();
+        return mockEventFormValidateResult;
+      },
       getValidationErrors: () => mockEventFormValidationErrors,
       getRegistrationQuestionDrafts: () => [],
       validatePendingStaffAssignments: async () => mockValidatePendingStaffAssignments(),
@@ -308,6 +322,12 @@ const buildEditorSnapshot = (
       canUseOnlinePayments: true,
       canManageStaff: true,
       canEdit: true,
+      canDelegateHost: true,
+      readOnly: false,
+      readOnlyReason: null,
+      managementAuthority: null,
+      eventHostId: typeof sourceEvent.hostId === 'string' ? sourceEvent.hostId : null,
+      viewerIsEventHost: true,
       supportsTeamStaffing: true,
     },
     catalogs: {
@@ -447,6 +467,14 @@ const installApiEditorContractMock = () => {
             scheduleOutcome: response.scheduleOutcome ?? scheduleOutcome,
           }
           : {
+            ...(mode === 'CREATE'
+              ? {
+                  createOperationId: options?.body?.createOperationId,
+                  editorRevision: snapshot.editorRevision,
+                  staffRevision: snapshot.staffRevision,
+                  scheduleRevision: snapshot.scheduleState.revision,
+                }
+              : {}),
             status: 'SAVED',
             snapshot,
             questionIdMap: {},
@@ -618,6 +646,7 @@ describe('League schedule page', () => {
     capturedEventFormProps = null;
     mockEventFormDraft = null;
     mockEventFormValidateResult = true;
+    mockEventFormValidationEffect = null;
     mockEventFormReportedValidity = null;
     mockEventFormDirtyState = false;
     mockEventFormValidationErrors = [];
@@ -980,6 +1009,75 @@ describe('League schedule page', () => {
     expect(screen.getByTestId('calendar-match-match_1')).toBeInTheDocument();
   });
 
+
+  it('renders unauthorized Event Editor requests as visibly read-only', async () => {
+    useAppMock.mockReturnValue({
+      user: { $id: 'viewer_1' },
+      isAuthenticated: true,
+      isGuest: false,
+      loading: false,
+      setUser: jest.fn(),
+    });
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => key === 'mode' ? 'edit' : null,
+      toString: () => 'mode=edit',
+    });
+    const readOnlyEvent = buildApiEvent({
+      hostId: 'host_1',
+      assistantHostIds: [],
+      organizationId: 'org_1',
+    });
+    (eventService.getEventDetailBootstrap as jest.Mock).mockResolvedValue({
+      event: readOnlyEvent,
+      participantSnapshot: {
+        event: readOnlyEvent,
+        participants: {
+          teamIds: [],
+          userIds: [],
+          waitListIds: [],
+          freeAgentIds: [],
+          divisions: [],
+        },
+        teams: [],
+        users: [],
+        participantCount: 0,
+        participantCapacity: 0,
+        occurrence: null,
+        divisionWarnings: [],
+      },
+      matches: readOnlyEvent.matches ?? [],
+      fields: readOnlyEvent.fields ?? [],
+      timeSlots: readOnlyEvent.timeSlots ?? [],
+      leagueScoringConfig: readOnlyEvent.leagueScoringConfig ?? null,
+      staffInvites: [],
+      staffRevision: null,
+      teamCompliance: null,
+      userCompliance: null,
+      capabilities: {
+        canEdit: false,
+        canManageStaff: false,
+        canDelegateHost: false,
+        readOnly: true,
+        readOnlyReason: 'NOT_AUTHORIZED',
+        managementAuthority: {
+          type: 'ORGANIZATION',
+          organizationId: 'org_1',
+          ownerUserId: 'owner_1',
+        },
+        eventHostId: 'host_1',
+        viewerIsEventHost: false,
+      },
+    });
+
+    renderWithMantine(<LeagueSchedulePage />);
+
+    expect(await screen.findByText('Read-only event')).toBeInTheDocument();
+    expect(screen.getByText(
+      'You can view this event, but only its Event Host or Management Authority can make changes.',
+    )).toBeInTheDocument();
+    expect(screen.queryByTestId('event-form')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^save$/i })).not.toBeInTheDocument();
+  });
   it('uses the event detail bootstrap endpoint for initial schedule hydration', async () => {
     useSearchParamsMock.mockReturnValue({
       get: (key: string) => {
@@ -2990,7 +3088,7 @@ describe('League schedule page', () => {
 
     fireEvent.click(await screen.findByRole('tab', { name: /schedule/i }));
     const emptyCopy = await screen.findByText(
-      'No schedule has been built. Build a schedule from the current divisions, fields, availability, and team capacity.',
+      /No schedule has been built\. Build a schedule from the current divisions, .+, availability, and team capacity\./,
     );
     fireEvent.click(within(emptyCopy.parentElement as HTMLElement).getByRole('button', { name: 'Build schedule' }));
 
@@ -3037,7 +3135,7 @@ describe('League schedule page', () => {
 
     fireEvent.click(await screen.findByRole('tab', { name: /schedule/i }));
     const emptyCopy = await screen.findByText(
-      'No schedule has been built. Build a schedule from the current divisions, fields, availability, and team capacity.',
+      /No schedule has been built\. Build a schedule from the current divisions, .+, availability, and team capacity\./,
     );
     fireEvent.click(within(emptyCopy.parentElement as HTMLElement).getByRole('button', { name: 'Build schedule' }));
 
@@ -3386,6 +3484,7 @@ describe('League schedule page', () => {
     expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
     expect(await screen.findByText(/Selected resources and time range conflict/)).toBeInTheDocument();
     expect(screen.getByTestId('event-form')).toBeInTheDocument();
+    expect(mockEventFormDraft?.name).toBe('Create Regular Event');
     expect(await screen.findByRole('button', { name: 'Save as draft without a schedule' })).toBeInTheDocument();
   });
   it('retries an unchanged create command with the same operation ID after the first response is lost', async () => {
@@ -3396,6 +3495,14 @@ describe('League schedule page', () => {
         return null;
       },
     });
+    mockEventFormDraft = {
+      name: 'Retry One-Time Event',
+      eventType: 'EVENT',
+      sportIds: ['sport_1'],
+      start: '2026-10-09T18:00:00.000Z',
+      end: '2026-10-09T21:00:00.000Z',
+    };
+
 
     const defaultImplementation = apiRequestMock.getMockImplementation();
     let rejected = false;
@@ -3433,6 +3540,258 @@ describe('League schedule page', () => {
     expect(calls[1][1]?.body?.createOperationId).toBe('create-operation-test');
     expect(calls[1][1]?.body).toEqual(calls[0][1]?.body);
     expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
+  });
+
+  it('validates and submits one synchronously captured complete One-Time Event configuration', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => {
+        if (key === 'create') return '1';
+        if (key === 'mode') return 'edit';
+        return null;
+      },
+    });
+    const visibleConfiguration = {
+      $id: 'event_create_one_time',
+      name: 'Friday Night Skills Clinic',
+      description: 'Advanced serve receive and transition work.',
+      eventType: 'EVENT',
+      sportIds: ['sport_volleyball'],
+      start: '2026-10-09T18:00:00.000Z',
+      end: '2026-10-09T21:00:00.000Z',
+      timeZone: 'America/Detroit',
+      location: 'River City Sports Club',
+      address: '123 River Road',
+      coordinates: [-83.04, 42.33],
+      affiliateUrl: '',
+      organizationId: null,
+      hostId: 'host_1',
+      state: 'DRAFT',
+      imageId: 'image_clinic',
+      tags: [{ id: 'tag_clinic', slug: 'clinic', name: 'Clinic' }],
+      teamSignup: true,
+      singleDivision: false,
+      registrationByDivisionType: true,
+      teamSizeLimit: 6,
+      maxParticipants: 24,
+      minAge: 16,
+      maxAge: 40,
+      cancellationRefundHours: 48,
+      registrationCutoffHours: 6,
+      allowTeamSplitDefault: true,
+      waitListIds: ['wait_1'],
+      freeAgentIds: ['free_agent_1'],
+      registrationPaymentMode: 'MANUAL',
+      price: 4321,
+      taxHandling: 'ORGANIZER_MANUAL',
+      organizerManualTaxRateBps: 725,
+      manualPaymentInstructions: 'Pay at check-in.',
+      manualPaymentLinks: [{
+        id: 'payment_link_1',
+        provider: 'cash_app',
+        label: 'Cash App',
+        url: 'https://example.com/pay',
+      }],
+      allowPaymentPlans: true,
+      installmentCount: 2,
+      installmentDueDates: [
+        '2026-09-01T12:00:00.000Z',
+        '2026-10-01T12:00:00.000Z',
+      ],
+      installmentDueRelativeDays: [30, 7],
+      installmentAmounts: [2160, 2161],
+      registrationQuestions: [{
+        clientId: 'question_dietary',
+        prompt: 'Any accessibility needs?',
+        answerType: 'LONG_TEXT',
+        required: true,
+        sortOrder: 0,
+      }],
+      requiredDocumentIds: ['document_waiver'],
+      divisions: [],
+      fields: [{
+        id: 'resource_court_1',
+        $id: 'resource_court_1',
+        name: 'Championship Court',
+        location: 'River City Sports Club',
+      }],
+      fieldIds: ['resource_court_1'],
+      timeSlots: [{
+        id: 'slot_clinic',
+        $id: 'slot_clinic',
+        start: '2026-10-09T18:00:00.000Z',
+        end: '2026-10-09T21:00:00.000Z',
+        startDate: '2026-10-09',
+        endDate: '2026-10-09',
+        timeZone: 'America/Detroit',
+        startTimeMinutes: 1080,
+        endTimeMinutes: 1260,
+        repeating: false,
+        scheduledFieldIds: ['resource_court_1'],
+      }],
+      timeSlotIds: ['slot_clinic'],
+      requiredTemplateIds: ['template_host'],
+      officialSchedulingMode: 'OFF',
+      teamOfficialsMaySwap: true,
+      teamCheckInMode: 'EVENT',
+      teamCheckInOpenMinutesBefore: 45,
+      allowMatchRosterEdits: true,
+      allowTemporaryMatchPlayers: true,
+      autoCreatePointMatchIncidents: true,
+      officialIds: ['official_1'],
+      officialPositions: [{
+        id: 'position_lead',
+        name: 'Lead Official',
+        count: 1,
+        order: 0,
+      }],
+      eventOfficials: [{
+        id: 'event_official_1',
+        userId: 'official_1',
+        positionIds: ['position_lead'],
+        fieldIds: ['resource_court_1'],
+        isActive: true,
+      }],
+      assistantHostIds: ['assistant_1'],
+      pendingStaffInvites: [{
+        email: 'helper@example.com',
+        firstName: 'Taylor',
+        lastName: 'Helper',
+        roles: ['ASSISTANT_HOST'],
+      }],
+    };
+    mockEventFormDraft = visibleConfiguration;
+    mockEventFormDirtyState = true;
+    mockEventFormValidationEffect = () => {
+      mockEventFormDraft = {
+        ...visibleConfiguration,
+        name: 'Background synchronization value',
+      };
+      const renderedDraft = capturedEventFormProps?.snapshot?.draft;
+      if (renderedDraft) {
+        const laterDraft = {
+          ...renderedDraft,
+          basics: {
+            ...renderedDraft.basics,
+            name: 'Background synchronization value',
+          },
+        };
+        capturedEventFormProps?.onDraftStateChange?.({
+          draft: laterDraft,
+          baselineDraft: laterDraft,
+        });
+      }
+    };
+
+    renderWithMantine(<LeagueSchedulePage />);
+
+    const createButton = await screen.findByRole('button', { name: /^create event$/i });
+    await waitFor(() => expect(createButton).toBeEnabled());
+    fireEvent.click(createButton);
+    const createCall = () => apiRequestMock.mock.calls.find(([path, options]) => (
+      path === '/api/events/editor' && options?.method === 'POST'
+    ));
+    await waitFor(() => expect(createCall()).toBeDefined());
+
+    const command = createCall()?.[1]?.body;
+    expect(command).toEqual(expect.objectContaining({
+      contractVersion: 3,
+      createOperationId: 'create-operation-test',
+      expectedRevisions: {
+        editorRevision: expect.any(String),
+        staffRevision: 'test-staff-revision',
+        scheduleRevision: 'test-schedule-revision-0',
+      },
+      completion: { mode: 'CREATE_ONLY' },
+    }));
+    expect(command.draft.basics).toEqual(expect.objectContaining({
+      name: 'Friday Night Skills Clinic',
+      description: visibleConfiguration.description,
+      sportIds: visibleConfiguration.sportIds,
+      location: visibleConfiguration.location,
+      address: visibleConfiguration.address,
+      imageId: 'image_clinic',
+      tags: visibleConfiguration.tags,
+    }));
+    expect(command.draft.participation).toEqual(expect.objectContaining({
+      teamSignup: true,
+      maxParticipants: 24,
+      minAge: 16,
+      waitListIds: ['wait_1'],
+      freeAgentIds: ['free_agent_1'],
+    }));
+    expect(command.draft.registration).toEqual(expect.objectContaining({
+      payment: expect.objectContaining({
+        mode: 'MANUAL',
+        priceCents: 4321,
+        manualPaymentInstructions: 'Pay at check-in.',
+        installmentAmounts: [2160, 2161],
+      }),
+      questions: [expect.objectContaining({
+        clientId: 'question_dietary',
+        prompt: 'Any accessibility needs?',
+      })],
+      requiredDocumentIds: ['document_waiver'],
+    }));
+    expect(command.draft.resources).toEqual(expect.objectContaining({
+      fieldIds: ['resource_court_1'],
+      timeSlotIds: ['slot_clinic'],
+      requiredTemplateIds: ['template_host'],
+    }));
+    expect(command.draft.staff).toEqual(expect.objectContaining({
+      officialIds: ['official_1'],
+      assistantHostIds: ['assistant_1'],
+      pendingInvites: [expect.objectContaining({ email: 'helper@example.com' })],
+    }));
+  });
+
+  it('uses a new operation identity when an applicable value changes after a failed create', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => {
+        if (key === 'create') return '1';
+        if (key === 'mode') return 'edit';
+        return null;
+      },
+    });
+    const initialDraft = {
+      name: 'Original One-Time Event',
+      eventType: 'EVENT',
+      sportIds: ['sport_1'],
+      start: '2026-10-09T18:00:00.000Z',
+      end: '2026-10-09T21:00:00.000Z',
+    };
+    mockEventFormDraft = initialDraft;
+    const defaultImplementation = apiRequestMock.getMockImplementation();
+    let rejected = false;
+    apiRequestMock.mockImplementation((path: string, options?: MockRequestOptions) => {
+      if (path === '/api/events/editor' && options?.method === 'POST' && !rejected) {
+        rejected = true;
+        return Promise.reject(new Error('Network response lost.'));
+      }
+      return defaultImplementation?.(path, options) ?? Promise.resolve({});
+    });
+
+    renderWithMantine(<LeagueSchedulePage />);
+
+    const createButton = await screen.findByRole('button', { name: /^create event$/i });
+    await waitFor(() => expect(createButton).toBeEnabled());
+    fireEvent.click(createButton);
+    const createCalls = () => apiRequestMock.mock.calls.filter(([path, options]) => (
+      path === '/api/events/editor' && options?.method === 'POST'
+    ));
+    await waitFor(() => expect(createCalls()).toHaveLength(1));
+    expect(await screen.findByText(/Network response lost/)).toBeInTheDocument();
+
+    mockEventFormDraft = {
+      ...initialDraft,
+      maxParticipants: 18,
+    };
+    await waitFor(() => expect(createButton).toBeEnabled());
+    fireEvent.click(createButton);
+    await waitFor(() => expect(createCalls()).toHaveLength(2));
+
+    const [first, second] = createCalls();
+    expect(second[1]?.body?.draft?.participation?.maxParticipants).toBe(18);
+    expect(second[1]?.body?.createOperationId).not.toBe(first[1]?.body?.createOperationId);
   });
 
   it('normalizes create payload with multi-day slots and slot divisions before schedule preview', async () => {

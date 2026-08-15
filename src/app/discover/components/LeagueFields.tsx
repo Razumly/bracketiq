@@ -23,6 +23,7 @@ import { parseOptionalWholeNumber } from '@/app/events/[id]/schedule/components/
 import type { WeeklySlotConflict } from '@/lib/leagueService';
 import { formatDisplayDate, formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
 import { getFacilityScopedFieldDisplayName, getFieldDisplayName } from '@/lib/fieldUtils';
+import { applySportResourceLabels, GENERIC_RESOURCE_LABELS, type SportResourceLabels } from '@/lib/sportResourceLabels';
 
 const DROPDOWN_PROPS = { withinPortal: true, zIndex: 1800 };
 const MAX_STANDARD_NUMBER = 99_999;
@@ -348,11 +349,11 @@ const getFieldFacility = (field: Field | null): Record<string, unknown> | null =
   return facility && typeof facility === 'object' ? facility as unknown as Record<string, unknown> : null;
 };
 
-const getFieldFacilityName = (field: Field | null): string => {
+const getFieldFacilityName = (field: Field | null, fallback: string): string => {
   const facility = getFieldFacility(field);
   return normalizeResourceText(facility?.name)
     || normalizeResourceText(field?.facilityId)
-    || 'Unassigned resources';
+    || fallback;
 };
 
 const getFieldFacilityLocation = (field: Field | null): string => {
@@ -491,10 +492,10 @@ const getRentalLockUpdates = (option: SlotResourceOption): Partial<LeagueSlotFor
   };
 };
 
-const RENTAL_SLOT_MISMATCH_ERROR_PREFIX = 'This rental resource is only available for ';
+const RENTAL_SLOT_MISMATCH_ERROR_MARKER = ' is only available for ';
 
 const isRentalSlotMismatchError = (error?: string): boolean =>
-  Boolean(error?.startsWith(RENTAL_SLOT_MISMATCH_ERROR_PREFIX));
+  Boolean(error?.includes(RENTAL_SLOT_MISMATCH_ERROR_MARKER));
 
 const slotHasUserTiming = (slot: LeagueSlotForm): boolean => (
   slot.repeating !== undefined
@@ -506,14 +507,17 @@ const slotHasUserTiming = (slot: LeagueSlotForm): boolean => (
   || Boolean(parseLocalDateTime(slot.endDate ?? null))
 );
 
-const buildRentalSlotMismatchError = (option: SlotResourceOption): string | null => {
+const buildRentalSlotMismatchError = (
+  option: SlotResourceOption,
+  resourceSingular: string,
+): string | null => {
   const metadata = getOptionRentalMetadata(option);
   const start = parseLocalDateTime(metadata.rentalStart ?? null);
   const end = parseLocalDateTime(metadata.rentalEnd ?? null);
   if (!start || !end || end.getTime() <= start.getTime()) {
     return null;
   }
-  return `${RENTAL_SLOT_MISMATCH_ERROR_PREFIX}${formatRentalWindowLabel(start, end)}. Update this timeslot to match the rental before selecting it.`;
+  return `This rental ${resourceSingular.toLocaleLowerCase()}${RENTAL_SLOT_MISMATCH_ERROR_MARKER}${formatRentalWindowLabel(start, end)}. Update this timeslot to match the rental before selecting it.`;
 };
 
 const slotMatchesRentalWindow = (slot: LeagueSlotForm, option: SlotResourceOption): boolean => {
@@ -530,11 +534,15 @@ const slotMatchesRentalWindow = (slot: LeagueSlotForm, option: SlotResourceOptio
     && slot.endTimeMinutes === rentalUpdates.endTimeMinutes;
 };
 
-const getRentalSelectionError = (slot: LeagueSlotForm, option: SlotResourceOption): string | null => {
+const getRentalSelectionError = (
+  slot: LeagueSlotForm,
+  option: SlotResourceOption,
+  resourceSingular: string,
+): string | null => {
   if (!slotHasUserTiming(slot) || slotMatchesRentalWindow(slot, option)) {
     return null;
   }
-  return buildRentalSlotMismatchError(option);
+  return buildRentalSlotMismatchError(option, resourceSingular);
 };
 
 const clearRentalLockUpdates = (): Partial<LeagueSlotForm> => ({
@@ -550,13 +558,14 @@ const clearRentalLockUpdates = (): Partial<LeagueSlotForm> => ({
 const buildSlotResourceGroups = (
   options: SlotResourceOption[],
   search: string,
+  resourceLabels: SportResourceLabels,
 ): SlotResourceGroup[] => {
   const query = search.trim().toLowerCase();
   const byKey = new Map<string, SlotResourceGroup>();
 
   options.forEach((option) => {
     const resourceLabel = option.label || getFieldDisplayName(option.field ?? createFieldStub(option.value), option.value);
-    const facilityName = getFieldFacilityName(option.field);
+    const facilityName = getFieldFacilityName(option.field, `Unassigned ${resourceLabels.plural.toLocaleLowerCase()}`);
     const facilityLocation = getFieldFacilityLocation(option.field);
     const searchable = [
       resourceLabel,
@@ -637,6 +646,7 @@ interface LeagueFieldsProps {
   leagueData: LeagueConfig;
   sport?: Sport;
   participantCount?: number;
+  resourceLabels?: SportResourceLabels;
   onLeagueDataChange: (updates: Partial<LeagueConfig>) => void;
   slots: LeagueSlotForm[];
   onAddSlot: (repeating?: boolean) => void;
@@ -666,6 +676,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
   leagueData,
   sport,
   participantCount,
+  resourceLabels = GENERIC_RESOURCE_LABELS,
   onLeagueDataChange,
   slots,
   onAddSlot,
@@ -688,7 +699,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
   showPlayoffSettings = true,
   showTimeslots = true,
   unstyled = false,
-  emptyFieldsMessage = 'No resources found. Create a resource first so you can attach weekly availability.',
+  emptyFieldsMessage,
 }) => {
   const fieldLookup = useMemo(
     () => new Map(fields.map((field) => [field.$id, field])),
@@ -701,7 +712,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
       ? fieldOptions
       : fields.map((field) => ({
           value: field.$id,
-          label: getFacilityScopedFieldDisplayName(field, 'Unnamed resource'),
+          label: getFacilityScopedFieldDisplayName(field, `Unnamed ${resourceLabels.singular.toLocaleLowerCase()}`),
           fieldId: field.$id,
         }));
 
@@ -737,7 +748,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
         };
       })
       .filter((option): option is SlotResourceOption => Boolean(option));
-  }, [fieldLookup, fieldOptions, fields]);
+  }, [fieldLookup, fieldOptions, fields, resourceLabels.singular]);
 
   const setsPerMatch = leagueData.setsPerMatch ?? 1;
   const pointsToVictory = leagueData.pointsToVictory ?? [];
@@ -880,7 +891,9 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
       if (optionSelected) {
         rentalUpdates = clearRentalLockUpdates();
       } else {
-        const rentalSelectionError = slotHasSelectedResources ? getRentalSelectionError(slot, option) : null;
+        const rentalSelectionError = slotHasSelectedResources
+          ? getRentalSelectionError(slot, option, resourceLabels.singular)
+          : null;
         if (rentalSelectionError) {
           onUpdateSlot(slotIndex, { error: rentalSelectionError });
           return;
@@ -1126,13 +1139,13 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
           {fieldsLoading && (
             <div className="flex items-center gap-2 mb-4 text-sm text-gray-600">
               <Loader size="sm" />
-              Loading resources...
+              Loading {resourceLabels.plural.toLocaleLowerCase()}...
             </div>
           )}
 
           {!fieldsLoading && availableFieldOptions.length === 0 && (
             <Alert color="yellow" radius="md" className="mb-4">
-              {emptyFieldsMessage}
+              {emptyFieldsMessage ?? `No ${resourceLabels.plural.toLocaleLowerCase()} found. Create a ${resourceLabels.singular.toLocaleLowerCase()} first so you can attach weekly availability.`}
             </Alert>
           )}
 
@@ -1250,7 +1263,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
             const resourceError = isRentalSlotMismatchError(slot.error) ? slot.error : null;
             const hasConflicts = conflictCount > 0;
             const slotTimingReadOnly = readOnly || slot.rentalLocked === true;
-            const resourceGroups = buildSlotResourceGroups(fieldOptionsForSlot, fieldSearch);
+            const resourceGroups = buildSlotResourceGroups(fieldOptionsForSlot, fieldSearch, resourceLabels);
             const previousVisibleSlot = visibleSlotEntries[visibleIndex - 1]?.slot;
             const mixedGroupLabel = isRepeating ? 'Weekly repeating timeslots' : 'One-time timeslots';
             const showMixedGroupLabel = timeslotMode === 'MIXED'
@@ -1286,9 +1299,9 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
 
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
                     <div className="md:col-span-6">
-                      <Text fw={500} size="sm" mb={6}>Resources</Text>
+                      <Text fw={500} size="sm" mb={6}>{resourceLabels.plural}</Text>
                       <TextInput
-                        placeholder="Search resources..."
+                        placeholder={`Search ${resourceLabels.plural.toLocaleLowerCase()}...`}
                         value={fieldSearch}
                         onChange={(event) => setSlotSearch(slot.key, event.currentTarget.value)}
                         disabled={resourcesReadOnly}
@@ -1375,13 +1388,13 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
                             </Stack>
                           ) : (
                             <Text size="sm" c="dimmed" p="sm">
-                              No resources match this search.
+                              No {resourceLabels.plural.toLocaleLowerCase()} match this search.
                             </Text>
                           )}
                         </div>
                       </div>
                       {fieldMissing && !resourcesReadOnly ? (
-                        <Text size="xs" c="red" mt={4}>Select at least one resource</Text>
+                        <Text size="xs" c="red" mt={4}>Select at least one {resourceLabels.singular.toLocaleLowerCase()}</Text>
                       ) : null}
                       {resourceError ? (
                         <Alert color="red" radius="md" mt="xs">
@@ -1389,7 +1402,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
                         </Alert>
                       ) : null}
                       <Text size="xs" c="dimmed" mt={4}>
-                        Tip: Hold Shift and click another resource to select a range.
+                        Tip: Hold Shift and click another {resourceLabels.singular.toLocaleLowerCase()} to select a range.
                       </Text>
                     </div>
 
@@ -1555,9 +1568,9 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
                 {conflictCount > 0 && (
                   <Alert color="yellow" radius="md">
                       <Stack gap="xs">
-                        <Text fw={600}>Field conflict warning.</Text>
+                        <Text fw={600}>{resourceLabels.singular} conflict warning.</Text>
                         <Text size="sm">
-                          This timeslot overlaps another event or rental on the same field. The scheduler will avoid the overlap when building matches; review it manually or auto resolve this slot.
+                          This timeslot overlaps another event or rental on the same {resourceLabels.singular.toLocaleLowerCase()}. The scheduler will avoid the overlap when building matches; review it manually or auto resolve this slot.
                         </Text>
                         {slot.conflicts.map(({ event, schedule }, conflictIndex) => (
                           <div key={`${schedule.$id}-${conflictIndex}`} className="flex items-start gap-2 text-sm">
@@ -1586,7 +1599,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
 
                   {slot.error && !resourceError && (
                     <Alert color="red" radius="md">
-                      {slot.error}
+                      {applySportResourceLabels(slot.error, resourceLabels)}
                     </Alert>
                   )}
                 </div>

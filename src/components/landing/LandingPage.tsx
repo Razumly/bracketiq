@@ -828,7 +828,6 @@ function StaticOperationsContent({
   landingImageProps: LandingImageProps;
 }) {
   const operationsRef = useRef<HTMLDivElement | null>(null);
-  const [isRevealReady, setIsRevealReady] = useState(false);
 
   useEffect(() => {
     const operationsElement = operationsRef.current;
@@ -841,7 +840,7 @@ function StaticOperationsContent({
     );
     if (!cards.length) return;
 
-    setIsRevealReady(true);
+    operationsElement.classList.add("is-reveal-ready");
 
     const showCard = (card: HTMLElement) => {
       card.classList.add("is-visible");
@@ -887,7 +886,7 @@ function StaticOperationsContent({
   return (
     <div
       ref={operationsRef}
-      className={`landing-static-operations mx-auto w-full max-w-7xl px-5 py-20 lg:px-8 ${isRevealReady ? "is-reveal-ready" : ""}`}
+      className="landing-static-operations mx-auto w-full max-w-7xl px-5 py-20 lg:px-8"
     >
       <div className="max-w-3xl">
         <p className="landing-static-operations-kicker inline-flex w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-black tracking-wide text-blue-800 uppercase">

@@ -29,6 +29,8 @@ export type SportsMinAggregateOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   name: string | null
+  resourceLabelSingular: string | null
+  resourceLabelPlural: string | null
   usePointsForWin: boolean | null
   usePointsForDraw: boolean | null
   usePointsForLoss: boolean | null
@@ -79,6 +81,8 @@ export type SportsMaxAggregateOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   name: string | null
+  resourceLabelSingular: string | null
+  resourceLabelPlural: string | null
   usePointsForWin: boolean | null
   usePointsForDraw: boolean | null
   usePointsForLoss: boolean | null
@@ -129,6 +133,8 @@ export type SportsCountAggregateOutputType = {
   createdAt: number
   updatedAt: number
   name: number
+  resourceLabelSingular: number
+  resourceLabelPlural: number
   usePointsForWin: number
   usePointsForDraw: number
   usePointsForLoss: number
@@ -184,6 +190,8 @@ export type SportsMinAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   name?: true
+  resourceLabelSingular?: true
+  resourceLabelPlural?: true
   usePointsForWin?: true
   usePointsForDraw?: true
   usePointsForLoss?: true
@@ -234,6 +242,8 @@ export type SportsMaxAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   name?: true
+  resourceLabelSingular?: true
+  resourceLabelPlural?: true
   usePointsForWin?: true
   usePointsForDraw?: true
   usePointsForLoss?: true
@@ -284,6 +294,8 @@ export type SportsCountAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   name?: true
+  resourceLabelSingular?: true
+  resourceLabelPlural?: true
   usePointsForWin?: true
   usePointsForDraw?: true
   usePointsForLoss?: true
@@ -410,6 +422,8 @@ export type SportsGroupByOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   name: string
+  resourceLabelSingular: string
+  resourceLabelPlural: string
   usePointsForWin: boolean | null
   usePointsForDraw: boolean | null
   usePointsForLoss: boolean | null
@@ -484,6 +498,8 @@ export type SportsWhereInput = {
   createdAt?: Prisma.DateTimeNullableFilter<"Sports"> | Date | string | null
   updatedAt?: Prisma.DateTimeNullableFilter<"Sports"> | Date | string | null
   name?: Prisma.StringFilter<"Sports"> | string
+  resourceLabelSingular?: Prisma.StringFilter<"Sports"> | string
+  resourceLabelPlural?: Prisma.StringFilter<"Sports"> | string
   usePointsForWin?: Prisma.BoolNullableFilter<"Sports"> | boolean | null
   usePointsForDraw?: Prisma.BoolNullableFilter<"Sports"> | boolean | null
   usePointsForLoss?: Prisma.BoolNullableFilter<"Sports"> | boolean | null
@@ -537,6 +553,8 @@ export type SportsOrderByWithRelationInput = {
   createdAt?: Prisma.SortOrderInput | Prisma.SortOrder
   updatedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   name?: Prisma.SortOrder
+  resourceLabelSingular?: Prisma.SortOrder
+  resourceLabelPlural?: Prisma.SortOrder
   usePointsForWin?: Prisma.SortOrderInput | Prisma.SortOrder
   usePointsForDraw?: Prisma.SortOrderInput | Prisma.SortOrder
   usePointsForLoss?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -593,6 +611,8 @@ export type SportsWhereUniqueInput = Prisma.AtLeast<{
   createdAt?: Prisma.DateTimeNullableFilter<"Sports"> | Date | string | null
   updatedAt?: Prisma.DateTimeNullableFilter<"Sports"> | Date | string | null
   name?: Prisma.StringFilter<"Sports"> | string
+  resourceLabelSingular?: Prisma.StringFilter<"Sports"> | string
+  resourceLabelPlural?: Prisma.StringFilter<"Sports"> | string
   usePointsForWin?: Prisma.BoolNullableFilter<"Sports"> | boolean | null
   usePointsForDraw?: Prisma.BoolNullableFilter<"Sports"> | boolean | null
   usePointsForLoss?: Prisma.BoolNullableFilter<"Sports"> | boolean | null
@@ -646,6 +666,8 @@ export type SportsOrderByWithAggregationInput = {
   createdAt?: Prisma.SortOrderInput | Prisma.SortOrder
   updatedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   name?: Prisma.SortOrder
+  resourceLabelSingular?: Prisma.SortOrder
+  resourceLabelPlural?: Prisma.SortOrder
   usePointsForWin?: Prisma.SortOrderInput | Prisma.SortOrder
   usePointsForDraw?: Prisma.SortOrderInput | Prisma.SortOrder
   usePointsForLoss?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -705,6 +727,8 @@ export type SportsScalarWhereWithAggregatesInput = {
   createdAt?: Prisma.DateTimeNullableWithAggregatesFilter<"Sports"> | Date | string | null
   updatedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"Sports"> | Date | string | null
   name?: Prisma.StringWithAggregatesFilter<"Sports"> | string
+  resourceLabelSingular?: Prisma.StringWithAggregatesFilter<"Sports"> | string
+  resourceLabelPlural?: Prisma.StringWithAggregatesFilter<"Sports"> | string
   usePointsForWin?: Prisma.BoolNullableWithAggregatesFilter<"Sports"> | boolean | null
   usePointsForDraw?: Prisma.BoolNullableWithAggregatesFilter<"Sports"> | boolean | null
   usePointsForLoss?: Prisma.BoolNullableWithAggregatesFilter<"Sports"> | boolean | null
@@ -758,6 +782,8 @@ export type SportsCreateInput = {
   createdAt?: Date | string | null
   updatedAt?: Date | string | null
   name: string
+  resourceLabelSingular?: string
+  resourceLabelPlural?: string
   usePointsForWin?: boolean | null
   usePointsForDraw?: boolean | null
   usePointsForLoss?: boolean | null
@@ -811,6 +837,8 @@ export type SportsUncheckedCreateInput = {
   createdAt?: Date | string | null
   updatedAt?: Date | string | null
   name: string
+  resourceLabelSingular?: string
+  resourceLabelPlural?: string
   usePointsForWin?: boolean | null
   usePointsForDraw?: boolean | null
   usePointsForLoss?: boolean | null
@@ -864,6 +892,8 @@ export type SportsUpdateInput = {
   createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   name?: Prisma.StringFieldUpdateOperationsInput | string
+  resourceLabelSingular?: Prisma.StringFieldUpdateOperationsInput | string
+  resourceLabelPlural?: Prisma.StringFieldUpdateOperationsInput | string
   usePointsForWin?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   usePointsForDraw?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   usePointsForLoss?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -917,6 +947,8 @@ export type SportsUncheckedUpdateInput = {
   createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   name?: Prisma.StringFieldUpdateOperationsInput | string
+  resourceLabelSingular?: Prisma.StringFieldUpdateOperationsInput | string
+  resourceLabelPlural?: Prisma.StringFieldUpdateOperationsInput | string
   usePointsForWin?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   usePointsForDraw?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   usePointsForLoss?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -970,6 +1002,8 @@ export type SportsCreateManyInput = {
   createdAt?: Date | string | null
   updatedAt?: Date | string | null
   name: string
+  resourceLabelSingular?: string
+  resourceLabelPlural?: string
   usePointsForWin?: boolean | null
   usePointsForDraw?: boolean | null
   usePointsForLoss?: boolean | null
@@ -1023,6 +1057,8 @@ export type SportsUpdateManyMutationInput = {
   createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   name?: Prisma.StringFieldUpdateOperationsInput | string
+  resourceLabelSingular?: Prisma.StringFieldUpdateOperationsInput | string
+  resourceLabelPlural?: Prisma.StringFieldUpdateOperationsInput | string
   usePointsForWin?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   usePointsForDraw?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   usePointsForLoss?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -1076,6 +1112,8 @@ export type SportsUncheckedUpdateManyInput = {
   createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   name?: Prisma.StringFieldUpdateOperationsInput | string
+  resourceLabelSingular?: Prisma.StringFieldUpdateOperationsInput | string
+  resourceLabelPlural?: Prisma.StringFieldUpdateOperationsInput | string
   usePointsForWin?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   usePointsForDraw?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   usePointsForLoss?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -1129,6 +1167,8 @@ export type SportsCountOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   name?: Prisma.SortOrder
+  resourceLabelSingular?: Prisma.SortOrder
+  resourceLabelPlural?: Prisma.SortOrder
   usePointsForWin?: Prisma.SortOrder
   usePointsForDraw?: Prisma.SortOrder
   usePointsForLoss?: Prisma.SortOrder
@@ -1182,6 +1222,8 @@ export type SportsMaxOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   name?: Prisma.SortOrder
+  resourceLabelSingular?: Prisma.SortOrder
+  resourceLabelPlural?: Prisma.SortOrder
   usePointsForWin?: Prisma.SortOrder
   usePointsForDraw?: Prisma.SortOrder
   usePointsForLoss?: Prisma.SortOrder
@@ -1232,6 +1274,8 @@ export type SportsMinOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   name?: Prisma.SortOrder
+  resourceLabelSingular?: Prisma.SortOrder
+  resourceLabelPlural?: Prisma.SortOrder
   usePointsForWin?: Prisma.SortOrder
   usePointsForDraw?: Prisma.SortOrder
   usePointsForLoss?: Prisma.SortOrder
@@ -1284,6 +1328,8 @@ export type SportsSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   createdAt?: boolean
   updatedAt?: boolean
   name?: boolean
+  resourceLabelSingular?: boolean
+  resourceLabelPlural?: boolean
   usePointsForWin?: boolean
   usePointsForDraw?: boolean
   usePointsForLoss?: boolean
@@ -1337,6 +1383,8 @@ export type SportsSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extens
   createdAt?: boolean
   updatedAt?: boolean
   name?: boolean
+  resourceLabelSingular?: boolean
+  resourceLabelPlural?: boolean
   usePointsForWin?: boolean
   usePointsForDraw?: boolean
   usePointsForLoss?: boolean
@@ -1390,6 +1438,8 @@ export type SportsSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extens
   createdAt?: boolean
   updatedAt?: boolean
   name?: boolean
+  resourceLabelSingular?: boolean
+  resourceLabelPlural?: boolean
   usePointsForWin?: boolean
   usePointsForDraw?: boolean
   usePointsForLoss?: boolean
@@ -1443,6 +1493,8 @@ export type SportsSelectScalar = {
   createdAt?: boolean
   updatedAt?: boolean
   name?: boolean
+  resourceLabelSingular?: boolean
+  resourceLabelPlural?: boolean
   usePointsForWin?: boolean
   usePointsForDraw?: boolean
   usePointsForLoss?: boolean
@@ -1491,7 +1543,7 @@ export type SportsSelectScalar = {
   matchRulesTemplate?: boolean
 }
 
-export type SportsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "name" | "usePointsForWin" | "usePointsForDraw" | "usePointsForLoss" | "usePointsForForfeitWin" | "usePointsForForfeitLoss" | "usePointsPerSetWin" | "usePointsPerSetLoss" | "usePointsPerGameWin" | "usePointsPerGameLoss" | "usePointsPerGoalScored" | "usePointsPerGoalConceded" | "useMaxGoalBonusPoints" | "useMinGoalBonusThreshold" | "usePointsForShutout" | "usePointsForCleanSheet" | "useApplyShutoutOnlyIfWin" | "usePointsPerGoalDifference" | "useMaxGoalDifferencePoints" | "usePointsPenaltyPerGoalDifference" | "usePointsForParticipation" | "usePointsForNoShow" | "usePointsForWinStreakBonus" | "useWinStreakThreshold" | "usePointsForOvertimeWin" | "usePointsForOvertimeLoss" | "useOvertimeEnabled" | "usePointsPerRedCard" | "usePointsPerYellowCard" | "usePointsPerPenalty" | "useMaxPenaltyDeductions" | "useMaxPointsPerMatch" | "useMinPointsPerMatch" | "useGoalDifferenceTiebreaker" | "useHeadToHeadTiebreaker" | "useTotalGoalsTiebreaker" | "useEnableBonusForComebackWin" | "useBonusPointsForComebackWin" | "useEnableBonusForHighScoringMatch" | "useHighScoringThreshold" | "useBonusPointsForHighScoringMatch" | "useEnablePenaltyUnsporting" | "usePenaltyPointsUnsporting" | "usePointPrecision" | "skillDivisionTypes" | "officialPositionTemplates" | "matchRulesTemplate", ExtArgs["result"]["sports"]>
+export type SportsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "name" | "resourceLabelSingular" | "resourceLabelPlural" | "usePointsForWin" | "usePointsForDraw" | "usePointsForLoss" | "usePointsForForfeitWin" | "usePointsForForfeitLoss" | "usePointsPerSetWin" | "usePointsPerSetLoss" | "usePointsPerGameWin" | "usePointsPerGameLoss" | "usePointsPerGoalScored" | "usePointsPerGoalConceded" | "useMaxGoalBonusPoints" | "useMinGoalBonusThreshold" | "usePointsForShutout" | "usePointsForCleanSheet" | "useApplyShutoutOnlyIfWin" | "usePointsPerGoalDifference" | "useMaxGoalDifferencePoints" | "usePointsPenaltyPerGoalDifference" | "usePointsForParticipation" | "usePointsForNoShow" | "usePointsForWinStreakBonus" | "useWinStreakThreshold" | "usePointsForOvertimeWin" | "usePointsForOvertimeLoss" | "useOvertimeEnabled" | "usePointsPerRedCard" | "usePointsPerYellowCard" | "usePointsPerPenalty" | "useMaxPenaltyDeductions" | "useMaxPointsPerMatch" | "useMinPointsPerMatch" | "useGoalDifferenceTiebreaker" | "useHeadToHeadTiebreaker" | "useTotalGoalsTiebreaker" | "useEnableBonusForComebackWin" | "useBonusPointsForComebackWin" | "useEnableBonusForHighScoringMatch" | "useHighScoringThreshold" | "useBonusPointsForHighScoringMatch" | "useEnablePenaltyUnsporting" | "usePenaltyPointsUnsporting" | "usePointPrecision" | "skillDivisionTypes" | "officialPositionTemplates" | "matchRulesTemplate", ExtArgs["result"]["sports"]>
 
 export type $SportsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "Sports"
@@ -1504,6 +1556,8 @@ export type $SportsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs
      * Trimmed and unique case-insensitively by the migration-enforced Sports_name_ci_key expression index, which Prisma schema syntax cannot represent.
      */
     name: string
+    resourceLabelSingular: string
+    resourceLabelPlural: string
     usePointsForWin: boolean | null
     usePointsForDraw: boolean | null
     usePointsForLoss: boolean | null
@@ -1977,6 +2031,8 @@ export interface SportsFieldRefs {
   readonly createdAt: Prisma.FieldRef<"Sports", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"Sports", 'DateTime'>
   readonly name: Prisma.FieldRef<"Sports", 'String'>
+  readonly resourceLabelSingular: Prisma.FieldRef<"Sports", 'String'>
+  readonly resourceLabelPlural: Prisma.FieldRef<"Sports", 'String'>
   readonly usePointsForWin: Prisma.FieldRef<"Sports", 'Boolean'>
   readonly usePointsForDraw: Prisma.FieldRef<"Sports", 'Boolean'>
   readonly usePointsForLoss: Prisma.FieldRef<"Sports", 'Boolean'>

@@ -14,6 +14,7 @@ describe('tournamentService', () => {
 
   it('normalizes match ids returned by the API', async () => {
     apiRequestMock.mockResolvedValue({
+      match: { id: 'match_1' },
     });
 
     const result = await tournamentService.updateMatch('event_1', 'match_1', {

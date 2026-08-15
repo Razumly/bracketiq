@@ -1,17 +1,21 @@
+import type { SportResourceLabels } from '@/lib/sportResourceLabels';
+
 type BuildLeagueWarningOptions = {
     hasPendingExternalConflictChecks: boolean;
     hasExternalSlotConflictWarnings: boolean;
+    resourceLabels: SportResourceLabels;
 };
 
 export const buildLeagueScheduleWarning = ({
     hasPendingExternalConflictChecks,
     hasExternalSlotConflictWarnings,
+    resourceLabels,
 }: BuildLeagueWarningOptions): string | null => {
     if (hasPendingExternalConflictChecks) {
-        return 'Checking field conflicts for timeslots. You can still save while this warning check finishes.';
+        return `Checking ${resourceLabels.singular.toLocaleLowerCase()} conflicts for timeslots. You can still save while this warning check finishes.`;
     }
     if (hasExternalSlotConflictWarnings) {
-        return 'Timeslot field conflicts are warnings. The scheduler will avoid overlaps when building matches, but review or auto resolve the affected slots if needed.';
+        return `Timeslot ${resourceLabels.singular.toLocaleLowerCase()} conflicts are warnings. The scheduler will avoid overlaps when building matches, but review or auto resolve the affected slots if needed.`;
     }
     return null;
 };

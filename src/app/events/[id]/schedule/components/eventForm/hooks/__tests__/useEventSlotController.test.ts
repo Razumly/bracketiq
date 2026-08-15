@@ -32,6 +32,7 @@ const SLOT_DIVISION_LOOKUP: SlotDivisionLookup = {
     valueToId: new Map([['open', 'open']]),
 };
 const FIELD = { $id: 'field_1', name: 'Court 1' } as Field;
+const RESOURCE_LABELS = { singular: 'Court', plural: 'Courts' } as const;
 const EMPTY_TIME_SLOTS: TimeSlot[] = [];
 
 const buildSlot = (overrides: Partial<LeagueSlotForm> = {}): LeagueSlotForm => ({
@@ -143,6 +144,7 @@ const useSlotHarness = ({
         parentEvent: formValues.parentEvent,
         rentalLockedSlotsForDraft,
         resolvedOrganizationId: 'org_1',
+        resourceLabels: RESOURCE_LABELS,
         simpleScheduleStyle,
         setLeagueData: jest.fn(),
         setPlayoffData: jest.fn(),
@@ -277,7 +279,7 @@ describe('useEventSlotController', () => {
 
         await waitFor(() => expect(result.current.formValues.leagueSlots[0].conflicts).toHaveLength(1));
         expect(result.current.formValues.leagueSlots[0].checking).toBe(false);
-        expect(result.current.leagueWarning).toMatch(/Timeslot field conflicts are warnings/i);
+        expect(result.current.leagueWarning).toMatch(/Timeslot court conflicts are warnings/i);
 
         const previousStart = result.current.formValues.leagueSlots[0].startTimeMinutes;
         act(() => result.current.handleAutoResolveSlotConflict(0));

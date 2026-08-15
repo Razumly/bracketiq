@@ -2,6 +2,7 @@ import type { ComponentProps } from 'react';
 import { NumberInput } from '@mantine/core';
 
 import type { Division, Event, EventTag, RegistrationQuestionDraft } from '@/types';
+import { resolveEventResourceLabels } from '@/lib/sportResourceLabels';
 
 import { deriveScheduleParticipantCount } from '../divisionForm';
 import type { EventFormValues } from '../formTypes';
@@ -159,6 +160,10 @@ export const EventFormSections = ({
     const leagueData = eventData.leagueData;
     const tournamentData = eventData.tournamentData;
     const playoffData = eventData.playoffData;
+    const resourceLabels = resolveEventResourceLabels({
+        sportIds: eventData.sportIds,
+        sportsById: catalog.sportsById,
+    });
     const {
         eventLocalFields,
         fieldCount,
@@ -233,7 +238,7 @@ export const EventFormSections = ({
     } = fieldWriters;
     const localFieldCreationControl = showLocalFieldCreationControls ? (
         <NumberInput
-            label="Count"
+            label={`${resourceLabels.singular} Count`}
             min={isOrganizationHostedEvent ? 0 : 1}
             max={12}
             value={fieldCount}
@@ -326,6 +331,7 @@ export const EventFormSections = ({
                 todaysDate={new Date(new Date().setHours(0, 0, 0, 0))}
                 maxStandardNumber={MAX_STANDARD_NUMBER}
                 maxResourceNameLength={MAX_MEDIUM_TEXT_LENGTH}
+                resourceLabels={resourceLabels}
                 selectStyles={alignedDetailsFieldStyles}
                 numberInputStyles={alignedDetailsFieldStyles}
                 dateTimePickerStyles={alignedDetailsFieldStyles}
@@ -497,6 +503,7 @@ export const EventFormSections = ({
                         maxParticipants: eventData.maxParticipants,
                         divisionDetails: eventData.divisionDetails,
                     })}
+                    resourceLabels={resourceLabels}
                     leagueSlots={eventData.leagueSlots}
                     leagueFieldOptions={leagueFieldOptions}
                     divisionOptions={divisionOptions}

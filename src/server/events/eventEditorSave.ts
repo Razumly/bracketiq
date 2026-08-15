@@ -5,6 +5,7 @@ import { acquireEventLock } from "@/server/repositories/locks";
 import { upsertEventFromPayload } from "@/server/repositories/events";
 import { hasOrgPermission, canManageEvent } from "@/server/accessControl";
 import { ORG_PERMISSIONS } from "@/lib/organizationPermissions";
+import { collectOrganizationHostIds, normalizeEntityId } from "@/lib/organizationEventAccess";
 import {
   EVENT_STAFF_CONTRACT_VERSION,
   EventStaffInputError,
@@ -18,6 +19,10 @@ import {
   type EditorActor,
   type EditorSnapshotClient,
 } from "./eventEditorSnapshot";
+import {
+  assertEventHostTransition,
+  EventHostDelegationError,
+} from "./eventHostDelegation";
 import { editorDraftToLegacyEvent } from "@/app/events/[id]/schedule/components/eventForm/editorContractAdapters";
 import {
   claimEventEditorCreateOperation,
@@ -37,6 +42,7 @@ import {
   type CreateEventEditorCommand,
   type EventEditorBootstrapQuery,
   type EventEditorDraft,
+  type EventEditorCreateResult,
   type EventEditorSaveResult,
   type EventEditorScheduleOutcome,
   type EventEditorSnapshot,
@@ -54,12 +60,18 @@ export class EditorPermissionError extends Error {
 export class EditorRevisionConflictError extends Error {
   readonly currentEditorRevision: string;
   readonly currentStaffRevision: string | null;
+  readonly currentScheduleRevision: string | null;
 
-  constructor(editorRevision: string, staffRevision: string | null) {
+  constructor(
+    editorRevision: string,
+    staffRevision: string | null,
+    scheduleRevision: string | null = null,
+  ) {
     super("Event editor data changed. Reload and try again.");
     this.name = "EditorRevisionConflictError";
     this.currentEditorRevision = editorRevision;
     this.currentStaffRevision = staffRevision;
+    this.currentScheduleRevision = scheduleRevision;
   }
 }
 
@@ -281,6 +293,7 @@ const saveWithinTransaction = async (
   draft: EventEditorDraft,
   eventId: string,
   existingSnapshot: EventEditorSnapshot | null,
+  resolvedHostId?: string,
 ): Promise<{
   questionIdMap: Record<string, string>;
   emailCandidates: unknown[];
@@ -338,7 +351,7 @@ const saveWithinTransaction = async (
   delete eventPayload.immutableFieldIds;
   delete eventPayload.rentalBookingId;
   delete eventPayload.rentalBookingItemId;
-  eventPayload.hostId = draft.basics.hostId ?? actor.userId;
+  eventPayload.hostId = resolvedHostId ?? draft.basics.hostId ?? actor.userId;
   eventPayload.registrationPaymentMode =
     draft.registration.payment.mode === "MANUAL" ? "MANUAL" : "ONLINE";
   eventPayload.price = draft.registration.payment.priceCents;
@@ -371,10 +384,16 @@ const saveWithinTransaction = async (
       .staffRevision;
   let staffResult;
   try {
+    const staffDraft = resolvedHostId && draft.basics.hostId !== resolvedHostId
+      ? {
+          ...draft,
+          basics: { ...draft.basics, hostId: resolvedHostId },
+        }
+      : draft;
     staffResult = await reconcileEventStaffDesiredState(
       tx,
       eventId,
-      staffInputFor(draft, staffRevision ?? ""),
+      staffInputFor(staffDraft, staffRevision ?? ""),
       actor.userId,
     );
   } catch (error) {
@@ -416,6 +435,30 @@ export const saveEventEditor = async (
       ))
     ) {
       throw new EditorPermissionError();
+    }
+    const currentHostId = typeof currentEvent.hostId === "string"
+      ? currentEvent.hostId.trim() || null
+      : null;
+    const nextHostId = typeof command.draft.basics.hostId === "string"
+      ? command.draft.basics.hostId.trim() || null
+      : null;
+    if (currentHostId !== nextHostId) {
+      try {
+        await assertEventHostTransition({
+          client: tx,
+          actor: { ...actor, isAdmin: Boolean(actor.isAdmin) },
+          event: currentEvent,
+          nextHostId,
+        });
+      } catch (error) {
+        if (error instanceof EventHostDelegationError) {
+          if (error.code === "EVENT_HOST_DELEGATION_FORBIDDEN") {
+            throw new EditorPermissionError(error.message);
+          }
+          throw new EditorInputError(error.message);
+        }
+        throw error;
+      }
     }
     const currentSnapshot = await buildEventEditorSnapshot(
       currentEvent as unknown as Record<string, unknown>,
@@ -554,11 +597,11 @@ export const createEventEditor = async (
   actor: EditorActor,
   command: CreateEventEditorCommand,
   options: EditorSaveOptions = {},
-): Promise<EventEditorSaveResult> => {
+): Promise<EventEditorCreateResult> => {
   const client = options.client ?? prisma;
   const requestHash = eventEditorCreateRequestHash(command);
   let claim: EventCreateOperationClaim | null = null;
-  let firstClaimResult: EventEditorSaveResult | null = null;
+  let firstClaimResult: EventEditorCreateResult | null = null;
   let questionIdMap: Record<string, string> = {};
   let emailCandidates: unknown[] = [];
   let scheduleOutcome: EventEditorScheduleOutcome = {
@@ -579,22 +622,37 @@ export const createEventEditor = async (
     if (!claimed.firstClaim) return;
 
     const organizationId = draftOrganizationId(command.draft);
-    const requestedHostId = command.draft.basics.hostId;
-    if (!actor.isAdmin && requestedHostId && requestedHostId !== actor.userId) {
-      throw new EditorPermissionError(
-        "The selected event host cannot create this event.",
-      );
-    }
-    if (!actor.isAdmin && organizationId) {
-      const organization = await tx.organizations.findUnique({
-        where: { id: organizationId },
-        select: { id: true, ownerId: true, enabledFeatures: true },
-      });
+    const requestedHostId = normalizeEntityId(command.draft.basics.hostId);
+    let resolvedCreateHostId = requestedHostId ?? actor.userId;
+    if (organizationId) {
+      const [organization, staffMembers, staffInvites] = await Promise.all([
+        tx.organizations.findUnique({
+          where: { id: organizationId },
+          select: {
+            id: true,
+            ownerId: true,
+            ownershipStatus: true,
+            enabledFeatures: true,
+          },
+        }),
+        tx.staffMembers.findMany({
+          where: { organizationId },
+          select: { organizationId: true, userId: true, types: true },
+        }),
+        tx.invites.findMany({
+          where: { organizationId, type: 'STAFF' },
+          select: { organizationId: true, userId: true, type: true, status: true },
+        }),
+      ]);
       if (!organization) {
         throw new EditorCapabilityError("Organization not found.");
       }
+      if (organization.ownershipStatus?.trim().toUpperCase() !== "CLAIMED") {
+        throw new EditorPermissionError("The Organization must be claimed before creating Events.");
+      }
       if (
-        !(await hasOrgPermission(
+        !actor.isAdmin
+        && !(await hasOrgPermission(
           { ...actor, isAdmin: Boolean(actor.isAdmin) },
           organization,
           ORG_PERMISSIONS.EVENTS_MANAGE,
@@ -612,6 +670,23 @@ export const createEventEditor = async (
           "Enable event management tools before creating events.",
         );
       }
+      const eligibleHostIds = new Set(collectOrganizationHostIds({
+        ownerId: organization.ownerId,
+        staffMembers,
+        staffInvites,
+      }));
+      resolvedCreateHostId = requestedHostId
+        ?? normalizeEntityId(organization.ownerId)
+        ?? actor.userId;
+      if (!eligibleHostIds.has(resolvedCreateHostId)) {
+        throw new EditorPermissionError(
+          "The selected Event Host is not an eligible Organization Host.",
+        );
+      }
+    } else if (!actor.isAdmin && requestedHostId && requestedHostId !== actor.userId) {
+      throw new EditorPermissionError(
+        "The selected event host cannot create this event.",
+      );
     }
     const createQuery: EventEditorBootstrapQuery = {
       organizationId: organizationId ?? undefined,
@@ -626,6 +701,17 @@ export const createEventEditor = async (
       actor,
       client: tx,
     });
+    if (
+      command.expectedRevisions.editorRevision !== createSnapshot.editorRevision ||
+      command.expectedRevisions.staffRevision !== createSnapshot.staffRevision ||
+      command.expectedRevisions.scheduleRevision !== createSnapshot.scheduleState.revision
+    ) {
+      throw new EditorRevisionConflictError(
+        createSnapshot.editorRevision,
+        createSnapshot.staffRevision,
+        createSnapshot.scheduleState.revision,
+      );
+    }
     assertImmutableFields(command.draft, claimed.eventId, createSnapshot);
     await assertPaymentCapability(command.draft, createSnapshot);
 
@@ -636,6 +722,7 @@ export const createEventEditor = async (
       command.draft,
       claimed.eventId,
       createSnapshot,
+      resolvedCreateHostId,
     ));
     if (command.completion.mode === "CREATE_AND_BUILD_SCHEDULE") {
       const eventType = command.draft.basics.eventType.trim().toUpperCase();
@@ -670,6 +757,10 @@ export const createEventEditor = async (
     });
     firstClaimResult = {
       status: "SAVED",
+      createOperationId: command.createOperationId,
+      editorRevision: snapshot.editorRevision,
+      staffRevision: snapshot.staffRevision,
+      scheduleRevision: snapshot.scheduleState.revision,
       snapshot,
       questionIdMap,
       staffEmailDelivery: "NOT_REQUESTED",
@@ -703,12 +794,12 @@ export const createEventEditor = async (
       throw new Error("The event create operation has no stored result.");
     return replay.result;
   }
-  const canonicalResult: EventEditorSaveResult | null =
-    firstClaimResult as EventEditorSaveResult | null;
+  const canonicalResult: EventEditorCreateResult | null =
+    firstClaimResult as EventEditorCreateResult | null;
   if (!canonicalResult)
     throw new Error("The event create operation has no canonical result.");
 
-  let staffEmailDelivery: EventEditorSaveResult["staffEmailDelivery"] =
+  let staffEmailDelivery: EventEditorCreateResult["staffEmailDelivery"] =
     "NOT_REQUESTED";
   if (emailCandidates.length && options.sendStaffInvites) {
     try {
@@ -766,7 +857,7 @@ export const createEventFromEditor = async (
   command: CreateEventEditorCommand,
   actor: EditorActor,
   options: EditorSaveOptions = {},
-): Promise<EventEditorSaveResult> => createEventEditor(actor, command, options);
+): Promise<EventEditorCreateResult> => createEventEditor(actor, command, options);
 
 export const saveEventFromEditor = async (
   eventId: string,

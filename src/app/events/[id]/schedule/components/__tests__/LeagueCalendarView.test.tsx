@@ -7,8 +7,12 @@ const mockCalendarProps: any[] = [];
 
 jest.mock('@mantine/core', () => {
   const React = require('react');
-  const passthrough = (tag: string) => ({ children, className, style, 'data-testid': testId }: any) =>
-    React.createElement(tag, { className, style, 'data-testid': testId }, children);
+  const passthrough = (tag: string) => {
+    const Component = ({ children, className, style, 'data-testid': testId }: any) =>
+      React.createElement(tag, { className, style, 'data-testid': testId }, children);
+    Component.displayName = `Mock${tag}`;
+    return Component;
+  };
 
   return {
     Button: passthrough('button'),
@@ -148,7 +152,7 @@ describe('LeagueCalendarView time handling', () => {
     expect(screen.getByText('2nd place (Open)')).toBeInTheDocument();
   });
 
-  it('orders by-field calendar columns alphanumerically by field name', () => {
+  it('orders by-Resource calendar columns alphanumerically by Resource name', () => {
     render(
       <LeagueCalendarView
         matches={[]}
@@ -171,7 +175,7 @@ describe('LeagueCalendarView time handling', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'By Field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'By Resource' }));
 
     const lastProps = mockCalendarProps[mockCalendarProps.length - 1];
     expect(lastProps.resources.map((resource: any) => resource.resourceTitle)).toEqual([

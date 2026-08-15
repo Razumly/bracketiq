@@ -1,12 +1,16 @@
 import { z } from 'zod';
 
 import type { LeagueSlotForm } from '@/app/discover/components/LeagueFields';
-import { parseLocalDateTime } from '@/lib/dateUtils';
+import { parseDateTimeInTimeZone, parseLocalDateTime } from '@/lib/dateUtils';
 import {
     hasWeeklyRepeatingTimeSlot,
     WEEKLY_REPEATING_TIME_SLOT_REQUIRED_MESSAGE,
 } from '@/lib/eventScheduling';
 import { getManualPaymentLinkError } from '@/lib/manualRegistrationPayments';
+import {
+    GENERIC_RESOURCE_LABELS,
+    getSportResourceLabels,
+} from '@/lib/sportResourceLabels';
 import type { Field } from '@/types';
 
 import { requiresOrganizationEventFieldSelection } from '../eventFieldSelection';
@@ -22,7 +26,7 @@ import { coordinatesAreSet } from './locationHelpers';
 import { isEventLocalField } from './resourceGroups';
 import { stringSetsEqual } from './shared';
 import { normalizeSlotFieldIds, normalizeWeekdays } from './slotForm';
-import { computeSlotError } from './slotValidation';
+import { computeOneTimeSlotBoundsError, computeSlotError } from './slotValidation';
 
 const leagueSlotSchema: z.ZodType<LeagueSlotForm> = z.object({
     key: z.string(),
@@ -50,7 +54,7 @@ const leagueSlotSchema: z.ZodType<LeagueSlotForm> = z.object({
     error: z.string().optional(),
 });
 
-const RENTAL_SLOT_MISMATCH_ERROR_PREFIX = 'This rental resource is only available for ';
+const RENTAL_SLOT_MISMATCH_ERROR_MARKER = ' is only available for ';
 
 const matchRulesConfigSchema = z.object({
     scoringModel: z.enum(['SETS', 'PERIODS', 'INNINGS', 'POINTS_ONLY']).optional(),
@@ -312,6 +316,14 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
         joinAsParticipant: z.boolean(),
     })
     .superRefine((values, ctx) => {
+        const sportConfig = values.sportConfig && typeof values.sportConfig === 'object'
+            ? values.sportConfig as Record<string, unknown>
+            : null;
+        const hasResourceLabels = typeof sportConfig?.resourceLabelSingular === 'string'
+            && typeof sportConfig.resourceLabelPlural === 'string';
+        const resourceLabels = values.sportIds.length === 1 && hasResourceLabels
+            ? getSportResourceLabels(sportConfig)
+            : GENERIC_RESOURCE_LABELS;
         if (!values.isAffiliateEvent && values.registrationPaymentMode === 'MANUAL') {
             values.manualPaymentLinks.forEach((link, index) => {
                 const message = getManualPaymentLinkError(link.provider, link.url);
@@ -420,7 +432,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
         if (!isAffiliateEvent && requiresOrganizationEventFieldSelection(values.eventType, values.organizationId, values.selectedFieldIds)) {
             ctx.addIssue({
                 code: "custom",
-                message: 'Select at least one organization resource for this event.',
+                message: `Select at least one organization ${resourceLabels.singular.toLocaleLowerCase()} for this event.`,
                 path: ['selectedFieldIds'],
             });
         }
@@ -436,7 +448,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
         if (!isAffiliateEvent && (values.eventType === 'EVENT' || values.eventType === 'WEEKLY_EVENT') && !hasAtLeastOneField) {
             ctx.addIssue({
                 code: "custom",
-                message: 'Select or create at least one resource for this event.',
+                message: `Select or create at least one ${resourceLabels.singular.toLocaleLowerCase()} for this event.`,
                 path: ['fieldCount'],
             });
         }
@@ -709,11 +721,15 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                 });
             }
             const coveredDivisionKeys = new Set<string>();
+            const resolvedEventStart = parseDateTimeInTimeZone(values.start, values.timeZone);
+            const resolvedEventEnd = values.noFixedEndDateTime
+                ? null
+                : parseDateTimeInTimeZone(values.end, values.timeZone);
             values.leagueSlots.forEach((slot, index) => {
                 if (!normalizeSlotFieldIds(slot).length) {
                     ctx.addIssue({
                         code: "custom",
-                        message: 'Select at least one resource',
+                        message: `Select at least one ${resourceLabels.singular.toLocaleLowerCase()}`,
                         path: ['leagueSlots', index, 'scheduledFieldIds'],
                     });
                 }
@@ -738,6 +754,18 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                         ctx.addIssue({
                             code: "custom",
                             message: 'End date/time must be after start date/time',
+                            path: ['leagueSlots', index, 'endDate'],
+                        });
+                    }
+                    const boundsError = computeOneTimeSlotBoundsError({
+                        slot,
+                        eventStart: resolvedEventStart,
+                        eventEnd: resolvedEventEnd,
+                    });
+                    if (boundsError) {
+                        ctx.addIssue({
+                            code: "custom",
+                            message: boundsError,
                             path: ['leagueSlots', index, 'endDate'],
                         });
                     }
@@ -797,7 +825,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                 }
                 if (
                     typeof slot.error === 'string' &&
-                    slot.error.trim().startsWith(RENTAL_SLOT_MISMATCH_ERROR_PREFIX)
+                    slot.error.includes(RENTAL_SLOT_MISMATCH_ERROR_MARKER)
                 ) {
                     ctx.addIssue({
                         code: "custom",

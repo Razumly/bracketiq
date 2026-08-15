@@ -481,6 +481,9 @@ describe('Weekly Event schedule validation', () => {
     divisionDetails: [makeDivisionDetail({ id: 'open' })],
     splitLeaguePlayoffDivisions: false,
     selectedFieldIds: ['field_1'],
+    fields: [makeField({ $id: 'field_1', name: 'Resource 1' })],
+    end: '2026-09-01T12:00',
+    fieldCount: 1,
     leagueSlots,
   });
 
@@ -499,6 +502,7 @@ describe('Weekly Event schedule validation', () => {
       divisions: ['open'],
       startDate: '2026-07-01T10:00',
       endDate: '2026-07-01T12:00',
+      timeZone: 'America/Los_Angeles',
       startTimeMinutes: 10 * 60,
       endTimeMinutes: 12 * 60,
       conflicts: [],
@@ -521,6 +525,7 @@ describe('Weekly Event schedule validation', () => {
         repeating: true,
         daysOfWeek: [0],
         dayOfWeek: 0,
+        timeZone: 'America/Los_Angeles',
         startDate: '2026-07-01T10:00',
         endDate: '2026-08-31T12:00',
       },

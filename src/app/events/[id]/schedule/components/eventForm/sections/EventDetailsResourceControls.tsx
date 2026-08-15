@@ -3,6 +3,7 @@ import { Controller, type Control } from 'react-hook-form';
 import { Button, Collapse, Text, TextInput, Title } from '@mantine/core';
 
 import { getFieldDisplayName } from '@/lib/fieldUtils';
+import type { SportResourceLabels } from '@/lib/sportResourceLabels';
 import type { Event, Field } from '@/types';
 
 import type { EventFormValues } from '../formTypes';
@@ -22,6 +23,7 @@ type EventDetailsResourceControlsProps = {
     fieldNamesCollapsed: boolean;
     setFieldNamesCollapsed: Dispatch<SetStateAction<boolean>>;
     maxResourceNameLength: number;
+    resourceLabels: SportResourceLabels;
     embedded?: boolean;
     showOrganizationResourceControls?: boolean;
     showLocalFieldNameControls?: boolean;
@@ -42,6 +44,7 @@ export const EventDetailsResourceControls = ({
     fieldNamesCollapsed,
     setFieldNamesCollapsed,
     maxResourceNameLength,
+    resourceLabels,
     embedded = false,
     showOrganizationResourceControls = true,
     showLocalFieldNameControls = true,
@@ -54,9 +57,10 @@ export const EventDetailsResourceControls = ({
             control={control}
             render={({ field, fieldState }) => (
                 <FacilityResourceSelector
-                    label="Resources"
-                    description="Choose which resources this event can use."
-                    placeholder={resourceSelectorLoading ? 'Loading resources...' : 'Select one or more resources'}
+                    label={resourceLabels.plural}
+                    description={`Choose which ${resourceLabels.plural.toLocaleLowerCase()} this event can use.`}
+                    placeholder={resourceSelectorLoading ? `Loading ${resourceLabels.plural.toLocaleLowerCase()}...` : `Select one or more ${resourceLabels.plural.toLocaleLowerCase()}`}
+                    resourceSingular={resourceLabels.singular}
                     fields={organizationResourcePool}
                     value={Array.isArray(field.value) ? field.value : []}
                     disabled={resourceSelectorLoading || isImmutableField('fieldIds')}
@@ -84,9 +88,9 @@ export const EventDetailsResourceControls = ({
                 <div className={`${organizationResourceControl ? 'mt-4 ' : ''}rounded-lg border border-gray-200 bg-white p-4`}>
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
                         <div className="min-w-0">
-                            <Title order={6}>Custom Resources</Title>
+                            <Title order={6}>Custom {resourceLabels.plural}</Title>
                             <Text size="sm" c="dimmed">
-                                Add custom resources for this event and name each one below.
+                                Add custom {resourceLabels.plural.toLocaleLowerCase()} for this event and name each one below.
                             </Text>
                         </div>
                         <div className="flex shrink-0 flex-wrap items-end gap-3 md:justify-end">
@@ -119,7 +123,7 @@ export const EventDetailsResourceControls = ({
                                 {eventLocalFields.map((field) => (
                                     <TextInput
                                         key={field.$id}
-                                        label={`${getFieldDisplayName(field, 'Resource')} Name`}
+                                        label={`${getFieldDisplayName(field, resourceLabels.singular)} Name`}
                                         value={field.name ?? ''}
                                         w="100%"
                                         maxLength={maxResourceNameLength}

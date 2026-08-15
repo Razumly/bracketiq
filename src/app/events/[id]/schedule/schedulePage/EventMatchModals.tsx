@@ -1,6 +1,6 @@
 import type { ComponentProps } from 'react';
 
-import type { Division, Event, Match, Team, UserData } from '@/types';
+import type { Division, Event, Match, Sport, Team, UserData } from '@/types';
 
 import MatchEditModal from '../components/MatchEditModal';
 import ScoreUpdateModal from '../components/ScoreUpdateModal';
@@ -38,6 +38,7 @@ export const getMatchEditorDivisions = (event: Event | null): Division[] => {
 
 type EventMatchModalsProps = {
   activeEvent: Event | null;
+  sportCatalog: Sport[];
   activeMatches: Match[];
   participantTeams: Team[];
   scoreUpdateMatch: Match | null;
@@ -62,6 +63,7 @@ type EventMatchModalsProps = {
 
 export default function EventMatchModals({
   activeEvent,
+  sportCatalog,
   activeMatches,
   participantTeams,
   scoreUpdateMatch,
@@ -110,6 +112,7 @@ export default function EventMatchModals({
         tournament={activeEvent}
         allMatches={activeMatches}
         fields={Array.isArray(activeEvent?.fields) ? activeEvent.fields : []}
+        sports={sportCatalog}
         divisions={getMatchEditorDivisions(activeEvent)}
         teams={matchEditorTeams}
         officials={matchEditorOfficials}

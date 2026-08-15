@@ -1160,6 +1160,8 @@ export const getLifecycleStatusLabel = (status: EventLifecycleStatus): string =>
 export const DEFAULT_SPORT: Sport = {
   $id: '',
   name: '',
+  resourceLabelSingular: 'Resource',
+  resourceLabelPlural: 'Resources',
   usePointsForWin: false,
   usePointsForDraw: false,
   usePointsForLoss: false,

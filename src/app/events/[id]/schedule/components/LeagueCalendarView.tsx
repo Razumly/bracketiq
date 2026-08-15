@@ -23,6 +23,7 @@ import {
 } from '@/lib/dateUtils';
 import { getFieldDisplayName } from '@/lib/fieldUtils';
 import { buildUniqueColorReferenceList } from '@/lib/calendarColorReferences';
+import { GENERIC_RESOURCE_LABELS, type SportResourceLabels } from '@/lib/sportResourceLabels';
 import {
   getBracketMatchDivisionId,
   toBracketDivisionKey,
@@ -35,6 +36,7 @@ interface LeagueCalendarViewProps {
   matches: Match[];
   teams?: Team[];
   fields?: Field[];
+  resourceLabels?: SportResourceLabels;
   officials?: UserData[];
   eventStart?: string;
   eventEnd?: string;
@@ -143,14 +145,18 @@ const resolveMatchFieldId = (match: Match): string | null => {
   return fieldId.length > 0 ? fieldId : null;
 };
 
-const resolveMatchFieldLabel = (match: Match, fieldLookup: Map<string, Field>): string => {
+const resolveMatchFieldLabel = (
+  match: Match,
+  fieldLookup: Map<string, Field>,
+  resourceSingular: string,
+): string => {
   const fieldId = resolveMatchFieldId(match);
   const relationField = match.field && typeof match.field === 'object' ? match.field : null;
   const mappedField = fieldId ? fieldLookup.get(fieldId) ?? null : null;
   return (
     resolveFieldLabel(relationField) ??
     resolveFieldLabel(mappedField) ??
-    'Field TBD'
+    `${resourceSingular} TBD`
   );
 };
 
@@ -264,6 +270,7 @@ export function LeagueCalendarView({
   matches,
   teams = [],
   fields = [],
+  resourceLabels = GENERIC_RESOURCE_LABELS,
   officials = [],
   eventStart,
   eventEnd,
@@ -523,7 +530,7 @@ export function LeagueCalendarView({
         const end = instantToCalendarDateInTimeZone(match.end, resolvedEventTimeZone)
           ?? new Date(start.getTime() + 60 * 60 * 1000);
         const fieldId = resolveMatchFieldId(hydratedMatch);
-        const fieldLabel = resolveMatchFieldLabel(hydratedMatch, fieldLookup);
+        const fieldLabel = resolveMatchFieldLabel(hydratedMatch, fieldLookup, resourceLabels.singular);
         const weeklyOccurrenceMeta = getWeeklyOccurrenceMeta(hydratedMatch);
         const matchHighlight = getCurrentUserMatchHighlight(hydratedMatch);
         const matchId = typeof match.$id === 'string' && match.$id.trim().length > 0
@@ -550,7 +557,7 @@ export function LeagueCalendarView({
       })
       .filter((event): event is CalendarEvent => Boolean(event))
       .sort((a, b) => a.start.getTime() - b.start.getTime());
-  }, [conflictMatchIdSet, fieldLookup, getCurrentUserMatchHighlight, matchesToDisplay, resolvedEventTimeZone, teamLookup]);
+  }, [conflictMatchIdSet, fieldLookup, getCurrentUserMatchHighlight, matchesToDisplay, resolvedEventTimeZone, resourceLabels.singular, teamLookup]);
 
   const agendaCalendarEvents = useMemo<CalendarEvent[]>(() => {
     const grouped = new Map<string, CalendarEvent>();
@@ -590,7 +597,7 @@ export function LeagueCalendarView({
       if (!fieldId) return;
       resources.set(fieldId, {
         resourceId: fieldId,
-        resourceTitle: resolveFieldLabel(field) ?? 'Field TBD',
+        resourceTitle: resolveFieldLabel(field) ?? `${resourceLabels.singular} TBD`,
       });
     });
 
@@ -601,9 +608,9 @@ export function LeagueCalendarView({
         resourceTitle: event.resourceId === UNASSIGNED_FIELD_RESOURCE_ID ? 'Unassigned' : event.fieldLabel,
       });
     });
-
     return Array.from(resources.values()).sort(compareCalendarResources);
-  }, [calendarEvents, fields]);
+
+  }, [calendarEvents, fields, resourceLabels.singular]);
 
   const initialDate = useMemo(() => {
     if (calendarEvents.length > 0) {
@@ -835,6 +842,7 @@ export function LeagueCalendarView({
           hideTimeBadge
           showOfficialInHeader
           fieldLabel={event.fieldLabel}
+          resourceSingular={resourceLabels.singular}
           team1Placeholder={getMatchSlotPlaceholder(event.resource, 'team1')}
           team2Placeholder={getMatchSlotPlaceholder(event.resource, 'team2')}
           hasConflict={hasConflict}
@@ -845,7 +853,7 @@ export function LeagueCalendarView({
         />
       );
     },
-    [WeeklyOccurrenceEventCard, canManage, getMatchSlotPlaceholder, matchHasHighlightedDivision, officialLookupById, onMatchClick, resolvedEventTimeZone, showEventOfficialNames, showMatchDivisionBadges],
+    [WeeklyOccurrenceEventCard, canManage, getMatchSlotPlaceholder, matchHasHighlightedDivision, officialLookupById, onMatchClick, resolvedEventTimeZone, resourceLabels.singular, showEventOfficialNames, showMatchDivisionBadges],
   );
 
   const AgendaEventComponent = useCallback(
@@ -861,7 +869,7 @@ export function LeagueCalendarView({
                 const hasConflict = matchId.length > 0 && conflictMatchIdSet.has(matchId);
                 const matchHighlight = hasConflict ? undefined : getCurrentUserMatchHighlight(match);
                 const weeklyOccurrenceMeta = getWeeklyOccurrenceMeta(match);
-                const fieldLabel = resolveMatchFieldLabel(match, fieldLookup);
+                const fieldLabel = resolveMatchFieldLabel(match, fieldLookup, resourceLabels.singular);
                 const fieldColorMatchKey = resolveMatchFieldId(match) ?? UNASSIGNED_FIELD_RESOURCE_ID;
 
                 return (
@@ -896,6 +904,7 @@ export function LeagueCalendarView({
                         showOfficialInHeader
                         fieldLabel={fieldLabel}
                         team1Placeholder={getMatchSlotPlaceholder(match, 'team1')}
+                        resourceSingular={resourceLabels.singular}
                         team2Placeholder={getMatchSlotPlaceholder(match, 'team2')}
                         hasConflict={hasConflict}
                         officialUsersById={officialLookupById}
@@ -912,7 +921,7 @@ export function LeagueCalendarView({
         </div>
       );
     },
-    [WeeklyOccurrenceEventCard, canManage, conflictMatchIdSet, fieldLookup, getCurrentUserMatchHighlight, getMatchSlotPlaceholder, matchHasHighlightedDivision, officialLookupById, onMatchClick, matchCardPaddingY, resolvedEventTimeZone, showEventOfficialNames, showMatchDivisionBadges],
+    [WeeklyOccurrenceEventCard, canManage, conflictMatchIdSet, fieldLookup, getCurrentUserMatchHighlight, getMatchSlotPlaceholder, matchHasHighlightedDivision, officialLookupById, onMatchClick, matchCardPaddingY, resolvedEventTimeZone, resourceLabels.singular, showEventOfficialNames, showMatchDivisionBadges],
   );
 
   const components = useMemo(
@@ -1036,7 +1045,7 @@ export function LeagueCalendarView({
             onChange={(value) => setLayoutMode(value as CalendarLayoutMode)}
             data={[
               { value: 'calendar', label: 'Calendar' },
-              { value: 'resource', label: 'By Field' },
+              { value: 'resource', label: `By ${resourceLabels.singular}` },
             ]}
           />
           <div className="flex flex-wrap items-center gap-2">

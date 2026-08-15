@@ -87,6 +87,7 @@ type UseEventResourceControllerOptions = {
     previousEventTypeRef: MutableRefObject<Event['eventType'] | null>;
     rentalPurchaseFieldId?: string | null;
     resolvedOrganization: Organization | null;
+    resourceLabelSingular: string;
     setHydratedOrganization: Dispatch<SetStateAction<Organization | null>>;
     setValue: SetEventFormValue;
     slotDivisionKeys: string[];
@@ -111,6 +112,7 @@ export const useEventResourceController = ({
     previousEventTypeRef,
     rentalPurchaseFieldId,
     resolvedOrganization,
+    resourceLabelSingular,
     setHydratedOrganization,
     setValue,
     slotDivisionKeys,
@@ -252,7 +254,7 @@ export const useEventResourceController = ({
 
         const currentLocalFields = (getValues('fields') ?? []).filter((field) => isEventLocalField(field));
         const onlyGeneratedLocalFields = currentLocalFields.every((field, index) => (
-            isGeneratedLocalFieldPlaceholder(field, index)
+            isGeneratedLocalFieldPlaceholder(field, index, resourceLabelSingular)
         ));
         if (onlyGeneratedLocalFields) {
             setValue('fieldCount', 0, RESET_FIELD_OPTIONS);
@@ -265,6 +267,7 @@ export const useEventResourceController = ({
         isCreateMode,
         rentalResourceOptions.length,
         rentalResourcesLoading,
+        resourceLabelSingular,
         setValue,
     ]);
 
@@ -324,7 +327,7 @@ export const useEventResourceController = ({
                 for (let index = normalizedLocalFields.length; index < fieldCount; index += 1) {
                     normalizedLocalFields.push({
                         $id: createClientId(),
-                        name: `Field ${index + 1}`,
+                        name: `${resourceLabelSingular} ${index + 1}`,
                         location: eventFieldLocation,
                         lat: 0,
                         long: 0,
@@ -337,6 +340,7 @@ export const useEventResourceController = ({
         eventData.location,
         fieldCount,
         previousEventFieldLocationRef,
+        resourceLabelSingular,
         setFields,
         shouldManageLocalFields,
     ]);

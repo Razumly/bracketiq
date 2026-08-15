@@ -30,6 +30,8 @@ describe('sportsService', () => {
         {
           id: 'Indoor Soccer',
           name: 'Indoor Soccer',
+          resourceLabelSingular: 'Field',
+          resourceLabelPlural: 'Fields',
           createdAt: '2026-07-14T10:00:00.000Z',
           updatedAt: '2026-07-14T10:05:00.000Z',
           officialPositionTemplates: [
@@ -71,16 +73,20 @@ describe('sportsService', () => {
       $id: 'Indoor Soccer',
       $createdAt: '2026-07-14T10:00:00.000Z',
       $updatedAt: '2026-07-14T10:05:00.000Z',
+      resourceLabelSingular: 'Field',
+      resourceLabelPlural: 'Fields',
     }));
   });
 
   it('hydrates cached sports with preserved match rules templates', async () => {
-    localStorage.setItem('sports-cache-v4', JSON.stringify({
+    localStorage.setItem('sports-cache-v5', JSON.stringify({
       timestamp: Date.now(),
       items: [
         {
           $id: 'Hockey',
           name: 'Hockey',
+          resourceLabelSingular: 'Rink',
+          resourceLabelPlural: 'Rinks',
           officialPositionTemplates: [
             { name: 'Scorekeeper', count: 1 },
           ],
@@ -122,11 +128,15 @@ describe('sportsService', () => {
         {
           $id: 'sport_indoor_volleyball_duplicate',
           name: ' indoor volleyball ',
+          resourceLabelSingular: 'Court',
+          resourceLabelPlural: 'Courts',
           matchRulesTemplate: { scoringModel: 'SETS' },
         },
         {
           $id: 'Indoor Volleyball',
           name: 'Indoor Volleyball',
+          resourceLabelSingular: 'Court',
+          resourceLabelPlural: 'Courts',
           matchRulesTemplate: null,
         },
       ],
@@ -142,7 +152,7 @@ describe('sportsService', () => {
   });
 
   it('ignores the prior cache version whose mapped booleans can distort canonical selection', async () => {
-    localStorage.setItem('sports-cache-v3', JSON.stringify({
+    localStorage.setItem('sports-cache-v4', JSON.stringify({
       timestamp: Date.now(),
       items: [
         {
@@ -160,17 +170,21 @@ describe('sportsService', () => {
   });
 
   it('deduplicates a current-version local-storage payload before returning it', async () => {
-    localStorage.setItem('sports-cache-v4', JSON.stringify({
+    localStorage.setItem('sports-cache-v5', JSON.stringify({
       timestamp: Date.now(),
       items: [
         {
           $id: 'sport_indoor_soccer_duplicate',
           name: ' INDOOR SOCCER ',
+          resourceLabelSingular: 'Field',
+          resourceLabelPlural: 'Fields',
           matchRulesTemplate: { scoringModel: 'PERIODS' },
         },
         {
           $id: 'Indoor Soccer',
           name: 'Indoor Soccer',
+          resourceLabelSingular: 'Field',
+          resourceLabelPlural: 'Fields',
           matchRulesTemplate: null,
         },
       ],
@@ -184,5 +198,21 @@ describe('sportsService', () => {
       $id: 'Indoor Soccer',
       name: 'Indoor Soccer',
     }));
+  });
+
+  it('rejects blank Resource Labels at the network boundary', async () => {
+    const { sportsService, apiRequestMock } = await loadSportsService();
+    apiRequestMock.mockResolvedValue({
+      sports: [{
+        id: 'Indoor Volleyball',
+        name: 'Indoor Volleyball',
+        resourceLabelSingular: '',
+        resourceLabelPlural: 'Courts',
+      }],
+    });
+
+    await expect(sportsService.getAll(true)).rejects.toThrow(
+      'Sport.resourceLabelSingular must be a trimmed, nonblank string with at most 40 characters.',
+    );
   });
 });

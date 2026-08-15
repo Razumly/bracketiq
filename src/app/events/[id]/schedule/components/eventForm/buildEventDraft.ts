@@ -37,6 +37,7 @@ import {
     normalizeOfficialSchedulingMode,
     normalizeSportOfficialPositionTemplates,
 } from './officials';
+import { normalizePendingStaffInvite, type PendingStaffInvite } from './staffInvites';
 import { defaultFieldLocationForEvent, withEventFieldLocationDefault } from './fieldDefaults';
 import { hasAffiliateUrl, isTournamentPoolPlayFormEnabled, supportsOrganizationFieldSelectionForEvent, supportsScheduleSlotsForEvent } from './eventRules';
 import { isEventLocalField, toFieldIdList } from './resourceGroups';
@@ -82,6 +83,10 @@ type BuildEventDraftInput = {
     source: EventFormValues;
     sportsById: Map<string, Sport>;
 };
+export type BuiltEventDraft = Partial<Event> & {
+    pendingStaffInvites: PendingStaffInvite[];
+};
+
 
 const minutesFromDate = (value: Date): number => value.getHours() * 60 + value.getMinutes();
 
@@ -98,7 +103,7 @@ const withMinutesOnDate = (date: Date, minutes: number): Date => {
     );
 };
 
-export function buildEventDraft(input: BuildEventDraftInput): Partial<Event> {
+export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
     const {
         activeEditingEvent,
         currentUser,
@@ -506,6 +511,10 @@ export function buildEventDraft(input: BuildEventDraftInput): Partial<Event> {
             organizationAssignments ? organizationAssignments.officialIds.includes(official.userId) : true
         ));
         const normalizedOfficialIds = getEventOfficialUserIds(normalizedEventOfficials);
+        const normalizedPendingStaffInvites = isAffiliateEvent
+            ? []
+            : (Array.isArray(source.pendingStaffInvites) ? source.pendingStaffInvites : [])
+                .map((invite) => normalizePendingStaffInvite(invite));
         const officialPoolById = new Map<string, UserData>();
         (source.officials || []).forEach((official) => {
             if (official?.$id) {
@@ -529,7 +538,7 @@ export function buildEventDraft(input: BuildEventDraftInput): Partial<Event> {
         })();
         const eventFieldLocation = defaultFieldLocationForEvent(source.location);
 
-        const draft: Partial<Event> = {
+        const draft: BuiltEventDraft = {
             $id: activeEditingEvent?.$id,
             hostId: normalizedHostId,
             name: (source.name ?? '').trim(),
@@ -672,6 +681,7 @@ export function buildEventDraft(input: BuildEventDraftInput): Partial<Event> {
             officialPositions: isAffiliateEvent ? [] : normalizedOfficialPositionsForPayload,
             eventOfficials: isAffiliateEvent ? [] : normalizedEventOfficials,
             assistantHostIds: isAffiliateEvent ? [] : normalizedAssistantHostIds,
+            pendingStaffInvites: normalizedPendingStaffInvites,
             doTeamsOfficiate: isAffiliateEvent ? false : source.doTeamsOfficiate,
             teamOfficialsMaySwap: isAffiliateEvent ? false : source.doTeamsOfficiate ? Boolean(source.teamOfficialsMaySwap) : false,
             teamCheckInMode: isAffiliateEvent || !source.teamSignup ? 'OFF' : source.teamCheckInMode,

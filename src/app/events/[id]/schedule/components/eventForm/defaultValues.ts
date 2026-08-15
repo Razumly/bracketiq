@@ -3,6 +3,7 @@ import {
     getSystemTimeZone,
     normalizeTimeZone,
 } from '@/lib/dateUtils';
+import { resolveEventResourceLabels } from '@/lib/sportResourceLabels';
 
 import {
     buildDefaultLeagueData,
@@ -121,6 +122,10 @@ export const buildEventFormDefaultValues = ({
         base.tags = syncEventTypeTagsForEventType(base.tags, base.eventType);
     }
     const defaults = immutableDefaults ?? {};
+    const resourceLabels = resolveEventResourceLabels({
+        sportIds: base.sportIds,
+        sportsById,
+    });
     const {
         defaultFields,
         defaultFieldCount,
@@ -137,6 +142,7 @@ export const buildEventFormDefaultValues = ({
             : [],
         resolvedOrganizationId,
         isCreateMode,
+        resourceLabelSingular: resourceLabels.singular,
     });
     const availableFieldIdsForDivisions = defaultSelectedFieldIds.length
         ? defaultSelectedFieldIds

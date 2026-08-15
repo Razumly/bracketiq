@@ -218,3 +218,18 @@ We persist raw string IDs for associations (for example `teamIds`, `friendIds`, 
 ## Completion Responses
 
 - End each response with concise suggestions for fixes or improvements noticed during the work. Include only relevant suggestions, and state when there are none.
+
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in this repository's GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage uses the five canonical label names without overrides. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Domain documentation uses a single-context layout. See `docs/agents/domain.md`.

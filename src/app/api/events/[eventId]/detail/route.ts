@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getOptionalSession } from '@/lib/permissions';
-import { canManageEvent } from '@/server/accessControl';
 import { assertCanViewEventSchedule } from '@/server/eventVisibility';
 import { loadEventWithRelations } from '@/server/repositories/events';
 import { serializeMatches } from '@/server/scheduler/serialize';
@@ -119,28 +117,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ even
   }
 
   const manageMode = req.nextUrl.searchParams.get('manage');
-  const shouldLoadManageData = await (async () => {
-    if (manageMode === 'true') {
-      return true;
-    }
-    if (manageMode !== 'auto') {
-      return false;
-    }
-    const session = await getOptionalSession(req);
-    if (!session) {
-      return false;
-    }
-    return canManageEvent(session, {
-      hostId: normalizeId(eventPayload?.hostId),
-      assistantHostIds: Array.isArray(eventPayload?.assistantHostIds)
-        ? eventPayload.assistantHostIds
-        : [],
-      organizationId:
-        normalizeId(eventPayload?.organizationId)
-        ?? normalizeId(eventPayload?.organization?.id)
-        ?? normalizeId(eventPayload?.organization?.$id),
-    });
-  })();
+  const authorityCapabilities = (
+    eventPayload?.capabilities
+    && typeof eventPayload.capabilities === 'object'
+  )
+    ? eventPayload.capabilities as Record<string, unknown>
+    : {};
+  const canEditEvent = authorityCapabilities.canEdit === true;
+  const shouldLoadManageData = (
+    canEditEvent && (manageMode === 'true' || manageMode === 'auto')
+  );
   const detailReq = requestWithManageMode(req, shouldLoadManageData);
 
   const participantResponse = await getParticipants(detailReq, { params: routeParams() });
@@ -202,6 +188,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ even
       }
     }
 
+    const { staffInvites: _untrustedStaffInvites, ...readOnlyEventPayload } = eventPayload ?? {};
+
     const canonicalEventPayload = managedStaffState
       ? {
           ...eventPayload,
@@ -211,10 +199,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ even
           officialIds: managedStaffState.officialIds,
           staffInvites: managedStaffState.staffInvites,
         }
-      : eventPayload;
+      : readOnlyEventPayload;
 
     return NextResponse.json({
       event: canonicalEventPayload,
+      capabilities: authorityCapabilities,
       participantSnapshot: participantPayload,
       matches: canViewSchedule ? serializeMatches(matches) : [],
       fields: canViewSchedule
@@ -226,8 +215,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ even
       leagueScoringConfig: canViewSchedule && leagueScoringConfig
         ? leagueScoringConfig
         : null,
-      staffInvites: managedStaffState?.staffInvites
-        ?? (Array.isArray(eventPayload?.staffInvites) ? eventPayload.staffInvites : []),
+      staffInvites: managedStaffState?.staffInvites ?? [],
       staffRevision: managedStaffState?.revision ?? null,
       teamCompliance,
       userCompliance,

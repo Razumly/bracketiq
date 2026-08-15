@@ -24,20 +24,27 @@ export function ProfileImageUploadField({
 }: ProfileImageUploadFieldProps) {
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [previewUrl, setPreviewUrl] = useState('');
+  const previewImageRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
+    const imageElement = previewImageRef.current;
+    if (!imageElement) {
+      return undefined;
+    }
     if (!file) {
-      setPreviewUrl('');
-      return;
+      imageElement.src = currentImageUrl;
+      return undefined;
     }
 
     const objectUrl = URL.createObjectURL(file);
-    setPreviewUrl(objectUrl);
-    return () => URL.revokeObjectURL(objectUrl);
-  }, [file]);
+    imageElement.src = objectUrl;
+    return () => {
+      URL.revokeObjectURL(objectUrl);
+      imageElement.src = currentImageUrl;
+    };
+  }, [currentImageUrl, file]);
 
-  const selectedImageUrl = previewUrl || currentImageUrl;
+  const hasSelectedImage = Boolean(file || currentImageUrl);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.currentTarget.files?.[0] ?? null;
@@ -71,9 +78,10 @@ export function ProfileImageUploadField({
     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <div className="flex items-center gap-4">
         <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-white text-sm font-semibold text-slate-500">
-          {selectedImageUrl ? (
+          {hasSelectedImage ? (
             <img
-              src={selectedImageUrl}
+              ref={previewImageRef}
+              src={file ? undefined : currentImageUrl}
               alt="Profile preview"
               className="h-full w-full object-cover"
             />
@@ -98,9 +106,9 @@ export function ProfileImageUploadField({
                 disabled ? 'pointer-events-none opacity-60' : ''
               }`}
             >
-              {selectedImageUrl ? 'Change Photo' : 'Upload Photo'}
+              {hasSelectedImage ? 'Change Photo' : 'Upload Photo'}
             </label>
-            {selectedImageUrl ? (
+            {hasSelectedImage ? (
               <button
                 type="button"
                 onClick={handleRemove}

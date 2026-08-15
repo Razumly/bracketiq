@@ -4,6 +4,7 @@ import type { UseFormClearErrors, UseFormGetValues } from 'react-hook-form';
 
 import type { LeagueSlotForm } from '@/app/discover/components/LeagueFields';
 import { eventService } from '@/lib/eventService';
+import type { SportResourceLabels } from '@/lib/sportResourceLabels';
 import type { Event, Field, LeagueConfig, TimeSlot, TournamentConfig } from '@/types';
 
 import { mergeSlotPayloadsForForm } from '../../slotPayloadMerge';
@@ -74,6 +75,7 @@ type UseEventSlotControllerOptions = {
     parentEvent?: string | null;
     rentalLockedSlotsForDraft: TimeSlot[];
     resolvedOrganizationId: string;
+    resourceLabels: SportResourceLabels;
     simpleScheduleStyle?: EventSetupScheduleStyle;
     setLeagueData: SetScheduleConfig<LeagueConfig>;
     setPlayoffData: SetScheduleConfig<TournamentConfig>;
@@ -124,6 +126,7 @@ export const useEventSlotController = ({
     parentEvent,
     rentalLockedSlotsForDraft,
     resolvedOrganizationId,
+    resourceLabels,
     simpleScheduleStyle,
     setLeagueData,
     setPlayoffData,
@@ -649,7 +652,8 @@ export const useEventSlotController = ({
     const leagueWarning = useMemo(() => buildLeagueScheduleWarning({
         hasPendingExternalConflictChecks,
         hasExternalSlotConflictWarnings,
-    }), [hasExternalSlotConflictWarnings, hasPendingExternalConflictChecks]);
+        resourceLabels,
+    }), [hasExternalSlotConflictWarnings, hasPendingExternalConflictChecks, resourceLabels]);
 
     return {
         handleAddSlot,

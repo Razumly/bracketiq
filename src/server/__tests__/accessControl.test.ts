@@ -23,7 +23,12 @@ jest.mock('@/lib/prisma', () => ({
   },
 }));
 
-import { canManageEvent, canManageOrganization, canOfficialOrganization } from '@/server/accessControl';
+import {
+  canManageEvent,
+  canManageOrganization,
+  canOfficialOrganization,
+  projectEventAuthorityCapabilities,
+} from '@/server/accessControl';
 
 describe('canManageOrganization', () => {
   it('allows verified razumly admins to manage any organization', async () => {
@@ -321,5 +326,189 @@ describe('canManageEvent', () => {
     );
 
     expect(allowed).toBe(false);
+  });
+
+  it.each([
+    ['primary Event Host', { hostId: 'viewer_1', assistantHostIds: [] }],
+    ['assistant Event Host', { hostId: 'host_1', assistantHostIds: ['viewer_1'] }],
+  ])('preserves direct %s authorization', async (_role, event) => {
+    const allowed = await canManageEvent(
+      { userId: 'viewer_1', isAdmin: false },
+      { ...event, organizationId: 'org_1' },
+      {
+        organizations: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'org_1',
+            ownerId: 'owner_1',
+            ownershipStatus: 'CLAIMED',
+          }),
+        },
+        staffMembers: {
+          findUnique: jest.fn().mockResolvedValue({
+            organizationId: 'org_1',
+            userId: 'viewer_1',
+            types: ['HOST'],
+            roleId: 'role_host',
+          }),
+        },
+      },
+    );
+
+    expect(allowed).toBe(true);
+  });
+
+  it('denies a stale assigned host after Organization Host membership is removed', async () => {
+    const allowed = await canManageEvent(
+      { userId: 'former_host', isAdmin: false },
+      {
+        hostId: 'former_host',
+        assistantHostIds: [],
+        organizationId: 'org_1',
+      },
+      {
+        organizations: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'org_1',
+            ownerId: 'owner_1',
+            ownershipStatus: 'CLAIMED',
+          }),
+        },
+        staffMembers: {
+          findUnique: jest.fn().mockResolvedValue(null),
+        },
+      },
+    );
+
+    expect(allowed).toBe(false);
+  });
+
+  it('projects a claimed Organization owner as Management Authority and automatic Event Host', async () => {
+    const organization = {
+      id: 'org_1',
+      ownerId: 'owner_1',
+      ownershipStatus: 'CLAIMED',
+    };
+    const capabilities = await projectEventAuthorityCapabilities(
+      { userId: 'owner_1', isAdmin: false },
+      {
+        hostId: 'delegated_host',
+        assistantHostIds: [],
+        organizationId: 'org_1',
+      },
+      {
+        authUser: {
+          findUnique: jest.fn().mockResolvedValue({
+            email: 'owner@example.com',
+            emailVerifiedAt: new Date('2026-01-01T00:00:00.000Z'),
+            sessionVersion: 0,
+          }),
+        },
+        organizations: {
+          findUnique: jest.fn().mockResolvedValue(organization),
+        },
+      },
+    );
+
+    expect(capabilities).toEqual(expect.objectContaining({
+      canEdit: true,
+      canManageStaff: true,
+      canDelegateHost: true,
+      readOnly: false,
+      viewerIsEventHost: true,
+      eventHostId: 'owner_1',
+      managementAuthority: {
+        type: 'ORGANIZATION',
+        organizationId: 'org_1',
+        ownerUserId: 'owner_1',
+      },
+    }));
+  });
+
+  it('allows a claimed Management Authority role with events.manage to edit', async () => {
+    const allowed = await canManageEvent(
+      { userId: 'manager_1', isAdmin: false },
+      {
+        hostId: 'host_1',
+        assistantHostIds: [],
+        organizationId: 'org_1',
+      },
+      {
+        authUser: {
+          findUnique: jest.fn().mockResolvedValue({
+            email: 'manager@example.com',
+            emailVerifiedAt: new Date('2026-01-01T00:00:00.000Z'),
+            sessionVersion: 0,
+          }),
+        },
+        organizations: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'org_1',
+            ownerId: 'owner_1',
+            ownershipStatus: 'CLAIMED',
+          }),
+        },
+        staffMembers: {
+          findUnique: jest.fn().mockResolvedValue({
+            organizationId: 'org_1',
+            userId: 'manager_1',
+            types: ['STAFF'],
+            roleId: 'role_manager',
+          }),
+        },
+        invites: {
+          findMany: jest.fn().mockResolvedValue([]),
+        },
+        organizationRoles: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 'role_manager',
+            organizationId: 'org_1',
+          }),
+        },
+        organizationRolePermissions: {
+          findFirst: jest.fn().mockResolvedValue({
+            permission: 'events.manage',
+          }),
+        },
+      },
+    );
+
+    expect(allowed).toBe(true);
+  });
+
+  it('fails closed with a visible read-only reason when Organization authority is unverified', async () => {
+    const capabilities = await projectEventAuthorityCapabilities(
+      { userId: 'external_operator', isAdmin: false },
+      {
+        hostId: 'external_operator',
+        assistantHostIds: [],
+        organizationId: 'org_1',
+      },
+      {
+        authUser: {
+          findUnique: jest.fn().mockResolvedValue({
+            email: 'viewer@example.com',
+            emailVerifiedAt: new Date('2026-01-01T00:00:00.000Z'),
+            sessionVersion: 0,
+          }),
+        },
+        organizations: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'org_1',
+            ownerId: 'placeholder_owner',
+            ownershipStatus: 'UNCLAIMED',
+          }),
+        },
+      },
+    );
+
+    expect(capabilities).toEqual(expect.objectContaining({
+      canEdit: false,
+      canManageStaff: false,
+      canDelegateHost: false,
+      readOnly: true,
+      readOnlyReason: 'MANAGEMENT_AUTHORITY_UNVERIFIED',
+      managementAuthority: null,
+      viewerIsEventHost: true,
+    }));
   });
 });

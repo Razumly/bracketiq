@@ -35,6 +35,7 @@ const verifyGuestRegistrationTokenMock = jest.fn();
 const syncChildRegistrationConsentStatusMock = jest.fn();
 const resolveEventRegistrationPriceCentsMock = jest.fn();
 const acquireEventLockAndLoadStructureMock = jest.fn();
+const sendEventRegistrationHostNotificationMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/server/events/eventRegistrations', () => {
@@ -57,6 +58,11 @@ jest.mock('@/lib/childConsentProgress', () => ({
 }));
 jest.mock('@/server/paidRegistrationGate', () => ({
   resolveEventRegistrationPriceCents: (...args: unknown[]) => resolveEventRegistrationPriceCentsMock(...args),
+}));
+jest.mock('@/server/registrationHostNotifications', () => ({
+  sendEventRegistrationHostNotification: (...args: unknown[]) => (
+    sendEventRegistrationHostNotificationMock(...args)
+  ),
 }));
 
 import { POST } from '@/app/api/public/organizations/[slug]/events/[eventId]/guest-record-signature/route';
@@ -184,6 +190,10 @@ describe('public guest record signature route', () => {
       childUserId: 'child_1',
       parentUserId: 'parent_1',
     });
+    expect(sendEventRegistrationHostNotificationMock).toHaveBeenCalledWith({
+      eventId: 'event_1',
+      registrationId: 'registration_1',
+    });
   });
 
   it('activates a completed no-payment guest team registration after creator participant documents are signed', async () => {
@@ -196,7 +206,7 @@ describe('public guest record signature route', () => {
       registrantId: 'event_team_1',
       eventTeamId: 'event_team_1',
     });
-    prismaMock.eventRegistrations.findUnique.mockResolvedValueOnce({
+    prismaMock.eventRegistrations.findUnique.mockResolvedValue({
       id: 'team_registration_1',
       eventId: 'event_1',
       registrantType: 'TEAM',
@@ -265,6 +275,10 @@ describe('public guest record signature route', () => {
         status: 'ACTIVE',
         consentStatus: 'completed',
       }),
+    });
+    expect(sendEventRegistrationHostNotificationMock).toHaveBeenCalledWith({
+      eventId: 'event_1',
+      registrationId: 'team_registration_1',
     });
   });
 });

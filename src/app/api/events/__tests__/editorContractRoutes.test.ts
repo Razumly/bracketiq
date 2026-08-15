@@ -19,6 +19,7 @@ const getRequestOriginMock = jest.fn(() => 'http://localhost');
 class MockEditorRevisionConflictError extends Error {
   currentEditorRevision = 'current-editor';
   currentStaffRevision = 'current-staff';
+  currentScheduleRevision = 'current-schedule';
   constructor() {
     super('The editor changed while you were editing. Reload before saving again.');
   }
@@ -28,6 +29,7 @@ class MockEditorInputError extends Error {
     super(message);
   }
 }
+class MockEditorPermissionError extends Error {}
 
 
 jest.mock('@/lib/permissions', () => ({ requireSession: (...args: any[]) => requireSessionMock(...args) }));
@@ -38,7 +40,7 @@ jest.mock('@/server/accessControl', () => ({
 }));
 jest.mock('@/lib/requestOrigin', () => ({ getRequestOrigin: (...args: any[]) => getRequestOriginMock(...args) }));
 jest.mock('@/contracts/eventEditor', () => ({
-  EVENT_EDITOR_CONTRACT_VERSION: 2,
+  EVENT_EDITOR_CONTRACT_VERSION: 3,
   eventEditorBootstrapQuerySchema: { safeParse: (...args: any[]) => bootstrapQueryMock(...args) },
   parseCreateEventEditorCommand: (...args: any[]) => parseCreateMock(...args),
   parseSaveEventEditorCommand: (...args: any[]) => parseSaveMock(...args),
@@ -53,7 +55,7 @@ jest.mock('@/server/events/eventEditorSave', () => ({
   EditorCapabilityError: class extends Error {},
   EditorImmutableFieldError: class extends Error {},
   EditorInputError: MockEditorInputError,
-  EditorPermissionError: class extends Error {},
+  EditorPermissionError: MockEditorPermissionError,
   EditorRevisionConflictError: MockEditorRevisionConflictError,
 }));
 jest.mock('@/server/events/eventStaffDelivery', () => ({
@@ -67,8 +69,10 @@ import {
   EventCreateOperationPayloadMismatchError,
 } from '@/server/events/eventCreateOperationReplay';
 import { EventFieldReferenceError } from '@/server/repositories/events';
+import { TimeSlotValidationError } from '@/lib/timeSlotAvailability';
 import {
   EditorInputError,
+  EditorPermissionError,
   EditorRevisionConflictError,
 } from '@/server/events/eventEditorSave';
 
@@ -105,9 +109,26 @@ describe('canonical editor routes', () => {
     expect(loadCreateSnapshotMock).not.toHaveBeenCalled();
   });
 
-  it('creates through the canonical command and returns the saved snapshot', async () => {
-    const command = { contractVersion: 1, draft: { basics: { name: 'Fixture' } } };
-    const result = { status: 'SAVED', snapshot: { eventId: 'event_1' }, questionIdMap: {} };
+  it('creates through the canonical command and returns its operation receipt and revisions', async () => {
+    const command = {
+      contractVersion: 3,
+      createOperationId: 'create-operation-1',
+      expectedRevisions: {
+        editorRevision: 'new',
+        staffRevision: null,
+        scheduleRevision: 'new',
+      },
+      draft: { basics: { name: 'Fixture' } },
+    };
+    const result = {
+      status: 'SAVED',
+      createOperationId: 'create-operation-1',
+      editorRevision: 'editor-revision-1',
+      staffRevision: 'staff-revision-1',
+      scheduleRevision: 'schedule-revision-1',
+      snapshot: { eventId: 'event_1' },
+      questionIdMap: {},
+    };
     parseCreateMock.mockReturnValue(command);
     createEventEditorMock.mockResolvedValue(result);
 
@@ -122,7 +143,7 @@ describe('canonical editor routes', () => {
   });
   it('returns invalid-editor-input for missing field resources instead of an internal error', async () => {
     const command = {
-      contractVersion: 2,
+      contractVersion: 3,
       createOperationId: 'create-operation-1',
       draft: { basics: { name: 'Fixture' } },
     };
@@ -137,9 +158,31 @@ describe('canonical editor routes', () => {
       code: 'INVALID_EDITOR_INPUT',
     });
   });
+  it('returns typed Time Slot evidence for a create input failure', async () => {
+    const command = {
+      contractVersion: 3,
+      createOperationId: 'create-operation-invalid-slot',
+      draft: { basics: { name: 'Fixture' } },
+    };
+    parseCreateMock.mockReturnValue(command);
+    createEventEditorMock.mockRejectedValue(new TimeSlotValidationError(
+      'ONE_TIME_SLOT_CONFLICT',
+      'The selected Time Slots overlap.',
+      { slotIds: ['slot_1', 'slot_2'] },
+    ));
+
+    const response = await createPost(request('http://localhost/api/events/editor', 'POST', command));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'The selected Time Slots overlap.',
+      code: 'INVALID_TIME_SLOT',
+      slotIds: ['slot_1', 'slot_2'],
+    });
+  });
   it('maps invalid staff input to a client-correctable create response', async () => {
     const command = {
-      contractVersion: 2,
+      contractVersion: 3,
       createOperationId: 'create-operation-invalid-staff',
       draft: { basics: { name: 'Fixture' } },
     };
@@ -156,9 +199,47 @@ describe('canonical editor routes', () => {
       code: 'INVALID_EDITOR_INPUT',
     });
   });
+  it('returns current revisions for a stale create command', async () => {
+    const command = {
+      contractVersion: 3,
+      createOperationId: 'create-operation-stale',
+      draft: { basics: { name: 'Fixture' } },
+    };
+    parseCreateMock.mockReturnValue(command);
+    createEventEditorMock.mockRejectedValue(new EditorRevisionConflictError());
+
+    const response = await createPost(request('http://localhost/api/events/editor', 'POST', command));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: 'The editor changed while you were editing. Reload before saving again.',
+      code: 'EDITOR_REVISION_CONFLICT',
+      editorRevision: 'current-editor',
+      staffRevision: 'current-staff',
+      scheduleRevision: 'current-schedule',
+    });
+  });
+
+  it('returns a typed authority error when creation is not permitted', async () => {
+    const command = {
+      contractVersion: 3,
+      createOperationId: 'create-operation-forbidden',
+      draft: { basics: { name: 'Fixture' } },
+    };
+    parseCreateMock.mockReturnValue(command);
+    createEventEditorMock.mockRejectedValue(new EditorPermissionError('Not permitted.'));
+
+    const response = await createPost(request('http://localhost/api/events/editor', 'POST', command));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: 'Not permitted.',
+      code: 'EDITOR_PERMISSION_DENIED',
+    });
+  });
   it('returns diagnostic details for unexpected create failures', async () => {
     const command = {
-      contractVersion: 2,
+      contractVersion: 3,
       createOperationId: 'create-operation-unexpected-failure',
       draft: { basics: { name: 'Fixture' } },
     };
@@ -182,7 +263,7 @@ describe('canonical editor routes', () => {
 
   it('maps a create payload mismatch to a typed conflict without retrying persistence', async () => {
     const command = {
-      contractVersion: 2,
+      contractVersion: 3,
       createOperationId: 'create-operation-1',
       draft: { basics: { name: 'Fixture' } },
     };
@@ -200,7 +281,7 @@ describe('canonical editor routes', () => {
 
   it('maps an in-flight create operation to a retryable typed conflict', async () => {
     const command = {
-      contractVersion: 2,
+      contractVersion: 3,
       createOperationId: 'create-operation-1',
       draft: { basics: { name: 'Fixture' } },
     };
@@ -227,7 +308,7 @@ describe('canonical editor routes', () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
-      contractVersion: 2,
+      contractVersion: 3,
       createOperationId: expect.any(String),
       snapshot,
     });
@@ -274,11 +355,32 @@ describe('canonical editor routes', () => {
   });
 
 
-  it('checks edit permissions before returning the canonical snapshot', async () => {
-    canManageEventMock.mockResolvedValue(false);
+  it('returns the canonical snapshot with read-only capabilities when mutation is not authorized', async () => {
+    loadSnapshotMock.mockResolvedValueOnce({
+      eventId: 'event_1',
+      capabilities: {
+        canEdit: false,
+        canManageStaff: false,
+        canDelegateHost: false,
+        readOnly: true,
+        readOnlyReason: 'NOT_AUTHORIZED',
+      },
+    });
+
     const response = await editGet(request('http://localhost/api/events/event_1/editor'), editContext());
-    expect(response.status).toBe(403);
-    expect((await response.json()).code).toBe('EDITOR_PERMISSION_DENIED');
-    expect(loadSnapshotMock).not.toHaveBeenCalled();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(expect.objectContaining({
+      eventId: 'event_1',
+      capabilities: expect.objectContaining({
+        canEdit: false,
+        readOnly: true,
+        readOnlyReason: 'NOT_AUTHORIZED',
+      }),
+    }));
+    expect(loadSnapshotMock).toHaveBeenCalledWith(
+      'event_1',
+      { actor: { userId: 'host_1', isAdmin: false } },
+    );
   });
 });

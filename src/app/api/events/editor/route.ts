@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createId } from "@/lib/id";
+import { TimeSlotValidationError } from "@/lib/timeSlotAvailability";
 import { requireSession } from "@/lib/permissions";
 import { getRequestOrigin } from "@/lib/requestOrigin";
 import { hasOrgPermission } from "@/server/accessControl";
@@ -16,6 +17,7 @@ import {
   EditorImmutableFieldError,
   EditorInputError,
   EditorPermissionError,
+  EditorRevisionConflictError,
   EditorScheduleIntentError,
 } from "@/server/events/eventEditorSave";
 import {
@@ -94,6 +96,18 @@ const errorResponse = (error: unknown) => {
       { status: 400 },
     );
   }
+  if (error instanceof EditorRevisionConflictError) {
+    return NextResponse.json(
+      {
+        error: error.message,
+        code: "EDITOR_REVISION_CONFLICT",
+        editorRevision: error.currentEditorRevision,
+        staffRevision: error.currentStaffRevision,
+        scheduleRevision: error.currentScheduleRevision,
+      },
+      { status: 409 },
+    );
+  }
   if (error instanceof EditorPermissionError) {
     return NextResponse.json(
       { error: error.message, code: "EDITOR_PERMISSION_DENIED" },
@@ -153,6 +167,12 @@ const errorResponse = (error: unknown) => {
     return NextResponse.json(
       { error: scheduleError.message, code: scheduleError.code },
       { status },
+    );
+  }
+  if (error instanceof TimeSlotValidationError) {
+    return NextResponse.json(
+      { error: error.message, code: "INVALID_TIME_SLOT", slotIds: error.slotIds },
+      { status: 400 },
     );
   }
   if (error instanceof ScheduleError) {

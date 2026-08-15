@@ -3,6 +3,8 @@ import { LeagueScoringConfig, Sport } from '@/types';
 export const createSport = (overrides: Partial<Sport> = {}): Sport => ({
   $id: overrides.$id ?? '',
   name: overrides.name ?? '',
+  resourceLabelSingular: overrides.resourceLabelSingular ?? 'Resource',
+  resourceLabelPlural: overrides.resourceLabelPlural ?? 'Resources',
   officialPositionTemplates: overrides.officialPositionTemplates ?? [],
   usePointsForWin: overrides.usePointsForWin ?? false,
   usePointsForDraw: overrides.usePointsForDraw ?? false,

@@ -1,6 +1,10 @@
 import { EventBuilder } from './EventBuilder';
-import { explicitTimeSlotWindow } from './Schedule';
-import { Division, League, Match, Tournament, TIMES, MINUTE_MS, SchedulerContext, Team } from './types';
+import { TimeSlotValidationError, type ResolvedOneTimeTimeSlot } from '@/lib/timeSlotAvailability';
+import { Division, League, Match, Tournament, TIMES, MINUTE_MS, SchedulerContext, Team, type TimeSlot } from './types';
+import {
+  assertCanonicalSchedulerTimeSlots,
+  calculateOneTimeAvailabilityMinutes,
+} from './timeSlotAvailability';
 
 export type ScheduleRequest = {
   event: League | Tournament;
@@ -192,6 +196,27 @@ const normalizeDivisionRefId = (value: unknown): string | null => {
   return normalizeDivisionId((value as { id?: unknown }).id);
 };
 
+const extendResourceEligibilityForInheritedSlotScope = (
+  event: League | Tournament,
+  slot: TimeSlot,
+  inheritedDivisions: Division[],
+): void => {
+  if (!inheritedDivisions.length) return;
+  const slotResourceIds = slot.fieldIds.length
+    ? slot.fieldIds
+    : (slot.field ? [slot.field] : Object.keys(event.fields));
+  for (const resourceId of slotResourceIds) {
+    const resource = event.fields[resourceId];
+    if (!resource) continue;
+    const eligibleDivisionIds = new Set(resource.divisions.map((division) => division.id.toLowerCase()));
+    for (const division of inheritedDivisions) {
+      if (eligibleDivisionIds.has(division.id.toLowerCase())) continue;
+      resource.divisions.push(division);
+      eligibleDivisionIds.add(division.id.toLowerCase());
+    }
+  }
+};
+
 const ensureSplitPlayoffTimeSlotCoverage = (league: League): void => {
   if (!league.splitLeaguePlayoffDivisions || !league.playoffDivisions.length || !league.timeSlots.length) {
     return;
@@ -267,7 +292,9 @@ const ensureSplitPlayoffTimeSlotCoverage = (league: League): void => {
       }
     }
     if (changed) {
+      const inheritedDivisions = nextDivisions.slice(existingDivisions.length);
       slot.divisions = nextDivisions;
+      extendResourceEligibilityForInheritedSlotScope(league, slot, inheritedDivisions);
     }
   }
 };
@@ -353,7 +380,9 @@ const ensureTournamentPoolTimeSlotCoverage = (tournament: Tournament): void => {
       }
     }
     if (changed) {
+      const inheritedDivisions = nextDivisions.slice(existingDivisions.length);
       slot.divisions = nextDivisions;
+      extendResourceEligibilityForInheritedSlotScope(tournament, slot, inheritedDivisions);
     }
   }
 };
@@ -395,39 +424,6 @@ const hasExtendableRecurringSlots = (event: League | Tournament): boolean => {
   return event.timeSlots.some((slot) => isExtendableRecurringSlot(slot));
 };
 
-export const ensureEventWindowCoversExplicitTimeSlots = (
-  event: League | Tournament,
-  options: { allowExpansion?: boolean } = {},
-): void => {
-  const allowExpansion = options.allowExpansion !== false;
-  const windows = event.timeSlots
-    .filter((slot) => slot.repeating === false)
-    .map((slot) => explicitTimeSlotWindow(slot))
-    .filter((window): window is [Date, Date] => window !== null);
-  if (!windows.length) {
-    return;
-  }
-  const earliestStart = windows.reduce((earliest, [start]) => (
-    start.getTime() < earliest.getTime() ? start : earliest
-  ), windows[0][0]);
-  const latestEnd = windows.reduce((latest, [, end]) => (
-    end.getTime() > latest.getTime() ? end : latest
-  ), windows[0][1]);
-
-  const eventEndsBeforeSlots = event.end.getTime() < earliestStart.getTime();
-  const eventStartsAfterSlots = event.start.getTime() > latestEnd.getTime();
-  if (eventEndsBeforeSlots || eventStartsAfterSlots) {
-    if (!allowExpansion) {
-      return;
-    }
-    event.start = earliestStart;
-    event.end = latestEnd;
-    return;
-  }
-  if (allowExpansion && event.end.getTime() < latestEnd.getTime()) {
-    event.end = latestEnd;
-  }
-};
 
 const isScheduleOverrunError = (message: string): boolean => {
   const normalized = message.toLowerCase();
@@ -437,6 +433,15 @@ const isScheduleOverrunError = (message: string): boolean => {
 
 export const scheduleEvent = (request: ScheduleRequest, context: SchedulerContext): ScheduleResult => {
   const { event } = request;
+  let resolvedOneTimeSlots: ResolvedOneTimeTimeSlot[];
+  try {
+    resolvedOneTimeSlots = assertCanonicalSchedulerTimeSlots(event);
+  } catch (error) {
+    if (error instanceof TimeSlotValidationError) {
+      throw new ScheduleError(error.message);
+    }
+    throw error;
+  }
   const includePlaceholderTeams = request.includePlaceholderTeams !== false;
   if (!includePlaceholderTeams) {
     stripPlaceholderTeamsFromEvent(event);
@@ -449,14 +454,16 @@ export const scheduleEvent = (request: ScheduleRequest, context: SchedulerContex
 
   const openEndedSchedule = isOpenEndedSchedule(event);
   applyStoredScheduleEnd(event);
-  ensureEventWindowCoversExplicitTimeSlots(event, {
-    allowExpansion: openEndedSchedule || !event.scheduleEndConstraint,
-  });
   if (!openEndedSchedule && event.end.getTime() <= event.start.getTime()) {
-    throw new ScheduleError('End date/time must be after start date/time when "No fixed end datetime scheduling" is disabled.');
+    throw new ScheduleError('End date/time must be after start date/time when \"No fixed end datetime scheduling\" is disabled.');
   }
   if (openEndedSchedule) {
     extendOpenEndedWindow(event);
+    for (const slot of resolvedOneTimeSlots) {
+      if (slot.end.getTime() > event.end.getTime()) {
+        event.end = slot.end;
+      }
+    }
   }
 
   prepareScheduleWindow(event, openEndedSchedule, includePlaceholderTeams);
@@ -841,27 +848,7 @@ const calculateSlotMinutes = (event: League): number => {
   const end = event.end;
   if (start.getTime() >= end.getTime()) return 0;
 
-  let totalMinutes = 0;
-  for (const slot of event.timeSlots) {
-    if (slot.repeating !== false) {
-      continue;
-    }
-    if (!(slot.startDate instanceof Date) || Number.isNaN(slot.startDate.getTime())) {
-      continue;
-    }
-    if (!(slot.endDate instanceof Date) || Number.isNaN(slot.endDate.getTime())) {
-      continue;
-    }
-    if (slot.endDate.getTime() <= slot.startDate.getTime()) {
-      continue;
-    }
-    const windowStart = slot.startDate.getTime() < start.getTime() ? start : slot.startDate;
-    const windowEnd = slot.endDate.getTime() > end.getTime() ? end : slot.endDate;
-    if (windowEnd.getTime() <= windowStart.getTime()) {
-      continue;
-    }
-    totalMinutes += Math.floor((windowEnd.getTime() - windowStart.getTime()) / MINUTE_MS);
-  }
+  let totalMinutes = calculateOneTimeAvailabilityMinutes(event);
 
   const recurringSlots = event.timeSlots.filter((slot) => slot.repeating !== false);
   if (!recurringSlots.length) {

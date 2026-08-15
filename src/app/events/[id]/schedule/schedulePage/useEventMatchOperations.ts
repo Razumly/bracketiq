@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 
 import { createClientId } from '@/lib/clientId';
 import { formatLocalDateTime } from '@/lib/dateUtils';
@@ -96,6 +96,16 @@ export default function useEventMatchOperations({
   const [matchBeingEdited, setMatchBeingEdited] = useState<Match | null>(null);
   const [scoreUpdateMatch, setScoreUpdateMatch] = useState<Match | null>(null);
   const [isScoreModalOpen, setIsScoreModalOpen] = useState(false);
+  const [matchEditorAuthorityToken, setMatchEditorAuthorityToken] = useState<object | null>(null);
+  const activeEventId = activeEvent?.$id;
+  const activeEventType = activeEvent?.eventType;
+  const activeEventFields = activeEvent?.fields;
+  const currentMatchEditorAuthorityToken = useMemo<object | null>(
+    () => (canEditMatches ? {} : null),
+    [canEditMatches],
+  );
+  const matchEditorIsCurrent = currentMatchEditorAuthorityToken !== null
+    && matchEditorAuthorityToken === currentMatchEditorAuthorityToken;
 
   const resetStagedMatchDrafts = useCallback(() => {
     setStagedMatchCreates({});
@@ -109,6 +119,7 @@ export default function useEventMatchOperations({
     setMatchEditorContext('bracket');
     setIsMatchEditorOpen(false);
     setMatchBeingEdited(null);
+    setMatchEditorAuthorityToken(null);
   }, []);
 
   const closeScoreModal = useCallback(() => {
@@ -126,7 +137,7 @@ export default function useEventMatchOperations({
     seed?: Partial<Match>;
     openEditor?: boolean;
   }) => {
-    if (!canEditMatches || !activeEvent?.$id) {
+    if (!canEditMatches || !activeEventId) {
       return null;
     }
 
@@ -136,7 +147,7 @@ export default function useEventMatchOperations({
     const defaultStart = formatLocalDateTime(now);
     const defaultEnd = formatLocalDateTime(new Date(now.getTime() + 60 * 60 * 1000));
     const nextMatchId = nextMatchSequenceNumber(activeMatches);
-    const isTournamentEvent = String(activeEvent.eventType ?? '').toUpperCase() === 'TOURNAMENT';
+    const isTournamentEvent = String(activeEventType ?? '').toUpperCase() === 'TOURNAMENT';
     const existingPlaceholderCount = activeMatches.reduce((count, match) => {
       const team1Name = (match.team1 as { name?: string } | null)?.name ?? '';
       const team2Name = (match.team2 as { name?: string } | null)?.name ?? '';
@@ -154,7 +165,7 @@ export default function useEventMatchOperations({
     const draft: Match = {
       $id: matchId,
       matchId: typeof params.seed?.matchId === 'number' ? params.seed.matchId : nextMatchId,
-      eventId: activeEvent.$id,
+      eventId: activeEventId,
       team1Id: null,
       team2Id: null,
       officialId: null,
@@ -198,11 +209,12 @@ export default function useEventMatchOperations({
       setMatchEditorContext(params.creationContext);
       setPendingCreateMatchId(matchId);
       setMatchBeingEdited(cloneValue(draft) as Match);
+      setMatchEditorAuthorityToken(currentMatchEditorAuthorityToken);
       setIsMatchEditorOpen(true);
     }
 
     return draft;
-  }, [activeEvent?.$id, activeEvent?.eventType, activeMatches, canEditMatches, matches, setChangesMatches, setHasUnsavedChanges]);
+  }, [activeEventId, activeEventType, activeMatches, canEditMatches, currentMatchEditorAuthorityToken, matches, setChangesMatches, setHasUnsavedChanges]);
 
   const removeDraftMatch = useCallback((matchId: string, options?: {
     stageDelete?: boolean;
@@ -253,6 +265,7 @@ export default function useEventMatchOperations({
     }
     setMatchEditorContext('bracket');
     setIsMatchEditorOpen(false);
+    setMatchEditorAuthorityToken(null);
     setMatchBeingEdited(null);
   }, [pendingCreateMatchId, removeDraftMatch]);
 
@@ -271,8 +284,9 @@ export default function useEventMatchOperations({
     setMatchEditorContext(context);
     setPendingCreateMatchId(null);
     setMatchBeingEdited(cloneValue(sourceMatch) as Match);
+    setMatchEditorAuthorityToken(currentMatchEditorAuthorityToken);
     setIsMatchEditorOpen(true);
-  }, [activeMatches, canEditMatches]);
+  }, [activeMatches, canEditMatches, currentMatchEditorAuthorityToken]);
 
   const handleMatchEditClose = useCallback(() => {
     if (pendingCreateMatchId) {
@@ -281,6 +295,7 @@ export default function useEventMatchOperations({
     }
     setMatchEditorContext('bracket');
     setIsMatchEditorOpen(false);
+    setMatchEditorAuthorityToken(null);
     setMatchBeingEdited(null);
   }, [pendingCreateMatchId, removeStagedClientMatch]);
 
@@ -313,7 +328,7 @@ export default function useEventMatchOperations({
           [updated.$id]: {
             clientId: getClientIdFromMatchId(updated.$id),
             creationContext: matchEditorContext,
-            autoPlaceholderTeam: String(activeEvent?.eventType ?? '').toUpperCase() === 'TOURNAMENT',
+            autoPlaceholderTeam: String(activeEventType ?? '').toUpperCase() === 'TOURNAMENT',
           },
         };
       });
@@ -322,9 +337,10 @@ export default function useEventMatchOperations({
     setPendingCreateMatchId(null);
     setMatchEditorContext('bracket');
     setIsMatchEditorOpen(false);
+    setMatchEditorAuthorityToken(null);
     setMatchBeingEdited(null);
   }, [
-    activeEvent?.eventType,
+    activeEventType,
     changesMatches,
     matchEditorContext,
     matches,
@@ -366,8 +382,8 @@ export default function useEventMatchOperations({
       ? new Date(range.end.getTime())
       : new Date(nextStart.getTime() + 60 * 60 * 1000);
     const nextFieldId = normalizeIdToken(range.fieldId ?? target.fieldId ?? null);
-    const nextField = nextFieldId && Array.isArray(activeEvent?.fields)
-      ? activeEvent.fields.find((field: Field) => field.$id === nextFieldId)
+    const nextField = nextFieldId && Array.isArray(activeEventFields)
+      ? activeEventFields.find((field: Field) => field.$id === nextFieldId)
       : undefined;
 
     setChangesMatches((prev) => {
@@ -390,7 +406,7 @@ export default function useEventMatchOperations({
     });
     onDraftMatchChanged();
     setHasUnsavedChanges(true);
-  }, [activeEvent?.fields, canEditMatches, matches, onDraftMatchChanged, setChangesMatches, setHasUnsavedChanges]);
+  }, [activeEventFields, canEditMatches, matches, onDraftMatchChanged, setChangesMatches, setHasUnsavedChanges]);
 
   const applyMatchUpdate = useCallback((updated: Match) => {
     const cloned = cloneValue(updated) as Match;
@@ -442,7 +458,7 @@ export default function useEventMatchOperations({
       matchAction,
       time,
     }: MatchOperationPayload) => {
-      const targetEventId = activeEvent?.$id ?? eventId;
+      const targetEventId = activeEventId ?? eventId;
       if (!targetEventId) return;
       try {
         const hasOperations =
@@ -481,7 +497,7 @@ export default function useEventMatchOperations({
         throw err;
       }
     },
-    [activeEvent?.$id, applyMatchUpdate, eventId],
+    [activeEventId, applyMatchUpdate, eventId],
   );
 
   const handleSetComplete = useCallback(
@@ -494,7 +510,7 @@ export default function useEventMatchOperations({
       incidentOperations,
       time,
     }: MatchOperationPayload) => {
-      const targetEventId = activeEvent?.$id ?? eventId;
+      const targetEventId = activeEventId ?? eventId;
       if (!targetEventId) return;
       const hasOperations = Boolean(segmentOperations?.length) || Boolean(incidentOperations?.length);
       const updated = hasOperations
@@ -512,16 +528,10 @@ export default function useEventMatchOperations({
           });
       applyMatchUpdate(updated as Match);
     },
-    [applyMatchUpdate, activeEvent?.$id, eventId],
+    [activeEventId, applyMatchUpdate, eventId],
   );
 
 
-  useEffect(() => {
-    if (!canEditMatches && isMatchEditorOpen) {
-      setIsMatchEditorOpen(false);
-      setMatchBeingEdited(null);
-    }
-  }, [canEditMatches, isMatchEditorOpen]);
 
   return {
     applyMatchUpdate,
@@ -536,9 +546,9 @@ export default function useEventMatchOperations({
     handleScoreChange,
     handleSetComplete,
     handleToggleLockAllMatches,
-    isMatchEditorOpen,
+    isMatchEditorOpen: matchEditorIsCurrent && isMatchEditorOpen,
     isScoreModalOpen,
-    matchBeingEdited,
+    matchBeingEdited: matchEditorIsCurrent ? matchBeingEdited : null,
     matchEditorContext,
     openScoreModalForMatch,
     resetMatchEditorState,

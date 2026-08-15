@@ -1,5 +1,5 @@
 import { normalizeRentalTaxHandling, type RentalTaxHandling } from '@/lib/taxPolicy';
-import { isTemplateRentalResourceSourceType } from '@/lib/templateRentalResources';
+import { resolveOneTimeTimeSlot } from '@/lib/timeSlotAvailability';
 import {
   DEFAULT_EVENT_TIME_ZONE,
   mondayDayInTimeZone,
@@ -30,8 +30,6 @@ export type CanonicalTimeSlotInput = {
   rentalBookingItemId: string | null;
   rentalLocked: boolean;
 };
-
-const MINUTE_MS = 60 * 1000;
 
 export const normalizeTimeSlotFieldIds = (slot: Record<string, unknown>): string[] => {
   const fromList = Array.isArray(slot.scheduledFieldIds)
@@ -137,7 +135,6 @@ type CanonicalizeSlotsParams = {
   fallbackDivisionKeys: string[];
   enforceAllDivisions: boolean;
   normalizeDivisions: (value: unknown) => string[];
-  allowTemplateRentalResourceReferences?: boolean;
 };
 
 export const canonicalizeTimeSlots = ({
@@ -148,7 +145,6 @@ export const canonicalizeTimeSlots = ({
   fallbackDivisionKeys,
   enforceAllDivisions,
   normalizeDivisions,
-  allowTemplateRentalResourceReferences = false,
 }: CanonicalizeSlotsParams): CanonicalTimeSlotInput[] => {
   const seenSlotIds = new Map<string, number>();
   const fallbackTimeZone = resolveTimeZone(timeZone, DEFAULT_EVENT_TIME_ZONE);
@@ -169,11 +165,6 @@ export const canonicalizeTimeSlots = ({
     });
 
     const normalizedFieldIds = normalizeTimeSlotFieldIds(slot);
-    const allowFieldlessSlot = allowTemplateRentalResourceReferences
-      && isTemplateRentalResourceSourceType(slot.sourceType);
-    if (normalizedFieldIds.length === 0 && !allowFieldlessSlot) {
-      return [];
-    }
 
     const slotStartMinutesRaw = normalizeMinuteValue(slot.startTimeMinutes);
     const slotEndMinutesRaw = normalizeMinuteValue(slot.endTimeMinutes);
@@ -183,17 +174,21 @@ export const canonicalizeTimeSlots = ({
       ? minutesInTimeZone(parsedEndDate, slotTimeZone)
       : null;
 
-    const startTimeMinutes = repeating
+    let startTimeMinutes = repeating
       ? slotStartMinutesRaw
       : (slotStartMinutesRaw ?? startMinutesFromDate);
-    const endTimeMinutes = repeating
+    let endTimeMinutes = repeating
       ? slotEndMinutesRaw
       : (slotEndMinutesRaw ?? endMinutesFromDate);
 
-    if (startTimeMinutes === null || endTimeMinutes === null || endTimeMinutes <= startTimeMinutes) {
+    if (
+      repeating
+      && (startTimeMinutes === null || endTimeMinutes === null || endTimeMinutes <= startTimeMinutes)
+    ) {
       return [];
     }
 
+    let resolvedStartDate = startDate;
     let endDate: Date | null = null;
     let daysOfWeek: number[] = [];
     if (repeating) {
@@ -202,20 +197,19 @@ export const canonicalizeTimeSlots = ({
         : [mondayDayInTimeZone(startDate, slotTimeZone)];
       endDate = parsedEndDate ?? null;
     } else {
-      const inferredEndDate = parsedEndDate ?? (() => {
-        const candidate = new Date(startDate.getTime() + (endTimeMinutes - startTimeMinutes) * MINUTE_MS);
-        if (candidate.getTime() <= startDate.getTime()) {
-          candidate.setTime(candidate.getTime() + 24 * 60 * MINUTE_MS);
-        }
-        return candidate;
-      })();
-      if (!inferredEndDate || inferredEndDate.getTime() <= startDate.getTime()) {
-        return [];
-      }
-      endDate = inferredEndDate;
-      daysOfWeek = normalizedDays.length > 0
-        ? [normalizedDays[0]]
-        : [mondayDayInTimeZone(startDate, slotTimeZone)];
+      const resolved = resolveOneTimeTimeSlot({
+        ...slot,
+        id: slotId,
+        repeating: false,
+        timeZone: slotTimeZone,
+        startTimeMinutes,
+        endTimeMinutes,
+      }, fallbackTimeZone);
+      resolvedStartDate = resolved.start;
+      endDate = resolved.end;
+      startTimeMinutes = resolved.startTimeMinutes;
+      endTimeMinutes = resolved.endTimeMinutes;
+      daysOfWeek = [mondayDayInTimeZone(resolved.start, slotTimeZone)];
     }
 
     const normalizedSlotDivisions = normalizeDivisions(slot.divisions);
@@ -229,7 +223,7 @@ export const canonicalizeTimeSlots = ({
       daysOfWeek,
       startTimeMinutes,
       endTimeMinutes,
-      startDate,
+      startDate: resolvedStartDate,
       endDate,
       timeZone: slotTimeZone,
       repeating,

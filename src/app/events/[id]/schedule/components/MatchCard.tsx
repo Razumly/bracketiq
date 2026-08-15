@@ -19,6 +19,7 @@ interface MatchCardProps {
     hideTimeBadge?: boolean;
     showOfficialInHeader?: boolean;
     fieldLabel?: string;
+    resourceSingular?: string;
     team1Placeholder?: string;
     team2Placeholder?: string;
     hasConflict?: boolean;
@@ -85,6 +86,7 @@ function MatchCard({
     hideTimeBadge = false,
     showOfficialInHeader = false,
     fieldLabel,
+    resourceSingular = 'Resource',
     team1Placeholder,
     team2Placeholder,
     hasConflict = false,
@@ -276,7 +278,7 @@ function MatchCard({
             return explicitLabel;
         }
 
-        return getFieldDisplayName(match.field, 'Field TBD');
+        return getFieldDisplayName(match.field, `${resourceSingular} TBD`);
     })();
 
     const clickable = typeof onClick === 'function';

@@ -8,6 +8,7 @@ import {
   WEEKLY_REPEATING_TIME_SLOT_REQUIRED_MESSAGE,
 } from '@/lib/eventScheduling';
 import { normalizeEventTaxHandling, normalizeOrganizerManualTaxRateBps, normalizeRentalTaxHandling } from '@/lib/taxPolicy';
+import { assertValidOneTimeTimeSlots } from '@/lib/timeSlotAvailability';
 import {
   normalizeManualPaymentInstructions,
   normalizeManualPaymentLinks,
@@ -4998,11 +4999,7 @@ export const upsertEventFromPayload = async (
       fallbackDivisionKeys: normalizedEventDivisionIds,
       enforceAllDivisions: singleDivisionEnabled && !isTournamentPoolPlay,
       normalizeDivisions: (value) => normalizeDivisionIdentifierList(value, id),
-      allowTemplateRentalResourceReferences: isTemplateState,
     });
-  if (!isAffiliateExternalEvent) {
-    await reserveRentalBookingSlotsForEvent(client, id, canonicalTimeSlots);
-  }
 
   const slotFieldIds = normalizeFieldIds(
     canonicalTimeSlots.flatMap((slot) => slot.scheduledFieldIds),
@@ -5234,6 +5231,17 @@ export const upsertEventFromPayload = async (
 
   if (!noFixedEndDateTime && (!normalizedEnd || normalizedEnd.getTime() <= start.getTime())) {
     throw new Error('End date/time must be after start date/time when "No fixed end datetime scheduling" is disabled.');
+  }
+  if (!isAffiliateExternalEvent) {
+    assertValidOneTimeTimeSlots({
+      slots: canonicalTimeSlots,
+      fallbackTimeZone: eventTimeZone,
+      eventStart: start,
+      eventEnd: noFixedEndDateTime ? null : normalizedEnd,
+      eligibleResourceIds: fieldIds,
+      eligibleDivisionIds: normalizedEventDivisionIds,
+    });
+    await reserveRentalBookingSlotsForEvent(client, id, canonicalTimeSlots);
   }
   if (!isAffiliateExternalEvent && normalizedEnd) {
     await assertNoEventFieldSchedulingConflicts({

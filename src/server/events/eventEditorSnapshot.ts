@@ -14,6 +14,7 @@ import { loadEventStaffSnapshot } from './eventStaffReconciliation';
 import { listRegistrationQuestions } from '@/server/registrationQuestions';
 import { buildSeedEventFromTemplate } from '@/server/eventTemplates';
 import { hasJoinedEventParticipant } from './eventRegistrations';
+import { projectEventAuthorityCapabilities } from '@/server/accessControl';
 
 export type EditorActor = {
   userId: string;
@@ -44,7 +45,11 @@ const jsonSafe = (value: unknown): unknown => {
   if (value instanceof Date) return value.toISOString();
   if (Array.isArray(value)) return value.map(jsonSafe);
   if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, child]) => [key, jsonSafe(child)]));
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, child]) => [key, jsonSafe(child)]),
+    );
   }
   return value;
 };
@@ -481,7 +486,12 @@ const loadCatalogs = async (client: EditorSnapshotClient, event: Record<string, 
   };
 };
 
-const loadCapability = async (client: EditorSnapshotClient, event: Record<string, unknown>, actor?: EditorActor | null) => {
+const loadCapability = async (
+  client: EditorSnapshotClient,
+  event: Record<string, unknown>,
+  actor: EditorActor | null | undefined,
+  mode: 'CREATE' | 'EDIT',
+) => {
   const organizationId = typeof event.organizationId === 'string' ? event.organizationId : null;
   let canUseOnlinePayments = false;
   if (organizationId) {
@@ -495,10 +505,24 @@ const loadCapability = async (client: EditorSnapshotClient, event: Record<string
     ? event.organization as Record<string, unknown>
     : null;
   if (!canUseOnlinePayments) canUseOnlinePayments = organization?.hasStripeAccount === true;
+  const authority = await projectEventAuthorityCapabilities(
+    actor ? { ...actor, isAdmin: Boolean(actor.isAdmin) } : null,
+    {
+      hostId: typeof event.hostId === 'string' ? event.hostId : null,
+      assistantHostIds: event.assistantHostIds,
+      organizationId,
+    },
+    client,
+  );
   return {
+    ...authority,
+    canManageStaff: mode === 'CREATE' ? Boolean(actor?.userId) : authority.canManageStaff,
+    canEdit: mode === 'CREATE' ? Boolean(actor?.userId) : authority.canEdit,
+    readOnly: mode === 'CREATE' ? !actor?.userId : authority.readOnly,
+    readOnlyReason: mode === 'CREATE' && actor?.userId
+      ? null
+      : authority.readOnlyReason,
     canUseOnlinePayments,
-    canManageStaff: Boolean(actor?.userId),
-    canEdit: Boolean(actor?.userId),
     supportsTeamStaffing: ['LEAGUE', 'TOURNAMENT', 'EVENT'].includes(String(event.eventType ?? '').toUpperCase()),
   };
 };
@@ -764,11 +788,16 @@ export const buildEventEditorSnapshot = async (
   const questions = eventId
     ? await listRegistrationQuestions({ scopeType: 'EVENT', scopeId: eventId, client })
     : [];
-  const staff = eventId
+  const capabilities = await loadCapability(
+    client,
+    eventWithResources,
+    context.actor,
+    mode,
+  );
+  const staff = eventId && capabilities.canManageStaff
     ? await loadEventStaffSnapshot(client, eventId)
     : null;
   const catalogs = await loadCatalogs(client, eventWithResources, context.query);
-  const capabilities = await loadCapability(client, eventWithResources, context.actor);
   const draft = legacyEventToEditorDraft(eventWithResources as unknown as Event, questions);
   if (staff) {
     draft.staff = {
@@ -780,9 +809,6 @@ export const buildEventEditorSnapshot = async (
       pendingInvites: staff.staffInvites,
     };
   }
-  const revision = mode === 'CREATE'
-    ? 'new'
-    : editorRevisionFor({ draft });
   const immutableFieldNames = new Set(
     Array.isArray(event.immutableFieldNames)
       ? event.immutableFieldNames.filter((fieldName): fieldName is string => typeof fieldName === 'string')
@@ -795,6 +821,24 @@ export const buildEventEditorSnapshot = async (
   if (scheduleState.hasProtectedHistory) {
     immutableFieldNames.add('eventType');
   }
+  if (mode === 'EDIT' && !capabilities.canDelegateHost) {
+    immutableFieldNames.add('hostId');
+  }
+  const immutable = {
+    fieldNames: Array.from(immutableFieldNames).sort(),
+    rental: Boolean(rentalBookingId || rentalSlots.length > 0),
+    template: String(event.state ?? '').toUpperCase() === 'TEMPLATE' || Boolean(context.query?.templateId),
+  };
+  const createSource = { draft, immutable };
+  const revision = mode === 'CREATE'
+    ? editorRevisionFor({ source: 'CREATE_EDITOR', ...createSource })
+    : editorRevisionFor({ draft });
+  const resolvedScheduleState = mode === 'CREATE'
+    ? {
+        ...scheduleState,
+        revision: editorRevisionFor({ source: 'CREATE_SCHEDULE', ...createSource }),
+      }
+    : scheduleState;
   const snapshot = {
     contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
     mode,
@@ -804,12 +848,8 @@ export const buildEventEditorSnapshot = async (
     draft,
     capabilities,
     catalogs,
-    immutable: {
-      fieldNames: Array.from(immutableFieldNames),
-      rental: Boolean(rentalBookingId || rentalSlots.length > 0),
-      template: String(event.state ?? '').toUpperCase() === 'TEMPLATE' || Boolean(context.query?.templateId),
-    },
-    scheduleState,
+    immutable,
+    scheduleState: resolvedScheduleState,
   };
   return parseEventEditorSnapshot(snapshot);
 };

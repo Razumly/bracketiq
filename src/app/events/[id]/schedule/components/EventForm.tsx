@@ -22,6 +22,7 @@ import {
   normalizeEntityId,
   sanitizeOrganizationEventAssignments,
 } from "@/lib/organizationEventAccess";
+import { resolveEventResourceLabels } from "@/lib/sportResourceLabels";
 import {
   buildEventTypeOptions,
   hasAffiliateUrl,
@@ -481,11 +482,20 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       },
       [],
     );
-    const displayedFormValidationErrors = schemaValidationResult.success
-      ? []
-      : currentSimplePageId === "review-publish"
-        ? reviewSchemaValidationErrors
-        : reportedFormValidationErrors;
+    const displayedFormValidationErrors = useMemo(
+      () =>
+        schemaValidationResult.success
+          ? []
+          : currentSimplePageId === "review-publish"
+            ? reviewSchemaValidationErrors
+            : reportedFormValidationErrors,
+      [
+        currentSimplePageId,
+        reportedFormValidationErrors,
+        reviewSchemaValidationErrors,
+        schemaValidationResult.success,
+      ],
+    );
     const validationErrorIndex = useMemo(
       () =>
         buildEventFormErrorIndex(
@@ -666,6 +676,10 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       ],
     );
     const slotDivisionKeys = slotDivisionLookup.keys;
+    const resourceLabels = resolveEventResourceLabels({
+      sportIds: eventData.sportIds,
+      sportsById,
+    });
     const resourceController = useEventResourceController({
       activeEditingEvent,
       eventData,
@@ -685,6 +699,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       previousEventTypeRef,
       rentalPurchaseFieldId: rentalPurchase?.fieldId,
       resolvedOrganization,
+      resourceLabelSingular: resourceLabels.singular,
       setHydratedOrganization,
       setValue,
       slotDivisionKeys,
@@ -746,6 +761,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       parentEvent: eventData.parentEvent,
       rentalLockedSlotsForDraft,
       resolvedOrganizationId,
+      resourceLabels,
       simpleScheduleStyle:
         setupMode === "SIMPLE" ? simpleSetupChoices.scheduleStyle : undefined,
       fixedWindowFieldIds: simpleFixedWindowFieldIds,
@@ -959,7 +975,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       assignedActiveOfficialsForStaffing,
       commitDirtyBaseline,
       currentUser,
-      errors,
       eventData,
       eventValidationSchema,
       fieldCount,

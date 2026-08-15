@@ -54,8 +54,8 @@ export const TryoutDivisionSelector = ({
     const { sports } = useSports();
     const [divisions, setDivisions] = useState<Division[]>([]);
     const [divisionTypes, setDivisionTypes] = useState<OrganizationDivisionTypePayload>({});
-    const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [loadedOrganizationId, setLoadedOrganizationId] = useState<string | null>(null);
     const [createOpened, setCreateOpened] = useState(false);
 
     const selectedSourceDivisionIds = useMemo(
@@ -67,13 +67,9 @@ export const TryoutDivisionSelector = ({
 
     useEffect(() => {
         if (!organizationId) {
-            setDivisions([]);
-            setError(null);
-            return;
+            return undefined;
         }
         let active = true;
-        setLoading(true);
-        setError(null);
         Promise.all([
             organizationService.listOrganizationDivisions(organizationId, true),
             fetch('/api/division-types').then((response) => {
@@ -85,26 +81,33 @@ export const TryoutDivisionSelector = ({
                 if (!active) return;
                 setDivisions(rows);
                 setDivisionTypes(nextDivisionTypes);
+                setError(null);
+                setLoadedOrganizationId(organizationId);
             })
             .catch((loadError) => {
                 if (!active) return;
+                setDivisions([]);
+                setDivisionTypes({});
                 setError(loadError instanceof Error ? loadError.message : 'Unable to load club divisions.');
-            })
-            .finally(() => {
-                if (active) setLoading(false);
+                setLoadedOrganizationId(organizationId);
             });
         return () => { active = false; };
     }, [organizationId]);
+    const loadIsCurrent = loadedOrganizationId === organizationId;
+    const loading = Boolean(organizationId) && !loadIsCurrent;
+    const currentDivisions = loadIsCurrent ? divisions : [];
+    const currentDivisionTypes = loadIsCurrent ? divisionTypes : {};
+    const currentError = loadIsCurrent ? error : null;
 
     const activeDivisions = useMemo(
-        () => divisions.filter((division) => division.status === 'ACTIVE' || selectedSourceDivisionIds.includes(division.id)),
-        [divisions, selectedSourceDivisionIds],
+        () => currentDivisions.filter((division) => division.status === 'ACTIVE' || selectedSourceDivisionIds.includes(division.id)),
+        [currentDivisions, selectedSourceDivisionIds],
     );
     const selectedOrganizationDivisions = useMemo(
         () => selectedSourceDivisionIds
-            .map((id) => divisions.find((division) => division.id === id))
+            .map((id) => currentDivisions.find((division) => division.id === id))
             .filter((division): division is Division => Boolean(division)),
-        [divisions, selectedSourceDivisionIds],
+        [currentDivisions, selectedSourceDivisionIds],
     );
     const selectedDetailBySourceId = useMemo(
         () => new Map(selectedDivisions
@@ -121,10 +124,10 @@ export const TryoutDivisionSelector = ({
     const labelFor = (optionsToSearch: Array<{ id: string; name: string }> | undefined, value?: string) => (
         optionsToSearch?.find((option) => option.id === value)?.name ?? value ?? 'Not specified'
     );
-    const genderLabel = (value?: string) => labelFor(divisionTypes.genders, value);
-    const ageLabel = (value?: string) => labelFor(divisionTypes.ages, value);
+    const genderLabel = (value?: string) => labelFor(currentDivisionTypes.genders, value);
+    const ageLabel = (value?: string) => labelFor(currentDivisionTypes.ages, value);
     const skillLabel = (division: Division) => labelFor(
-        divisionTypes.sportSkills?.find((entry) => entry.sportId === division.sportId)?.skills,
+        currentDivisionTypes.sportSkills?.find((entry) => entry.sportId === division.sportId)?.skills,
         division.skillDivisionTypeId,
     );
     const sportLabel = (sportId?: string) => (
@@ -171,8 +174,8 @@ export const TryoutDivisionSelector = ({
                     onChange(selected);
                 }}
             />
-            {error ? <Alert color="red">{error}</Alert> : null}
-            {!loading && !error && activeDivisions.length === 0 ? (
+            {currentError ? <Alert color="red">{currentError}</Alert> : null}
+            {!loading && !currentError && activeDivisions.length === 0 ? (
                 <Alert color="yellow">
                     <Stack gap="xs">
                         <Text size="sm">

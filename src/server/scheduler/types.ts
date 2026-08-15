@@ -282,11 +282,12 @@ export class TimeSlot {
     this.id = params.id;
     this.dayOfWeek = normalizedDays[0] ?? params.dayOfWeek;
     this.daysOfWeek = normalizedDays.length ? normalizedDays : [this.dayOfWeek];
-    this.startDate = params.startDate;
-    this.endDate = params.endDate ?? null;
     this.repeating = params.repeating;
+    this.timeZone = normalizeTimeZone(params.timeZone, 'UTC');
     this.startTimeMinutes = params.startTimeMinutes;
     this.endTimeMinutes = params.endTimeMinutes;
+    this.startDate = params.startDate;
+    this.endDate = params.endDate ?? null;
     this.price = params.price ?? null;
     this.sourceType = params.sourceType ?? null;
     this.rentalBookingId = params.rentalBookingId ?? null;
@@ -295,7 +296,6 @@ export class TimeSlot {
     this.fieldIds = normalizedFieldIds;
     this.field = params.field ?? normalizedFieldIds[0] ?? null;
     this.divisions = params.divisions ?? [];
-    this.timeZone = normalizeTimeZone(params.timeZone, 'UTC');
   }
 
   asDateRange(reference: Date): [Date, Date] {

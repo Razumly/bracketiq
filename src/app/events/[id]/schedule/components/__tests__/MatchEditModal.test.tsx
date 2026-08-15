@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 
-import type { Event, Match, ResolvedMatchRules, Team, UserData } from '@/types';
+import type { Event, Field, Match, ResolvedMatchRules, Sport, Team, UserData } from '@/types';
 
 import { renderWithMantine } from '../../../../../../../test/utils/renderWithMantine';
 
@@ -622,5 +622,47 @@ describe('MatchEditModal', () => {
         ],
       }),
     );
+  });
+
+  it('uses the selected Resource Sport label in a multi-Sport match editor', async () => {
+    const soccerField = {
+      $id: 'resource_soccer',
+      fieldNumber: 2,
+      name: '',
+      sportIds: ['soccer'],
+    } as Field;
+    renderModal({
+      targetEvent: {
+        ...event,
+        sportIds: ['volleyball', 'soccer'],
+      } as Event,
+      targetMatch: {
+        ...match,
+        fieldId: soccerField.$id,
+      } as Match,
+      fields: [soccerField],
+      sports: [
+        {
+          $id: 'volleyball',
+          name: 'Volleyball',
+          resourceLabelSingular: 'Court',
+          resourceLabelPlural: 'Courts',
+        },
+        {
+          $id: 'soccer',
+          name: 'Soccer',
+          resourceLabelSingular: 'Field',
+          resourceLabelPlural: 'Fields',
+        },
+      ] as Sport[],
+    });
+
+    await waitFor(() => {
+      const input = screen.getAllByLabelText('Field')
+        .find((element) => element.tagName === 'INPUT');
+      expect(input).toBeDefined();
+      expect(input).toHaveValue('resource_soccer');
+    });
+    expect(screen.queryByLabelText('Court')).not.toBeInTheDocument();
   });
 });

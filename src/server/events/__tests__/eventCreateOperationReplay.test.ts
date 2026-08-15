@@ -45,11 +45,20 @@ const draft = legacyEventToEditorDraft(eventEditorFixtures[0].event);
 const command = {
   contractVersion: 3 as const,
   createOperationId: 'create-operation-1',
+  expectedRevisions: {
+    editorRevision: 'new',
+    staffRevision: null,
+    scheduleRevision: 'new',
+  },
   draft,
   completion: { mode: 'CREATE_ONLY' as const },
 };
 const result = {
   status: 'SAVED' as const,
+  createOperationId: 'create-operation-1',
+  editorRevision: 'revision-1',
+  staffRevision: 'staff-revision-1',
+  scheduleRevision: 'schedule-revision-1',
   snapshot: {
     contractVersion: 3 as const,
     draft,
@@ -61,6 +70,12 @@ const result = {
       canUseOnlinePayments: true,
       canManageStaff: true,
       canEdit: true,
+      canDelegateHost: true,
+      readOnly: false,
+      readOnlyReason: null,
+      managementAuthority: null,
+      eventHostId: 'host-1',
+      viewerIsEventHost: true,
       supportsTeamStaffing: true,
     },
     catalogs: { sports: [], organizations: [], fields: [], templates: [] },
@@ -138,7 +153,7 @@ describe('event editor create operation replay', () => {
     await completeEventEditorCreateOperation({
       client,
       createOperationId: command.createOperationId,
-      result: storedResult as any,
+      result: storedResult,
       emailDelivery: 'QUEUED',
     });
     const replay = await claimEventEditorCreateOperation({
@@ -167,7 +182,7 @@ describe('event editor create operation replay', () => {
       await completeEventEditorCreateOperation({
         client,
         createOperationId: command.createOperationId,
-        result: storedResult as any,
+        result: storedResult,
         emailDelivery: 'PROCESSING',
       });
 
@@ -197,7 +212,7 @@ describe('event editor create operation replay', () => {
       await completeEventEditorCreateOperation({
         client,
         createOperationId: command.createOperationId,
-        result: { ...storedResult, staffEmailDelivery: 'QUEUED' } as any,
+        result: { ...storedResult, staffEmailDelivery: 'QUEUED' },
         emailDelivery: 'QUEUED',
       });
       await jest.advanceTimersByTimeAsync(10);
@@ -256,7 +271,7 @@ describe('event editor create operation replay', () => {
     await completeEventEditorCreateOperation({
       client,
       createOperationId: command.createOperationId,
-      result: finalResult as any,
+      result: finalResult,
       emailDelivery: 'NOT_REQUESTED',
     });
     const replay = await waitForEventEditorCreateOperation({

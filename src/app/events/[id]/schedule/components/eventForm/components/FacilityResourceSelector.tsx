@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Badge, Collapse, Text } from '@mantine/core';
 import { ChevronDown } from 'lucide-react';
 
@@ -12,6 +12,7 @@ export type FacilityResourceSelectorProps = {
     label: string;
     description: string;
     placeholder: string;
+    resourceSingular: string;
     fields: Field[];
     value: string[];
     onChange: (values: string[]) => void;
@@ -25,6 +26,7 @@ export const FacilityResourceSelector: React.FC<FacilityResourceSelectorProps> =
     label,
     description,
     placeholder,
+    resourceSingular,
     fields,
     value,
     onChange,
@@ -37,7 +39,7 @@ export const FacilityResourceSelector: React.FC<FacilityResourceSelectorProps> =
         () => buildFacilityResourceGroups(fields, eventOrganizationId),
         [eventOrganizationId, fields],
     );
-    const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+    const [groupExpansionOverrides, setGroupExpansionOverrides] = useState<Record<string, boolean>>({});
     const selectedValues = useMemo(
         () => Array.from(new Set(value.map((fieldId) => String(fieldId).trim()).filter(Boolean))),
         [value],
@@ -45,15 +47,6 @@ export const FacilityResourceSelector: React.FC<FacilityResourceSelectorProps> =
     const selectedSet = useMemo(() => new Set(selectedValues), [selectedValues]);
     const showFacilityRows = groups.length > 1 || groups.some((group) => group.isRental);
 
-    useEffect(() => {
-        setExpandedGroups((previous) => {
-            const next: Record<string, boolean> = {};
-            groups.forEach((group) => {
-                next[group.key] = previous[group.key] ?? (group.isRental || groups.length === 1);
-            });
-            return next;
-        });
-    }, [groups]);
 
     const toggleResource = useCallback((resourceId: string) => {
         if (disabled) {
@@ -66,7 +59,7 @@ export const FacilityResourceSelector: React.FC<FacilityResourceSelectorProps> =
     }, [disabled, onChange, selectedSet, selectedValues]);
 
     const renderResourceRow = (resource: Field & { $id: string }) => {
-        const resourceLabel = getFieldDisplayName(resource, 'Resource');
+        const resourceLabel = getFieldDisplayName(resource, resourceSingular);
         const selected = selectedSet.has(resource.$id);
         return (
             <label
@@ -120,7 +113,7 @@ export const FacilityResourceSelector: React.FC<FacilityResourceSelectorProps> =
                 ) : showFacilityRows ? (
                     <div>
                         {groups.map((group) => {
-                            const expanded = expandedGroups[group.key] ?? group.isRental;
+                            const expanded = groupExpansionOverrides[group.key] ?? (group.isRental || groups.length === 1);
                             const selectedCount = group.resources.filter((resource) => selectedSet.has(resource.$id)).length;
                             const panelId = `facility-resource-group-${group.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
                             return (
@@ -131,7 +124,7 @@ export const FacilityResourceSelector: React.FC<FacilityResourceSelectorProps> =
                                         aria-expanded={expanded}
                                         aria-controls={panelId}
                                         onClick={() => {
-                                            setExpandedGroups((previous) => ({
+                                            setGroupExpansionOverrides((previous) => ({
                                                 ...previous,
                                                 [group.key]: !expanded,
                                             }));

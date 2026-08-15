@@ -319,7 +319,7 @@ const toWidgetEventSelection = (event: Event): WidgetEventSelection | null => {
   };
 };
 
-type WidgetEventSearchPickerProps = {
+export type WidgetEventSearchPickerProps = {
   label: string;
   description: string;
   organizationId?: string;
@@ -328,7 +328,7 @@ type WidgetEventSearchPickerProps = {
   onChange: (events: WidgetEventSelection[]) => void;
 };
 
-function WidgetEventSearchPicker({
+export function WidgetEventSearchPicker({
   label,
   description,
   organizationId,
@@ -337,6 +337,7 @@ function WidgetEventSearchPicker({
   onChange,
 }: WidgetEventSearchPickerProps) {
   const [query, setQuery] = useState('');
+  const [resolvedSearchKey, setResolvedSearchKey] = useState('');
   const [results, setResults] = useState<WidgetEventSelection[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -344,17 +345,25 @@ function WidgetEventSearchPicker({
   const normalizedQuery = query.trim();
   const selectedIds = useMemo(() => new Set(selectedEvents.map((event) => event.id)), [selectedEvents]);
   const eventTypesKey = eventTypes.join(',');
+  const searchKey = organizationId && normalizedQuery
+    ? `${organizationId}:${eventTypesKey}:${normalizedQuery}`
+    : '';
+  const searchStateIsCurrent = Boolean(searchKey) && resolvedSearchKey === searchKey;
+  const visibleResults = searchStateIsCurrent
+    ? results.filter((event) => !selectedIds.has(event.id))
+    : [];
+  const visibleLoading = Boolean(searchKey) && (!searchStateIsCurrent || loading);
+  const visibleError = searchStateIsCurrent ? error : null;
 
   useEffect(() => {
-    if (!organizationId || !normalizedQuery) {
-      setResults([]);
-      setLoading(false);
-      setError(null);
+    if (!searchKey) {
       return undefined;
     }
 
     let cancelled = false;
     const timeoutId = window.setTimeout(() => {
+      setResolvedSearchKey(searchKey);
+      setResults([]);
       setLoading(true);
       setError(null);
       eventService
@@ -375,8 +384,7 @@ function WidgetEventSearchPicker({
           setResults(
             events
               .map((event) => toWidgetEventSelection(event))
-              .filter((event): event is WidgetEventSelection => Boolean(event))
-              .filter((event) => !selectedIds.has(event.id)),
+              .filter((event): event is WidgetEventSelection => Boolean(event)),
           );
         })
         .catch((searchError) => {
@@ -397,7 +405,7 @@ function WidgetEventSearchPicker({
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [eventTypes, eventTypesKey, normalizedQuery, organizationId, selectedIds]);
+  }, [eventTypes, normalizedQuery, organizationId, searchKey]);
 
   const addEvent = (event: WidgetEventSelection) => {
     if (selectedIds.has(event.id)) {
@@ -405,8 +413,6 @@ function WidgetEventSearchPicker({
     }
     onChange([...selectedEvents, event]);
     setQuery('');
-    setResults([]);
-    setError(null);
   };
 
   const removeEvent = (eventId: string) => {
@@ -455,12 +461,12 @@ function WidgetEventSearchPicker({
       {normalizedQuery ? (
         <Paper withBorder p="xs" radius="md" className="org-tab-item">
           <Stack gap="xs">
-            {loading ? <Loader size="sm" /> : null}
-            {!loading && error ? <Text size="xs" c="red">{error}</Text> : null}
-            {!loading && !error && !results.length ? (
+            {visibleLoading ? <Loader size="sm" /> : null}
+            {!visibleLoading && visibleError ? <Text size="xs" c="red">{visibleError}</Text> : null}
+            {!visibleLoading && !visibleError && !visibleResults.length ? (
               <Text size="xs" c="dimmed">No matching events found.</Text>
             ) : null}
-            {!loading && !error ? results.map((event) => (
+            {!visibleLoading && !visibleError ? visibleResults.map((event) => (
               <Paper key={event.id} withBorder p="xs" radius="md" className="org-tab-nested-item">
                 <Group justify="space-between" align="center" wrap="nowrap">
                   <div>
