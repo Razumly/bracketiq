@@ -736,6 +736,7 @@ describe('EventForm dirty state', () => {
 
     expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
     const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
+    expect(screen.getByLabelText('Required documents')).not.toBeChecked();
     fireEvent.click(within(progress).getByRole('button', { name: 'Basics: Available' }));
     const nameInput = await screen.findByPlaceholderText('Enter event name');
     fireEvent.change(nameInput, { target: { value: 'Directly edited event' } });
@@ -759,8 +760,38 @@ describe('EventForm dirty state', () => {
       'aria-current',
       'step',
     );
+
+    fireEvent.click(within(progress).getByRole('button', { name: 'Options: Available' }));
+    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Required documents')).not.toBeChecked();
+    expect(within(progress).getByRole('button', { name: 'Basics: Available' })).toBeEnabled();
   });
 
+  it('preserves the draft through rendered Simple Setup Back navigation', async () => {
+    renderForm(jest.fn(), undefined, {}, null, {
+      initialSetupMode: 'SIMPLE',
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByRole('heading', { name: 'Basics' })).toBeInTheDocument();
+
+    const nameInput = screen.getByPlaceholderText('Enter event name');
+    fireEvent.change(nameInput, { target: { value: 'Back navigation draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByRole('heading', { name: 'Divisions' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(await screen.findByRole('heading', { name: 'Basics' })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Enter event name')).toHaveValue('Back navigation draft');
+
+    const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
+    expect(within(progress).getByRole('button', { name: 'Basics: Current' })).toHaveAttribute(
+      'aria-current',
+      'step',
+    );
+    expect(within(progress).getByRole('button', { name: 'Divisions: Available' })).toBeEnabled();
+  });
   it('preserves the draft when switching from Advanced to Simple Setup', async () => {
     renderForm(jest.fn(), undefined, {}, null, {
       initialSetupMode: 'ADVANCED',
