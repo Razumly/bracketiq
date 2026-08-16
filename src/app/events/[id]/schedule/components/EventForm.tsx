@@ -46,7 +46,10 @@ import {
   normalizeEventOfficials,
   normalizeSportOfficialPositionTemplates,
 } from "./eventForm/officials";
-import { buildEventFormSchema } from "./eventForm/schema";
+import {
+  buildEventFormSchema,
+  buildRegistrationQuestionValidationIssues,
+} from "./eventForm/schema";
 import type { EventFormValues } from "./eventForm/formTypes";
 import {
   buildSportOptions,
@@ -419,6 +422,9 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
     });
 
     const eventData = formValues;
+    const isAffiliateEvent = Boolean(
+      eventData.isAffiliateEvent || hasAffiliateUrl(eventData.affiliateUrl),
+    );
     const defaultSetupMode =
       initialSetupMode ?? (isCreateMode ? "SIMPLE" : "ADVANCED");
     const [setupMode, setSetupMode] =
@@ -441,13 +447,32 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       () => eventValidationSchema.safeParse(formValues),
       [eventValidationSchema, formValues],
     );
+    const registrationQuestionValidationErrors = useMemo(
+      () =>
+        isAffiliateEvent
+          ? []
+          : flattenZodIssues(
+              buildRegistrationQuestionValidationIssues(
+                registrationQuestionDrafts,
+              ),
+            ),
+      [isAffiliateEvent, registrationQuestionDrafts],
+    );
     const reviewSchemaValidationErrors = useMemo(
       () =>
-        currentSimplePageId === "review-publish" &&
-        !schemaValidationResult.success
-          ? flattenZodIssues(schemaValidationResult.error.issues)
+        currentSimplePageId === "review-publish"
+          ? dedupeValidationErrors([
+              ...(schemaValidationResult.success
+                ? []
+                : flattenZodIssues(schemaValidationResult.error.issues)),
+              ...registrationQuestionValidationErrors,
+            ])
           : [],
-      [currentSimplePageId, schemaValidationResult],
+      [
+        currentSimplePageId,
+        registrationQuestionValidationErrors,
+        schemaValidationResult,
+      ],
     );
     const liveFormValidationErrors = useMemo(
       () => dedupeValidationErrors(flattenFormErrors(errors)),
@@ -484,27 +509,37 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
     );
     const displayedFormValidationErrors = useMemo(
       () =>
-        schemaValidationResult.success
-          ? []
-          : currentSimplePageId === "review-publish"
-            ? reviewSchemaValidationErrors
-            : reportedFormValidationErrors,
+        currentSimplePageId === "review-publish"
+          ? reviewSchemaValidationErrors
+          : reportedFormValidationErrors,
       [
         currentSimplePageId,
         reportedFormValidationErrors,
         reviewSchemaValidationErrors,
-        schemaValidationResult.success,
       ],
     );
+    const validationErrorsForDisplay = useMemo(() => {
+      const errorsForDisplay = dedupeValidationErrors([
+        ...displayedFormValidationErrors,
+        ...externalValidationErrors,
+      ]);
+      if (setupMode !== "SIMPLE" || currentSimplePageId === "review-publish") {
+        return errorsForDisplay;
+      }
+      return (
+        buildEventFormErrorIndex(errorsForDisplay).bySimplePage[
+          currentSimplePageId
+        ] ?? []
+      );
+    }, [
+      currentSimplePageId,
+      displayedFormValidationErrors,
+      externalValidationErrors,
+      setupMode,
+    ]);
     const validationErrorIndex = useMemo(
-      () =>
-        buildEventFormErrorIndex(
-          dedupeValidationErrors([
-            ...displayedFormValidationErrors,
-            ...externalValidationErrors,
-          ]),
-        ),
-      [displayedFormValidationErrors, externalValidationErrors],
+      () => buildEventFormErrorIndex(validationErrorsForDisplay),
+      [validationErrorsForDisplay],
     );
     const sectionErrorCounts = useMemo(
       () =>
@@ -615,9 +650,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
     const lockedEventTypeTagSlugs = useMemo(
       () => getLockedEventTypeTagSlugs(eventData.eventType),
       [eventData.eventType],
-    );
-    const isAffiliateEvent = Boolean(
-      eventData.isAffiliateEvent || hasAffiliateUrl(eventData.affiliateUrl),
     );
     const hasUnsetTeamCapacityLimits =
       eventData.teamSizeLimit == null ||
@@ -970,46 +1002,47 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
 
     const leagueError = buildLeagueScheduleError(errors.leagueSlots);
 
-    const { buildDraftEvent } = useEventFormSubmissionController({
-      activeEditingEvent,
-      assignedActiveOfficialsForStaffing,
-      commitDirtyBaseline,
-      currentUser,
-      eventData,
-      eventValidationSchema,
-      fieldCount,
-      fields,
-      fieldsReferencedInSlots,
-      formRef: ref,
-      getValues,
-      hasImmutableTimeSlots,
-      hasRestrictedImmutableFields,
-      hasStripeAccount,
-      immutableFields,
-      immutableTimeSlots,
-      isAffiliateEvent,
-      isEditMode,
-      isOrganizationHostedEvent,
-      isOrganizationManagedEvent,
-      joinAsParticipant,
-      officialStaffingCoverageError,
-      organizationHostedEventId,
-      organizationOfficialsById,
-      previousEventFieldLocationRef,
-      registrationQuestionDrafts,
-      rentalLockedSlotsForDraft,
-      rentalPurchase,
-      requiredOfficialSlotsPerMatch,
-      resolvedOrganization,
-      selectedRentedFieldIds,
-      setEventData,
-      shouldManageLocalFields,
-      shouldProvisionFields,
-      sportsById,
-      trigger,
-      validatePendingStaffAssignments,
-      onValidationResult: reportValidationResult,
-    });
+    const { buildDraftEvent, setLastValidationErrors } =
+      useEventFormSubmissionController({
+        activeEditingEvent,
+        assignedActiveOfficialsForStaffing,
+        commitDirtyBaseline,
+        currentUser,
+        eventData,
+        eventValidationSchema,
+        fieldCount,
+        fields,
+        fieldsReferencedInSlots,
+        formRef: ref,
+        getValues,
+        hasImmutableTimeSlots,
+        hasRestrictedImmutableFields,
+        hasStripeAccount,
+        immutableFields,
+        immutableTimeSlots,
+        isAffiliateEvent,
+        isEditMode,
+        isOrganizationHostedEvent,
+        isOrganizationManagedEvent,
+        joinAsParticipant,
+        officialStaffingCoverageError,
+        organizationHostedEventId,
+        organizationOfficialsById,
+        previousEventFieldLocationRef,
+        registrationQuestionDrafts,
+        rentalLockedSlotsForDraft,
+        rentalPurchase,
+        requiredOfficialSlotsPerMatch,
+        resolvedOrganization,
+        selectedRentedFieldIds,
+        setEventData,
+        shouldManageLocalFields,
+        shouldProvisionFields,
+        sportsById,
+        trigger,
+        validatePendingStaffAssignments,
+        onValidationResult: reportValidationResult,
+      });
     useEventFormLifecycleStabilization({
       buildDraftEvent,
       fieldsLoading,
@@ -1499,39 +1532,44 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
     const validateSimpleSetupPage = useCallback(
       async (pageId: EventSetupPageId): Promise<boolean> => {
         if (pageId === "review-publish") {
-          const valid = await trigger();
-          if (!valid) {
+          const isFormValid = await trigger();
+          const isPageValid =
+            isFormValid && registrationQuestionValidationErrors.length === 0;
+          if (!isPageValid) {
             const schemaResult = eventValidationSchema.safeParse(getValues());
-            reportValidationResult(
-              dedupeValidationErrors([
-                ...(schemaResult.success
-                  ? []
-                  : flattenZodIssues(schemaResult.error.issues)),
-                ...flattenFormErrors(errors),
-              ]),
-              "FORM",
-            );
+            const validationErrors = dedupeValidationErrors([
+              ...(schemaResult.success
+                ? []
+                : flattenZodIssues(schemaResult.error.issues)),
+              ...flattenFormErrors(errors),
+              ...registrationQuestionValidationErrors,
+            ]);
+            setLastValidationErrors(validationErrors);
+            reportValidationResult(validationErrors, "FORM");
           } else {
+            setLastValidationErrors([]);
             reportValidationResult([], "CLEAR");
           }
-          return valid;
+          return isPageValid;
         }
 
-        const previousPageErrorPaths = buildEventFormErrorIndex(
-          flattenFormErrors(errors),
-        ).bySimplePage[pageId]?.map((error) => error.path) ?? [];
+        const previousPageErrorPaths =
+          buildEventFormErrorIndex(flattenFormErrors(errors)).bySimplePage[
+            pageId
+          ]?.map((error) => error.path) ?? [];
         if (previousPageErrorPaths.length > 0) {
-          clearErrors(
-            previousPageErrorPaths as FieldPath<EventFormValues>[],
-          );
+          clearErrors(previousPageErrorPaths as FieldPath<EventFormValues>[]);
         }
 
         const schemaResult = eventValidationSchema.safeParse(getValues());
-        const pageErrors = schemaResult.success
-          ? []
-          : buildEventFormErrorIndex(
-              flattenZodIssues(schemaResult.error.issues),
-            ).bySimplePage[pageId] ?? [];
+        const validationErrors = dedupeValidationErrors([
+          ...(schemaResult.success
+            ? []
+            : flattenZodIssues(schemaResult.error.issues)),
+          ...registrationQuestionValidationErrors,
+        ]);
+        const pageErrors =
+          buildEventFormErrorIndex(validationErrors).bySimplePage[pageId] ?? [];
 
         pageErrors.forEach((error) => {
           setError(error.path as FieldPath<EventFormValues>, {
@@ -1539,6 +1577,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
             message: error.message,
           });
         });
+        setLastValidationErrors(pageErrors);
         reportValidationResult(
           pageErrors,
           pageErrors.length > 0 ? "FORM" : "CLEAR",
@@ -1550,6 +1589,8 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
         errors,
         eventValidationSchema,
         getValues,
+        registrationQuestionValidationErrors,
+        setLastValidationErrors,
         reportValidationResult,
         setError,
         trigger,

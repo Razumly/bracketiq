@@ -262,6 +262,52 @@ describe('useEventFormSubmissionController', () => {
         expect(valid).toBe(true);
         expect(formRef.current?.getValidationErrors()).toEqual([]);
     });
+    it('blocks invalid registration question drafts during submission validation', async () => {
+        const formRef = createRef<EventFormHandle>();
+        renderHook(() => useSubmissionHarness({
+            formRef,
+            registrationQuestionDrafts: [{
+                ...VALID_QUESTION,
+                answerType: 'CHECKBOX',
+            } as RegistrationQuestionDraft],
+        }));
+
+        await expect(formRef.current!.validate()).resolves.toBe(false);
+        expect(formRef.current?.getValidationErrors()).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    path: expect.stringMatching(/^registrationQuestions\.0/),
+                }),
+            ]),
+        );
+    });
+    it('preserves source indexes when blank question drafts precede invalid questions', async () => {
+        const formRef = createRef<EventFormHandle>();
+        renderHook(() => useSubmissionHarness({
+            formRef,
+            registrationQuestionDrafts: [{
+                clientId: 'blank_question',
+                prompt: '',
+                answerType: 'TEXT',
+                required: false,
+                sortOrder: 0,
+            }, {
+                ...VALID_QUESTION,
+                answerType: 'CHECKBOX',
+                sortOrder: 1,
+            } as RegistrationQuestionDraft],
+        }));
+
+        await expect(formRef.current!.validate()).resolves.toBe(false);
+        expect(formRef.current?.getValidationErrors()).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    path: expect.stringMatching(/^registrationQuestions\.1/),
+                }),
+            ]),
+        );
+    });
+
 
     it('blocks insufficient official staffing and clears the report after a valid rerender', async () => {
         const warningSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);

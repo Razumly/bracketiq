@@ -130,6 +130,86 @@ _Avoid_: Affiliate Event Type
 An Event with an externally completed, tracked registration journey. Affiliate Event is a commercial context independent of Event Type.
 _Avoid_: Affiliate Event Type
 
+**Discovery Coverage**:
+Evidence that a Coverage Cell has at least one qualified direct source and has completed the required independent search strategies without unresolved discovery or capture work. It does not mean the source is mapped, approved, or published.
+_Avoid_: Coverage, supply coverage, queue drained
+
+**Coverage Cell**:
+One city, one Sport, and one applicable source profile used to measure Discovery Coverage and Search Saturation.
+_Avoid_: Market, Supply Target
+
+**Supply Target**:
+The versioned minimum of Fresh Published Supply required for one market, one Sport, and one applicable source profile.
+_Avoid_: Coverage Cell, queue target
+
+**Market Tier**:
+A versioned Large, Medium, or Small classification based on the summed populations of the checked-in cities grouped into a market. It determines Supply Target minimums independently of rollout cohort.
+_Avoid_: Rollout cohort, city population band
+
+**Coverage Applicability**:
+The versioned decision that a Sport and source profile form Coverage Cells and a Supply Target. A new Sport is excluded until its profile applicability is explicitly reviewed.
+_Avoid_: Sports catalog, every Sport
+
+**Supply Contract**:
+An immutable, versioned combination of Coverage Applicability, Search Strategy, Supply Targets and Market Tiers, freshness rules, and mapping and lifecycle evidence rules. Historical assessments retain the Supply Contract under which they were made.
+_Avoid_: Configuration blob, current rules
+
+**Marginal Yield**:
+The newly qualified direct sources added to a Coverage Cell by a successful search cycle, excluding known, duplicate, intermediary, rejected, and excluded results.
+_Avoid_: Raw results, returned links
+
+**Supply Source**:
+One evidence-backed official public source path that owns one mapping and automation lifecycle and may produce many public targets. Its intake identity is the durable lifecycle root. A directory intake produces child Supply Sources but is not itself Mapped, Approved, Activated, or Published Supply.
+_Avoid_: Domain, Organization, directory intake
+
+**Mapped Supply**:
+A Supply Source with a reproducible, evidence-backed extraction package that produces valid candidate Events, Facilities, or Organizations and is ready for independent review.
+_Avoid_: Completed source, approved source
+
+**Approved Supply**:
+Mapped Supply that passed independent review and exists in a reversible quarantine: live but not public and not authorized for recurring imports.
+_Avoid_: Published Supply, active source
+
+**Activated Supply**:
+Approved Supply with a validated mapping and automatic imports enabled but no current Fresh Published Supply. Natural expiry of its last public target does not disable automation; drift or an automation hold returns it to Approved Supply.
+_Avoid_: Published Supply, inactive source
+
+**Published Supply**:
+Activated Supply with at least one valid public Event, Facility, or Organization, the appropriate source or candidate Organization listed, and ongoing refresh enabled against its reviewed baseline.
+_Avoid_: Approved Supply, Activated Supply, enabled source
+
+**Fresh Published Supply**:
+Published Supply whose latest successful automatic refresh is within its source-class freshness window and whose public target remains current. Approved Supply, Source Excluded, and unresolved automation holds do not qualify even when their targets remain visible.
+_Avoid_: Visible listing, last-known-good content
+
+**Last-Known-Good Supply**:
+A public target retained after its source loses Fresh Published Supply qualification. It remains visible but does not count toward Target Met and stays until natural expiry or Published Target Rejected.
+_Avoid_: Fresh Published Supply, stale listing
+
+**Target Met**:
+A versioned product outcome in which every applicable market, Sport, and source profile meets its minimum of Fresh Published Supply. Search Saturation and queue exhaustion do not satisfy it.
+_Avoid_: Queue drained, coverage complete, search complete
+
+**Search Saturation**:
+A Coverage Cell state reached after two materially different completed assessment cycles across every required current strategy family produce zero Marginal Yield, with no unresolved promotable leads or active capture failures. It does not imply Target Met.
+_Avoid_: Covered, complete, queue drained
+
+**Public Source Capture Standard**:
+The rule that BracketIQ may capture a public, unauthenticated source path unless applicable robots or source-policy evidence explicitly prohibits it. Authentication, CAPTCHA, or access-control bypass is never permitted.
+_Avoid_: Default allow, scrape anything public
+
+**Source Excluded**:
+A source barred from further capture, mapping, and automatic import by durable policy, access, identity, or scope evidence, including a changed robots rule. Existing public targets remain unless separately rejected and do not count toward Target Met.
+_Avoid_: Human Review Required, failed capture
+
+**Published Target Rejected**:
+A decision that immediately hides one identified public Event, Facility, or Organization because evidence proves it wrong, unsafe, prohibited, or explicitly withdrawn. It never cascades to sibling targets unless they are identified separately.
+_Avoid_: Source Excluded, Event expiry
+
+**Human Review Required**:
+A source outcome reserved for conflicting identity, contradictory policy evidence, or a proposed replacement domain that automation cannot decide safely.
+_Avoid_: Source Excluded, retry later
+
 **Resource**:
 A schedulable playing area on which a Match or Occurrence takes place. Product interfaces use the Sport's Resource Label instead of hard-coding Field or Court.
 _Avoid_: Field, Court

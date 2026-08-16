@@ -686,6 +686,30 @@ describe('EventForm dirty state', () => {
     fireEvent.click(within(progress).getByRole('button', { name: 'Review & Publish: Available' }));
     expect(await screen.findByRole('heading', { name: 'Review & Publish' })).toBeInTheDocument();
   });
+  it('does not surface a future-page error on a valid current page', async () => {
+    const formRef = React.createRef<EventFormHandle>();
+    renderForm(jest.fn(), formRef, {
+      divisions: [],
+      divisionDetails: [],
+    }, null, {
+      initialSetupMode: 'SIMPLE',
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+    await waitFor(() => expect(formRef.current).not.toBeNull());
+
+    await act(async () => {
+      await expect(formRef.current?.validate()).resolves.toBe(false);
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Divisions' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Basics: Available' }));
+    expect(await screen.findByRole('heading', { name: 'Basics' })).toBeInTheDocument();
+    expect(screen.queryByText('Select at least one division')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByRole('heading', { name: 'Divisions' })).toBeInTheDocument();
+  });
 
   it('keeps a normal event on Basics until its required image is added', async () => {
     renderForm(jest.fn(), undefined, { imageId: '' }, null, {
@@ -825,6 +849,72 @@ describe('EventForm dirty state', () => {
 
     expect(within(progress).getByRole('button', { name: 'Staff & Operations: Current' })).toBeInTheDocument();
   });
+  it('allows an empty registration question placeholder to advance', async () => {
+    renderForm(jest.fn(), undefined, {
+      registrationQuestions: [{
+        id: 'question_1',
+        prompt: 'What is your team color?',
+        answerType: 'TEXT',
+        required: false,
+        sortOrder: 0,
+      }],
+    }, null, {
+      initialSetupMode: 'SIMPLE',
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+    const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
+    fireEvent.click(within(progress).getByRole('button', { name: 'Documents & Questions: Available' }));
+    expect(await screen.findByRole('heading', { name: 'Documents & Questions' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Question 1'), { target: { value: '' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    });
+
+    expect(within(progress).getByRole('button', { name: 'Staff & Operations: Current' })).toBeInTheDocument();
+  });
+  it('blocks Documents and Questions when a question draft violates the editor contract', async () => {
+    const formRef = React.createRef<EventFormHandle>();
+    renderForm(jest.fn(), formRef, {
+      registrationQuestions: [{
+        id: 'question_1',
+        prompt: 'What is your team color?',
+        answerType: 'TEXT',
+        required: true,
+        sortOrder: -1,
+      }],
+    }, null, {
+      initialSetupMode: 'SIMPLE',
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+    const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
+    await waitFor(() => {
+      expect(within(progress).getByRole('button', {
+        name: 'Documents & Questions: Available',
+      })).toBeEnabled();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', {
+        name: 'Documents & Questions: Available',
+      }));
+    });
+    expect(await screen.findByRole('heading', { name: 'Documents & Questions' })).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    });
+
+    expect(screen.getByRole('heading', { name: 'Documents & Questions' })).toBeInTheDocument();
+    await waitFor(() => expect(formRef.current?.getValidationErrors()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: expect.stringMatching(/^registrationQuestions\.0/),
+        }),
+      ]),
+    ));
+  });
+
 
   it('allows rental creation to advance from Basics without an event image', async () => {
     renderForm(jest.fn(), undefined, { imageId: '', divisions: [], divisionDetails: [] }, null, {

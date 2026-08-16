@@ -11,8 +11,11 @@ import {
     GENERIC_RESOURCE_LABELS,
     getSportResourceLabels,
 } from '@/lib/sportResourceLabels';
-import type { Field } from '@/types';
-
+import type { Field, RegistrationQuestionDraft } from '@/types';
+import {
+    registrationQuestionInputSchema,
+    type RegistrationQuestionInput,
+} from '@/contracts/eventEditor';
 import { requiresOrganizationEventFieldSelection } from '../eventFieldSelection';
 import {
     buildSlotDivisionLookup,
@@ -27,6 +30,37 @@ import { isEventLocalField } from './resourceGroups';
 import { stringSetsEqual } from './shared';
 import { normalizeSlotFieldIds, normalizeWeekdays } from './slotForm';
 import { computeOneTimeSlotBoundsError, computeSlotError } from './slotValidation';
+
+const normalizeRegistrationQuestionDraft = (
+    question: RegistrationQuestionDraft,
+    index: number,
+): RegistrationQuestionInput => {
+    const id = typeof question.id === 'string' ? question.id.trim() : '';
+    const clientId = typeof question.clientId === 'string' ? question.clientId.trim() : '';
+    return {
+        ...(id ? { id } : { clientId: clientId || `question-client-${index + 1}` }),
+        prompt: question.prompt,
+        answerType: question.answerType ?? 'TEXT',
+        required: Boolean(question.required),
+        sortOrder: Number.isFinite(Number(question.sortOrder))
+            ? Number(question.sortOrder)
+            : index,
+    };
+};
+
+export const buildRegistrationQuestionValidationIssues = (
+    questions: RegistrationQuestionDraft[],
+): z.ZodIssue[] => questions.flatMap((question, index) => {
+    if (String(question.prompt ?? '').trim().length === 0) return [];
+    const result = registrationQuestionInputSchema.safeParse(
+        normalizeRegistrationQuestionDraft(question, index),
+    );
+    if (result.success) return [];
+    return result.error.issues.map((issue) => ({
+        ...issue,
+        path: ['registrationQuestions', index, ...issue.path],
+    }));
+});
 
 const leagueSlotSchema: z.ZodType<LeagueSlotForm> = z.object({
     key: z.string(),
