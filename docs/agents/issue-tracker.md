@@ -13,6 +13,12 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone.
 
+## Issue completion
+
+- **Close an issue** when its scoped work or answer is resolved and its acceptance criteria are satisfied.
+- **Delivery gate**: require push, merge, or release before closing only when the issue's acceptance criteria explicitly require that step. Otherwise, delivery is separate from issue resolution.
+- **Close with context**: add a comment summarizing the outcome and verification, with commit, PR, or deployment references when available.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_

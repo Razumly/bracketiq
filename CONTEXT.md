@@ -159,7 +159,7 @@ The newly qualified direct sources added to a Coverage Cell by a successful sear
 _Avoid_: Raw results, returned links
 
 **Supply Source**:
-One evidence-backed official public source path that owns one mapping and automation lifecycle and may produce many public targets. Its intake identity is the durable lifecycle root. A directory intake produces child Supply Sources but is not itself Mapped, Approved, Activated, or Published Supply.
+One evidence-backed official public source path that owns one mapping and automation lifecycle and may produce many public targets. Its intake identity is the durable lifecycle root. Machine-verified same-origin canonical changes preserve that identity; a cross-origin or operator change creates a linked successor. A directory intake produces child Supply Sources but is not itself Mapped, Approved, Activated, or Published Supply.
 _Avoid_: Domain, Organization, directory intake
 
 **Mapped Supply**:
