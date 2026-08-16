@@ -62,8 +62,8 @@ export const SectionNavigation = ({
 }: SectionNavigationProps) => {
     if (variant === 'desktop') {
         return (
-            <aside className="hidden xl:block">
-                <div className="sticky top-20 rounded-xl border border-gray-200 bg-white/95 p-4 shadow-sm backdrop-blur">
+            <aside className="hidden xl:block xl:sticky xl:top-20 xl:self-start">
+                <div className="rounded-xl border border-gray-200 bg-white/95 p-4 shadow-sm backdrop-blur">
                     <Text fw={700} size="sm" c="gray.8" mb="xs">
                         Sections
                     </Text>

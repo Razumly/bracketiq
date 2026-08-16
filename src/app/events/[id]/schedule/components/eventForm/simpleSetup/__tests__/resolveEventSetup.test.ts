@@ -139,6 +139,45 @@ describe('resolveEventSetupPages', () => {
         expect(pages.find((page) => page.id === 'documents-questions')?.status).toBe('not-used');
         expect(pages.find((page) => page.id === 'staff-operations')?.status).toBe('not-used');
     });
+    it('exposes the complete, current, available, locked, and not-used edit policy states', () => {
+        const pages = resolveEventSetupPages(input({
+            workflow: 'EDIT',
+            currentPageId: 'basics',
+            completePageIds: ['format'],
+        }));
+
+        expect(pages.find((page) => page.id === 'format')).toEqual(
+            expect.objectContaining({ status: 'complete', used: true }),
+        );
+        expect(pages.find((page) => page.id === 'basics')).toEqual(
+            expect.objectContaining({ status: 'current', used: true }),
+        );
+        expect(pages.find((page) => page.id === 'review-publish')).toEqual(
+            expect.objectContaining({ status: 'available', used: true }),
+        );
+        expect(pages.find((page) => page.id === 'documents-questions')).toEqual(
+            expect.objectContaining({
+                status: 'not-used',
+                used: false,
+                controlledByPageId: 'format',
+            }),
+        );
+    });
+
+    it('keeps every later used page locked during creation after the current page', () => {
+        const pages = resolveEventSetupPages(input({
+            workflow: 'CREATE',
+            currentPageId: 'basics',
+            completePageIds: ['format'],
+        }));
+
+        expect(pages.find((page) => page.id === 'format')?.status).toBe('complete');
+        expect(pages.find((page) => page.id === 'basics')?.status).toBe('current');
+        expect(pages.find((page) => page.id === 'divisions')?.status).toBe('locked');
+        expect(pages.find((page) => page.id === 'review-publish')?.status).toBe('locked');
+        expect(pages.find((page) => page.id === 'documents-questions')?.status).toBe('not-used');
+    });
+
 
     it('makes enabled document and staff pages available in order', () => {
         const setup = input({

@@ -686,6 +686,97 @@ describe('EventForm dirty state', () => {
     fireEvent.click(within(progress).getByRole('button', { name: 'Review & Publish: Available' }));
     expect(await screen.findByRole('heading', { name: 'Review & Publish' })).toBeInTheDocument();
   });
+  it('recalculates optional pages in edit mode without restoring prerequisite locks', async () => {
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    try {
+      renderForm(jest.fn(), undefined, { requiredTemplateIds: ['template_1'] }, null, {
+        initialSetupMode: 'SIMPLE',
+      });
+
+      expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+      const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
+      expect(within(progress).getByRole('button', {
+        name: 'Documents & Questions: Available',
+      })).toBeEnabled();
+
+      fireEvent.click(screen.getByLabelText('Required documents'));
+      await waitFor(() => {
+        expect(within(progress).getByRole('button', {
+          name: 'Documents & Questions: Not used',
+        })).toBeEnabled();
+      });
+
+      fireEvent.click(within(progress).getByRole('button', {
+        name: 'Documents & Questions: Not used',
+      }));
+      expect(await screen.findByRole('heading', {
+        name: 'Documents & Questions',
+      })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', {
+        name: 'Review the choice that controls this page',
+      }));
+      expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByLabelText('Required documents'));
+      await waitFor(() => {
+        expect(within(progress).getByRole('button', {
+          name: 'Documents & Questions: Available',
+        })).toBeEnabled();
+      });
+    } finally {
+      confirmSpy.mockRestore();
+    }
+  });
+
+  it('keeps direct edit navigation side-effect free for draft and validation state', async () => {
+    const formRef = React.createRef<EventFormHandle>();
+    renderForm(jest.fn(), formRef, { imageId: '' }, null, {
+      initialSetupMode: 'SIMPLE',
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+    const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
+    fireEvent.click(within(progress).getByRole('button', { name: 'Basics: Available' }));
+    const nameInput = await screen.findByPlaceholderText('Enter event name');
+    fireEvent.change(nameInput, { target: { value: 'Directly edited event' } });
+    await waitFor(() => {
+      expect(getLegacyDraft(formRef)?.name).toBe('Directly edited event');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('Event image is required')).toBeInTheDocument();
+    fireEvent.click(within(progress).getByRole('button', {
+      name: 'Schedule & Location: Available',
+    }));
+    expect(await screen.findByRole('heading', {
+      name: 'Schedule & Location',
+    })).toBeInTheDocument();
+    fireEvent.click(within(progress).getByRole('button', { name: 'Basics: Available' }));
+    expect(await screen.findByRole('heading', { name: 'Basics' })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Enter event name')).toHaveValue('Directly edited event');
+    expect(screen.getByText('Event image is required')).toBeInTheDocument();
+    expect(within(progress).getByRole('button', { name: 'Basics: Current' })).toHaveAttribute(
+      'aria-current',
+      'step',
+    );
+  });
+
+  it('preserves the draft when switching from Advanced to Simple Setup', async () => {
+    renderForm(jest.fn(), undefined, {}, null, {
+      initialSetupMode: 'ADVANCED',
+    });
+
+    const nameInput = screen.getByPlaceholderText('Enter event name');
+    fireEvent.change(nameInput, { target: { value: 'Advanced draft event' } });
+    fireEvent.click(screen.getByLabelText('Simple Setup'));
+
+    expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+    const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
+    fireEvent.click(within(progress).getByRole('button', { name: 'Basics: Available' }));
+    expect(await screen.findByPlaceholderText('Enter event name')).toHaveValue(
+      'Advanced draft event',
+    );
+  });
   it('does not surface a future-page error on a valid current page', async () => {
     const formRef = React.createRef<EventFormHandle>();
     renderForm(jest.fn(), formRef, {
