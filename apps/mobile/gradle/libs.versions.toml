@@ -61,7 +61,7 @@ googleId = "1.2.0"
 googleServicesPlugin = "4.5.0"
 splashscreen = "1.2.0"
 androidxSecurityCrypto = "1.1.0"
-skie = "0.10.13"
+skie = "0.10.14"
 wearCompose = "1.6.2"
 
 [libraries]
