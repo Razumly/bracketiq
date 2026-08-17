@@ -75,6 +75,68 @@ const isPlayoffMatch = (match: {
 );
 
 describe('league scheduling (time slots)', () => {
+  it('chooses an immediately available Resource before a later Time Slot', () => {
+    const division = buildDivision();
+    const earlyField = buildFieldById('field_early', division);
+    const laterField = buildFieldById('field_later', division);
+    const teams = buildTeams(2, division);
+    const earlySlot = new TimeSlot({
+      id: 'slot_early',
+      dayOfWeek: 3,
+      daysOfWeek: [3],
+      startDate: new Date('2026-08-27T14:00:00.000Z'),
+      endDate: new Date('2026-08-27T16:00:00.000Z'),
+      repeating: false,
+      startTimeMinutes: 14 * 60,
+      endTimeMinutes: 16 * 60,
+      field: earlyField.id,
+      fieldIds: [earlyField.id],
+      divisions: [division],
+      timeZone: 'UTC',
+    });
+    const laterSlot = new TimeSlot({
+      id: 'slot_later',
+      dayOfWeek: 5,
+      daysOfWeek: [5],
+      startDate: new Date('2026-08-29T16:00:00.000Z'),
+      endDate: new Date('2026-08-29T18:00:00.000Z'),
+      repeating: true,
+      startTimeMinutes: 16 * 60,
+      endTimeMinutes: 18 * 60,
+      field: laterField.id,
+      fieldIds: [laterField.id],
+      divisions: [division],
+      timeZone: 'UTC',
+    });
+    const league = new League({
+      id: 'league_prefers_earliest_slot',
+      name: 'Earliest Slot League',
+      start: new Date('2026-08-27T14:00:00.000Z'),
+      end: new Date('2026-08-30T18:00:00.000Z'),
+      maxParticipants: 2,
+      teamSignup: true,
+      eventType: 'LEAGUE',
+      teams,
+      divisions: [division],
+      fields: {
+        [laterField.id]: laterField,
+        [earlyField.id]: earlyField,
+      },
+      timeSlots: [laterSlot, earlySlot],
+      noFixedEndDateTime: false,
+      matchDurationMinutes: 60,
+      gamesPerOpponent: 1,
+      includePlayoffs: false,
+      usesSets: false,
+      restTimeMinutes: 0,
+    });
+
+    const scheduled = scheduleEvent({ event: league }, context);
+
+    expect(scheduled.matches).toHaveLength(1);
+    expect(scheduled.matches[0].field?.id).toBe(earlyField.id);
+    expect(scheduled.matches[0].start.toISOString()).toBe('2026-08-27T14:00:00.000Z');
+  });
   it('uses division-owned league config for split regular-season divisions', () => {
     const rec = new Division(
       'rec',

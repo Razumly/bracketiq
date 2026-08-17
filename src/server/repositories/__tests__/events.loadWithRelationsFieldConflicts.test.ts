@@ -23,6 +23,9 @@ type LoadClient = {
   timeSlots: {
     findMany: jest.Mock;
   };
+  eventDivisionPhaseSources?: {
+    findMany: jest.Mock;
+  };
   userData: {
     findMany: jest.Mock;
   };
@@ -180,6 +183,144 @@ describe('loadEventWithRelations field conflict hydration', () => {
     }));
     expect(loaded.timeSlots).toHaveLength(1);
     expect(loaded.timeSlots[0].timeZone).toBe('America/Los_Angeles');
+  });
+  it('retains every Phase Division scoped by a shared Bracket', async () => {
+    const client = createClient({
+      divisions: ['entry_a', 'entry_b'],
+      fieldIds: ['field_1'],
+      timeSlotIds: ['slot_bracket'],
+    });
+    client.divisions.findMany.mockResolvedValue([
+      {
+        id: 'entry_a',
+        key: 'entry_a',
+        name: 'Entry A',
+        kind: 'LEAGUE',
+        role: 'ENTRY',
+        status: 'ACTIVE',
+        scope: 'EVENT',
+        fieldIds: ['field_1'],
+        teamIds: [],
+      },
+      {
+        id: 'entry_b',
+        key: 'entry_b',
+        name: 'Entry B',
+        kind: 'LEAGUE',
+        role: 'ENTRY',
+        status: 'ACTIVE',
+        scope: 'EVENT',
+        fieldIds: ['field_1'],
+        teamIds: [],
+      },
+      {
+        id: 'entry_a__phase__pool',
+        key: 'entry_a__phase__pool',
+        name: 'Pool A',
+        kind: 'LEAGUE',
+        role: 'PHASE',
+        phase: 'POOL',
+        sourceDivisionId: 'entry_a',
+        status: 'ACTIVE',
+        scope: 'EVENT',
+        fieldIds: ['field_1'],
+        teamIds: [],
+      },
+      {
+        id: 'entry_b__phase__pool',
+        key: 'entry_b__phase__pool',
+        name: 'Pool B',
+        kind: 'LEAGUE',
+        role: 'PHASE',
+        phase: 'POOL',
+        sourceDivisionId: 'entry_b',
+        status: 'ACTIVE',
+        scope: 'EVENT',
+        fieldIds: ['field_1'],
+        teamIds: [],
+      },
+      {
+        id: 'bracket_open',
+        key: 'bracket_open',
+        name: 'Open Bracket',
+        kind: 'PLAYOFF',
+        role: 'PHASE',
+        phase: 'BRACKET',
+        sourceDivisionId: 'entry_a',
+        status: 'ACTIVE',
+        scope: 'EVENT',
+        fieldIds: ['field_1'],
+        teamIds: [],
+      },
+      {
+        id: 'bracket_closed',
+        key: 'bracket_closed',
+        name: 'Closed Bracket',
+        kind: 'PLAYOFF',
+        role: 'PHASE',
+        phase: 'BRACKET',
+        sourceDivisionId: 'entry_a',
+        status: 'ACTIVE',
+        scope: 'EVENT',
+        fieldIds: ['field_1'],
+        teamIds: [],
+      },
+    ]);
+    client.eventDivisionPhaseSources = {
+      findMany: jest.fn().mockResolvedValue([
+        { phaseDivisionId: 'entry_a__phase__pool', entryDivisionId: 'entry_a' },
+        { phaseDivisionId: 'entry_b__phase__pool', entryDivisionId: 'entry_b' },
+        { phaseDivisionId: 'bracket_open', entryDivisionId: 'entry_a' },
+        { phaseDivisionId: 'bracket_open', entryDivisionId: 'entry_b' },
+        { phaseDivisionId: 'bracket_closed', entryDivisionId: 'entry_a' },
+      ]),
+    };
+    client.fields.findMany.mockResolvedValue([
+      {
+        id: 'field_1',
+        organizationId: null,
+        divisions: ['entry_a', 'entry_b', 'bracket_open'],
+        name: 'Court A',
+        createdAt: null,
+        updatedAt: null,
+      },
+    ]);
+    client.timeSlots.findMany.mockResolvedValue([
+      {
+        id: 'slot_bracket',
+        dayOfWeek: 5,
+        daysOfWeek: [5],
+        startTimeMinutes: 9 * 60,
+        endTimeMinutes: 17 * 60,
+        startDate: new Date('2026-08-29T09:00:00.000Z'),
+        endDate: new Date('2026-08-29T17:00:00.000Z'),
+        repeating: true,
+        scheduledFieldId: 'field_1',
+        scheduledFieldIds: ['field_1'],
+        divisions: ['bracket_open'],
+        timeZone: 'UTC',
+      },
+    ]);
+
+    const loaded = await loadEventWithRelations(
+      'event_sched',
+      client as unknown as Parameters<typeof loadEventWithRelations>[1],
+    );
+
+    expect(loaded.timeSlots[0].divisions.map((division) => division.id).sort()).toEqual([
+      'bracket_open',
+      'entry_a__phase__pool',
+      'entry_b__phase__pool',
+    ]);
+    const reloaded = await loadEventWithRelations(
+      'event_sched',
+      client as unknown as Parameters<typeof loadEventWithRelations>[1],
+    );
+    expect(reloaded.timeSlots[0].divisions.map((division) => division.id).sort()).toEqual([
+      'bracket_open',
+      'entry_a__phase__pool',
+      'entry_b__phase__pool',
+    ]);
   });
 
   it('hydrates field blocking windows from external regular events and matches', async () => {

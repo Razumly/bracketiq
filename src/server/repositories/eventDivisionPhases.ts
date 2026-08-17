@@ -106,6 +106,12 @@ const asStringArray = (value: unknown): string[] => (
     : []
 );
 
+const asPositionalStringArray = (value: unknown): string[] => (
+  Array.isArray(value)
+    ? value.map((entry) => String(entry ?? '').trim())
+    : []
+);
+
 export const persistPhaseParticipantAssignments = async (params: {
   client: PhasePersistenceClient;
   eventId: string;
@@ -390,7 +396,7 @@ const writeDataFor = (
     price: isBracket ? null : (entry.price ?? null),
     maxParticipants,
     playoffTeamCount,
-    playoffPlacementDivisionIds: asStringArray(entry.playoffPlacementDivisionIds),
+    playoffPlacementDivisionIds: asPositionalStringArray(entry.playoffPlacementDivisionIds),
     standingsOverrides: phaseStandingsOverridesFor(entry, isBracket, !plan.clone),
     phaseSettings: entry.phaseSettings ?? {},
     gamesPerOpponent: entry.gamesPerOpponent ?? null,

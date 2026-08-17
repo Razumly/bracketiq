@@ -3772,7 +3772,11 @@ export const loadEventWithRelations = async (
   for (const row of phaseSourceRows) {
     const phaseDivisionId = normalizeDivisionKey(row.phaseDivisionId);
     const entryDivisionId = normalizeDivisionKey(row.entryDivisionId);
-    if (!phaseDivisionId || !entryDivisionId) continue;
+    if (!phaseDivisionId || !entryDivisionId) {
+      throw new Error(
+        "Unable to hydrate Phase Division scope because a persisted phase or source Division ID is missing.",
+      );
+    }
     const sourceIds = phaseSourceDivisionIdsByPhase.get(phaseDivisionId) ?? [];
     if (!sourceIds.includes(entryDivisionId)) sourceIds.push(entryDivisionId);
     phaseSourceDivisionIdsByPhase.set(phaseDivisionId, sourceIds);
@@ -4089,13 +4093,29 @@ export const loadEventWithRelations = async (
   const timeSlots = buildTimeSlots(timeSlotRows, divisionMap, allDivisions);
   const phaseDivisionsBySource = new Map<string, Division[]>();
   const addPhaseSource = (phaseDivisionId: string, sourceDivisionId: string) => {
-    const phaseDivision = divisionMap.get(phaseDivisionId);
-    if (!phaseDivision) return;
-    const phaseDivisions = phaseDivisionsBySource.get(sourceDivisionId) ?? [];
+    const normalizedPhaseId = normalizeDivisionKey(phaseDivisionId);
+    const normalizedSourceId = normalizeDivisionKey(sourceDivisionId);
+    if (!normalizedPhaseId || !normalizedSourceId) {
+      throw new Error(
+        "Unable to hydrate Phase Division scope because a phase or source Division ID is missing.",
+      );
+    }
+    const phaseDivision = divisionMap.get(normalizedPhaseId);
+    if (!phaseDivision) {
+      throw new Error(
+        `Unable to hydrate Phase Division scope because ${phaseDivisionId} is not present in the Event.`,
+      );
+    }
+    const phaseDivisions = phaseDivisionsBySource.get(normalizedSourceId) ?? [];
     if (!phaseDivisions.some((division) => division.id === phaseDivision.id)) {
       phaseDivisions.push(phaseDivision);
     }
-    phaseDivisionsBySource.set(sourceDivisionId, phaseDivisions);
+    phaseDivisionsBySource.set(normalizedSourceId, phaseDivisions);
+    const sourceIds = phaseSourceDivisionIdsByPhase.get(normalizedPhaseId) ?? [];
+    if (!sourceIds.includes(normalizedSourceId)) {
+      sourceIds.push(normalizedSourceId);
+      phaseSourceDivisionIdsByPhase.set(normalizedPhaseId, sourceIds);
+    }
   };
   for (const [phaseDivisionId, sourceDivisionIds] of phaseSourceDivisionIdsByPhase.entries()) {
     for (const sourceDivisionId of sourceDivisionIds) {
@@ -4106,26 +4126,56 @@ export const loadEventWithRelations = async (
     if (String(row.role ?? "").toUpperCase() !== "PHASE") continue;
     const phaseDivisionId = normalizeDivisionKey(row.id);
     const sourceDivisionId = normalizeDivisionKey(row.sourceDivisionId);
-    if (phaseDivisionId && sourceDivisionId) {
-      addPhaseSource(phaseDivisionId, sourceDivisionId);
-    }
-  }
-  for (const phaseDivisions of Array.from(phaseDivisionsBySource.values())) {
-    for (const phaseDivision of phaseDivisions) {
-      phaseDivisionsBySource.set(
-        normalizeDivisionKey(phaseDivision.id) ?? phaseDivision.id,
-        phaseDivisions,
+    if (!phaseDivisionId) {
+      throw new Error(
+        "Unable to hydrate Phase Division scope because a persisted phase Division ID is missing.",
       );
     }
+    if (sourceDivisionId) {
+      addPhaseSource(phaseDivisionId, sourceDivisionId);
+    } else if (!phaseSourceDivisionIdsByPhase.has(phaseDivisionId)) {
+      throw new Error(
+        `Unable to hydrate Phase Division scope because ${row.id} has no source Division.`,
+      );
+    }
+  }
+  const relatedPhaseDivisionsByPhaseId = new Map<string, Division[]>();
+  for (const [phaseDivisionId, sourceDivisionIds] of phaseSourceDivisionIdsByPhase.entries()) {
+    const phaseDivision = divisionMap.get(phaseDivisionId);
+    if (!phaseDivision) {
+      throw new Error(
+        `Unable to hydrate Phase Division scope because ${phaseDivisionId} is not present in the Event.`,
+      );
+    }
+    const relatedDivisions = new Map<string, Division>([
+      [phaseDivision.id, phaseDivision],
+    ]);
+    const phase = String(phaseDivision.phase ?? "").toUpperCase();
+    if (phase === "BRACKET" || phase === "PLAYOFF") {
+      for (const sourceDivisionId of sourceDivisionIds) {
+        for (const sourcePhaseDivision of phaseDivisionsBySource.get(sourceDivisionId) ?? []) {
+          const sourcePhase = String(sourcePhaseDivision.phase ?? "").toUpperCase();
+          if (sourcePhase !== "POOL" && sourcePhase !== "LEAGUE") {
+            continue;
+          }
+          relatedDivisions.set(sourcePhaseDivision.id, sourcePhaseDivision);
+        }
+      }
+    }
+    relatedPhaseDivisionsByPhaseId.set(
+      phaseDivisionId,
+      Array.from(relatedDivisions.values()),
+    );
   }
   for (const timeSlot of timeSlots) {
     const expandedDivisions = new Map(
       timeSlot.divisions.map((division) => [division.id, division]),
     );
     for (const division of timeSlot.divisions) {
-      const sourcePhaseDivisions = phaseDivisionsBySource.get(
-        normalizeDivisionKey(division.id) ?? division.id,
-      ) ?? [];
+      const divisionId = normalizeDivisionKey(division.id) ?? division.id;
+      const sourcePhaseDivisions = relatedPhaseDivisionsByPhaseId.get(divisionId)
+        ?? phaseDivisionsBySource.get(divisionId)
+        ?? [];
       for (const phaseDivision of sourcePhaseDivisions) {
         expandedDivisions.set(phaseDivision.id, phaseDivision);
       }

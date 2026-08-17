@@ -601,8 +601,7 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
       throw new Error(`Unable to schedule event because no fields are available${suffix}.`);
     }
     let hasCompatibleSlots = false;
-    let bestFuture: Date | null = null;
-    let hasCandidate = false;
+    let earliestAvailableStart: Date | null = null;
 
     for (const resource of resources) {
       const slots = this.slotsForResource(resource);
@@ -610,14 +609,14 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
       hasCompatibleSlots = true;
       const slotStart = this.alignStartToSlots(slots, candidate, durationMs);
       if (!slotStart) continue;
-      hasCandidate = true;
-      if (slotStart.getTime() > candidate.getTime()) {
-        if (!bestFuture || slotStart.getTime() < bestFuture.getTime()) {
-          bestFuture = slotStart;
-        }
+      if (
+        !earliestAvailableStart
+        || slotStart.getTime() < earliestAvailableStart.getTime()
+      ) {
+        earliestAvailableStart = slotStart;
       }
     }
-    if (hasCandidate) return bestFuture ?? candidate;
+    if (earliestAvailableStart) return earliestAvailableStart;
     if (!hasCompatibleSlots) {
       const groupIds = this.currentGroups
         .map((group) => (group as any)?.id)

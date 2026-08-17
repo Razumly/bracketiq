@@ -83,8 +83,22 @@ describe('syncEventDivisionPhases', () => {
   it('creates pool-owned phase rows and one shared bracket phase for tournaments', async () => {
     const client = createClient();
     const entries = [
-      { id: 'pool_a', key: 'pool_a', name: 'Pool A', kind: 'LEAGUE' as const, teamIds: ['team_1'] },
-      { id: 'pool_b', key: 'pool_b', name: 'Pool B', kind: 'LEAGUE' as const, teamIds: ['team_2'] },
+      {
+        id: 'pool_a',
+        key: 'pool_a',
+        name: 'Pool A',
+        kind: 'LEAGUE' as const,
+        teamIds: ['team_1'],
+        playoffPlacementDivisionIds: ['bracket_open', 'bracket_open'],
+      },
+      {
+        id: 'pool_b',
+        key: 'pool_b',
+        name: 'Pool B',
+        kind: 'LEAGUE' as const,
+        teamIds: ['team_2'],
+        playoffPlacementDivisionIds: ['bracket_open', '', 'bracket_open'],
+      },
     ];
     const bracket = {
       id: 'bracket_open',
@@ -110,6 +124,24 @@ describe('syncEventDivisionPhases', () => {
       'bracket_open',
     ]);
     expect(phaseUpserts.slice(0, 2).map((args: any) => args.create.phase)).toEqual(['POOL', 'POOL']);
+    expect(phaseUpserts[0].create.playoffPlacementDivisionIds).toEqual([
+      'bracket_open',
+      'bracket_open',
+    ]);
+    expect(phaseUpserts[0].update.playoffPlacementDivisionIds).toEqual([
+      'bracket_open',
+      'bracket_open',
+    ]);
+    expect(phaseUpserts[1].create.playoffPlacementDivisionIds).toEqual([
+      'bracket_open',
+      '',
+      'bracket_open',
+    ]);
+    expect(phaseUpserts[1].update.playoffPlacementDivisionIds).toEqual([
+      'bracket_open',
+      '',
+      'bracket_open',
+    ]);
     expect(phaseUpserts[2].update).toEqual(expect.objectContaining({
       phase: 'BRACKET',
       role: 'PHASE',

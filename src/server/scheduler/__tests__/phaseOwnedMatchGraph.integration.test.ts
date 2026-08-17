@@ -1,12 +1,12 @@
 /** @jest-environment node */
 
 import { buildEventDivisionId } from "@/lib/divisionTypes";
-import { upsertEventFromPayload } from "@/server/repositories/events";
+import { loadEventWithRelations, upsertEventFromPayload } from "@/server/repositories/events";
+import { scheduleEvent } from "@/server/scheduler/scheduleEvent";
 import {
   persistCreateOnlyMatchGraph,
   type CreateOnlyMatchGraphPersistenceResult,
 } from "@/server/scheduler/eventScheduleMutation";
-
 type Row = Record<string, any>;
 type Store = Map<string, Row>;
 
@@ -342,5 +342,125 @@ describe("phase-owned Match Graph persistence", () => {
       && row.end === null
     ))).toBe(true);
     expect((client.state.eventRegistrations ?? new Map()).size).toBe(0);
+  });
+  it("loads a persisted multi-Pool Tournament scope before scheduling", async () => {
+    const client = new InMemoryClient();
+    const eventId = "event-persisted-multi-pool-scope";
+    const entryDivisionId = buildEventDivisionId(eventId, "open");
+    const bracketDivisionId = entryDivisionId;
+    const bracketPhaseId = `${bracketDivisionId}__phase__bracket`;
+
+    await client.$transaction(async (tx) => {
+      await upsertEventFromPayload({
+        ...leaguePayload(eventId),
+        name: "Persisted Multi-Pool Tournament",
+        eventType: "TOURNAMENT",
+        includePlayoffs: true,
+        singleDivision: false,
+        divisions: [entryDivisionId],
+        fieldIds: ["field-1"],
+        fields: [{
+          id: "field-1",
+          name: "Court A",
+          location: "Main Gym",
+          divisions: [entryDivisionId],
+        }],
+        timeSlotIds: ["slot-bracket"],
+        timeSlots: [{
+          id: "slot-bracket",
+          dayOfWeek: 1,
+          daysOfWeek: [1],
+          startTimeMinutes: 9 * 60,
+          endTimeMinutes: 18 * 60,
+          startDate: "2026-09-01T09:00:00.000Z",
+          endDate: "2026-09-01T18:00:00.000Z",
+          repeating: false,
+          scheduledFieldId: "field-1",
+          scheduledFieldIds: ["field-1"],
+          divisions: [bracketPhaseId],
+          timeZone: "UTC",
+        }],
+        divisionDetails: [{
+          id: entryDivisionId,
+          key: "open",
+          name: "Open",
+          kind: "LEAGUE",
+          divisionTypeId: "skill_open_age_18plus",
+          divisionTypeName: "Open",
+          ratingType: "SKILL",
+          gender: "M",
+          maxParticipants: 16,
+          playoffTeamCount: 8,
+          poolCount: 2,
+          fieldIds: ["field-1"],
+          playoffPlacementDivisionIds: [bracketDivisionId],
+          gamesPerOpponent: 1,
+          matchDurationMinutes: 60,
+        }],
+        playoffDivisionDetails: [{
+          id: bracketDivisionId,
+          key: "open_playoff",
+          name: "Open Bracket",
+          kind: "PLAYOFF",
+          divisionTypeId: "skill_open_age_18plus",
+          divisionTypeName: "Open",
+          ratingType: "SKILL",
+          gender: "M",
+          maxParticipants: 16,
+          playoffTeamCount: 8,
+          poolCount: 2,
+          fieldIds: ["field-1"],
+          playoffConfig: {
+            fieldCount: 1,
+            matchDurationMinutes: 60,
+            restTimeMinutes: 0,
+          },
+        }],
+      }, tx as unknown as Parameters<typeof upsertEventFromPayload>[1]);
+    });
+
+    const eventRow = client.state.events.get(eventId);
+    if (!eventRow) throw new Error(`Missing persisted event ${eventId}`);
+    const poolPhaseIds = [...client.state.divisions.values()]
+      .filter((row) => row.role === "PHASE" && row.phase === "POOL")
+      .sort((left, right) => Number(left.sortOrder ?? 0) - Number(right.sortOrder ?? 0))
+      .map((row) => String(row.id));
+    expect(poolPhaseIds).toHaveLength(2);
+    const teamRows = [
+      ["team_pool_a_1", poolPhaseIds[0]],
+      ["team_pool_a_2", poolPhaseIds[0]],
+      ["team_pool_b_1", poolPhaseIds[1]],
+      ["team_pool_b_2", poolPhaseIds[1]],
+    ] as const;
+    eventRow.teamIds = teamRows.map(([teamId]) => teamId);
+    const teamStore = client.state.teams ?? (client.state.teams = new Map());
+    for (const [teamId, divisionId] of teamRows) {
+      teamStore.set(teamId, {
+        id: teamId,
+        captainId: `${teamId}_captain`,
+        division: divisionId,
+        name: teamId,
+        playerIds: [],
+      });
+    }
+
+    const loaded = await loadEventWithRelations(
+      eventId,
+      client as unknown as Parameters<typeof loadEventWithRelations>[1],
+    );
+    const loadedSlot = loaded.timeSlots.find((slot) => slot.id === "slot-bracket");
+    expect(loadedSlot?.divisions.map((division) => division.id)).toEqual(
+      expect.arrayContaining(poolPhaseIds),
+    );
+
+    const scheduled = scheduleEvent(
+      { event: loaded, includePlaceholderTeams: false },
+      { log: () => {}, error: () => {} },
+    );
+    const poolMatches = scheduled.matches.filter((match) => match.division.phase === "POOL");
+    expect(new Set(poolMatches.map((match) => match.division.id))).toEqual(
+      new Set(poolPhaseIds),
+    );
+    expect(poolMatches.every((match) => match.field?.id === "field-1")).toBe(true);
   });
 });
