@@ -1,0 +1,242 @@
+import { locationService } from '../locationService';
+
+const setGooglePlacesMock = (places: Record<string, unknown>) => {
+  (window as typeof window & { google?: any }).google = {
+    maps: {
+      places,
+    },
+  };
+};
+
+const setGoogleGeocoderMock = (geocode: jest.Mock) => {
+  (window as typeof window & { google?: any }).google = {
+    maps: {
+      places: {},
+      Geocoder: jest.fn(() => ({ geocode })),
+      GeocoderStatus: {
+        OK: 'OK',
+        ZERO_RESULTS: 'ZERO_RESULTS',
+      },
+    },
+  };
+};
+
+describe('locationService Places autocomplete', () => {
+  afterEach(() => {
+    delete (window as typeof window & { google?: any }).google;
+    jest.clearAllMocks();
+  });
+
+  it('uses AutocompleteSuggestion for place predictions', async () => {
+    const fetchAutocompleteSuggestions = jest.fn().mockResolvedValue({
+      suggestions: [
+        {
+          placePrediction: {
+            placeId: 'place_austin',
+            text: { text: 'Austin, TX, USA' },
+          },
+        },
+        { placePrediction: null },
+      ],
+    });
+    const autocompleteServiceConstructor = jest.fn();
+
+    setGooglePlacesMock({
+      AutocompleteSuggestion: { fetchAutocompleteSuggestions },
+      AutocompleteService: autocompleteServiceConstructor,
+    });
+
+    const sessionToken = { token: 'places-session' };
+    const predictions = await locationService.getPlacePredictions('Austin', sessionToken);
+
+    expect(fetchAutocompleteSuggestions).toHaveBeenCalledWith({
+      input: 'Austin',
+      includedPrimaryTypes: [
+        'locality',
+        'postal_code',
+        'administrative_area_level_1',
+        'administrative_area_level_2',
+        'country',
+      ],
+      sessionToken,
+    });
+    expect(autocompleteServiceConstructor).not.toHaveBeenCalled();
+    expect(predictions).toEqual([
+      {
+        description: 'Austin, TX, USA',
+        placeId: 'place_austin',
+      },
+    ]);
+  });
+
+  it('maps legacy address filters to AutocompleteSuggestion request fields', async () => {
+    const fetchAutocompleteSuggestions = jest.fn().mockResolvedValue({
+      suggestions: [],
+    });
+
+    setGooglePlacesMock({
+      AutocompleteSuggestion: { fetchAutocompleteSuggestions },
+    });
+
+    await locationService.getPlacePredictions(
+      '1600 Amphitheatre',
+      undefined,
+      {
+        types: ['address'],
+        componentRestrictions: { country: ['US', 'CA'] },
+      },
+    );
+
+    expect(fetchAutocompleteSuggestions).toHaveBeenCalledWith({
+      input: '1600 Amphitheatre',
+      includedPrimaryTypes: ['street_address'],
+      includedRegionCodes: ['us', 'ca'],
+    });
+  });
+
+  it('can request unrestricted place autocomplete for map searches', async () => {
+    const fetchAutocompleteSuggestions = jest.fn().mockResolvedValue({
+      suggestions: [],
+    });
+
+    setGooglePlacesMock({
+      AutocompleteSuggestion: { fetchAutocompleteSuggestions },
+    });
+
+    await locationService.getPlacePredictions(
+      '2130 N Q St',
+      undefined,
+      { includeAllPlaceTypes: true },
+    );
+
+    expect(fetchAutocompleteSuggestions).toHaveBeenCalledWith({
+      input: '2130 N Q St',
+    });
+  });
+
+  it('falls back to AutocompleteService when AutocompleteSuggestion is unavailable', async () => {
+    const getPlacePredictions = jest.fn((request, callback) => {
+      callback(
+        [{ description: 'Austin, TX, USA', place_id: 'place_austin' }],
+        'OK',
+      );
+    });
+    const autocompleteServiceConstructor = jest.fn(() => ({ getPlacePredictions }));
+
+    setGooglePlacesMock({
+      AutocompleteService: autocompleteServiceConstructor,
+      PlacesServiceStatus: {
+        OK: 'OK',
+        ZERO_RESULTS: 'ZERO_RESULTS',
+      },
+    });
+
+    const predictions = await locationService.getPlacePredictions('Austin');
+
+    expect(autocompleteServiceConstructor).toHaveBeenCalledTimes(1);
+    expect(getPlacePredictions).toHaveBeenCalledWith(
+      { input: 'Austin', types: ['(cities)'] },
+      expect.any(Function),
+    );
+    expect(predictions).toEqual([
+      {
+        description: 'Austin, TX, USA',
+        placeId: 'place_austin',
+      },
+    ]);
+  });
+
+  it('omits legacy autocomplete type filters for unrestricted map searches', async () => {
+    const getPlacePredictions = jest.fn((request, callback) => {
+      callback([], 'ZERO_RESULTS');
+    });
+    const autocompleteServiceConstructor = jest.fn(() => ({ getPlacePredictions }));
+
+    setGooglePlacesMock({
+      AutocompleteService: autocompleteServiceConstructor,
+      PlacesServiceStatus: {
+        OK: 'OK',
+        ZERO_RESULTS: 'ZERO_RESULTS',
+      },
+    });
+
+    await locationService.getPlacePredictions(
+      'Whole Foods',
+      { token: 'places-session' },
+      { includeAllPlaceTypes: true },
+    );
+
+    expect(getPlacePredictions).toHaveBeenCalledWith(
+      { input: 'Whole Foods', sessionToken: { token: 'places-session' } },
+      expect.any(Function),
+    );
+  });
+
+  it('geocodes ZIP codes through the browser Maps SDK', async () => {
+    const geocode = jest.fn((request, callback) => {
+      callback([
+        {
+          formatted_address: 'Washougal, WA 98671, USA',
+          geometry: {
+            location: {
+              lat: () => 45.5826,
+              lng: () => -122.3534,
+            },
+          },
+          address_components: [
+            { long_name: 'Washougal', short_name: 'Washougal', types: ['locality'] },
+            { long_name: 'Washington', short_name: 'WA', types: ['administrative_area_level_1'] },
+            { long_name: '98671', short_name: '98671', types: ['postal_code'] },
+            { long_name: 'United States', short_name: 'US', types: ['country'] },
+          ],
+        },
+      ], 'OK');
+    });
+    setGoogleGeocoderMock(geocode);
+
+    await expect(locationService.geocodeLocation('98671')).resolves.toMatchObject({
+      city: 'Washougal',
+      state: 'WA',
+      zipCode: '98671',
+      lat: 45.5826,
+      lng: -122.3534,
+      formattedAddress: 'Washougal, WA 98671, USA',
+    });
+    expect(geocode).toHaveBeenCalledWith({ address: '98671' }, expect.any(Function));
+  });
+
+  it('reverse geocodes current coordinates through the browser Maps SDK', async () => {
+    const geocode = jest.fn((request, callback) => {
+      callback([
+        {
+          formatted_address: 'Washougal, WA 98671, USA',
+          geometry: { location: request.location },
+          address_components: [
+            { long_name: 'Washougal', short_name: 'Washougal', types: ['locality'] },
+            { long_name: 'Washington', short_name: 'WA', types: ['administrative_area_level_1'] },
+          ],
+        },
+      ], 'OK');
+    });
+    setGoogleGeocoderMock(geocode);
+
+    await expect(locationService.reverseGeocode(45.5826, -122.3534)).resolves.toMatchObject({
+      city: 'Washougal',
+      state: 'WA',
+      lat: 45.5826,
+      lng: -122.3534,
+    });
+    expect(geocode).toHaveBeenCalledWith({
+      location: { lat: 45.5826, lng: -122.3534 },
+    }, expect.any(Function));
+  });
+
+  it('surfaces a not-found geocoding result', async () => {
+    const geocode = jest.fn((_request, callback) => callback([], 'ZERO_RESULTS'));
+    setGoogleGeocoderMock(geocode);
+
+    await expect(locationService.geocodeLocation('not-a-real-place')).rejects.toThrow(
+      'Geocoding failed: Location not found',
+    );
+  });
+});
