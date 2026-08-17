@@ -5020,7 +5020,7 @@ describe('EventForm dirty state', () => {
         expect(getLegacyDraft(formRef).fields).toEqual([
           expect.objectContaining({
             $id: 'local_field_1',
-            name: 'Field 1',
+            name: 'Court 1',
           }),
         ]);
       });
