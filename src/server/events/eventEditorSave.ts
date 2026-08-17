@@ -285,7 +285,7 @@ const saveWithinTransaction = async (
     playoffDivisionDetails: draft.competition.playoffDivisionDetails,
     divisionFieldIds: draft.competition.divisionFieldIds,
     tags: draft.basics.tags,
-  }, tx, { preserveOperationalState: true });
+  }, tx, { preserveOperationalState: true, preserveStaffState: true });
 
   const questionIdMap = await reconcileQuestions(tx, eventId, draft, actor.userId);
   const staffRevision = existingSnapshot?.staffRevision

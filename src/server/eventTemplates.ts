@@ -512,7 +512,7 @@ const buildRentalHintSourceType = (hint: any): string => {
   });
 };
 
-export const buildSeedEventFromTemplate = (
+export const buildEventDraftFromTemplate = (
   bundle: TemplateBundle,
   params: {
     newEventId: string;
@@ -691,9 +691,9 @@ export const buildSeedEventFromTemplate = (
   } as Event;
 };
 
-const serializeSeedValue = (value: unknown): unknown => {
+const serializeEditorValue = (value: unknown): unknown => {
   if (Array.isArray(value)) {
-    return value.map(serializeSeedValue);
+    return value.map(serializeEditorValue);
   }
   if (!value || typeof value !== 'object' || value instanceof Date) {
     return value;
@@ -706,7 +706,7 @@ const serializeSeedValue = (value: unknown): unknown => {
     if (key.startsWith('$')) {
       continue;
     }
-    response[key] = serializeSeedValue(entry);
+    response[key] = serializeEditorValue(entry);
   }
   if (canonicalId) {
     response.id = canonicalId;
@@ -714,8 +714,8 @@ const serializeSeedValue = (value: unknown): unknown => {
   return response;
 };
 
-export const serializeSeedEvent = (event: Event): Record<string, unknown> => (
-  serializeSeedValue(event) as Record<string, unknown>
+export const serializeEditorEvent = (event: Event): Record<string, unknown> => (
+  serializeEditorValue(event) as Record<string, unknown>
 );
 
 export const archiveEventTemplate = async (

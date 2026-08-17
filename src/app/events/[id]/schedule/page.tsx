@@ -545,7 +545,7 @@ function EventScheduleContent() {
     setSelectedTemplateId,
     selectedTemplateStartDate,
     setSelectedTemplateStartDate,
-    templateSeedKey,
+    templateBootstrapKey,
     templateRentalResourcePrompt,
     dismissTemplateRentalResourcePrompt,
     handleApplyTemplate,
@@ -556,6 +556,7 @@ function EventScheduleContent() {
     isGuest,
     changesEvent,
     activeEvent,
+    editorSnapshot,
     activeMatches,
     hasPendingUnsavedChanges,
     editorDraftRef,
@@ -608,9 +609,15 @@ function EventScheduleContent() {
   const handleCloseTemplatePrompt = useCallback(() => {
     if (templateIdParam) {
       setDismissedDirectTemplatePromptId(templateIdParam);
+      if (pathname) {
+        const params = new URLSearchParams(searchParams?.toString() ?? '');
+        params.delete('templateId');
+        const query = params.toString();
+        router.replace(`${pathname}${query ? `?${query}` : ''}`, { scroll: false });
+      }
     }
     closeTemplatePrompt();
-  }, [closeTemplatePrompt, templateIdParam]);
+  }, [closeTemplatePrompt, pathname, router, searchParams, templateIdParam]);
   const handleApplyTemplateWithPromptState = useCallback(async () => {
     const applied = await handleApplyTemplate();
     if (applied && templateIdParam) {
@@ -704,7 +711,8 @@ function EventScheduleContent() {
           if (organizationId ?? resolvedHostOrgId) query.set('organizationId', organizationId ?? resolvedHostOrgId ?? '');
           if (sportId ?? fallbackSportId) query.set('sportId', sportId ?? fallbackSportId);
           if (parentEventIdParam) query.set('parentEventId', parentEventIdParam);
-          if (templateIdParam) query.set('templateId', templateIdParam);
+          const bootstrapTemplateId = selectedTemplateId ?? templateIdParam;
+          if (bootstrapTemplateId) query.set('templateId', bootstrapTemplateId);
           if (rentalBookingIdParam) query.set('rentalBookingId', rentalBookingIdParam);
           if (start) query.set('start', start);
           const bootstrapKey = query.toString();
@@ -756,6 +764,7 @@ function EventScheduleContent() {
     parentEventIdParam,
     rentalBookingIdParam,
     resolvedHostOrgId,
+    selectedTemplateId,
     selectedTemplateStartDate,
     templateIdParam,
     user?.$id,
@@ -5120,7 +5129,6 @@ function EventScheduleContent() {
 
     try {
       await leagueService.deleteMatchesByEvent(templateEvent.$id);
-      await leagueService.deleteWeeklySchedulesForEvent(templateEvent.$id);
       await eventService.deleteEventResult(templateEvent);
       router.push(homePath);
     } catch (err) {
@@ -5154,7 +5162,6 @@ function EventScheduleContent() {
 
     try {
       await leagueService.deleteMatchesByEvent(eventToDelete.$id);
-      await leagueService.deleteWeeklySchedulesForEvent(eventToDelete.$id);
       await eventService.deleteEventResult(eventToDelete);
       router.push(homePath);
     } catch (err) {
@@ -5247,7 +5254,6 @@ function EventScheduleContent() {
     setError(null);
     try {
       await leagueService.deleteMatchesByEvent(event.$id);
-      await leagueService.deleteWeeklySchedulesForEvent(event.$id);
       await eventService.deleteEventResult(event);
       router.push(homePath);
     } catch (err) {
@@ -5829,7 +5835,7 @@ function EventScheduleContent() {
         user={user}
         event={changesEvent}
         editorSnapshot={editorSnapshot}
-        templateSeedKey={templateSeedKey}
+        templateBootstrapKey={templateBootstrapKey}
         eventFormRef={eventFormRef}
         onEventFormClose={() => router.push('/events')}
         onDirtyStateChange={handleEventFormDirtyStateChange}
@@ -5912,7 +5918,7 @@ function EventScheduleContent() {
   const showLifecycleStatusSelect = isEditingEvent && !isTemplateEvent;
   const showDiscardChangesButton = (isEditingEvent || isCreateMode) && hasPendingUnsavedChanges;
   const eventFormRenderKey = isCreateMode
-    ? `create:${activeEvent?.$id ?? eventId ?? 'event'}:${templateSeedKey}:${editorSnapshot?.editorRevision ?? 'loading'}:${eventFormResetVersion}`
+    ? `create:${activeEvent?.$id ?? eventId ?? 'event'}:${templateBootstrapKey}:${editorSnapshot?.editorRevision ?? 'loading'}:${eventFormResetVersion}`
     : `event:${activeEvent?.$id ?? eventId ?? 'event'}:${editorSnapshot?.editorRevision ?? 'loading'}:${eventFormResetVersion}`;
 
   return (

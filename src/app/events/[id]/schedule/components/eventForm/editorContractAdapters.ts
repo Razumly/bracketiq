@@ -45,6 +45,30 @@ const objectArray = (value: unknown): Record<string, unknown>[] => (
       .map((entry) => ({ ...entry }))
     : []
 );
+const normalizeFieldRelationMetadata = (field: Record<string, unknown>): Record<string, unknown> => {
+  const organization = field.organization;
+  const organizationId = nullableString(field.organizationId)
+    ?? (typeof organization === 'string'
+      ? nullableString(organization)
+      : organization && typeof organization === 'object'
+        ? nullableString((organization as Record<string, unknown>).$id)
+          ?? nullableString((organization as Record<string, unknown>).id)
+        : null);
+  const facility = field.facility;
+  const facilityName = nullableString(field.facilityName)
+    ?? (typeof facility === 'string'
+      ? nullableString(facility)
+      : facility && typeof facility === 'object'
+        ? nullableString((facility as Record<string, unknown>).name)
+          ?? nullableString((facility as Record<string, unknown>).location)
+          ?? nullableString((facility as Record<string, unknown>).address)
+        : null);
+  return {
+    ...field,
+    ...(organizationId ? { organizationId } : {}),
+    ...(facilityName ? { facilityName } : {}),
+  };
+};
 
 
 const asIsoDateTime = (value: unknown, fallback: string): string => {
@@ -97,7 +121,7 @@ const draftFromRecord = (
   const generatedEnd = explicitScheduleEndConstraint
     ? false
     : explicitGeneratedScheduleEnd !== null || booleanValue(event.noFixedEndDateTime, false);
-  const rawFields = objectArray(event.fields);
+  const rawFields = objectArray(event.fields).map(normalizeFieldRelationMetadata);
   const rawFieldIds = stringArray(
     Array.isArray(event.fieldIds) && event.fieldIds.length > 0 ? event.fieldIds : event.selectedFieldIds,
   );
@@ -118,11 +142,13 @@ const draftFromRecord = (
   );
   const eventId = nullableString(event.$id) ?? nullableString(event.id);
   const normalizedSchedulingMode = stringValue(event.officialSchedulingMode).toUpperCase();
-  const officialSchedulingMode = normalizedSchedulingMode === 'TEAM_STAFFING'
-    ? 'TEAM_STAFFING'
-    : normalizedSchedulingMode === 'STAFFING'
-      ? 'STAFFING'
-      : 'SCHEDULE';
+  const officialSchedulingMode = normalizedSchedulingMode === 'OFF'
+    ? 'OFF'
+    : normalizedSchedulingMode === 'TEAM_STAFFING'
+      ? 'TEAM_STAFFING'
+      : normalizedSchedulingMode === 'STAFFING'
+        ? 'STAFFING'
+        : 'SCHEDULE';
   const normalizedOfficialIds = stringArray(event.officialIds);
   const eventOfficials = objectArray(event.eventOfficials).length > 0
     ? objectArray(event.eventOfficials)

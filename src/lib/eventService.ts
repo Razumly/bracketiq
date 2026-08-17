@@ -19,7 +19,6 @@ import {
   Invite,
   getTeamAvatarUrl,
   normalizePayloadIdentifiers,
-  toEventPayload,
 } from "@/types";
 import type { RegistrationQuestionAnswerInput, TeamPlayerRegistration } from "@/types";
 import { ensureLocalDateTimeString } from "@/lib/dateUtils";
@@ -32,7 +31,6 @@ import { LeagueScheduleResponse } from "./leagueService";
 import {
   normalizeApiEvent,
   normalizeApiMatch,
-  stripApiCompatibilityFields,
 } from "./apiMappers";
 import { resolveOrganizationVerificationStatus } from "@/lib/organizationVerification";
 import { normalizeBracketSeed } from "@/lib/bracketSeeds";
@@ -252,23 +250,6 @@ const recentPaginatedEventsResponses = new Map<
   { page: PaginatedEventsPage; expiresAt: number }
 >();
 
-const normalizeNewFieldPayload = (field: unknown): Record<string, unknown> => {
-  if (!field || typeof field !== "object" || Array.isArray(field)) {
-    return {};
-  }
-
-  const normalizedField = { ...(field as Record<string, unknown>) };
-  const id =
-    typeof normalizedField.id === "string" && normalizedField.id.trim().length > 0
-      ? normalizedField.id.trim()
-      : null;
-
-  if (id) {
-    normalizedField.id = id;
-  }
-
-  return normalizedField;
-};
 
 class EventService {
   private resolveSportFromMap(
@@ -481,29 +462,6 @@ class EventService {
     return this.getEvent(id);
   }
 
-  async updateEventParticipants(
-    eventId: string,
-    updates: { userIds: string[]; teamIds: string[] },
-  ): Promise<Event> {
-    try {
-      const response = await apiRequest<any>(`/api/events/${eventId}`, {
-        method: "PATCH",
-        body: { event: updates },
-      });
-
-      const hydrated = await this.getEvent(eventId);
-      if (hydrated) {
-        return hydrated;
-      }
-
-      await this.ensureSportRelationship(response);
-      await this.ensureLeagueScoringConfig(response);
-      return this.mapRowToEvent(response);
-    } catch (error) {
-      console.error("Failed to update event participants:", error);
-      throw error;
-    }
-  }
 
   async getEventParticipants(
     eventId: string,
@@ -654,133 +612,10 @@ class EventService {
     }
   }
 
-  async updateEvent(
-    eventId: string,
-    eventData: Partial<Event>,
-    options: {
-      fields?: Field[];
-      timeSlots?: TimeSlot[];
-      leagueScoringConfig?: LeagueScoringConfig | null;
-      omitStaffAssignments?: boolean;
-      expectedStaffRevision?: string | null;
-    } = {},
-  ): Promise<Event> {
-    try {
-      const hasFieldsOverride = Object.prototype.hasOwnProperty.call(
-        options,
-        "fields",
-      );
-      const hasTimeSlotsOverride = Object.prototype.hasOwnProperty.call(
-        options,
-        "timeSlots",
-      );
-      const hasLeagueScoringConfigOverride =
-        Object.prototype.hasOwnProperty.call(options, "leagueScoringConfig");
-      const payloadSource = {
-        ...(eventData as Event),
-        ...(hasFieldsOverride ? { fields: options.fields } : {}),
-        ...(hasTimeSlotsOverride ? { timeSlots: options.timeSlots } : {}),
-      } as Event;
-      const payload = stripApiCompatibilityFields(
-        toEventPayload(payloadSource),
-      ) as Record<string, unknown>;
-      [
-        "matches",
-        "teams",
-        "organization",
-        "sport",
-        "players",
-        "officials",
-        "assistantHosts",
-        "staffInvites",
-        "waitList",
-        "freeAgents",
-        "attendees",
-        "participantCount",
-        "participantCapacity",
-        "resolvedMatchRules",
-        "id",
-        "$id",
-        "createdAt",
-        "$createdAt",
-        "updatedAt",
-        "$updatedAt",
-        "organizationId",
-        "parentEvent",
-        "affiliateActionUrl",
-        "sourceUrl",
-        "organizerName",
-        "scheduleText",
-        "dateDisplayMode",
-        "dateDisplayText",
-        "priceText",
-        "statusText",
-        "fieldCount",
-        "status",
-        "leagueConfig",
-        "refType",
-        "officialIds",
-        "sourceType",
-        "sourceId",
-        "rentalBookingId",
-        "rentalBookingItemId",
-      ].forEach((key) => {
-        delete payload[key];
-      });
-
-      if (!hasFieldsOverride) {
-        delete payload.fields;
-      }
-      if (!hasTimeSlotsOverride) {
-        delete payload.timeSlots;
-      }
-      if (hasLeagueScoringConfigOverride) {
-        payload.leagueScoringConfig = stripApiCompatibilityFields(
-          normalizePayloadIdentifiers(options.leagueScoringConfig),
-        );
-      }
-      if (options.omitStaffAssignments) {
-        delete payload.assistantHostIds;
-        delete payload.officialIds;
-        delete payload.eventOfficials;
-        delete payload.staffInvites;
-        delete payload.pendingStaffInvites;
-      }
-
-      const response = await apiRequest<any>(`/api/events/${eventId}`, {
-        method: "PATCH",
-        body: {
-          event: payload,
-          ...(options.omitStaffAssignments
-            ? {
-                preserveStaffAssignments: true,
-                expectedStaffRevision: options.expectedStaffRevision,
-              }
-            : {}),
-        },
-      });
-
-      const hydrated = await this.getEvent(eventId);
-      if (hydrated) {
-        return hydrated;
-      }
-
-      if (response?.$id || response?.id) {
-        return this.mapRowToEvent(response);
-      }
-
-      throw new Error("Failed to hydrate updated event");
-    } catch (error) {
-      console.error("Failed to update event:", error);
-      throw error;
-    }
-  }
 
   async deleteEventResult(event: Event): Promise<DeleteOrArchiveResult> {
     try {
-      const normalizedEvent = this.withNormalizedOfficials(
-        this.withNormalizedEventEnums(event),
-      );
+      const normalizedEvent = this.withNormalizedOfficials(event);
       const payload = buildPayload(normalizedEvent);
       delete payload.officialIds;
       const response = await apiRequest<{ deleted?: boolean; archived?: boolean; error?: string }>(`/api/events/${event.$id}`, {
@@ -990,95 +825,6 @@ class EventService {
     };
   }
 
-  async createEvent(newEvent: Partial<Event>): Promise<Event> {
-    try {
-      const normalizedEvent = this.withNormalizedOfficials(
-        this.withNormalizedEventEnums(newEvent),
-      );
-      const payload = toEventPayload(normalizedEvent as Event) as Record<
-        string,
-        unknown
-      >;
-      delete payload.officialIds;
-      const eventId = (() => {
-        const fromId = typeof payload.id === "string" ? payload.id.trim() : "";
-        if (fromId) {
-          return fromId;
-        }
-        return createId();
-      })();
-
-      const newFields = Array.isArray(payload.fields)
-        ? payload.fields.map((field) => normalizeNewFieldPayload(field))
-        : undefined;
-      const timeSlots = Array.isArray(payload.timeSlots)
-        ? payload.timeSlots
-        : undefined;
-      const leagueScoringConfig = Object.prototype.hasOwnProperty.call(
-        payload,
-        "leagueScoringConfig",
-      )
-        ? payload.leagueScoringConfig
-        : undefined;
-
-      delete payload.id;
-      delete payload.matches;
-      delete payload.fields;
-      delete payload.teams;
-      delete payload.timeSlots;
-      delete payload.organization;
-      delete payload.sport;
-      delete payload.players;
-      delete payload.officials;
-      delete payload.assistantHosts;
-      delete payload.staffInvites;
-      delete payload.createdAt;
-      delete payload.$createdAt;
-      delete payload.updatedAt;
-      delete payload.$updatedAt;
-      delete payload.parentEvent;
-      delete payload.leagueScoringConfig;
-
-      const response = await apiRequest<any>("/api/events", {
-        method: "POST",
-        body: {
-          id: eventId,
-          event: payload,
-          ...(newFields?.length ? { newFields } : {}),
-          ...(timeSlots?.length ? { timeSlots } : {}),
-          ...(leagueScoringConfig !== undefined ? { leagueScoringConfig } : {}),
-        },
-      });
-
-      const createdEvent = response?.event ?? response;
-      if (createdEvent?.$id || createdEvent?.id) {
-        return await this.mapRowFromDatabase(createdEvent, true);
-      }
-
-      const createdEventId = response?.eventId ?? response?.id;
-      if (createdEventId) {
-        const hydrated = await this.getEvent(String(createdEventId));
-        if (hydrated) {
-          return hydrated;
-        }
-      }
-
-      throw new Error("Failed to hydrate created event");
-    } catch (error) {
-      console.error("Failed to create event:", error);
-      throw error;
-    }
-  }
-
-  private withNormalizedEventEnums<T extends Partial<Event>>(event: T): T {
-    const normalizedEventType = normalizeEnumValue(event.eventType);
-    return {
-      ...event,
-      ...(normalizedEventType
-        ? { eventType: normalizedEventType as Event["eventType"] }
-        : {}),
-    };
-  }
 
   private withNormalizedOfficials<T extends Partial<Event>>(event: T): T {
     const officialPositions = this.mapEventOfficialPositions(

@@ -27,6 +27,18 @@ The result is visible in these workflows: open an existing event and save no cha
 - [ ] (2026-08-09) Authenticated browser smoke remains blocked: the direct Next page reached successfully, but login/editor bootstrap returned 500 because local Postgres refused connections and Docker was unavailable.
 - [x] (2026-08-09) Added an editor-boundary projection for division details so hydrated form metadata cannot cross the strict save command; regression coverage now parses league and playoff division payloads with those fields present.
 
+- [x] (2026-08-10) Generalized the web contract-owned nested projection for fields, time slots, tags, manual payment links, official positions, officials, staff invites, and intentionally open rule records. Strict command parsing remains unchanged.
+- [x] (2026-08-10) Added create bootstrap `start` support and the version-2 create envelope with a durable `createOperationId`.
+- [x] (2026-08-10) Added atomic create-operation claiming, canonical request hashing, immutable result replay, actor/payload conflict handling, and transactional event/resource/question/staff persistence with durable staff-delivery metadata.
+- [x] (2026-08-10) Migrated web create retries to a frozen pending command and migrated Kotlin create/edit/schedule flows to typed editor sessions, canonical snapshot replacement, typed errors, and one editor mutation per action.
+- [x] (2026-08-10) Removed broad event authoring routes, legacy web/mobile authoring methods and DTOs, seed/save paths, separate editor question/staff writes, and unused compatibility aliases after caller audits. Retained routes have named non-editor callers.
+- [x] (2026-08-10) Focused web verification passes: 6 suites and 115 tests for nested projection, editor routes, schedule-page behavior, template snapshots, event service, and the focused host route. Mobile create, editor, navigation, repository, and integration harness verification passes with the Android debug unit-test task; external backend integration is environment-gated.
+- [x] (2026-08-10) Final web verification passed: `npx tsc --noEmit` and `npm run test:ci`; route coverage reported 321 API files with 64.90% statements, above the 64% floor.
+- [x] (2026-08-10) Final mobile verification passed with `ANDROID_HOME`/`ANDROID_SDK_ROOT` set and stable single-worker JVM settings: `:composeApp:testDebugUnitTest` completed successfully. Mobile backend integration classes reported skipped because `MVP_TEST_BACKEND_URL` was not set; when an explicit backend is configured, editor bootstrap contract failures remain test failures.
+
+- [x] (2026-08-10) Tightened mobile auto-seed readiness so only seed failures are converted to fixture-unavailable skips; post-seed editor bootstrap contract failures propagate. Added regression coverage for seed failure, successful readiness checks, and post-seed contract failure propagation.
+- [x] (2026-08-10) Re-ran the two event-lifecycle tests, the league-playoff integration test, and the paid team-registration integration test against the seeded worktree backend on port 3011. All four tests passed with one worker.
+
 ## Surprises & Discoveries
 - Observation: `DivisionDetailForm` includes hydrated `skillDivisionTypeName`, `ageDivisionTypeName`, and `sportId` values that are not part of the strict editor command.
   Evidence: The form-to-draft adapter previously copied division records unchanged, so any division-enabled create or edit could be rejected as `INVALID_EDITOR_COMMAND` by the strict route schema. The adapter now allowlists the canonical division fields before building the draft.
@@ -57,12 +69,22 @@ The result is visible in these workflows: open an existing event and save no cha
 
 - Observation: File size is a warning but not the root cause.
   Evidence: `src/app/events/[id]/schedule/page.tsx`, `src/lib/eventService.ts`, and both event routes remain large. More file splitting alone will not remove duplicate contracts or make a no-change save safe.
+- Observation: Cross-client migration exposed a second ownership boundary.
+  Evidence: A Kotlin `Event` projection cannot reconstruct web-only canonical fields without risking data loss. The mobile mapper now starts from `EventEditorSnapshot.draft`, overlays only changed mobile-owned values, and derives refreshed state only from the returned snapshot.
+
+- Observation: Create retries need durable identity, not only child-row identities.
+  Evidence: A lost response after event creation can otherwise allocate a second event on retry. The create bootstrap now supplies one operation ID, the client freezes the command before submission, and the server stores the canonical result for replay.
+
+- Observation: Legacy authoring compatibility had no current consumer after migration.
+  Evidence: Web and mobile caller audits found no remaining broad create/update authoring calls. The broad mutation routes, seed path, DTOs, aliases, and editor-only follow-up writes were removed; retained focused routes have non-editor callers.
+
 
 ## Decision Log
 
-- Decision: Use an additive migration with compatibility adapters.
-  Rationale: The current editor supports many event types, rental flows, and scheduling paths. Keeping the old route available while the new contract is tested reduces regression risk and permits milestone-level verification.
-  Date/Author: 2026-08-09 / Codex
+- Decision: Complete the editor migration with a clean cutover after caller audits.
+  Rationale: The deployment has no external authoring consumers. Retaining broad `POST /api/events` and `PATCH /api/events/{eventId}` would preserve two write contracts and permit data-loss regressions. Keep only focused routes with named non-editor callers.
+  Date/Author: 2026-08-10 / Codex
+
 
 - Decision: Introduce `EventEditorSnapshot`, `EventEditorDraft`, and `SaveEventEditorCommand` as separate types.
   Rationale: A server read result, an editable client draft, and a write request have different valid fields. Deriving all three from `Event` recreates the current ambiguity.
@@ -103,10 +125,26 @@ The result is visible in these workflows: open an existing event and save no cha
 - Decision: Separate a user-provided schedule end constraint from the calculated schedule end.
   Rationale: Open-ended scheduling cannot be reliable while one field means both “do not schedule after this time” and “the last generated match ends here.”
   Date/Author: 2026-08-09 / Codex
+- Decision: Make create operations durable and idempotent with an immutable canonical receipt.
+  Rationale: The bootstrap operation ID is stable for one create session. A unique transactional claim, canonical request hash, stored result, and actor/payload conflict policy prevent duplicate events and duplicate post-commit work after retries or response loss.
+  Date/Author: 2026-08-10 / Codex
+
+- Decision: Use the same strict editor protocol for web and mobile.
+  Rationale: Mobile must not rebuild a complete command from its incomplete `Event` read model. Both clients start from the server snapshot, project only exposed edits, send questions/staff in the atomic command, and adopt the returned canonical snapshot.
+  Date/Author: 2026-08-10 / Codex
+
+- Decision: Treat failed staff email delivery as committed-save warning metadata.
+  Rationale: Database state and the canonical editor result must not roll back because a post-commit email provider failed. The first create claimant records delivery status; replays return it without invoking delivery hooks again.
+  Date/Author: 2026-08-10 / Codex
+
 
 ## Outcomes & Retrospective
 
-Implementation is complete through the editor snapshot, strict save command, transactional persistence, scheduler end/timing separation, explicit save-versus-schedule result boundaries, and the read-only form draft callback contract. The form no longer takes a hydrated `Event`, emits partial event writes, or exposes a draft getter through its imperative ref; legacy conversion is confined to compatibility edges. Focused editor, contract, API, and scheduler suites pass 356 tests across 15 suites, and TypeScript passes. Targeted ESLint reports zero errors in milestone files with seven pre-existing warnings. Authenticated browser smoke remains blocked by unavailable local database services.
+The cross-client editor migration is complete. Web and mobile use version-2 editor bootstrap, snapshot, strict command, canonical result, and separate schedule contracts. Web nested projections strip hydrated relation keys before strict parsing. Create sessions freeze one command and replay through a durable operation receipt. Mobile create, edit, template, rental, staff, question, and schedule flows use typed editor sessions and no longer rebuild authoring requests from `Event`.
+
+The broad event authoring mutations and obsolete seed/save paths are removed after caller audits. Focused reads, deletion, schedule, match, question, staff, and template workflows remain only where current non-editor callers use them. Staff delivery failure remains warning metadata after a committed save.
+
+Focused web verification passed 6 suites and 115 tests, including nested projection, editor routes, schedule-page behavior, template snapshots, event service, and the focused host route. Mobile Android debug unit-test verification passed for the create/editor/navigation/repository changes and integration coverage. Full authenticated browser smoke remains blocked by unavailable local Postgres/Docker services, as recorded above.
 
 ## Context and Orientation
 
@@ -230,11 +268,11 @@ Add focused scheduler tests for two explicit slots separated by one hour. The sc
 
 ### Milestone 8: Remove compatibility paths and finish validation
 
-After all create and edit entry points use the new routes, remove editor use of `Partial<Event>`, `toEventPayload`, `buildEventDraft`, `changesEvent`, separate registration-question save calls, separate staff save calls, and initialization effects that mutate draft fields. Keep public read-model mapping and non-editor APIs that still need `Event`.
+Completed on 2026-08-10. All web and mobile create/edit entry points use the version-2 editor protocol. The contract-owned projector removes hydrated relation keys before strict parsing. The web create session freezes one command and the server durably replays its canonical result. Mobile uses typed editor sessions and snapshot-based mutation projection.
 
-Replace `z.record(..., z.unknown())` on editor create and edit with the shared strict command schemas. Mark the old editor mutation path deprecated, add a test that prevents new schedule-page imports from using it, and remove it when no consumer remains.
+The broad `POST /api/events` and `PATCH /api/events/{eventId}` authoring mutations, template seed route, legacy authoring DTOs and repository methods, seeded-event navigation, separate editor question/staff writes, and unused compatibility aliases are removed. Retained focused routes have named non-editor callers. Schedule generation remains a separate operation.
 
-Update relevant plans and architecture documentation with the final contract, route ownership, compatibility fields, and migration status. Record exact test output and browser evidence in this plan.
+The architecture plan records the final route ownership, create-operation receipt contract, mobile projection boundary, staff-delivery warning behavior, verification output, and the unavailable authenticated browser prerequisite.
 
 ## Concrete Steps
 
@@ -310,22 +348,24 @@ TypeScript, lint, focused tests, Prisma validation, and the final CI test comman
 
 ## Idempotence and Recovery
 
-The bootstrap routes are read-only. Save commands are complete desired-state commands with revision checks. Repeating a command against the returned canonical revision is safe and does not accumulate child rows.
+Create bootstrap is read-only and returns one operation ID for one create session. The client stores a frozen command before the first POST. Network, 5xx, and response-loss retries resend that command unchanged. A definitive pre-claim validation or authorization rejection may return to editing; an ambiguous failure must recover the original receipt before any new edit.
 
-The migration is additive. Keep legacy `end` and `noFixedEndDateTime` fields until every deployed client reads the new effective schedule fields. Backfill SQL must be deterministic and safe to rerun as a guarded update. Do not drop compatibility columns in the same release.
+The server claims the operation ID atomically, hashes the complete canonical command excluding that ID, and stores the immutable canonical result with status 201 in the same transaction as event, resource, question, and staff persistence. Same actor plus same hash replays the receipt. A different hash returns `CREATE_OPERATION_PAYLOAD_MISMATCH`; a different actor returns `CREATE_OPERATION_CONFLICT`. Failed transactions leave no receipt or domain rows.
 
-Keep the old editor route available until the new create and edit matrix passes. If a milestone fails, disable the new entry point and continue using the old path while retaining additive contracts and tests. Do not attempt to translate a partially saved client draft back into the old route automatically.
+Edit saves use complete desired-state commands with editor and staff revisions. Successful saves replace client state from the returned canonical snapshot. Schedule replacement remains candidate-first and transactional; a failed schedule leaves prior matches intact and reports a separate schedule failure.
 
-Schedule replacement must use a candidate-first transaction. A failed candidate leaves existing matches untouched. Retrying uses the same saved canonical configuration.
+Compatibility is a clean cutover, not a fallback strategy. Do not reintroduce broad authoring routes, legacy DTOs, seed paths, or request reconstruction from `Event`. Retained focused mutations require a current non-editor caller.
 
 Do not use destructive Git commands. Do not edit or deploy production data as part of implementation validation. Preserve unrelated working-tree changes and stage only files owned by the active milestone.
+
 
 ## Artifacts and Notes
 
 The intended save success shape is equivalent to:
 
     {
-      "contractVersion": 1,
+      "contractVersion": 2,
+      "createOperationId": "<stable create-session operation ID>",
       "status": "SAVED",
       "snapshot": {
         "eventId": "event_1",
@@ -365,11 +405,20 @@ Use the existing `zod`, `react-hook-form`, Prisma, permission, event-lock, sched
 
 `src/contracts/eventEditor.ts` must export interfaces equivalent to:
 
+    EventEditorCreateBootstrapSchema
     EventEditorSnapshotSchema
     EventEditorDraftSchema
     SaveEventEditorCommandSchema
     CreateEventEditorCommandSchema
     EventEditorSaveResultSchema
+    EventEditorErrorSchema
+
+The create protocol must also expose:
+
+    GET /api/events/editor
+    POST /api/events/editor
+    src/server/events/eventCreateOperationReplay.ts
+
 
 `src/server/events/eventEditorSnapshot.ts` must expose:
 
@@ -392,4 +441,6 @@ The form boundary must become equivalent to:
 
 The form must not accept a hydrated `Event`, emit `Partial<Event>`, expose `getDraft` through an imperative ref, or establish a dirty baseline from locally normalized values after the migration completes.
 
-Plan revision note (2026-08-09): Created the initial architecture-hardening plan after tracing the current event editor from bootstrap through form initialization, draft building, client serialization, API validation, repository persistence, question and staff reconciliation, and schedule generation. The plan uses additive contracts and milestone-level compatibility because the earlier file split improved maintainability but did not remove the data ownership and save-boundary risks.
+Plan revision note (2026-08-09): Created the initial architecture-hardening plan after tracing the event editor from bootstrap through form initialization, draft building, client serialization, API validation, repository persistence, question and staff reconciliation, and schedule generation. The initial plan used additive compatibility because the form migration was incomplete.
+
+Plan revision note (2026-08-10): Completed the cross-client clean cutover. Web nested projection, version-2 create bootstrap, durable idempotent create replay, mobile snapshot-based editor sessions, focused-route caller audit, broad authoring-path removal, and final verification are recorded above. Authenticated browser smoke remains blocked by unavailable local Postgres/Docker services.

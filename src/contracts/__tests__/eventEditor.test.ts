@@ -209,6 +209,19 @@ describe('event editor contracts', () => {
     expect(roundTrip.priceCents).toBe(priceCents);
   });
 
+  it('preserves OFF official scheduling mode through the strict draft projection', () => {
+    const parsed = eventEditorDraftSchema.parse({
+      ...draft,
+      staff: {
+        ...draft.staff,
+        officialSchedulingMode: 'OFF',
+      },
+    });
+    expect(parsed.staff.officialSchedulingMode).toBe('OFF');
+    expect(legacyEventToEditorDraft({ officialSchedulingMode: 'OFF' } as unknown as Event).staff.officialSchedulingMode)
+      .toBe('OFF');
+  });
+
   it('derives segmented match duration from editable timing rules', () => {
     const event = {
       name: 'Timed event',

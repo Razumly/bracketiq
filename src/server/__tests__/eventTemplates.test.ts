@@ -3,8 +3,8 @@ jest.mock('@/lib/prisma', () => ({
 }));
 
 import {
-  buildSeedEventFromTemplate,
-  serializeSeedEvent,
+  buildEventDraftFromTemplate,
+  serializeEditorEvent,
   mapSourceEventToTemplateBundle,
 } from '@/server/eventTemplates';
 import {
@@ -216,7 +216,7 @@ describe('dedicated event templates', () => {
       pointsPerSetWin: 0.5,
     }));
 
-    const seeded = buildSeedEventFromTemplate(bundle, {
+    const seeded = buildEventDraftFromTemplate(bundle, {
       newEventId: 'event_new',
       newStartDate: new Date('2026-02-02T10:00:00'),
       hostId: 'host_2',
@@ -253,7 +253,7 @@ describe('dedicated event templates', () => {
       expect.objectContaining({ fieldId: 'field_rental_a', fieldName: 'Rental Court A' }),
     ]);
 
-    const responseEvent = serializeSeedEvent(seeded);
+    const responseEvent = serializeEditorEvent(seeded);
     expect(responseEvent.id).toBe('event_new');
     expect(responseEvent.sport).toEqual(expect.objectContaining({ id: 'sport_1' }));
     expect(responseEvent.timeSlots).toEqual(expect.arrayContaining([

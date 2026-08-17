@@ -12,7 +12,7 @@ import {
 import { legacyEventToEditorDraft } from '@/app/events/[id]/schedule/components/eventForm/editorContractAdapters';
 import { loadEventStaffSnapshot } from './eventStaffReconciliation';
 import { listRegistrationQuestions } from '@/server/registrationQuestions';
-import { buildSeedEventFromTemplate } from '@/server/eventTemplates';
+import { buildEventDraftFromTemplate } from '@/server/eventTemplates';
 
 export type EditorActor = {
   userId: string;
@@ -299,7 +299,7 @@ const loadCreateSourceEvent = async (
         callFindMany(client, 'eventTemplateRentalResourceHints', { where: { templateId: query.templateId } }),
         callFindUnique(client, 'eventTemplateLeagueScoringConfigs', { where: { eventTemplateId: query.templateId } }),
       ]);
-      const seeded = buildSeedEventFromTemplate({
+      const seeded = buildEventDraftFromTemplate({
         template,
         resources,
         timeSlots,

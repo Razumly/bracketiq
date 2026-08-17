@@ -31,6 +31,7 @@ const editorFieldSchema = z.object({
   archiveReason: optionalString,
   organizationId: optionalString,
   facilityId: optionalString,
+  facilityName: optionalString,
   latitude: optionalNumber,
   longitude: optionalNumber,
 }).strict();
@@ -172,7 +173,7 @@ const editorNestedRecordKeys = {
   fields: [
     'id', '$id', 'name', 'location', 'address', 'lat', 'long', 'heading', 'inUse',
     'rentalSlotIds', 'sportIds', 'createdBy', 'archivedAt', 'archivedByUserId',
-    'archiveReason', 'organizationId', 'facilityId', 'latitude', 'longitude',
+    'archiveReason', 'organizationId', 'facilityId', 'facilityName', 'latitude', 'longitude',
   ],
   timeSlots: [
     'id', '$id', 'eventId', 'archivedAt', 'archivedByUserId', 'archiveReason',
@@ -198,7 +199,7 @@ const editorNestedRecordKeys = {
   officialPositions: ['id', 'name', 'count', 'order'],
   eventOfficials: ['id', 'userId', 'positionIds', 'fieldIds', 'isActive'],
   pendingInvites: [
-    'id', 'createdAt', 'updatedAt', 'sentAt', 'email', 'firstName', 'lastName',
+    'id', '$id', 'createdAt', 'updatedAt', 'sentAt', 'email', 'firstName', 'lastName',
     'roles', 'staffTypes', 'resolvedUserId', 'userId', 'type', 'status', 'eventId',
     'organizationId', 'teamId', 'createdBy',
   ],
@@ -389,7 +390,7 @@ export const editorResourcesSchema = z.object({
 }).strict();
 
 export const editorStaffSchema = z.object({
-  officialSchedulingMode: z.enum(['SCHEDULE', 'STAFFING', 'TEAM_STAFFING']),
+  officialSchedulingMode: z.enum(['OFF', 'SCHEDULE', 'STAFFING', 'TEAM_STAFFING']),
   teamOfficialsMaySwap: z.boolean(),
   teamCheckInMode: z.enum(['OFF', 'EVENT', 'MATCH']),
   teamCheckInOpenMinutesBefore: z.number().int().nonnegative(),

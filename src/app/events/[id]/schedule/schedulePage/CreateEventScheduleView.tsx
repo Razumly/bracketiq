@@ -71,7 +71,7 @@ type CreateEventScheduleViewProps = {
   user: UserData | null;
   event: import('@/types').Event | null;
   editorSnapshot: EventEditorSnapshot | null;
-  templateSeedKey: number;
+  templateBootstrapKey: number;
   eventFormRef: Ref<EventFormHandle>;
   onEventFormClose: () => void;
   onDraftStateChange: (state: { draft: EventEditorDraft; baselineDraft: EventEditorDraft }) => void;
@@ -123,7 +123,7 @@ export default function CreateEventScheduleView({
   user,
   event,
   editorSnapshot,
-  templateSeedKey,
+  templateBootstrapKey,
   eventFormRef,
   onEventFormClose,
   onDraftStateChange,
@@ -137,7 +137,7 @@ export default function CreateEventScheduleView({
 }: CreateEventScheduleViewProps) {
   const [directTemplateId, setDirectTemplateId] = useState<string | null>(null);
   const [dismissedDirectTemplateId, setDismissedDirectTemplateId] = useState<string | null>(null);
-  const validityKey = `${templateSeedKey}:${editorSnapshot?.editorRevision ?? ''}`;
+  const validityKey = `${templateBootstrapKey}:${editorSnapshot?.editorRevision ?? ''}`;
   const [validity, setValidity] = useState({ key: '', isValid: false });
   const canCreateEvent = validity.key === validityKey && validity.isValid;
   const handleValidityChange = useCallback((isValid: boolean) => {
@@ -363,7 +363,7 @@ export default function CreateEventScheduleView({
 
           {user && editorSnapshot ? (
             <EventForm
-              key={`create-event-form-${templateSeedKey}`}
+              key={`create-event-form-${templateBootstrapKey}`}
               ref={eventFormRef}
               isOpen
               onClose={onEventFormClose}

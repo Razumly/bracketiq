@@ -8,7 +8,6 @@ import { formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
 import { getFieldResolvedLocation } from '@/lib/fieldUtils';
 import { createClientId } from '@/lib/clientId';
 import { createId } from '@/lib/id';
-import { normalizeApiEvent } from '@/lib/apiMappers';
 import { organizationService } from '@/lib/organizationService';
 import { paymentService } from '@/lib/paymentService';
 import { signedDocumentService } from '@/lib/signedDocumentService';
@@ -29,7 +28,7 @@ import type {
 } from '@/types';
 
 import type { EventFormHandle, EventFormProps } from '../components/EventForm';
-import type { EventEditorDraft } from '@/contracts/eventEditor';
+import type { EventEditorDraft, EventEditorSnapshot } from '@/contracts/eventEditor';
 import { editorDraftToLegacyEvent } from '../components/eventForm/editorContractAdapters';
 import type { RentalCheckoutModalsProps } from './RentalCheckoutModals';
 import {
@@ -45,33 +44,6 @@ import {
 type TemplateSummary = {
   id: string;
   name: string;
-};
-
-const seedEventTemplate = async (
-  templateId: string,
-  params: {
-    newEventId: string;
-    newStartDate: Date;
-  },
-): Promise<Event> => {
-  const response = await apiRequest<{ event?: Event }>(
-    `/api/event-templates/${encodeURIComponent(templateId)}/seed`,
-    {
-      method: 'POST',
-      body: {
-        newEventId: params.newEventId,
-        newStartDate: formatLocalDateTime(params.newStartDate),
-      },
-    },
-  );
-  if (!response?.event) {
-    throw new Error('Template seed response did not include an event.');
-  }
-  const event = normalizeApiEvent(response.event);
-  if (!event) {
-    throw new Error('Template seed response did not include a valid event.');
-  }
-  return event;
 };
 
 export type TemplateRentalResourcePrompt = {
@@ -106,6 +78,17 @@ const buildTemplateRentalResourcePrompt = (
   };
 };
 
+const calendarDayKey = (value: Date | string | null | undefined): string | null => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : parseLocalDateTime(value);
+  if (!date || Number.isNaN(date.getTime())) return null;
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+};
+
 type UseCreateEventFlowParams = {
   isCreateMode: boolean;
   eventId?: string | null;
@@ -113,6 +96,7 @@ type UseCreateEventFlowParams = {
   isGuest: boolean;
   changesEvent: Event | null;
   activeEvent: Event | null;
+  editorSnapshot: EventEditorSnapshot | null;
   activeMatches: Match[];
   hasPendingUnsavedChanges: boolean;
   eventFormRef: RefObject<EventFormHandle | null>;
@@ -154,6 +138,7 @@ export function useCreateEventFlow({
   isGuest,
   changesEvent,
   activeEvent,
+  editorSnapshot,
   activeMatches,
   hasPendingUnsavedChanges,
   eventFormRef,
@@ -188,7 +173,6 @@ export function useCreateEventFlow({
   setActionError,
 }: UseCreateEventFlowParams) {
   const templatePromptResolvedRef = useRef(false);
-  const templateIdSeedResolvedRef = useRef<string | null>(null);
   const templateRentalResourcePromptDismissedRef = useRef(false);
 
   const [organizationForCreate, setOrganizationForCreate] = useState<Organization | null>(null);
@@ -200,8 +184,7 @@ export function useCreateEventFlow({
   const [templatePromptOpen, setTemplatePromptOpen] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [selectedTemplateStartDate, setSelectedTemplateStartDate] = useState<Date | null>(null);
-  const [templateSeedKey, setTemplateSeedKey] = useState(0);
-  const [failedTemplateSeedId, setFailedTemplateSeedId] = useState<string | null>(null);
+  const [templateBootstrapKey, setTemplateBootstrapKey] = useState(0);
   const [applyingTemplate, setApplyingTemplate] = useState(false);
   const [templateRentalResourcePrompt, setTemplateRentalResourcePrompt] = useState<TemplateRentalResourcePrompt | null>(null);
 
@@ -449,20 +432,31 @@ export function useCreateEventFlow({
     [templateSummaries],
   );
 
+  const templateBootstrapReady = useMemo(() => {
+    if (!selectedTemplateId || !selectedTemplateStartDate || !editorSnapshot) {
+      return false;
+    }
+    const requiredTemplateIds = editorSnapshot.draft.resources.requiredTemplateIds;
+    if (!editorSnapshot.immutable.template || !requiredTemplateIds.includes(selectedTemplateId)) {
+      return false;
+    }
+    const selectedDay = calendarDayKey(selectedTemplateStartDate);
+    const snapshotDay = calendarDayKey(editorSnapshot.draft.basics.start);
+    return !selectedDay || !snapshotDay || selectedDay === snapshotDay;
+  }, [editorSnapshot, selectedTemplateId, selectedTemplateStartDate]);
+
   const closeTemplatePrompt = useCallback(() => {
     templatePromptResolvedRef.current = true;
     setTemplatePromptOpen(false);
+    setSelectedTemplateId(null);
+    setSelectedTemplateStartDate(null);
   }, []);
 
   useEffect(() => {
     if (!isCreateMode) {
       return;
     }
-    if (templateIdParam && templateIdSeedResolvedRef.current === templateIdParam) {
-      return;
-    }
     templatePromptResolvedRef.current = false;
-    templateIdSeedResolvedRef.current = null;
     templateRentalResourcePromptDismissedRef.current = false;
     setTemplatePromptOpen(Boolean(templateIdParam));
     setTemplateSummaries([]);
@@ -470,34 +464,18 @@ export function useCreateEventFlow({
     setSelectedTemplateId(templateIdParam ?? null);
     setSelectedTemplateStartDate(null);
     setTemplatesError(null);
-    setFailedTemplateSeedId(null);
+    setApplyingTemplate(false);
   }, [eventId, isCreateMode, resolvedHostOrgId, templateIdParam]);
 
   useEffect(() => {
-    if (!isCreateMode || !eventId || !user?.$id || !templateIdParam) {
+    if (!applyingTemplate || !templateBootstrapReady) {
       return;
     }
-    if (
-      templateIdSeedResolvedRef.current === templateIdParam
-      || templatePromptResolvedRef.current
-    ) {
-      return;
-    }
-
-    setTemplatesError(null);
-    setActionError(null);
-    setFailedTemplateSeedId(null);
-    setSelectedTemplateId(templateIdParam);
-    setSelectedTemplateStartDate(null);
-    setTemplatePromptOpen(true);
-  }, [
-    eventId,
-    isCreateMode,
-    resolvedHostOrgId,
-    setActionError,
-    templateIdParam,
-    user?.$id,
-  ]);
+    setApplyingTemplate(false);
+    setTemplateBootstrapKey((previous) => previous + 1);
+    templateRentalResourcePromptDismissedRef.current = false;
+    setTemplatePromptOpen(false);
+  }, [applyingTemplate, templateBootstrapReady]);
 
   const handleApplyTemplate = useCallback(async () => {
     if (!isCreateMode || !user?.$id) {
@@ -518,36 +496,13 @@ export function useCreateEventFlow({
       return false;
     }
 
+    templatePromptResolvedRef.current = true;
     setApplyingTemplate(true);
     setTemplatesError(null);
     setActionError(null);
-
-    try {
-      const seeded = await seedEventTemplate(selectedTemplateId, {
-        newEventId: eventId,
-        newStartDate: selectedTemplateStartDate,
-      });
-
-      setChangesEvent(seeded);
-      templateRentalResourcePromptDismissedRef.current = false;
-      setTemplateRentalResourcePrompt(
-        buildTemplateRentalResourcePrompt(seeded),
-      );
-      setHasUnsavedChanges(false);
-      setFormHasUnsavedChanges(false);
-      setTemplateSeedKey((prev) => prev + 1);
-      if (selectedTemplateId === templateIdParam) {
-        templateIdSeedResolvedRef.current = selectedTemplateId;
-      }
-      closeTemplatePrompt();
-      return true;
-    } catch (error) {
-      console.error('Failed to apply template:', error);
-      setActionError(error instanceof Error ? error.message : 'Failed to apply template.');
-      return false;
-    } finally {
-      setApplyingTemplate(false);
-    }
+    setHasUnsavedChanges(false);
+    setFormHasUnsavedChanges(false);
+    return true;
   }, [
     closeTemplatePrompt,
     eventId,
@@ -555,27 +510,33 @@ export function useCreateEventFlow({
     selectedTemplateId,
     selectedTemplateStartDate,
     setActionError,
-    setChangesEvent,
     setFormHasUnsavedChanges,
     setHasUnsavedChanges,
-    templateIdParam,
     user?.$id,
   ]);
+
+
+  const templateSnapshotEvent = useMemo(
+    () => editorSnapshot
+      ? editorDraftToLegacyEvent(editorSnapshot.draft, editorSnapshot.eventId) as unknown as Event
+      : null,
+    [editorSnapshot],
+  );
 
   useEffect(() => {
     if (
       !isCreateMode
-      || templateRentalResourcePrompt
+      || !editorSnapshot?.immutable.template
+      || !templateSnapshotEvent
       || templateRentalResourcePromptDismissedRef.current
-      || !changesEvent
     ) {
       return;
     }
-    const prompt = buildTemplateRentalResourcePrompt(changesEvent);
+    const prompt = buildTemplateRentalResourcePrompt(templateSnapshotEvent);
     if (prompt) {
       setTemplateRentalResourcePrompt(prompt);
     }
-  }, [changesEvent, isCreateMode, templateRentalResourcePrompt]);
+  }, [editorSnapshot, isCreateMode, templateSnapshotEvent]);
 
   useEffect(() => {
     if (!isCreateMode || !user) return;
@@ -724,7 +685,6 @@ export function useCreateEventFlow({
   }, [
     changesEvent?.start,
     eventId,
-    failedTemplateSeedId,
     isCreateMode,
     isGuest,
     isRentalFlow,
@@ -888,7 +848,6 @@ export function useCreateEventFlow({
     templatePromptOpen: templatePromptOpen || Boolean(
       isCreateMode
       && templateIdParam
-      && templateIdSeedResolvedRef.current !== templateIdParam
       && !templatePromptResolvedRef.current,
     ),
     closeTemplatePrompt,
@@ -899,7 +858,7 @@ export function useCreateEventFlow({
     setSelectedTemplateId,
     selectedTemplateStartDate,
     setSelectedTemplateStartDate,
-    templateSeedKey,
+    templateBootstrapKey,
     templateRentalResourcePrompt,
     dismissTemplateRentalResourcePrompt: () => {
       templateRentalResourcePromptDismissedRef.current = true;

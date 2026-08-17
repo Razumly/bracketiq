@@ -40,7 +40,7 @@ export const getFieldFacilityLabel = (field: Field): string => {
             || normalizeResourceText(facility.location)
             || normalizeResourceText(facility.address);
     }
-    return '';
+    return normalizeResourceText((field as { facilityName?: string | null }).facilityName);
 };
 
 export const getFieldFacilityDescription = (field: Field): string => {
