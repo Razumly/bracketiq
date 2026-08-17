@@ -1,0 +1,105 @@
+@file:OptIn(ExperimentalTime::class)
+
+package com.razumly.mvp.core.presentation.composables
+
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.presentation.PaymentResult
+import com.razumly.mvp.eventMap.MapComponent
+import com.razumly.mvp.eventSearch.EventSearchComponent
+import dev.icerock.moko.geo.LatLng
+import kotlin.time.Instant
+import platform.UIKit.UIViewController
+import kotlin.time.ExperimentalTime
+
+interface NativeViewFactory {
+    fun createNativeStartupSplashViewController(): UIViewController
+
+    fun createNativeDiscoverViewController(
+        component: EventSearchComponent,
+        mapComponent: MapComponent,
+        bottomPadding: Float,
+        shouldShowOnboarding: Boolean,
+        onOnboardingCompleted: () -> Unit,
+    ): UIViewController
+
+    fun updateNativeDiscoverViewController(
+        viewController: UIViewController,
+        bottomPadding: Float,
+        shouldShowOnboarding: Boolean,
+    )
+
+    fun createNativeEventCard(
+        data: NativeEventCardData,
+        bottomPadding: Float,
+        onCardClick: () -> Unit,
+        onMapClick: (x: Float, y: Float) -> Unit,
+    ): UIViewController
+
+    fun updateNativeEventCard(
+        viewController: UIViewController,
+        data: NativeEventCardData,
+        bottomPadding: Float,
+        onCardClick: () -> Unit,
+        onMapClick: (x: Float, y: Float) -> Unit,
+    )
+
+    fun createNativeMapView(
+        component: MapComponent,
+        onEventSelected: (event: Event) -> Unit,
+        onPlaceSelected: (place: MVPPlace) -> Unit,
+        onPlaceSelectionPoint: (x: Float, y: Float) -> Unit,
+        selectionRequiresConfirmation: Boolean,
+        originalPlace: MVPPlace?,
+        selectedPlace: MVPPlace?,
+        onPlaceSelectionCleared: () -> Unit,
+        canClickPOI: Boolean,
+        organizationLogoIdsById: Map<String, String>,
+        focusedLocation: LatLng?,
+        focusedEvent: Event?,
+        showSelectedEventCards: Boolean,
+        recenterRequestToken: Int,
+        locationButtonBottomPadding: Float,
+    ): UIViewController
+
+    fun updateNativeMapView(
+        viewController: UIViewController,
+        component: MapComponent,
+        onEventSelected: (event: Event) -> Unit,
+        onPlaceSelected: (place: MVPPlace) -> Unit,
+        onPlaceSelectionPoint: (x: Float, y: Float) -> Unit,
+        selectionRequiresConfirmation: Boolean,
+        originalPlace: MVPPlace?,
+        selectedPlace: MVPPlace?,
+        onPlaceSelectionCleared: () -> Unit,
+        canClickPOI: Boolean,
+        organizationLogoIdsById: Map<String, String>,
+        focusedLocation: LatLng?,
+        focusedEvent: Event?,
+        showSelectedEventCards: Boolean,
+        recenterRequestToken: Int,
+        locationButtonBottomPadding: Float,
+    )
+
+    fun createNativePlatformDatePicker(
+        initialDate: Instant,
+        minDate: Instant,
+        maxDate: Instant,
+        getTime: Boolean,
+        showDate: Boolean,
+        onDateSelected: (Instant?) -> Unit,
+        onDismissRequest: () -> Unit
+    )
+
+    fun presentStripePaymentSheet(
+        publishableKey: String,
+        customerId: String?,
+        ephemeralKey: String?,
+        paymentIntent: String,
+        billingName: String?,
+        billingEmail: String?,
+        billingAddress: BillingAddressDraft?,
+        onPaymentResult: (PaymentResult) -> Unit
+    )
+}

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="not_official_check_in_message">You are not the official for this match. Would you like to officiate this match?</string>
+    <string name="official_checkin_message">Would you like to check in as official?</string>
+    <string name="official_check_in_title">Official Check-In</string>
+    <string name="previous">Previous</string>
+    <string name="next">Next</string>
+    <string name="create_tournament">Create Tournament</string>
+    <string name="enter_value">Enter a Value</string>
+</resources>

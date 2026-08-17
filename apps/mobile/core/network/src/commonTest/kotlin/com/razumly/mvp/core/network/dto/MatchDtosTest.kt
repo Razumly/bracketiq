@@ -1,0 +1,279 @@
+package com.razumly.mvp.core.network.dto
+
+import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
+import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
+import com.razumly.mvp.core.util.jsonMVP
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
+import kotlin.time.Instant
+
+class MatchDtosTest {
+    @Test
+    fun match_api_dto_maps_structured_official_assignments() {
+        val dto = MatchApiDto(
+            id = "match-1",
+            matchId = 1,
+            eventId = "event-1",
+            officialIds = listOf(
+                MatchOfficialAssignment(
+                    positionId = "position-r1",
+                    slotIndex = 0,
+                    holderType = OfficialAssignmentHolderType.OFFICIAL,
+                    userId = "official-1",
+                    eventOfficialId = "event-official-1",
+                    checkedIn = true,
+                ),
+            ),
+        )
+
+        val match = dto.toMatchOrNull()
+
+        assertNotNull(match)
+        assertEquals(listOf("official-1"), match.officialIds.map(MatchOfficialAssignment::userId))
+        assertEquals(true, match.officialIds.single().checkedIn)
+    }
+
+    @Test
+    fun bulk_match_update_entry_includes_structured_official_assignments() {
+        val match = MatchMVP(
+            id = "match-2",
+            eventId = "event-2",
+            matchId = 2,
+            officialIds = listOf(
+                MatchOfficialAssignment(
+                    positionId = "position-line",
+                    slotIndex = 1,
+                    holderType = OfficialAssignmentHolderType.PLAYER,
+                    userId = "player-1",
+                    checkedIn = false,
+                ),
+            ),
+        )
+
+        val dto = match.toBulkMatchUpdateEntryDto()
+
+        assertEquals(listOf("player-1"), dto.officialIds?.map(MatchOfficialAssignment::userId))
+        assertEquals(OfficialAssignmentHolderType.PLAYER, dto.officialIds?.single()?.holderType)
+    }
+
+    @Test
+    fun match_api_dto_uses_embedded_field_id_when_scalar_field_id_is_missing() {
+        val dto = MatchApiDto(
+            id = "match-3",
+            matchId = 3,
+            eventId = "event-3",
+            field = MatchEmbeddedFieldDto(
+                id = "field-7",
+                name = "Field 7",
+            ),
+        )
+
+        val match = dto.toMatchOrNull()
+
+        assertNotNull(match)
+        assertEquals("field-7", match.fieldId)
+    }
+
+    @Test
+    fun match_api_dto_rejects_offset_less_start_end() {
+        val dto = MatchApiDto(
+            id = "match-4",
+            matchId = 4,
+            eventId = "event-4",
+            start = "2026-07-11T09:30:00",
+            end = "2026-07-11T10:45",
+        )
+
+        assertFailsWith<IllegalArgumentException> {
+            dto.toMatchOrNull()
+        }
+    }
+
+    @Test
+    fun match_api_dto_maps_iso_start_end() {
+        val dto = MatchApiDto(
+            id = "match-4b",
+            matchId = 4,
+            eventId = "event-4",
+            start = "2026-07-11T09:30:00Z",
+            end = "2026-07-11T10:45:00Z",
+        )
+
+        val match = dto.toMatchOrNull()
+
+        assertNotNull(match)
+        assertEquals(Instant.parse("2026-07-11T09:30:00Z"), match.start)
+        assertEquals(Instant.parse("2026-07-11T10:45:00Z"), match.end)
+    }
+
+    @Test
+    fun match_api_dto_preserves_opaque_division_id() {
+        val divisionId = "qa-official-match-camka14-open"
+        val dto = MatchApiDto(
+            id = "match-division",
+            matchId = 5,
+            eventId = "event-division",
+            division = " $divisionId ",
+        )
+
+        val match = dto.toMatchOrNull()
+
+        assertNotNull(match)
+        assertEquals(divisionId, match.division)
+    }
+
+    @Test
+    fun match_api_dto_decodes_object_segment_metadata() {
+        val response = jsonMVP.decodeFromString<MatchResponseDto>(
+            """
+            {
+              "match": {
+                "id": "match-4",
+                "matchId": 4,
+                "eventId": "event-4",
+                "segments": [
+                  {
+                    "id": "segment-1",
+                    "matchId": "match-4",
+                    "sequence": 1,
+                    "metadata": {
+                      "source": "mobile",
+                      "clientOperation": {
+                        "id": "op-1",
+                        "sequence": 6
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+            """.trimIndent(),
+        )
+
+        val match = response.match?.toMatchOrNull()
+
+        assertNotNull(match)
+        val metadata = match.segments.single().metadata
+        assertEquals("mobile", metadata?.get("source"))
+        assertTrue(metadata?.get("clientOperation")?.contains("\"id\":\"op-1\"") == true)
+    }
+
+    @Test
+    fun embedded_field_dto_only_maps_to_field_when_required_field_data_exists() {
+        val partialField = MatchEmbeddedFieldDto(
+            id = "field-7",
+            name = "Field 7",
+        )
+        val completeField = MatchEmbeddedFieldDto(
+            id = "field-8",
+            fieldNumber = 8,
+            name = "Field 8",
+        )
+
+        assertEquals(null, partialField.toFieldOrNull())
+        assertEquals(
+            Field(
+                id = "field-8",
+                fieldNumber = 8,
+                inUse = null,
+                name = "Field 8",
+            ),
+            completeField.toFieldOrNull(),
+        )
+    }
+
+    @Test
+    fun match_operations_json_includes_explicit_nulls_for_timer_reset() {
+        val payload = MatchUpdateDto(
+            lifecycle = MatchLifecycleOperationDto(
+                status = "SCHEDULED",
+                clearActualStart = true,
+                clearActualEnd = true,
+            ),
+            segmentOperations = listOf(
+                MatchSegmentOperationDto(
+                    id = "segment-1",
+                    sequence = 1,
+                    status = "NOT_STARTED",
+                    scores = mapOf("team-1" to 1, "team-2" to 0),
+                    metadata = mapOf("segmentBreakSkippedAt" to "2026-08-04T00:18:00Z"),
+                    clearStartedAt = true,
+                    clearEndedAt = true,
+                ),
+            ),
+        ).toMatchOperationsJsonObject()
+
+        val encoded = jsonMVP.encodeToString(JsonObject.serializer(), payload)
+        val lifecycle = payload["lifecycle"] as JsonObject
+        val segment = (payload["segmentOperations"] as kotlinx.serialization.json.JsonArray).single() as JsonObject
+
+        assertTrue("\"actualStart\":null" in encoded)
+        assertTrue("\"startedAt\":null" in encoded)
+        assertEquals(JsonNull, lifecycle["actualStart"])
+        assertEquals(JsonNull, lifecycle["actualEnd"])
+        assertEquals(JsonNull, segment["startedAt"])
+        assertEquals(JsonNull, segment["endedAt"])
+        assertEquals(
+            "2026-08-04T00:18:00Z",
+            ((segment["metadata"] as JsonObject)["segmentBreakSkippedAt"] as JsonPrimitive).content,
+        )
+    }
+
+    @Test
+    fun match_operations_json_omits_nullable_timer_fields_without_clear_flags() {
+        val payload = MatchUpdateDto(
+            lifecycle = MatchLifecycleOperationDto(status = "IN_PROGRESS"),
+            segmentOperations = listOf(
+                MatchSegmentOperationDto(
+                    sequence = 2,
+                    status = "IN_PROGRESS",
+                ),
+            ),
+        ).toMatchOperationsJsonObject()
+
+        val encoded = jsonMVP.encodeToString(JsonObject.serializer(), payload)
+
+        assertTrue("\"actualStart\"" !in encoded)
+        assertTrue("\"startedAt\"" !in encoded)
+    }
+
+    @Test
+    fun match_operations_json_persists_clock_stops_without_a_paused_status() {
+        val payload = MatchUpdateDto(
+            segmentOperations = listOf(
+                MatchSegmentOperationDto(
+                    sequence = 1,
+                    status = "IN_PROGRESS",
+                    clockStoppedAt = "2026-07-31T20:15:30Z",
+                    clockStoppedDurationSeconds = 12,
+                ),
+                MatchSegmentOperationDto(
+                    sequence = 2,
+                    status = "IN_PROGRESS",
+                    clearClockStoppedAt = true,
+                    clockStoppedDurationSeconds = 18,
+                ),
+            ),
+        ).toMatchOperationsJsonObject()
+
+        val segments = payload["segmentOperations"] as JsonArray
+        val stopped = segments[0] as JsonObject
+        val resumed = segments[1] as JsonObject
+
+        assertEquals("IN_PROGRESS", (stopped["status"] as JsonPrimitive).content)
+        assertEquals("2026-07-31T20:15:30Z", (stopped["clockStoppedAt"] as JsonPrimitive).content)
+        assertEquals(12, (stopped["clockStoppedDurationSeconds"] as JsonPrimitive).content.toInt())
+        assertEquals(JsonNull, resumed["clockStoppedAt"])
+        assertEquals("IN_PROGRESS", (resumed["status"] as JsonPrimitive).content)
+        assertTrue(payload.toString().contains("PAUSED", ignoreCase = true).not())
+    }
+}

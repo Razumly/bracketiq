@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>$(APP_NAME)</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(APP_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.6.21</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.razumly.mvp.deeplink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>mvp</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.razumly.mvp.googleoauth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>$(GOOGLE_REVERSED_CLIENT_ID)</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleVersion</key>
+	<string>85</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>CLIENT_ID</key>
+	<string>49655448987-5mt89kqe079js16hbb4476epf06mhjgp.apps.googleusercontent.com</string>
+	<key>GOOGLE_MAPS_MAP_ID</key>
+	<string>$(GOOGLE_MAPS_MAP_ID)</string>
+	<key>MVP_RELEASE_API_BASE_URL</key>
+	<string>$(MVP_RELEASE_API_BASE_URL)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>This app does not access bluetooth, but a third-party library may require this permission for compatibility.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>This app does not access camera, but a third-party library may require this permission for compatibility.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>This app may access your photo library so you can select and upload photos.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>This app may save images to your photo library when you choose to export or share content.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>BracketIQ uses your contacts only when you choose Add from contacts, so you can find an existing account or prefill one team invitation. Your full address book is not uploaded.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>BracketIQ uses your location only for finding local events while you use the app. Your data is not shared or sold.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>BracketIQ uses your location only for finding local events while you use the app. Your data is not shared or sold.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>This app does not access motion, but a third-party library may require this permission for compatibility.</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>armv7</string>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:bracket-iq.com</string>
+		<string>applinks:www.bracket-iq.com</string>
+	</array>
+</dict>
+</plist>

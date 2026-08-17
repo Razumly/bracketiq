@@ -1,0 +1,64 @@
+package com.razumly.mvp.core.data.dataTypes
+
+import kotlinx.serialization.Serializable
+
+@Serializable
+enum class DivisionCompetitionPhase {
+    LEAGUE,
+    POOL,
+    BRACKET,
+    PLAYOFF,
+}
+
+@Serializable
+data class DivisionPhaseSettingsMVP(
+    val matchRulesOverride: MatchRulesConfigMVP? = null,
+    val autoCreatePointMatchIncidents: Boolean? = null,
+    val segmentLengthMinutes: Int? = null,
+    val segmentBreakMinutes: Int? = null,
+)
+
+@Serializable
+data class DivisionDetail(
+    val id: String,
+    val sourceDivisionId: String? = null,
+    val kind: String? = null,
+    val key: String = "",
+    val name: String = "",
+    val divisionTypeId: String = "",
+    val divisionTypeName: String = "",
+    val ratingType: String = "",
+    val gender: String = "",
+    val skillDivisionTypeId: String = "",
+    val skillDivisionTypeName: String = "",
+    val ageDivisionTypeId: String = "",
+    val ageDivisionTypeName: String = "",
+    // Stored in cents to match backend event/checkout pricing semantics.
+    val price: Int? = null,
+    val maxParticipants: Int? = null,
+    val playoffTeamCount: Int? = null,
+    val poolCount: Int? = null,
+    val poolTeamCount: Int? = null,
+    val allowPaymentPlans: Boolean? = null,
+    val installmentCount: Int? = null,
+    val installmentDueDates: List<String> = emptyList(),
+    val installmentDueRelativeDays: List<Int> = emptyList(),
+    val installmentAmounts: List<Int> = emptyList(),
+    val sportId: String? = null,
+    val registrationUrl: String? = null,
+    val ageCutoffDate: String? = null,
+    val ageCutoffLabel: String? = null,
+    val ageCutoffSource: String? = null,
+    val fieldIds: List<String> = emptyList(),
+    val playoffPlacementDivisionIds: List<String> = emptyList(),
+    val playoffConfig: TournamentConfig? = null,
+    val gamesPerOpponent: Int? = null,
+    val restTimeMinutes: Int? = null,
+    val usesSets: Boolean? = null,
+    val matchDurationMinutes: Int? = null,
+    val setDurationMinutes: Int? = null,
+    val setsPerMatch: Int? = null,
+    val pointsToVictory: List<Int> = emptyList(),
+    val phaseSettings: Map<String, DivisionPhaseSettingsMVP> = emptyMap(),
+    val teamIds: List<String> = emptyList(),
+)

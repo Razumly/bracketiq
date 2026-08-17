@@ -1,0 +1,45 @@
+package com.razumly.mvp.eventSearch.tabs.events.composables
+
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyListState
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.eventSearch.tabs.events.EventList
+
+@Composable
+fun EventsTabContent(
+    events: List<Event>,
+    organizationLogoIdsById: Map<String, String> = emptyMap(),
+    publishedBadgeEventIds: Set<String> = emptySet(),
+    firstElementPadding: PaddingValues,
+    lastElementPadding: PaddingValues,
+    lazyListState: LazyListState,
+    isLoadingMore: Boolean,
+    hasMoreEvents: Boolean,
+    showPagingStatus: Boolean = true,
+    emptyMessage: String = "No events found.",
+    onLoadMore: () -> Unit,
+    onMapClick: (Offset, Event) -> Unit,
+    onEventClick: (Event) -> Unit,
+    onCreateEventClick: (() -> Unit)?,
+    firstItemGuideTargetId: String? = null,
+) {
+    EventList(
+        events = events,
+        organizationLogoIdsById = organizationLogoIdsById,
+        publishedBadgeEventIds = publishedBadgeEventIds,
+        firstElementPadding = firstElementPadding,
+        lastElementPadding = lastElementPadding,
+        lazyListState = lazyListState,
+        isLoadingMore = isLoadingMore,
+        hasMoreEvents = hasMoreEvents,
+        showPagingStatus = showPagingStatus,
+        emptyMessage = emptyMessage,
+        onLoadMore = onLoadMore,
+        onMapClick = onMapClick,
+        onEventClick = onEventClick,
+        onCreateEventClick = onCreateEventClick,
+        firstItemGuideTargetId = firstItemGuideTargetId,
+    )
+}

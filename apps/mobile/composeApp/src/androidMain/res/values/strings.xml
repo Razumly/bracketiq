@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">BracketIQ</string>
+    <string name="app_deep_links">Open with BracketIQ</string>
+</resources>

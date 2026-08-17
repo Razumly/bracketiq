@@ -1,0 +1,742 @@
+package com.razumly.mvp.teamManagement
+
+import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.backhandler.BackCallback
+import com.arkivanov.essenty.backhandler.BackHandler
+import com.arkivanov.essenty.lifecycle.coroutines.withLifecycle
+import com.arkivanov.essenty.lifecycle.doOnDestroy
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
+import com.razumly.mvp.core.data.dataTypes.Sport
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.isActive
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
+import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.data.repositories.IBillingRepository
+import com.razumly.mvp.core.data.repositories.ISportsRepository
+import com.razumly.mvp.core.data.repositories.ITeamRepository
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
+import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
+import com.razumly.mvp.core.data.repositories.TeamInviteFreeAgentContext
+import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
+import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.UserVisibilityContext
+import com.razumly.mvp.core.network.userMessage
+import com.razumly.mvp.core.presentation.INavigationHandler
+import com.razumly.mvp.core.presentation.LatestPlayerInviteSearch
+import com.razumly.mvp.core.util.LoadingHandler
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+data class TeamMemberInviteDraft(
+    val userId: String? = null,
+    val roleInviteType: String,
+    val displayName: String,
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val email: String? = null,
+    val phone: String? = null,
+    val shareOnly: Boolean = false,
+)
+
+interface TeamManagementComponent {
+    val selectedEvent: StateFlow<Event?>
+    val currentUser: UserData
+    val selectedFreeAgentId: String?
+    val selectedFreeAgent: StateFlow<UserData?>
+    val sports: StateFlow<List<Sport>>
+    val divisionTypeParameters: StateFlow<DivisionTypeParameters>
+    val friends: StateFlow<List<UserData>>
+    val currentTeams: StateFlow<List<TeamWithPlayers>>
+    val isCurrentTeamsLoading: StateFlow<Boolean>
+    val selectedTeam: StateFlow<TeamWithPlayers?>
+    val errorState: StateFlow<String?>
+    val staffUsersById: StateFlow<Map<String, UserData>>
+    val teamMemberCompliance: StateFlow<Map<String, EventTeamComplianceSummary>>
+    val loadingTeamMemberComplianceId: StateFlow<String?>
+    val suggestedPlayers: StateFlow<List<UserData>>
+    val inviteFreeAgentContext: StateFlow<TeamInviteFreeAgentContext>
+    val freeAgentsFiltered: StateFlow<List<UserData>>
+    val enableDeleteTeam: StateFlow<Boolean>
+    val onBack: () -> Unit
+
+    fun setLoadingHandler(handler: LoadingHandler)
+    fun clearError()
+    fun selectTeam(team: TeamWithPlayers?)
+    fun createTeam(team: Team, onResult: (Result<Unit>) -> Unit = {})
+    fun createTeamFromBuilder(
+        team: Team,
+        personInvites: List<TeamBuilderPersonInvite>,
+        staffInvites: List<TeamBuilderStaffInvite>,
+        onResult: (Result<List<TeamBuilderCreatedInviteLink>>) -> Unit = {},
+    ) = createTeam(team) { result -> onResult(result.map { emptyList() }) }
+    fun joinTeam(team: Team)
+    fun updateTeam(team: Team, onResult: (Result<Unit>) -> Unit = {})
+    fun leaveTeam(team: Team)
+    fun requestTeamRefund(team: Team, reason: String, onResult: (Result<Unit>) -> Unit = {})
+    fun refreshTeams()
+    fun loadTeamMemberCompliance(teamId: String)
+    fun deselectTeam()
+    fun deleteTeam(team: TeamWithPlayers)
+    fun searchPlayers(query: String)
+    suspend fun matchSelectedContact(email: String?, phone: String?): Result<UserData?> =
+        Result.success(null)
+    fun inviteUserToRole(
+        teamId: String,
+        invite: TeamMemberInviteDraft,
+        onResult: (Result<TeamBuilderCreatedInviteLink?>) -> Unit = {},
+    )
+    suspend fun ensureUserByEmail(email: String): Result<UserData>
+    suspend fun quoteInclusivePrice(
+        direction: InclusivePriceQuoteDirection,
+        amountCents: Int,
+        eventType: String? = null,
+    ): Result<InclusivePriceQuote> = Result.failure(
+        UnsupportedOperationException("Inclusive price quotes are unavailable."),
+    )
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class DefaultTeamManagementComponent(
+    componentContext: ComponentContext,
+    private val eventRepository: IEventRepository,
+    private val billingRepository: IBillingRepository,
+    private val sportsRepository: ISportsRepository,
+    private val teamRepository: ITeamRepository,
+    private val userRepository: IUserRepository,
+    _legacyFreeAgents: List<String>,
+    eventId: String?,
+    override val selectedFreeAgentId: String?,
+    private val navigationHandler: INavigationHandler
+) : ComponentContext by componentContext, TeamManagementComponent {
+    private val scope = teamManagementCoroutineScope()
+    private var loadingHandler: LoadingHandler? = null
+
+    override val onBack = navigationHandler::navigateBack
+
+    override suspend fun quoteInclusivePrice(
+        direction: InclusivePriceQuoteDirection,
+        amountCents: Int,
+        eventType: String?,
+    ): Result<InclusivePriceQuote> = billingRepository.quoteInclusivePrice(
+        direction = direction,
+        amountCents = amountCents,
+        eventType = eventType,
+    )
+    private val teamEditorBackCallback = BackCallback(
+        isEnabled = false,
+        priority = BackCallback.PRIORITY_MAX,
+    ) {
+        deselectTeam()
+    }
+    private val _errorState = MutableStateFlow<String?>(null)
+    override val errorState = _errorState.asStateFlow()
+    private val _divisionTypeParameters = MutableStateFlow(DivisionTypeParameters())
+    override val divisionTypeParameters = _divisionTypeParameters.asStateFlow()
+    private val normalizedEventId = eventId?.trim()?.takeIf(String::isNotBlank)
+    private val legacyFreeAgentIds = _legacyFreeAgents.map(String::trim).filter(String::isNotBlank).distinct()
+    override val selectedEvent: StateFlow<Event?> = normalizedEventId
+        ?.let { selectedEventId ->
+            eventRepository.getEventWithRelationsFlow(selectedEventId)
+                .map { result ->
+                    result.getOrElse { error ->
+                        if (error !is NoSuchElementException) {
+                            _errorState.value = error.userMessage("Failed to load event context")
+                        }
+                        null
+                    }?.event
+                }
+                .stateIn(scope, SharingStarted.Eagerly, null)
+        }
+        ?: MutableStateFlow(null)
+
+    private val currentUserState = userRepository.currentUser
+        .map { result -> result.getOrNull() ?: UserData() }
+        .stateIn(scope, SharingStarted.Eagerly, UserData())
+    override val currentUser: UserData
+        get() = currentUserState.value
+    private val currentUserIdFlow = currentUserState
+        .map { user -> user.id.trim() }
+        .distinctUntilChanged()
+    private val normalizedSelectedFreeAgentId = selectedFreeAgentId
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+
+    private val _friends = MutableStateFlow<List<UserData>>(listOf())
+    override val friends = _friends.asStateFlow()
+
+    private val _sports = MutableStateFlow<List<Sport>>(emptyList())
+    override val sports = _sports.asStateFlow()
+
+    private val currentTeamsResult: StateFlow<Result<List<TeamWithPlayers>>> = currentUserIdFlow
+        .flatMapLatest { currentUserId ->
+            if (currentUserId.isBlank()) {
+                flowOf(Result.success(emptyList()))
+            } else {
+                teamRepository.getTeamsWithPlayersFlow(currentUserId)
+            }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, Result.success(emptyList()))
+    override val currentTeams = currentTeamsResult.map { team ->
+            team.getOrElse {
+                _errorState.value = it.userMessage()
+                emptyList()
+            }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+    private val _isTeamsRefreshing = MutableStateFlow(false)
+    private val repositoryCurrentTeamsLoading = currentUserIdFlow
+        .flatMapLatest { currentUserId ->
+            if (currentUserId.isBlank()) {
+                flowOf(true)
+            } else {
+                teamRepository.getTeamsWithPlayersLoadingFlow(currentUserId)
+            }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, true)
+    override val isCurrentTeamsLoading = combine(
+        repositoryCurrentTeamsLoading,
+        _isTeamsRefreshing,
+    ) { isRepositoryLoading, isRefreshing ->
+        isRepositoryLoading || isRefreshing
+    }.stateIn(scope, SharingStarted.Eagerly, true)
+
+    private val _selectedTeam = MutableStateFlow<TeamWithPlayers?>(null)
+    override val selectedTeam = _selectedTeam.asStateFlow()
+    private val isSelectedTeamDraft = MutableStateFlow(false)
+
+    private val _staffUsersById = MutableStateFlow<Map<String, UserData>>(emptyMap())
+    override val staffUsersById = _staffUsersById.asStateFlow()
+
+    private val _teamMemberCompliance = MutableStateFlow<Map<String, EventTeamComplianceSummary>>(emptyMap())
+    override val teamMemberCompliance = _teamMemberCompliance.asStateFlow()
+
+    private val _loadingTeamMemberComplianceId = MutableStateFlow<String?>(null)
+    override val loadingTeamMemberComplianceId = _loadingTeamMemberComplianceId.asStateFlow()
+
+    private val playerInviteSearch = LatestPlayerInviteSearch(
+        scope = scope,
+        searchPlayers = { query -> userRepository.searchPlayers(search = query) },
+        excludedUserId = { currentUser.id },
+        onFailure = { error -> _errorState.value = error.userMessage() },
+    )
+    override val suggestedPlayers = playerInviteSearch.suggestions
+
+    override val inviteFreeAgentContext = selectedTeam
+        .flatMapLatest { team ->
+            val teamId = team?.team?.id?.trim()?.takeIf(String::isNotBlank)
+            flow {
+                if (teamId == null || isSelectedTeamDraft.value) {
+                    emit(TeamInviteFreeAgentContext())
+                    return@flow
+                }
+
+                emit(teamRepository.getInviteFreeAgentContext(teamId).getOrElse {
+                    _errorState.value = it.userMessage()
+                    TeamInviteFreeAgentContext()
+                })
+            }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, TeamInviteFreeAgentContext())
+
+    private val eventFreeAgentUsers = selectedEvent
+        .flatMapLatest { event ->
+            val ids = ((event?.freeAgentIds ?: emptyList()) + legacyFreeAgentIds)
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .distinct()
+            if (ids.isEmpty()) {
+                flowOf(emptyList())
+            } else {
+                flow {
+                    emit(
+                        userRepository.getUsers(
+                            ids,
+                            UserVisibilityContext(eventId = event?.id),
+                        ).getOrElse {
+                            _errorState.value = it.userMessage("Failed to load event free agents")
+                            emptyList()
+                        },
+                    )
+                }
+            }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    override val freeAgentsFiltered = combine(
+        inviteFreeAgentContext,
+        eventFreeAgentUsers,
+        selectedTeam,
+        currentUserState,
+    ) { context, eventUsers, team, user ->
+        val playerIdsToExclude = buildSet {
+            user.id.takeIf(String::isNotBlank)?.let(::add)
+            team?.players?.forEach { add(it.id) }
+        }
+        val filteredFreeAgents = (context.users + eventUsers)
+            .distinctBy(UserData::id)
+            .filterNot { it.id in playerIdsToExclude }
+        normalizedSelectedFreeAgentId?.let { selectedId ->
+            if (filteredFreeAgents.any { it.id == selectedId }) {
+                val prioritized = filteredFreeAgents.firstOrNull { it.id == selectedId }
+                listOfNotNull(prioritized) + filteredFreeAgents.filterNot { it.id == selectedId }
+            } else {
+                filteredFreeAgents
+            }
+        } ?: filteredFreeAgents
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    override val selectedFreeAgent = freeAgentsFiltered
+        .map { users ->
+            normalizedSelectedFreeAgentId?.let { selectedId ->
+                users.firstOrNull { it.id == selectedId }
+            }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
+    private val hostEventsFlow = currentUserIdFlow.flatMapLatest { currentUserId ->
+        if (currentUserId.isBlank()) {
+            flowOf(Result.success(emptyList()))
+        } else {
+            eventRepository.getEventsByHostFlow(currentUserId)
+        }
+    }
+
+    override val enableDeleteTeam = combine(selectedTeam, hostEventsFlow) { team, eventsResult ->
+        val hostEvents = eventsResult.getOrElse {
+            _errorState.value = it.userMessage()
+            emptyList()
+        }
+        val teamAssigned =
+            team?.team?.id?.let { teamId -> hostEvents.any { it.teamIds.contains(teamId) } } == true
+        team != null && !teamAssigned
+    }.stateIn(scope, SharingStarted.Eagerly, false)
+
+    init {
+        backHandler.register(teamEditorBackCallback)
+        lifecycle.doOnDestroy(
+            TeamManagementLifecycleCleanup(
+                backHandler = backHandler,
+                backCallback = teamEditorBackCallback,
+            )::onDestroy,
+        )
+        lifecycle.doOnDestroy(playerInviteSearch::invalidate)
+        scope.launch {
+            currentUserState
+                .map { user -> user.friendIds }
+                .distinctUntilChanged()
+                .collect { friendIds ->
+                    _friends.value = if (friendIds.isEmpty()) {
+                        emptyList()
+                    } else {
+                        userRepository.getUsers(friendIds).getOrElse {
+                            _errorState.value = it.userMessage()
+                            emptyList()
+                        }
+                    }
+                }
+            }
+        scope.launch {
+            _sports.value = sportsRepository.getSports().getOrElse {
+                _errorState.value = it.userMessage()
+                emptyList()
+            }
+            sportsRepository.getDivisionTypeParameters()
+                .onSuccess { parameters ->
+                    _divisionTypeParameters.value = parameters
+                }
+                .onFailure {
+                    _errorState.value = it.userMessage("Failed to load division options")
+                }
+        }
+        scope.launch {
+            currentTeamsResult.collect { result ->
+                val teams = result.getOrNull() ?: return@collect
+                val selectedTeam = _selectedTeam.value
+                if (selectedTeam != null) {
+                    val updatedSelectedTeam = resolveSelectedTeamAfterRefresh(
+                        selectedTeam = selectedTeam,
+                        refreshedTeams = teams,
+                        isDraft = isSelectedTeamDraft.value,
+                    )
+                    if (updatedSelectedTeam != null) {
+                        _selectedTeam.value = updatedSelectedTeam
+                        refreshSelectedTeamStaffUsers(updatedSelectedTeam)
+                    } else {
+                        deselectTeam()
+                    }
+                }
+            }
+        }
+    }
+
+    override fun setLoadingHandler(handler: LoadingHandler) {
+        loadingHandler = handler
+    }
+
+    override fun clearError() {
+        _errorState.value = null
+    }
+
+    override fun selectTeam(team: TeamWithPlayers?) {
+        playerInviteSearch.invalidate()
+        isSelectedTeamDraft.value = team == null
+        val resolvedTeam = team ?: TeamWithPlayers(
+            Team(currentUser.id), currentUser, listOf(currentUser), listOf()
+        )
+        _selectedTeam.value = resolvedTeam
+        teamEditorBackCallback.isEnabled = true
+        refreshSelectedTeamStaffUsers(resolvedTeam)
+    }
+
+    override fun createTeam(team: Team, onResult: (Result<Unit>) -> Unit) {
+        createTeamFromBuilder(team, emptyList(), emptyList()) { result -> onResult(result.map { Unit }) }
+    }
+
+    override fun createTeamFromBuilder(
+        team: Team,
+        personInvites: List<TeamBuilderPersonInvite>,
+        staffInvites: List<TeamBuilderStaffInvite>,
+        onResult: (Result<List<TeamBuilderCreatedInviteLink>>) -> Unit,
+    ) {
+        scope.launch {
+            val loadingOperation = loadingHandler?.newOperation()
+            try {
+                loadingOperation?.showLoading("Creating team...")
+                val createResult = teamRepository.createTeam(
+                    team.copy(
+                        managerId = currentUser.id,
+                    )
+                )
+
+                createResult.onFailure {
+                    _errorState.value = it.userMessage()
+                    onResult(Result.failure(it))
+                    return@launch
+                }
+
+                val createdTeam = createResult.getOrThrow()
+                val createdInviteLinks = mutableListOf<TeamBuilderCreatedInviteLink>()
+
+                createdTeam.pending
+                    .map(String::trim)
+                    .filter(String::isNotBlank)
+                    .distinct()
+                    .forEach { userId ->
+                        teamRepository.createTeamMemberInvite(
+                            teamId = createdTeam.id,
+                            userId = userId,
+                            roleInviteType = "player",
+                        ).getOrThrow()
+                    }
+
+                staffInvites.forEach { invite ->
+                    val result = teamRepository.createTeamMemberInvite(
+                        teamId = createdTeam.id,
+                        userId = invite.user?.id,
+                        roleInviteType = invite.role.inviteType,
+                        firstName = invite.firstName,
+                        lastName = invite.lastName,
+                        email = invite.email.trim().takeIf(String::isNotBlank),
+                        phone = invite.phone.trim().takeIf(String::isNotBlank),
+                        shareOnly = invite.user == null && invite.email.isBlank(),
+                    ).getOrThrow()
+                    result.shareUrl?.let { url ->
+                        createdInviteLinks += TeamBuilderCreatedInviteLink(
+                            name = invite.displayName,
+                            role = invite.role.label,
+                            url = url,
+                            emailSent = invite.email.trim().matches(Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")),
+                        )
+                    }
+                }
+
+                personInvites.forEach { invite ->
+                    val result = teamRepository.createTeamMemberInvite(
+                        teamId = createdTeam.id,
+                        email = invite.email.trim().takeIf(String::isNotBlank),
+                        roleInviteType = "player",
+                        firstName = invite.firstName,
+                        lastName = invite.lastName,
+                        phone = invite.phone.trim().takeIf(String::isNotBlank),
+                        shareOnly = invite.email.isBlank(),
+                    ).getOrThrow()
+                    result.shareUrl?.let { url ->
+                        createdInviteLinks += TeamBuilderCreatedInviteLink(
+                            name = "${invite.firstName} ${invite.lastName}".trim(),
+                            role = "Player",
+                            url = url,
+                            emailSent = invite.email.trim().matches(Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")),
+                        )
+                    }
+                }
+
+                loadingOperation?.showLoading("Fetching teams...")
+                val teamIdsToRefresh = (currentTeams.value.map { teamWithPlayers ->
+                    teamWithPlayers.team.id
+                } + createdTeam.id)
+                    .filter(String::isNotBlank)
+                    .distinct()
+
+                if (teamIdsToRefresh.isNotEmpty()) {
+                    teamRepository.getTeamsWithPlayers(teamIdsToRefresh).onFailure {
+                        _errorState.value = it.userMessage()
+                    }
+                }
+                onResult(Result.success(createdInviteLinks))
+            } catch (throwable: Throwable) {
+                if (throwable is CancellationException) throw throwable
+                _errorState.value = throwable.userMessage()
+                onResult(Result.failure(throwable))
+            } finally {
+                loadingOperation?.hideLoading()
+            }
+        }
+    }
+
+    override fun joinTeam(team: Team) {
+        scope.launch {
+            teamRepository.addPlayerToTeam(team, currentUser).onFailure {
+                _errorState.value = it.userMessage()
+            }
+        }
+    }
+
+    override fun updateTeam(team: Team, onResult: (Result<Unit>) -> Unit) {
+        scope.launch {
+            try {
+                teamRepository.updateTeam(team)
+                    .onSuccess {
+                        onResult(Result.success(Unit))
+                    }
+                    .onFailure {
+                        _errorState.value = it.userMessage()
+                        onResult(Result.failure(it))
+                    }
+            } catch (throwable: Throwable) {
+                if (throwable is CancellationException) throw throwable
+                _errorState.value = throwable.userMessage()
+                onResult(Result.failure(throwable))
+            }
+        }
+    }
+
+    override fun leaveTeam(team: Team) {
+        scope.launch {
+            teamRepository.leaveTeam(team.id).onFailure {
+                _errorState.value = it.userMessage()
+            }
+        }
+        deselectTeam()
+    }
+
+    override fun requestTeamRefund(team: Team, reason: String, onResult: (Result<Unit>) -> Unit) {
+        scope.launch {
+            val loadingOperation = loadingHandler?.newOperation()
+            loadingOperation?.showLoading("Requesting refund...")
+            try {
+                val result = teamRepository.requestTeamRegistrationRefund(team.id, reason)
+                result
+                    .onSuccess {
+                        deselectTeam()
+                    }
+                    .onFailure {
+                        _errorState.value = it.userMessage("Refund request failed")
+                    }
+                onResult(result)
+            } finally {
+                loadingOperation?.hideLoading()
+            }
+        }
+    }
+
+    override fun refreshTeams() {
+        val currentUserId = currentUser.id.trim()
+        if (currentUserId.isBlank() || _isTeamsRefreshing.value) return
+
+        scope.launch {
+            _isTeamsRefreshing.value = true
+            try {
+                teamRepository.getTeamsForUser(currentUserId)
+                    .onFailure {
+                        _errorState.value = it.userMessage("Failed to refresh teams.")
+                    }
+            } finally {
+                _isTeamsRefreshing.value = false
+            }
+        }
+    }
+
+    override fun loadTeamMemberCompliance(teamId: String) {
+        val normalizedTeamId = teamId.trim()
+        if (normalizedTeamId.isBlank()) return
+        if (_teamMemberCompliance.value.containsKey(normalizedTeamId)) return
+        if (_loadingTeamMemberComplianceId.value == normalizedTeamId) return
+
+        scope.launch {
+            _loadingTeamMemberComplianceId.value = normalizedTeamId
+            try {
+                teamRepository.getTeamMemberCompliance(normalizedTeamId)
+                    .onSuccess { summary ->
+                        val summaryTeamId = summary.teamId.trim().ifBlank { normalizedTeamId }
+                        _teamMemberCompliance.value = _teamMemberCompliance.value + (summaryTeamId to summary)
+                    }
+                    .onFailure {
+                        _errorState.value = it.userMessage("Failed to load team member status.")
+                    }
+            } finally {
+                if (_loadingTeamMemberComplianceId.value == normalizedTeamId) {
+                    _loadingTeamMemberComplianceId.value = null
+                }
+            }
+        }
+    }
+
+    override fun deselectTeam() {
+        playerInviteSearch.invalidate()
+        isSelectedTeamDraft.value = false
+        _selectedTeam.value = null
+        teamEditorBackCallback.isEnabled = false
+        _staffUsersById.value = emptyMap()
+    }
+
+    override fun deleteTeam(team: TeamWithPlayers) {
+        scope.launch {
+            teamRepository.deleteTeam(team).onFailure {
+                _errorState.value = it.userMessage()
+            }
+        }
+    }
+
+    override fun searchPlayers(query: String) {
+        playerInviteSearch.submit(query)
+    }
+
+    override suspend fun matchSelectedContact(
+        email: String?,
+        phone: String?,
+    ): Result<UserData?> = userRepository.matchSelectedContact(email, phone)
+
+    override fun inviteUserToRole(
+        teamId: String,
+        invite: TeamMemberInviteDraft,
+        onResult: (Result<TeamBuilderCreatedInviteLink?>) -> Unit,
+    ) {
+        scope.launch {
+            teamRepository.createTeamMemberInvite(
+                teamId = teamId,
+                userId = invite.userId,
+                email = invite.email,
+                roleInviteType = invite.roleInviteType,
+                firstName = invite.firstName,
+                lastName = invite.lastName,
+                phone = invite.phone,
+                shareOnly = invite.shareOnly,
+            ).map { result ->
+                result.shareUrl?.let { url ->
+                    TeamBuilderCreatedInviteLink(
+                        name = invite.displayName,
+                        role = when (invite.roleInviteType) {
+                            "team_manager" -> "Manager"
+                            "team_head_coach" -> "Head Coach"
+                            "team_assistant_coach" -> "Assistant Coach"
+                            else -> "Player"
+                        },
+                        url = url,
+                        emailSent = !invite.email.isNullOrBlank(),
+                    )
+                }
+            }.onFailure {
+                _errorState.value = it.userMessage()
+            }.also(onResult)
+        }
+    }
+
+    override suspend fun ensureUserByEmail(email: String): Result<UserData> {
+        return userRepository.ensureUserByEmail(email)
+    }
+
+    private fun refreshSelectedTeamStaffUsers(team: TeamWithPlayers?) {
+        if (team == null) {
+            _staffUsersById.value = emptyMap()
+            return
+        }
+
+        val syncedTeam = team.team.withSynchronizedMembership()
+        val selectedTeamId = syncedTeam.id
+        val knownUsers = buildKnownUsers(team)
+        val staffIds = syncedTeam.staffAssignments
+            .filter(TeamStaffAssignment::isActive)
+            .map(TeamStaffAssignment::userId)
+            .filter(String::isNotBlank)
+            .toSet()
+
+        val missingUserIds = staffIds.filterNot { knownUsers.containsKey(it) }
+        if (missingUserIds.isEmpty()) {
+            _staffUsersById.value = knownUsers
+            return
+        }
+
+        scope.launch {
+            val fetchedUsers = userRepository.getUsers(
+                userIds = missingUserIds,
+                visibilityContext = UserVisibilityContext(teamId = selectedTeamId),
+            ).getOrElse {
+                _errorState.value = it.userMessage()
+                emptyList()
+            }
+            if (_selectedTeam.value?.team?.id != selectedTeamId) {
+                return@launch
+            }
+            _staffUsersById.value = knownUsers + fetchedUsers.associateBy { it.id }
+        }
+    }
+
+    private fun buildKnownUsers(team: TeamWithPlayers): Map<String, UserData> = buildMap {
+        team.captain?.let { captain -> put(captain.id, captain) }
+        team.players.forEach { put(it.id, it) }
+        team.pendingPlayers.forEach { put(it.id, it) }
+    }
+}
+
+internal fun ComponentContext.teamManagementCoroutineScope() =
+    CoroutineScope(Dispatchers.Main + SupervisorJob()).withLifecycle(lifecycle)
+
+internal class TeamManagementLifecycleCleanup(
+    private val backHandler: BackHandler,
+    private val backCallback: BackCallback,
+) {
+    fun onDestroy() {
+        backCallback.isEnabled = false
+        if (backHandler.isRegistered(backCallback)) {
+            backHandler.unregister(backCallback)
+        }
+    }
+}
+
+internal fun resolveSelectedTeamAfterRefresh(
+    selectedTeam: TeamWithPlayers,
+    refreshedTeams: List<TeamWithPlayers>,
+    isDraft: Boolean,
+): TeamWithPlayers? {
+    if (isDraft) return selectedTeam
+    return refreshedTeams.firstOrNull { team -> team.team.id == selectedTeam.team.id }
+}

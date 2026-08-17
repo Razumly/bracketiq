@@ -1,0 +1,1385 @@
+@file:OptIn(kotlin.time.ExperimentalTime::class)
+
+package com.razumly.mvp.eventCreate
+
+import com.arkivanov.decompose.DefaultComponentContext
+import com.arkivanov.essenty.backhandler.BackDispatcher
+import com.arkivanov.essenty.lifecycle.LifecycleRegistry
+import com.razumly.mvp.core.data.dataTypes.AuthAccount
+import com.razumly.mvp.core.data.dataTypes.Bill
+import com.razumly.mvp.core.data.dataTypes.BillPayment
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
+import com.razumly.mvp.core.data.dataTypes.BillingAddressProfile
+import com.razumly.mvp.core.data.dataTypes.Bounds
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventWithRelations
+import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
+import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.ManualPaymentProof
+import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
+import com.razumly.mvp.core.data.dataTypes.Product
+import com.razumly.mvp.core.data.dataTypes.RefundRequest
+import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
+import com.razumly.mvp.core.data.dataTypes.RentalAvailabilitySnapshot
+import com.razumly.mvp.core.data.dataTypes.Sport
+import com.razumly.mvp.core.data.dataTypes.SportDTO
+import com.razumly.mvp.core.data.dataTypes.Subscription
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.repositories.FamilyChild
+import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
+import com.razumly.mvp.core.data.repositories.FamilyJoinRequestAction
+import com.razumly.mvp.core.data.repositories.FamilyJoinRequestResolution
+import com.razumly.mvp.core.data.repositories.BoldSignOperationStatus
+import com.razumly.mvp.core.data.repositories.ChatTermsConsentState
+import com.razumly.mvp.core.data.repositories.IBillingRepository
+import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.data.repositories.IFieldRepository
+import com.razumly.mvp.core.data.repositories.IImagesRepository
+import com.razumly.mvp.core.data.repositories.ISportsRepository
+import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
+import com.razumly.mvp.core.data.repositories.LeagueStandingsConfirmResult
+import com.razumly.mvp.core.data.repositories.ProfileDocumentsBundle
+import com.razumly.mvp.core.data.repositories.PurchaseIntentTimeSlotContext
+import com.razumly.mvp.core.data.repositories.PurchaseIntent
+import com.razumly.mvp.core.data.repositories.RecordSignatureResult
+import com.razumly.mvp.core.data.repositories.RentalResourceOption
+import com.razumly.mvp.core.data.repositories.RegistrationQuestionDraft
+import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
+import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
+import com.razumly.mvp.core.data.repositories.CreateBillRequest
+import com.razumly.mvp.core.data.repositories.DiscountCode
+import com.razumly.mvp.core.data.repositories.DiscountOffer
+import com.razumly.mvp.core.data.repositories.DiscountTarget
+import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
+import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
+import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckout
+import com.razumly.mvp.core.data.repositories.EventTeamPaymentCheckoutRequest
+import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.data.repositories.EventParticipantRefundMode
+import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
+import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
+import com.razumly.mvp.core.data.repositories.SignerContext
+import com.razumly.mvp.core.data.repositories.SignStep
+import com.razumly.mvp.core.data.repositories.SignupProfileSelection
+import com.razumly.mvp.core.data.repositories.UserEmailMembershipMatch
+import com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome
+import com.razumly.mvp.core.data.repositories.UserVisibilityContext
+import com.razumly.mvp.core.network.dto.InviteCreateDto
+import com.razumly.mvp.core.network.dto.MatchActionOperationDto
+import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
+import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
+import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
+import com.razumly.mvp.core.network.dto.MatchRosterDto
+import com.razumly.mvp.core.network.dto.MatchRostersResponseDto
+import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
+import com.razumly.mvp.core.network.dto.TeamCheckInDto
+import com.razumly.mvp.core.network.dto.TeamCheckInsResponseDto
+import com.razumly.mvp.core.network.MvpUploadFile
+import com.razumly.mvp.core.network.dto.*
+import com.razumly.mvp.core.network.dto.EventEditorScheduleStateDto
+import com.razumly.mvp.core.data.repositories.EventEditorSession
+import com.razumly.mvp.core.data.repositories.EventEditorSessionMapper
+import com.razumly.mvp.core.util.jsonMVP
+import com.razumly.mvp.core.util.LoadingHandler
+import com.razumly.mvp.core.util.LoadingHandlerImpl
+import com.razumly.mvp.core.util.LoadingOperation
+import com.razumly.mvp.eventDetail.data.IMatchRepository
+import com.razumly.mvp.eventDetail.PendingStaffInviteDraft
+import com.razumly.mvp.eventDetail.data.StagedMatchCreate
+import dev.icerock.moko.geo.LatLng
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.datetime.TimeZone
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
+import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
+import kotlin.time.Instant
+
+abstract class MainDispatcherTest {
+    protected val testDispatcher = StandardTestDispatcher()
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @BeforeTest
+    fun setMainDispatcher() {
+        Dispatchers.setMain(testDispatcher)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @AfterTest
+    fun resetMainDispatcher() {
+        Dispatchers.resetMain()
+    }
+
+    protected fun advance() {
+        testDispatcher.scheduler.advanceUntilIdle()
+    }
+}
+
+internal class CreateEventHarness(
+    sports: List<Sport> = emptyList(),
+    existingOrganizationEvents: List<Event> = emptyList(),
+    rentalResourceOptions: List<RentalResourceOption> = emptyList(),
+    bootstrap: EventEditorBootstrapQueryDto = EventEditorBootstrapQueryDto(),
+    bootstrapSession: EventEditorSession? = null,
+    canonicalRentalOptions: List<RentalResourceOption> = rentalResourceOptions,
+) {
+    val userRepository = CreateEvent_FakeUserRepository()
+    val eventRepository = CreateEvent_FakeEventRepository(existingOrganizationEvents).apply {
+        createBootstrapSession = bootstrapSession ?: createEventEditorSession(
+            event = Event(
+                id = "bootstrap-event",
+                hostId = "user-1",
+                start = canonicalRentalOptions.minOfOrNull(RentalResourceOption::start)
+                    ?: Instant.parse("2026-01-01T00:00:00Z"),
+                timeZone = TimeZone.currentSystemDefault().id,
+                end = canonicalRentalOptions.maxOfOrNull(RentalResourceOption::end)
+                    ?: Instant.parse("2026-01-01T02:00:00Z"),
+            ),
+            fields = canonicalRentalOptions
+                .filter { option -> option.bookingId.trim() == bootstrap.rentalBookingId?.trim() }
+                .map(RentalResourceOption::field)
+                .distinctBy(Field::id),
+            timeSlots = canonicalRentalOptions
+                .filter { option -> option.bookingId.trim() == bootstrap.rentalBookingId?.trim() }
+                .map(RentalResourceOption::toCanonicalTimeSlot),
+            rentalBookingId = bootstrap.rentalBookingId,
+        )
+    }
+    val fieldRepository = CreateEvent_FakeFieldRepository()
+    val sportsRepository = CreateEvent_FakeSportsRepository(sports)
+    val billingRepository = CreateEvent_FakeBillingRepository().apply {
+        this.rentalResourceOptions = rentalResourceOptions
+    }
+    val imageRepository = CreateEvent_FakeImagesRepository()
+    val loadingHandler = CreateEvent_FakeLoadingHandler()
+
+    var onEventCreatedCount = 0
+    var navigatedToSchedule = false
+
+    val component: DefaultCreateEventComponent = DefaultCreateEventComponent(
+        componentContext = createTestComponentContext(),
+        userRepository = userRepository,
+        eventRepository = eventRepository,
+        fieldRepository = fieldRepository,
+        sportsRepository = sportsRepository,
+        billingRepository = billingRepository,
+        imageRepository = imageRepository,
+        bootstrap = bootstrap,
+        onEventCreated = { _, scheduleBuilt ->
+            onEventCreatedCount += 1
+            navigatedToSchedule = scheduleBuilt
+        },
+    ).also { component ->
+        component.setLoadingHandler(loadingHandler)
+    }
+}
+internal fun RentalResourceOption.toCanonicalTimeSlot(): TimeSlot = TimeSlot(
+    id = "canonical-$bookingItemId",
+    dayOfWeek = null,
+    startTimeMinutes = null,
+    endTimeMinutes = null,
+    startDate = start,
+    timeZone = timeZone,
+    repeating = false,
+    endDate = end,
+    scheduledFieldId = field.id,
+    scheduledFieldIds = listOf(field.id),
+    price = priceCents,
+    requiredTemplateIds = requiredTemplateIds,
+    hostRequiredTemplateIds = hostRequiredTemplateIds,
+    sourceType = "RENTAL_BOOKING",
+    rentalBookingId = bookingId,
+    rentalBookingItemId = bookingItemId,
+    rentalLocked = true,
+)
+
+internal fun createEventEditorSession(
+    event: Event,
+    fields: List<Field> = emptyList(),
+    timeSlots: List<TimeSlot> = emptyList(),
+    leagueScoringConfig: LeagueScoringConfigDTO? = null,
+    questions: List<RegistrationQuestionDraft> = emptyList(),
+    pendingStaffInvites: List<PendingStaffInviteDraft> = emptyList(),
+    rentalBookingId: String? = null,
+    operationId: String = "test-create-operation",
+): EventEditorSession {
+    fun DivisionDetail.toDto(): EventEditorDivisionDetailDto = EventEditorDivisionDetailDto(
+        id = id,
+        sourceDivisionId = sourceDivisionId,
+        key = key,
+        name = name,
+        kind = kind ?: "LEAGUE",
+        divisionTypeId = divisionTypeId,
+        skillDivisionTypeId = skillDivisionTypeId,
+        ageDivisionTypeId = ageDivisionTypeId,
+        divisionTypeName = divisionTypeName,
+        ratingType = ratingType,
+        gender = gender,
+        price = price?.toDouble(),
+        maxParticipants = maxParticipants?.toDouble(),
+        playoffTeamCount = playoffTeamCount?.toDouble(),
+        poolCount = poolCount?.toDouble(),
+        poolTeamCount = poolTeamCount?.toDouble(),
+        allowPaymentPlans = allowPaymentPlans,
+        installmentCount = installmentCount?.toDouble(),
+        installmentDueDates = installmentDueDates,
+        installmentDueRelativeDays = installmentDueRelativeDays,
+        installmentAmounts = installmentAmounts,
+        ageCutoffDate = ageCutoffDate,
+        ageCutoffLabel = ageCutoffLabel,
+        ageCutoffSource = ageCutoffSource,
+        fieldIds = fieldIds,
+        playoffPlacementDivisionIds = playoffPlacementDivisionIds,
+        playoffConfig = playoffConfig?.let { jsonMVP.encodeToJsonElement(it).jsonObject },
+        gamesPerOpponent = gamesPerOpponent?.toDouble(),
+        restTimeMinutes = restTimeMinutes?.toDouble(),
+        usesSets = usesSets,
+        matchDurationMinutes = matchDurationMinutes?.toDouble(),
+        setDurationMinutes = setDurationMinutes?.toDouble(),
+        setsPerMatch = setsPerMatch?.toDouble(),
+        pointsToVictory = pointsToVictory,
+        phaseSettings = phaseSettings.takeIf { it.isNotEmpty() }?.let {
+            jsonMVP.encodeToJsonElement(it).jsonObject
+        },
+        teamIds = teamIds,
+    )
+
+    val draft = EventEditorDraftDto(
+        basics = EventEditorBasicsDto(
+            name = event.name,
+            description = event.description,
+            eventType = event.eventType.name,
+            sportIds = event.sportIds,
+            start = event.start.toString(),
+            timeZone = event.timeZone,
+            location = event.location,
+            address = event.address.orEmpty(),
+            coordinates = event.coordinates,
+            affiliateUrl = event.affiliateUrl.orEmpty(),
+            organizationId = event.organizationId,
+            hostId = event.hostId,
+            state = event.state,
+            imageId = event.imageId.takeIf(String::isNotBlank),
+            tags = event.tags.map { tag ->
+                EventEditorTagDto(id = tag.id, slug = tag.slug, name = tag.name)
+            },
+        ),
+        participation = EventEditorParticipationDto(
+            teamSignup = event.teamSignup,
+            singleDivision = event.singleDivision,
+            registrationByDivisionType = event.registrationByDivisionType,
+            teamSizeLimit = event.teamSizeLimit.takeIf { it > 0 },
+            maxParticipants = event.maxParticipants.takeIf { it > 0 },
+            minAge = event.minAge,
+            maxAge = event.maxAge,
+            cancellationRefundHours = event.cancellationRefundHours,
+            registrationCutoffHours = event.registrationCutoffHours,
+            allowTeamSplitDefault = event.allowTeamSplitDefault == true,
+            waitListIds = event.waitListIds,
+            freeAgentIds = event.freeAgentIds,
+        ),
+        registration = EventEditorRegistrationDto(
+            payment = EventEditorPaymentDto(
+                mode = event.registrationPaymentMode,
+                priceCents = event.priceCents,
+                taxHandling = "EXCLUSIVE",
+                organizerManualTaxRateBps = 0,
+                manualPaymentInstructions = event.manualPaymentInstructions,
+                manualPaymentLinks = event.manualPaymentLinks.map { link ->
+                    EventEditorManualPaymentLinkDto(
+                        id = link.id.takeIf(String::isNotBlank),
+                        provider = link.provider,
+                        label = link.label,
+                        url = link.url,
+                    )
+                },
+                allowPaymentPlans = event.allowPaymentPlans == true,
+                installmentCount = event.installmentCount,
+                installmentDueDates = event.installmentDueDates,
+                installmentDueRelativeDays = event.installmentDueRelativeDays,
+                installmentAmounts = event.installmentAmounts,
+            ),
+            questions = questions.map { question ->
+                EventEditorQuestionDto(
+                    id = question.id,
+                    clientId = question.clientId,
+                    prompt = question.prompt,
+                    answerType = question.answerType,
+                    required = question.required,
+                    sortOrder = question.sortOrder,
+                )
+            },
+        ),
+        competition = EventEditorCompetitionDto(
+            divisionIds = event.divisions,
+            divisionDetails = event.divisionDetails
+                .filterNot { detail -> detail.kind.equals("PLAYOFF", ignoreCase = true) }
+                .map { detail -> detail.toDto() },
+            playoffDivisionDetails = event.divisionDetails
+                .filter { detail -> detail.kind.equals("PLAYOFF", ignoreCase = true) }
+                .map { detail -> detail.toDto() },
+            divisionFieldIds = event.divisionDetails.associate { detail -> detail.id to detail.fieldIds },
+            winnerSetCount = event.winnerSetCount,
+            loserSetCount = event.loserSetCount,
+            doubleElimination = event.doubleElimination,
+            includePlayoffs = event.includePlayoffs,
+            splitLeaguePlayoffDivisions = event.splitLeaguePlayoffDivisions,
+            playoffTeamCount = event.playoffTeamCount,
+            pointsToVictory = event.pointsToVictory,
+            winnerBracketPointsToVictory = event.winnerBracketPointsToVictory,
+            loserBracketPointsToVictory = event.loserBracketPointsToVictory,
+            usesSets = event.usesSets,
+            setsPerMatch = event.setsPerMatch,
+            setDurationMinutes = event.setDurationMinutes?.toDouble(),
+            restTimeMinutes = event.restTimeMinutes?.toDouble(),
+            matchDurationMinutes = event.matchDurationMinutes?.toDouble(),
+            gamesPerOpponent = event.gamesPerOpponent,
+            matchRulesOverride = event.matchRulesOverride?.let { jsonMVP.encodeToJsonElement(it).jsonObject },
+            leagueScoringConfig = leagueScoringConfig?.let {
+                jsonMVP.encodeToJsonElement(it).jsonObject
+            },
+        ),
+        schedule = EventEditorScheduleDto(
+            mode = if (event.noFixedEndDateTime) "GENERATED_END" else "FIXED_END",
+            endConstraint = event.end.toString().takeUnless { event.noFixedEndDateTime },
+            generatedScheduleEnd = event.end.toString().takeIf { event.noFixedEndDateTime },
+        ),
+        resources = EventEditorResourcesDto(
+            fieldIds = fields.map(Field::id),
+            fields = fields.map { field ->
+                EventEditorFieldDto(
+                    id = field.id,
+                    name = field.name,
+                    location = field.location,
+                    lat = field.lat,
+                    long = field.long,
+                    inUse = field.inUse,
+                    rentalSlotIds = field.rentalSlotIds,
+                    organizationId = field.organizationId,
+                    facilityId = field.facilityId,
+                )
+            },
+            timeSlotIds = timeSlots.map(TimeSlot::id),
+            timeSlots = timeSlots.map { slot ->
+                EventEditorTimeSlotDto(
+                    id = slot.id,
+                    dayOfWeek = slot.dayOfWeek,
+                    daysOfWeek = slot.daysOfWeek.orEmpty(),
+                    startTimeMinutes = slot.startTimeMinutes,
+                    endTimeMinutes = slot.endTimeMinutes,
+                    startDate = slot.startDate.toString(),
+                    endDate = slot.endDate?.toString(),
+                    timeZone = slot.timeZone,
+                    scheduledFieldId = slot.scheduledFieldId,
+                    scheduledFieldIds = slot.scheduledFieldIds.orEmpty(),
+                    divisions = slot.divisions.orEmpty(),
+                    requiredTemplateIds = slot.requiredTemplateIds,
+                    hostRequiredTemplateIds = slot.hostRequiredTemplateIds,
+                    repeating = slot.repeating,
+                    price = slot.price?.toDouble(),
+                    sourceType = slot.sourceType,
+                    rentalBookingId = slot.rentalBookingId,
+                    rentalBookingItemId = slot.rentalBookingItemId,
+                    rentalLocked = slot.rentalLocked,
+                )
+            },
+            requiredTemplateIds = event.requiredTemplateIds,
+            rentalBookingId = rentalBookingId,
+        ),
+        staff = EventEditorStaffDto(
+            officialSchedulingMode = event.officialSchedulingMode.name,
+            teamOfficialsMaySwap = event.teamOfficialsMaySwap == true,
+            teamCheckInMode = event.teamCheckInMode.name,
+            teamCheckInOpenMinutesBefore = event.teamCheckInOpenMinutesBefore,
+            allowMatchRosterEdits = event.allowMatchRosterEdits,
+            allowTemporaryMatchPlayers = event.allowTemporaryMatchPlayers,
+            autoCreatePointMatchIncidents = event.autoCreatePointMatchIncidents,
+            officialIds = event.officialIds,
+            officialPositions = event.officialPositions.map { position ->
+                EventEditorOfficialPositionDto(
+                    id = position.id,
+                    name = position.name,
+                    count = position.count,
+                    order = position.order,
+                )
+            },
+            eventOfficials = event.eventOfficials.map { official ->
+                EventEditorOfficialDto(
+                    id = official.id,
+                    userId = official.userId,
+                    positionIds = official.positionIds,
+                    fieldIds = official.fieldIds,
+                    isActive = official.isActive,
+                )
+            },
+            assistantHostIds = event.assistantHostIds,
+            pendingInvites = pendingStaffInvites.map { invite ->
+                EventEditorStaffInviteDto(
+                    email = invite.email,
+                    firstName = invite.firstName,
+                    lastName = invite.lastName,
+                    roles = invite.roles.map { role -> role.name },
+                    staffTypes = invite.roles.map { role -> role.name },
+                    resolvedUserId = invite.resolvedUserId,
+                    eventId = event.id,
+                )
+            },
+        ),
+    )
+    return EventEditorSessionMapper.fromCreateBootstrap(
+        EventEditorCreateBootstrapDto(
+            contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
+            createOperationId = operationId,
+            snapshot = EventEditorSnapshotDto(
+                contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
+                draft = draft,
+                mode = "CREATE",
+                eventId = event.id,
+                editorRevision = "test-editor-revision",
+                staffRevision = "test-staff-revision",
+                capabilities = EventEditorCapabilitiesDto(
+                    canUseOnlinePayments = true,
+                    canManageStaff = true,
+                    canEdit = true,
+                    supportsTeamStaffing = true,
+                ),
+                catalogs = EventEditorCatalogsDto(),
+                immutable = EventEditorImmutableDto(
+                    rental = rentalBookingId != null,
+                ),
+                scheduleState = EventEditorScheduleStateDto(
+                    sourceType = null,
+                    matchCount = 0,
+                    revision = "new",
+                    hasProtectedHistory = false,
+                ),
+            ),
+        ),
+    )
+}
+
+
+internal fun createSport(id: String, usePointsPerSetWin: Boolean): Sport =
+    SportDTO(
+        name = id,
+        matchRulesTemplate = MatchRulesConfigMVP(
+            scoringModel = if (usePointsPerSetWin) "SETS" else "POINTS_ONLY",
+        ),
+        usePointsPerSetWin = usePointsPerSetWin,
+    ).toSport(id)
+
+internal fun createUser(
+    id: String = "user-1",
+    hasStripeAccount: Boolean = true,
+): UserData = UserData(
+    firstName = "Test",
+    lastName = "User",
+    teamIds = emptyList(),
+    friendIds = emptyList(),
+    friendRequestIds = emptyList(),
+    friendRequestSentIds = emptyList(),
+    followingIds = emptyList(),
+    userName = "test_user",
+    hasStripeAccount = hasStripeAccount,
+    uploadedImages = emptyList(),
+    profileImageId = null,
+    id = id,
+)
+
+internal fun instant(epochMillis: Long): Instant = Instant.fromEpochMilliseconds(epochMillis)
+
+private fun createTestComponentContext(): DefaultComponentContext {
+    val lifecycle = LifecycleRegistry()
+    lifecycle.onCreate()
+    lifecycle.onStart()
+    lifecycle.onResume()
+    return DefaultComponentContext(
+        lifecycle = lifecycle,
+        backHandler = BackDispatcher(),
+    )
+}
+
+internal class CreateEvent_FakeLoadingHandler : LoadingHandler {
+    private val delegate = LoadingHandlerImpl()
+    override val loadingState = delegate.loadingState
+
+    override fun newOperation(): LoadingOperation = delegate.newOperation()
+}
+
+internal class CreateEvent_FakeUserRepository : IUserRepository {
+    private val user = createUser()
+    private val account = AuthAccount(
+        id = user.id,
+        email = "user@example.test",
+        name = user.fullName,
+    )
+    val createInviteCalls = mutableListOf<List<InviteCreateDto>>()
+    val deleteInviteCalls = mutableListOf<String>()
+    var createdInvitesResult: List<com.razumly.mvp.core.data.dataTypes.Invite> = emptyList()
+    var emailMembershipMatches: List<UserEmailMembershipMatch> = emptyList()
+    var searchResults: List<UserData> = emptyList()
+    private val initialChatTermsConsent = ChatTermsConsentState(
+        version = "2026-04-14",
+        url = "/terms",
+        summary = listOf("There is no tolerance for objectionable content or abusive users."),
+        accepted = true,
+        acceptedAt = "2026-04-14T12:00:00Z",
+    )
+    private val _chatTermsConsentState = MutableStateFlow(initialChatTermsConsent)
+    override val chatTermsConsentState: StateFlow<ChatTermsConsentState> = _chatTermsConsentState
+    var chatTermsConsent = initialChatTermsConsent
+        set(value) {
+            field = value
+            _chatTermsConsentState.value = value
+        }
+    private val _chatTermsConsentLoading = MutableStateFlow(false)
+    override val chatTermsConsentLoading: StateFlow<Boolean> = _chatTermsConsentLoading
+    var isChatTermsConsentLoading = false
+        set(value) {
+            field = value
+            _chatTermsConsentLoading.value = value
+        }
+    var getChatTermsConsentStateCalls = 0
+    var acceptChatTermsConsentCalls = 0
+
+    override val currentUser: StateFlow<Result<UserData>> = MutableStateFlow(Result.success(user))
+    override val currentAccount: StateFlow<Result<AuthAccount>> = MutableStateFlow(Result.success(account))
+
+    override suspend fun login(email: String, password: String): Result<UserData> = error("unused")
+    override suspend fun logout(): Result<Unit> = error("unused")
+    override suspend fun deleteAccount(confirmationText: String): Result<Unit> = Result.success(Unit)
+    override suspend fun getUsers(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Result<List<UserData>> = Result.success(emptyList())
+    override fun getUsersFlow(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Flow<Result<List<UserData>>> =
+        flowOf(Result.success(emptyList()))
+    override suspend fun searchPlayers(search: String): Result<List<UserData>> = Result.success(searchResults)
+    override suspend fun ensureUserByEmail(email: String): Result<UserData> = Result.success(user)
+    override suspend fun createInvites(invites: List<InviteCreateDto>): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> =
+        Result.success(createdInvitesResult).also {
+            createInviteCalls += invites
+        }
+    override suspend fun deleteInvite(inviteId: String): Result<Unit> = Result.success(Unit).also {
+        deleteInviteCalls += inviteId
+    }
+    override suspend fun findEmailMembership(
+        emails: List<String>,
+        userIds: List<String>,
+    ): Result<List<UserEmailMembershipMatch>> = Result.success(emailMembershipMatches)
+    override suspend fun listInvites(userId: String, type: String?): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> =
+        Result.success(emptyList())
+    override suspend fun acceptInvite(inviteId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun declineInvite(inviteId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun isCurrentUserChild(minorAgeThreshold: Int): Result<Boolean> = Result.success(false)
+    override suspend fun listChildren(): Result<List<FamilyChild>> = Result.success(emptyList())
+    override suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> =
+        Result.success(emptyList())
+    override suspend fun resolveChildJoinRequest(
+        registrationId: String,
+        action: FamilyJoinRequestAction,
+    ): Result<FamilyJoinRequestResolution> = Result.failure(NotImplementedError("unused"))
+    override suspend fun createChildAccount(
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String?,
+        relationship: String?,
+    ): Result<Unit> = Result.success(Unit)
+
+    override suspend fun updateChildAccount(
+        childUserId: String,
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String?,
+        relationship: String?,
+    ): Result<Unit> = Result.success(Unit)
+
+    override suspend fun linkChildToParent(
+        childEmail: String?,
+        childUserId: String?,
+        relationship: String?,
+    ): Result<Unit> = Result.success(Unit)
+
+    override suspend fun createNewUser(
+        email: String,
+        password: String,
+        firstName: String,
+        lastName: String,
+        userName: String,
+        dateOfBirth: String?,
+        profileSelection: SignupProfileSelection?,
+    ): Result<UserData> = Result.success(user)
+
+    override suspend fun updateUser(user: UserData): Result<UserData> = Result.success(user)
+    override suspend fun updateEmail(email: String, password: String): Result<Unit> = Result.success(Unit)
+    override suspend fun updatePassword(currentPassword: String, newPassword: String): Result<Unit> =
+        Result.success(Unit)
+    override suspend fun updateProfile(
+        firstName: String,
+        lastName: String,
+        email: String,
+        userName: String,
+        profileImageId: String?,
+    ): Result<Unit> = Result.success(Unit)
+
+    override suspend fun getCurrentAccount(): Result<Unit> = Result.success(Unit)
+    override suspend fun sendFriendRequest(user: UserData): Result<Unit> = Result.success(Unit)
+    override suspend fun acceptFriendRequest(user: UserData): Result<Unit> = Result.success(Unit)
+    override suspend fun declineFriendRequest(userId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun followUser(userId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun unfollowUser(userId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun removeFriend(userId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun getChatTermsConsentState(): Result<ChatTermsConsentState> =
+        Result.success(chatTermsConsent).also {
+            getChatTermsConsentStateCalls += 1
+        }
+    override suspend fun acceptChatTermsConsent(): Result<ChatTermsConsentState> =
+        Result.success(
+            chatTermsConsent.copy(
+                accepted = true,
+                acceptedAt = chatTermsConsent.acceptedAt ?: "2026-04-14T12:00:00Z",
+            )
+        ).also { result ->
+            acceptChatTermsConsentCalls += 1
+            chatTermsConsent = result.getOrThrow()
+        }
+}
+
+internal data class CreateEditorCall(
+    val command: EventEditorCreateCommandDto,
+    val event: Event,
+    val requiredTemplateIds: List<String>,
+    val leagueScoringConfig: LeagueScoringConfigDTO?,
+    val fields: List<Field>?,
+    val timeSlots: List<TimeSlot>?,
+)
+
+internal class CreateEvent_FakeEventRepository(
+    private val organizationEvents: List<Event> = emptyList(),
+) : IEventRepository {
+    val createEditorCalls = mutableListOf<CreateEditorCall>()
+    val createEventEditorCalls = mutableListOf<EventEditorCreateCommandDto>()
+    val attemptedCreateEventEditorCommands = mutableListOf<EventEditorCreateCommandDto>()
+    val createBootstrapQueries = mutableListOf<EventEditorBootstrapQueryDto>()
+    var createBootstrapSession: EventEditorSession? = null
+    var createEditorFailure: Throwable? = null
+    var staffEmailDelivery: String = "NOT_REQUESTED"
+
+    override fun getCachedEventsFlow(): Flow<Result<List<Event>>> =
+        flowOf(Result.success(emptyList()))
+
+    override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> =
+        flowOf(Result.failure(IllegalStateException("unused")))
+
+    override fun resetCursor() = Unit
+    override suspend fun getEvent(eventId: String): Result<Event> = Result.failure(IllegalStateException("unused"))
+    override suspend fun getEventStaffInvites(eventId: String): Result<List<Invite>> =
+        Result.success(emptyList())
+    override suspend fun getEventEditorCreateBootstrap(
+        query: EventEditorBootstrapQueryDto,
+    ): Result<EventEditorSession> {
+        createBootstrapQueries += query
+        return createBootstrapSession?.let(Result.Companion::success)
+            ?: Result.failure(IllegalStateException("missing test editor bootstrap"))
+    }
+
+    override suspend fun createEventEditor(
+        command: EventEditorCreateCommandDto,
+    ): Result<EventEditorSaveOutcome> {
+        attemptedCreateEventEditorCommands += command
+        createEditorFailure?.let { failure -> return Result.failure(failure) }
+        val bootstrap = createBootstrapSession
+            ?: return Result.failure(IllegalStateException("missing test editor bootstrap"))
+        val snapshot = bootstrap.snapshot.copy(draft = command.draft)
+        val session = EventEditorSessionMapper.fromCreateBootstrap(
+            EventEditorCreateBootstrapDto(
+                contractVersion = command.contractVersion,
+                createOperationId = command.createOperationId,
+                snapshot = snapshot,
+            ),
+        )
+        val canonical = session.canonicalState
+        createEditorCalls += CreateEditorCall(
+            command = command,
+            event = canonical.event,
+            requiredTemplateIds = canonical.event.requiredTemplateIds,
+            leagueScoringConfig = canonical.leagueScoringConfig,
+            fields = canonical.fields,
+            timeSlots = canonical.timeSlots,
+        )
+        createEventEditorCalls += command
+        return Result.success(
+            EventEditorSaveOutcome(
+                session = session,
+                staffEmailDelivery = staffEmailDelivery,
+                scheduleOutcome = EventEditorScheduleOutcomeDto(
+                    status = EventEditorScheduleOutcomeStatus.NOT_REQUESTED,
+                    matchCount = 0,
+                ),
+            ),
+        )
+    }
+    override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> = Result.success(emptyList())
+
+    override suspend fun getEventsByOrganization(
+        organizationId: String,
+        limit: Int,
+    ): Result<List<Event>> = Result.success(organizationEvents)
+
+    override suspend fun updateLocalEvent(newEvent: Event): Result<Event> = Result.failure(IllegalStateException("unused"))
+    override fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<Event>>> =
+        flowOf(Result.success(emptyList()))
+    override suspend fun getEventsInBounds(bounds: Bounds): Result<Pair<List<Event>, Boolean>> =
+        Result.success(Pair(emptyList(), true))
+    override suspend fun getEventsInBounds(
+        bounds: Bounds,
+        dateFrom: Instant?,
+        dateTo: Instant?,
+        sports: List<String>,
+        tags: List<String>,
+        limit: Int,
+        offset: Int,
+        includeDistanceFilter: Boolean,
+    ): Result<Pair<List<Event>, Boolean>> = getEventsInBounds(bounds)
+
+    override suspend fun searchEvents(
+        searchQuery: String,
+        userLocation: LatLng?,
+        limit: Int,
+        offset: Int,
+    ): Result<Pair<List<Event>, Boolean>> = Result.success(Pair(emptyList(), true))
+
+    override fun getEventsByHostFlow(hostId: String): Flow<Result<List<Event>>> =
+        flowOf(Result.success(emptyList()))
+
+    override suspend fun deleteEvent(eventId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun addCurrentUserToEvent(
+        event: Event,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<SelfRegistrationResult> = Result.success(SelfRegistrationResult())
+    override suspend fun addPlayerToEvent(
+        event: Event,
+        player: UserData,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<SelfRegistrationResult> = Result.success(SelfRegistrationResult())
+    override suspend fun registerChildForEvent(
+        eventId: String,
+        childUserId: String,
+        joinWaitlist: Boolean,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<ChildRegistrationResult> = Result.failure(NotImplementedError("unused"))
+    override suspend fun addTeamToEvent(
+        event: Event,
+        team: Team,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<Unit> = Result.success(Unit)
+    override suspend fun syncEventParticipants(
+        event: Event,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<EventParticipantsSyncResult> = Result.success(
+        EventParticipantsSyncResult(event = event)
+    )
+    override suspend fun getLeagueDivisionStandings(
+        eventId: String,
+        divisionId: String,
+    ): Result<LeagueDivisionStandings> = Result.failure(IllegalStateException("unused"))
+    override suspend fun confirmLeagueDivisionStandings(
+        eventId: String,
+        divisionId: String,
+        applyReassignment: Boolean,
+    ): Result<LeagueStandingsConfirmResult> = Result.failure(IllegalStateException("unused"))
+    override suspend fun removeTeamFromEvent(
+        event: Event,
+        teamWithPlayers: TeamWithPlayers,
+        refundMode: EventParticipantRefundMode?,
+        refundReason: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<Unit> =
+        Result.success(Unit)
+    override suspend fun removeCurrentUserFromEvent(
+        event: Event,
+        targetUserId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<Unit> = Result.success(Unit)
+}
+
+internal class CreateEvent_FakeFieldRepository : IFieldRepository {
+    val createdFields = mutableListOf<Field>()
+    val createdTimeSlots = mutableListOf<TimeSlot>()
+    private var fieldCounter = 0
+    private var slotCounter = 0
+
+    override suspend fun createField(field: Field): Result<Field> = runCatching {
+        fieldCounter += 1
+        val created = field.copy(id = "field-created-$fieldCounter")
+        createdFields += created
+        created
+    }
+
+    override suspend fun updateField(field: Field): Result<Field> = Result.success(field)
+    override fun getFieldsWithMatchesFlow(ids: List<String>): Flow<List<FieldWithMatches>> = flowOf(emptyList())
+    override suspend fun getFields(ids: List<String>): Result<List<Field>> = Result.success(emptyList())
+    override suspend fun listFields(eventId: String?): Result<List<Field>> = Result.success(emptyList())
+    override suspend fun getTimeSlots(ids: List<String>): Result<List<TimeSlot>> = Result.success(emptyList())
+    override suspend fun getTimeSlotsForField(fieldId: String): Result<List<TimeSlot>> = Result.success(emptyList())
+    override suspend fun getTimeSlotsForFields(
+        fieldIds: List<String>,
+        rentalOnly: Boolean,
+    ): Result<List<TimeSlot>> = Result.success(emptyList())
+    override suspend fun getRentalAvailability(
+        organizationId: String,
+        rangeStart: Instant,
+        rangeEnd: Instant,
+    ): Result<RentalAvailabilitySnapshot> = Result.success(
+        RentalAvailabilitySnapshot(
+            rangeStart = rangeStart,
+            rangeEnd = rangeEnd,
+            fields = emptyList(),
+            busyBlocks = emptyList(),
+        )
+    )
+
+    override suspend fun createTimeSlot(slot: TimeSlot): Result<TimeSlot> = runCatching {
+        slotCounter += 1
+        val created = slot.copy(id = "slot-created-$slotCounter")
+        createdTimeSlots += created
+        created
+    }
+
+    override suspend fun updateTimeSlot(slot: TimeSlot): Result<TimeSlot> = Result.success(slot)
+    override suspend fun deleteTimeSlot(timeSlotId: String): Result<Unit> = Result.success(Unit)
+}
+
+internal class CreateEvent_FakeSportsRepository(
+    private val sports: List<Sport>,
+    private val divisionTypeParameters: DivisionTypeParameters = DivisionTypeParameters(),
+) : ISportsRepository {
+    override suspend fun getSports(): Result<List<Sport>> = Result.success(sports)
+    override suspend fun getDivisionTypeParameters(): Result<DivisionTypeParameters> =
+        Result.success(divisionTypeParameters)
+}
+
+internal class CreateEvent_FakeImagesRepository : IImagesRepository {
+    private val imageIds = MutableStateFlow<List<String>>(emptyList())
+    private var imageCounter = 0
+    var uploadFailure: Throwable? = null
+    var deleteFailure: Throwable? = null
+
+    override suspend fun uploadImage(inputFile: MvpUploadFile): Result<String> {
+        uploadFailure?.let { return Result.failure(it) }
+        return runCatching {
+            imageCounter += 1
+            val imageId = "image-$imageCounter"
+            imageIds.value = imageIds.value + imageId
+            imageId
+        }
+    }
+
+    override fun getUserImageIdsFlow(): Flow<List<String>> = imageIds
+    override suspend fun addImageToUser(imageId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun deleteImage(imageId: String): Result<Unit> {
+        deleteFailure?.let { return Result.failure(it) }
+        return runCatching {
+            imageIds.value = imageIds.value.filterNot { it == imageId }
+        }
+    }
+}
+
+internal class CreateEvent_FakeMatchRepository : IMatchRepository {
+    var tournamentMatches: List<MatchMVP> = emptyList()
+
+    override suspend fun getMatch(matchId: String): Result<MatchMVP> = Result.failure(IllegalStateException("unused"))
+    override fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>> =
+        flowOf(Result.failure(IllegalStateException("unused")))
+    override suspend fun saveMatchLocally(match: MatchMVP): Result<Unit> = Result.success(Unit)
+    override suspend fun updateMatch(match: MatchMVP): Result<Unit> = Result.success(Unit)
+    override suspend fun updateMatchOperations(
+        match: MatchMVP,
+        lifecycle: MatchLifecycleOperationDto?,
+        segmentOperations: List<MatchSegmentOperationDto>?,
+        incidentOperations: List<MatchIncidentOperationDto>?,
+        officialCheckIn: MatchOfficialCheckInOperationDto?,
+        matchAction: MatchActionOperationDto?,
+        finalize: Boolean,
+        time: Instant?,
+    ): Result<MatchMVP> = Result.success(match)
+
+    override suspend fun setMatchScore(
+        match: MatchMVP,
+        segmentId: String?,
+        sequence: Int,
+        eventTeamId: String,
+        points: Int,
+    ): Result<MatchMVP> = Result.success(match)
+
+    override suspend fun addMatchIncident(
+        match: MatchMVP,
+        operation: MatchIncidentOperationDto,
+    ): Result<MatchMVP> = Result.success(match)
+
+    override suspend fun syncPendingMatchOperations(matchId: String?): Result<Int> = Result.success(0)
+
+    override suspend fun updateMatchesBulk(
+        matches: List<MatchMVP>,
+        creates: List<StagedMatchCreate>,
+        deletes: List<String>,
+    ): Result<List<MatchMVP>> =
+        Result.success(matches)
+    override fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>> =
+        flowOf(Result.success(emptyList()))
+    override suspend fun updateMatchFinished(match: MatchMVP, time: Instant): Result<Unit> = Result.success(Unit)
+    override suspend fun getMatchesOfTournament(tournamentId: String): Result<List<MatchMVP>> =
+        Result.success(tournamentMatches)
+    override suspend fun getMatchesByEventIds(
+        eventIds: List<String>,
+        fieldIds: List<String>?,
+        rangeStart: Instant?,
+        rangeEnd: Instant?,
+    ): Result<List<MatchMVP>> = Result.success(
+        tournamentMatches.filter { match -> eventIds.contains(match.eventId) }
+    )
+
+    override suspend fun getEventTeamCheckIns(eventId: String): Result<TeamCheckInsResponseDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun checkInEventTeam(eventId: String, eventTeamId: String): Result<TeamCheckInDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun getMatchTeamCheckIns(
+        eventId: String,
+        matchId: String,
+    ): Result<TeamCheckInsResponseDto> = Result.failure(IllegalStateException("unused"))
+
+    override suspend fun checkInMatchTeam(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+    ): Result<TeamCheckInDto> = Result.failure(IllegalStateException("unused"))
+
+    override suspend fun getMatchRosters(eventId: String, matchId: String): Result<MatchRostersResponseDto> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun removeMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        userId: String,
+    ): Result<MatchRosterDto> = Result.failure(IllegalStateException("unused"))
+
+    override suspend fun restoreMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        userId: String,
+    ): Result<MatchRosterDto> = Result.failure(IllegalStateException("unused"))
+
+    override suspend fun addTemporaryMatchRosterPlayer(
+        eventId: String,
+        matchId: String,
+        eventTeamId: String,
+        firstName: String?,
+        lastName: String?,
+        email: String?,
+        entryId: String?,
+    ): Result<MatchRosterDto> = Result.failure(IllegalStateException("unused"))
+
+    override suspend fun deleteMatchesOfTournament(tournamentId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun subscribeToMatches(eventId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun unsubscribeFromRealtime(): Result<Unit> = Result.success(Unit)
+    override fun setRealtimePaused(reason: String, paused: Boolean): Result<Unit> = Result.success(Unit)
+    override fun setIgnoreMatch(match: MatchMVP?): Result<Unit> = Result.success(Unit)
+}
+
+internal class CreateEvent_FakeBillingRepository : IBillingRepository {
+    data class PurchaseIntentCall(
+        val event: Event,
+        val timeSlotContext: PurchaseIntentTimeSlotContext?,
+    )
+    data class RentalSignLinksCall(
+        val templateIds: List<String>,
+        val eventId: String?,
+        val organizationId: String?,
+    )
+    data class RecordSignatureCall(
+        val eventId: String,
+        val templateId: String,
+        val documentId: String,
+        val type: String,
+        val signerContext: SignerContext,
+        val childUserId: String?,
+    )
+    data class TeamRecordSignatureCall(
+        val teamId: String,
+        val templateId: String,
+        val documentId: String,
+        val type: String,
+        val signerContext: SignerContext,
+        val childUserId: String?,
+    )
+
+    val purchaseIntentCalls = mutableListOf<PurchaseIntentCall>()
+    val teamRegistrationPurchaseIntentCalls = mutableListOf<String>()
+    val teamRegistrationPurchaseTargets = mutableListOf<com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration?>()
+    val rentalSignLinksCalls = mutableListOf<RentalSignLinksCall>()
+    val recordSignatureCalls = mutableListOf<RecordSignatureCall>()
+    val teamRecordSignatureCalls = mutableListOf<TeamRecordSignatureCall>()
+    val rentalResourceOptionCalls = mutableListOf<Pair<String?, String?>>()
+    var rentalResourceOptions: List<RentalResourceOption> = emptyList()
+    var rentalSignLinksResult: List<SignStep> = emptyList()
+    var teamSignLinksResult: List<SignStep> = emptyList()
+    var queuedTeamSignLinksResults: MutableList<List<SignStep>> = mutableListOf()
+    var billingAddressProfile: BillingAddressProfile = BillingAddressProfile(
+        billingAddress = BillingAddressDraft(
+            line1 = "1 Test St",
+            city = "Los Angeles",
+            state = "CA",
+            postalCode = "90001",
+            countryCode = "US",
+        ),
+        email = "test@example.com",
+    )
+    val updatedBillingAddresses = mutableListOf<BillingAddressDraft>()
+
+    override suspend fun createPurchaseIntent(
+        event: Event,
+        teamId: String?,
+        priceCents: Int?,
+        timeSlotContext: PurchaseIntentTimeSlotContext?,
+        occurrence: EventOccurrenceSelection?,
+        divisionId: String?,
+        discountCode: String?,
+    ): Result<PurchaseIntent> {
+        purchaseIntentCalls += PurchaseIntentCall(
+            event = event,
+            timeSlotContext = timeSlotContext,
+        )
+        return Result.success(PurchaseIntent(paymentIntent = "pi_test", publishableKey = "pk_test"))
+    }
+
+    suspend fun createTeamRegistrationPurchaseIntent(team: Team): Result<PurchaseIntent> =
+        createTeamRegistrationPurchaseIntent(team, null, null)
+
+    override suspend fun createTeamRegistrationPurchaseIntent(
+        team: Team,
+        teamRegistration: com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration?,
+        discountCode: String?,
+    ): Result<PurchaseIntent> {
+        teamRegistrationPurchaseIntentCalls += team.id
+        teamRegistrationPurchaseTargets += teamRegistration
+        return Result.success(PurchaseIntent(paymentIntent = "pi_team_registration", publishableKey = "pk_test"))
+    }
+
+    override suspend fun listDiscounts(ownerType: String, ownerId: String?): Result<List<DiscountOffer>> =
+        Result.success(emptyList())
+
+    override suspend fun listDiscountTargets(
+        ownerType: String,
+        ownerId: String?,
+        itemType: String,
+        query: String?,
+    ): Result<List<DiscountTarget>> = Result.success(emptyList())
+
+    override suspend fun createDiscount(
+        ownerType: String,
+        ownerId: String?,
+        name: String,
+        description: String?,
+        targetType: String,
+        targetId: String,
+        discountedPriceCents: Int,
+    ): Result<DiscountOffer> = Result.failure(UnsupportedOperationException("Discounts are not supported."))
+
+    override suspend fun generateDiscountCode(
+        discountId: String,
+        code: String?,
+        usageLimit: Int?,
+    ): Result<DiscountCode> = Result.failure(UnsupportedOperationException("Discounts are not supported."))
+
+    override suspend fun updateDiscountCodeStatus(
+        discountId: String,
+        codeId: String,
+        status: String,
+    ): Result<DiscountCode> = Result.failure(UnsupportedOperationException("Discounts are not supported."))
+
+    override suspend fun deleteDiscountCode(
+        discountId: String,
+        codeId: String,
+    ): Result<Unit> = Result.failure(UnsupportedOperationException("Discounts are not supported."))
+
+    override suspend fun createBill(request: CreateBillRequest): Result<Bill> = Result.success(
+        Bill(
+            ownerType = request.ownerType,
+            ownerId = request.ownerId,
+            organizationId = request.organizationId,
+            eventId = request.eventId,
+            totalAmountCents = request.totalAmountCents,
+            allowSplit = request.allowSplit,
+            paymentPlanEnabled = request.paymentPlanEnabled,
+            id = "bill-test",
+        )
+    )
+
+    override suspend fun getRequiredSignLinks(eventId: String): Result<List<SignStep>> =
+        Result.success(emptyList())
+
+    override suspend fun getRequiredTeamSignLinks(teamId: String): Result<List<SignStep>> =
+        Result.success(
+            queuedTeamSignLinksResults.removeFirstOrNull() ?: teamSignLinksResult
+        )
+
+    override suspend fun getRequiredRentalSignLinks(
+        templateIds: List<String>,
+        eventId: String?,
+        organizationId: String?,
+    ): Result<List<SignStep>> {
+        rentalSignLinksCalls += RentalSignLinksCall(
+            templateIds = templateIds,
+            eventId = eventId,
+            organizationId = organizationId,
+        )
+        return Result.success(rentalSignLinksResult)
+    }
+
+    override suspend fun listRentalResourceOptions(
+        eventId: String?,
+        organizationId: String?,
+    ): Result<List<RentalResourceOption>> {
+        rentalResourceOptionCalls += eventId to organizationId
+        return Result.success(rentalResourceOptions)
+    }
+
+    override suspend fun recordSignature(
+        eventId: String,
+        templateId: String,
+        documentId: String,
+        type: String,
+        signerContext: SignerContext,
+        childUserId: String?,
+    ): Result<RecordSignatureResult> {
+        recordSignatureCalls += RecordSignatureCall(
+            eventId = eventId,
+            templateId = templateId,
+            documentId = documentId,
+            type = type,
+            signerContext = signerContext,
+            childUserId = childUserId,
+        )
+        return Result.success(RecordSignatureResult())
+    }
+
+    override suspend fun recordTeamSignature(
+        teamId: String,
+        templateId: String,
+        documentId: String,
+        type: String,
+        signerContext: SignerContext,
+        childUserId: String?,
+    ): Result<RecordSignatureResult> {
+        teamRecordSignatureCalls += TeamRecordSignatureCall(
+            teamId = teamId,
+            templateId = templateId,
+            documentId = documentId,
+            type = type,
+            signerContext = signerContext,
+            childUserId = childUserId,
+        )
+        return Result.success(RecordSignatureResult())
+    }
+
+    override suspend fun pollBoldSignOperation(
+        operationId: String,
+        timeoutMillis: Long,
+        intervalMillis: Long,
+    ): Result<BoldSignOperationStatus> = Result.success(
+        BoldSignOperationStatus(
+            operationId = operationId,
+            status = "CONFIRMED",
+        )
+    )
+
+    override suspend fun createAccount(): Result<String> = Result.success("https://example.test/onboarding")
+    override suspend fun getOnboardingLink(): Result<String> = Result.success("https://example.test/onboarding")
+    override suspend fun listBills(ownerType: String, ownerId: String, limit: Int): Result<List<Bill>> =
+        Result.success(emptyList())
+    override suspend fun getBillPayments(billId: String): Result<List<BillPayment>> = Result.success(emptyList())
+    override suspend fun getEventTeamBillingSnapshot(
+        eventId: String,
+        teamId: String,
+    ): Result<EventTeamBillingSnapshot> = Result.success(
+        EventTeamBillingSnapshot(
+            teamId = teamId,
+            teamName = "Team",
+        )
+    )
+    override suspend fun createEventTeamBill(
+        eventId: String,
+        teamId: String,
+        request: EventTeamBillCreateRequest,
+    ): Result<Bill> = Result.success(
+        Bill(
+            ownerType = request.ownerType,
+            ownerId = request.ownerId ?: teamId,
+            eventId = eventId,
+            totalAmountCents = request.eventAmountCents + request.taxAmountCents,
+            allowSplit = request.allowSplit,
+            id = "bill-event-team-test",
+        )
+    )
+    override suspend fun createEventTeamPaymentCheckout(
+        eventId: String,
+        teamId: String,
+        request: EventTeamPaymentCheckoutRequest,
+    ): Result<EventTeamPaymentCheckout> = Result.success(
+        EventTeamPaymentCheckout(
+            checkoutUrl = "https://checkout.stripe.com/c/pay/test",
+            qrCodeUrl = "https://example.test/api/billing/checkout-qr?url=test",
+            amountCents = request.eventAmountCents + request.taxAmountCents,
+            eventAmountCents = request.eventAmountCents,
+            billOwnerType = request.ownerType,
+            billOwnerId = request.ownerId ?: teamId,
+        )
+    )
+    override suspend fun refundEventTeamBillPayment(
+        eventId: String,
+        teamId: String,
+        billPaymentId: String,
+        amountCents: Int,
+    ): Result<Unit> = Result.success(Unit)
+    override suspend fun createBillingIntent(billId: String, billPaymentId: String): Result<PurchaseIntent> =
+        Result.success(PurchaseIntent(paymentIntent = "pi_bill", publishableKey = "pk_bill"))
+    override suspend fun markBillingPaymentProcessing(
+        billId: String,
+        billPaymentId: String,
+        paymentIntent: String,
+    ): Result<Bill> = Result.success(
+        Bill(
+            ownerType = "USER",
+            ownerId = "user-1",
+            totalAmountCents = 0,
+            status = "PENDING",
+            id = billId,
+        )
+    )
+    override suspend fun cancelBillPayment(billId: String, billPaymentId: String): Result<Bill> = Result.success(
+        Bill(
+            ownerType = "USER",
+            ownerId = "user-1",
+            totalAmountCents = 0,
+            status = "OPEN",
+            id = billId,
+        )
+    )
+    override suspend fun submitManualPaymentProof(
+        billId: String,
+        billPaymentId: String,
+        fileId: String,
+    ): Result<ManualPaymentProof> = Result.success(
+        ManualPaymentProof(
+            id = "proof-test",
+            status = "SUBMITTED",
+            fileId = fileId,
+        )
+    )
+    override suspend fun reviewManualPaymentProof(
+        billId: String,
+        billPaymentId: String,
+        proofId: String,
+        decision: String,
+        amountAcceptedCents: Int?,
+        reviewNote: String?,
+    ): Result<Bill> = Result.success(
+        Bill(
+            ownerType = "USER",
+            ownerId = "user-1",
+            totalAmountCents = amountAcceptedCents ?: 0,
+            paidAmountCents = amountAcceptedCents,
+            status = if (decision.equals("ACCEPT", ignoreCase = true)) "PAID" else "OPEN",
+            id = billId,
+        )
+    )
+    override suspend fun getBillingAddress(): Result<BillingAddressProfile> = Result.success(billingAddressProfile)
+    override suspend fun updateBillingAddress(address: BillingAddressDraft): Result<BillingAddressProfile> {
+        val normalizedAddress = address.normalized()
+        updatedBillingAddresses += normalizedAddress
+        billingAddressProfile = BillingAddressProfile(
+            billingAddress = normalizedAddress,
+            email = billingAddressProfile.email,
+        )
+        return Result.success(billingAddressProfile)
+    }
+    override suspend fun listSubscriptions(userId: String, limit: Int): Result<List<Subscription>> =
+        Result.success(emptyList())
+    override suspend fun cancelSubscription(subscriptionId: String): Result<Boolean> = Result.success(true)
+    override suspend fun restartSubscription(subscriptionId: String): Result<Boolean> = Result.success(true)
+    override suspend fun getProductsByIds(productIds: List<String>): Result<List<Product>> = Result.success(emptyList())
+    override suspend fun listProductsByOrganization(organizationId: String): Result<List<Product>> =
+        Result.success(emptyList())
+    override suspend fun createProductPurchaseIntent(productId: String): Result<PurchaseIntent> =
+        Result.success(PurchaseIntent(paymentIntent = "pi_product", publishableKey = "pk_product"))
+    override suspend fun createProductSubscriptionIntent(productId: String): Result<PurchaseIntent> =
+        Result.success(PurchaseIntent(paymentIntent = "pi_subscription", publishableKey = "pk_product"))
+    override suspend fun createProductSubscription(
+        productId: String,
+        organizationId: String?,
+        priceCents: Int?,
+        startDate: String?,
+    ): Result<Subscription> = Result.success(
+        Subscription(
+            productId = productId,
+            userId = "user-1",
+            organizationId = organizationId,
+            startDate = startDate ?: "1970-01-01",
+            priceCents = priceCents ?: 0,
+            period = "month",
+            status = "ACTIVE",
+            id = "sub-test",
+        )
+    )
+    override suspend fun listOrganizations(
+        limit: Int,
+        includeAffiliateRentals: Boolean,
+        tagSlugs: Set<String>,
+    ): Result<List<Organization>> = Result.success(emptyList())
+    override suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>> =
+        Result.success(emptyList())
+    override suspend fun listOrganizationTemplates(organizationId: String): Result<List<OrganizationTemplateDocument>> =
+        Result.success(emptyList())
+    override suspend fun leaveAndRefundEvent(event: Event, reason: String, targetUserId: String?): Result<Unit> =
+        Result.success(Unit)
+    override suspend fun deleteAndRefundEvent(event: Event): Result<Unit> = Result.success(Unit)
+    override suspend fun listProfileDocuments(): Result<ProfileDocumentsBundle> =
+        Result.success(ProfileDocumentsBundle())
+    override suspend fun getRefundsWithRelations(): Result<List<RefundRequestWithRelations>> = Result.success(emptyList())
+    override suspend fun getRefunds(): Result<List<RefundRequest>> = Result.success(emptyList())
+    override suspend fun approveRefund(refundRequest: RefundRequest): Result<Unit> = Result.success(Unit)
+    override suspend fun rejectRefund(refundId: String): Result<Unit> = Result.success(Unit)
+}

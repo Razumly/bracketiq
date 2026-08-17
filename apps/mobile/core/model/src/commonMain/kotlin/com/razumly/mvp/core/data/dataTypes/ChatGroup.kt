@@ -1,0 +1,43 @@
+package com.razumly.mvp.core.data.dataTypes
+
+import androidx.room.Entity
+import androidx.room.Ignore
+import androidx.room.PrimaryKey
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
+import kotlin.time.ExperimentalTime
+
+@Serializable
+@Entity
+@OptIn(ExperimentalTime::class)
+data class ChatGroup @Ignore constructor(
+    @Transient @PrimaryKey override val id: String = "",
+    val name: String,
+    @Ignore val userIds: List<String> = emptyList(),
+    val hostId: String,
+) : MVPDocument, DisplayableEntity {
+    constructor(
+        id: String = "",
+        name: String,
+        hostId: String,
+    ) : this(id = id, name = name, userIds = emptyList(), hostId = hostId)
+
+    @Ignore @Transient var teamId: String? = null
+    override var imageUrl: String? = null
+    override var displayName: String = ""
+    fun setDisplayName(name: String): ChatGroup {
+        displayName = name
+        return this
+    }
+
+    fun setImageUrl(url: String?): ChatGroup {
+        imageUrl = url
+        return this
+    }
+
+    companion object {
+        fun empty() = ChatGroup(
+            id = "", name = "", userIds = listOf(), hostId = ""
+        )
+    }
+}

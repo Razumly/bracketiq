@@ -1,0 +1,48 @@
+// PhotoResultConverter.ios.kt (iosMain)
+package com.razumly.mvp.core.presentation.util
+
+import com.razumly.mvp.core.network.MvpUploadFile
+import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
+import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.usePinned
+import platform.Foundation.NSData
+import platform.Foundation.NSURL
+import platform.Foundation.dataWithContentsOfURL
+import platform.Foundation.getBytes
+import kotlin.time.Clock
+
+actual suspend fun convertPhotoResultToUploadFile(photoResult: GalleryPhotoResult): MvpUploadFile {
+    val fileName = photoResult.fileName
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: "image_${Clock.System.now().toEpochMilliseconds()}"
+    val mimeType = normalizeSelectedImageContentType(photoResult.mimeType)
+
+    val byteArray = convertUriToByteArray(photoResult.uri)
+    if (byteArray.size > MAX_IMAGE_UPLOAD_BYTES) {
+        throw ImageUploadTooLargeException()
+    }
+
+    return MvpUploadFile(bytes = byteArray, filename = fileName, mimeType = mimeType)
+}
+
+@OptIn(ExperimentalForeignApi::class)
+private fun convertUriToByteArray(uri: String): ByteArray {
+    return try {
+        val nsUrl = NSURL.URLWithString(uri)
+            ?: throw IllegalArgumentException("Invalid URI: $uri")
+
+        val nsData = NSData.dataWithContentsOfURL(nsUrl)
+            ?: throw IllegalArgumentException("Could not read data from URI: $uri")
+
+        val byteArray = ByteArray(nsData.length.toInt())
+        byteArray.usePinned { pinned ->
+            nsData.getBytes(pinned.addressOf(0), nsData.length)
+        }
+
+        byteArray
+    } catch (e: Exception) {
+        throw IllegalArgumentException("Failed to convert URI to byte array: ${e.message}")
+    }
+}

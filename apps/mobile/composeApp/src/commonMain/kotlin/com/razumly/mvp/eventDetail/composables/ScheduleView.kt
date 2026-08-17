@@ -1,0 +1,1113 @@
+package com.razumly.mvp.eventDetail.composables
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
+import com.kizitonwose.calendar.compose.HorizontalCalendar
+import com.kizitonwose.calendar.compose.rememberCalendarState
+import com.kizitonwose.calendar.core.CalendarDay
+import com.kizitonwose.calendar.core.DayPosition
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.GENERIC_SPORT_RESOURCE_LABELS
+import com.razumly.mvp.core.data.dataTypes.SportResourceLabels
+import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
+import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
+import com.razumly.mvp.core.data.dataTypes.assignedOfficialUserIds
+import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
+import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.util.getScreenHeight
+import com.razumly.mvp.core.presentation.util.getImageUrl
+import com.razumly.mvp.core.presentation.util.getScreenWidth
+import com.razumly.mvp.core.presentation.util.isScrollingUp
+import com.razumly.mvp.core.presentation.util.timeFormat
+import com.razumly.mvp.core.util.resolvedTimeZone
+import com.razumly.mvp.eventDetail.LocalTournamentComponent
+import kotlinx.coroutines.launch
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.Month
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.YearMonth
+import kotlinx.datetime.format
+import kotlinx.datetime.number
+import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Clock
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Instant
+
+private enum class ScheduleGroupingMode {
+    TIME,
+    FIELD,
+}
+
+enum class ScheduleMatchGroupMode {
+    FIELD,
+    EVENT,
+}
+
+sealed interface ScheduleItem {
+    val key: String
+    val eventId: String
+    val start: Instant
+    val end: Instant
+
+    data class MatchEntry(
+        val match: MatchWithRelations,
+    ) : ScheduleItem {
+        override val key: String = "match-${match.match.id}"
+        override val eventId: String = match.match.eventId
+        override val start: Instant = match.match.start ?: match.match.end ?: Clock.System.now()
+        override val end: Instant = normalizeScheduleEnd(start, match.match.end)
+    }
+
+    data class EventEntry(
+        val event: Event,
+    ) : ScheduleItem {
+        override val key: String = "event-${event.id}"
+        override val eventId: String = event.id
+        override val start: Instant = event.start
+        override val end: Instant = normalizeScheduleEnd(event.start, event.end)
+    }
+}
+
+private data class MatchScheduleGroup(
+    val key: String,
+    val label: String,
+    val matches: List<MatchWithRelations>,
+)
+
+private const val MOBILE_BREAKPOINT_DP = 600
+private const val UNASSIGNED_FIELD_KEY = "__unassigned_field__"
+private const val UNASSIGNED_EVENT_KEY = "__unassigned_event__"
+private const val ALL_MATCH_GROUPS_KEY = "__all_match_groups__"
+private const val BRACKET_CARD_HEIGHT_DP = 90
+private const val BRACKET_CARD_VERTICAL_PADDING_DP = 20
+private const val BRACKET_CARD_VERTICAL_PADDING_WITH_OFFICIAL_DP = 28
+private const val EVENT_CARD_IMAGE_WIDTH_DP = 96
+
+@Composable
+fun ScheduleView(
+    items: List<ScheduleItem>,
+    fields: List<FieldWithMatches>,
+    resourceLabels: SportResourceLabels = GENERIC_SPORT_RESOURCE_LABELS,
+    resourceLabelsByFieldId: Map<String, SportResourceLabels> = emptyMap(),
+    showFab: (Boolean) -> Unit,
+    topContentPadding: Dp = 0.dp,
+    trackedUserIds: Set<String> = emptySet(),
+    showEventOfficialNames: Boolean = true,
+    limitOfficialsToCurrentUser: Boolean = false,
+    canManageMatches: Boolean = false,
+    showGroupingToggle: Boolean = true,
+    matchGroupMode: ScheduleMatchGroupMode = ScheduleMatchGroupMode.FIELD,
+    eventLabelsById: Map<String, String> = emptyMap(),
+    contentPadding: PaddingValues? = null,
+    timeZone: TimeZone = TimeZone.currentSystemDefault(),
+    onToggleLockAllMatches: ((Boolean, List<String>) -> Unit)? = null,
+    onMatchClick: (MatchWithRelations) -> Unit,
+    onEventClick: (Event) -> Unit = {},
+    matchCardContent: @Composable (MatchWithRelations, () -> Unit) -> Unit = { match, onClick ->
+        ScheduleMatchCard(
+            match = match,
+            onClick = onClick,
+            showEventOfficialNames = showEventOfficialNames,
+            limitOfficialsToCurrentUser = limitOfficialsToCurrentUser,
+            manageMode = canManageMatches,
+            resourceSingular = resourceLabelsByFieldId[
+                (match.field?.id ?: match.match.fieldId).orEmpty()
+            ]?.singular ?: resourceLabels.singular,
+        )
+    },
+    eventCardContent: @Composable (Event, Instant, Instant, () -> Unit) -> Unit = { event, start, end, onClick ->
+        ScheduleEventCard(event = event, start = start, end = end, onClick = onClick)
+    },
+) {
+    val currentShowFab by rememberUpdatedState(showFab)
+    if (items.isEmpty()) {
+        LaunchedEffect(Unit) {
+            currentShowFab(true)
+        }
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("No scheduled entries yet.", style = MaterialTheme.typography.bodyMedium)
+        }
+        return
+    }
+
+    val listContentPadding = contentPadding ?: LocalNavBarPadding.current
+    val sortedItems = remember(items, timeZone) {
+        items.sortedBy { it.start }
+    }
+    var showOnlyMyMatches by rememberSaveable { mutableStateOf(false) }
+    val hasTrackedMatches = remember(sortedItems, trackedUserIds) {
+        trackedUserIds.isNotEmpty() && sortedItems.any { item ->
+            val match = (item as? ScheduleItem.MatchEntry)?.match ?: return@any false
+            matchIncludesTrackedUsers(match, trackedUserIds)
+        }
+    }
+    LaunchedEffect(hasTrackedMatches) {
+        if (!hasTrackedMatches && showOnlyMyMatches) {
+            showOnlyMyMatches = false
+        }
+    }
+    val displayedItems = remember(sortedItems, showOnlyMyMatches, trackedUserIds) {
+        if (showOnlyMyMatches && trackedUserIds.isNotEmpty()) {
+            sortedItems.filter { item ->
+                val match = (item as? ScheduleItem.MatchEntry)?.match ?: return@filter false
+                matchIncludesTrackedUsers(match, trackedUserIds)
+            }
+        } else {
+            sortedItems
+        }
+    }
+    val displayedMatches = remember(displayedItems) {
+        displayedItems.mapNotNull { item -> (item as? ScheduleItem.MatchEntry)?.match }
+    }
+    val allVisibleLocked = remember(displayedMatches) {
+        displayedMatches.isNotEmpty() && displayedMatches.all { match -> match.match.locked }
+    }
+    val visibleMatchIds = remember(displayedMatches) {
+        displayedMatches.map { match -> match.match.id }.filter { id -> id.isNotBlank() }
+    }
+    val itemsByDate = remember(displayedItems) {
+        displayedItems.groupBy { item -> item.start.toLocalDateTime(timeZone).date }
+    }
+    val fieldsById = remember(fields) {
+        fields.associateBy { it.field.id }
+    }
+    val sortedDates = remember(itemsByDate) { itemsByDate.keys.sorted() }
+    val today = remember { Clock.System.now().toLocalDateTime(timeZone).date }
+    val defaultDate = remember(sortedDates, today) {
+        sortedDates.firstOrNull { it >= today } ?: sortedDates.firstOrNull() ?: today
+    }
+    var selectedDate by remember(defaultDate) { mutableStateOf(defaultDate) }
+    var groupingMode by rememberSaveable(showGroupingToggle) {
+        mutableStateOf(
+            if (showGroupingToggle) {
+                ScheduleGroupingMode.TIME
+            } else {
+                ScheduleGroupingMode.FIELD
+            }
+        )
+    }
+    var selectedMatchGroupKey by rememberSaveable { mutableStateOf(ALL_MATCH_GROUPS_KEY) }
+    val isMobileLayout = getScreenWidth() < MOBILE_BREAKPOINT_DP
+    val hasAnyMatches = remember(displayedItems) {
+        displayedItems.any { item -> item is ScheduleItem.MatchEntry }
+    }
+    LaunchedEffect(hasAnyMatches) {
+        if (!hasAnyMatches && groupingMode == ScheduleGroupingMode.FIELD) {
+            groupingMode = ScheduleGroupingMode.TIME
+        }
+    }
+    LaunchedEffect(showGroupingToggle, hasAnyMatches) {
+        if (!showGroupingToggle && hasAnyMatches) {
+            groupingMode = ScheduleGroupingMode.FIELD
+        }
+    }
+    LaunchedEffect(sortedDates) {
+        if (selectedDate !in itemsByDate.keys) {
+            selectedDate = sortedDates.firstOrNull() ?: today
+        }
+    }
+    LaunchedEffect(groupingMode) {
+        if (groupingMode != ScheduleGroupingMode.FIELD) {
+            selectedMatchGroupKey = ALL_MATCH_GROUPS_KEY
+        }
+    }
+    val startMonth = remember(sortedDates, selectedDate) {
+        sortedDates.firstOrNull()?.toYearMonth() ?: selectedDate.toYearMonth()
+    }
+    val endMonth = remember(sortedDates, selectedDate) {
+        sortedDates.lastOrNull()?.toYearMonth() ?: selectedDate.toYearMonth()
+    }
+    val calendarState = rememberCalendarState(
+        startMonth = startMonth,
+        endMonth = endMonth,
+        firstVisibleMonth = selectedDate.toYearMonth(),
+    )
+    val coroutineScope = rememberCoroutineScope()
+    val lazyListState = rememberLazyListState()
+    val isScrollingUp by lazyListState.isScrollingUp()
+    LaunchedEffect(isScrollingUp) {
+        currentShowFab(isScrollingUp)
+    }
+    val agendaViewportHeight = (
+        getScreenHeight() *
+            if (isMobileLayout) {
+                0.75f
+            } else {
+                0.8f
+            }
+        ).dp
+    val dayItems = itemsByDate[selectedDate].orEmpty()
+    val dayMatches = remember(dayItems) {
+        dayItems.mapNotNull { item -> (item as? ScheduleItem.MatchEntry)?.match }
+    }
+    val dayEvents = remember(dayItems) {
+        dayItems.mapNotNull { item -> item as? ScheduleItem.EventEntry }
+    }
+    val matchGroups = remember(
+        dayMatches,
+        fieldsById,
+        matchGroupMode,
+        eventLabelsById,
+        resourceLabels,
+        resourceLabelsByFieldId,
+    ) {
+        when (matchGroupMode) {
+            ScheduleMatchGroupMode.FIELD -> buildFieldScheduleGroups(
+                dayMatches,
+                fieldsById,
+                resourceLabels.singular,
+                resourceLabelsByFieldId,
+            )
+            ScheduleMatchGroupMode.EVENT -> buildEventScheduleGroups(dayMatches, eventLabelsById)
+        }
+    }
+    val selectableMatchGroupKeys = remember(matchGroups) {
+        matchGroups.map(MatchScheduleGroup::key).toSet()
+    }
+    LaunchedEffect(selectableMatchGroupKeys) {
+        if (selectedMatchGroupKey != ALL_MATCH_GROUPS_KEY && selectedMatchGroupKey !in selectableMatchGroupKeys) {
+            selectedMatchGroupKey = ALL_MATCH_GROUPS_KEY
+        }
+    }
+    val visibleMatchGroups = remember(matchGroups, selectedMatchGroupKey) {
+        if (selectedMatchGroupKey == ALL_MATCH_GROUPS_KEY) {
+            matchGroups
+        } else {
+            matchGroups.filter { it.key == selectedMatchGroupKey }
+        }
+    }
+    val canLockVisibleMatches =
+        canManageMatches && onToggleLockAllMatches != null && visibleMatchIds.isNotEmpty()
+    val showScheduleControls = hasTrackedMatches || canLockVisibleMatches || showGroupingToggle
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = lazyListState,
+            verticalArrangement = Arrangement.spacedBy(0.dp),
+            contentPadding = listContentPadding
+        ) {
+            if (topContentPadding > 0.dp) {
+                item(key = "division_pill_spacer") {
+                    Spacer(modifier = Modifier.height(topContentPadding))
+                }
+            }
+            item(key = "schedule_calendar") {
+                HorizontalCalendar(
+                    state = calendarState,
+                    modifier = Modifier.fillMaxWidth(),
+                    monthHeader = { calendarMonth ->
+                        val currentMonth = calendarMonth.yearMonth
+                        SimpleCalendarTitle(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            currentMonth = currentMonth,
+                            goToPrevious = {
+                                val previous = currentMonth.previousMonth()
+                                if (previous.toMonthIndex() >= startMonth.toMonthIndex()) {
+                                    coroutineScope.launch {
+                                        calendarState.animateScrollToMonth(previous)
+                                    }
+                                }
+                            },
+                            goToNext = {
+                                val next = currentMonth.nextMonth()
+                                if (next.toMonthIndex() <= endMonth.toMonthIndex()) {
+                                    coroutineScope.launch {
+                                        calendarState.animateScrollToMonth(next)
+                                    }
+                                }
+                            }
+                        )
+                    },
+                    dayContent = { day ->
+                        ScheduleDay(
+                            day = day,
+                            isSelected = day.date == selectedDate,
+                            hasMatches = itemsByDate.containsKey(day.date),
+                            onClick = { selectedDate = day.date }
+                        )
+                    }
+                )
+            }
+            item(key = "schedule_calendar_spacer") {
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+            item(key = "schedule_day_summary") {
+                DaySummaryHeader(selectedDate, dayItems)
+            }
+            if (showScheduleControls) {
+                item(key = "schedule_controls") {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (hasTrackedMatches || canLockVisibleMatches) {
+                        ScheduleQuickActions(
+                            hasTrackedMatches = hasTrackedMatches,
+                            showOnlyMyMatches = showOnlyMyMatches,
+                            onToggleShowOnlyMyMatches = { showOnlyMyMatches = !showOnlyMyMatches },
+                            canLockVisibleMatches = canLockVisibleMatches,
+                            allVisibleLocked = allVisibleLocked,
+                            onToggleLockAllMatches = {
+                                onToggleLockAllMatches?.invoke(!allVisibleLocked, visibleMatchIds)
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    if (showGroupingToggle) {
+                        ScheduleGroupingToggle(
+                            selectedMode = groupingMode,
+                            onModeSelected = { groupingMode = it },
+                            canGroupByField = hasAnyMatches,
+                            resourceLabels = resourceLabels,
+                            groupMode = matchGroupMode,
+                            showFieldSelector = isMobileLayout &&
+                                hasAnyMatches &&
+                                groupingMode == ScheduleGroupingMode.FIELD &&
+                                matchGroupMode == ScheduleMatchGroupMode.FIELD &&
+                                matchGroups.isNotEmpty(),
+                            matchGroups = matchGroups,
+                            selectedMatchGroupKey = selectedMatchGroupKey,
+                            onMatchGroupSelected = { selectedMatchGroupKey = it },
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+            } else {
+                item(key = "schedule_controls_spacer") {
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
+
+            if (dayItems.isEmpty()) {
+                item(key = "schedule_empty_day") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(agendaViewportHeight),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "No schedule entries for this day.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                item(key = "schedule_agenda_content") {
+                    val agendaContentModifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = agendaViewportHeight)
+                    Column(
+                        modifier = agendaContentModifier,
+                        verticalArrangement = Arrangement.spacedBy(0.dp)
+                    ) {
+                        if (groupingMode == ScheduleGroupingMode.TIME || !hasAnyMatches) {
+                            dayItems.forEach { item ->
+                                when (item) {
+                                    is ScheduleItem.MatchEntry -> {
+                                        matchCardContent(item.match) { onMatchClick(item.match) }
+                                    }
+
+                                    is ScheduleItem.EventEntry -> {
+                                        eventCardContent(item.event, item.start, item.end) {
+                                            onEventClick(item.event)
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            if (selectedMatchGroupKey == ALL_MATCH_GROUPS_KEY && dayEvents.isNotEmpty()) {
+                                Text(
+                                    text = "Events (${dayEvents.size})",
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                dayEvents.forEach { eventEntry ->
+                                    eventCardContent(eventEntry.event, eventEntry.start, eventEntry.end) {
+                                        onEventClick(eventEntry.event)
+                                    }
+                                }
+                            }
+                            visibleMatchGroups.forEach { group ->
+                                Text(
+                                    text = "${group.label} (${group.matches.size})",
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                group.matches.forEach { match ->
+                                    matchCardContent(match) { onMatchClick(match) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScheduleQuickActions(
+    hasTrackedMatches: Boolean,
+    showOnlyMyMatches: Boolean,
+    onToggleShowOnlyMyMatches: () -> Unit,
+    canLockVisibleMatches: Boolean,
+    allVisibleLocked: Boolean,
+    onToggleLockAllMatches: () -> Unit,
+) {
+    val scrollState = rememberScrollState()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(scrollState)
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (hasTrackedMatches) {
+            FilterChip(
+                selected = showOnlyMyMatches,
+                onClick = onToggleShowOnlyMyMatches,
+                label = {
+                    Text(
+                        if (showOnlyMyMatches) "Showing my matches" else "Show only my matches"
+                    )
+                }
+            )
+        }
+        if (canLockVisibleMatches) {
+            FilterChip(
+                selected = allVisibleLocked,
+                onClick = onToggleLockAllMatches,
+                label = {
+                    Text(if (allVisibleLocked) "Unlock all matches" else "Lock all matches")
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ScheduleDay(
+    day: CalendarDay,
+    isSelected: Boolean,
+    hasMatches: Boolean,
+    onClick: () -> Unit
+) {
+    val enabled = day.position == DayPosition.MonthDate
+    val background = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
+    val contentColor = when {
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+        isSelected -> MaterialTheme.colorScheme.onPrimary
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .background(background)
+            .padding(vertical = 6.dp, horizontal = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = day.date.day.toString(),
+                color = contentColor,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+            )
+            if (hasMatches) {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .height(4.dp)
+                        .fillMaxWidth(0.3f)
+                        .clip(CircleShape)
+                        .background(
+                            if (isSelected) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.primary
+                        )
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DaySummaryHeader(date: LocalDate, dayItems: List<ScheduleItem>) {
+    val formattedDate = remember(date) { formatDate(date) }
+    val matchCount = remember(dayItems) { dayItems.count { item -> item is ScheduleItem.MatchEntry } }
+    val eventCount = remember(dayItems) { dayItems.count { item -> item is ScheduleItem.EventEntry } }
+    val summary = when {
+        matchCount > 0 && eventCount > 0 -> "${dayItems.size} entries"
+        matchCount > 0 -> "$matchCount ${if (matchCount == 1) "match" else "matches"}"
+        eventCount > 0 -> "$eventCount ${if (eventCount == 1) "event" else "events"}"
+        else -> "0 entries"
+    }
+    Text(
+        text = "$formattedDate - $summary",
+        modifier = Modifier.padding(horizontal = 16.dp),
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+@Composable
+private fun ScheduleGroupingToggle(
+    selectedMode: ScheduleGroupingMode,
+    onModeSelected: (ScheduleGroupingMode) -> Unit,
+    canGroupByField: Boolean,
+    groupMode: ScheduleMatchGroupMode,
+    showFieldSelector: Boolean,
+    matchGroups: List<MatchScheduleGroup>,
+    selectedMatchGroupKey: String,
+    resourceLabels: SportResourceLabels,
+    onMatchGroupSelected: (String) -> Unit,
+) {
+    val scrollState = rememberScrollState()
+    val groupLabel = when (groupMode) {
+        ScheduleMatchGroupMode.FIELD -> "By ${resourceLabels.singular}"
+        ScheduleMatchGroupMode.EVENT -> "By Event"
+    }
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .horizontalScroll(scrollState)
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FilterChip(
+                selected = selectedMode == ScheduleGroupingMode.TIME,
+                onClick = { onModeSelected(ScheduleGroupingMode.TIME) },
+                label = { Text("By Time") }
+            )
+            if (canGroupByField) {
+                FilterChip(
+                    selected = selectedMode == ScheduleGroupingMode.FIELD,
+                    onClick = { onModeSelected(ScheduleGroupingMode.FIELD) },
+                    label = { Text(groupLabel) }
+                )
+                if (showFieldSelector) {
+                    FieldSelectorDropdownChip(
+                        matchGroups = matchGroups,
+                        selectedMatchGroupKey = selectedMatchGroupKey,
+                        onMatchGroupSelected = onMatchGroupSelected,
+                        resourceLabels = resourceLabels,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FieldSelectorDropdownChip(
+    matchGroups: List<MatchScheduleGroup>,
+    selectedMatchGroupKey: String,
+    onMatchGroupSelected: (String) -> Unit,
+    resourceLabels: SportResourceLabels,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedLabel = remember(matchGroups, selectedMatchGroupKey) {
+        matchGroups.firstOrNull { it.key == selectedMatchGroupKey }?.label ?: "All ${resourceLabels.plural.lowercase()}"
+    }
+
+    Box {
+        FilterChip(
+            selected = selectedMatchGroupKey != ALL_MATCH_GROUPS_KEY,
+            onClick = { expanded = true },
+            label = {
+                Text(
+                    text = selectedLabel,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            },
+            trailingIcon = {
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = "Select ${resourceLabels.singular.lowercase()}"
+                )
+            },
+        )
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text("All ${resourceLabels.plural.lowercase()}") },
+                onClick = {
+                    onMatchGroupSelected(ALL_MATCH_GROUPS_KEY)
+                    expanded = false
+                }
+            )
+            matchGroups.forEach { group ->
+                DropdownMenuItem(
+                    text = { Text(group.label) },
+                    onClick = {
+                        onMatchGroupSelected(group.key)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+private fun buildFieldScheduleGroups(
+    dayMatches: List<MatchWithRelations>,
+    fieldsById: Map<String, FieldWithMatches>,
+    resourceSingular: String,
+    resourceLabelsByFieldId: Map<String, SportResourceLabels>,
+): List<MatchScheduleGroup> {
+    if (dayMatches.isEmpty()) return emptyList()
+
+    val grouped = dayMatches.groupBy { match ->
+        resolveFieldKey(match)
+    }
+
+    return grouped.map { (fieldKey, matchesForField) ->
+        MatchScheduleGroup(
+            key = fieldKey,
+            label = resolveFieldLabel(
+                matchesForField.firstOrNull(),
+                fieldsById,
+                resourceLabelsByFieldId[fieldKey]?.singular ?: resourceSingular,
+            ),
+            matches = matchesForField.sortedBy { it.match.start }
+        )
+    }.sortedBy { group ->
+        if (group.key == UNASSIGNED_FIELD_KEY) {
+            "\uFFFF"
+        } else {
+            group.label.lowercase()
+        }
+    }
+}
+
+private fun buildEventScheduleGroups(
+    dayMatches: List<MatchWithRelations>,
+    eventLabelsById: Map<String, String>,
+): List<MatchScheduleGroup> {
+    if (dayMatches.isEmpty()) return emptyList()
+
+    val grouped = dayMatches.groupBy { match ->
+        match.match.eventId.trim().ifBlank { UNASSIGNED_EVENT_KEY }
+    }
+
+    return grouped.map { (eventKey, matchesForEvent) ->
+        MatchScheduleGroup(
+            key = eventKey,
+            label = resolveEventLabel(eventKey, eventLabelsById),
+            matches = matchesForEvent.sortedBy { it.match.start }
+        )
+    }.sortedBy { group ->
+        if (group.key == UNASSIGNED_EVENT_KEY) {
+            "\uFFFF"
+        } else {
+            group.label.lowercase()
+        }
+    }
+}
+
+private fun resolveFieldKey(match: MatchWithRelations): String {
+    val fieldId = match.match.fieldId?.trim().takeUnless { it.isNullOrEmpty() }
+        ?: match.field?.id?.trim().takeUnless { it.isNullOrEmpty() }
+    return fieldId ?: UNASSIGNED_FIELD_KEY
+}
+
+private fun resolveFieldLabel(
+    match: MatchWithRelations?,
+    fieldsById: Map<String, FieldWithMatches>,
+    resourceSingular: String,
+): String {
+    if (match == null) return "$resourceSingular TBD"
+
+    val fieldId = match.match.fieldId?.trim().takeUnless { it.isNullOrEmpty() }
+        ?: match.field?.id?.trim().takeUnless { it.isNullOrEmpty() }
+    if (fieldId != null) {
+        val mappedField = fieldsById[fieldId]?.field
+        val mappedName = mappedField?.name?.trim().orEmpty()
+        if (mappedName.isNotEmpty()) {
+            return mappedName
+        }
+        val mappedNumber = mappedField?.fieldNumber
+        if (mappedNumber != null && mappedNumber > 0) {
+            return "$resourceSingular $mappedNumber"
+        }
+    }
+
+    val fieldName = match.field?.name?.trim().orEmpty()
+    if (fieldName.isNotEmpty()) {
+        return fieldName
+    }
+
+    val fieldNumber = match.field?.fieldNumber
+    if (fieldNumber != null && fieldNumber > 0) {
+        return "$resourceSingular $fieldNumber"
+    }
+
+    return "$resourceSingular TBD"
+}
+
+private fun resolveEventLabel(
+    eventId: String,
+    eventLabelsById: Map<String, String>,
+): String {
+    if (eventId == UNASSIGNED_EVENT_KEY) return "Event TBD"
+
+    return eventLabelsById[eventId]
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: "Event"
+}
+
+private fun normalizeScheduleEnd(start: Instant, end: Instant?): Instant =
+    end?.takeIf { it > start } ?: start.plus(1.hours)
+
+@Composable
+private fun ScheduleMatchCard(
+    match: MatchWithRelations,
+    onClick: () -> Unit,
+    showEventOfficialNames: Boolean,
+    limitOfficialsToCurrentUser: Boolean,
+    manageMode: Boolean,
+    resourceSingular: String,
+) {
+    val component = LocalTournamentComponent.current
+    val currentUser by component.currentUser.collectAsState()
+    val selectedEvent by component.selectedEvent.collectAsState()
+    val normalizedCurrentUserId = currentUser.id.trim()
+    val hasTeamOfficial =
+        !match.match.teamOfficialId.isNullOrBlank() ||
+            match.teamOfficial != null
+    val hasAnyEventOfficial =
+        match.match.assignedOfficialUserIds().isNotEmpty()
+    val hasVisibleEventOfficial = if (
+        limitOfficialsToCurrentUser && normalizedCurrentUserId.isNotBlank()
+    ) {
+        match.match.normalizedOfficialAssignments().any { assignment ->
+            assignment.userId == normalizedCurrentUserId
+        } || match.match.officialId?.trim() == normalizedCurrentUserId
+    } else {
+        hasAnyEventOfficial
+    }
+    val hasBottomEdgeOfficial = hasTeamOfficial || (!manageMode && showEventOfficialNames && hasVisibleEventOfficial)
+    val cardHeightDp = calculateMatchCardHeightDp(
+        match = match.match,
+        positions = selectedEvent.officialPositions,
+        manageMode = manageMode,
+    )
+    val verticalPadding = if (hasBottomEdgeOfficial) {
+        BRACKET_CARD_VERTICAL_PADDING_WITH_OFFICIAL_DP.dp
+    } else {
+        BRACKET_CARD_VERTICAL_PADDING_DP.dp
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = verticalPadding)
+    ) {
+        MatchCard(
+            match = match,
+            onClick = onClick,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(cardHeightDp.dp),
+            showEventOfficialNames = showEventOfficialNames,
+            limitOfficialsToCurrentUser = limitOfficialsToCurrentUser,
+            manageMode = manageMode,
+            resourceSingular = resourceSingular,
+        )
+    }
+}
+
+@Composable
+private fun ScheduleEventCard(
+    event: Event,
+    start: Instant,
+    end: Instant,
+    onClick: () -> Unit,
+) {
+    val timeZone = remember(event.timeZone) { event.resolvedTimeZone() }
+    val dateTimeLabel = remember(start, end, timeZone) {
+        formatScheduleDateTimeWindow(start = start, end = end, timeZone = timeZone)
+    }
+    val eventImageUrl = remember(event.imageId) {
+        event.imageId
+            .trim()
+            .takeIf { imageId -> imageId.isNotEmpty() }
+            ?.let { imageId -> getImageUrl(fileId = imageId, width = 240, height = 180) }
+    }
+    val location = remember(event.location) { event.location.trim() }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = BRACKET_CARD_VERTICAL_PADDING_DP.dp)
+    ) {
+        androidx.compose.material3.Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(BRACKET_CARD_HEIGHT_DP.dp),
+            shape = RoundedCornerShape(14.dp),
+            onClick = onClick,
+        ) {
+            Row(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(EVENT_CARD_IMAGE_WIDTH_DP.dp)
+                        .background(Color.Black),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (eventImageUrl == null) {
+                        Text(
+                            text = "Event",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        AsyncImage(
+                            model = eventImageUrl,
+                            contentDescription = "${event.name} image",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = event.name.ifBlank { "Event" },
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (location.isNotEmpty()) {
+                        Text(
+                            text = location,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Text(
+                        text = dateTimeLabel,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun formatScheduleDateTimeWindow(
+    start: Instant,
+    end: Instant,
+    timeZone: TimeZone,
+): String {
+    val localStart = start.toLocalDateTime(timeZone)
+    val localEnd = end.toLocalDateTime(timeZone)
+    val startTimeLabel = localStart.time.format(timeFormat)
+    val endTimeLabel = localEnd.time.format(timeFormat)
+    return if (localStart.date == localEnd.date) {
+        "${formatDate(localStart.date)} - $startTimeLabel - $endTimeLabel"
+    } else {
+        "${formatDate(localStart.date)} $startTimeLabel - ${formatDate(localEnd.date)} $endTimeLabel"
+    }
+}
+
+internal fun matchIncludesTrackedUsers(
+    match: MatchWithRelations,
+    trackedUserIds: Set<String>,
+): Boolean {
+    if (trackedUserIds.isEmpty()) return false
+
+    if (match.match.assignedOfficialUserIds().any { userId -> trackedUserIds.contains(userId) }) {
+        return true
+    }
+
+    val teams = listOfNotNull(match.team1, match.team2, match.teamOfficial)
+    return teams.any { team ->
+        val syncedTeam = team.withSynchronizedMembership()
+        trackedUserIds.contains(syncedTeam.captainId) ||
+            syncedTeam.activePlayerRegistrations().any { registration ->
+                trackedUserIds.contains(registration.userId)
+            } ||
+            syncedTeam.activeStaffAssignments().any { assignment ->
+                trackedUserIds.contains(assignment.userId)
+            }
+    }
+}
+
+private fun formatDate(date: LocalDate): String {
+    val monthName = date.month.displayName()
+    return "$monthName ${date.day}, ${date.year}"
+}
+
+private fun rememberCalendarLabel(yearMonth: YearMonth): String {
+    val month = yearMonth.month.displayName()
+    return "$month ${yearMonth.year}"
+}
+
+private fun YearMonth.toMonthIndex(): Int = year * 12 + month.number
+
+private fun YearMonth.previousMonth(): YearMonth {
+    val prevMonthNumber = if (month.number == 1) 12 else month.number - 1
+    val prevYear = if (month.number == 1) year - 1 else year
+    return YearMonth(prevYear, prevMonthNumber)
+}
+
+private fun YearMonth.nextMonth(): YearMonth {
+    val nextMonthNumber = if (month.number == 12) 1 else month.number + 1
+    val nextYear = if (month.number == 12) year + 1 else year
+    return YearMonth(nextYear, nextMonthNumber)
+}
+
+private fun LocalDate.toYearMonth(): YearMonth = YearMonth(year, month.number)
+
+private fun Month.displayName(): String =
+    name.lowercase().replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+
+@Composable
+private fun SimpleCalendarTitle(
+    modifier: Modifier,
+    currentMonth: YearMonth,
+    isHorizontal: Boolean = true,
+    goToPrevious: () -> Unit,
+    goToNext: () -> Unit,
+) {
+    Row(
+        modifier = modifier.height(40.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CalendarNavigationIcon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+            contentDescription = "Previous",
+            onClick = goToPrevious,
+            isHorizontal = isHorizontal,
+        )
+        Text(
+            modifier = Modifier
+                .weight(1f),
+            text = rememberCalendarLabel(currentMonth),
+            fontSize = 22.sp,
+            textAlign = TextAlign.Center,
+            fontWeight = FontWeight.Medium,
+        )
+        CalendarNavigationIcon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = "Next",
+            onClick = goToNext,
+            isHorizontal = isHorizontal,
+        )
+    }
+}
+
+@Composable
+private fun CalendarNavigationIcon(
+    imageVector: ImageVector,
+    contentDescription: String,
+    isHorizontal: Boolean = true,
+    onClick: () -> Unit,
+) = Box(
+    modifier = Modifier
+        .fillMaxHeight()
+        .aspectRatio(1f)
+        .clip(shape = CircleShape)
+        .clickable(role = Role.Button, onClick = onClick),
+) {
+    val rotation by animateFloatAsState(if (isHorizontal) 0f else 90f)
+    Icon(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(4.dp)
+            .align(Alignment.Center)
+            .rotate(rotation),
+        imageVector = imageVector,
+        contentDescription = contentDescription,
+    )
+}

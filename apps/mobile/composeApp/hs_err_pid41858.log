@@ -1,0 +1,24 @@
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x0000000145e0fe20, pid=41858, tid=5123
+#
+# JRE version: OpenJDK Runtime Environment Temurin-17.0.18+8 (17.0.18+8) (build 17.0.18+8)
+# Java VM: OpenJDK 64-Bit Server VM Temurin-17.0.18+8 (17.0.18+8, mixed mode, sharing, tiered, compressed oops, compressed class ptrs, g1 gc, bsd-aarch64)
+# Problematic frame:
+# C  [libllvmstubs.dylib+0x1883e20]  llvm::BranchProbabilityInfo::calculate(llvm::Function const&, llvm::LoopInfo const&, llvm::TargetLibraryInfo const*, llvm::DominatorTree*, llvm::PostDominatorTree*)+0x3e4
+#
+# No core dump will be written. Core dumps have been disabled. To enable core dumping, try "ulimit -c unlimited" before starting Java again
+#
+# If you would like to submit a bug report, please visit:
+#   https://github.com/adoptium/adoptium-support/issues
+# The crash happened outside the Java Virtual Machine in native code.
+# See problematic frame for where to report the bug.
+#
+
+---------------  S U M M A R Y ------------
+
+Command Line: -Dfile.separator=/ -Dftp.nonProxyHosts=local|*.local|169.254/16|*.169.254/16 -Dhttp.nonProxyHosts=local|*.local|169.254/16|*.169.254/16 -Djava.awt.headless=true -Djava.class.version=61.0 -Djava.home=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home -Djava.library.path=/Users/elesesy/Library/Java/Extensions:/Library/Java/Extensions:/Network/Library/Java/Extensions:/System/Library/Java/Extensions:/usr/lib/java:. -Djava.runtime.name=OpenJDK Runtime Environment -Djava.runtime.version=17.0.18+8 -Djava.specification.maintenance.version=1 -Djava.specification.name=Java Platform API Specification -Djava.specification.vendor=Oracle Corporation -Djava.specification.version=17 -Djava.vendor=Eclipse Adoptium -Djava.vendor.url=https://adoptium.net/ -Djava.vendor.url.bug=https://github.com/adoptium/adoptium-support/issues -Djava.vendor.version=Temurin-17.0.18+8 -Djava.version=17.0.18 -Djava.version.date=2026-01-20 -Djava.vm.compressedOopsMode=Zero based -Djava.vm.info=mixed mode, sharing -Djava.vm.name=OpenJDK 64-Bit Server VM -Djava.vm.specification.name=Java Virtual Machine Specification -Djava.vm.specification.vendor=Oracle Corporation -Djava.vm.specification.version=17 -Djava.vm.vendor=Eclipse Adoptium -Djava.vm.version=17.0.18+8 -Djdk.debug=release -Dkotlin.native.dependencies.lock=lock -Dlibrary.jansi.path=/Users/elesesy/.gradle/native/jansi/1.18/osx -Dline.separator=
+ -Dnative.encoding=UTF-8 -Dorg.gradle.appname=gradlew -Dorg.jetbrains.kotlin.cliMessageRenderer=XcodeStyle -Dos.arch=aarch64 -Dos.name=Mac OS X -Dos.version=26.3 -Dpath.separator=: -DsocksNonProxyHosts=local|*.local|169.254/16|*.169.254/16 -Dsun.arch.data.model=64 -Dsun.boot.library.path=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home/lib -Dsun.cpu.endian=little -Dsun.io.unicode.encoding=UnicodeBig -Dsun.jnu.encoding=UTF-8 -Dsun.management.compiler=HotSpot 64-Bit Tiered Compilers -Duser.home=/Users/elesesy -Duser.name=elesesy -Duser.timezone=America/Los_Angeles -XX:MaxMetaspaceSize=1g -Xmx8g -Dfile.encoding=UTF-8 -Djava.io.tmpdir=/var/folders/_n/6dvz_rkj0y14dd6nvmr7x9r40000gn/T/ -Duser.country=US -Duser.language=en -Duser.variant -ea org.jetbrains.kotlin.cli.utilities.MainKt konanc @/var/folders/_n/6dvz_rkj0y14dd6nvmr7x9r40000gn/T/kotlinc-native-args12769690160541987991.lst
+
+Host: "Mac14,9" arm64, 12 cores, 16G, Darwin 25.3.0, macOS 26.3 (25D125)

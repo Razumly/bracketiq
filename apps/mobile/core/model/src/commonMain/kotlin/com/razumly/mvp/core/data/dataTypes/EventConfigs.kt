@@ -1,0 +1,190 @@
+package com.razumly.mvp.core.data.dataTypes
+
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class LeagueConfig(
+    val gamesPerOpponent: Int = 1,
+    val includePlayoffs: Boolean = false,
+    val playoffTeamCount: Int? = null,
+    val usesSets: Boolean = false,
+    val matchDurationMinutes: Int? = null,
+    val restTimeMinutes: Int = 0,
+    val setDurationMinutes: Int? = null,
+    val setsPerMatch: Int? = null,
+    val pointsToVictory: List<Int> = emptyList(),
+    val doTeamsOfficiate: Boolean = false,
+)
+
+@Serializable
+data class TournamentConfig(
+    val doubleElimination: Boolean = false,
+    val winnerSetCount: Int = 1,
+    val loserSetCount: Int = 1,
+    val winnerBracketPointsToVictory: List<Int> = listOf(21),
+    val loserBracketPointsToVictory: List<Int> = listOf(21),
+    val prize: String = "",
+    val fieldCount: Int = 1,
+    val restTimeMinutes: Int = 0,
+    val usesSets: Boolean = false,
+    val matchDurationMinutes: Int? = null,
+    val setDurationMinutes: Int? = null,
+)
+
+fun Event.toLeagueConfig(): LeagueConfig = LeagueConfig(
+    gamesPerOpponent = gamesPerOpponent ?: 1,
+    includePlayoffs = includePlayoffs,
+    playoffTeamCount = playoffTeamCount,
+    usesSets = usesSets,
+    matchDurationMinutes = matchDurationMinutes,
+    restTimeMinutes = restTimeMinutes ?: 0,
+    setDurationMinutes = setDurationMinutes,
+    setsPerMatch = setsPerMatch,
+    pointsToVictory = pointsToVictory,
+    doTeamsOfficiate = doTeamsOfficiate ?: false,
+)
+
+fun Event.withLeagueConfig(config: LeagueConfig): Event {
+    val timedMode = !config.usesSets
+    return copy(
+        gamesPerOpponent = config.gamesPerOpponent,
+        includePlayoffs = config.includePlayoffs,
+        playoffTeamCount = if (config.includePlayoffs) config.playoffTeamCount else null,
+        usesSets = config.usesSets,
+        matchDurationMinutes = if (config.usesSets) null else config.matchDurationMinutes,
+        setDurationMinutes = if (config.usesSets) config.setDurationMinutes else null,
+        setsPerMatch = if (config.usesSets) config.setsPerMatch else null,
+        pointsToVictory = if (config.usesSets) config.pointsToVictory else emptyList(),
+        winnerSetCount = if (timedMode) 1 else winnerSetCount,
+        loserSetCount = if (timedMode) 1 else loserSetCount,
+        winnerBracketPointsToVictory = if (timedMode) {
+            winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) }
+        } else {
+            winnerBracketPointsToVictory
+        },
+        loserBracketPointsToVictory = if (timedMode) {
+            loserBracketPointsToVictory.take(1).ifEmpty { listOf(21) }
+        } else {
+            loserBracketPointsToVictory
+        },
+        restTimeMinutes = config.restTimeMinutes,
+        doTeamsOfficiate = config.doTeamsOfficiate,
+        teamOfficialsMaySwap = if (config.doTeamsOfficiate) teamOfficialsMaySwap else false,
+    )
+}
+
+fun Event.toTournamentConfig(): TournamentConfig = TournamentConfig(
+    doubleElimination = doubleElimination,
+    winnerSetCount = winnerSetCount,
+    loserSetCount = loserSetCount.coerceAtLeast(1),
+    winnerBracketPointsToVictory = if (winnerBracketPointsToVictory.isEmpty()) {
+        listOf(21)
+    } else {
+        winnerBracketPointsToVictory
+    },
+    loserBracketPointsToVictory = if (loserBracketPointsToVictory.isEmpty()) {
+        listOf(21)
+    } else {
+        loserBracketPointsToVictory
+    },
+    prize = prize,
+    fieldCount = (
+        fieldIds.count { fieldId -> fieldId.isNotBlank() }
+            .takeIf { count -> count > 0 }
+            ?: fieldCount
+            ?: 1
+        ).coerceAtLeast(1),
+    restTimeMinutes = (restTimeMinutes ?: 0).coerceAtLeast(0),
+    usesSets = usesSets,
+    matchDurationMinutes = matchDurationMinutes,
+    setDurationMinutes = setDurationMinutes,
+)
+
+fun Event.withTournamentConfig(config: TournamentConfig): Event = copy(
+    doubleElimination = config.doubleElimination,
+    winnerSetCount = config.winnerSetCount.coerceAtLeast(1),
+    loserSetCount = config.loserSetCount.coerceAtLeast(1),
+    winnerBracketPointsToVictory = config.winnerBracketPointsToVictory,
+    loserBracketPointsToVictory = config.loserBracketPointsToVictory,
+    prize = config.prize,
+    restTimeMinutes = config.restTimeMinutes.coerceAtLeast(0),
+    usesSets = config.usesSets,
+    matchDurationMinutes = if (config.usesSets) null else config.matchDurationMinutes,
+    setDurationMinutes = if (config.usesSets) config.setDurationMinutes else null,
+)
+
+fun DivisionDetail.toLeagueConfig(fallback: LeagueConfig = LeagueConfig()): LeagueConfig {
+    val resolvedUsesSets = usesSets ?: fallback.usesSets
+    return LeagueConfig(
+        gamesPerOpponent = gamesPerOpponent ?: fallback.gamesPerOpponent,
+        includePlayoffs = fallback.includePlayoffs,
+        playoffTeamCount = playoffTeamCount ?: fallback.playoffTeamCount,
+        usesSets = resolvedUsesSets,
+        matchDurationMinutes = if (resolvedUsesSets) {
+            null
+        } else {
+            matchDurationMinutes ?: fallback.matchDurationMinutes
+        },
+        restTimeMinutes = restTimeMinutes ?: fallback.restTimeMinutes,
+        setDurationMinutes = if (resolvedUsesSets) {
+            setDurationMinutes ?: fallback.setDurationMinutes
+        } else {
+            null
+        },
+        setsPerMatch = if (resolvedUsesSets) {
+            setsPerMatch ?: fallback.setsPerMatch
+        } else {
+            null
+        },
+        pointsToVictory = if (resolvedUsesSets) {
+            pointsToVictory.takeIf { points -> points.isNotEmpty() } ?: fallback.pointsToVictory
+        } else {
+            emptyList()
+        },
+        doTeamsOfficiate = fallback.doTeamsOfficiate,
+    )
+}
+
+fun DivisionDetail.withLeagueConfig(config: LeagueConfig): DivisionDetail = copy(
+    gamesPerOpponent = config.gamesPerOpponent,
+    restTimeMinutes = config.restTimeMinutes,
+    usesSets = config.usesSets,
+    matchDurationMinutes = if (config.usesSets) null else config.matchDurationMinutes,
+    setDurationMinutes = if (config.usesSets) config.setDurationMinutes else null,
+    setsPerMatch = if (config.usesSets) config.setsPerMatch else null,
+    pointsToVictory = if (config.usesSets) config.pointsToVictory else emptyList(),
+)
+
+fun DivisionDetail.toTournamentConfig(fallback: TournamentConfig = TournamentConfig()): TournamentConfig {
+    val source = playoffConfig ?: fallback
+    val resolvedUsesSets = if (usesSets == true) {
+        true
+    } else {
+        source.usesSets || fallback.usesSets
+    }
+    return TournamentConfig(
+        doubleElimination = source.doubleElimination,
+        winnerSetCount = source.winnerSetCount,
+        loserSetCount = source.loserSetCount,
+        winnerBracketPointsToVictory = source.winnerBracketPointsToVictory,
+        loserBracketPointsToVictory = source.loserBracketPointsToVictory,
+        prize = source.prize,
+        fieldCount = source.fieldCount,
+        restTimeMinutes = source.restTimeMinutes,
+        usesSets = resolvedUsesSets,
+        matchDurationMinutes = if (resolvedUsesSets) {
+            null
+        } else {
+            source.matchDurationMinutes ?: matchDurationMinutes ?: fallback.matchDurationMinutes
+        },
+        setDurationMinutes = if (resolvedUsesSets) {
+            source.setDurationMinutes ?: setDurationMinutes ?: fallback.setDurationMinutes
+        } else {
+            null
+        },
+    )
+}
+
+fun DivisionDetail.withTournamentConfig(config: TournamentConfig?): DivisionDetail = copy(
+    playoffConfig = config,
+)

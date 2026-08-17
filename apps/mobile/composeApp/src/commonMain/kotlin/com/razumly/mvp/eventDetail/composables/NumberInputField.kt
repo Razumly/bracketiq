@@ -1,0 +1,40 @@
+package com.razumly.mvp.eventDetail.composables
+
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import com.razumly.mvp.core.presentation.composables.StandardTextField
+
+@Composable
+fun NumberInputField(
+    modifier: Modifier = Modifier,
+    value: String,
+    label: String,
+    onValueChange: (String) -> Unit,
+    isError: Boolean,
+    errorMessage: String? = null,
+    supportingText: String? = null,
+    placeholder: String? = null,
+    enabled: Boolean = true,
+    showZero: Boolean = false,
+) {
+    Column(modifier = modifier) {
+        StandardTextField(
+            value = if (!showZero && value == "0") "" else value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = label,
+            placeholder = placeholder ?: "",
+            keyboardType = "number",
+            isError = isError,
+            supportingText =
+                if (isError && errorMessage != null) {
+                        errorMessage
+                }
+                else supportingText ?: ""
+            ,
+            enabled = enabled
+        )
+    }
+}

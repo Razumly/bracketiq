@@ -1,0 +1,478 @@
+package com.razumly.mvp.eventMap
+
+import android.content.Context
+import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.backhandler.BackCallback
+import com.arkivanov.essenty.instancekeeper.InstanceKeeper
+import com.google.android.gms.common.ConnectionResult
+import com.google.android.gms.common.GoogleApiAvailability
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.CommonStatusCodes
+import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.LatLngBounds
+import com.google.android.libraries.places.api.Places
+import com.google.android.libraries.places.api.model.Place
+import com.google.android.libraries.places.api.model.RectangularBounds
+import com.google.android.libraries.places.api.net.FetchPlaceRequest
+import com.google.android.libraries.places.api.net.FindAutocompletePredictionsRequest
+import com.google.android.libraries.places.api.net.PlacesClient
+import com.google.android.libraries.places.api.net.SearchByTextRequest
+import com.razumly.mvp.BuildConfig
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.util.getBounds
+import dev.icerock.moko.geo.LocationTracker
+import dev.icerock.moko.permissions.DeniedAlwaysException
+import dev.icerock.moko.permissions.DeniedException
+import dev.icerock.moko.permissions.Permission
+import dev.icerock.moko.permissions.PermissionsController
+import dev.icerock.moko.permissions.location.LOCATION
+import io.github.aakira.napier.Napier
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resumeWithException
+import kotlin.math.PI
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.sin
+import kotlin.math.sqrt
+
+actual class MapComponent(
+    componentContext: ComponentContext,
+    private val eventRepository: IEventRepository,
+    context: Context,
+    val locationTracker: LocationTracker,
+    private val permissionsController: PermissionsController,
+) : ComponentContext by componentContext {
+
+    private val logTag = "MapComponent"
+    private val cleanupKey = "Cleanup_Map"
+    private val scopeExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        when (throwable) {
+            is DeniedAlwaysException -> {
+                Napier.w(
+                    message = "Location permission always denied in map scope",
+                    tag = logTag,
+                )
+            }
+
+            is DeniedException -> {
+                Napier.w(
+                    message = "Location permission denied in map scope",
+                    tag = logTag,
+                )
+            }
+
+            else -> {
+                Napier.e(
+                    message = "Unhandled exception in MapComponent scope: ${throwable.message}",
+                    throwable = throwable,
+                    tag = logTag,
+                )
+            }
+        }
+    }
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob() + scopeExceptionHandler)
+
+    private val _currentLocation = MutableStateFlow<dev.icerock.moko.geo.LatLng?>(null)
+    actual val currentLocation = _currentLocation.asStateFlow()
+
+    private val _events = MutableStateFlow<List<Event>>(emptyList())
+    actual val events: StateFlow<List<Event>> = _events.asStateFlow()
+
+    private val _places = MutableStateFlow<List<MVPPlace>>(emptyList())
+    actual val places: StateFlow<List<MVPPlace>> = _places.asStateFlow()
+
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(false)
+    actual val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _currentRadiusMeters = MutableStateFlow(50.0)
+
+    private val _showMap = MutableStateFlow(false)
+    actual val showMap = _showMap.asStateFlow()
+
+    private val _currentViewCenter = MutableStateFlow<dev.icerock.moko.geo.LatLng?>(null)
+    actual val currentViewCenter = _currentViewCenter.asStateFlow()
+    private val _currentViewRadiusMiles = MutableStateFlow<Double?>(null)
+    actual val currentViewRadiusMiles = _currentViewRadiusMiles.asStateFlow()
+    private val _currentBounds = MutableStateFlow<LatLngBounds?>(null)
+
+    private val placesClient: PlacesClient by lazy {
+        logMapsDiagnostics(context)
+        if (!Places.isInitialized()) {
+            runCatching {
+                Places.initializeWithNewPlacesApiEnabled(context, BuildConfig.MAPS_API_KEY)
+            }.onFailure { throwable ->
+                Napier.e(
+                    message = "Failed to initialize Places SDK",
+                    throwable = throwable,
+                    tag = logTag
+                )
+                throw throwable
+            }
+        }
+        Places.createClient(context)
+    }
+
+    private val _backCallback = BackCallback {
+        _showMap.value = false
+    }
+
+    init {
+        logMapsDiagnostics(context)
+        backHandler.register(_backCallback)
+        _backCallback.priority = BackCallback.PRIORITY_MAX
+        instanceKeeper.put(
+            cleanupKey,
+            MapComponentCleanup(
+                scope = scope,
+                backHandler = backHandler,
+                backCallback = _backCallback,
+                stopLocationTracking = locationTracker::stopTracking,
+            ),
+        )
+        scope.launch {
+            _showMap.collect {
+                _backCallback.isEnabled = it
+            }
+        }
+        scope.launch {
+            _showMap
+                .collectLatest { visible ->
+                    if (!visible) {
+                        runCatching { locationTracker.stopTracking() }
+                            .onFailure { throwable ->
+                                Napier.w(
+                                    message = "Failed to stop location tracking: ${throwable.message}",
+                                    tag = logTag,
+                                )
+                            }
+                        return@collectLatest
+                    }
+
+                    if (!permissionsController.isPermissionGranted(Permission.LOCATION)) {
+                        Napier.d(
+                            message = "Location tracking skipped because permission is not granted",
+                            tag = logTag,
+                        )
+                        return@collectLatest
+                    }
+
+                    try {
+                        locationTracker.startTracking()
+                    } catch (deniedAlwaysException: DeniedAlwaysException) {
+                        Napier.w(
+                            message = "Location tracking disabled (always denied)",
+                            tag = logTag,
+                        )
+                        return@collectLatest
+                    } catch (deniedException: DeniedException) {
+                        Napier.w(
+                            message = "Location tracking disabled (denied)",
+                            tag = logTag,
+                        )
+                        return@collectLatest
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (e: Exception) {
+                        Napier.w(
+                            message = "Location tracking disabled: ${e.message}",
+                            tag = logTag,
+                        )
+                        return@collectLatest
+                    }
+
+                    try {
+                        locationTracker.getLocationsFlow().collect { trackedLocation ->
+                            _currentLocation.value = trackedLocation
+                        }
+                    } catch (deniedAlwaysException: DeniedAlwaysException) {
+                        Napier.w(
+                            message = "Location updates unavailable (always denied)",
+                            tag = logTag,
+                        )
+                    } catch (deniedException: DeniedException) {
+                        Napier.w(
+                            message = "Location updates unavailable (denied)",
+                            tag = logTag,
+                        )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (e: Exception) {
+                        Napier.w(
+                            message = "Location updates unavailable: ${e.message}",
+                            tag = logTag,
+                        )
+                    }
+                }
+        }
+    }
+
+    fun updateCameraBounds(center: LatLng, bounds: LatLngBounds) {
+        _currentViewCenter.value = dev.icerock.moko.geo.LatLng(center.latitude, center.longitude)
+        _currentViewRadiusMiles.value = max(
+            distanceMilesBetween(center, bounds.northeast),
+            distanceMilesBetween(center, bounds.southwest),
+        ).coerceAtLeast(MIN_MAP_VIEW_RADIUS_MILES)
+        _currentBounds.value = bounds
+    }
+
+    suspend fun getMVPPlace(place: Place): MVPPlace {
+        return place.toMVPPlace(placesClient)
+    }
+
+    actual fun setEvents(events: List<Event>) {
+        _events.value = events
+    }
+
+    actual fun setPlaces(places: List<MVPPlace>) {
+        _places.value = places
+    }
+
+    actual fun openMap() {
+        _showMap.value = true
+    }
+
+    actual fun closeMap() {
+        _showMap.value = false
+    }
+
+    actual fun toggleMap() {
+        _showMap.value = !_showMap.value
+    }
+
+    suspend fun getPlace(placeId: String): MVPPlace =
+        suspendCancellableCoroutine { cont ->
+            val fields = listOf(
+                Place.Field.ID,
+                Place.Field.DISPLAY_NAME,
+                Place.Field.LOCATION,
+                Place.Field.FORMATTED_ADDRESS,
+            )
+            val fetchPlaceRequest = FetchPlaceRequest.builder(placeId, fields).build()
+            placesClient.fetchPlace(fetchPlaceRequest)
+                .addOnSuccessListener { placeResponse ->
+                    scope.launch {
+                        val place = placeResponse.place.toMVPPlace(placesClient)
+                        cont.resume(place) { cause, _, _ ->
+                            Napier.d { "Cancelled fetchPlace: $cause" }
+                        }
+                    }
+                }
+                .addOnFailureListener { exception ->
+                    logPlacesFailure("fetchPlace", exception)
+                    cont.resumeWithException(exception)
+                }
+        }
+
+    suspend fun suggestPlaces(query: String): List<Place> =
+        suspendCancellableCoroutine { cont ->
+            val viewCenter = _currentViewCenter.value ?: run {
+                cont.resume(emptyList()) { cause, _, _ ->
+                    Napier.d { "Cancelled autocomplete - no view center: $cause" }
+                }
+                return@suspendCancellableCoroutine
+            }
+
+            val request = FindAutocompletePredictionsRequest.builder()
+                .setQuery(query)
+                .build()
+
+            placesClient.findAutocompletePredictions(request)
+                .addOnSuccessListener { response ->
+                    val results = response.autocompletePredictions.map { prediction ->
+                        Place
+                            .builder()
+                            .setId(prediction.placeId)
+                            .setDisplayName(prediction.getPrimaryText(null).toString())
+                            .build()
+                    }
+                    cont.resume(results) { cause, _, _ ->
+                        Napier.d { "Cancelled autocomplete: $cause" }
+                    }
+                }
+                .addOnFailureListener { exception ->
+                    logPlacesFailure("findAutocompletePredictions", exception)
+                    cont.resumeWithException(exception)
+                }
+        }
+
+    suspend fun searchPlaces(query: String): List<Place> =
+        suspendCancellableCoroutine { cont ->
+            val bounds = _currentBounds.value ?: run {
+                cont.resume(emptyList()) { cause, _, _ ->
+                    Napier.d { "Cancelled search - no bounds: $cause" }
+                }
+                return@suspendCancellableCoroutine
+            }
+
+            val fields = listOf(
+                Place.Field.ID,
+                Place.Field.DISPLAY_NAME,
+                Place.Field.LOCATION,
+                Place.Field.FORMATTED_ADDRESS,
+            )
+
+            val request = SearchByTextRequest.builder(query, fields)
+                .setLocationBias(RectangularBounds.newInstance(bounds))
+                .build()
+
+            placesClient.searchByText(request).addOnSuccessListener { response ->
+                val result = response.places
+                cont.resume(result) { cause, _, _ ->
+                    Napier.d { "Cancelled search: $cause" }
+                }
+            }.addOnFailureListener { exception ->
+                logPlacesFailure("searchByText", exception)
+                _error.value = "Failed to search places"
+                cont.resume(emptyList()) { cause, _, _ ->
+                    Napier.d { "Cancelled search after failure: $cause" }
+                }
+            }
+        }
+
+    actual suspend fun searchLocationPlaces(query: String): List<MVPPlace> =
+        suspendCancellableCoroutine { cont ->
+            val fields = listOf(
+                Place.Field.ID,
+                Place.Field.DISPLAY_NAME,
+                Place.Field.LOCATION,
+                Place.Field.FORMATTED_ADDRESS,
+            )
+            val requestBuilder = SearchByTextRequest.builder(query, fields)
+            _currentBounds.value?.let { bounds ->
+                requestBuilder.setLocationBias(RectangularBounds.newInstance(bounds))
+            }
+
+            placesClient.searchByText(requestBuilder.build()).addOnSuccessListener { response ->
+                scope.launch {
+                    val results = response.places
+                        .map { place -> place.toMVPPlace(placesClient) }
+                        .filter { place -> place.latitude != 0.0 || place.longitude != 0.0 }
+                    cont.resume(results) { cause, _, _ ->
+                        Napier.d { "Cancelled location search: $cause" }
+                    }
+                }
+            }.addOnFailureListener { exception ->
+                logPlacesFailure("searchLocationPlaces", exception)
+                cont.resume(emptyList()) { cause, _, _ ->
+                    Napier.d { "Cancelled location search after failure: $cause" }
+                }
+            }
+        }
+
+    private fun logMapsDiagnostics(context: Context) {
+        val apiKey = BuildConfig.MAPS_API_KEY
+        val keyState = when {
+            apiKey.isBlank() -> "blank"
+            apiKey == "DEFAULT_API_KEY" -> "default-placeholder"
+            else -> "present(length=${apiKey.length})"
+        }
+        val availability = GoogleApiAvailability.getInstance()
+        val playServicesCode = availability.isGooglePlayServicesAvailable(context)
+        val playServicesStatus = availability.getErrorString(playServicesCode)
+        val playServicesAvailable = playServicesCode == ConnectionResult.SUCCESS
+        Napier.i(
+            message = "Maps diagnostics package=${context.packageName} key=$keyState " +
+                "playServices=$playServicesCode($playServicesStatus) available=$playServicesAvailable",
+            tag = logTag
+        )
+    }
+
+    private fun logPlacesFailure(operation: String, exception: Exception) {
+        val apiException = exception as? ApiException
+        if (apiException != null) {
+            val statusCode = apiException.statusCode
+            val statusName = CommonStatusCodes.getStatusCodeString(statusCode)
+            Napier.e(
+                message = "$operation failed statusCode=$statusCode($statusName): ${apiException.message}",
+                throwable = apiException,
+                tag = logTag
+            )
+            return
+        }
+
+        Napier.e(
+            message = "$operation failed: ${exception.message}",
+            throwable = exception,
+            tag = logTag
+        )
+    }
+
+    actual suspend fun refreshEventsForVisibleArea() {
+        _isLoading.value = true
+        _error.value = null
+        _events.value = emptyList()
+        val searchCenter = _currentViewCenter.value ?: _currentLocation.value ?: run {
+            _error.value = "Location not available"
+            _isLoading.value = false
+            return
+        }
+        val searchRadiusMiles = _currentViewRadiusMiles.value ?: _currentRadiusMeters.value
+
+        val currentBounds = getBounds(
+            searchRadiusMiles,
+            searchCenter.latitude,
+            searchCenter.longitude
+        )
+
+        eventRepository.getEventsInBounds(currentBounds).onSuccess {
+            _events.value = it.first
+        }.onFailure {
+            _error.value = "Failed to fetch events: ${it.message}"
+        }
+
+        _isLoading.value = false
+    }
+
+    suspend fun getEvents() {
+        refreshEventsForVisibleArea()
+    }
+
+    private fun distanceMilesBetween(start: LatLng, end: LatLng): Double {
+        val earthRadiusMiles = 3958.8
+        val startLat = start.latitude * PI / 180.0
+        val endLat = end.latitude * PI / 180.0
+        val deltaLat = (end.latitude - start.latitude) * PI / 180.0
+        val deltaLong = (end.longitude - start.longitude) * PI / 180.0
+        val a = sin(deltaLat / 2) * sin(deltaLat / 2) +
+            cos(startLat) * cos(endLat) * sin(deltaLong / 2) * sin(deltaLong / 2)
+        val normalizedA = a.coerceIn(0.0, 1.0)
+        val c = 2 * atan2(sqrt(normalizedA), sqrt(1 - normalizedA))
+        return earthRadiusMiles * c
+    }
+
+    private companion object {
+        const val MIN_MAP_VIEW_RADIUS_MILES = 0.25
+    }
+}
+
+internal class MapComponentCleanup(
+    private val scope: CoroutineScope,
+    private val backHandler: com.arkivanov.essenty.backhandler.BackHandler,
+    private val backCallback: BackCallback,
+    private val stopLocationTracking: () -> Unit,
+) : InstanceKeeper.Instance {
+    override fun onDestroy() {
+        scope.cancel()
+        runCatching(stopLocationTracking)
+        if (backHandler.isRegistered(backCallback)) {
+            backHandler.unregister(backCallback)
+        }
+    }
+}
