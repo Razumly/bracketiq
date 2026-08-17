@@ -28,3 +28,5 @@ composeApp/google-services.json
 buildServer.json
 .compile
 output/
+hs_err_pid*.log
+replay_pid*.log
