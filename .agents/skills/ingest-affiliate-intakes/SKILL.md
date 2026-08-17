@@ -9,15 +9,17 @@ Turn one eligible stored intake at a time into a reproducible, tested organizati
 
 Before processing the first intake, read:
 
-- `AGENTS.md`
-- `PLANS.md`
-- `docs/affiliate-source-rollout-agent-goal.md`
-- `docs/admin-affiliate-scrape-sources.md`
-- `docs/admin-affiliate-scraping-execplan.md`
+- `AGENTS.md` and `../../AGENTS.md`
+- `../../PLANS.md`
+- `../../docs/affiliate-source-rollout-agent-goal.md`
+- `../../docs/admin-affiliate-scrape-sources.md`
+- `../../docs/admin-affiliate-scraping-execplan.md`
 - `src/server/affiliateImports/codexIngestionResult.ts`
 - `references/completion-contract.md` in this skill
 
 Also read `/Users/elesesy/.codex/skills/affiliate-scrape-source-builder/SKILL.md` and its `references/import-contract.md` when they exist on the machine. The completion contract in this skill remains authoritative on a VM where that user-level skill is absent.
+
+The agent starts in `apps/site`. Report generated package paths relative to the monorepo root. Prefix site paths with `apps/site/`. Keep shared registry notes under the root `docs/` directory.
 
 ## Run the queue
 

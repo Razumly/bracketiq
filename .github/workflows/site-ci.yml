@@ -1,0 +1,99 @@
+name: Site CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: site-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect site changes
+    runs-on: ubuntu-latest
+    outputs:
+      site: ${{ steps.filter.outputs.site }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Detect site paths
+        id: filter
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            site:
+              - 'apps/site/**'
+              - '.github/workflows/site-ci.yml'
+              - '.github/workflows/publish-site-image.yml'
+              - 'AGENTS.md'
+              - 'CONTEXT.md'
+              - 'PLANS.md'
+
+  quality:
+    name: Site quality
+    needs: changes
+    if: needs.changes.outputs.site == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/site
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/bracketiq_ci
+      JWT_SECRET: bracketiq-ci-only-secret-not-used-outside-tests
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      TZ: America/Los_Angeles
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/site/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npm run prisma:validate
+
+      - name: Run route-inclusive tests and coverage gates
+        run: npm run test:ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+  gate:
+    name: Site CI gate
+    needs:
+      - changes
+      - quality
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate site CI
+        env:
+          SITE_CHANGED: ${{ needs.changes.outputs.site }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
+        run: |
+          if [[ "$CHANGES_RESULT" != "success" ]]; then
+            echo "Site path detection failed: $CHANGES_RESULT" >&2
+            exit 1
+          fi
+          if [[ "$SITE_CHANGED" == "true" && "$QUALITY_RESULT" != "success" ]]; then
+            echo "Site quality checks did not pass: $QUALITY_RESULT" >&2
+            exit 1
+          fi
+          echo "Site CI gate passed. Site changed: $SITE_CHANGED."

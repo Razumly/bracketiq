@@ -1,0 +1,2875 @@
+@file:OptIn(kotlin.time.ExperimentalTime::class)
+
+package com.razumly.mvp.eventDetail
+
+import com.arkivanov.decompose.DefaultComponentContext
+import com.arkivanov.essenty.backhandler.BackDispatcher
+import com.arkivanov.essenty.lifecycle.LifecycleRegistry
+import com.razumly.mvp.core.data.dataTypes.AuthAccount
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
+import com.razumly.mvp.core.data.dataTypes.EventWithRelations
+import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
+import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.Sport
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
+import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.data.repositories.EventComplianceUserSummary
+import com.razumly.mvp.core.data.repositories.EventDetailSyncResult
+import com.razumly.mvp.core.data.repositories.EventParticipantManagementSnapshot
+import com.razumly.mvp.core.data.repositories.EventParticipantsSummary
+import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
+import com.razumly.mvp.core.data.repositories.EventTeamComplianceSummary
+import com.razumly.mvp.core.data.repositories.FamilyChild
+import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
+import com.razumly.mvp.core.data.repositories.FamilyJoinRequestAction
+import com.razumly.mvp.core.data.repositories.FamilyJoinRequestResolution
+import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.data.repositories.IFieldRepository
+import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
+import com.razumly.mvp.core.data.repositories.ISportsRepository
+import com.razumly.mvp.core.data.repositories.ITeamRepository
+import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
+import com.razumly.mvp.core.data.repositories.SignStep
+import com.razumly.mvp.core.data.repositories.SignupProfileSelection
+import com.razumly.mvp.core.data.repositories.TeamRegistrationConsent
+import com.razumly.mvp.core.data.repositories.TeamRegistrationResult
+import com.razumly.mvp.core.data.repositories.TeamJoinRequestContext
+import com.razumly.mvp.core.data.repositories.UserEmailMembershipMatch
+import com.razumly.mvp.core.data.repositories.UserVisibilityContext
+import com.razumly.mvp.core.data.repositories.EventEditorSessionMapper
+import com.razumly.mvp.eventCreate.createEventEditorSession
+import com.razumly.mvp.core.network.dto.InviteCreateDto
+import com.razumly.mvp.core.presentation.INavigationHandler
+import com.razumly.mvp.core.presentation.OrganizationDetailTab
+import com.razumly.mvp.eventCreate.CreateEvent_FakeBillingRepository
+import com.razumly.mvp.eventCreate.CreateEvent_FakeImagesRepository
+import com.razumly.mvp.eventCreate.CreateEvent_FakeSportsRepository
+import com.razumly.mvp.eventCreate.MainDispatcherTest
+import com.razumly.mvp.core.util.LoadingHandler
+import com.razumly.mvp.core.util.LoadingHandlerImpl
+import com.razumly.mvp.core.util.LoadingOperation
+import com.razumly.mvp.eventDetail.data.IMatchRepository
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.runTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlin.time.Instant
+
+class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
+    @Test
+    fun id_only_event_detail_hydrates_current_event_relations_by_id() = runTest(testDispatcher) {
+        val host = mobileUser(id = "id_only_host", firstName = "ID", lastName = "Host")
+        val event = Event(
+            id = "id_only_event",
+            name = "Current event from repository",
+            hostId = host.id,
+            state = "PUBLISHED",
+            eventType = EventType.EVENT,
+        )
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = event,
+            host = host,
+            currentUser = host,
+            players = emptyList(),
+            teams = emptyList(),
+            staffInvites = emptyList(),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(host),
+            fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
+            eventId = event.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(emptyList(), emptyMap(), emptyMap()),
+            teamRepository = EventDetailFakeTeamRepository(emptyList(), listOf(host)),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        advance()
+
+        assertEquals(listOf(event.id), eventRepository.eventWithRelationsFlowRequests)
+        assertTrue(eventRepository.cachedEventWithRelationsFlowRequests.isEmpty())
+        assertEquals(event.name, component.selectedEvent.value.name)
+    }
+
+    @Test
+    fun published_event_defers_sports_catalog_load_until_editing() =
+        runTest(testDispatcher) {
+            val host = mobileUser(id = "host_1", firstName = "Host", lastName = "User")
+            val sportsRepository = FailingSportsRepository()
+            val initialEvent = Event(
+                id = "sports_timeout_event",
+                name = "Sports Timeout Event",
+                hostId = host.id,
+                state = "PUBLISHED",
+                eventType = EventType.EVENT,
+                singleDivision = true,
+                divisions = listOf("open"),
+                divisionDetails = listOf(freeOpenDivisionDetail()),
+            )
+            val component = DefaultEventDetailComponent(
+                componentContext = createTestComponentContext(),
+                userRepository = EventDetailFakeUserRepository(host),
+                fieldRepository = EventDetailFakeFieldRepository(
+                    fields = emptyList(),
+                    timeSlots = emptyList(),
+                    fieldMatches = emptyList(),
+                ),
+                eventId = initialEvent.id,
+                notificationsRepository = NoopPushNotificationsRepository,
+                billingRepository = CreateEvent_FakeBillingRepository(),
+                eventRepository = EventDetailFakeEventRepository(
+                    initialEvent = initialEvent,
+                    host = host,
+                    currentUser = host,
+                    players = emptyList(),
+                    teams = emptyList(),
+                    staffInvites = emptyList(),
+                ),
+                matchRepository = EventDetailFakeMatchRepository(
+                    matches = emptyList(),
+                    fieldsById = emptyMap(),
+                    teamsById = emptyMap(),
+                ),
+                teamRepository = EventDetailFakeTeamRepository(
+                    teams = emptyList(),
+                    users = listOf(host),
+                ),
+                sportsRepository = sportsRepository,
+                imageRepository = CreateEvent_FakeImagesRepository(),
+                navigationHandler = NoopNavigationHandler,
+            )
+            component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+            advance()
+
+            assertEquals(0, sportsRepository.getSportsCalls)
+            assertEquals(0, sportsRepository.getDivisionTypeParametersCalls)
+            assertNull(component.errorState.value)
+
+            component.startEditingEvent()
+            advance()
+
+            assertEquals(1, sportsRepository.getSportsCalls)
+            assertEquals(1, sportsRepository.getDivisionTypeParametersCalls)
+            assertEquals(
+                "Failed to load sports: Request timeout has expired",
+                component.errorState.value?.message,
+            )
+
+            component.clearError()
+
+            assertNull(component.errorState.value)
+        }
+
+    @Test
+    fun editing_loads_editor_before_seeding_division_draft() = runTest(testDispatcher) {
+        val host = mobileUser(id = "edit_host", firstName = "Edit", lastName = "Host")
+        val divisionId = "edit_event__division__open"
+        val partialEvent = Event(
+            id = "edit_event",
+            name = "Edit Tournament",
+            hostId = host.id,
+            state = "PUBLISHED",
+            eventType = EventType.TOURNAMENT,
+            singleDivision = false,
+            divisions = emptyList(),
+            divisionDetails = emptyList(),
+        )
+        val refreshedEvent = partialEvent.copy(
+            divisions = listOf(divisionId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = divisionId,
+                    key = "open",
+                    name = "Open",
+                    maxParticipants = 16,
+                    playoffTeamCount = 8,
+                    poolCount = 4,
+                ),
+            ),
+        )
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = partialEvent,
+            host = host,
+            currentUser = host,
+            players = emptyList(),
+            teams = emptyList(),
+            staffInvites = emptyList(),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(host),
+            fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
+            eventId = partialEvent.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(emptyList(), emptyMap(), emptyMap()),
+            teamRepository = EventDetailFakeTeamRepository(emptyList(), listOf(host)),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+        advance()
+        eventRepository.refreshedEvent = refreshedEvent
+        eventRepository.refreshRequests.clear()
+
+        component.startEditingEvent()
+        advance()
+
+        assertTrue(component.isEditing.value)
+        assertEquals(listOf(partialEvent.id), eventRepository.editorRequests)
+        assertTrue(eventRepository.refreshRequests.isEmpty())
+        assertEquals(listOf(divisionId), component.editedEvent.value.divisions)
+        assertEquals(listOf(divisionId), component.editedEvent.value.divisionDetails.map(DivisionDetail::id))
+        assertEquals(4, component.editedEvent.value.divisionDetails.single().poolCount)
+    }
+
+    @Test
+    fun league_mobile_join_flow_loads_playoffs_schedule_and_periphery_without_exposing_staff_invites() =
+        runTest(testDispatcher) {
+            val host = mobileUser(id = "host_1", firstName = "Host", lastName = "User")
+            val currentUser = mobileUser(id = "mobile_joiner", firstName = "Mobile", lastName = "Joiner")
+            val seededParticipant = mobileUser(id = "seeded_player", firstName = "Seeded", lastName = "Player")
+
+            val teams = listOf(
+                mobileTeam("team_1", "Court Crushers", "captain_1"),
+                mobileTeam("team_2", "Baseline Bandits", "captain_2"),
+                mobileTeam("team_3", "Volley Vortex", "captain_3"),
+                mobileTeam("team_4", "Net Ninjas", "captain_4"),
+            )
+
+            val field = Field(
+                id = "field_main",
+                fieldNumber = 1,
+                name = "Championship Court",
+                divisions = listOf("open"),
+                rentalSlotIds = listOf("slot_main"),
+                location = "Main Complex",
+                organizationId = "org_league",
+            )
+            val slot = TimeSlot(
+                id = "slot_main",
+                dayOfWeek = 4,
+                daysOfWeek = listOf(4),
+                divisions = listOf("open"),
+                startTimeMinutes = 420,
+                endTimeMinutes = 780,
+                startDate = Instant.parse("2030-04-02T00:00:00Z"),
+                repeating = true,
+                endDate = Instant.parse("2030-06-25T00:00:00Z"),
+                scheduledFieldId = field.id,
+                scheduledFieldIds = listOf(field.id),
+                price = 0,
+            )
+            val matches = listOf(
+                mobileMatch("match_1", 1, "team_1", "team_4", field.id, "2030-04-02T07:00:00Z", "2030-04-02T08:00:00Z"),
+                mobileMatch("match_2", 2, "team_2", "team_3", field.id, "2030-04-02T08:00:00Z", "2030-04-02T09:00:00Z"),
+                mobileMatch("match_3", 3, "team_1", "team_3", field.id, "2030-04-02T09:00:00Z", "2030-04-02T10:00:00Z"),
+                mobileMatch("match_4", 4, "team_4", "team_2", field.id, "2030-04-02T10:00:00Z", "2030-04-02T11:00:00Z"),
+                mobileMatch("match_5", 5, "team_1", "team_2", field.id, "2030-04-02T11:00:00Z", "2030-04-02T12:00:00Z"),
+                mobileMatch("match_6", 6, "team_3", "team_4", field.id, "2030-04-02T12:00:00Z", "2030-04-02T13:00:00Z"),
+            )
+            val staffInvites = listOf(
+                Invite(
+                    id = "invite_scorekeeper",
+                    type = "event_staff",
+                    eventId = "league_mobile_flow",
+                    email = "scorekeeper@example.test",
+                    firstName = "Score",
+                    lastName = "Keeper",
+                    status = "PENDING",
+                    staffTypes = listOf("SCOREKEEPER"),
+                    createdBy = host.id,
+                ),
+                Invite(
+                    id = "invite_referee",
+                    type = "event_staff",
+                    eventId = "league_mobile_flow",
+                    email = "referee@example.test",
+                    firstName = "Ref",
+                    lastName = "Eree",
+                    status = "PENDING",
+                    staffTypes = listOf("REFEREE"),
+                    createdBy = host.id,
+                ),
+            )
+            val initialEvent = Event(
+                id = "league_mobile_flow",
+                name = "Mobile League Playoff Flow",
+                description = "Regression coverage for hydrated league joins on mobile.",
+                hostId = host.id,
+                coordinates = listOf(-80.1918, 25.7617),
+                location = "Downtown Sports Hub",
+                start = Instant.parse("2030-06-01T15:00:00Z"),
+                end = Instant.parse("2030-06-29T19:00:00Z"),
+                state = "PUBLISHED",
+                eventType = EventType.LEAGUE,
+                imageId = UPLOADED_DB_IMAGE_ID,
+                includePlayoffs = true,
+                playoffTeamCount = 4,
+                teamSignup = false,
+                singleDivision = true,
+                divisions = listOf("open"),
+                divisionDetails = listOf(freeOpenDivisionDetail(maxParticipants = 32)),
+                fieldIds = listOf(field.id),
+                timeSlotIds = listOf(slot.id),
+                teamIds = teams.map(Team::id),
+                userIds = listOf(seededParticipant.id),
+                maxParticipants = 32,
+                gamesPerOpponent = 1,
+            )
+
+            val eventRepository = EventDetailFakeEventRepository(
+                initialEvent = initialEvent,
+                host = host,
+                currentUser = currentUser,
+                players = listOf(seededParticipant),
+                teams = teams,
+                staffInvites = staffInvites,
+            )
+            val fieldRepository = EventDetailFakeFieldRepository(
+                fields = listOf(field),
+                timeSlots = listOf(slot),
+                fieldMatches = listOf(FieldWithMatches(field = field, matches = matches)),
+            )
+            val matchRepository = EventDetailFakeMatchRepository(
+                matches = matches,
+                fieldsById = mapOf(field.id to field),
+                teamsById = teams.associateBy(Team::id),
+            )
+            val teamRepository = EventDetailFakeTeamRepository(
+                teams = teams,
+                users = listOf(host, currentUser, seededParticipant) + teams.map { team ->
+                    mobileUser(id = team.captainId, firstName = "Captain", lastName = team.id.takeLast(1))
+                },
+            )
+
+            val component = DefaultEventDetailComponent(
+                componentContext = createTestComponentContext(),
+                userRepository = EventDetailFakeUserRepository(currentUser),
+                fieldRepository = fieldRepository,
+                eventId = initialEvent.id,
+                notificationsRepository = NoopPushNotificationsRepository,
+                billingRepository = CreateEvent_FakeBillingRepository(),
+                eventRepository = eventRepository,
+                matchRepository = matchRepository,
+                teamRepository = teamRepository,
+                sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+                imageRepository = CreateEvent_FakeImagesRepository(),
+                navigationHandler = NoopNavigationHandler,
+            )
+            component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+            advance()
+
+            assertEquals(UPLOADED_DB_IMAGE_ID, component.selectedEvent.value.imageId)
+            assertTrue(component.selectedEvent.value.includePlayoffs)
+            assertEquals(4, component.selectedEvent.value.playoffTeamCount)
+            assertEquals(emptyList(), component.eventWithRelations.value.staffInvites)
+            assertEquals(listOf(slot.id), component.eventWithRelations.value.timeSlots.map(TimeSlot::id))
+            assertEquals(listOf(field.id), component.eventFields.value.map { it.field.id })
+            assertEquals(matches.map(MatchMVP::id), component.eventWithRelations.value.matches.map { it.match.id })
+            assertEquals(teams.map(Team::id), component.eventWithRelations.value.teams.map { it.team.id })
+            assertEquals(matches.size, component.eventFields.value.first().matches.size)
+            assertTrue(fieldRepository.requestedFieldIds.any { it == listOf(field.id) })
+            assertTrue(fieldRepository.requestedTimeSlotIds.any { it == listOf(slot.id) })
+            assertTrue(matchRepository.requestedTournamentIds.contains(initialEvent.id))
+            assertTrue(eventRepository.staffInviteRequests.isEmpty())
+
+            component.joinEvent()
+            advance()
+
+            assertEquals(1, eventRepository.joinCallCount)
+            assertTrue(eventRepository.refreshRequests.isNotEmpty())
+            assertTrue(component.isUserInEvent.value)
+            assertTrue(component.selectedEvent.value.userIds.contains(currentUser.id))
+            assertEquals(matches.map(MatchMVP::id), component.eventWithRelations.value.matches.map { it.match.id })
+            assertEquals(listOf(slot.id), component.eventWithRelations.value.timeSlots.map(TimeSlot::id))
+            assertEquals(listOf(field.id), component.eventFields.value.map { it.field.id })
+            assertEquals(emptyList(), component.eventWithRelations.value.staffInvites)
+            assertTrue(eventRepository.staffInviteRequests.isEmpty())
+        }
+
+    @Test
+    fun weekly_join_refreshes_selected_occurrence_summary_after_join() = runTest(testDispatcher) {
+        val host = mobileUser(id = "weekly_host", firstName = "Weekly", lastName = "Host")
+        val currentUser = mobileUser(id = "weekly_joiner", firstName = "Weekly", lastName = "Joiner")
+
+        val field = Field(
+            id = "weekly_field",
+            fieldNumber = 1,
+            name = "Weekly Court",
+            divisions = listOf("open"),
+            rentalSlotIds = listOf("weekly_slot"),
+            location = "Practice Complex",
+            organizationId = "org_weekly",
+        )
+        val slot = TimeSlot(
+            id = "weekly_slot",
+            dayOfWeek = 2,
+            daysOfWeek = listOf(2),
+            divisions = listOf("open"),
+            startTimeMinutes = 540,
+            endTimeMinutes = 600,
+            startDate = Instant.parse("2030-04-16T00:00:00Z"),
+            repeating = true,
+            endDate = Instant.parse("2030-05-28T00:00:00Z"),
+            scheduledFieldId = field.id,
+            scheduledFieldIds = listOf(field.id),
+            price = 0,
+        )
+        val initialEvent = Event(
+            id = "weekly_event",
+            name = "Weekly Clinic",
+            description = "Weekly occurrence summary regression.",
+            hostId = host.id,
+            coordinates = listOf(-80.1918, 25.7617),
+            location = "Practice Complex",
+            start = Instant.parse("2030-04-16T16:00:00Z"),
+            end = Instant.parse("2030-05-28T17:00:00Z"),
+            state = "PUBLISHED",
+            eventType = EventType.WEEKLY_EVENT,
+            teamSignup = false,
+            singleDivision = true,
+            divisions = listOf("open"),
+            divisionDetails = listOf(freeOpenDivisionDetail(maxParticipants = 6)),
+            fieldIds = listOf(field.id),
+            timeSlotIds = listOf(slot.id),
+            userIds = emptyList(),
+            maxParticipants = 6,
+        )
+
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = initialEvent,
+            host = host,
+            currentUser = currentUser,
+            players = emptyList(),
+            teams = emptyList(),
+            staffInvites = emptyList(),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(currentUser),
+            fieldRepository = EventDetailFakeFieldRepository(
+                fields = listOf(field),
+                timeSlots = listOf(slot),
+                fieldMatches = listOf(FieldWithMatches(field = field, matches = emptyList())),
+            ),
+                eventId = initialEvent.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(
+                matches = emptyList(),
+                fieldsById = mapOf(field.id to field),
+                teamsById = emptyMap(),
+            ),
+            teamRepository = EventDetailFakeTeamRepository(
+                teams = emptyList(),
+                users = listOf(host, currentUser),
+            ),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        advance()
+
+        component.selectWeeklySession(
+            sessionStart = Instant.parse("2030-04-16T16:00:00Z"),
+            sessionEnd = Instant.parse("2030-04-16T17:00:00Z"),
+            slotId = slot.id,
+            occurrenceDate = "2030-04-16",
+            label = "Tue Apr 16",
+        )
+
+        advance()
+
+        assertEquals(0, component.selectedWeeklyOccurrenceSummary.value?.participantCount)
+
+        component.joinEvent()
+        advance()
+
+        assertEquals(1, eventRepository.joinCallCount)
+        assertEquals(1, component.selectedWeeklyOccurrenceSummary.value?.participantCount)
+    }
+
+    @Test
+    fun child_registration_flow_shows_linked_children_and_registers_selected_child() = runTest(testDispatcher) {
+        val host = mobileUser(id = "child_event_host", firstName = "Child", lastName = "Host")
+        val currentUser = mobileUser(id = "child_parent", firstName = "Parent", lastName = "User")
+        val linkedChild = FamilyChild(
+            userId = "child_joiner",
+            firstName = "Kid",
+            lastName = "One",
+            email = "kid@example.test",
+            hasEmail = true,
+            linkStatus = "active",
+        )
+        val inactiveChild = FamilyChild(
+            userId = "inactive_child",
+            firstName = "Inactive",
+            lastName = "Child",
+            linkStatus = "removed",
+        )
+        val initialEvent = Event(
+            id = "child_registration_event",
+            name = "Child Registration Event",
+            description = "Linked children should be selectable before registering.",
+            hostId = host.id,
+            coordinates = listOf(-80.1918, 25.7617),
+            location = "Downtown Sports Hub",
+            start = Instant.parse("2030-06-01T15:00:00Z"),
+            end = Instant.parse("2030-06-01T19:00:00Z"),
+            state = "PUBLISHED",
+            eventType = EventType.TOURNAMENT,
+            teamSignup = false,
+            singleDivision = true,
+            divisions = listOf("open"),
+            userIds = emptyList(),
+            maxParticipants = 8,
+        )
+        val userRepository = EventDetailFakeUserRepository(
+            currentUserData = currentUser,
+            children = listOf(linkedChild, inactiveChild),
+        )
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = initialEvent,
+            host = host,
+            currentUser = currentUser,
+            players = emptyList(),
+            teams = emptyList(),
+            staffInvites = emptyList(),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = userRepository,
+            fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
+                eventId = initialEvent.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(emptyList(), emptyMap(), emptyMap()),
+            teamRepository = EventDetailFakeTeamRepository(emptyList(), listOf(host, currentUser)),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        advance()
+
+        component.joinEvent()
+        advance()
+
+        assertEquals(listOf(linkedChild.userId), component.joinChoiceDialog.value?.children?.map { it.userId })
+        assertNull(component.childJoinSelectionDialog.value)
+        assertEquals(0, eventRepository.joinCallCount)
+        assertTrue(eventRepository.childRegistrationRequests.isEmpty())
+
+        component.showChildJoinSelection()
+
+        assertNull(component.joinChoiceDialog.value)
+        assertEquals(listOf(linkedChild.userId), component.childJoinSelectionDialog.value?.children?.map { it.userId })
+
+        component.selectChildForJoin(linkedChild.userId)
+        advance()
+
+        assertEquals(
+            listOf(
+                ChildRegistrationRequest(
+                    eventId = initialEvent.id,
+                    childUserId = linkedChild.userId,
+                    joinWaitlist = false,
+                    occurrence = null,
+                )
+            ),
+            eventRepository.childRegistrationRequests,
+        )
+        assertEquals(0, eventRepository.joinCallCount)
+        assertNull(component.childJoinSelectionDialog.value)
+        assertEquals(
+            "${linkedChild.firstName} ${linkedChild.lastName} registration completed.",
+            component.errorState.value?.message,
+        )
+    }
+
+    @Test
+    fun weekly_prefetch_occurrence_summaries_loads_visible_option_fullness() = runTest(testDispatcher) {
+        val host = mobileUser(id = "weekly_host_prefetch", firstName = "Weekly", lastName = "Host")
+        val currentUser = mobileUser(id = "weekly_joiner_prefetch", firstName = "Weekly", lastName = "Joiner")
+
+        val field = Field(
+            id = "weekly_field_prefetch",
+            fieldNumber = 1,
+            name = "Weekly Court",
+            divisions = listOf("open"),
+            rentalSlotIds = listOf("weekly_slot_prefetch"),
+            location = "Practice Complex",
+            organizationId = "org_weekly_prefetch",
+        )
+        val slot = TimeSlot(
+            id = "weekly_slot_prefetch",
+            dayOfWeek = 2,
+            daysOfWeek = listOf(2, 3),
+            divisions = listOf("open"),
+            startTimeMinutes = 540,
+            endTimeMinutes = 600,
+            startDate = Instant.parse("2030-04-16T00:00:00Z"),
+            repeating = true,
+            endDate = Instant.parse("2030-05-28T00:00:00Z"),
+            scheduledFieldId = field.id,
+            scheduledFieldIds = listOf(field.id),
+            price = 0,
+        )
+        val initialEvent = Event(
+            id = "weekly_event_prefetch",
+            name = "Weekly Clinic Prefetch",
+            description = "Weekly visible option summaries should be prefetched.",
+            hostId = host.id,
+            coordinates = listOf(-80.1918, 25.7617),
+            location = "Practice Complex",
+            start = Instant.parse("2030-04-16T16:00:00Z"),
+            end = Instant.parse("2030-05-28T17:00:00Z"),
+            state = "PUBLISHED",
+            eventType = EventType.WEEKLY_EVENT,
+            teamSignup = false,
+            singleDivision = true,
+            divisions = listOf("open"),
+            fieldIds = listOf(field.id),
+            timeSlotIds = listOf(slot.id),
+            userIds = emptyList(),
+            maxParticipants = 6,
+        )
+
+        val firstOccurrence = EventOccurrenceSelection(
+            slotId = slot.id,
+            occurrenceDate = "2030-04-16",
+            label = "Tue Apr 16",
+        )
+        val secondOccurrence = EventOccurrenceSelection(
+            slotId = slot.id,
+            occurrenceDate = "2030-04-17",
+            label = "Wed Apr 17",
+        )
+
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = initialEvent,
+            host = host,
+            currentUser = currentUser,
+            players = emptyList(),
+            teams = emptyList(),
+            staffInvites = emptyList(),
+            syncSnapshotsByOccurrence = mapOf(
+                "${slot.id}|2030-04-16" to FakeParticipantSyncSnapshot(
+                    event = initialEvent,
+                    participantCount = 6,
+                    participantCapacity = 6,
+                ),
+                "${slot.id}|2030-04-17" to FakeParticipantSyncSnapshot(
+                    event = initialEvent,
+                    participantCount = 2,
+                    participantCapacity = 6,
+                ),
+            ),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(currentUser),
+            fieldRepository = EventDetailFakeFieldRepository(
+                fields = listOf(field),
+                timeSlots = listOf(slot),
+                fieldMatches = listOf(FieldWithMatches(field = field, matches = emptyList())),
+            ),
+                eventId = initialEvent.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(
+                matches = emptyList(),
+                fieldsById = mapOf(field.id to field),
+                teamsById = emptyMap(),
+            ),
+            teamRepository = EventDetailFakeTeamRepository(
+                teams = emptyList(),
+                users = listOf(host, currentUser),
+            ),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        advance()
+
+        component.prefetchWeeklyOccurrenceSummaries(
+            listOf(firstOccurrence, secondOccurrence),
+        )
+
+        advance()
+
+        assertEquals(
+            WeeklyOccurrenceSummary(participantCount = 6, participantCapacity = 6),
+            component.weeklyOccurrenceSummaries.value["${slot.id}|2030-04-16"],
+        )
+        assertEquals(
+            WeeklyOccurrenceSummary(participantCount = 2, participantCapacity = 6),
+            component.weeklyOccurrenceSummaries.value["${slot.id}|2030-04-17"],
+        )
+        assertEquals(null, component.selectedWeeklyOccurrenceSummary.value)
+    }
+
+    @Test
+    fun weekly_past_occurrence_does_not_attempt_join() = runTest(testDispatcher) {
+        val host = mobileUser(id = "weekly_host_past", firstName = "Weekly", lastName = "Host")
+        val currentUser = mobileUser(id = "weekly_joiner_past", firstName = "Weekly", lastName = "Joiner")
+
+        val field = Field(
+            id = "weekly_field_past",
+            fieldNumber = 1,
+            name = "Weekly Court",
+            divisions = listOf("open"),
+            rentalSlotIds = listOf("weekly_slot_past"),
+            location = "Practice Complex",
+            organizationId = "org_weekly_past",
+        )
+        val slot = TimeSlot(
+            id = "weekly_slot_past",
+            dayOfWeek = 1,
+            daysOfWeek = listOf(1),
+            divisions = listOf("open"),
+            startTimeMinutes = 540,
+            endTimeMinutes = 600,
+            startDate = Instant.parse("2024-04-16T00:00:00Z"),
+            repeating = true,
+            endDate = Instant.parse("2024-05-28T00:00:00Z"),
+            scheduledFieldId = field.id,
+            scheduledFieldIds = listOf(field.id),
+            price = 0,
+        )
+        val initialEvent = Event(
+            id = "weekly_event_past",
+            name = "Weekly Clinic Past",
+            description = "Past weekly occurrence should not allow joining.",
+            hostId = host.id,
+            coordinates = listOf(-80.1918, 25.7617),
+            location = "Practice Complex",
+            start = Instant.parse("2024-04-16T16:00:00Z"),
+            end = Instant.parse("2024-05-28T17:00:00Z"),
+            state = "PUBLISHED",
+            eventType = EventType.WEEKLY_EVENT,
+            teamSignup = false,
+            singleDivision = true,
+            divisions = listOf("open"),
+            fieldIds = listOf(field.id),
+            timeSlotIds = listOf(slot.id),
+            userIds = emptyList(),
+            maxParticipants = 6,
+        )
+
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = initialEvent,
+            host = host,
+            currentUser = currentUser,
+            players = emptyList(),
+            teams = emptyList(),
+            staffInvites = emptyList(),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(currentUser),
+            fieldRepository = EventDetailFakeFieldRepository(
+                fields = listOf(field),
+                timeSlots = listOf(slot),
+                fieldMatches = listOf(FieldWithMatches(field = field, matches = emptyList())),
+            ),
+                eventId = initialEvent.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(
+                matches = emptyList(),
+                fieldsById = mapOf(field.id to field),
+                teamsById = emptyMap(),
+            ),
+            teamRepository = EventDetailFakeTeamRepository(
+                teams = emptyList(),
+                users = listOf(host, currentUser),
+            ),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        advance()
+
+        component.selectWeeklySession(
+            sessionStart = Instant.parse("2024-04-16T16:00:00Z"),
+            sessionEnd = Instant.parse("2024-04-16T17:00:00Z"),
+            slotId = slot.id,
+            occurrenceDate = "2024-04-16",
+            label = "Tue Apr 16",
+        )
+
+        advance()
+        component.joinEvent()
+        advance()
+
+        assertEquals(0, eventRepository.joinCallCount)
+    }
+
+    @Test
+    fun weekly_parent_without_selected_occurrence_does_not_mark_user_as_joined() = runTest(testDispatcher) {
+        val host = mobileUser(id = "weekly_host_existing", firstName = "Weekly", lastName = "Host")
+        val currentUser = mobileUser(
+            id = "weekly_joiner_existing",
+            firstName = "Weekly",
+            lastName = "Joiner",
+        ).copy(teamIds = listOf("weekly_team_existing"))
+        val registeredTeam = mobileTeam(
+            id = "weekly_team_existing",
+            name = "Registered Team",
+            captainId = currentUser.id,
+        ).copy(playerIds = listOf(currentUser.id))
+
+        val field = Field(
+            id = "weekly_field_existing",
+            fieldNumber = 1,
+            name = "Weekly Court",
+            divisions = listOf("open"),
+            rentalSlotIds = listOf("weekly_slot_existing"),
+            location = "Practice Complex",
+            organizationId = "org_weekly_existing",
+        )
+        val slot = TimeSlot(
+            id = "weekly_slot_existing",
+            dayOfWeek = 2,
+            daysOfWeek = listOf(2),
+            divisions = listOf("open"),
+            startTimeMinutes = 540,
+            endTimeMinutes = 600,
+            startDate = Instant.parse("2030-04-16T00:00:00Z"),
+            repeating = true,
+            endDate = Instant.parse("2030-05-28T00:00:00Z"),
+            scheduledFieldId = field.id,
+            scheduledFieldIds = listOf(field.id),
+            price = 0,
+        )
+        val initialEvent = Event(
+            id = "weekly_event_existing",
+            name = "Weekly Clinic Existing Team",
+            description = "Existing weekly occurrence should not block another selection.",
+            hostId = host.id,
+            coordinates = listOf(-80.1918, 25.7617),
+            location = "Practice Complex",
+            start = Instant.parse("2030-04-16T16:00:00Z"),
+            end = Instant.parse("2030-05-28T17:00:00Z"),
+            state = "PUBLISHED",
+            eventType = EventType.WEEKLY_EVENT,
+            teamSignup = true,
+            singleDivision = true,
+            divisions = listOf("open"),
+            fieldIds = listOf(field.id),
+            timeSlotIds = listOf(slot.id),
+            teamIds = listOf(registeredTeam.id),
+            maxParticipants = 6,
+        )
+
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = initialEvent,
+            host = host,
+            currentUser = currentUser,
+            players = emptyList(),
+            teams = listOf(registeredTeam),
+            staffInvites = emptyList(),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(currentUser),
+            fieldRepository = EventDetailFakeFieldRepository(
+                fields = listOf(field),
+                timeSlots = listOf(slot),
+                fieldMatches = listOf(FieldWithMatches(field = field, matches = emptyList())),
+            ),
+                eventId = initialEvent.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(
+                matches = emptyList(),
+                fieldsById = mapOf(field.id to field),
+                teamsById = mapOf(registeredTeam.id to registeredTeam),
+            ),
+            teamRepository = EventDetailFakeTeamRepository(
+                teams = listOf(registeredTeam),
+                users = listOf(host, currentUser),
+            ),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        advance()
+
+        assertFalse(component.isUserInEvent.value)
+        assertFalse(component.isUserInWaitlist.value)
+        assertFalse(component.isUserFreeAgent.value)
+    }
+
+    @Test
+    fun weekly_team_membership_tracks_selected_occurrence_when_switching_between_occurrences() = runTest(testDispatcher) {
+        val host = mobileUser(id = "weekly_host_switch", firstName = "Weekly", lastName = "Host")
+        val currentUser = mobileUser(
+            id = "weekly_joiner_switch",
+            firstName = "Weekly",
+            lastName = "Joiner",
+        ).copy(teamIds = listOf("weekly_team_switch"))
+        val registeredTeam = mobileTeam(
+            id = "weekly_team_switch",
+            name = "Switch Team",
+            captainId = currentUser.id,
+        ).copy(playerIds = listOf(currentUser.id))
+
+        val field = Field(
+            id = "weekly_field_switch",
+            fieldNumber = 1,
+            name = "Weekly Court",
+            divisions = listOf("open"),
+            rentalSlotIds = listOf("weekly_slot_switch"),
+            location = "Practice Complex",
+            organizationId = "org_weekly_switch",
+        )
+        val slot = TimeSlot(
+            id = "weekly_slot_switch",
+            dayOfWeek = 2,
+            daysOfWeek = listOf(2, 4),
+            divisions = listOf("open"),
+            startTimeMinutes = 540,
+            endTimeMinutes = 600,
+            startDate = Instant.parse("2030-04-16T00:00:00Z"),
+            repeating = true,
+            endDate = Instant.parse("2030-05-28T00:00:00Z"),
+            scheduledFieldId = field.id,
+            scheduledFieldIds = listOf(field.id),
+            price = 0,
+        )
+        val initialEvent = Event(
+            id = "weekly_event_switch",
+            name = "Weekly Clinic Switch",
+            description = "Switching occurrences should keep joined state occurrence scoped.",
+            hostId = host.id,
+            coordinates = listOf(-80.1918, 25.7617),
+            location = "Practice Complex",
+            start = Instant.parse("2030-04-16T16:00:00Z"),
+            end = Instant.parse("2030-05-28T17:00:00Z"),
+            state = "PUBLISHED",
+            eventType = EventType.WEEKLY_EVENT,
+            teamSignup = true,
+            singleDivision = true,
+            divisions = listOf("open"),
+            fieldIds = listOf(field.id),
+            timeSlotIds = listOf(slot.id),
+            teamIds = emptyList(),
+            maxParticipants = 6,
+        )
+        val joinedOccurrence = initialEvent.copy(teamIds = listOf(registeredTeam.id))
+        val openOccurrence = initialEvent.copy(teamIds = emptyList())
+
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = initialEvent,
+            host = host,
+            currentUser = currentUser,
+            players = emptyList(),
+            teams = emptyList(),
+            staffInvites = emptyList(),
+            syncSnapshotsByOccurrence = mapOf(
+                "${slot.id}|2030-04-16" to FakeParticipantSyncSnapshot(
+                    event = joinedOccurrence,
+                    teams = emptyList(),
+                    participantCount = 1,
+                ),
+                "${slot.id}|2030-04-18" to FakeParticipantSyncSnapshot(
+                    event = openOccurrence,
+                    teams = emptyList(),
+                    participantCount = 0,
+                ),
+            ),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(currentUser),
+            fieldRepository = EventDetailFakeFieldRepository(
+                fields = listOf(field),
+                timeSlots = listOf(slot),
+                fieldMatches = listOf(FieldWithMatches(field = field, matches = emptyList())),
+            ),
+                eventId = initialEvent.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(
+                matches = emptyList(),
+                fieldsById = mapOf(field.id to field),
+                teamsById = mapOf(registeredTeam.id to registeredTeam),
+            ),
+            teamRepository = EventDetailFakeTeamRepository(
+                teams = listOf(registeredTeam),
+                users = listOf(host, currentUser),
+            ),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        advance()
+
+        component.selectWeeklySession(
+            sessionStart = Instant.parse("2030-04-16T16:00:00Z"),
+            sessionEnd = Instant.parse("2030-04-16T17:00:00Z"),
+            slotId = slot.id,
+            occurrenceDate = "2030-04-16",
+            label = "Tue Apr 16",
+        )
+        advance()
+        assertTrue(component.isUserInEvent.value)
+
+        component.selectWeeklySession(
+            sessionStart = Instant.parse("2030-04-18T16:00:00Z"),
+            sessionEnd = Instant.parse("2030-04-18T17:00:00Z"),
+            slotId = slot.id,
+            occurrenceDate = "2030-04-18",
+            label = "Thu Apr 18",
+        )
+        advance()
+        assertFalse(component.isUserInEvent.value)
+
+        component.selectWeeklySession(
+            sessionStart = Instant.parse("2030-04-16T16:00:00Z"),
+            sessionEnd = Instant.parse("2030-04-16T17:00:00Z"),
+            slotId = slot.id,
+            occurrenceDate = "2030-04-16",
+            label = "Tue Apr 16",
+        )
+        advance()
+        assertTrue(component.isUserInEvent.value)
+    }
+
+    @Test
+    fun weekly_cached_team_registration_keeps_original_occurrence_blocked_after_toggle() = runTest(testDispatcher) {
+        val host = mobileUser(id = "weekly_host_cached", firstName = "Weekly", lastName = "Host")
+        val currentUser = mobileUser(
+            id = "weekly_joiner_cached",
+            firstName = "Weekly",
+            lastName = "Joiner",
+        ).copy(teamIds = listOf("weekly_team_cached"))
+        val registeredTeam = mobileTeam(
+            id = "weekly_team_cached",
+            name = "Cached Team",
+            captainId = currentUser.id,
+        ).copy(playerIds = listOf(currentUser.id))
+        val field = Field(
+            id = "weekly_field_cached",
+            fieldNumber = 1,
+            name = "Weekly Court",
+            divisions = listOf("open"),
+            rentalSlotIds = listOf("weekly_slot_cached"),
+            location = "Practice Complex",
+            organizationId = "org_weekly_cached",
+        )
+        val slot = TimeSlot(
+            id = "weekly_slot_cached",
+            dayOfWeek = 2,
+            daysOfWeek = listOf(2, 3, 4),
+            divisions = listOf("open"),
+            startTimeMinutes = 540,
+            endTimeMinutes = 1080,
+            startDate = Instant.parse("2030-04-14T00:00:00Z"),
+            repeating = true,
+            endDate = Instant.parse("2030-04-30T00:00:00Z"),
+            scheduledFieldId = field.id,
+            scheduledFieldIds = listOf(field.id),
+            price = 0,
+        )
+        val initialEvent = Event(
+            id = "weekly_event_cached",
+            name = "Weekly Clinic Cached",
+            description = "Cached registrations should keep joined occurrences blocked.",
+            hostId = host.id,
+            coordinates = listOf(-80.1918, 25.7617),
+            location = "Practice Complex",
+            start = Instant.parse("2030-04-14T16:00:00Z"),
+            end = Instant.parse("2030-04-30T17:00:00Z"),
+            state = "PUBLISHED",
+            eventType = EventType.WEEKLY_EVENT,
+            teamSignup = true,
+            singleDivision = true,
+            divisions = listOf("open"),
+            fieldIds = listOf(field.id),
+            timeSlotIds = listOf(slot.id),
+            maxParticipants = 6,
+        )
+
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = initialEvent,
+            host = host,
+            currentUser = currentUser,
+            players = emptyList(),
+            teams = listOf(registeredTeam),
+            staffInvites = emptyList(),
+            initialCachedRegistrations = listOf(
+                EventRegistrationCacheEntry(
+                    id = "weekly_event_cached__TEAM__weekly_team_cached__weekly_slot_cached__2030-04-16",
+                    eventId = initialEvent.id,
+                    registrantId = registeredTeam.id,
+                    registrantType = "TEAM",
+                    rosterRole = "PARTICIPANT",
+                    status = "ACTIVE",
+                    slotId = slot.id,
+                    occurrenceDate = "2030-04-16",
+                ),
+            ),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(currentUser),
+            fieldRepository = EventDetailFakeFieldRepository(
+                fields = listOf(field),
+                timeSlots = listOf(slot),
+                fieldMatches = listOf(FieldWithMatches(field = field, matches = emptyList())),
+            ),
+                eventId = initialEvent.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(
+                matches = emptyList(),
+                fieldsById = mapOf(field.id to field),
+                teamsById = mapOf(registeredTeam.id to registeredTeam),
+            ),
+            teamRepository = EventDetailFakeTeamRepository(
+                teams = listOf(registeredTeam),
+                users = listOf(host, currentUser),
+            ),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        advance()
+
+        component.selectWeeklySession(
+            sessionStart = Instant.parse("2030-04-16T16:00:00Z"),
+            sessionEnd = Instant.parse("2030-04-16T17:00:00Z"),
+            slotId = slot.id,
+            occurrenceDate = "2030-04-16",
+            label = "Tue Apr 16",
+        )
+        advance()
+        assertTrue(component.isUserInEvent.value)
+
+        component.selectWeeklySession(
+            sessionStart = Instant.parse("2030-04-17T16:00:00Z"),
+            sessionEnd = Instant.parse("2030-04-17T17:00:00Z"),
+            slotId = slot.id,
+            occurrenceDate = "2030-04-17",
+            label = "Wed Apr 17",
+        )
+        advance()
+        assertFalse(component.isUserInEvent.value)
+
+        component.selectWeeklySession(
+            sessionStart = Instant.parse("2030-04-16T16:00:00Z"),
+            sessionEnd = Instant.parse("2030-04-16T17:00:00Z"),
+            slotId = slot.id,
+            occurrenceDate = "2030-04-16",
+            label = "Tue Apr 16",
+        )
+        advance()
+        assertTrue(component.isUserInEvent.value)
+    }
+
+    @Test
+    fun non_weekly_view_event_opens_details_without_triggering_an_extra_participant_sync() = runTest(testDispatcher) {
+        val host = mobileUser(id = "league_host_sync", firstName = "League", lastName = "Host")
+        val currentUser = mobileUser(id = "league_joiner_sync", firstName = "League", lastName = "Joiner")
+
+        val field = Field(
+            id = "league_field_sync",
+            fieldNumber = 1,
+            name = "League Court",
+            divisions = listOf("open"),
+            rentalSlotIds = listOf("league_slot_sync"),
+            location = "League Complex",
+            organizationId = "org_league_sync",
+        )
+        val slot = TimeSlot(
+            id = "league_slot_sync",
+            dayOfWeek = 2,
+            daysOfWeek = listOf(2),
+            divisions = listOf("open"),
+            startTimeMinutes = 540,
+            endTimeMinutes = 600,
+            startDate = Instant.parse("2030-04-16T00:00:00Z"),
+            repeating = true,
+            endDate = Instant.parse("2030-05-28T00:00:00Z"),
+            scheduledFieldId = field.id,
+            scheduledFieldIds = listOf(field.id),
+            price = 0,
+        )
+        val initialEvent = Event(
+            id = "league_event_sync",
+            name = "League Detail Sync",
+            description = "Opening detail should not trigger an extra roster refresh.",
+            hostId = host.id,
+            coordinates = listOf(-80.1918, 25.7617),
+            location = "League Complex",
+            start = Instant.parse("2030-04-16T16:00:00Z"),
+            end = Instant.parse("2030-05-28T17:00:00Z"),
+            state = "PUBLISHED",
+            eventType = EventType.LEAGUE,
+            teamSignup = false,
+            singleDivision = true,
+            divisions = listOf("open"),
+            fieldIds = listOf(field.id),
+            timeSlotIds = listOf(slot.id),
+            maxParticipants = 6,
+        )
+
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = initialEvent,
+            host = host,
+            currentUser = currentUser,
+            players = emptyList(),
+            teams = emptyList(),
+            staffInvites = emptyList(),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(currentUser),
+            fieldRepository = EventDetailFakeFieldRepository(
+                fields = listOf(field),
+                timeSlots = listOf(slot),
+                fieldMatches = listOf(FieldWithMatches(field = field, matches = emptyList())),
+            ),
+                eventId = initialEvent.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(
+                matches = emptyList(),
+                fieldsById = mapOf(field.id to field),
+                teamsById = emptyMap(),
+            ),
+            teamRepository = EventDetailFakeTeamRepository(
+                teams = emptyList(),
+                users = listOf(host, currentUser),
+            ),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        advance()
+
+        assertEquals(1, eventRepository.syncCallCount)
+        assertEquals(null, eventRepository.lastSyncedOccurrence)
+        assertFalse(component.showDetails.value)
+
+        val initialSyncCount = eventRepository.syncCallCount
+        component.viewEvent()
+        advance()
+
+        assertTrue(component.showDetails.value)
+        assertEquals(initialSyncCount, eventRepository.syncCallCount)
+        assertEquals(null, eventRepository.lastSyncedOccurrence)
+    }
+
+    @Test
+    fun non_weekly_team_relations_use_cached_event_team_ids_without_prefetch() = runTest(testDispatcher) {
+        val host = mobileUser(id = "league_host_team_sync", firstName = "League", lastName = "Host")
+        val currentUser = mobileUser(id = "league_joiner_team_sync", firstName = "League", lastName = "Joiner")
+        val team = Team(
+            id = "league_team_sync",
+            name = "Sync Squad",
+            captainId = host.id,
+            division = "open",
+            playerIds = listOf(currentUser.id),
+            teamSize = 6,
+        )
+
+        val field = Field(
+            id = "league_field_team_sync",
+            fieldNumber = 2,
+            name = "League Arena",
+            divisions = listOf("open"),
+            rentalSlotIds = listOf("league_slot_team_sync"),
+            location = "League Arena",
+            organizationId = "org_league_team_sync",
+        )
+        val slot = TimeSlot(
+            id = "league_slot_team_sync",
+            dayOfWeek = 4,
+            daysOfWeek = listOf(4),
+            divisions = listOf("open"),
+            startTimeMinutes = 600,
+            endTimeMinutes = 660,
+            startDate = Instant.parse("2030-04-18T00:00:00Z"),
+            repeating = true,
+            endDate = Instant.parse("2030-05-30T00:00:00Z"),
+            scheduledFieldId = field.id,
+            scheduledFieldIds = listOf(field.id),
+            price = 0,
+        )
+        val initialEvent = Event(
+            id = "league_team_event_sync",
+            name = "League Team Sync",
+            description = "Cached roster ids should populate teams before opening detail.",
+            hostId = host.id,
+            coordinates = listOf(-80.1918, 25.7617),
+            location = "League Arena",
+            start = Instant.parse("2030-04-18T17:00:00Z"),
+            end = Instant.parse("2030-05-30T18:00:00Z"),
+            state = "PUBLISHED",
+            eventType = EventType.LEAGUE,
+            teamSignup = true,
+            singleDivision = true,
+            divisions = listOf("open"),
+            fieldIds = listOf(field.id),
+            timeSlotIds = listOf(slot.id),
+            teamIds = listOf(team.id),
+            maxParticipants = 8,
+        )
+
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = initialEvent,
+            host = host,
+            currentUser = currentUser,
+            players = emptyList(),
+            teams = emptyList(),
+            staffInvites = emptyList(),
+        )
+        val teamRepository = EventDetailFakeTeamRepository(
+            teams = listOf(team),
+            users = listOf(host, currentUser),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(currentUser),
+            fieldRepository = EventDetailFakeFieldRepository(
+                fields = listOf(field),
+                timeSlots = listOf(slot),
+                fieldMatches = listOf(FieldWithMatches(field = field, matches = emptyList())),
+            ),
+                eventId = initialEvent.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(
+                matches = emptyList(),
+                fieldsById = mapOf(field.id to field),
+                teamsById = mapOf(team.id to team),
+            ),
+            teamRepository = teamRepository,
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        assertFalse(component.eventTeamsAndParticipantsLoading.value)
+
+        advance()
+
+        assertEquals(1, eventRepository.syncCallCount)
+        assertFalse(component.eventTeamsAndParticipantsLoading.value)
+        assertTrue(teamRepository.getTeamsRequests.isEmpty())
+        assertTrue(teamRepository.getTeamsFlowRequests.any { request -> request == listOf(team.id) })
+        assertEquals(listOf(team.id), component.eventWithRelations.value.teams.map { it.team.id })
+        assertEquals(setOf(team.id), component.divisionTeams.value.keys)
+
+        component.viewEvent()
+        advance()
+
+        assertTrue(component.showDetails.value)
+        assertEquals(1, eventRepository.syncCallCount)
+        assertEquals(setOf(team.id), component.divisionTeams.value.keys)
+    }
+
+    @Test
+    fun startTeamRegistration_forFreeOpenTeam_registersImmediately() = runTest(testDispatcher) {
+        val host = mobileUser(id = "host_free_team", firstName = "Host", lastName = "User")
+        val currentUser = mobileUser(id = "free_team_joiner", firstName = "Free", lastName = "Joiner")
+        val team = Team(
+            id = "free_open_team",
+            division = "open",
+            name = "Free Open Team",
+            captainId = host.id,
+            managerId = host.id,
+            playerIds = listOf(host.id),
+            teamSize = 6,
+            divisionTypeId = "open",
+            skillDivisionTypeId = "open",
+            skillDivisionTypeName = "Open",
+            ageDivisionTypeId = "open",
+            ageDivisionTypeName = "Open",
+            divisionGender = "C",
+            openRegistration = true,
+            registrationPriceCents = 0,
+        )
+        val initialEvent = Event(
+            id = "free_team_event",
+            name = "Free Team Event",
+            description = "Free open team registration from event detail.",
+            hostId = host.id,
+            coordinates = listOf(-80.1918, 25.7617),
+            location = "Downtown Sports Hub",
+            start = Instant.parse("2030-06-01T15:00:00Z"),
+            end = Instant.parse("2030-06-01T19:00:00Z"),
+            state = "PUBLISHED",
+            eventType = EventType.TOURNAMENT,
+            teamSignup = true,
+            singleDivision = true,
+            divisions = listOf("open"),
+            teamIds = listOf(team.id),
+        )
+
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = initialEvent,
+            host = host,
+            currentUser = currentUser,
+            players = emptyList(),
+            teams = listOf(team),
+            staffInvites = emptyList(),
+        )
+        val teamRepository = EventDetailFakeTeamRepository(
+            teams = listOf(team),
+            users = listOf(host, currentUser),
+        )
+        val billingRepository = CreateEvent_FakeBillingRepository()
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(currentUser),
+            fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
+                eventId = initialEvent.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = billingRepository,
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(
+                matches = emptyList(),
+                fieldsById = emptyMap(),
+                teamsById = mapOf(team.id to team),
+            ),
+            teamRepository = teamRepository,
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        advance()
+
+        component.startTeamRegistration(component.eventWithRelations.value.teams.first())
+        advance()
+
+        assertEquals(listOf(team.id), teamRepository.registeredTeamIds)
+        assertTrue(billingRepository.teamRegistrationPurchaseIntentCalls.isEmpty())
+        assertNull(component.startingTeamRegistrationId.value)
+        assertTrue(component.isUserInEvent.value)
+        assertEquals("You joined ${team.name}.", component.errorState.value?.message)
+    }
+
+    @Test
+    fun startTeamRegistration_forPaidOpenTeam_clearsPendingState_whenPaymentPresentationIsUnavailable() =
+        runTest(testDispatcher) {
+        val host = mobileUser(id = "host_paid_team", firstName = "Host", lastName = "User")
+        val currentUser = mobileUser(id = "paid_team_joiner", firstName = "Paid", lastName = "Joiner")
+        val team = Team(
+            id = "paid_open_team",
+            division = "open",
+            name = "Paid Open Team",
+            captainId = host.id,
+            managerId = host.id,
+            playerIds = listOf(host.id),
+            teamSize = 6,
+            divisionTypeId = "open",
+            skillDivisionTypeId = "open",
+            skillDivisionTypeName = "Open",
+            ageDivisionTypeId = "open",
+            ageDivisionTypeName = "Open",
+            divisionGender = "C",
+            openRegistration = true,
+            registrationPriceCents = 3500,
+        )
+        val initialEvent = Event(
+            id = "paid_team_event",
+            name = "Paid Team Event",
+            description = "Paid open team registration from event detail.",
+            hostId = host.id,
+            coordinates = listOf(-80.1918, 25.7617),
+            location = "Downtown Sports Hub",
+            start = Instant.parse("2030-06-01T15:00:00Z"),
+            end = Instant.parse("2030-06-01T19:00:00Z"),
+            state = "PUBLISHED",
+            eventType = EventType.TOURNAMENT,
+            teamSignup = true,
+            singleDivision = true,
+            divisions = listOf("open"),
+            teamIds = listOf(team.id),
+        )
+
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = initialEvent,
+            host = host,
+            currentUser = currentUser,
+            players = emptyList(),
+            teams = listOf(team),
+            staffInvites = emptyList(),
+        )
+        val teamRepository = EventDetailFakeTeamRepository(
+            teams = listOf(team),
+            users = listOf(host, currentUser),
+        )
+        val billingRepository = CreateEvent_FakeBillingRepository()
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(currentUser),
+            fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
+                eventId = initialEvent.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = billingRepository,
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(
+                matches = emptyList(),
+                fieldsById = emptyMap(),
+                teamsById = mapOf(team.id to team),
+            ),
+            teamRepository = teamRepository,
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        advance()
+
+        component.startTeamRegistration(component.eventWithRelations.value.teams.first())
+        advance()
+
+        assertEquals(listOf(team.id), teamRepository.registeredTeamIds)
+        assertEquals(listOf(team.id), billingRepository.teamRegistrationPurchaseIntentCalls)
+        assertNull(component.startingTeamRegistrationId.value)
+        assertFalse(component.isUserInEvent.value)
+        assertEquals("Payment setup is unavailable. Please try again.", component.errorState.value?.message)
+    }
+
+    @Test
+    fun startTeamRegistration_forFreeOpenTeam_withRequiredDocuments_signsBeforeJoining() = runTest(testDispatcher) {
+        val host = mobileUser(id = "host_team_docs_free", firstName = "Host", lastName = "User")
+        val currentUser = mobileUser(id = "free_team_docs_joiner", firstName = "Free", lastName = "Signer")
+        val team = Team(
+            id = "free_team_docs",
+            division = "open",
+            name = "Free Team With Docs",
+            captainId = host.id,
+            managerId = host.id,
+            playerIds = listOf(host.id),
+            teamSize = 6,
+            divisionTypeId = "open",
+            skillDivisionTypeId = "open",
+            skillDivisionTypeName = "Open",
+            ageDivisionTypeId = "open",
+            ageDivisionTypeName = "Open",
+            divisionGender = "C",
+            openRegistration = true,
+            registrationPriceCents = 0,
+            requiredTemplateIds = listOf("team-waiver"),
+        )
+        val joinedTeam = team.copy(playerIds = listOf(host.id, currentUser.id))
+        val initialEvent = Event(
+            id = "free_team_docs_event",
+            name = "Free Team Docs Event",
+            description = "Free open team registration with required documents.",
+            hostId = host.id,
+            coordinates = listOf(-80.1918, 25.7617),
+            location = "Downtown Sports Hub",
+            start = Instant.parse("2030-06-01T15:00:00Z"),
+            end = Instant.parse("2030-06-01T19:00:00Z"),
+            state = "PUBLISHED",
+            eventType = EventType.TOURNAMENT,
+            teamSignup = true,
+            singleDivision = true,
+            divisions = listOf("open"),
+            teamIds = listOf(team.id),
+        )
+
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = initialEvent,
+            host = host,
+            currentUser = currentUser,
+            players = emptyList(),
+            teams = listOf(team),
+            staffInvites = emptyList(),
+        )
+        val teamRepository = EventDetailFakeTeamRepository(
+            teams = listOf(team),
+            users = listOf(host, currentUser),
+            registrationResultsByTeamId = mapOf(
+                team.id to listOf(
+                    TeamRegistrationResult(
+                        team = team,
+                        registrationStatus = "STARTED",
+                        registration = TeamPlayerRegistration(
+                            id = "team_reg_started",
+                            teamId = team.id,
+                            userId = currentUser.id,
+                            registrantId = currentUser.id,
+                            status = "STARTED",
+                            consentStatus = "sent",
+                        ),
+                        consent = TeamRegistrationConsent(
+                            documentId = "team_doc_1",
+                            status = "sent",
+                        ),
+                    ),
+                    TeamRegistrationResult(
+                        team = joinedTeam,
+                        registrationStatus = "ACTIVE",
+                        registration = TeamPlayerRegistration(
+                            id = "team_reg_active",
+                            teamId = team.id,
+                            userId = currentUser.id,
+                            registrantId = currentUser.id,
+                            status = "ACTIVE",
+                            consentStatus = "completed",
+                        ),
+                        consent = TeamRegistrationConsent(
+                            documentId = "team_doc_1",
+                            status = "completed",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val signStep = SignStep(
+            templateId = "team-waiver",
+            type = "TEXT",
+            title = "Team Waiver",
+            content = "Please sign this waiver.",
+            documentId = "team_doc_1",
+        )
+        val billingRepository = CreateEvent_FakeBillingRepository().apply {
+            queuedTeamSignLinksResults = mutableListOf(
+                listOf(signStep),
+                emptyList(),
+            )
+        }
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(currentUser),
+            fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
+                eventId = initialEvent.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = billingRepository,
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(
+                matches = emptyList(),
+                fieldsById = emptyMap(),
+                teamsById = mapOf(team.id to team),
+            ),
+            teamRepository = teamRepository,
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        advance()
+
+        component.startTeamRegistration(component.eventWithRelations.value.teams.first())
+        advance()
+
+        assertTrue(component.textSignaturePrompt.value != null)
+        assertTrue(billingRepository.teamRegistrationPurchaseIntentCalls.isEmpty())
+
+        component.confirmTextSignature()
+        advance()
+
+        assertEquals(2, teamRepository.registeredTeamIds.count { it == team.id })
+        assertEquals(1, billingRepository.teamRecordSignatureCalls.size)
+        assertTrue(billingRepository.teamRegistrationPurchaseIntentCalls.isEmpty())
+        assertTrue(component.textSignaturePrompt.value == null)
+        assertTrue(component.isUserInEvent.value)
+        assertEquals("You joined ${team.name}.", component.errorState.value?.message)
+    }
+
+    @Test
+    fun startTeamRegistration_forPaidOpenTeam_withRequiredDocuments_signsBeforeCheckout() = runTest(testDispatcher) {
+        val host = mobileUser(id = "host_team_docs_paid", firstName = "Host", lastName = "User")
+        val currentUser = mobileUser(id = "paid_team_docs_joiner", firstName = "Paid", lastName = "Signer")
+        val team = Team(
+            id = "paid_team_docs",
+            division = "open",
+            name = "Paid Team With Docs",
+            captainId = host.id,
+            managerId = host.id,
+            playerIds = listOf(host.id),
+            teamSize = 6,
+            divisionTypeId = "open",
+            skillDivisionTypeId = "open",
+            skillDivisionTypeName = "Open",
+            ageDivisionTypeId = "open",
+            ageDivisionTypeName = "Open",
+            divisionGender = "C",
+            openRegistration = true,
+            registrationPriceCents = 3500,
+            requiredTemplateIds = listOf("team-waiver"),
+        )
+        val initialEvent = Event(
+            id = "paid_team_docs_event",
+            name = "Paid Team Docs Event",
+            description = "Paid open team registration with required documents.",
+            hostId = host.id,
+            coordinates = listOf(-80.1918, 25.7617),
+            location = "Downtown Sports Hub",
+            start = Instant.parse("2030-06-01T15:00:00Z"),
+            end = Instant.parse("2030-06-01T19:00:00Z"),
+            state = "PUBLISHED",
+            eventType = EventType.TOURNAMENT,
+            teamSignup = true,
+            singleDivision = true,
+            divisions = listOf("open"),
+            teamIds = listOf(team.id),
+        )
+
+        val pendingRegistration = TeamPlayerRegistration(
+            id = "paid_team_reg_started",
+            teamId = team.id,
+            userId = currentUser.id,
+            registrantId = currentUser.id,
+            status = "STARTED",
+            registrantType = "SELF",
+            consentStatus = "sent",
+        )
+        val signedRegistration = pendingRegistration.copy(consentStatus = "completed")
+
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = initialEvent,
+            host = host,
+            currentUser = currentUser,
+            players = emptyList(),
+            teams = listOf(team),
+            staffInvites = emptyList(),
+        )
+        val teamRepository = EventDetailFakeTeamRepository(
+            teams = listOf(team),
+            users = listOf(host, currentUser),
+            registrationResultsByTeamId = mapOf(
+                team.id to listOf(
+                    TeamRegistrationResult(
+                        team = team,
+                        registrationStatus = "STARTED",
+                        registration = pendingRegistration,
+                        consent = TeamRegistrationConsent(
+                            documentId = "team_doc_2",
+                            status = "sent",
+                        ),
+                    ),
+                    TeamRegistrationResult(
+                        team = team,
+                        registrationStatus = "STARTED",
+                        registration = signedRegistration,
+                        consent = TeamRegistrationConsent(
+                            documentId = "team_doc_2",
+                            status = "completed",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val signStep = SignStep(
+            templateId = "team-waiver",
+            type = "TEXT",
+            title = "Team Waiver",
+            content = "Please sign this waiver.",
+            documentId = "team_doc_2",
+        )
+        val billingRepository = CreateEvent_FakeBillingRepository().apply {
+            queuedTeamSignLinksResults = mutableListOf(
+                listOf(signStep),
+                emptyList(),
+            )
+        }
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(currentUser),
+            fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
+                eventId = initialEvent.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = billingRepository,
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(
+                matches = emptyList(),
+                fieldsById = emptyMap(),
+                teamsById = mapOf(team.id to team),
+            ),
+            teamRepository = teamRepository,
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        advance()
+
+        component.startTeamRegistration(component.eventWithRelations.value.teams.first())
+        advance()
+
+        assertTrue(component.textSignaturePrompt.value != null)
+        assertTrue(billingRepository.teamRegistrationPurchaseIntentCalls.isEmpty())
+
+        component.confirmTextSignature()
+        advance()
+
+        assertEquals(2, teamRepository.registeredTeamIds.count { it == team.id })
+        assertEquals(1, billingRepository.teamRecordSignatureCalls.size)
+        assertEquals(listOf(team.id), billingRepository.teamRegistrationPurchaseIntentCalls)
+        assertEquals(currentUser.id, billingRepository.teamRegistrationPurchaseTargets.single()?.registrantId)
+        assertEquals("completed", billingRepository.teamRegistrationPurchaseTargets.single()?.consentStatus)
+    }
+
+    @Test
+    fun startTeamRegistration_forPaidOpenTeam_waitsForTeamSignatureClearance_thenPromptsBillingAddress_beforeCheckout() = runTest(testDispatcher) {
+        val host = mobileUser(id = "host_team_docs_paid_prompt", firstName = "Host", lastName = "User")
+        val currentUser = mobileUser(id = "paid_team_docs_prompt_joiner", firstName = "Paid", lastName = "Prompt")
+        val team = Team(
+            id = "paid_team_docs_prompt",
+            division = "open",
+            name = "Paid Team Needs Billing",
+            captainId = host.id,
+            managerId = host.id,
+            playerIds = listOf(host.id),
+            teamSize = 6,
+            divisionTypeId = "open",
+            skillDivisionTypeId = "open",
+            skillDivisionTypeName = "Open",
+            ageDivisionTypeId = "open",
+            ageDivisionTypeName = "Open",
+            divisionGender = "C",
+            openRegistration = true,
+            registrationPriceCents = 4200,
+            requiredTemplateIds = listOf("team-waiver"),
+        )
+        val initialEvent = Event(
+            id = "paid_team_docs_prompt_event",
+            name = "Paid Team Docs Prompt Event",
+            description = "Paid open team registration that needs billing after signing.",
+            hostId = host.id,
+            coordinates = listOf(-80.1918, 25.7617),
+            location = "Downtown Sports Hub",
+            start = Instant.parse("2030-06-01T15:00:00Z"),
+            end = Instant.parse("2030-06-01T19:00:00Z"),
+            state = "PUBLISHED",
+            eventType = EventType.TOURNAMENT,
+            teamSignup = true,
+            singleDivision = true,
+            divisions = listOf("open"),
+            teamIds = listOf(team.id),
+        )
+
+        val pendingRegistration = TeamPlayerRegistration(
+            id = "paid_team_reg_prompt_started",
+            teamId = team.id,
+            userId = currentUser.id,
+            registrantId = currentUser.id,
+            status = "STARTED",
+            registrantType = "SELF",
+            consentStatus = "sent",
+        )
+        val signedRegistration = pendingRegistration.copy(consentStatus = "completed")
+
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = initialEvent,
+            host = host,
+            currentUser = currentUser,
+            players = emptyList(),
+            teams = listOf(team),
+            staffInvites = emptyList(),
+        )
+        val teamRepository = EventDetailFakeTeamRepository(
+            teams = listOf(team),
+            users = listOf(host, currentUser),
+            registrationResultsByTeamId = mapOf(
+                team.id to listOf(
+                    TeamRegistrationResult(
+                        team = team,
+                        registrationStatus = "STARTED",
+                        registration = pendingRegistration,
+                        consent = TeamRegistrationConsent(
+                            documentId = "team_doc_prompt",
+                            status = "sent",
+                        ),
+                    ),
+                    TeamRegistrationResult(
+                        team = team,
+                        registrationStatus = "STARTED",
+                        registration = signedRegistration,
+                        consent = TeamRegistrationConsent(
+                            documentId = "team_doc_prompt",
+                            status = "completed",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val signStep = SignStep(
+            templateId = "team-waiver",
+            type = "TEXT",
+            title = "Team Waiver",
+            content = "Please sign this waiver.",
+            documentId = "team_doc_prompt",
+        )
+        val billingRepository = CreateEvent_FakeBillingRepository().apply {
+            queuedTeamSignLinksResults = mutableListOf(
+                listOf(signStep),
+                listOf(signStep),
+                emptyList(),
+            )
+            billingAddressProfile = com.razumly.mvp.core.data.dataTypes.BillingAddressProfile(
+                billingAddress = BillingAddressDraft(countryCode = "US"),
+                email = "test@example.com",
+            )
+        }
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(currentUser),
+            fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
+                eventId = initialEvent.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = billingRepository,
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(
+                matches = emptyList(),
+                fieldsById = emptyMap(),
+                teamsById = mapOf(team.id to team),
+            ),
+            teamRepository = teamRepository,
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+
+        advance()
+
+        component.startTeamRegistration(component.eventWithRelations.value.teams.first())
+        advance()
+
+        assertTrue(component.textSignaturePrompt.value != null)
+        assertTrue(component.billingAddressPrompt.value == null)
+        assertTrue(billingRepository.teamRegistrationPurchaseIntentCalls.isEmpty())
+
+        component.confirmTextSignature()
+        advance()
+
+        assertEquals(2, teamRepository.registeredTeamIds.count { it == team.id })
+        assertEquals(1, billingRepository.teamRecordSignatureCalls.size)
+        assertTrue(component.textSignaturePrompt.value == null)
+        assertTrue(component.billingAddressPrompt.value != null)
+        assertTrue(billingRepository.teamRegistrationPurchaseIntentCalls.isEmpty())
+
+        component.submitBillingAddress(
+            BillingAddressDraft(
+                line1 = "42 Test Ave",
+                city = "Los Angeles",
+                state = "CA",
+                postalCode = "90001",
+                countryCode = "US",
+            )
+        )
+        advance()
+
+        assertEquals(listOf(team.id), billingRepository.teamRegistrationPurchaseIntentCalls)
+        assertEquals(currentUser.id, billingRepository.teamRegistrationPurchaseTargets.single()?.registrantId)
+        assertEquals("completed", billingRepository.teamRegistrationPurchaseTargets.single()?.consentStatus)
+        assertEquals(1, billingRepository.updatedBillingAddresses.size)
+        assertTrue(component.billingAddressPrompt.value == null)
+    }
+
+    @Test
+    fun invitePlayerToEvent_adds_existing_user_to_event_participants() = runTest(testDispatcher) {
+        val host = mobileUser(id = "host_1", firstName = "Host", lastName = "User")
+        val target = mobileUser(id = "player_1", firstName = "Target", lastName = "Player")
+        val event = Event(
+            id = "event_1",
+            name = "Friday Open Play",
+            hostId = host.id,
+            teamSignup = false,
+            organizationId = "org_1",
+        )
+        val userRepository = EventDetailFakeUserRepository(host)
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = event,
+            host = host,
+            currentUser = host,
+            players = emptyList(),
+            teams = emptyList(),
+            staffInvites = emptyList(),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = userRepository,
+            fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
+            eventId = event.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(emptyList(), emptyMap(), emptyMap()),
+            teamRepository = EventDetailFakeTeamRepository(emptyList(), listOf(host, target)),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+        advance()
+
+        component.invitePlayerToEvent(target)
+        advance()
+
+        assertEquals(listOf("player_1"), eventRepository.addedPlayerIds)
+        assertEquals("event_1", eventRepository.addPlayerEvents.single().id)
+        assertTrue(userRepository.createdInviteRequests.isEmpty())
+    }
+
+    @Test
+    fun eventEntryLoadsRegistrationDetailsOnceAndReusesThemUntilRefresh() = runTest(testDispatcher) {
+        val host = mobileUser(id = "host_1", firstName = "Host", lastName = "User")
+        val event = Event(
+            id = "event_1",
+            name = "Friday Teams",
+            hostId = host.id,
+            teamSignup = true,
+        )
+        val eventRepository = EventDetailFakeEventRepository(
+            initialEvent = event,
+            host = host,
+            currentUser = host,
+            players = emptyList(),
+            teams = emptyList(),
+            staffInvites = emptyList(),
+        )
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = EventDetailFakeUserRepository(host),
+            fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
+            eventId = event.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = eventRepository,
+            matchRepository = EventDetailFakeMatchRepository(emptyList(), emptyMap(), emptyMap()),
+            teamRepository = EventDetailFakeTeamRepository(emptyList(), listOf(host)),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+        advance()
+
+        assertEquals(1, eventRepository.managementSnapshotCallCount)
+        assertEquals(1, eventRepository.teamComplianceCallCount)
+
+        component.startManagingParticipants()
+        advance()
+
+        assertEquals(1, eventRepository.managementSnapshotCallCount)
+        assertEquals(1, eventRepository.teamComplianceCallCount)
+
+        component.stopManagingParticipants()
+        component.startManagingParticipants()
+        advance()
+
+        assertEquals(1, eventRepository.managementSnapshotCallCount)
+        assertEquals(1, eventRepository.teamComplianceCallCount)
+
+        component.refreshEventDetails()
+        advance()
+
+        assertEquals(2, eventRepository.managementSnapshotCallCount)
+        assertEquals(2, eventRepository.teamComplianceCallCount)
+    }
+
+    @Test
+    fun invitePlayerToEventByEmail_creates_event_invite_with_name_and_email() = runTest(testDispatcher) {
+        val host = mobileUser(id = "host_1", firstName = "Host", lastName = "User")
+        val event = Event(
+            id = "event_1",
+            name = "Friday Open Play",
+            hostId = host.id,
+            teamSignup = false,
+            organizationId = "org_1",
+        )
+        val userRepository = EventDetailFakeUserRepository(host)
+        val component = DefaultEventDetailComponent(
+            componentContext = createTestComponentContext(),
+            userRepository = userRepository,
+            fieldRepository = EventDetailFakeFieldRepository(emptyList(), emptyList(), emptyList()),
+            eventId = event.id,
+            notificationsRepository = NoopPushNotificationsRepository,
+            billingRepository = CreateEvent_FakeBillingRepository(),
+            eventRepository = EventDetailFakeEventRepository(
+                initialEvent = event,
+                host = host,
+                currentUser = host,
+                players = emptyList(),
+                teams = emptyList(),
+                staffInvites = emptyList(),
+            ),
+            matchRepository = EventDetailFakeMatchRepository(emptyList(), emptyMap(), emptyMap()),
+            teamRepository = EventDetailFakeTeamRepository(emptyList(), listOf(host)),
+            sportsRepository = CreateEvent_FakeSportsRepository(emptyList()),
+            imageRepository = CreateEvent_FakeImagesRepository(),
+            navigationHandler = NoopNavigationHandler,
+        )
+        component.setLoadingHandler(EventDetailTestLoadingHandler())
+        advance()
+
+        component.invitePlayerToEventByEmail("Alex", "Morgan", "alex@example.com")
+        advance()
+
+        val invite = userRepository.createdInviteRequests.single()
+        assertEquals("EVENT", invite.type)
+        assertEquals("PENDING", invite.status)
+        assertEquals("event_1", invite.eventId)
+        assertEquals("org_1", invite.organizationId)
+        assertEquals("alex@example.com", invite.email)
+        assertEquals("Alex", invite.firstName)
+        assertEquals("Morgan", invite.lastName)
+        assertNull(invite.userId)
+        assertEquals("host_1", invite.createdBy)
+    }
+}
+
+private const val UPLOADED_DB_IMAGE_ID = "camka_upload_upscaled_cc_indoor_sports_024be2e8d5cdead5_jpg"
+
+private data class FakeParticipantSyncSnapshot(
+    val event: Event,
+    val players: List<UserData> = emptyList(),
+    val teams: List<Team> = emptyList(),
+    val participantCount: Int = 0,
+    val participantCapacity: Int? = null,
+)
+
+private data class ChildRegistrationRequest(
+    val eventId: String,
+    val childUserId: String,
+    val joinWaitlist: Boolean,
+    val occurrence: EventOccurrenceSelection?,
+)
+
+private class EventDetailFakeEventRepository(
+    initialEvent: Event,
+    private val host: UserData,
+    private val currentUser: UserData,
+    players: List<UserData>,
+    private val teams: List<Team>,
+    private val staffInvites: List<Invite>,
+    private val syncSnapshotsByOccurrence: Map<String, FakeParticipantSyncSnapshot> = emptyMap(),
+    initialCachedRegistrations: List<EventRegistrationCacheEntry> = emptyList(),
+    private val defaultSyncSnapshot: FakeParticipantSyncSnapshot? = null,
+    private val childRegistrationResult: ChildRegistrationResult = ChildRegistrationResult(
+        registrationStatus = "ACTIVE",
+    ),
+) : IEventRepository by com.razumly.mvp.eventCreate.CreateEvent_FakeEventRepository() {
+    private val eventFlow = MutableStateFlow(Result.success(initialEvent.toRelations(host, players, teams)))
+    private val cachedRegistrationsFlow = MutableStateFlow(initialCachedRegistrations)
+
+    var refreshedEvent: Event? = null
+    val editorRequests = mutableListOf<String>()
+
+    val staffInviteRequests = mutableListOf<String>()
+    val refreshRequests = mutableListOf<String>()
+    val eventWithRelationsFlowRequests = mutableListOf<String>()
+    val cachedEventWithRelationsFlowRequests = mutableListOf<String>()
+    var joinCallCount = 0
+    var syncCallCount = 0
+    var lastSyncedOccurrence: EventOccurrenceSelection? = null
+    val addedPlayerIds = mutableListOf<String>()
+    val addPlayerEvents = mutableListOf<Event>()
+    val childRegistrationRequests = mutableListOf<ChildRegistrationRequest>()
+    var managementSnapshotCallCount = 0
+    var teamComplianceCallCount = 0
+    var userComplianceCallCount = 0
+
+    override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> {
+        eventWithRelationsFlowRequests += eventId
+        return eventFlow
+    }
+
+    override fun getCachedEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> {
+        cachedEventWithRelationsFlowRequests += eventId
+        return eventFlow
+    }
+
+    override suspend fun getEvent(eventId: String): Result<Event> {
+        refreshRequests += eventId
+        return Result.success(refreshedEvent ?: eventFlow.value.getOrThrow().event)
+    }
+
+    override suspend fun getEventEditor(eventId: String): Result<com.razumly.mvp.core.data.repositories.EventEditorSession> {
+        editorRequests += eventId
+        val sourceEvent = refreshedEvent ?: eventFlow.value.getOrThrow().event
+        val createSession = createEventEditorSession(event = sourceEvent)
+        return Result.success(
+            EventEditorSessionMapper.fromEditSnapshot(
+                createSession.snapshot.copy(mode = "EDIT"),
+            ),
+        )
+    }
+
+    override suspend fun getEventStaffInvites(eventId: String): Result<List<Invite>> {
+        staffInviteRequests += eventId
+        return Result.success(staffInvites)
+    }
+
+
+    override fun observeCurrentUserRegistrationsForEvent(eventId: String): Flow<List<EventRegistrationCacheEntry>> =
+        cachedRegistrationsFlow
+
+    override suspend fun syncCurrentUserRegistrationCache(): Result<Unit> = Result.success(Unit)
+
+    override suspend fun addCurrentUserToEvent(
+        event: Event,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<SelfRegistrationResult> {
+        joinCallCount += 1
+        val currentRelations = eventFlow.value.getOrThrow()
+        val updatedEvent = currentRelations.event.copy(
+            userIds = (currentRelations.event.userIds + currentUser.id).distinct(),
+        )
+        val updatedPlayers = (currentRelations.players + currentUser).distinctBy(UserData::id)
+        eventFlow.value = Result.success(updatedEvent.toRelations(host, updatedPlayers, teams))
+        return Result.success(SelfRegistrationResult())
+    }
+
+    override suspend fun addPlayerToEvent(
+        event: Event,
+        player: UserData,
+        preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<SelfRegistrationResult> {
+        addedPlayerIds += player.id
+        addPlayerEvents += event
+        val currentRelations = eventFlow.value.getOrThrow()
+        val updatedEvent = currentRelations.event.copy(
+            userIds = (currentRelations.event.userIds + player.id).distinct(),
+        )
+        val updatedPlayers = (currentRelations.players + player).distinctBy(UserData::id)
+        eventFlow.value = Result.success(updatedEvent.toRelations(host, updatedPlayers, teams))
+        return Result.success(SelfRegistrationResult())
+    }
+
+    override suspend fun registerChildForEvent(
+        eventId: String,
+        childUserId: String,
+        joinWaitlist: Boolean,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<ChildRegistrationResult> {
+        childRegistrationRequests += ChildRegistrationRequest(
+            eventId = eventId,
+            childUserId = childUserId,
+            joinWaitlist = joinWaitlist,
+            occurrence = occurrence,
+        )
+        val currentRelations = eventFlow.value.getOrThrow()
+        val updatedEvent = if (joinWaitlist) {
+            currentRelations.event.copy(
+                waitListIds = (currentRelations.event.waitListIds + childUserId).distinct(),
+            )
+        } else {
+            currentRelations.event.copy(
+                userIds = (currentRelations.event.userIds + childUserId).distinct(),
+            )
+        }
+        val updatedPlayers = if (joinWaitlist) {
+            currentRelations.players
+        } else {
+            val childUser = mobileUser(
+                id = childUserId,
+                firstName = "Child",
+                lastName = childUserId.takeLast(2),
+            )
+            (currentRelations.players + childUser).distinctBy(UserData::id)
+        }
+        eventFlow.value = Result.success(updatedEvent.toRelations(host, updatedPlayers, teams))
+        return Result.success(childRegistrationResult)
+    }
+
+    override suspend fun syncEventParticipants(
+        event: Event,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<EventParticipantsSyncResult> {
+        syncCallCount += 1
+        lastSyncedOccurrence = occurrence
+        val snapshotKey = occurrence?.let { selection -> "${selection.slotId}|${selection.occurrenceDate}" }
+        val snapshot = snapshotKey?.let(syncSnapshotsByOccurrence::get) ?: defaultSyncSnapshot.takeIf { snapshotKey == null }
+        if (snapshot != null) {
+            eventFlow.value = Result.success(
+                snapshot.event.toRelations(
+                    host = host,
+                    players = snapshot.players,
+                    teams = snapshot.teams,
+                )
+            )
+            return Result.success(
+                EventParticipantsSyncResult(
+                    event = snapshot.event,
+                    participantCount = snapshot.participantCount,
+                    participantCapacity = snapshot.participantCapacity,
+                )
+            )
+        }
+        return Result.success(
+            EventParticipantsSyncResult(
+                event = eventFlow.value.getOrThrow().event,
+                participantCount = eventFlow.value.getOrThrow().players.size,
+            )
+        )
+    }
+
+    override suspend fun syncEventDetail(
+        event: Event,
+        occurrence: EventOccurrenceSelection?,
+        manage: Boolean,
+    ): Result<EventDetailSyncResult> {
+        val participantResult = syncEventParticipants(event, occurrence).getOrThrow()
+        if (manage) {
+            managementSnapshotCallCount += 1
+            if (participantResult.event.teamSignup) {
+                teamComplianceCallCount += 1
+            } else {
+                userComplianceCallCount += 1
+            }
+        }
+        return Result.success(
+            EventDetailSyncResult(
+                participants = participantResult,
+                staffInvites = staffInvites,
+            )
+        )
+    }
+
+    override suspend fun getEventParticipantsSummary(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<EventParticipantsSummary> {
+        val snapshotKey = occurrence?.let { selection -> "${selection.slotId}|${selection.occurrenceDate}" }
+        val snapshot = snapshotKey?.let(syncSnapshotsByOccurrence::get) ?: defaultSyncSnapshot.takeIf { snapshotKey == null }
+        return Result.success(
+            EventParticipantsSummary(
+                participantCount = snapshot?.participantCount ?: 0,
+                participantCapacity = snapshot?.participantCapacity,
+                weeklySelectionRequired = occurrence == null && snapshot == null,
+            )
+        )
+    }
+
+    override suspend fun getEventParticipantManagementSnapshot(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<EventParticipantManagementSnapshot> {
+        managementSnapshotCallCount += 1
+        return Result.success(EventParticipantManagementSnapshot())
+    }
+
+    override suspend fun getEventTeamCompliance(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<List<EventTeamComplianceSummary>> {
+        teamComplianceCallCount += 1
+        return Result.success(emptyList())
+    }
+
+    override suspend fun getEventUserCompliance(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<List<EventComplianceUserSummary>> {
+        userComplianceCallCount += 1
+        return Result.success(emptyList())
+    }
+}
+
+private class EventDetailFakeFieldRepository(
+    private val fields: List<Field>,
+    private val timeSlots: List<TimeSlot>,
+    fieldMatches: List<FieldWithMatches>,
+) : IFieldRepository by com.razumly.mvp.eventCreate.CreateEvent_FakeFieldRepository() {
+    private val fieldMatchesFlow = MutableStateFlow(fieldMatches)
+    val requestedFieldIds = mutableListOf<List<String>>()
+    val requestedTimeSlotIds = mutableListOf<List<String>>()
+
+    override fun getFieldsWithMatchesFlow(ids: List<String>): Flow<List<FieldWithMatches>> {
+        requestedFieldIds += ids
+        return fieldMatchesFlow
+    }
+
+    override suspend fun getFields(ids: List<String>): Result<List<Field>> {
+        requestedFieldIds += ids
+        val requested = ids.toSet()
+        return Result.success(fields.filter { it.id in requested })
+    }
+
+    override suspend fun getTimeSlots(ids: List<String>): Result<List<TimeSlot>> {
+        requestedTimeSlotIds += ids
+        val requested = ids.toSet()
+        return Result.success(timeSlots.filter { it.id in requested })
+    }
+}
+
+private class EventDetailFakeMatchRepository(
+    matches: List<MatchMVP>,
+    fieldsById: Map<String, Field>,
+    teamsById: Map<String, Team>,
+) : IMatchRepository by com.razumly.mvp.eventCreate.CreateEvent_FakeMatchRepository() {
+    private val matchFlow = MutableStateFlow(
+        Result.success(matches.map { match ->
+            MatchWithRelations(
+                match = match,
+                field = match.fieldId?.let(fieldsById::get),
+                team1 = match.team1Id?.let(teamsById::get),
+                team2 = match.team2Id?.let(teamsById::get),
+                teamOfficial = match.teamOfficialId?.let(teamsById::get),
+                winnerNextMatch = null,
+                loserNextMatch = null,
+                previousLeftMatch = null,
+                previousRightMatch = null,
+            )
+        })
+    )
+    private val matchesByTournamentId = matches.groupBy(MatchMVP::eventId)
+
+    val requestedTournamentIds = mutableListOf<String>()
+
+    override fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>> {
+        requestedTournamentIds += tournamentId
+        return matchFlow
+    }
+
+    override fun getCachedMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>> {
+        requestedTournamentIds += tournamentId
+        return matchFlow
+    }
+
+    override suspend fun getMatchesOfTournament(tournamentId: String): Result<List<MatchMVP>> {
+        requestedTournamentIds += tournamentId
+        return Result.success(matchesByTournamentId[tournamentId].orEmpty())
+    }
+}
+
+private class FailingSportsRepository : ISportsRepository {
+    var getSportsCalls = 0
+        private set
+    var getDivisionTypeParametersCalls = 0
+        private set
+
+    override suspend fun getSports(): Result<List<Sport>> {
+        getSportsCalls += 1
+        return Result.failure(IllegalStateException("Request timeout has expired"))
+    }
+
+    override suspend fun getDivisionTypeParameters(): Result<DivisionTypeParameters> {
+        getDivisionTypeParametersCalls += 1
+        return Result.success(DivisionTypeParameters())
+    }
+}
+
+private class EventDetailFakeTeamRepository(
+    teams: List<Team>,
+    users: List<UserData>,
+    registrationResultsByTeamId: Map<String, List<TeamRegistrationResult>> = emptyMap(),
+) : ITeamRepository {
+    private val usersById = users.associateBy(UserData::id)
+    private val teamsById = teams.associateBy(Team::id).toMutableMap()
+    private val queuedRegistrationResults = registrationResultsByTeamId
+        .mapValues { (_, results) -> results.toMutableList() }
+        .toMutableMap()
+    val registeredTeamIds = mutableListOf<String>()
+    val getTeamsRequests = mutableListOf<List<String>>()
+    val getTeamsFlowRequests = mutableListOf<List<String>>()
+
+    private fun buildTeamRelations(): List<TeamWithPlayers> = teamsById.values.map { team ->
+        TeamWithPlayers(
+            team = team,
+            captain = usersById[team.captainId],
+            players = team.playerIds.mapNotNull(usersById::get),
+            pendingPlayers = team.pending.mapNotNull(usersById::get),
+        )
+    }
+
+    override fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> {
+        getTeamsFlowRequests += ids
+        val requested = ids.toSet()
+        return flowOf(Result.success(buildTeamRelations().filter { it.team.id in requested }))
+    }
+
+    override suspend fun getTeamWithPlayers(teamId: String): Result<TeamWithPlayers> =
+        Result.success(buildTeamRelations().first { it.team.id == teamId })
+
+    override suspend fun getTeams(ids: List<String>): Result<List<Team>> {
+        getTeamsRequests += ids
+        val requested = ids.toSet()
+        return Result.success(teamsById.values.filter { it.id in requested })
+    }
+
+    override suspend fun getTeamsWithPlayers(ids: List<String>): Result<List<TeamWithPlayers>> {
+        val requested = ids.toSet()
+        return Result.success(buildTeamRelations().filter { it.team.id in requested })
+    }
+
+    override suspend fun addPlayerToTeam(team: Team, player: UserData): Result<Unit> = Result.success(Unit)
+    override suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit> = Result.success(Unit)
+    override suspend fun createTeam(newTeam: Team): Result<Team> = Result.success(newTeam)
+    override suspend fun updateTeam(newTeam: Team): Result<Team> = Result.success(newTeam)
+    override suspend fun getTeamJoinRequestContext(teamId: String): Result<TeamJoinRequestContext> =
+        teamsById[teamId]?.let { team ->
+            Result.success(
+                TeamJoinRequestContext(
+                    teamId = team.id,
+                    joinPolicy = if (team.openRegistration) "OPEN_REGISTRATION" else "CLOSED",
+                    openRegistration = team.openRegistration,
+                    registrationPriceCents = team.registrationPriceCents,
+                    questions = emptyList(),
+                )
+            )
+        } ?: Result.failure(IllegalStateException("Team $teamId not found"))
+
+    override suspend fun requestTeamRegistration(
+        teamId: String,
+        answers: Map<String, String>,
+    ): Result<TeamRegistrationResult> {
+        registeredTeamIds += teamId
+        val queued = queuedRegistrationResults[teamId]
+        if (queued != null && queued.isNotEmpty()) {
+            val result = queued.removeAt(0)
+            teamsById[teamId] = result.team
+            return Result.success(result)
+        }
+        return teamsById[teamId]?.let { team ->
+            Result.success(
+                TeamRegistrationResult(
+                    team = team,
+                    registrationStatus = if (team.registrationPriceCents > 0) "STARTED" else "ACTIVE",
+                ),
+            )
+        } ?: Result.failure(IllegalStateException("Team $teamId not found"))
+    }
+    override suspend fun registerForTeam(teamId: String): Result<Team> =
+        teamsById[teamId]?.let { team ->
+            registeredTeamIds += teamId
+            Result.success(team)
+        }
+            ?: Result.failure(IllegalStateException("Team $teamId not found"))
+    override suspend fun leaveTeam(teamId: String): Result<Team> =
+        teamsById[teamId]?.let { team -> Result.success(team) }
+            ?: Result.failure(IllegalStateException("Team $teamId not found"))
+    override suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit> = Result.success(Unit)
+    override fun getTeamsWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>> = flowOf(
+        Result.success(
+            buildTeamRelations().filter { team ->
+                team.team.managerId == id || team.players.any { player -> player.id == id }
+            },
+        ),
+    )
+    override fun getTeamsWithPlayersLoadingFlow(id: String): Flow<Boolean> = flowOf(false)
+    override fun getTeamWithPlayersFlow(id: String): Flow<Result<TeamWithRelations>> =
+        flowOf(Result.failure(IllegalStateException("unused")))
+    override suspend fun listTeamInvites(userId: String): Result<List<Invite>> = Result.success(emptyList())
+    override suspend fun getInviteFreeAgents(teamId: String): Result<List<UserData>> = Result.success(emptyList())
+    override suspend fun createTeamInvite(
+        teamId: String,
+        userId: String,
+        createdBy: String,
+        inviteType: String,
+    ): Result<Unit> = Result.success(Unit)
+    override suspend fun deleteInvite(inviteId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun acceptTeamInvite(inviteId: String, teamId: String): Result<Unit> = Result.success(Unit)
+}
+
+private class EventDetailFakeUserRepository(
+    currentUserData: UserData,
+    private val children: List<FamilyChild> = emptyList(),
+) : IUserRepository by com.razumly.mvp.eventCreate.CreateEvent_FakeUserRepository() {
+    val createdInviteRequests = mutableListOf<InviteCreateDto>()
+    private val account = AuthAccount(
+        id = currentUserData.id,
+        email = "${currentUserData.id}@example.test",
+        name = currentUserData.fullName,
+    )
+
+    override val currentUser: StateFlow<Result<UserData>> =
+        MutableStateFlow(Result.success(currentUserData))
+    override val currentAccount: StateFlow<Result<AuthAccount>> =
+        MutableStateFlow(Result.success(account))
+
+    override suspend fun getUsers(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Result<List<UserData>> = Result.success(userIds.distinct().map { userId ->
+        mobileUser(id = userId, firstName = "User", lastName = userId.takeLast(2))
+    })
+
+    override fun getUsersFlow(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Flow<Result<List<UserData>>> = flowOf(
+        Result.success(userIds.distinct().map { userId ->
+            mobileUser(id = userId, firstName = "User", lastName = userId.takeLast(2))
+        })
+    )
+
+    override suspend fun searchPlayers(search: String): Result<List<UserData>> = Result.success(emptyList())
+    override suspend fun ensureUserByEmail(email: String): Result<UserData> =
+        Result.success(mobileUser(id = email.substringBefore('@'), firstName = "Email", lastName = "User"))
+    override suspend fun createInvites(invites: List<InviteCreateDto>): Result<List<Invite>> {
+        createdInviteRequests += invites
+        return Result.success(emptyList())
+    }
+    override suspend fun deleteInvite(inviteId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun findEmailMembership(
+        emails: List<String>,
+        userIds: List<String>,
+    ): Result<List<UserEmailMembershipMatch>> = Result.success(emptyList())
+    override suspend fun listInvites(userId: String, type: String?): Result<List<Invite>> = Result.success(emptyList())
+    override suspend fun acceptInvite(inviteId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun declineInvite(inviteId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun isCurrentUserChild(minorAgeThreshold: Int): Result<Boolean> = Result.success(false)
+    override suspend fun listChildren(): Result<List<FamilyChild>> = Result.success(children)
+    override suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> = Result.success(emptyList())
+    override suspend fun resolveChildJoinRequest(
+        registrationId: String,
+        action: FamilyJoinRequestAction,
+    ): Result<FamilyJoinRequestResolution> = Result.failure(NotImplementedError("unused"))
+    override suspend fun createChildAccount(
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String?,
+        relationship: String?,
+    ): Result<Unit> = Result.success(Unit)
+    override suspend fun updateChildAccount(
+        childUserId: String,
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String?,
+        relationship: String?,
+    ): Result<Unit> = Result.success(Unit)
+    override suspend fun linkChildToParent(
+        childEmail: String?,
+        childUserId: String?,
+        relationship: String?,
+    ): Result<Unit> = Result.success(Unit)
+    override suspend fun createNewUser(
+        email: String,
+        password: String,
+        firstName: String,
+        lastName: String,
+        userName: String,
+        dateOfBirth: String?,
+        profileSelection: SignupProfileSelection?,
+    ): Result<UserData> = Result.success(currentUser.value.getOrThrow())
+    override suspend fun updateUser(user: UserData): Result<UserData> = Result.success(user)
+    override suspend fun updateEmail(email: String, password: String): Result<Unit> = Result.success(Unit)
+    override suspend fun updatePassword(currentPassword: String, newPassword: String): Result<Unit> = Result.success(Unit)
+    override suspend fun updateProfile(
+        firstName: String,
+        lastName: String,
+        email: String,
+        userName: String,
+        profileImageId: String?,
+    ): Result<Unit> = Result.success(Unit)
+    override suspend fun getCurrentAccount(): Result<Unit> = Result.success(Unit)
+    override suspend fun sendFriendRequest(user: UserData): Result<Unit> = Result.success(Unit)
+    override suspend fun acceptFriendRequest(user: UserData): Result<Unit> = Result.success(Unit)
+    override suspend fun declineFriendRequest(userId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun followUser(userId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun unfollowUser(userId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun removeFriend(userId: String): Result<Unit> = Result.success(Unit)
+}
+
+private object NoopPushNotificationsRepository : IPushNotificationsRepository {
+    override suspend fun subscribeUserToTeamNotifications(userId: String, teamId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun unsubscribeUserFromTeamNotifications(userId: String, teamId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun subscribeUserToEventNotifications(userId: String, eventId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun unsubscribeUserFromEventNotifications(userId: String, eventId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun subscribeUserToMatchNotifications(userId: String, matchId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun unsubscribeUserFromMatchNotifications(userId: String, matchId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun subscribeUserToChatGroup(userId: String, chatGroupId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun unsubscribeUserFromChatGroup(userId: String, chatGroupId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun sendUserNotification(userId: String, title: String, body: String): Result<Unit> = Result.success(Unit)
+    override suspend fun sendTeamNotification(teamId: String, title: String, body: String): Result<Unit> = Result.success(Unit)
+    override suspend fun sendEventNotification(eventId: String, title: String, body: String, isTournament: Boolean): Result<Unit> =
+        Result.success(Unit)
+    override suspend fun sendMatchNotification(matchId: String, title: String, body: String): Result<Unit> = Result.success(Unit)
+    override suspend fun sendChatGroupNotification(chatGroupId: String, title: String, body: String): Result<Unit> = Result.success(Unit)
+    override suspend fun createTeamTopic(team: Team): Result<Unit> = Result.success(Unit)
+    override suspend fun deleteTopic(id: String): Result<Unit> = Result.success(Unit)
+    override suspend fun createEventTopic(event: Event): Result<Unit> = Result.success(Unit)
+    override suspend fun createTournamentTopic(event: Event): Result<Unit> = Result.success(Unit)
+    override suspend fun createChatGroupTopic(chatGroup: com.razumly.mvp.core.data.dataTypes.ChatGroup): Result<Unit> =
+        Result.success(Unit)
+    override fun setActiveChat(chatGroupId: String?) = Unit
+    override fun clearActiveChatIfMatches(chatGroupId: String?) = Unit
+    override suspend fun addDeviceAsTarget(): Result<Unit> = Result.success(Unit)
+    override suspend fun removeDeviceAsTarget(): Result<Unit> = Result.success(Unit)
+    override suspend fun getDeviceTargetDebugStatus(syncBeforeCheck: Boolean): Result<com.razumly.mvp.core.data.repositories.PushDeviceTargetDebugStatus> =
+        Result.success(com.razumly.mvp.core.data.repositories.PushDeviceTargetDebugStatus())
+}
+
+private object NoopNavigationHandler : INavigationHandler {
+    override fun navigateToMatch(matchId: String, eventId: String) = Unit
+    override fun navigateToTeams(freeAgents: List<String>, eventId: String?, selectedFreeAgentId: String?) = Unit
+    override fun navigateToChat(messageUserId: String?, chatId: String?) = Unit
+    override fun navigateToCreate() = Unit
+    override fun navigateToCreate(bootstrap: com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto) = Unit
+    override fun navigateToSearch() = Unit
+    override fun navigateToEvent(eventId: String) = Unit
+    override fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab) = Unit
+    override fun navigateToEvents() = Unit
+    override fun navigateToRefunds() = Unit
+    override fun navigateToLogin() = Unit
+    override fun navigateBack() = Unit
+}
+
+private class EventDetailTestLoadingHandler : LoadingHandler {
+    private val delegate = LoadingHandlerImpl()
+    override val loadingState = delegate.loadingState
+
+    override fun newOperation(): LoadingOperation = delegate.newOperation()
+}
+
+private fun createTestComponentContext(): DefaultComponentContext {
+    val lifecycle = LifecycleRegistry()
+    lifecycle.onCreate()
+    lifecycle.onStart()
+    lifecycle.onResume()
+    return DefaultComponentContext(
+        lifecycle = lifecycle,
+        backHandler = BackDispatcher(),
+    )
+}
+
+private fun Event.toRelations(
+    host: UserData,
+    players: List<UserData>,
+    teams: List<Team>,
+): EventWithRelations = EventWithRelations(
+    event = this,
+    host = host,
+    players = players,
+    teams = teams,
+)
+
+private fun mobileUser(
+    id: String,
+    firstName: String,
+    lastName: String,
+): UserData = UserData(
+    firstName = firstName,
+    lastName = lastName,
+    teamIds = emptyList(),
+    friendIds = emptyList(),
+    friendRequestIds = emptyList(),
+    friendRequestSentIds = emptyList(),
+    followingIds = emptyList(),
+    userName = id,
+    hasStripeAccount = false,
+    uploadedImages = emptyList(),
+    profileImageId = null,
+    id = id,
+)
+
+private fun freeOpenDivisionDetail(maxParticipants: Int? = null): DivisionDetail = DivisionDetail(
+    id = "open",
+    key = "open",
+    name = "Open",
+    divisionTypeId = "open",
+    divisionTypeName = "Open",
+    gender = "C",
+    price = 0,
+    maxParticipants = maxParticipants,
+)
+
+private fun mobileTeam(
+    id: String,
+    name: String,
+    captainId: String,
+): Team = Team(
+    id = id,
+    division = "open",
+    name = name,
+    captainId = captainId,
+    managerId = captainId,
+    playerIds = listOf(captainId),
+    teamSize = 6,
+    divisionTypeId = "open",
+    skillDivisionTypeId = "open",
+    skillDivisionTypeName = "Open",
+    ageDivisionTypeId = "open",
+    ageDivisionTypeName = "Open",
+    divisionGender = "C",
+)
+
+private fun mobileMatch(
+    id: String,
+    matchId: Int,
+    team1Id: String,
+    team2Id: String,
+    fieldId: String,
+    start: String,
+    end: String,
+): MatchMVP = MatchMVP(
+    id = id,
+    matchId = matchId,
+    eventId = "league_mobile_flow",
+    team1Id = team1Id,
+    team2Id = team2Id,
+    fieldId = fieldId,
+    start = Instant.parse(start),
+    end = Instant.parse(end),
+    division = "open",
+)

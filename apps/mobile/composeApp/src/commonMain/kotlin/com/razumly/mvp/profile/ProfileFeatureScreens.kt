@@ -1,0 +1,3159 @@
+package com.razumly.mvp.profile
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FabPosition
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.NotificationSettings
+import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.inferTeamInviteRole
+import com.razumly.mvp.core.data.dataTypes.isNotificationChannelSupported
+import com.razumly.mvp.core.data.dataTypes.label
+import com.razumly.mvp.core.data.dataTypes.normalizeNotificationSettings
+import com.razumly.mvp.core.data.dataTypes.notificationChannels
+import com.razumly.mvp.core.data.dataTypes.notificationSettingOptions
+import com.razumly.mvp.core.data.dataTypes.staffInviteRoleLabel
+import com.razumly.mvp.core.data.repositories.DiscountCode
+import com.razumly.mvp.core.data.repositories.DiscountOffer
+import com.razumly.mvp.core.data.repositories.DiscountTarget
+import com.razumly.mvp.core.data.repositories.EventTemplateSummary
+import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
+import com.razumly.mvp.core.data.repositories.ProfileDocumentType
+import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
+import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
+import com.razumly.mvp.core.util.EmbeddedWebUrlPolicy
+import com.razumly.mvp.core.presentation.composables.DropdownOption
+import com.razumly.mvp.core.presentation.composables.NetworkAvatar
+import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
+import com.razumly.mvp.core.presentation.composables.PlatformDropdown
+import com.razumly.mvp.core.presentation.composables.StandardTextField
+import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
+import com.razumly.mvp.core.presentation.util.MoneyInputUtils
+import com.razumly.mvp.core.presentation.util.dateTimeFormat
+import io.github.ismoy.imagepickerkmp.domain.models.MimeType
+import io.github.ismoy.imagepickerkmp.presentation.ui.components.GalleryPickerLauncher
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Clock
+
+private enum class DiscountValueMode {
+    PERCENT,
+    FLAT,
+}
+
+@Composable
+fun ProfilePaymentsScreen(component: ProfileComponent) {
+    val hasStripeAccount by component.isStripeAccountConnected.collectAsState()
+
+    ProfileSectionScaffold(
+        title = "Manage Stripe",
+        description = if (hasStripeAccount) {
+            "Manage your Stripe account to update payout details."
+        } else {
+            "Connect a Stripe account to accept payments for your events and rentals."
+        },
+        onBack = component::onBackClicked,
+    ) {
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = if (hasStripeAccount) component::manageStripeAccount else component::manageStripeAccountOnboarding,
+        ) {
+            Text(if (hasStripeAccount) "Manage Stripe Account" else "Connect Stripe Account")
+        }
+
+    }
+}
+
+@Composable
+fun ProfileDiscountsScreen(component: ProfileComponent) {
+    val state by component.discountsState.collectAsState()
+    val navPadding = LocalNavBarPadding.current
+    var showCreateDialog by rememberSaveable { mutableStateOf(false) }
+    var pendingCreateDismiss by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(component) {
+        component.refreshDiscounts()
+    }
+    LaunchedEffect(state.isCreating, state.error, state.selectedTargetId) {
+        if (pendingCreateDismiss && !state.isCreating && state.error == null && state.selectedTargetId == null) {
+            showCreateDialog = false
+            pendingCreateDismiss = false
+        }
+        if (pendingCreateDismiss && !state.isCreating && state.error != null) {
+            pendingCreateDismiss = false
+        }
+    }
+    fun dismissCreateDialog() {
+        showCreateDialog = false
+        pendingCreateDismiss = false
+        component.setDiscountTargetSearch("")
+        component.selectDiscountTarget(null)
+        component.updateDiscountName("")
+        component.updateDiscountDescription("")
+        component.updateDiscountedPriceCents(0)
+    }
+
+    ProfileSectionScaffold(
+        title = "Discounts",
+        onBack = component::onBackClicked,
+        onRefresh = component::refreshDiscounts,
+        isRefreshing = state.isLoading,
+        scrollContent = false,
+        contentPadding = PaddingValues(0.dp),
+        floatingActionButton = {
+            if (state.discounts.isNotEmpty()) {
+                FloatingActionButton(
+                    onClick = { showCreateDialog = true },
+                    modifier = Modifier.padding(navPadding),
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Create discount")
+                }
+            }
+        },
+    ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                top = 16.dp,
+                end = 16.dp,
+                bottom = 16.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item(key = "discounts-intro") {
+                Text(
+                    text = "Create user-owned discounts and generate codes for your paid events and team registrations.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            state.error?.let { message ->
+                item(key = "discounts-error") {
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+            when {
+                state.isLoading && state.discounts.isEmpty() -> {
+                    item(key = "discounts-loading") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 72.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("Loading discounts...")
+                        }
+                    }
+                }
+
+                state.discounts.isEmpty() -> {
+                    item(key = "discounts-empty") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 72.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(24.dp),
+                            ) {
+                                Text("Create your first discount", style = MaterialTheme.typography.headlineSmall)
+                                FloatingActionButton(
+                                    onClick = { showCreateDialog = true },
+                                    modifier = Modifier.size(112.dp),
+                                    shape = MaterialTheme.shapes.extraLarge,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Create discount",
+                                        modifier = Modifier.size(52.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                else -> {
+                    item(key = "discounts-title") {
+                        Text("Your discounts", style = MaterialTheme.typography.titleMedium)
+                    }
+                    items(
+                        items = state.discounts,
+                        key = { discount -> discount.id },
+                    ) { discount ->
+                        DiscountOfferCard(
+                            discount = discount,
+                            codeInput = state.codeInputs[discount.id].orEmpty(),
+                            usageLimitInput = state.usageLimitInputs[discount.id].orEmpty(),
+                            isGenerating = state.generatingCodeDiscountId == discount.id,
+                            activeCodeActionId = state.activeCodeActionId,
+                            onCodeChanged = { component.updateDiscountCodeInput(discount.id, it) },
+                            onUsageLimitChanged = { component.updateDiscountUsageLimitInput(discount.id, it) },
+                            onGenerate = { component.generateDiscountCode(discount) },
+                            onDeactivateCode = { code -> component.deactivateDiscountCode(discount, code) },
+                            onActivateCode = { code -> component.activateDiscountCode(discount, code) },
+                            onDeleteCode = { code -> component.deleteDiscountCode(discount, code) },
+                        )
+                    }
+                }
+        }
+    }
+    }
+
+    if (showCreateDialog) {
+        CreateDiscountDialog(
+            state = state,
+            onItemTypeChanged = component::setDiscountItemType,
+            onTargetSearchChanged = component::setDiscountTargetSearch,
+            onTargetSelected = component::selectDiscountTarget,
+            onNameChanged = component::updateDiscountName,
+            onDescriptionChanged = component::updateDiscountDescription,
+            onPriceChanged = component::updateDiscountedPriceCents,
+            onCreate = {
+                pendingCreateDismiss = true
+                component.createUserDiscount()
+            },
+            onDismiss = ::dismissCreateDialog,
+        )
+    }
+}
+
+@Composable
+private fun CreateDiscountDialog(
+    state: ProfileDiscountsState,
+    onItemTypeChanged: (String) -> Unit,
+    onTargetSearchChanged: (String) -> Unit,
+    onTargetSelected: (String?) -> Unit,
+    onNameChanged: (String) -> Unit,
+    onDescriptionChanged: (String) -> Unit,
+    onPriceChanged: (Int) -> Unit,
+    onCreate: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val selectedTarget = remember(state.allTargets, state.selectedTargetId) {
+        state.allTargets.firstOrNull { it.id == state.selectedTargetId }
+    }
+    var discountModeName by rememberSaveable { mutableStateOf(DiscountValueMode.PERCENT.name) }
+    val discountMode = remember(discountModeName) {
+        runCatching { DiscountValueMode.valueOf(discountModeName) }.getOrDefault(DiscountValueMode.PERCENT)
+    }
+    var finalPriceText by remember(state.selectedTargetId, state.discountedPriceCents) {
+        mutableStateOf(
+            if (selectedTarget != null) {
+                state.discountedPriceCents.toString()
+            } else {
+                ""
+            },
+        )
+    }
+    var discountValueText by remember(state.selectedTargetId, state.discountedPriceCents, discountModeName) {
+        mutableStateOf(
+            selectedTarget?.let { target ->
+                when (discountMode) {
+                    DiscountValueMode.PERCENT -> formatDiscountPercentInput(
+                        discountPercentForFinalPrice(
+                            originalPriceCents = target.priceCents,
+                            finalPriceCents = state.discountedPriceCents,
+                        ),
+                    )
+                    DiscountValueMode.FLAT -> discountAmountCentsForFinalPrice(
+                        originalPriceCents = target.priceCents,
+                        finalPriceCents = state.discountedPriceCents,
+                    ).toString()
+                }
+            }.orEmpty(),
+        )
+    }
+    val itemTypeOptions = remember {
+        listOf(
+            DropdownOption("EVENT", "Event"),
+            DropdownOption("TEAM_REGISTRATION", "Team registration"),
+        )
+    }
+    val dialogContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = dialogContainerColor,
+        title = { Text("Create discount") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                state.error?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                PlatformDropdown(
+                    selectedValue = state.itemType,
+                    onSelectionChange = onItemTypeChanged,
+                    options = itemTypeOptions,
+                    label = "Item type",
+                    containerColor = dialogContainerColor,
+                )
+                DiscountTargetAutocomplete(
+                    query = state.targetSearch,
+                    targets = state.targets,
+                    selectedTargetId = state.selectedTargetId,
+                    isLoading = state.targetLoading,
+                    containerColor = dialogContainerColor,
+                    onQueryChanged = onTargetSearchChanged,
+                    onTargetSelected = onTargetSelected,
+                )
+                selectedTarget?.let { target ->
+                    Text(
+                        text = "Current price: ${formatCurrency(target.priceCents)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                StandardTextField(
+                    value = state.name,
+                    onValueChange = onNameChanged,
+                    label = "Discount name",
+                    containerColor = dialogContainerColor,
+                )
+                StandardTextField(
+                    value = state.description,
+                    onValueChange = onDescriptionChanged,
+                    label = "Description",
+                    supportingText = "Optional",
+                    containerColor = dialogContainerColor,
+                )
+                Text(
+                    text = "Discount type",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    DiscountModeButton(
+                        text = "Percent",
+                        selected = discountMode == DiscountValueMode.PERCENT,
+                        onClick = { discountModeName = DiscountValueMode.PERCENT.name },
+                        modifier = Modifier.weight(1f),
+                    )
+                    DiscountModeButton(
+                        text = "Flat amount",
+                        selected = discountMode == DiscountValueMode.FLAT,
+                        onClick = { discountModeName = DiscountValueMode.FLAT.name },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (discountMode == DiscountValueMode.PERCENT) {
+                        StandardTextField(
+                            value = discountValueText,
+                            onValueChange = { value ->
+                                val filtered = discountPercentInputFilter(value)
+                                discountValueText = filtered
+                                onPriceChanged(
+                                    finalPriceCentsFromPercentDiscount(
+                                        originalPriceCents = selectedTarget?.priceCents ?: 0,
+                                        discountPercent = filtered.toDoubleOrNull() ?: 0.0,
+                                    ),
+                                )
+                            },
+                            modifier = Modifier.weight(1f),
+                            label = "Discount %",
+                            keyboardType = "decimal",
+                            enabled = selectedTarget != null,
+                            inputFilter = ::discountPercentInputFilter,
+                            containerColor = dialogContainerColor,
+                        )
+                    } else {
+                        StandardTextField(
+                            value = discountValueText,
+                            onValueChange = { value ->
+                                val filtered = MoneyInputUtils.moneyInputFilter(value)
+                                discountValueText = filtered
+                                onPriceChanged(
+                                    finalPriceCentsFromFlatDiscount(
+                                        originalPriceCents = selectedTarget?.priceCents ?: 0,
+                                        discountAmountCents = filtered.toIntOrNull() ?: 0,
+                                    ),
+                                )
+                            },
+                            modifier = Modifier.weight(1f),
+                            label = "Discount",
+                            keyboardType = "money",
+                            enabled = selectedTarget != null,
+                            inputFilter = MoneyInputUtils::moneyInputFilter,
+                            containerColor = dialogContainerColor,
+                        )
+                    }
+                    StandardTextField(
+                        value = finalPriceText,
+                        onValueChange = { value ->
+                            val filtered = MoneyInputUtils.moneyInputFilter(value)
+                            finalPriceText = filtered
+                            onPriceChanged(filtered.toIntOrNull() ?: 0)
+                        },
+                        modifier = Modifier.weight(1f),
+                        label = "Final price",
+                        keyboardType = "money",
+                        enabled = selectedTarget != null,
+                        inputFilter = MoneyInputUtils::moneyInputFilter,
+                        containerColor = dialogContainerColor,
+                    )
+                }
+                Text(
+                    text = "Stored as the discounted final price.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = !state.isCreating && selectedTarget != null,
+                onClick = onCreate,
+            ) {
+                Text(if (state.isCreating) "Creating..." else "Create")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun DiscountModeButton(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (selected) {
+        Button(
+            modifier = modifier,
+            onClick = onClick,
+        ) {
+            Text(text)
+        }
+    } else {
+        OutlinedButton(
+            modifier = modifier,
+            onClick = onClick,
+        ) {
+            Text(text)
+        }
+    }
+}
+
+private fun discountPercentInputFilter(input: String): String {
+    val sanitized = buildString {
+        var hasDecimal = false
+        input.forEach { character ->
+            when {
+                character.isDigit() -> append(character)
+                character == '.' && !hasDecimal -> {
+                    append(character)
+                    hasDecimal = true
+                }
+            }
+        }
+    }
+    val bounded = sanitized.toDoubleOrNull()?.coerceIn(0.0, 100.0) ?: return sanitized.take(4)
+    if (sanitized.endsWith(".") && bounded < 100.0) {
+        return "${bounded.toInt()}."
+    }
+    return formatDiscountPercentInput(bounded)
+}
+
+private fun formatDiscountPercentInput(value: Double): String {
+    val hundredths = (value.coerceIn(0.0, 100.0) * 100).toInt()
+    val whole = hundredths / 100
+    val fraction = hundredths % 100
+    return when {
+        fraction == 0 -> whole.toString()
+        fraction % 10 == 0 -> "$whole.${fraction / 10}"
+        else -> "$whole.${fraction.toString().padStart(2, '0')}"
+    }
+}
+
+@Composable
+private fun DiscountTargetAutocomplete(
+    query: String,
+    targets: List<DiscountTarget>,
+    selectedTargetId: String?,
+    isLoading: Boolean,
+    containerColor: androidx.compose.ui.graphics.Color,
+    onQueryChanged: (String) -> Unit,
+    onTargetSelected: (String?) -> Unit,
+) {
+    val density = LocalDensity.current
+    var suggestionsExpanded by remember { mutableStateOf(false) }
+    var isFieldFocused by remember { mutableStateOf(false) }
+    var fieldWidth by remember { mutableStateOf(0.dp) }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        StandardTextField(
+            value = query,
+            onValueChange = {
+                onQueryChanged(it)
+                onTargetSelected(null)
+                if (isFieldFocused) {
+                    suggestionsExpanded = true
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .onGloballyPositioned { coordinates ->
+                    fieldWidth = with(density) { coordinates.size.width.toDp() }
+                },
+            onFocusChanged = { isFocused ->
+                isFieldFocused = isFocused
+                suggestionsExpanded = isFocused
+            },
+            label = "Item",
+            placeholder = if (isLoading) "Loading..." else "Search or select an item",
+            enabled = !isLoading,
+            containerColor = containerColor,
+        )
+
+        DropdownMenu(
+            expanded = suggestionsExpanded && isFieldFocused && !isLoading,
+            onDismissRequest = { suggestionsExpanded = false },
+            properties = PopupProperties(focusable = false),
+            modifier = Modifier
+                .then(if (fieldWidth > 0.dp) Modifier.width(fieldWidth) else Modifier.fillMaxWidth())
+                .heightIn(max = 240.dp),
+        ) {
+            when {
+                targets.isEmpty() -> {
+                    Text(
+                        text = if (query.isBlank()) "No eligible items found." else "No matching items.",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                else -> {
+                    targets.forEach { target ->
+                        DiscountTargetSuggestionRow(
+                            target = target,
+                            selected = target.id == selectedTargetId,
+                            onClick = {
+                                onTargetSelected(target.id)
+                                suggestionsExpanded = false
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiscountTargetSuggestionRow(
+    target: DiscountTarget,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val containerColor = if (selected) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 8.dp, horizontal = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = target.label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = "${target.targetType.displayDiscountTargetType()} • ${formatCurrency(target.priceCents)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DiscountOfferCard(
+    discount: DiscountOffer,
+    codeInput: String,
+    usageLimitInput: String,
+    isGenerating: Boolean,
+    activeCodeActionId: String?,
+    onCodeChanged: (String) -> Unit,
+    onUsageLimitChanged: (String) -> Unit,
+    onGenerate: () -> Unit,
+    onDeactivateCode: (DiscountCode) -> Unit,
+    onActivateCode: (DiscountCode) -> Unit,
+    onDeleteCode: (DiscountCode) -> Unit,
+) {
+    var pendingDeleteCode by remember { mutableStateOf<DiscountCode?>(null) }
+    pendingDeleteCode?.let { code ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteCode = null },
+            title = { Text("Delete code") },
+            text = {
+                Text("Delete discount code ${code.code}? This cannot be undone.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingDeleteCode = null
+                        onDeleteCode(code)
+                    },
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { pendingDeleteCode = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+    val cardContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = cardContainerColor,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(discount.name, style = MaterialTheme.typography.titleMedium)
+            discount.description?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = "${discount.targetType.displayDiscountTargetType()} • ${formatCurrency(discount.discountedPriceCents)} of ${formatCurrency(discount.originalPriceCents)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            StandardTextField(
+                value = codeInput,
+                onValueChange = onCodeChanged,
+                label = "New code",
+                supportingText = "Optional. Leave blank to generate one.",
+                containerColor = cardContainerColor,
+            )
+            StandardTextField(
+                value = usageLimitInput,
+                onValueChange = onUsageLimitChanged,
+                label = "Usage limit",
+                keyboardType = "number",
+                supportingText = "Optional",
+                containerColor = cardContainerColor,
+            )
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isGenerating,
+                onClick = onGenerate,
+            ) {
+                Text(if (isGenerating) "Generating..." else "Generate code")
+            }
+            if (discount.codes.isEmpty()) {
+                Text(
+                    text = "No codes generated yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    discount.codes.forEachIndexed { index, code ->
+                        if (index > 0) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        }
+                        val limitLabel = code.usageLimit?.let { limit -> " / $limit" } ?: ""
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "${code.code} • ${code.usedCount}$limitLabel used • ${code.status}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                val isBusy = activeCodeActionId == code.id
+                                if (code.status.equals("ACTIVE", ignoreCase = true)) {
+                                    OutlinedButton(
+                                        modifier = Modifier.weight(1f),
+                                        enabled = !isBusy,
+                                        onClick = { onDeactivateCode(code) },
+                                    ) {
+                                        Text(if (isBusy) "Updating..." else "Deactivate")
+                                    }
+                                } else {
+                                    OutlinedButton(
+                                        modifier = Modifier.weight(1f),
+                                        enabled = !isBusy,
+                                        onClick = { onActivateCode(code) },
+                                    ) {
+                                        Text(if (isBusy) "Updating..." else "Activate")
+                                    }
+                                    OutlinedButton(
+                                        modifier = Modifier.weight(1f),
+                                        enabled = !isBusy,
+                                        onClick = { pendingDeleteCode = code },
+                                    ) {
+                                        Text(if (isBusy) "Deleting..." else "Delete")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun String.displayDiscountTargetType(): String {
+    return when (trim().uppercase()) {
+        "TEAM_REGISTRATION" -> "Team registration"
+        "PRODUCT" -> "Product"
+        else -> lowercase().replaceFirstChar { char ->
+            if (char.isLowerCase()) char.titlecase() else char.toString()
+        }
+    }
+}
+
+@Composable
+fun ProfileNotificationsScreen(component: ProfileComponent) {
+    val state by component.notificationSettingsState.collectAsState()
+
+    ProfileSectionScaffold(
+        title = "Notifications",
+        description = "Choose which optional updates you receive by email or push.",
+        onBack = component::onBackClicked,
+    ) {
+        state.error?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        NotificationSettingsCard(
+            settings = state.settings,
+            enabled = !state.isSaving,
+            onSettingChanged = component::setNotificationSetting,
+        )
+
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !state.isSaving,
+            onClick = component::saveNotificationSettings,
+        ) {
+            Text(if (state.isSaving) "Saving..." else "Save settings")
+        }
+    }
+}
+
+@Composable
+fun ProfilePaymentPlansScreen(component: ProfileComponent) {
+    val plansState by component.paymentPlansState.collectAsState()
+    val activeBillPaymentId by component.activeBillPaymentId.collectAsState()
+    var proofUploadPlan by remember { mutableStateOf<ProfilePaymentPlan?>(null) }
+
+    LaunchedEffect(component) {
+        component.refreshPaymentPlans()
+    }
+
+    proofUploadPlan?.let { paymentPlan ->
+        GalleryPickerLauncher(
+            onPhotosSelected = { photos ->
+                proofUploadPlan = null
+                photos.firstOrNull()?.let { photo ->
+                    component.uploadManualPaymentProof(paymentPlan, photo)
+                }
+            },
+            onError = {
+                proofUploadPlan = null
+            },
+            onDismiss = {
+                proofUploadPlan = null
+            },
+            allowMultiple = false,
+            mimeTypes = listOf(MimeType.IMAGE_ALL),
+        )
+    }
+
+    ProfileSectionScaffold(
+        title = "Bills",
+        description = "Review and manage bills for your account.",
+        onBack = component::onBackClicked,
+        onRefresh = component::refreshPaymentPlans,
+        isRefreshing = plansState.isLoading,
+    ) {
+        SectionHeaderRow(title = "Bills")
+
+        plansState.error?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        plansState.warning?.let { message ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                ),
+            ) {
+                Text(
+                    modifier = Modifier.padding(16.dp),
+                    text = message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            }
+        }
+
+        when {
+            plansState.isLoading -> {
+                Text(
+                    text = "Loading bills...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            plansState.plans.isEmpty() -> {
+                Text(
+                    text = "No bills are available.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            else -> {
+                plansState.plans.forEach { paymentPlan ->
+                    PaymentPlanCard(
+                        paymentPlan = paymentPlan,
+                        isProcessing = activeBillPaymentId == paymentPlan.bill.id,
+                        onPayNextInstallment = { component.payNextInstallment(paymentPlan) },
+                        onUploadProof = { proofUploadPlan = paymentPlan },
+                        onCancelPendingPayment = { component.cancelPendingBillPayment(paymentPlan) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProfileMembershipsScreen(component: ProfileComponent) {
+    val membershipsState by component.membershipsState.collectAsState()
+    val activeMembershipActionId by component.activeMembershipActionId.collectAsState()
+
+    LaunchedEffect(component) {
+        component.refreshMemberships()
+    }
+
+    ProfileSectionScaffold(
+        title = "Memberships",
+        description = "Track recurring memberships and subscription status.",
+        onBack = component::onBackClicked,
+        onRefresh = component::refreshMemberships,
+        isRefreshing = membershipsState.isLoading,
+    ) {
+        SectionHeaderRow(title = "Active Memberships")
+
+        membershipsState.error?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        when {
+            membershipsState.isLoading -> {
+                Text(
+                    text = "Loading memberships...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            membershipsState.memberships.isEmpty() -> {
+                Text(
+                    text = "No active memberships.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            else -> {
+                membershipsState.memberships.forEach { membership ->
+                    MembershipCard(
+                        membership = membership,
+                        isProcessing = activeMembershipActionId == membership.subscription.id,
+                        onCancel = { component.cancelMembership(membership) },
+                        onRestart = { component.restartMembership(membership) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProfileEventTemplatesScreen(component: ProfileComponent) {
+    val templatesState by component.eventTemplatesState.collectAsState()
+
+    LaunchedEffect(component) {
+        component.refreshEventTemplates()
+    }
+
+    ProfileSectionScaffold(
+        title = "Event Templates",
+        description = "Reusable templates for personal (non-organization) events.",
+        onBack = component::onBackClicked,
+        onRefresh = component::refreshEventTemplates,
+        isRefreshing = templatesState.isLoading,
+    ) {
+        templatesState.error?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        when {
+            templatesState.isLoading && templatesState.templates.isEmpty() -> {
+                Text(
+                    text = "Loading event templates...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            templatesState.templates.isEmpty() -> {
+                EventTemplatesEmptyState(onCreateEvent = component::createEvent)
+            }
+
+            else -> {
+                templatesState.templates.forEach { template ->
+                    EventTemplateCard(
+                        template = template,
+                        onUseTemplate = component::useEventTemplate,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun EventTemplatesEmptyState(onCreateEvent: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = "No event templates yet",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            text = "Templates are made from an existing personal event. Create or open an event, then choose Create Template from its actions.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Button(onClick = onCreateEvent) {
+            Text("Create an event")
+        }
+    }
+}
+
+@Composable
+fun ProfileInvitesScreen(component: ProfileComponent) {
+    val invitesState by component.invitesState.collectAsState()
+
+    LaunchedEffect(component) {
+        component.refreshInvites()
+    }
+
+    val organizationInvites = remember(invitesState.invites) {
+        invitesState.invites.filter { invite ->
+            invite.type.equals("STAFF", ignoreCase = true) && !invite.organizationId.isNullOrBlank()
+        }
+    }
+    val teamInvites = remember(invitesState.invites) {
+        invitesState.invites.filter { invite ->
+            invite.type.equals("TEAM", ignoreCase = true) && !invite.teamId.isNullOrBlank()
+        }
+    }
+    val eventStaffInvites = remember(invitesState.invites) {
+        invitesState.invites.filter { invite ->
+            invite.type.equals("STAFF", ignoreCase = true) &&
+                invite.organizationId.isNullOrBlank() &&
+                !invite.eventId.isNullOrBlank()
+        }
+    }
+    val eventInvites = remember(invitesState.invites) {
+        invitesState.invites.filter { invite ->
+            invite.type.equals("EVENT", ignoreCase = true) && !invite.eventId.isNullOrBlank()
+        }
+    }
+
+    ProfileSectionScaffold(
+        title = "Invites",
+        description = "Review organization, team, event staff, and event invites waiting on you.",
+        onBack = component::onBackClicked,
+        onRefresh = component::refreshInvites,
+        isRefreshing = invitesState.isLoading,
+    ) {
+        invitesState.error?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        when {
+            invitesState.isLoading && invitesState.invites.isEmpty() -> {
+                Text(
+                    text = "Loading invites...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            invitesState.invites.isEmpty() -> {
+                Text(
+                    text = "No pending invites.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            else -> {
+                val hasActiveInviteAction = invitesState.activeInviteId != null
+                if (organizationInvites.isNotEmpty()) {
+                    SectionHeaderRow(title = "Organization Invites")
+                    organizationInvites.forEach { invite ->
+                        val organization = invite.organizationId?.let(invitesState.organizationsById::get)
+                        val isAccepting = invitesState.activeInviteId == invite.id &&
+                            invitesState.activeInviteAction == ProfileInviteAction.ACCEPT
+                        val isDeclining = invitesState.activeInviteId == invite.id &&
+                            invitesState.activeInviteAction == ProfileInviteAction.DECLINE
+                        InviteActionCard(
+                            title = organization?.name ?: "Organization",
+                            subtitle = invite.staffInviteRoleLabel(),
+                            tertiary = invite.email.takeIf(String::isNotBlank),
+                            primaryActionLabel = if (isAccepting) "Accepting..." else "Accept",
+                            onPrimaryAction = { component.acceptInvite(invite) },
+                            secondaryActionLabel = if (isDeclining) "Declining..." else "Decline",
+                            onSecondaryAction = { component.declineInvite(invite) },
+                            primaryEnabled = !hasActiveInviteAction || isAccepting,
+                            secondaryEnabled = !hasActiveInviteAction || isDeclining,
+                        )
+                    }
+                }
+
+                if (teamInvites.isNotEmpty()) {
+                    SectionHeaderRow(title = "Team Invites")
+                    teamInvites.forEach { invite ->
+                        val team = invite.teamId?.let(invitesState.teamsById::get)
+                        val roleLabel = invite.inferTeamInviteRole(team?.team).label()
+                        val childLabel = invite.childDisplayName()
+                        val requiresParentAccept = invite.requiresParentAcceptanceForCurrentMinor(
+                            currentUserId = invitesState.currentUserId,
+                            currentUserIsMinor = invitesState.currentUserIsMinor,
+                        )
+                        val isAccepting = invitesState.activeInviteId == invite.id &&
+                            invitesState.activeInviteAction == ProfileInviteAction.ACCEPT
+                        val isDeclining = invitesState.activeInviteId == invite.id &&
+                            invitesState.activeInviteAction == ProfileInviteAction.DECLINE
+                        InviteActionCard(
+                            title = team?.team?.name?.takeIf(String::isNotBlank) ?: "Team",
+                            subtitle = when {
+                                requiresParentAccept -> "$roleLabel - parent/guardian approval required"
+                                invite.viewerCanAcceptForChild && childLabel != null -> "$roleLabel for $childLabel"
+                                else -> roleLabel
+                            },
+                            tertiary = when {
+                                requiresParentAccept -> CHILD_TEAM_INVITE_PARENT_MESSAGE
+                                invite.viewerCanAcceptForChild && childLabel != null -> "For $childLabel"
+                                else -> invite.email.takeIf(String::isNotBlank)
+                            },
+                            primaryActionLabel = when {
+                                requiresParentAccept -> "Parent required"
+                                isAccepting -> "Accepting..."
+                                else -> "Accept"
+                            },
+                            onPrimaryAction = {
+                                if (!requiresParentAccept) {
+                                    component.acceptInvite(invite)
+                                }
+                            },
+                            secondaryActionLabel = if (isDeclining) "Declining..." else "Decline",
+                            onSecondaryAction = { component.declineInvite(invite) },
+                            primaryEnabled = !requiresParentAccept && (!hasActiveInviteAction || isAccepting),
+                            secondaryEnabled = !hasActiveInviteAction || isDeclining,
+                        )
+                    }
+                }
+
+                if (eventStaffInvites.isNotEmpty()) {
+                    SectionHeaderRow(title = "Event Staff Invites")
+                    eventStaffInvites.forEach { invite ->
+                        val event = invite.eventId?.let(invitesState.eventsById::get)
+                        val isAccepting = invitesState.activeInviteId == invite.id &&
+                            invitesState.activeInviteAction == ProfileInviteAction.ACCEPT
+                        val isDeclining = invitesState.activeInviteId == invite.id &&
+                            invitesState.activeInviteAction == ProfileInviteAction.DECLINE
+                        InviteActionCard(
+                            title = event?.name?.takeIf(String::isNotBlank) ?: "Event",
+                            subtitle = invite.staffInviteRoleLabel(),
+                            tertiary = event?.start?.let(::formatTemplateDateTime)
+                                ?: event?.location?.takeIf(String::isNotBlank)
+                                ?: invite.email.takeIf(String::isNotBlank),
+                            primaryActionLabel = if (isAccepting) "Accepting..." else "Accept",
+                            onPrimaryAction = { component.acceptInvite(invite) },
+                            secondaryActionLabel = if (isDeclining) "Declining..." else "Decline",
+                            onSecondaryAction = { component.declineInvite(invite) },
+                            primaryEnabled = !hasActiveInviteAction || isAccepting,
+                            secondaryEnabled = !hasActiveInviteAction || isDeclining,
+                        )
+                    }
+                }
+
+                if (eventInvites.isNotEmpty()) {
+                    SectionHeaderRow(title = "Event Invites")
+                    eventInvites.forEach { invite ->
+                        val event = invite.eventId?.let(invitesState.eventsById::get)
+                        val isDeclining = invitesState.activeInviteId == invite.id &&
+                            invitesState.activeInviteAction == ProfileInviteAction.DECLINE
+                        InviteActionCard(
+                            title = event?.name?.takeIf(String::isNotBlank) ?: "Event",
+                            subtitle = event?.location?.takeIf(String::isNotBlank) ?: "Event Invite",
+                            tertiary = event?.start?.let(::formatTemplateDateTime),
+                            primaryActionLabel = "Open Event",
+                            onPrimaryAction = {
+                                invite.eventId?.let(component::openInviteEvent)
+                            },
+                            secondaryActionLabel = if (isDeclining) "Declining..." else "Decline",
+                            onSecondaryAction = { component.declineInvite(invite) },
+                            primaryEnabled = !hasActiveInviteAction,
+                            secondaryEnabled = !hasActiveInviteAction || isDeclining,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProfileChildrenScreen(component: ProfileComponent) {
+    val childrenState by component.childrenState.collectAsState()
+    var childFirstName by rememberSaveable { mutableStateOf("") }
+    var childLastName by rememberSaveable { mutableStateOf("") }
+    var childEmail by rememberSaveable { mutableStateOf("") }
+    var childDateOfBirth by rememberSaveable { mutableStateOf("") }
+    var showChildBirthdayPicker by rememberSaveable { mutableStateOf(false) }
+    var childRelationship by rememberSaveable { mutableStateOf("parent") }
+    var showAddChildForm by rememberSaveable { mutableStateOf(false) }
+    var editingChildUserId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    var linkChildEmail by rememberSaveable { mutableStateOf("") }
+    var linkChildUserId by rememberSaveable { mutableStateOf("") }
+    var linkRelationship by rememberSaveable { mutableStateOf("parent") }
+
+    val relationshipOptions = remember {
+        listOf(
+            DropdownOption(value = "parent", label = "Parent"),
+            DropdownOption(value = "guardian", label = "Guardian"),
+        )
+    }
+
+    var wasCreatingChild by remember { mutableStateOf(false) }
+    var wasUpdatingChild by remember { mutableStateOf(false) }
+    var wasLinkingChild by remember { mutableStateOf(false) }
+    val isEditingChild = editingChildUserId != null
+    val isSavingChild = childrenState.isCreatingChild || childrenState.isUpdatingChild
+    val childFormError = if (isEditingChild) childrenState.updateError else childrenState.createError
+
+    val resetChildForm = {
+        childFirstName = ""
+        childLastName = ""
+        childEmail = ""
+        childDateOfBirth = ""
+        childRelationship = "parent"
+        editingChildUserId = null
+    }
+
+    LaunchedEffect(component) {
+        component.refreshChildren()
+    }
+
+    LaunchedEffect(childrenState.isCreatingChild, childrenState.createError) {
+        if (wasCreatingChild && !childrenState.isCreatingChild && childrenState.createError == null) {
+            resetChildForm()
+            showAddChildForm = false
+        }
+        wasCreatingChild = childrenState.isCreatingChild
+    }
+
+    LaunchedEffect(childrenState.isUpdatingChild, childrenState.updateError) {
+        if (wasUpdatingChild && !childrenState.isUpdatingChild && childrenState.updateError == null) {
+            resetChildForm()
+            showAddChildForm = false
+        }
+        wasUpdatingChild = childrenState.isUpdatingChild
+    }
+
+    LaunchedEffect(childrenState.isLinkingChild, childrenState.linkError) {
+        if (wasLinkingChild && !childrenState.isLinkingChild && childrenState.linkError == null) {
+            linkChildEmail = ""
+            linkChildUserId = ""
+            linkRelationship = "parent"
+        }
+        wasLinkingChild = childrenState.isLinkingChild
+    }
+
+    ProfileSectionScaffold(
+        title = "Children",
+        description = "Manage linked child accounts and guardian relationships.",
+        onBack = component::onBackClicked,
+        onRefresh = component::refreshChildren,
+        isRefreshing = childrenState.isLoading || childrenState.isLoadingJoinRequests,
+    ) {
+        SectionHeaderRow(title = "Child details")
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = {
+                editingChildUserId = null
+                showAddChildForm = true
+            },
+        ) {
+            Text("Add child")
+        }
+
+        if (showAddChildForm) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = if (isEditingChild) "Edit child" else "Add a child",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+
+                    childFormError?.let { message ->
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+
+                    StandardTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = childFirstName,
+                        onValueChange = { childFirstName = it },
+                        label = "First name",
+                    )
+                    StandardTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = childLastName,
+                        onValueChange = { childLastName = it },
+                        label = "Last name",
+                    )
+                    StandardTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = childEmail,
+                        onValueChange = { childEmail = it },
+                        label = "Email (optional)",
+                        keyboardType = "email",
+                    )
+                    StandardTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = childDateOfBirth,
+                        onValueChange = {},
+                        label = "Date of birth",
+                        placeholder = "Select date",
+                        supportingText = "Date only",
+                        readOnly = true,
+                        onTap = { showChildBirthdayPicker = true },
+                    )
+                    PlatformDropdown(
+                        selectedValue = childRelationship,
+                        onSelectionChange = { childRelationship = it },
+                        options = relationshipOptions,
+                        label = "Relationship",
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                val activeChildUserId = editingChildUserId
+                                if (activeChildUserId != null) {
+                                    component.updateChild(
+                                        childUserId = activeChildUserId,
+                                        firstName = childFirstName,
+                                        lastName = childLastName,
+                                        dateOfBirth = childDateOfBirth,
+                                        email = childEmail,
+                                        relationship = childRelationship,
+                                    )
+                                } else {
+                                    component.createChild(
+                                        firstName = childFirstName,
+                                        lastName = childLastName,
+                                        dateOfBirth = childDateOfBirth,
+                                        email = childEmail,
+                                        relationship = childRelationship,
+                                    )
+                                }
+                            },
+                            enabled = !isSavingChild,
+                        ) {
+                            val buttonText = when {
+                                childrenState.isUpdatingChild -> "Saving..."
+                                childrenState.isCreatingChild -> "Adding child..."
+                                isEditingChild -> "Save child"
+                                else -> "Add child"
+                            }
+                            Text(buttonText)
+                        }
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                resetChildForm()
+                                showAddChildForm = false
+                            },
+                            enabled = !isSavingChild,
+                        ) {
+                            Text("Cancel")
+                        }
+                    }
+                }
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            ),
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = "Link an existing child",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+
+                childrenState.linkError?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+
+                StandardTextField(
+                    value = linkChildEmail,
+                    onValueChange = { linkChildEmail = it },
+                    label = "Child email",
+                    keyboardType = "email",
+                )
+                StandardTextField(
+                    value = linkChildUserId,
+                    onValueChange = { linkChildUserId = it },
+                    label = "Child user ID",
+                )
+                PlatformDropdown(
+                    selectedValue = linkRelationship,
+                    onSelectionChange = { linkRelationship = it },
+                    options = relationshipOptions,
+                    label = "Relationship",
+                )
+                Text(
+                    text = "Provide either the child email or user ID to link an existing account.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        component.linkChild(
+                            childEmail = linkChildEmail,
+                            childUserId = linkChildUserId,
+                            relationship = linkRelationship,
+                        )
+                    },
+                    enabled = !childrenState.isLinkingChild,
+                ) {
+                    Text(if (childrenState.isLinkingChild) "Linking child..." else "Link child")
+                }
+            }
+        }
+
+        SectionHeaderRow(title = "Pending join requests")
+
+        childrenState.joinRequestsError?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        when {
+            childrenState.isLoadingJoinRequests -> {
+                Text(
+                    text = "Loading join requests...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            childrenState.joinRequests.isEmpty() -> {
+                Text(
+                    text = "No pending join requests.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            else -> {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    childrenState.joinRequests.forEach { request ->
+                        val isResolving = childrenState.activeJoinRequestId == request.registrationId
+                        val requestVerb = when {
+                            request.isTeamRequest &&
+                                request.requestSource.equals("TEAM_INVITE", ignoreCase = true) ->
+                                "has a team invite for"
+                            request.isTeamRequest -> "requested to join"
+                            else -> "requested to join"
+                        }
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            ),
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Text(
+                                    text = "${request.childFullName} $requestVerb ${request.targetName}",
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                                Text(
+                                    text = if (request.isTeamRequest) "Team request" else "Event request",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    text = "Consent status: ${request.consentStatus ?: "guardian_approval_required"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                if (request.isTeamRequest && (request.teamRegistrationPriceCents ?: 0) > 0) {
+                                    Text(
+                                        text = "Approving starts registration. Payment can continue after approval.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                request.requestedAt?.let { requestedAt ->
+                                    Text(
+                                        text = "Requested: ${formatDateForDisplay(requestedAt)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                if (!request.childHasEmail) {
+                                    Text(
+                                        text = "Child email is missing. Approval can proceed, but child-signature links stay pending.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Button(
+                                        modifier = Modifier.weight(1f),
+                                        onClick = { component.approveChildJoinRequest(request.registrationId) },
+                                        enabled = !isResolving,
+                                    ) {
+                                        Text(if (isResolving) "Working..." else "Approve")
+                                    }
+                                    Button(
+                                        modifier = Modifier.weight(1f),
+                                        onClick = { component.declineChildJoinRequest(request.registrationId) },
+                                        enabled = !isResolving,
+                                    ) {
+                                        Text(if (isResolving) "Working..." else "Decline")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        SectionHeaderRow(title = "Children")
+
+        childrenState.error?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        when {
+            childrenState.isLoading -> {
+                Text(
+                    text = "Loading children...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            childrenState.children.isEmpty() -> {
+                Text(
+                    text = "No children linked yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            else -> {
+                ChildrenGrid(
+                    children = childrenState.children,
+                    onEditChild = { child ->
+                        childFirstName = child.firstName
+                        childLastName = child.lastName
+                        childEmail = child.email.orEmpty()
+                        childDateOfBirth = normalizeDateInput(child.dateOfBirth)
+                        childRelationship = child.relationship
+                            ?.trim()
+                            ?.takeIf(String::isNotBlank)
+                            ?: "parent"
+                        editingChildUserId = child.userId
+                        showAddChildForm = true
+                    },
+                )
+            }
+        }
+    }
+
+    PlatformDateTimePicker(
+        onDateSelected = { selected ->
+            childDateOfBirth = selected
+                ?.toLocalDateTime(TimeZone.currentSystemDefault())
+                ?.date
+                ?.toString()
+                .orEmpty()
+            showChildBirthdayPicker = false
+        },
+        onDismissRequest = { showChildBirthdayPicker = false },
+        showPicker = showChildBirthdayPicker,
+        getTime = false,
+        canSelectPast = true,
+        canSelectFuture = false,
+    )
+}
+
+@Composable
+fun ProfileConnectionsScreen(component: ProfileComponent) {
+    val state by component.connectionsState.collectAsState()
+    val currentUser = state.currentUser
+    var pendingBlockUser by remember { mutableStateOf<UserData?>(null) }
+    var pendingUnblockUser by remember { mutableStateOf<UserData?>(null) }
+    var leaveSharedChatsOnBlock by rememberSaveable { mutableStateOf(true) }
+
+    LaunchedEffect(component) {
+        component.refreshConnections()
+    }
+
+    ProfileSectionScaffold(
+        title = "Connections",
+        description = "Manage friend requests, friends, and following.",
+        onBack = component::onBackClicked,
+        onRefresh = component::refreshConnections,
+        isRefreshing = state.isLoading,
+    ) {
+        SectionHeaderRow(title = "Find users")
+        StandardTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = state.searchQuery,
+            onValueChange = component::searchConnections,
+            label = "Search by name or username",
+        )
+
+        when {
+            state.isSearching -> {
+                Text(
+                    text = "Searching...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            state.searchQuery.trim().length < 2 -> {
+                Text(
+                    text = "Enter at least 2 characters to search.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            state.searchResults.isEmpty() -> {
+                Text(
+                    text = "No users found.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            else -> {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.searchResults.forEach { candidate ->
+                        val candidateId = candidate.id
+                        val isFriend = currentUser?.friendIds?.contains(candidateId) == true
+                        val isFollowing = currentUser?.followingIds?.contains(candidateId) == true
+                        val isBlocked = currentUser?.blockedUserIds?.contains(candidateId) == true
+                        val hasIncomingRequest = currentUser?.friendRequestIds?.contains(candidateId) == true
+                        val hasOutgoingRequest = currentUser?.friendRequestSentIds?.contains(candidateId) == true
+                        val isActionInProgress = state.activeUserId == candidateId
+                        val isActionRestricted = candidate.shouldRestrictSocialActions
+
+                        ConnectionUserCard(
+                            user = candidate,
+                            isActionInProgress = isActionInProgress,
+                            primaryActions = {
+                                when {
+                                    isBlocked -> {
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = { pendingUnblockUser = candidate },
+                                            enabled = !isActionInProgress,
+                                        ) {
+                                            Text(if (isActionInProgress) "Working..." else "Unblock")
+                                        }
+                                    }
+
+                                    isFriend -> {
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = { component.removeFriend(candidate) },
+                                            enabled = !isActionInProgress,
+                                        ) {
+                                            Text(if (isActionInProgress) "Working..." else "Remove friend")
+                                        }
+                                    }
+
+                                    hasIncomingRequest -> {
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = { component.acceptFriendRequest(candidate) },
+                                            enabled = !isActionInProgress && !isActionRestricted,
+                                        ) {
+                                            Text(if (isActionInProgress) "Working..." else "Accept")
+                                        }
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = { component.declineFriendRequest(candidate) },
+                                            enabled = !isActionInProgress,
+                                        ) {
+                                            Text(if (isActionInProgress) "Working..." else "Decline")
+                                        }
+                                    }
+
+                                    hasOutgoingRequest -> {
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = {},
+                                            enabled = false,
+                                        ) {
+                                            Text("Request sent")
+                                        }
+                                    }
+
+                                    else -> {
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = { component.sendFriendRequest(candidate) },
+                                            enabled = !isActionInProgress && !isActionRestricted,
+                                        ) {
+                                            Text(if (isActionInProgress) "Working..." else "Add friend")
+                                        }
+                                    }
+                                }
+                            },
+                            secondaryActions = {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    if (!isBlocked) {
+                                        Button(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            onClick = {
+                                                if (isFollowing) {
+                                                    component.unfollowUser(candidate)
+                                                } else {
+                                                    component.followUser(candidate)
+                                                }
+                                            },
+                                            enabled = !isActionInProgress && (isFollowing || !isActionRestricted),
+                                        ) {
+                                            when {
+                                                isActionInProgress -> Text("Working...")
+                                                isFollowing -> Text("Unfollow")
+                                                else -> Text("Follow")
+                                            }
+                                        }
+                                    }
+                                    Button(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        onClick = {
+                                            if (isBlocked) {
+                                                pendingUnblockUser = candidate
+                                            } else {
+                                                leaveSharedChatsOnBlock = true
+                                                pendingBlockUser = candidate
+                                            }
+                                        },
+                                        enabled = !isActionInProgress,
+                                    ) {
+                                        Text(if (isBlocked) "Unblock user" else "Block user")
+                                    }
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
+        state.error?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        SectionHeaderRow(title = "Incoming friend requests")
+        if (state.isLoading) {
+            Text(
+                text = "Loading friend requests...",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else if (state.incomingFriendRequests.isEmpty()) {
+            Text(
+                text = "No pending friend requests.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.incomingFriendRequests.forEach { requester ->
+                    val isActionInProgress = state.activeUserId == requester.id
+                    val isActionRestricted = requester.shouldRestrictSocialActions
+                    ConnectionUserCard(
+                        user = requester,
+                        isActionInProgress = isActionInProgress,
+                        primaryActions = {
+                            Button(
+                                modifier = Modifier.weight(1f),
+                                onClick = { component.acceptFriendRequest(requester) },
+                                enabled = !isActionInProgress && !isActionRestricted,
+                            ) {
+                                Text(if (isActionInProgress) "Working..." else "Accept")
+                            }
+                            Button(
+                                modifier = Modifier.weight(1f),
+                                onClick = { component.declineFriendRequest(requester) },
+                                enabled = !isActionInProgress,
+                            ) {
+                                Text(if (isActionInProgress) "Working..." else "Decline")
+                            }
+                        },
+                    )
+                }
+            }
+        }
+
+        SectionHeaderRow(title = "Friends")
+        if (state.isLoading) {
+            Text(
+                text = "Loading friends...",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else if (state.friends.isEmpty()) {
+            Text(
+                text = "No friends yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.friends.forEach { friend ->
+                    val isActionInProgress = state.activeUserId == friend.id
+                    ConnectionUserCard(
+                        user = friend,
+                        isActionInProgress = isActionInProgress,
+                        primaryActions = {
+                            Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = { component.removeFriend(friend) },
+                                enabled = !isActionInProgress,
+                            ) {
+                                Text(if (isActionInProgress) "Working..." else "Remove friend")
+                            }
+                        },
+                        secondaryActions = {
+                            Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {
+                                    leaveSharedChatsOnBlock = true
+                                    pendingBlockUser = friend
+                                },
+                                enabled = !isActionInProgress,
+                            ) {
+                                Text(if (isActionInProgress) "Working..." else "Block user")
+                            }
+                        },
+                    )
+                }
+            }
+        }
+
+        SectionHeaderRow(title = "Following")
+        if (state.isLoading) {
+            Text(
+                text = "Loading following users...",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else if (state.following.isEmpty()) {
+            Text(
+                text = "Not following anyone yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.following.forEach { followedUser ->
+                    val isActionInProgress = state.activeUserId == followedUser.id
+                    ConnectionUserCard(
+                        user = followedUser,
+                        isActionInProgress = isActionInProgress,
+                        primaryActions = {
+                            Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = { component.unfollowUser(followedUser) },
+                                enabled = !isActionInProgress,
+                            ) {
+                                Text(if (isActionInProgress) "Working..." else "Unfollow")
+                            }
+                        },
+                        secondaryActions = {
+                            Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {
+                                    leaveSharedChatsOnBlock = true
+                                    pendingBlockUser = followedUser
+                                },
+                                enabled = !isActionInProgress,
+                            ) {
+                                Text(if (isActionInProgress) "Working..." else "Block user")
+                            }
+                        },
+                    )
+                }
+            }
+        }
+
+        SectionHeaderRow(title = "Blocked users")
+        if (state.isLoading) {
+            Text(
+                text = "Loading blocked users...",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else if (state.blockedUsers.isEmpty()) {
+            Text(
+                text = "No blocked users.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.blockedUsers.forEach { blockedUser ->
+                    val isActionInProgress = state.activeUserId == blockedUser.id
+                    ConnectionUserCard(
+                        user = blockedUser,
+                        isActionInProgress = isActionInProgress,
+                        primaryActions = {
+                            Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = { pendingUnblockUser = blockedUser },
+                                enabled = !isActionInProgress,
+                            ) {
+                                Text(if (isActionInProgress) "Working..." else "Unblock")
+                            }
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    pendingBlockUser?.let { user ->
+        AlertDialog(
+            onDismissRequest = { pendingBlockUser = null },
+            title = { Text("Block ${user.displayName.ifBlank { "user" }}?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Blocking removes social links and can hide every shared chat from your feed immediately.")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Checkbox(
+                            checked = leaveSharedChatsOnBlock,
+                            onCheckedChange = { checked -> leaveSharedChatsOnBlock = checked },
+                        )
+                        Text("Leave all chats with this user")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        component.blockUser(user, leaveSharedChatsOnBlock)
+                        pendingBlockUser = null
+                    }
+                ) {
+                    Text("Block")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingBlockUser = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    pendingUnblockUser?.let { user ->
+        AlertDialog(
+            onDismissRequest = { pendingUnblockUser = null },
+            title = { Text("Unblock ${user.displayName.ifBlank { "user" }}?") },
+            text = {
+                Text("This removes the block and clears the block report created for this user.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        component.unblockUser(user)
+                        pendingUnblockUser = null
+                    }
+                ) {
+                    Text("Unblock")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingUnblockUser = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+}
+
+@Composable
+fun ProfileDocumentsScreen(component: ProfileComponent) {
+    val documentsState by component.documentsState.collectAsState()
+    val activeDocumentActionId by component.activeDocumentActionId.collectAsState()
+    val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
+    val webDocumentPrompt by component.webDocumentPrompt.collectAsState()
+    var textPreviewDocument by remember { mutableStateOf<ProfileDocumentCard?>(null) }
+
+    LaunchedEffect(component) {
+        component.refreshDocuments()
+    }
+
+    ProfileSectionScaffold(
+        title = "Documents",
+        description = "Sign required documents and review completed signatures.",
+        onBack = component::onBackClicked,
+        onRefresh = component::refreshDocuments,
+        isRefreshing = documentsState.isLoading,
+    ) {
+        SectionHeaderRow(title = "Unsigned documents")
+
+        documentsState.error?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        when {
+            documentsState.isLoading &&
+                documentsState.unsignedDocuments.isEmpty() &&
+                documentsState.signedDocuments.isEmpty() -> {
+                Text(
+                    text = "Loading documents...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            documentsState.unsignedDocuments.isEmpty() -> {
+                Text(
+                    text = "No unsigned documents.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            else -> {
+                documentsState.unsignedDocuments.forEach { document ->
+                    val isProcessing = activeDocumentActionId == document.id
+                    val actionEnabled = !document.requiresChildEmail
+                    DocumentCard(
+                        document = document,
+                        actionLabel = if (actionEnabled) {
+                            if (document.type == ProfileDocumentType.TEXT) "Sign text" else "Sign document"
+                        } else {
+                            "Add child email first"
+                        },
+                        isProcessing = isProcessing,
+                        processingLabel = "Opening...",
+                        actionEnabled = actionEnabled,
+                        onAction = { component.signDocument(document) },
+                    )
+                }
+            }
+        }
+
+        SectionHeaderRow(title = "Signed documents")
+
+        if (documentsState.signedDocuments.isEmpty()) {
+            Text(
+                text = "No signed documents.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            documentsState.signedDocuments.forEach { document ->
+                val isProcessing = activeDocumentActionId == document.id
+                val actionLabel = if (document.type == ProfileDocumentType.TEXT) "Preview text" else "View document"
+                val onAction = {
+                    if (document.type == ProfileDocumentType.TEXT) {
+                        textPreviewDocument = document
+                    } else {
+                        component.openSignedDocument(document)
+                    }
+                }
+                DocumentCard(
+                    document = document,
+                    actionLabel = actionLabel,
+                    isProcessing = isProcessing,
+                    processingLabel = "Opening...",
+                    onAction = onAction,
+                )
+            }
+        }
+    }
+
+    textSignaturePrompt?.let { prompt ->
+        val isSigning = activeDocumentActionId == prompt.document.id
+        AlertDialog(
+            onDismissRequest = component::dismissTextSignature,
+            title = { Text("Sign document") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = prompt.document.title,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = "Signer: ${prompt.document.signerContextLabel}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    val body = prompt.step.content
+                        ?.trim()
+                        ?.takeIf(String::isNotBlank)
+                        ?: prompt.document.content
+                            ?.trim()
+                            ?.takeIf(String::isNotBlank)
+                        ?: "Tap confirm to sign this text document."
+                    Text(
+                        text = body,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = component::confirmTextSignature,
+                    enabled = !isSigning,
+                ) {
+                    Text(if (isSigning) "Signing..." else "Confirm signature")
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = component::dismissTextSignature,
+                    enabled = !isSigning,
+                ) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    webDocumentPrompt?.let { prompt ->
+        EmbeddedWebModal(
+            title = prompt.title,
+            url = prompt.url,
+            urlPolicy = when (prompt.mode) {
+                ProfileWebDocumentPromptMode.SIGN -> EmbeddedWebUrlPolicy.SIGNING
+                ProfileWebDocumentPromptMode.VIEW -> EmbeddedWebUrlPolicy.DOCUMENT_VIEW
+            },
+            description = prompt.description,
+            onDismiss = component::dismissWebDocumentPrompt,
+        )
+    }
+
+    textPreviewDocument?.let { document ->
+        AlertDialog(
+            onDismissRequest = { textPreviewDocument = null },
+            title = { Text(document.title) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = document.content?.trim()?.takeIf(String::isNotBlank)
+                            ?: "No text content available for this document.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    document.signedAt?.let { signedAt ->
+                        Text(
+                            text = "Signed: ${formatDateForDisplay(signedAt)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { textPreviewDocument = null }) {
+                    Text("Close")
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun DocumentCard(
+    document: ProfileDocumentCard,
+    actionLabel: String,
+    isProcessing: Boolean,
+    processingLabel: String,
+    actionEnabled: Boolean = true,
+    onAction: () -> Unit,
+) {
+    val eventName = document.eventName?.trim()?.takeIf(String::isNotBlank) ?: "Event document"
+    val signedLabel = document.signedAt?.let { "Signed: ${formatDateForDisplay(it)}" }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = document.title,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = eventName,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = document.organizationName,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "Type: ${if (document.type == ProfileDocumentType.TEXT) "Text" else "PDF"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "Signer: ${document.signerContextLabel}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            document.consentStatus?.let { consentStatus ->
+                Text(
+                    text = "Consent status: $consentStatus",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            document.statusNote?.let { statusNote ->
+                Text(
+                    text = statusNote,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            signedLabel?.let { label ->
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onAction,
+                enabled = !isProcessing && actionEnabled,
+            ) {
+                Text(if (isProcessing) processingLabel else actionLabel)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConnectionUserCard(
+    user: UserData,
+    isActionInProgress: Boolean,
+    primaryActions: @Composable () -> Unit,
+    secondaryActions: (@Composable () -> Unit)? = null,
+) {
+    val avatarSize = 56.dp
+    val avatarDisplayName = user.displayName.ifBlank { user.userName.ifBlank { "User" } }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NetworkAvatar(
+                    displayName = avatarDisplayName,
+                    imageRef = user.profileImageId,
+                    size = avatarSize,
+                    contentDescription = "$avatarDisplayName avatar",
+                    modifier = Modifier.size(avatarSize),
+                )
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = user.displayName.ifBlank { "User" },
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    user.publicHandle?.let { handle ->
+                        Text(
+                            text = handle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (user.shouldRestrictSocialActions) {
+                        Text(
+                            text = "Social actions unavailable",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                primaryActions()
+            }
+
+            if (secondaryActions != null) {
+                secondaryActions()
+            }
+
+            if (isActionInProgress) {
+                Text(
+                    text = "Updating connection...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChildrenGrid(
+    children: List<ProfileChild>,
+    onEditChild: (ProfileChild) -> Unit,
+) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val minCardWidth = 160.dp
+        val horizontalSpacing = 8.dp
+        val columns = ((maxWidth + horizontalSpacing) / (minCardWidth + horizontalSpacing))
+            .toInt()
+            .coerceAtLeast(1)
+        val rows = children.chunked(columns)
+
+        Column(
+            verticalArrangement = Arrangement.spacedBy(horizontalSpacing),
+        ) {
+            rows.forEach { rowChildren ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
+                ) {
+                    rowChildren.forEach { child ->
+                        ChildAccountCard(
+                            child = child,
+                            modifier = Modifier
+                                .weight(1f)
+                                .aspectRatio(1f),
+                            onEdit = { onEditChild(child) },
+                        )
+                    }
+
+                    repeat(columns - rowChildren.size) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChildAccountCard(
+    child: ProfileChild,
+    modifier: Modifier = Modifier,
+    onEdit: (() -> Unit)? = null,
+) {
+    Card(
+        modifier = modifier,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = child.fullName,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = "@${child.userName?.trim()?.takeIf(String::isNotBlank) ?: "user"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "Age: ${child.age ?: "Unknown"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "Status: ${formatLinkStatus(child.linkStatus)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "Relationship: ${formatRelationship(child.relationship)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!child.hasEmail) {
+                    Text(
+                        text = "Missing email. Consent links cannot be sent until an email is added.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+
+            onEdit?.let { onEditClick ->
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onEditClick,
+                ) {
+                    Text("Edit")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeaderRow(
+    title: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Start,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+        )
+    }
+}
+
+@Composable
+private fun NotificationSettingsCard(
+    settings: NotificationSettings,
+    enabled: Boolean,
+    onSettingChanged: (type: String, channel: String, enabled: Boolean) -> Unit,
+) {
+    val normalizedSettings = normalizeNotificationSettings(settings)
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = "Notification",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                notificationChannels.forEach { channel ->
+                    Text(
+                        text = channel.replaceFirstChar { char ->
+                            if (char.isLowerCase()) char.titlecase() else char.toString()
+                        },
+                        modifier = Modifier.weight(0.42f),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            }
+
+            notificationSettingOptions.forEach { option ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = option.label,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = option.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    notificationChannels.forEach { channel ->
+                        val supported = isNotificationChannelSupported(option.id, channel)
+                        Box(
+                            modifier = Modifier.weight(0.42f),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (supported) {
+                                Checkbox(
+                                    checked = normalizedSettings[option.id]?.get(channel) == true,
+                                    enabled = enabled,
+                                    onCheckedChange = { checked ->
+                                        onSettingChanged(option.id, channel, checked)
+                                    },
+                                )
+                            } else {
+                                Text(
+                                    text = "N/A",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private const val CHILD_TEAM_INVITE_PARENT_MESSAGE =
+    "A parent or guardian must accept team invitations for child accounts."
+
+private fun Invite.childDisplayName(): String? {
+    childFullName?.trim()?.takeIf(String::isNotBlank)?.let { return it }
+    val fullName = listOf(
+        childFirstName?.trim().orEmpty(),
+        childLastName?.trim().orEmpty(),
+    ).filter(String::isNotBlank).joinToString(" ")
+    return fullName.takeIf(String::isNotBlank)
+}
+
+private fun Invite.requiresParentAcceptanceForCurrentMinor(
+    currentUserId: String?,
+    currentUserIsMinor: Boolean,
+): Boolean {
+    val normalizedCurrentUserId = currentUserId?.trim()?.takeIf(String::isNotBlank) ?: return false
+    return currentUserIsMinor &&
+        type.equals("TEAM", ignoreCase = true) &&
+        userId?.trim() == normalizedCurrentUserId &&
+        !viewerCanAcceptForChild
+}
+
+@Composable
+private fun InviteActionCard(
+    title: String,
+    subtitle: String,
+    tertiary: String? = null,
+    primaryActionLabel: String,
+    onPrimaryAction: () -> Unit,
+    secondaryActionLabel: String,
+    onSecondaryAction: () -> Unit,
+    primaryEnabled: Boolean,
+    secondaryEnabled: Boolean,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            tertiary?.let { tertiaryText ->
+                Text(
+                    text = tertiaryText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    modifier = Modifier.weight(1f),
+                    enabled = primaryEnabled,
+                    onClick = onPrimaryAction,
+                ) {
+                    Text(primaryActionLabel)
+                }
+                Button(
+                    modifier = Modifier.weight(1f),
+                    enabled = secondaryEnabled,
+                    onClick = onSecondaryAction,
+                ) {
+                    Text(secondaryActionLabel)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PaymentPlanCard(
+    paymentPlan: ProfilePaymentPlan,
+    isProcessing: Boolean,
+    onPayNextInstallment: () -> Unit,
+    onUploadProof: () -> Unit,
+    onCancelPendingPayment: () -> Unit,
+) {
+    val status = paymentPlan.bill.status ?: "OPEN"
+    val billDisplayId = paymentPlan.bill.id.take(6)
+    val processingPayment = paymentPlan.processingPayment
+    val failedPayment = paymentPlan.failedPayment
+    val isManualBill = paymentPlan.isManualRegistrationBill
+    val nextProofStatus = paymentPlan.nextPayablePayment
+        ?.manualPaymentProofs
+        ?.lastOrNull()
+        ?.status
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+    val actionLabel = when {
+        isProcessing -> "Opening payment..."
+        isManualBill -> "Upload payment proof"
+        processingPayment != null -> "Payment pending"
+        failedPayment != null -> "Complete payment"
+        else -> "Pay next installment"
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = paymentPlan.ownerLabel,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = "Bill #$billDisplayId • $status",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "Next due: ${formatDateForDisplay(paymentPlan.nextPaymentDue)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Text(
+                text = if (paymentPlan.discountAmountCents > 0) {
+                    "Original: ${formatCurrency(paymentPlan.originalAmountCents)}"
+                } else {
+                    "Total: ${formatCurrency(paymentPlan.discountedAmountCents)}"
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (paymentPlan.discountAmountCents > 0) {
+                Text(
+                    text = "${paymentPlan.discountLabel()}: -${formatCurrency(paymentPlan.discountAmountCents)}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Text(
+                text = "Paid: ${formatCurrency(paymentPlan.paidAmountCents)}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                text = "Next: ${formatCurrency(paymentPlan.nextPaymentAmountCents)}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            when {
+                isManualBill -> Text(
+                    text = when (nextProofStatus?.uppercase()) {
+                        "SUBMITTED" -> "Proof submitted. The host will review it."
+                        "ACCEPTED" -> "Proof accepted. Paid amount is reflected on this bill."
+                        "REJECTED" -> "Proof rejected. Upload a new proof image when ready."
+                        else -> "Pay the host outside BracketIQ, then upload an image as proof."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                processingPayment != null -> Text(
+                    text = "Payment pending. You can cancel it if the bank payment should not continue.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                failedPayment != null -> Text(
+                    text = "Payment failed. Complete payment to try again.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = if (isManualBill) onUploadProof else onPayNextInstallment,
+                enabled = !isProcessing &&
+                    (isManualBill || processingPayment == null) &&
+                    paymentPlan.nextPayablePayment != null &&
+                    paymentPlan.nextPaymentAmountCents > 0,
+            ) {
+                Text(actionLabel)
+            }
+
+            if (processingPayment != null && !isManualBill) {
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onCancelPendingPayment,
+                    enabled = !isProcessing,
+                ) {
+                    Text("Cancel pending payment")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MembershipCard(
+    membership: ProfileMembership,
+    isProcessing: Boolean,
+    onCancel: () -> Unit,
+    onRestart: () -> Unit,
+) {
+    val status = membership.subscription.status ?: "ACTIVE"
+    val isCancelled = status.equals("CANCELLED", ignoreCase = true)
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = membership.productName,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = membership.organizationName,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "${formatCurrency(membership.subscription.priceCents)} / ${membership.subscription.period.lowercase()}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                text = "Status: $status",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isCancelled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = "Started: ${formatDateForDisplay(membership.subscription.startDate)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = if (isCancelled) onRestart else onCancel,
+                enabled = !isProcessing,
+            ) {
+                when {
+                    isProcessing -> Text("Updating membership...")
+                    isCancelled -> Text("Restart membership")
+                    else -> Text("Cancel membership")
+                }
+            }
+        }
+    }
+}
+
+private fun formatCurrency(cents: Int): String {
+    return "$${MoneyInputUtils.centsToDisplayValue(cents)}"
+}
+
+private fun ProfilePaymentPlan.discountLabel(): String {
+    val primary = bill.discounts.firstOrNull { discount -> discount.code.isNotBlank() }
+        ?: bill.discounts.firstOrNull { discount -> !discount.name.isNullOrBlank() }
+    val code = primary?.code?.trim().orEmpty()
+    val name = primary?.name?.trim().orEmpty()
+    return when {
+        code.isNotBlank() -> "Discount $code"
+        name.isNotBlank() -> "Discount $name"
+        bill.discounts.size > 1 -> "Discounts"
+        else -> "Discount"
+    }
+}
+
+private fun formatDateForDisplay(rawDate: String?): String {
+    if (rawDate.isNullOrBlank()) return "TBD"
+    return rawDate.substringBefore("T")
+}
+
+private fun formatTemplateDateTime(instant: kotlin.time.Instant): String {
+    return runCatching {
+        dateTimeFormat.format(
+            instant.toLocalDateTime(TimeZone.currentSystemDefault()),
+        )
+    }.getOrElse { "TBD" }
+}
+
+private fun formatLinkStatus(rawStatus: String?): String {
+    if (rawStatus.isNullOrBlank()) return "Unknown"
+    val normalized = rawStatus.lowercase()
+    return normalized.replaceFirstChar { char ->
+        if (char.isLowerCase()) char.titlecase() else char.toString()
+    }
+}
+
+private fun formatRelationship(rawRelationship: String?): String {
+    if (rawRelationship.isNullOrBlank()) return "Unknown"
+    val normalized = rawRelationship.lowercase()
+    return normalized.replaceFirstChar { char ->
+        if (char.isLowerCase()) char.titlecase() else char.toString()
+    }
+}
+
+@Composable
+private fun EventTemplateCard(
+    template: EventTemplateSummary,
+    onUseTemplate: (EventTemplateSummary, kotlin.time.Instant) -> Unit,
+) {
+    var showStartDatePicker by rememberSaveable(template.id) { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Event Template",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = template.name.ifBlank { "Untitled Template" },
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                template.description?.takeIf(String::isNotBlank)?.let { description ->
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                template.updatedAt?.let { updatedAt ->
+                    Text(
+                        text = "Updated: ${formatTemplateDateTime(updatedAt)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { showStartDatePicker = true },
+            ) {
+                Text("Use Template")
+            }
+        }
+    }
+
+    PlatformDateTimePicker(
+        onDateSelected = { selected ->
+            showStartDatePicker = false
+            selected?.let { startDate ->
+                onUseTemplate(template, startDate)
+            }
+        },
+        onDismissRequest = { showStartDatePicker = false },
+        showPicker = showStartDatePicker,
+        getTime = false,
+        canSelectPast = false,
+        initialDate = Clock.System.now(),
+    )
+}
+
+private fun normalizeDateInput(rawDate: String?): String {
+    if (rawDate.isNullOrBlank()) return ""
+    val trimmed = rawDate.trim()
+    if (DATE_INPUT_REGEX.matches(trimmed)) return trimmed
+    val datePrefix = trimmed.take(10)
+    return if (DATE_INPUT_REGEX.matches(datePrefix)) datePrefix else ""
+}
+
+private val DATE_INPUT_REGEX = Regex("""\d{4}-\d{2}-\d{2}""")
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProfileSectionScaffold(
+    title: String,
+    description: String? = null,
+    onBack: () -> Unit,
+    showBackButton: Boolean = true,
+    onRefresh: (() -> Unit)? = null,
+    isRefreshing: Boolean = false,
+    scrollContent: Boolean = true,
+    contentPadding: PaddingValues = PaddingValues(16.dp),
+    floatingActionButton: @Composable () -> Unit = {},
+    floatingActionButtonPosition: FabPosition = FabPosition.End,
+    content: @Composable () -> Unit,
+) {
+    val navPadding = LocalNavBarPadding.current
+
+    Scaffold(
+        contentWindowInsets = NoScaffoldContentInsets,
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text(title) },
+                navigationIcon = {
+                    if (showBackButton) {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                            )
+                        }
+                    }
+                },
+            )
+        },
+        floatingActionButton = floatingActionButton,
+        floatingActionButtonPosition = floatingActionButtonPosition,
+    ) { innerPadding ->
+        val contentModifier = Modifier
+            .fillMaxSize()
+            .padding(innerPadding)
+            .padding(navPadding)
+
+        if (onRefresh != null) {
+            PullToRefreshContainer(
+                isRefreshing = isRefreshing,
+                onRefresh = onRefresh,
+                modifier = contentModifier,
+            ) {
+                ProfileSectionContent(
+                    description = description,
+                    scrollContent = scrollContent,
+                    contentPadding = contentPadding,
+                    content = content,
+                )
+            }
+        } else {
+            ProfileSectionContent(
+                description = description,
+                scrollContent = scrollContent,
+                contentPadding = contentPadding,
+                content = content,
+                modifier = contentModifier,
+            )
+        }
+    }
+}
+
+@Composable
+fun ProfileSectionContent(
+    description: String?,
+    content: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    scrollContent: Boolean = true,
+    contentPadding: PaddingValues = PaddingValues(16.dp),
+) {
+    if (scrollContent) {
+        Column(
+            modifier = modifier
+                .padding(contentPadding)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            description?.takeIf(String::isNotBlank)?.let { text ->
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            content()
+        }
+    } else {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(contentPadding),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            description?.takeIf(String::isNotBlank)?.let { text ->
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+            ) {
+                content()
+            }
+        }
+    }
+}

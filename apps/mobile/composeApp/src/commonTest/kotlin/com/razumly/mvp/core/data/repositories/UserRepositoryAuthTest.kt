@@ -1,0 +1,1901 @@
+package com.razumly.mvp.core.data.repositories
+
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
+import com.razumly.mvp.core.data.CurrentUserDataSource
+import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.RegistrationProgressDraft
+import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
+import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
+import com.razumly.mvp.core.data.dataTypes.daos.EventDao
+import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
+import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
+import com.razumly.mvp.core.data.dataTypes.daos.InviteDao
+import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
+import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
+import com.razumly.mvp.core.data.dataTypes.daos.RefundRequestDao
+import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
+import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
+import com.razumly.mvp.core.network.AuthTokenStore
+import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.util.jsonMVP
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.client.plugins.HttpResponseValidator
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.content.OutgoingContent
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
+import io.ktor.http.isSuccess
+import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertIs
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlin.time.Clock
+
+private class UserRepositoryAuth_InMemoryAuthTokenStore(
+    private var token: String = "",
+) : AuthTokenStore {
+    override suspend fun get(): String = token
+    override suspend fun set(token: String) { this.token = token }
+    override suspend fun clear() { token = "" }
+}
+
+private class InMemoryPreferencesDataStore(
+    initial: Preferences = emptyPreferences(),
+) : DataStore<Preferences> {
+    private val mutex = Mutex()
+    private val state = MutableStateFlow(initial)
+
+    override val data: Flow<Preferences> = state
+
+    override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+        return mutex.withLock {
+            val updated = transform(state.value)
+            state.value = updated
+            updated
+        }
+    }
+}
+
+private class FakeUserDataDao : RoomUserDataDaoTestAdapter() {
+    private val users = MutableStateFlow<Map<String, UserData>>(emptyMap())
+
+    override suspend fun upsertUserData(userData: UserData) {
+        users.value = users.value + (userData.id to userData)
+    }
+
+    override suspend fun upsertUsersData(usersData: List<UserData>) {
+        users.value = usersData.fold(users.value) { acc, user -> acc + (user.id to user) }
+    }
+
+    override suspend fun deleteUsersById(ids: List<String>) {
+        users.value = users.value - ids.toSet()
+    }
+
+    override suspend fun upsertUserEventCrossRef(crossRef: EventUserCrossRef) {}
+    override suspend fun upsertUserEventCrossRefs(crossRefs: List<EventUserCrossRef>) {}
+    override suspend fun upsertUserTeamCrossRefs(crossRefs: List<TeamPlayerCrossRef>) {}
+
+    override suspend fun deleteUserData(userData: UserData) {
+        users.value = users.value - userData.id
+    }
+
+    override suspend fun deleteTeamCrossRefById(userIds: List<String>) {}
+
+    override suspend fun getUserDataById(id: String): UserData? = users.value[id]
+
+    override suspend fun getUserDatasById(ids: List<String>): List<UserData> = ids.mapNotNull { users.value[it] }
+
+    override fun getUserDatasByIdFlow(ids: List<String>): Flow<List<UserData>> {
+        val deduped = ids.distinct()
+        return users.map { map -> deduped.mapNotNull { map[it] } }
+    }
+
+    override fun getUserFlowById(id: String): Flow<UserData?> = users.map { it[id] }
+
+    override suspend fun searchUsers(search: String): List<UserData> {
+        val term = search.lowercase()
+        return users.value.values.filter {
+            it.userName.lowercase().contains(term) ||
+                it.firstName.lowercase().contains(term) ||
+                it.lastName.lowercase().contains(term)
+        }
+    }
+}
+
+private class UserRepositoryAuth_FakeDatabaseService(
+    override val getUserDataDao: UserDataDao,
+    private val inviteDao: InviteDao? = null,
+) : DatabaseService {
+    override val getMatchDao: MatchDao get() = error("unused")
+    override val getTeamDao: TeamDao get() = error("unused")
+    override val getFieldDao: FieldDao get() = error("unused")
+    override val getEventDao: EventDao get() = error("unused")
+    override val getEventRegistrationDao: EventRegistrationDao get() = error("unused")
+    override val getChatGroupDao: ChatGroupDao get() = error("unused")
+    override val getMessageDao: MessageDao get() = error("unused")
+    override val getRefundRequestDao: RefundRequestDao get() = error("unused")
+    override val getInviteDao: InviteDao get() = inviteDao ?: error("unused")
+}
+
+private class UserRepositoryAuth_FakeInviteDao(
+    invites: List<Invite> = emptyList(),
+) : InviteDao {
+    val stored = invites.associateBy { it.id }.toMutableMap()
+
+    override suspend fun upsertInvite(invite: Invite) {
+        stored[invite.id] = invite
+    }
+
+    override suspend fun upsertInvites(invites: List<Invite>) {
+        invites.forEach { invite -> stored[invite.id] = invite }
+    }
+
+    override suspend fun getInvitesForUser(userId: String, type: String?): List<Invite> =
+        stored.values.filter { invite ->
+            invite.userId == userId && (type == null || invite.type.equals(type, ignoreCase = true))
+        }
+
+    override fun getInvitesForUserFlow(userId: String, type: String?): Flow<List<Invite>> =
+        flowOf(stored.values.filter { invite ->
+            invite.userId == userId && (type == null || invite.type.equals(type, ignoreCase = true))
+        })
+
+    override suspend fun deleteInviteById(inviteId: String) {
+        stored.remove(inviteId)
+    }
+
+    override suspend fun deleteInvitesForUser(userId: String, type: String?) {
+        stored.entries.removeAll { (_, invite) ->
+            invite.userId == userId && (type == null || invite.type.equals(type, ignoreCase = true))
+        }
+    }
+
+    override suspend fun deleteDelegatedInvites(type: String?) {
+        stored.entries.removeAll { (_, invite) ->
+            invite.viewerCanAcceptForChild && (type == null || invite.type.equals(type, ignoreCase = true))
+        }
+    }
+
+    override suspend fun deleteMissingInvitesForUser(userId: String, type: String?, ids: List<String>) {
+        stored.entries.removeAll { (id, invite) ->
+            invite.userId == userId &&
+                (type == null || invite.type.equals(type, ignoreCase = true)) &&
+                id !in ids
+        }
+    }
+
+    override suspend fun deleteMissingDelegatedInvites(type: String?, ids: List<String>) {
+        stored.entries.removeAll { (id, invite) ->
+            invite.viewerCanAcceptForChild &&
+                (type == null || invite.type.equals(type, ignoreCase = true)) &&
+                id !in ids
+        }
+    }
+}
+
+private const val accountDeletionRegistrationDraftKey = "event:shared:event-1:none:none"
+
+private fun accountDeletionRegistrationDraft(userId: String, answer: String): RegistrationProgressDraft =
+    RegistrationProgressDraft(
+        scope = "event",
+        userId = userId,
+        eventId = "event-1",
+        answers = mapOf("answer" to answer),
+        updatedAt = Clock.System.now().toString(),
+    )
+
+class UserRepositoryAuthTest {
+    @Test
+    fun login_normalizes_email_before_request() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """{"user":null,"session":null}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/login" -> {
+                    capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
+                    respond(
+                        content = """
+                            {
+                              "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
+                              "session": { "userId":"u1", "isAdmin":false },
+                              "token":"t123",
+                              "profile": {
+                                "id":"u1",
+                                "firstName":"A",
+                                "lastName":"B",
+                                "userName":"ab",
+                                "teamIds":[],
+                                "friendIds":[],
+                                "friendRequestIds":[],
+                                "friendRequestSentIds":[],
+                                "followingIds":[],
+                                "uploadedImages":[],
+                                "hasStripeAccount":false
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        repo.login("  U1@Example.com  ", "password123").getOrThrow()
+
+        assertEquals(true, capturedBody.contains("\"email\":\"u1@example.com\""))
+    }
+
+    @Test
+    fun login_stores_token_and_sets_current_user_and_account() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """{"user":null,"session":null}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/login" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
+                          "session": { "userId":"u1", "isAdmin":false },
+                          "token":"t123",
+                          "profile": {
+                            "id":"u1",
+                            "firstName":"A",
+                            "lastName":"B",
+                            "userName":"ab",
+                            "teamIds":["team_server"],
+                            "friendIds":[],
+                            "friendRequestIds":[],
+                            "friendRequestSentIds":[],
+                            "followingIds":[],
+                            "uploadedImages":[],
+                            "hasStripeAccount":false
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val user = repo.login("u1@example.com", "password123").getOrThrow()
+        assertEquals("u1", user.id)
+        assertEquals(listOf("team_server"), user.teamIds)
+        assertEquals("t123", tokenStore.get())
+        assertEquals("u1", currentUserDataSource.getUserId().first())
+        assertEquals(listOf("team_server"), repo.currentUser.value.getOrThrow().teamIds)
+        assertEquals(listOf("team_server"), userDao.getUserDataById("u1")?.teamIds)
+
+        val account = repo.currentAccount.value.getOrThrow()
+        assertEquals("u1", account.id)
+        assertEquals("u1@example.com", account.email)
+    }
+
+    @Test
+    fun login_populates_required_profile_prefill_values_from_profile() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """{"user":null,"session":null}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/login" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u_prefill", "email":"prefill@example.com", "name":"Prefill User" },
+                          "session": { "userId":"u_prefill", "isAdmin":false },
+                          "token":"prefill_token",
+                          "requiresProfileCompletion":true,
+                          "missingProfileFields":["dateOfBirth","userName"],
+                          "profile": {
+                            "id":"u_prefill",
+                            "firstName":"Pre",
+                            "lastName":"Fill",
+                            "userName":"prefilled_user",
+                            "dateOfBirth":"2009-02-03T00:00:00.000Z",
+                            "teamIds":[],
+                            "friendIds":[],
+                            "friendRequestIds":[],
+                            "friendRequestSentIds":[],
+                            "followingIds":[],
+                            "uploadedImages":[],
+                            "hasStripeAccount":false
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        repo.login("prefill@example.com", "password123").getOrThrow()
+
+        val state = repo.requiredProfileCompletionState.value
+        assertTrue(state.isRequired)
+        assertEquals(setOf(SignupProfileField.DATE_OF_BIRTH, SignupProfileField.USER_NAME), state.missingFields)
+        assertEquals("Pre", state.prefill.firstName)
+        assertEquals("Fill", state.prefill.lastName)
+        assertEquals("prefilled_user", state.prefill.userName)
+        assertEquals("2009-02-03", state.prefill.dateOfBirth)
+    }
+
+    @Test
+    fun loginWithGoogleIdToken_stores_token_and_sets_current_user_and_account() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """{"user":null,"session":null}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/google/mobile" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u_google", "email":"google@example.com", "name":"Google User" },
+                          "session": { "userId":"u_google", "isAdmin":false },
+                          "token":"google_token_123",
+                          "profile": {
+                            "id":"u_google",
+                            "firstName":"Google",
+                            "lastName":"User",
+                            "userName":"google_user",
+                            "teamIds":[],
+                            "friendIds":[],
+                            "friendRequestIds":[],
+                            "friendRequestSentIds":[],
+                            "followingIds":[],
+                            "uploadedImages":[],
+                            "hasStripeAccount":false
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val user = repo.loginWithGoogleIdToken("id_token_value").getOrThrow()
+        assertEquals("u_google", user.id)
+        assertEquals("google_token_123", tokenStore.get())
+        assertEquals("u_google", currentUserDataSource.getUserId().first())
+
+        val account = repo.currentAccount.value.getOrThrow()
+        assertEquals("u_google", account.id)
+        assertEquals("google@example.com", account.email)
+    }
+
+    @Test
+    fun loginWithAppleIdentityToken_sends_identity_payload_and_sets_current_user_and_account() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """{"user":null,"session":null}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/apple/mobile" -> {
+                    capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
+                    respond(
+                        content = """
+                            {
+                              "user": { "id":"u_apple", "email":"apple@example.com", "name":"Apple User" },
+                              "session": { "userId":"u_apple", "isAdmin":false },
+                              "token":"apple_token_123",
+                              "profile": {
+                                "id":"u_apple",
+                                "firstName":"Apple",
+                                "lastName":"User",
+                                "userName":"apple_user",
+                                "teamIds":[],
+                                "friendIds":[],
+                                "friendRequestIds":[],
+                                "friendRequestSentIds":[],
+                                "followingIds":[],
+                                "uploadedImages":[],
+                                "hasStripeAccount":false
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val user = repo.loginWithAppleIdentityToken(
+            identityToken = "apple.identity.token",
+            authorizationCode = "apple.authorization.code",
+            user = "apple-user-1",
+            email = "Apple@Example.com",
+            firstName = " Apple ",
+            lastName = " User ",
+        ).getOrThrow()
+
+        assertEquals("u_apple", user.id)
+        assertEquals("apple_token_123", tokenStore.get())
+        assertEquals("u_apple", currentUserDataSource.getUserId().first())
+        assertEquals(true, capturedBody.contains("\"identityToken\":\"apple.identity.token\""))
+        assertEquals(true, capturedBody.contains("\"authorizationCode\":\"apple.authorization.code\""))
+        assertEquals(true, capturedBody.contains("\"user\":\"apple-user-1\""))
+        assertEquals(true, capturedBody.contains("\"email\":\"apple@example.com\""))
+        assertEquals(true, capturedBody.contains("\"firstName\":\"Apple\""))
+        assertEquals(true, capturedBody.contains("\"lastName\":\"User\""))
+
+        val account = repo.currentAccount.value.getOrThrow()
+        assertEquals("u_apple", account.id)
+        assertEquals("apple@example.com", account.email)
+    }
+
+    @Test
+    fun deleteAccount_calls_account_delete_endpoint_and_clears_local_auth_state() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("delete_token")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var deleteBody = ""
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u_delete", "email":"delete@example.com", "name":"Delete User" },
+                          "session": { "userId":"u_delete", "isAdmin":false },
+                          "token":"delete_token",
+                          "profile": {
+                            "id":"u_delete",
+                            "firstName":"Delete",
+                            "lastName":"User",
+                            "userName":"delete_user",
+                            "teamIds":[],
+                            "friendIds":[],
+                            "friendRequestIds":[],
+                            "friendRequestSentIds":[],
+                            "followingIds":[],
+                            "uploadedImages":[],
+                            "hasStripeAccount":false
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/account" -> {
+                    assertEquals(HttpMethod.Delete, request.method)
+                    assertEquals("Bearer delete_token", request.headers[HttpHeaders.Authorization])
+                    deleteBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
+                    respond(
+                        content = """{"ok":true}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        repo.getCurrentAccount().getOrThrow()
+        currentUserDataSource.saveUserId("u_delete")
+        currentUserDataSource.saveRegistrationProgress(
+            key = accountDeletionRegistrationDraftKey,
+            draft = accountDeletionRegistrationDraft("u_delete", "deleted-account-answer"),
+        )
+        assertEquals(
+            "deleted-account-answer",
+            currentUserDataSource.loadRegistrationProgress(accountDeletionRegistrationDraftKey)?.answers?.get("answer"),
+        )
+        currentUserDataSource.saveUserId("u_other")
+        currentUserDataSource.saveRegistrationProgress(
+            key = accountDeletionRegistrationDraftKey,
+            draft = accountDeletionRegistrationDraft("u_other", "other-account-answer"),
+        )
+        currentUserDataSource.saveUserId("u_delete")
+        repo.deleteAccount("delete my account").getOrThrow()
+
+        assertEquals(true, deleteBody.contains("\"confirmationText\":\"delete my account\""))
+        assertEquals("", tokenStore.get())
+        assertEquals("", currentUserDataSource.getUserId().first())
+        currentUserDataSource.saveUserId("u_delete")
+        assertNull(currentUserDataSource.loadRegistrationProgress(accountDeletionRegistrationDraftKey))
+        currentUserDataSource.saveUserId("u_other")
+        assertEquals(
+            "other-account-answer",
+            currentUserDataSource.loadRegistrationProgress(accountDeletionRegistrationDraftKey)?.answers?.get("answer"),
+        )
+        assertTrue(repo.currentAccount.value.isFailure)
+        assertTrue(repo.currentUser.value.isFailure)
+    }
+
+    @Test
+    fun createNewUser_includes_date_of_birth_in_register_payload() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """{"user":null,"session":null}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/register" -> {
+                    assertEquals(HttpMethod.Post, request.method)
+                    capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
+                    respond(
+                        content = """
+                            {
+                              "user": { "id":"u_signup", "email":"signup@example.com", "name":"Signup User" },
+                              "session": { "userId":"u_signup", "isAdmin":false },
+                              "token":"signup_token",
+                              "profile": {
+                                "id":"u_signup",
+                                "firstName":"Sign",
+                                "lastName":"Up",
+                                "userName":"signup_user",
+                                "teamIds":[],
+                                "friendIds":[],
+                                "friendRequestIds":[],
+                                "friendRequestSentIds":[],
+                                "followingIds":[],
+                                "uploadedImages":[],
+                                "hasStripeAccount":false
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val created = repo.createNewUser(
+            email = "signup@example.com",
+            password = "password123",
+            firstName = "Sign",
+            lastName = "Up",
+            userName = "signup_user",
+            dateOfBirth = "2008-05-02",
+        ).getOrThrow()
+
+        assertEquals("u_signup", created.id)
+        assertEquals("signup_token", tokenStore.get())
+        assertEquals(true, capturedBody.contains("\"dateOfBirth\":\"2008-05-02\""))
+        assertEquals(true, capturedBody.contains("\"enforceProfileConflictSelection\":true"))
+    }
+
+    @Test
+    fun createNewUser_accepts_authenticated_email_verification_response() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """{"user":null,"session":null}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/register" -> respond(
+                    content = """
+                        {
+                          "error":"Email not verified. We sent a verification link to your email.",
+                          "code":"EMAIL_NOT_VERIFIED",
+                          "email":"signup@example.com",
+                          "requiresEmailVerification":true,
+                          "verificationEmailSent":true,
+                          "user": { "id":"u_signup", "email":"signup@example.com", "name":"Signup User" },
+                          "session": { "userId":"u_signup", "isAdmin":false },
+                          "token":"signup_token",
+                          "profile": {
+                            "id":"u_signup",
+                            "firstName":"Sign",
+                            "lastName":"Up",
+                            "userName":"signup_user",
+                            "teamIds":[],
+                            "friendIds":[],
+                            "friendRequestIds":[],
+                            "friendRequestSentIds":[],
+                            "followingIds":[],
+                            "uploadedImages":[],
+                            "hasStripeAccount":false
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.Accepted,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val result = repo.createNewUser(
+            email = "signup@example.com",
+            password = "password123",
+            firstName = "Sign",
+            lastName = "Up",
+            userName = "signup_user",
+            dateOfBirth = "2008-05-02",
+        )
+
+        val created = result.getOrThrow()
+        assertEquals("u_signup", created.id)
+        assertEquals("signup_token", tokenStore.get())
+        assertEquals("u_signup", currentUserDataSource.getUserId().first())
+    }
+
+    @Test
+    fun completeRequiredProfile_includes_username_and_profile_image_in_patch_payload() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("complete_token")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var capturedPatchBody = ""
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> {
+                    respond(
+                        content = """
+                            {
+                              "user": { "id":"u_complete", "email":"complete@example.com", "name":"Complete User" },
+                              "session": { "userId":"u_complete", "isAdmin":false },
+                              "token":"complete_token",
+                              "profile": {
+                                "id":"u_complete",
+                                "firstName":"Complete",
+                                "lastName":"User",
+                                "userName":"initial_user",
+                                "teamIds":[],
+                                "friendIds":[],
+                                "friendRequestIds":[],
+                                "friendRequestSentIds":[],
+                                "followingIds":[],
+                                "uploadedImages":[],
+                                "hasStripeAccount":false
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                    )
+                }
+
+                "/api/users/u_complete" -> {
+                    assertEquals(HttpMethod.Patch, request.method)
+                    capturedPatchBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
+                    respond(
+                        content = """
+                            {
+                              "user": {
+                                "id":"u_complete",
+                                "firstName":"Updated",
+                                "lastName":"Profile",
+                                "userName":"updated_user",
+                                "profileImageId":"profile_image_123",
+                                "teamIds":[],
+                                "friendIds":[],
+                                "friendRequestIds":[],
+                                "friendRequestSentIds":[],
+                                "followingIds":[],
+                                "uploadedImages":[],
+                                "hasStripeAccount":false
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                    )
+                }
+
+                else -> error("Unexpected path: ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        repo.getCurrentAccount().getOrThrow()
+        val updated = repo.completeRequiredProfile(
+            firstName = "Updated",
+            lastName = "Profile",
+            userName = "updated_user",
+            dateOfBirth = "2008-05-02",
+            profileImageId = " profile_image_123 ",
+        ).getOrThrow()
+
+        assertEquals(true, capturedPatchBody.contains("\"userName\":\"updated_user\""))
+        assertEquals(true, capturedPatchBody.contains("\"dateOfBirth\":\"2008-05-02\""))
+        assertEquals(true, capturedPatchBody.contains("\"profileImageId\":\"profile_image_123\""))
+        assertEquals("updated_user", updated.userName)
+        assertEquals("profile_image_123", updated.profileImageId)
+        assertEquals("updated_user", repo.currentUser.value.getOrThrow().userName)
+        assertEquals("profile_image_123", repo.currentUser.value.getOrThrow().profileImageId)
+        assertEquals(RequiredProfileCompletionState(), repo.requiredProfileCompletionState.value)
+    }
+
+    @Test
+    fun createNewUser_returns_profile_conflict_exception_for_conflicting_claim_signup() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine {
+            respond(
+                content = """
+                    {
+                      "error":"Profile selection required",
+                      "code":"PROFILE_CONFLICT",
+                      "conflict":{
+                        "fields":["firstName","dateOfBirth"],
+                        "existing":{"firstName":"Existing","dateOfBirth":"2010-01-01"},
+                        "incoming":{"firstName":"Incoming","dateOfBirth":"2011-02-02"}
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.Conflict,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+            HttpResponseValidator {
+                validateResponse { response ->
+                    if (!response.status.isSuccess()) {
+                        throw com.razumly.mvp.core.network.ApiException(
+                            statusCode = response.status.value,
+                            url = response.call.request.url.toString(),
+                            responseBody = response.bodyAsText(),
+                        )
+                    }
+                }
+            }
+        }
+
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val result = repo.createNewUser(
+            email = "signup@example.com",
+            password = "password123",
+            firstName = "Incoming",
+            lastName = "User",
+            userName = "incoming_user",
+            dateOfBirth = "2011-02-02",
+        )
+
+        assertTrue(result.isFailure)
+        val conflictException = assertIs<SignupProfileConflictException>(result.exceptionOrNull())
+        assertEquals(
+            setOf(SignupProfileField.FIRST_NAME, SignupProfileField.DATE_OF_BIRTH),
+            conflictException.conflict.fields,
+        )
+        assertEquals("Existing", conflictException.conflict.existing.firstName)
+        assertEquals("Incoming", conflictException.conflict.incoming.firstName)
+    }
+
+    @Test
+    fun createNewUser_serializes_profile_selection_when_retrying_conflict() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/register" -> {
+                    capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
+                    respond(
+                        content = """
+                            {
+                              "user": { "id":"u_signup", "email":"signup@example.com", "name":"Signup User" },
+                              "session": { "userId":"u_signup", "isAdmin":false },
+                              "token":"signup_token",
+                              "profile": {
+                                "id":"u_signup",
+                                "firstName":"Existing",
+                                "lastName":"Up",
+                                "userName":"existing_user",
+                                "teamIds":[],
+                                "friendIds":[],
+                                "friendRequestIds":[],
+                                "friendRequestSentIds":[],
+                                "followingIds":[],
+                                "uploadedImages":[],
+                                "hasStripeAccount":false
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                    )
+                }
+
+                "/api/chat/terms-consent" -> respond(
+                    content = """{"accepted":false,"acceptedAt":null,"version":"2026-04-14","url":"/terms","summary":[]}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        repo.createNewUser(
+            email = "signup@example.com",
+            password = "password123",
+            firstName = "Incoming",
+            lastName = "Up",
+            userName = "incoming_user",
+            dateOfBirth = "2011-02-02",
+            profileSelection = SignupProfileSelection(
+                firstName = "Existing",
+                lastName = "Up",
+                userName = "existing_user",
+                dateOfBirth = "2010-01-01",
+            ),
+        ).getOrThrow()
+
+        assertEquals(true, capturedBody.contains("\"profileSelection\""))
+        assertEquals(true, capturedBody.contains("\"firstName\":\"Existing\""))
+        assertEquals(true, capturedBody.contains("\"userName\":\"existing_user\""))
+    }
+
+    @Test
+    fun ensureUserByEmail_returns_public_user_and_persists_to_cache() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
+                          "session": { "userId":"u1", "isAdmin":false },
+                          "token":"t123"
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                )
+
+                "/api/users/ensure" -> {
+                    assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+                    respond(
+                        content = """
+                            {
+                              "user": {
+                                "id":"u2",
+                                "firstName":"Invited",
+                                "lastName":"User",
+                                "userName":"invited_user",
+                                "teamIds":[],
+                                "friendIds":[],
+                                "friendRequestIds":[],
+                                "friendRequestSentIds":[],
+                                "followingIds":[],
+                                "uploadedImages":[],
+                                "hasStripeAccount":false
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val ensured = repo.ensureUserByEmail("u2@example.com").getOrThrow()
+        assertEquals("u2", ensured.id)
+        assertEquals("u2", userDao.getUserDataById("u2")?.id)
+    }
+
+    @Test
+    fun listInvites_decodes_staff_types() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/invites" -> {
+                    assertEquals("u1", request.url.parameters["userId"])
+                    assertEquals("STAFF", request.url.parameters["type"])
+                    assertEquals("PENDING", request.url.parameters["status"])
+                    assertEquals("100", request.url.parameters["limit"])
+                    assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+                    respond(
+                        content = """
+                            {
+                              "invites": [
+                                {
+                                  "id":"invite_1",
+                                  "type":"STAFF",
+                                  "email":"host@example.com",
+                                  "status":"PENDING",
+                                  "staffTypes":["HOST","OFFICIAL"],
+                                  "organizationId":"org_1",
+                                  "userId":"u1"
+                                }
+                              ]
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                    )
+                }
+
+                "/api/auth/me" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
+                          "session": { "userId":"u1", "isAdmin":false },
+                          "token":"t123",
+                          "profile": {
+                            "id":"u1",
+                            "firstName":"A",
+                            "lastName":"B",
+                            "userName":"ab",
+                            "teamIds":[],
+                            "friendIds":[],
+                            "friendRequestIds":[],
+                            "friendRequestSentIds":[],
+                            "followingIds":[],
+                            "uploadedImages":[],
+                            "hasStripeAccount":false
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+            HttpResponseValidator {
+                validateResponse { response ->
+                    if (!response.status.isSuccess()) {
+                        throw IllegalStateException(response.bodyAsText())
+                    }
+                }
+            }
+        }
+
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val invites = repo.listInvites(userId = "u1", type = "STAFF").getOrThrow()
+
+        assertEquals(1, invites.size)
+        assertEquals("invite_1", invites.first().id)
+        assertEquals(listOf("HOST", "OFFICIAL"), invites.first().staffTypes)
+    }
+
+    @Test
+    fun listInvites_follows_every_pending_page_before_replacing_the_cache() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
+        val inviteDao = UserRepositoryAuth_FakeInviteDao(
+            invites = listOf(
+                Invite(id = "stale_declined", type = "TEAM", status = "DECLINED", userId = "u1"),
+                Invite(
+                    id = "stale_child_invite",
+                    type = "TEAM",
+                    status = "PENDING",
+                    userId = "child_1",
+                    childUserId = "child_1",
+                    viewerCanAcceptForChild = true,
+                ),
+            ),
+        )
+        val db = UserRepositoryAuth_FakeDatabaseService(FakeUserDataDao(), inviteDao)
+        val currentUserDataSource = CurrentUserDataSource(InMemoryPreferencesDataStore())
+        val requestedCursors = mutableListOf<String?>()
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/invites" -> {
+                    assertEquals("u1", request.url.parameters["userId"])
+                    assertEquals("TEAM", request.url.parameters["type"])
+                    assertEquals("PENDING", request.url.parameters["status"])
+                    assertEquals("100", request.url.parameters["limit"])
+                    val cursor = request.url.parameters["cursor"]
+                    requestedCursors += cursor
+                    val content = if (cursor == null) {
+                        """
+                            {
+                              "invites": [
+                                {"id":"invite_1","type":"TEAM","status":"PENDING","userId":"u1"},
+                                {"id":"invite_2","type":"TEAM","status":"PENDING","userId":"u1"}
+                              ],
+                              "nextCursor":"page_2"
+                            }
+                        """.trimIndent()
+                    } else {
+                        assertEquals("page_2", cursor)
+                        """
+                            {
+                              "invites": [
+                                {"id":"invite_2","type":"TEAM","status":"PENDING","userId":"u1"},
+                                {"id":"invite_3","type":"TEAM","status":"PENDING","userId":"u1"}
+                              ],
+                              "nextCursor":null
+                            }
+                        """.trimIndent()
+                    }
+                    respond(
+                        content = content,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                "/api/auth/me" -> respond(
+                    content = """{"user":null,"session":null}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val repo = UserRepository(
+            databaseService = db,
+            api = MvpApiClient(http, "http://example.test", tokenStore),
+            tokenStore = tokenStore,
+            currentUserDataSource = currentUserDataSource,
+        )
+
+        val invites = repo.listInvites(userId = "u1", type = "TEAM").getOrThrow()
+
+        assertEquals(listOf(null, "page_2"), requestedCursors)
+        assertEquals(listOf("invite_1", "invite_2", "invite_3"), invites.map(Invite::id))
+        assertEquals(setOf("invite_1", "invite_2", "invite_3"), inviteDao.stored.keys)
+    }
+
+    @Test
+    fun declineInvite_removes_the_terminal_invite_from_room_after_server_success() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
+        val inviteDao = UserRepositoryAuth_FakeInviteDao(
+            invites = listOf(
+                Invite(id = "invite_1", type = "TEAM", status = "PENDING", userId = "u1"),
+            ),
+        )
+        val db = UserRepositoryAuth_FakeDatabaseService(FakeUserDataDao(), inviteDao)
+        val currentUserDataSource = CurrentUserDataSource(InMemoryPreferencesDataStore())
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/invites/invite_1/decline" -> {
+                    assertEquals(HttpMethod.Post, request.method)
+                    respond(
+                        content = """{"ok":true}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                "/api/auth/me" -> respond(
+                    content = """{"user":null,"session":null}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val repo = UserRepository(
+            databaseService = db,
+            api = MvpApiClient(http, "http://example.test", tokenStore),
+            tokenStore = tokenStore,
+            currentUserDataSource = currentUserDataSource,
+        )
+
+        repo.declineInvite("invite_1").getOrThrow()
+
+        assertTrue("invite_1" !in inviteDao.stored)
+    }
+
+    @Test
+    fun listChildren_gets_and_maps_family_children() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
+                          "session": { "userId":"u1", "isAdmin":false },
+                          "token":"t123",
+                          "profile": {
+                            "id":"u1",
+                            "firstName":"A",
+                            "lastName":"B",
+                            "userName":"ab",
+                            "teamIds":[],
+                            "friendIds":[],
+                            "friendRequestIds":[],
+                            "friendRequestSentIds":[],
+                            "followingIds":[],
+                            "uploadedImages":[],
+                            "hasStripeAccount":false
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/family/children" -> {
+                    assertEquals(HttpMethod.Get, request.method)
+                    assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+                    respond(
+                        content = """
+                            {
+                              "children": [
+                                {
+                                  "userId": "child_1",
+                                  "firstName": "Kid",
+                                  "lastName": "One",
+                                  "dateOfBirth": "2015-04-12T00:00:00.000Z",
+                                  "age": 10,
+                                  "linkStatus": "active",
+                                  "email": null,
+                                  "hasEmail": false
+                                }
+                              ]
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val children = repo.listChildren().getOrThrow()
+
+        assertEquals(1, children.size)
+        assertEquals("child_1", children.first().userId)
+        assertEquals("Kid", children.first().firstName)
+        assertEquals("active", children.first().linkStatus)
+    }
+
+    @Test
+    fun createChildAccount_posts_to_family_children_endpoint() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
+                          "session": { "userId":"u1", "isAdmin":false },
+                          "token":"t123"
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                )
+
+                "/api/family/children" -> {
+                    assertEquals(HttpMethod.Post, request.method)
+                    assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+                    respond(
+                        content = """{"childUserId":"child_2","linkId":"link_1","status":"active"}""",
+                        status = HttpStatusCode.Created,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val result = repo.createChildAccount(
+            firstName = "Kid",
+            lastName = "Two",
+            dateOfBirth = "2016-01-20",
+            email = "kid.two@example.com",
+            relationship = "parent",
+        )
+
+        assertEquals(true, result.isSuccess)
+    }
+
+    @Test
+    fun updateChildAccount_patches_family_child_endpoint() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
+                          "session": { "userId":"u1", "isAdmin":false },
+                          "token":"t123"
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                )
+
+                "/api/family/children/child_2" -> {
+                    assertEquals(HttpMethod.Patch, request.method)
+                    assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+                    respond(
+                        content = """{}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val result = repo.updateChildAccount(
+            childUserId = "child_2",
+            firstName = "Kid",
+            lastName = "Two",
+            dateOfBirth = "2016-01-20",
+            email = "kid.two@example.com",
+            relationship = "parent",
+        )
+
+        assertEquals(true, result.isSuccess)
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun updatePassword_stores_refreshed_token_before_reloading_current_user() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("old-token")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var authMeCalls = 0
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> {
+                    authMeCalls += 1
+                    val expectedToken = if (authMeCalls == 1) "Bearer old-token" else "Bearer new-token"
+                    assertEquals(expectedToken, request.headers[HttpHeaders.Authorization])
+                    val token = if (authMeCalls == 1) "old-token" else "new-token"
+                    respond(
+                        content = """
+                            {
+                              "user": { "id":"u1", "email":"u1@example.com", "name":"U One" },
+                              "session": { "userId":"u1", "isAdmin":false, "sessionVersion":1 },
+                              "token":"$token",
+                              "profile": {
+                                "id":"u1",
+                                "firstName":"U",
+                                "lastName":"One",
+                                "userName":"u_one",
+                                "teamIds":[],
+                                "friendIds":[],
+                                "friendRequestIds":[],
+                                "friendRequestSentIds":[],
+                                "followingIds":[],
+                                "uploadedImages":[],
+                                "hasStripeAccount":false
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                "/api/auth/password" -> {
+                    assertEquals(HttpMethod.Post, request.method)
+                    assertEquals("Bearer old-token", request.headers[HttpHeaders.Authorization])
+                    respond(
+                        content = """
+                            {
+                              "ok": true,
+                              "token": "new-token",
+                              "session": { "userId":"u1", "isAdmin":false, "sessionVersion":1 }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                "/api/chat/terms-consent" -> respond(
+                    content = """{"accepted":false,"acceptedAt":null,"version":"2026-04-14","url":"/terms","summary":[]}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(
+            databaseService = db,
+            api = api,
+            tokenStore = tokenStore,
+            currentUserDataSource = currentUserDataSource,
+            startupDispatcher = UnconfinedTestDispatcher(testScheduler),
+        )
+
+        val result = repo.updatePassword("password123", "password456")
+
+        assertEquals(true, result.isSuccess)
+        assertEquals("new-token", tokenStore.get())
+        assertEquals(2, authMeCalls)
+    }
+
+    @Test
+    fun linkChildToParent_without_email_or_id_fails_fast() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            error("Request should not be made: ${request.url}")
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val result = repo.linkChildToParent(
+            childEmail = " ",
+            childUserId = null,
+            relationship = "parent",
+        )
+
+        assertEquals(true, result.isFailure)
+    }
+
+    @Test
+    fun getUsers_requests_ids_in_batch_query() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var usersRequestCount = 0
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u_boot", "email":"boot@example.com", "name":"Boot User" },
+                          "session": { "userId":"u_boot", "isAdmin":false },
+                          "token":"t123"
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/users" -> {
+                    usersRequestCount += 1
+                    assertEquals(HttpMethod.Get, request.method)
+                    val ids = request.url.parameters["ids"]
+                    assertEquals("user_1,user_2,user_3", ids)
+                    respond(
+                        content = """
+                            {
+                              "users": [
+                                {
+                                  "id":"user_1",
+                                  "firstName":"One",
+                                  "lastName":"User",
+                                  "userName":"user_one"
+                                },
+                                {
+                                  "id":"user_2",
+                                  "firstName":"Two",
+                                  "lastName":"User",
+                                  "userName":"user_two"
+                                },
+                                {
+                                  "id":"user_3",
+                                  "firstName":"Three",
+                                  "lastName":"User",
+                                  "userName":"user_three"
+                                }
+                              ]
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val users = repo.getUsers(listOf("user_1", "user_2", "user_3")).getOrThrow()
+
+        assertEquals(1, usersRequestCount)
+        assertEquals(listOf("user_1", "user_2", "user_3"), users.map { it.id })
+    }
+
+    @Test
+    fun init_bootstraps_auth_token_from_auth_me_when_token_missing() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/auth/me", request.url.encodedPath)
+            assertEquals(HttpMethod.Get, request.method)
+            request.headers[HttpHeaders.Authorization]?.let { header ->
+                assertEquals("Bearer boot_token", header)
+            }
+            respond(
+                content = """
+                    {
+                      "user": { "id":"u_boot", "email":"boot@example.com", "name":"Boot User" },
+                      "session": { "userId":"u_boot", "isAdmin":false },
+                      "token":"boot_token",
+                      "profile": {
+                        "id":"u_boot",
+                        "firstName":"Boot",
+                        "lastName":"User",
+                        "userName":"boot_user",
+                        "teamIds":[],
+                        "friendIds":[],
+                        "friendRequestIds":[],
+                        "friendRequestSentIds":[],
+                        "followingIds":[],
+                        "uploadedImages":[],
+                        "hasStripeAccount":false
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        repo.getCurrentAccount().getOrThrow()
+
+        assertEquals("boot_token", tokenStore.get())
+        assertEquals("u_boot", currentUserDataSource.getUserId().first())
+        assertEquals("u_boot", repo.currentAccount.value.getOrThrow().id)
+        assertEquals("u_boot", repo.currentUser.value.getOrThrow().id)
+    }
+
+    @Test
+    fun init_clears_cached_user_id_when_token_missing_and_auth_me_has_no_session() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        currentUserDataSource.saveUserId("stale_user")
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/auth/me", request.url.encodedPath)
+            respond(
+                content = """{"user":null,"session":null}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        repo.getCurrentAccount().getOrThrow()
+
+        assertEquals("", tokenStore.get())
+        assertEquals("", currentUserDataSource.getUserId().first())
+        assertTrue(repo.currentAccount.value.isFailure)
+        assertTrue(repo.currentUser.value.isFailure)
+    }
+
+    @Test
+    fun startup_auth_state_is_checking_while_bootstrap_request_is_in_flight() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/auth/me", request.url.encodedPath)
+            delay(50)
+            respond(
+                content = """{"user":null,"session":null}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        assertEquals(StartupAuthState.Checking, repo.startupAuthState.value)
+        repo.getCurrentAccount()
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun startup_load_initializes_state_before_running_auth_restore() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/auth/me", request.url.encodedPath)
+            respond(
+                content = """{"user":null,"session":null}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(
+            databaseService = db,
+            api = api,
+            tokenStore = tokenStore,
+            currentUserDataSource = currentUserDataSource,
+            startupDispatcher = UnconfinedTestDispatcher(testScheduler),
+        )
+
+        repo.getCurrentAccount().getOrThrow()
+        assertEquals(StartupAuthState.Unauthenticated, repo.startupAuthState.value)
+    }
+
+    @Test
+    fun startup_auth_state_is_authenticated_when_bootstrap_succeeds() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/auth/me", request.url.encodedPath)
+            respond(
+                content = """
+                    {
+                      "user": { "id":"u_start", "email":"start@example.com", "name":"Start User" },
+                      "session": { "userId":"u_start", "isAdmin":false },
+                      "token":"start_token",
+                      "profile": {
+                        "id":"u_start",
+                        "firstName":"Start",
+                        "lastName":"User",
+                        "userName":"start_user",
+                        "teamIds":[],
+                        "friendIds":[],
+                        "friendRequestIds":[],
+                        "friendRequestSentIds":[],
+                        "followingIds":[],
+                        "uploadedImages":[],
+                        "hasStripeAccount":false
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        repo.getCurrentAccount().getOrThrow()
+
+        assertEquals(StartupAuthState.Authenticated, repo.startupAuthState.value)
+    }
+
+    @Test
+    fun startup_auth_state_is_unauthenticated_when_bootstrap_finds_no_session() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/auth/me", request.url.encodedPath)
+            respond(
+                content = """{"user":null,"session":null}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        repo.getCurrentAccount().getOrThrow()
+
+        assertEquals(StartupAuthState.Unauthenticated, repo.startupAuthState.value)
+    }
+}

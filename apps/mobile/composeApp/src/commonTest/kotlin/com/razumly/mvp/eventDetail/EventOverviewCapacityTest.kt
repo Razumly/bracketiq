@@ -1,0 +1,239 @@
+package com.razumly.mvp.eventDetail
+
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.EventParticipantsSummary
+import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
+import com.razumly.mvp.core.data.util.buildEventDivisionId
+import kotlin.test.Test
+import kotlin.test.assertEquals
+
+class EventOverviewCapacityTest {
+    @Test
+    fun resolveOverviewFilledParticipantCount_teamSignup_usesRegisteredTeamIds() {
+        val relations = EventWithFullRelations(
+            event = Event(
+                eventType = EventType.LEAGUE,
+                teamSignup = true,
+                maxParticipants = 5,
+                teamIds = listOf("team-1", "team-2", "team-3"),
+            ),
+            players = emptyList(),
+            matches = emptyList(),
+            teams = listOf(
+                buildTeamWithPlayers("team-1"),
+                buildTeamWithPlayers("team-2"),
+                buildTeamWithPlayers("team-3"),
+                buildTeamWithPlayers("team-4", kind = "PLACEHOLDER", parentTeamId = null),
+                buildTeamWithPlayers("team-5", parentTeamId = null),
+            ),
+        )
+
+        assertEquals(3, relations.resolveOverviewFilledParticipantCount())
+    }
+
+    @Test
+    fun resolveOverviewFilledParticipantCount_selectedWeeklySummaryOverridesRosterCount() {
+        val relations = EventWithFullRelations(
+            event = Event(teamSignup = true),
+            players = emptyList(),
+            matches = emptyList(),
+            teams = listOf(
+                buildTeamWithPlayers("team-1"),
+                buildTeamWithPlayers("team-2"),
+                buildTeamWithPlayers("team-3"),
+                buildTeamWithPlayers("team-4"),
+                buildTeamWithPlayers("team-5"),
+            ),
+        )
+
+        val filled = relations.resolveOverviewFilledParticipantCount(
+            WeeklyOccurrenceSummary(participantCount = 3, participantCapacity = 5),
+        )
+
+        assertEquals(3, filled)
+    }
+
+    @Test
+    fun countTeamSignupParticipantsForCapacity_singleDivision_usesRegisteredTeamIds() {
+        val event = Event(
+            eventType = EventType.LEAGUE,
+            teamSignup = true,
+            singleDivision = true,
+            teamIds = listOf("team-1", "team-2", "team-3"),
+        )
+        val teams = listOf(
+            buildTeamWithPlayers("team-1"),
+            buildTeamWithPlayers("team-2"),
+            buildTeamWithPlayers("team-3"),
+            buildTeamWithPlayers("team-4", kind = "PLACEHOLDER", parentTeamId = null),
+            buildTeamWithPlayers("team-5", parentTeamId = null),
+        )
+
+        assertEquals(3, countTeamSignupParticipantsForCapacity(event, teams))
+    }
+
+    @Test
+    fun countTeamSignupParticipantsForCapacity_multiDivision_usesRegisteredDivisionAssignments() {
+        val event = Event(
+            eventType = EventType.LEAGUE,
+            teamSignup = true,
+            singleDivision = false,
+            teamIds = listOf("team-1", "team-3"),
+            divisions = listOf("open"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "open",
+                    key = "open",
+                    name = "Open",
+                    teamIds = listOf("team-1", "team-2"),
+                ),
+            ),
+        )
+        val selectedDivision = DivisionDetail(
+            id = "open",
+            key = "open",
+            name = "Open",
+        )
+        val teams = listOf(
+            buildTeamWithPlayers("team-1", division = "open"),
+            buildTeamWithPlayers("team-2", division = "open", kind = "PLACEHOLDER", parentTeamId = null),
+            buildTeamWithPlayers("team-3", division = "advanced"),
+        )
+
+        assertEquals(1, countTeamSignupParticipantsForCapacity(event, teams, selectedDivision))
+    }
+
+    @Test
+    fun countTeamSignupParticipantsForCapacity_multiDivision_doesNotFallbackToTeamDivisionTypeMetadata() {
+        val eventId = "event-1"
+        val divisionTypeId = buildCombinedDivisionTypeId(
+            skillDivisionTypeId = "open",
+            ageDivisionTypeId = "u17",
+        )
+        val selectedDivision = DivisionDetail(
+            id = buildEventDivisionId(eventId, "c_skill_open_age_u17"),
+            key = "c_skill_open_age_u17",
+            name = "Coed Open U17",
+            divisionTypeId = divisionTypeId,
+            skillDivisionTypeId = "open",
+            ageDivisionTypeId = "u17",
+            gender = "C",
+        )
+        val event = Event(
+            id = eventId,
+            eventType = EventType.LEAGUE,
+            teamSignup = true,
+            singleDivision = false,
+            teamIds = listOf("team-1", "team-2"),
+            divisions = listOf(selectedDivision.id),
+            divisionDetails = listOf(selectedDivision.copy(teamIds = emptyList())),
+        )
+        val teams = listOf(
+            buildTeamWithPlayers(
+                teamId = "team-1",
+                division = "unused",
+                divisionTypeId = divisionTypeId,
+                ageDivisionTypeId = "u17",
+            ),
+            buildTeamWithPlayers(
+                teamId = "team-2",
+                division = "unused",
+                divisionTypeId = buildCombinedDivisionTypeId(
+                    skillDivisionTypeId = "open",
+                    ageDivisionTypeId = "u15",
+                ),
+                ageDivisionTypeId = "u15",
+            ),
+        )
+
+        assertEquals(0, countTeamSignupParticipantsForCapacity(event, teams, selectedDivision))
+    }
+
+    @Test
+    fun eventIsFullForRegistration_uses_weekly_overview_and_division_capacity_sources() {
+        val weeklyEvent = Event(
+            eventType = EventType.WEEKLY_EVENT,
+            timeSlotIds = listOf("slot-1"),
+            maxParticipants = 10,
+        )
+        assertEquals(
+            true,
+            eventIsFullForRegistration(
+                event = weeklyEvent,
+                teams = emptyList(),
+                preferredDivisionId = null,
+                selectedWeeklyOccurrenceSummary = WeeklyOccurrenceSummary(
+                    participantCount = 4,
+                    participantCapacity = 4,
+                ),
+            ),
+        )
+        assertEquals(false, eventIsFullForRegistration(weeklyEvent, emptyList(), null))
+
+        val overviewEvent = Event(
+            teamSignup = false,
+            singleDivision = true,
+            maxParticipants = 20,
+        )
+        assertEquals(
+            true,
+            eventIsFullForRegistration(
+                event = overviewEvent,
+                teams = emptyList(),
+                preferredDivisionId = null,
+                overviewParticipantSummary = EventParticipantsSummary(
+                    participantCount = 6,
+                    participantCapacity = 6,
+                ),
+            ),
+        )
+
+        val teamCapacityEvent = Event(
+            teamSignup = true,
+            singleDivision = true,
+            teamIds = listOf("team-1", "team-2"),
+            maxParticipants = 2,
+        )
+        assertEquals(
+            true,
+            eventIsFullForRegistration(
+                event = teamCapacityEvent,
+                teams = listOf(buildTeamWithPlayers("team-1"), buildTeamWithPlayers("team-2")),
+                preferredDivisionId = null,
+            ),
+        )
+    }
+
+    private fun buildTeamWithPlayers(
+        teamId: String,
+        division: String = "open",
+        divisionTypeId: String? = null,
+        skillDivisionTypeId: String? = "open",
+        ageDivisionTypeId: String? = null,
+        divisionGender: String? = "C",
+        kind: String? = "REGISTERED",
+        parentTeamId: String? = "parent-$teamId",
+    ): TeamWithPlayers = TeamWithPlayers(
+        team = Team(
+            division = division,
+            name = teamId,
+            kind = kind,
+            captainId = "captain-$teamId",
+            parentTeamId = parentTeamId,
+            teamSize = 2,
+            divisionTypeId = divisionTypeId,
+            skillDivisionTypeId = skillDivisionTypeId,
+            ageDivisionTypeId = ageDivisionTypeId,
+            divisionGender = divisionGender,
+            id = teamId,
+        ),
+        captain = UserData(),
+        players = emptyList(),
+        pendingPlayers = emptyList(),
+    )
+}

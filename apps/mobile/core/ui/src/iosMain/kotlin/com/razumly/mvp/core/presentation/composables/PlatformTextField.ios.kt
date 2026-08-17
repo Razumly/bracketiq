@@ -1,0 +1,529 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
+package com.razumly.mvp.core.presentation.composables
+
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.UIKitView
+import com.razumly.mvp.core.presentation.localAllFocusManagers
+import kotlinx.cinterop.CValue
+import kotlinx.cinterop.CValuesRef
+import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.StableRef
+import kotlinx.cinterop.cstr
+import platform.CoreGraphics.CGRectMake
+import platform.Foundation.*
+import platform.UIKit.*
+import platform.darwin.NSObject
+import platform.objc.*
+
+private val LightReadablePlaceholder = Color(0xFF6B7785)
+private val LightReadableDisabled = Color(0xFF5E6B78)
+
+@Composable
+actual fun PlatformTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier,
+    label: String,
+    placeholder: String,
+    isPassword: Boolean,
+    keyboardType: String,
+    isError: Boolean,
+    supportingText: String,
+    enabled: Boolean,
+    readOnly: Boolean,
+    trailingIcon: @Composable (() -> Unit)?,
+    leadingIcon: @Composable (() -> Unit)?,
+    textStyle: TextStyle?,
+    fontSize: TextUnit?,
+    height: Dp?,
+    contentPadding: PaddingValues?,
+    inputFilter: ((String) -> String)?,
+    onTap: (() -> Unit)?,
+    imeAction: ImeAction,
+    style: PlatformTextFieldStyle,
+    externalFocusManager: PlatformFocusManager?,
+    onImeAction: (() -> Unit)?,
+) {
+    val focusManager = externalFocusManager ?: rememberPlatformFocusManager()
+    val allFocusManagers = localAllFocusManagers.current
+    val platformTextFieldVisible = LocalPlatformTextFieldVisible.current
+
+    DisposableEffect(focusManager) {
+        allFocusManagers.add(focusManager)
+        onDispose {
+            allFocusManagers.remove(focusManager)
+        }
+    }
+
+    val iosFocusManager = focusManager as IOSFocusManager
+    val fieldHeight = height ?: 44.dp
+    val actualFontSize = fontSize ?: textStyle?.fontSize ?: 16.sp
+    val glassStyle = style == PlatformTextFieldStyle.GlassPill
+    val cornerRadius = if (glassStyle) 28.dp else 8.dp
+    val readablePlaceholder = if (isSystemInDarkTheme()) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        LightReadablePlaceholder
+    }
+    val readableDisabled = if (isSystemInDarkTheme()) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        LightReadableDisabled
+    }
+    val fillColor = if (glassStyle) Color.Transparent else MaterialTheme.colorScheme.surface
+    val disabledFillColor = if (glassStyle) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerLow
+    val borderColor = if (glassStyle) {
+        Color.Transparent
+    } else if (isError) {
+        MaterialTheme.colorScheme.error
+    } else {
+        MaterialTheme.colorScheme.outline
+    }
+    // Use system semantic colors for native text rendering so typed text stays visible.
+    val textUIColor = UIColor.labelColor
+    val disabledTextUIColor = UIColor.secondaryLabelColor
+    val placeholderUIColor = UIColor.secondaryLabelColor
+    val fillUIColor = fillColor.toUIColor()
+    val disabledFillUIColor = disabledFillColor.toUIColor()
+    val borderUIColor = borderColor.toUIColor()
+    val paddingModifier = if (contentPadding != null) {
+        Modifier.padding(contentPadding)
+    } else {
+        Modifier
+    }
+
+    Column(modifier = modifier.then(paddingModifier)) {
+        // Label above the text field
+        if (label.isNotEmpty()) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)
+            )
+        }
+
+        // Text field with leading and trailing icons
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Leading icon
+            leadingIcon?.let { icon ->
+                Box(
+                    modifier = Modifier.padding(end = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    icon()
+                }
+            }
+
+            // For tap-only fields (like date pickers), use a simple clickable Box
+            if (onTap != null && readOnly) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(fieldHeight)
+                        .background(
+                            fillColor,
+                            RoundedCornerShape(cornerRadius)
+                        )
+                        .border(
+                            1.dp,
+                            borderColor,
+                            RoundedCornerShape(cornerRadius)
+                        )
+                        .clickable(enabled = enabled, onClick = onTap)
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Text(
+                        text = value.ifEmpty { placeholder },
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = actualFontSize,
+                            color = when {
+                                !enabled -> readableDisabled
+                                value.isEmpty() -> readablePlaceholder
+                                else ->
+                                MaterialTheme.colorScheme.onSurface
+                            }
+                        )
+                    )
+                }
+            } else if (!platformTextFieldVisible) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(fieldHeight)
+                        .background(
+                            fillColor,
+                            RoundedCornerShape(cornerRadius)
+                        )
+                        .border(
+                            1.dp,
+                            borderColor,
+                            RoundedCornerShape(cornerRadius)
+                        )
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Text(
+                        text = value.ifEmpty { placeholder },
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = actualFontSize,
+                            color = when {
+                                !enabled -> readableDisabled
+                                value.isEmpty() -> readablePlaceholder
+                                else -> MaterialTheme.colorScheme.onSurface
+                            }
+                        )
+                    )
+                }
+            } else {
+                // For interactive fields, use UITextField - SIMPLIFIED!
+                UIKitView(
+                    factory = {
+                        createSimpleUITextField(
+                            placeholder = placeholder,
+                            text = value,
+                            onTextChanged = { newValue ->
+                                val filteredValue = inputFilter?.invoke(newValue) ?: newValue
+                                onValueChange(filteredValue)
+                            },
+                            isSecure = isPassword,
+                            keyboardType = keyboardType,
+                            enabled = enabled && !readOnly,
+                            fontSize = actualFontSize,
+                            focusManager = iosFocusManager,
+                            imeAction = imeAction,
+                            style = style,
+                            textColor = textUIColor,
+                            disabledTextColor = disabledTextUIColor,
+                            placeholderColor = placeholderUIColor,
+                            fillColor = fillUIColor,
+                            disabledFillColor = disabledFillUIColor,
+                            borderColor = borderUIColor,
+                            cornerRadius = cornerRadius.value.toDouble(),
+                            onImeAction = onImeAction,
+                        )
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(fieldHeight)
+                        .platformFocusable(iosFocusManager, enabled)
+                        .clip(RoundedCornerShape(if (glassStyle) 28.dp else 5.dp)),
+                    update = { textField ->
+                        updateSimpleUITextField(
+                            textField = textField,
+                            text = value,
+                            placeholder = placeholder,
+                            isSecure = isPassword,
+                            keyboardType = keyboardType,
+                            enabled = enabled && !readOnly,
+                            fontSize = actualFontSize,
+                            imeAction = imeAction,
+                            style = style,
+                            textColor = textUIColor,
+                            disabledTextColor = disabledTextUIColor,
+                            placeholderColor = placeholderUIColor,
+                            fillColor = fillUIColor,
+                            disabledFillColor = disabledFillUIColor,
+                            borderColor = borderUIColor,
+                            cornerRadius = cornerRadius.value.toDouble(),
+                        )
+                    }
+                )
+            }
+
+            // Trailing icon
+            trailingIcon?.let { icon ->
+                Box(
+                    modifier = Modifier.padding(start = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    icon()
+                }
+            }
+        }
+
+        // Supporting text below the field
+        if (supportingText.isNotEmpty()) {
+            Text(
+                text = supportingText,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+            )
+        }
+    }
+}
+
+// SIMPLIFIED: No keyboard handling needed!
+fun createSimpleUITextField(
+    placeholder: String,
+    text: String,
+    onTextChanged: (String) -> Unit,
+    isSecure: Boolean,
+    keyboardType: String,
+    enabled: Boolean,
+    fontSize: TextUnit = 16.sp,
+    focusManager: IOSFocusManager,
+    imeAction: ImeAction = ImeAction.Next,
+    onImeAction: (() -> Unit)? = null,
+    style: PlatformTextFieldStyle = PlatformTextFieldStyle.Default,
+    textColor: UIColor,
+    disabledTextColor: UIColor,
+    placeholderColor: UIColor,
+    fillColor: UIColor,
+    disabledFillColor: UIColor,
+    borderColor: UIColor,
+    cornerRadius: Double,
+): UITextField {
+    val textField = UITextField() // Just regular UITextField - no custom subclass!
+
+    // Basic setup only
+    textField.text = toDisplayText(text, keyboardType)
+    textField.borderStyle = UITextBorderStyle.UITextBorderStyleNone
+    textField.secureTextEntry = isSecure
+    textField.enabled = enabled
+    textField.font = UIFont.systemFontOfSize(fontSize.value.toDouble())
+    textField.layer.cornerRadius = cornerRadius
+    textField.layer.borderWidth = if (style == PlatformTextFieldStyle.GlassPill) 0.0 else 1.0
+    textField.layer.borderColor = borderColor.CGColor
+    textField.backgroundColor = if (enabled) fillColor else disabledFillColor
+    textField.textColor = if (enabled) textColor else disabledTextColor
+    textField.attributedPlaceholder = placeholder.toAttributedPlaceholder(placeholderColor)
+    textField.leftView = UIView(frame = CGRectMake(0.0, 0.0, 12.0, 0.0))
+    textField.leftViewMode = UITextFieldViewMode.UITextFieldViewModeAlways
+    textField.rightView = UIView(frame = CGRectMake(0.0, 0.0, 12.0, 0.0))
+    textField.rightViewMode = UITextFieldViewMode.UITextFieldViewModeAlways
+
+    // Set keyboard traits once when creating the field.
+    textField.keyboardType = resolveKeyboardType(
+        keyboardType = keyboardType,
+        isSecure = isSecure,
+    )
+    textField.returnKeyType = resolveReturnKeyType(imeAction)
+
+    focusManager.attachToTextField(textField)
+
+    // Keep your existing delegate for focus management
+    val delegate = SimpleTextFieldDelegate(
+        onTextChanged = onTextChanged,
+        focusManager = focusManager,
+        keyboardType = keyboardType,
+        onImeAction = onImeAction,
+    )
+
+    textField.delegate = delegate
+
+    objc_setAssociatedObject(
+        textField as Any,
+        "textFieldDelegate".cstr as CValuesRef<*>?,
+        StableRef.create(delegate).asCPointer(),
+        OBJC_ASSOCIATION_RETAIN_NONATOMIC
+    )
+
+    return textField
+}
+
+@OptIn(ExperimentalForeignApi::class)
+fun updateSimpleUITextField(
+    textField: UITextField,
+    text: String,
+    placeholder: String,
+    isSecure: Boolean,
+    keyboardType: String,
+    enabled: Boolean,
+    fontSize: TextUnit = 16.sp,
+    imeAction: ImeAction = ImeAction.Next,
+    style: PlatformTextFieldStyle = PlatformTextFieldStyle.Default,
+    textColor: UIColor,
+    disabledTextColor: UIColor,
+    placeholderColor: UIColor,
+    fillColor: UIColor,
+    disabledFillColor: UIColor,
+    borderColor: UIColor,
+    cornerRadius: Double,
+) {
+    val displayText = toDisplayText(text, keyboardType)
+    val isFocused = textField.isFirstResponder()
+    // Only update text if different to avoid cursor jumping
+    // Avoid overwriting active iOS text input while the user is editing.
+    // UIKit can report intermediate text states that should remain while focused.
+    if (!isFocused && textField.text != displayText) {
+        textField.text = displayText
+    }
+
+    if (textField.secureTextEntry != isSecure) {
+        textField.secureTextEntry = isSecure
+    }
+    if (textField.enabled != enabled) {
+        textField.enabled = enabled
+    }
+    textField.font = UIFont.systemFontOfSize(fontSize.value.toDouble())
+    textField.borderStyle = UITextBorderStyle.UITextBorderStyleNone
+    textField.layer.cornerRadius = cornerRadius
+    textField.layer.borderWidth = if (style == PlatformTextFieldStyle.GlassPill) 0.0 else 1.0
+    textField.layer.borderColor = borderColor.CGColor
+    textField.backgroundColor = if (enabled) fillColor else disabledFillColor
+    textField.textColor = if (enabled) textColor else disabledTextColor
+    textField.attributedPlaceholder = placeholder.toAttributedPlaceholder(placeholderColor)
+
+    // Avoid forcing keyboard trait updates while editing unless they changed.
+    val resolvedKeyboardType = resolveKeyboardType(
+        keyboardType = keyboardType,
+        isSecure = isSecure,
+    )
+    if (textField.keyboardType != resolvedKeyboardType) {
+        textField.keyboardType = resolvedKeyboardType
+        if (textField.isFirstResponder()) {
+            textField.reloadInputViews()
+        }
+    }
+
+    val resolvedReturnKeyType = resolveReturnKeyType(imeAction)
+    if (textField.returnKeyType != resolvedReturnKeyType) {
+        textField.returnKeyType = resolvedReturnKeyType
+    }
+}
+
+private fun resolveKeyboardType(
+    keyboardType: String,
+    isSecure: Boolean,
+): UIKeyboardType = when {
+    isSecure || keyboardType == "password" -> UIKeyboardTypeDefault
+    keyboardType == "email" -> UIKeyboardTypeEmailAddress
+    keyboardType == "decimal" -> UIKeyboardTypeDecimalPad
+    keyboardType == "number" || keyboardType == "money" -> UIKeyboardTypeNumberPad
+    else -> UIKeyboardTypeDefault
+}
+
+private fun resolveReturnKeyType(imeAction: ImeAction): UIReturnKeyType = when (imeAction) {
+    ImeAction.Next -> UIReturnKeyType.UIReturnKeyNext
+    ImeAction.Done -> UIReturnKeyType.UIReturnKeyDone
+    ImeAction.Go -> UIReturnKeyType.UIReturnKeyGo
+    ImeAction.Send -> UIReturnKeyType.UIReturnKeySend
+    else -> UIReturnKeyType.UIReturnKeyDefault
+}
+
+private fun toDisplayText(value: String, keyboardType: String): String {
+    return if (keyboardType == "money") {
+        formatMoneyDisplay(value)
+    } else {
+        value
+    }
+}
+
+private fun formatMoneyDisplay(rawValue: String): String {
+    val digits = rawValue.filter { it.isDigit() }
+    if (digits.isEmpty()) return ""
+
+    val normalized = digits.trimStart('0').ifEmpty { "0" }
+    val padded = normalized.padStart(3, '0')
+    val whole = padded.dropLast(2).trimStart('0').ifEmpty { "0" }
+    val fractional = padded.takeLast(2)
+    return "$whole.$fractional"
+}
+
+private fun String.toAttributedPlaceholder(color: UIColor): NSAttributedString =
+    NSAttributedString.create(
+        string = this,
+        attributes = mapOf(NSForegroundColorAttributeName to color)
+    )
+
+private fun Color.toUIColor(): UIColor =
+    UIColor.colorWithRed(
+        red = red.toDouble(),
+        green = green.toDouble(),
+        blue = blue.toDouble(),
+        alpha = alpha.toDouble(),
+    )
+
+// Simplified delegate - only handles text changes and focus
+class SimpleTextFieldDelegate(
+    private val onTextChanged: (String) -> Unit,
+    private val focusManager: IOSFocusManager,
+    private val keyboardType: String,
+    private val onImeAction: (() -> Unit)?,
+) : NSObject(), UITextFieldDelegateProtocol {
+
+    @OptIn(ExperimentalForeignApi::class)
+    override fun textField(
+        textField: UITextField,
+        shouldChangeCharactersInRange: CValue<NSRange>,
+        replacementString: String
+    ): Boolean {
+        val currentText = textField.text ?: ""
+        val newText = (currentText as NSString).stringByReplacingCharactersInRange(
+            shouldChangeCharactersInRange,
+            replacementString
+        )
+        if (keyboardType == "money") {
+            val rawDigits = newText.filter { it.isDigit() }
+            onTextChanged(rawDigits)
+            textField.text = formatMoneyDisplay(rawDigits)
+            val endPosition = textField.endOfDocument
+            textField.selectedTextRange = textField.textRangeFromPosition(endPosition, toPosition = endPosition)
+            return false
+        }
+        onTextChanged(newText)
+        return true
+    }
+
+    override fun textFieldDidBeginEditing(textField: UITextField) {
+        focusManager.updateFocusState(true)
+    }
+
+    override fun textFieldDidEndEditing(textField: UITextField) {
+        focusManager.updateFocusState(false)
+    }
+
+    override fun textFieldShouldReturn(textField: UITextField): Boolean {
+        when (textField.returnKeyType) {
+            UIReturnKeyType.UIReturnKeyNext -> {
+                focusManager.handleNextAction()
+                return false // Keep keyboard open for next field
+            }
+            UIReturnKeyType.UIReturnKeyDone, UIReturnKeyType.UIReturnKeyGo, UIReturnKeyType.UIReturnKeySend -> {
+                if (onImeAction != null) {
+                    onImeAction.invoke()
+                    return false
+                }
+                textField.resignFirstResponder()
+                focusManager.handleDoneAction()
+                return true
+            }
+            else -> {
+                textField.resignFirstResponder()
+                return true
+            }
+        }
+    }
+}

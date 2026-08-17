@@ -1,0 +1,14 @@
+# Uncomment the next line to define a global platform for your project
+platform :ios, '15.3'
+use_frameworks!
+
+target 'iosApp' do
+  # This points at the .podspec that Gradle generates for your shared module
+  pod 'composeApp', :path => '../composeApp'
+  pod 'FirebaseCore'
+  pod 'FirebaseMessaging'
+  pod 'FirebaseAnalytics'
+  pod 'PostHog', '~> 3.62.3'
+
+  # (Your other pod dependencies go here…)
+end

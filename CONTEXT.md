@@ -2,6 +2,12 @@
 
 BracketIQ Events models organizer-managed activities from configuration through creation and scheduling.
 
+## Application boundary
+
+`apps/site` owns the backend, Prisma schema, HTTP API, web UI, and production container image.
+
+`apps/mobile` owns the Kotlin Multiplatform clients and its local data models. It consumes `apps/site` only through the HTTP API. The applications do not share runtime TypeScript or Kotlin source.
+
 ## Language
 
 **Event**:

@@ -1,0 +1,162 @@
+name: Mobile CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: mobile-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect mobile changes
+    runs-on: ubuntu-latest
+    outputs:
+      mobile: ${{ steps.filter.outputs.mobile }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Detect mobile paths
+        id: filter
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            mobile:
+              - 'apps/mobile/**'
+              - 'apps/site/src/app/api/**'
+              - 'apps/site/prisma/schema.prisma'
+              - '.github/workflows/mobile-ci.yml'
+              - 'AGENTS.md'
+              - 'CONTEXT.md'
+              - 'PLANS.md'
+
+  android-tests:
+    name: Android unit tests
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: apps/mobile/**/*.gradle*
+
+      - name: Install Android SDK packages
+        run: >-
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "platforms;android-36"
+          "build-tools;36.0.0"
+
+      - name: Verify release Google Sign-In resource
+        run: ./scripts/tests/google-sign-in-release-resource-contract.sh
+
+      - name: Verify Android release API endpoint
+        run: ./scripts/tests/android-release-api-base-url-contract.sh
+
+      - name: Run Android unit tests
+        run: ./gradlew testDebugUnitTest --continue --stacktrace
+
+  ios-tests:
+    name: iOS simulator tests
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: apps/mobile/**/*.gradle*
+
+      - name: Install Android SDK packages
+        run: >-
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "platforms;android-36"
+          "build-tools;36.0.0"
+
+      - name: Verify iOS release API endpoint
+        run: ./scripts/tests/ios-release-api-base-url-contract.sh
+
+      - name: Select and boot an iOS simulator
+        shell: bash
+        run: |
+          simulator_udid="$(
+            xcrun simctl list devices available |
+              sed -nE '/iPhone/ {
+                s/.*\(([0-9A-Fa-f-]{36})\).*/\1/p
+                q
+              }'
+          )"
+          if [[ -z "$simulator_udid" ]]; then
+            echo "No available iPhone simulator was found." >&2
+            exit 1
+          fi
+          echo "IOS_SIMULATOR_UDID=$simulator_udid" >> "$GITHUB_ENV"
+          xcrun simctl boot "$simulator_udid"
+          xcrun simctl bootstatus "$simulator_udid" -b
+
+      - name: Run iOS simulator tests
+        run: >-
+          ./gradlew
+          :composeApp:iosSimulatorArm64Test
+          :core:database:iosSimulatorArm64Test
+          -PiosDevice="$IOS_SIMULATOR_UDID"
+          --continue
+          --stacktrace
+
+  gate:
+    name: Mobile CI gate
+    needs:
+      - changes
+      - android-tests
+      - ios-tests
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate mobile CI
+        env:
+          MOBILE_CHANGED: ${{ needs.changes.outputs.mobile }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          ANDROID_RESULT: ${{ needs.android-tests.result }}
+          IOS_RESULT: ${{ needs.ios-tests.result }}
+        run: |
+          if [[ "$CHANGES_RESULT" != "success" ]]; then
+            echo "Mobile path detection failed: $CHANGES_RESULT" >&2
+            exit 1
+          fi
+          if [[ "$MOBILE_CHANGED" == "true" && "$ANDROID_RESULT" != "success" ]]; then
+            echo "Android unit tests did not pass: $ANDROID_RESULT" >&2
+            exit 1
+          fi
+          if [[ "$MOBILE_CHANGED" == "true" && "$IOS_RESULT" != "success" ]]; then
+            echo "iOS simulator tests did not pass: $IOS_RESULT" >&2
+            exit 1
+          fi
+          echo "Mobile CI gate passed. Mobile changed: $MOBILE_CHANGED."

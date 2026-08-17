@@ -2,6 +2,8 @@
 
 This ExecPlan is a living document. The sections `Progress`, `Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work proceeds. Maintain this document in accordance with `PLANS.md` at the repository root.
 
+Repository layout: producer repository roots identify the BracketIQ monorepo root. Producer `generatedPaths` are monorepo-relative. Site setup scripts therefore use `apps/site/scripts/setup-…-affiliate-source.ts`; the materialized setup runs with `apps/site` as its working directory.
+
 ## Purpose / Big Picture
 
 The affiliate mapping agent produces source packages in one isolated checkout,

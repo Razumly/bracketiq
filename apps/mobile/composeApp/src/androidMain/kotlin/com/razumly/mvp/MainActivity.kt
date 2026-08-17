@@ -1,0 +1,339 @@
+package com.razumly.mvp
+
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Color
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.view.WindowManager
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.platform.LocalView
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.view.WindowCompat
+import androidx.lifecycle.lifecycleScope
+import com.arkivanov.decompose.ExperimentalDecomposeApi
+import com.arkivanov.decompose.handleDeepLink
+import com.arkivanov.decompose.retainedComponent
+import com.mmk.kmpnotifier.extensions.onCreateOrOnNewIntent
+import com.mmk.kmpnotifier.notification.NotifierManager
+import com.razumly.mvp.app.App
+import com.razumly.mvp.app.RootComponent
+import com.razumly.mvp.app.RootComponent.DeepLinkNav
+import com.razumly.mvp.core.presentation.MVPTheme
+import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
+import dev.icerock.moko.permissions.compose.BindEffect
+import io.github.aakira.napier.Napier
+import kotlinx.coroutines.launch
+import org.koin.core.parameter.parametersOf
+import org.koin.mp.KoinPlatform.getKoin
+
+val LocalRootComponent = compositionLocalOf<RootComponent> { error("No component provided") }
+
+class MainActivity : ComponentActivity() {
+    private lateinit var rootComponent: RootComponent
+    @Volatile
+    private var keepSystemSplashVisible: Boolean = true
+
+    @OptIn(ExperimentalDecomposeApi::class)
+    override fun onCreate(savedInstanceState: Bundle?) {
+        val splashScreen = installSplashScreen()
+        splashScreen.setKeepOnScreenCondition { keepSystemSplashVisible }
+        configureEdgeToEdgeWindow()
+        super.onCreate(savedInstanceState)
+        if (redirectWearLaunchIfNeeded()) return
+
+        val initialNotificationPayload = intent.extractNotificationPayload()
+        val initialDeepLinkNav = intent.extractDeepLinkNav()
+        NotifierManager.onCreateOrOnNewIntent(intent)
+        Napier.d(tag = "intent", message = intent.data.toString())
+        rootComponent = handleDeepLink { uri ->
+            val deepLinkNav = uri?.extractDeepLinkNav() ?: initialDeepLinkNav
+            Napier.d(tag = "DeepLink", message = "Extracted DeepLinkNav: $deepLinkNav")
+            retainedComponent("RootRetainedComponent") {
+                getKoin().get<RootComponent> { parametersOf(it, deepLinkNav) }
+            }
+        } ?: return
+        rootComponent.handleNotificationPayload(initialNotificationPayload)
+
+        lifecycleScope.launch {
+            rootComponent.isStartupInProgress.collect { inProgress ->
+                keepSystemSplashVisible = inProgress
+            }
+        }
+
+        setContent {
+            val darkTheme = isSystemInDarkTheme()
+            ApplyStatusBarContentStyle(darkTheme = darkTheme)
+
+            MVPTheme(darkTheme = darkTheme) {
+                CompositionLocalProvider(LocalRootComponent provides rootComponent) {
+                    BindLocationTrackerEffect(rootComponent.locationTracker)
+                    BindEffect(rootComponent.permissionsController)
+                    App(rootComponent)
+                }
+            }
+        }
+    }
+
+    private fun redirectWearLaunchIfNeeded(): Boolean {
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_WATCH)) return false
+
+        val wearIntent = Intent()
+            .setClassName("com.razumly.mvp", "com.razumly.mvp.wear.MainActivity")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            startActivity(wearIntent)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "Open BracketIQ: Officials on this watch.", Toast.LENGTH_LONG).show()
+        }
+        finish()
+        return true
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        NotifierManager.onCreateOrOnNewIntent(intent)
+        Napier.d(tag = "intent", message = intent.data.toString())
+        rootComponent.handleNotificationPayload(intent.extractNotificationPayload())
+
+        // Handle deep links when app is already open
+        val deepLinkNav = intent.extractDeepLinkNav()
+        if (deepLinkNav != null) {
+            Napier.d(tag = "DeepLink", message = "Extracted DeepLinkNav from intent: $deepLinkNav")
+            rootComponent.handleDeepLink(deepLinkNav)
+        } else {
+            Napier.d(tag = "DeepLink", message = "No deep link data in intent")
+        }
+    }
+
+    private fun configureEdgeToEdgeWindow() {
+        // Force the decor view to initialize before changing edge-to-edge attributes.
+        window.decorView
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            @Suppress("DEPRECATION")
+            window.statusBarColor = Color.TRANSPARENT
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = Color.TRANSPARENT
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = true
+        }
+
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM
+        ) {
+            val attributes = window.attributes
+            if (
+                attributes.layoutInDisplayCutoutMode !=
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            ) {
+                attributes.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                window.attributes = attributes
+            }
+        }
+    }
+
+    @Composable
+    private fun ApplyStatusBarContentStyle(darkTheme: Boolean) {
+        val view = LocalView.current
+        if (view.isInEditMode) return
+
+        SideEffect {
+            val activity = view.context as? Activity ?: return@SideEffect
+            val window = activity.window
+            val insetsController = WindowCompat.getInsetsController(window, view)
+
+            insetsController.isAppearanceLightStatusBars = !darkTheme
+            insetsController.isAppearanceLightNavigationBars = !darkTheme
+        }
+    }
+
+    private fun Intent.extractDeepLinkNav(): DeepLinkNav? {
+        data?.extractDeepLinkNav()?.let { return it }
+
+        val payload = extractNotificationPayload()
+        val deepLink = payload.normalizedPayloadValue("deepLink")
+            ?: payload.normalizedPayloadValue("url")
+            ?: payload.normalizedPayloadValue("link")
+        deepLink?.let { value ->
+            runCatching { Uri.parse(value).extractDeepLinkNav() }
+                .getOrNull()
+                ?.let { return it }
+        }
+
+        return if (payload.isInviteNotificationPayload()) {
+            DeepLinkNav.Invites
+        } else {
+            null
+        }
+    }
+
+    private fun Intent.extractNotificationPayload(): Map<String, String> {
+        val extras = extras ?: return emptyMap()
+        return extras.keySet().mapNotNull { key ->
+            val normalizedKey = key.trim()
+            val normalizedValue = extras.get(key)?.toString()?.trim()?.takeIf(String::isNotBlank)
+            if (normalizedKey.isBlank() || normalizedValue == null) {
+                null
+            } else {
+                normalizedKey to normalizedValue
+            }
+        }.toMap()
+    }
+
+    private fun Uri.extractDeepLinkNav(): DeepLinkNav? {
+        val pathSegments = pathSegments.filter { it.isNotBlank() }
+        Napier.d(tag = "DeepLink", message = "Received URI: $this")
+        Napier.d(tag = "DeepLink", message = "Raw path segments: $pathSegments")
+
+        val normalizedScheme = scheme.orEmpty().lowercase()
+        val normalizedHost = host.orEmpty().lowercase()
+        val segmentsWithHost = if (
+            (normalizedScheme == "mvp" || normalizedScheme == "razumly") &&
+            normalizedHost.isNotBlank() &&
+            !normalizedHost.contains('.')
+        ) {
+            listOf(normalizedHost) + pathSegments
+        } else {
+            pathSegments
+        }
+        val effectiveSegments = if (segmentsWithHost.firstOrNull() == "mvp") {
+            segmentsWithHost.drop(1)
+        } else {
+            segmentsWithHost
+        }
+        Napier.d(tag = "DeepLink", message = "Effective segments: $effectiveSegments")
+
+        if (
+            effectiveSegments.isInviteRoute() ||
+            getQueryParameter("screen")?.equals("invites", ignoreCase = true) == true
+        ) {
+            Napier.d(tag = "DeepLink", message = "Navigating to Invites")
+            return DeepLinkNav.Invites
+        }
+
+        val queryEventId = getQueryParameter("eventId")?.trim().orEmpty()
+        val queryMatchId = getQueryParameter("matchId")?.trim().orEmpty()
+        if (queryEventId.isNotEmpty() && queryMatchId.isNotEmpty()) {
+            Napier.d(tag = "DeepLink", message = "Navigating to Match from query: $queryEventId/$queryMatchId")
+            return DeepLinkNav.Match(eventId = queryEventId, matchId = queryMatchId)
+        }
+
+        return when {
+            effectiveSegments.size >= 4 -> {
+                val route = effectiveSegments[0].lowercase()
+                val eventId = effectiveSegments[1].trim()
+                val matchRoute = effectiveSegments[2].lowercase()
+                val matchId = effectiveSegments[3].trim()
+                if (
+                    (route == "event" ||
+                        route == "events" ||
+                        route == "tournament" ||
+                        route == "tournaments") &&
+                    (matchRoute == "match" || matchRoute == "matches") &&
+                    eventId.isNotEmpty() &&
+                    matchId.isNotEmpty()
+                ) {
+                    Napier.d(tag = "DeepLink", message = "Navigating to Match: $eventId/$matchId")
+                    DeepLinkNav.Match(eventId = eventId, matchId = matchId)
+                } else {
+                    Napier.d(tag = "DeepLink", message = "No matching deep link pattern found")
+                    null
+                }
+            }
+
+            effectiveSegments.size >= 2 &&
+                (effectiveSegments[0].lowercase() == "match" || effectiveSegments[0].lowercase() == "matches") &&
+                queryEventId.isNotEmpty() -> {
+                val matchId = effectiveSegments[1].trim()
+                if (matchId.isEmpty()) {
+                    Napier.w(tag = "DeepLink", message = "Deep link match id was blank")
+                    null
+                } else {
+                    Napier.d(tag = "DeepLink", message = "Navigating to Match: $queryEventId/$matchId")
+                    DeepLinkNav.Match(eventId = queryEventId, matchId = matchId)
+                }
+            }
+
+            effectiveSegments.size >= 2 -> {
+                val route = effectiveSegments[0].lowercase()
+                val eventId = effectiveSegments[1].trim()
+                if (
+                    route == "event" ||
+                    route == "events" ||
+                    route == "tournament" ||
+                    route == "tournaments"
+                ) {
+                    if (eventId.isEmpty()) {
+                        Napier.w(tag = "DeepLink", message = "Deep link event id was blank")
+                        null
+                    } else {
+                        Napier.d(tag = "DeepLink", message = "Navigating to Event: $eventId")
+                        DeepLinkNav.Event(eventId)
+                    }
+                } else if (route == "host" && effectiveSegments[1].lowercase() == "onboarding") {
+                    val isRefresh = getQueryParameter("refresh")?.toBoolean() == true
+                    val isReturn = getQueryParameter("success")?.toBoolean() == true
+                    Napier.d(
+                        tag = "DeepLink",
+                        message = "Host Onboarding - Refresh: $isRefresh, Return: $isReturn"
+                    )
+                    when {
+                        isRefresh -> DeepLinkNav.Refresh
+                        isReturn -> DeepLinkNav.Return
+                        else -> null
+                    }
+                } else {
+                    Napier.d(tag = "DeepLink", message = "No matching deep link pattern found")
+                    null
+                }
+            }
+
+            else -> {
+                Napier.d(tag = "DeepLink", message = "No matching deep link pattern found")
+                null
+            }
+        }
+    }
+
+    private fun List<String>.isInviteRoute(): Boolean {
+        val segments = map { it.lowercase() }
+        val first = segments.firstOrNull() ?: return false
+        val second = segments.getOrNull(1)
+        return first == "invite" ||
+            first == "invites" ||
+            first == "invitations" ||
+            (first == "profile" && (second == "invite" || second == "invites" || second == "invitations"))
+    }
+
+    private fun Map<String, String>.normalizedPayloadValue(key: String): String? =
+        this[key]?.trim()?.takeIf(String::isNotBlank)
+            ?: entries.firstOrNull { (candidate, value) ->
+                candidate.equals(key, ignoreCase = true) && value.trim().isNotBlank()
+            }?.value?.trim()
+
+    private fun Map<String, String>.isInviteNotificationPayload(): Boolean {
+        val notificationType = normalizedPayloadValue("notificationType")?.lowercase()
+        val inviteId = normalizedPayloadValue("inviteId")
+        val deepLink = normalizedPayloadValue("deepLink")?.lowercase()
+        return !inviteId.isNullOrBlank() ||
+            notificationType == "invitations" ||
+            deepLink?.contains("invites") == true
+    }
+}

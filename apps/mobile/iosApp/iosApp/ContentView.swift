@@ -1,0 +1,139 @@
+import UIKit
+import SwiftUI
+import ComposeApp
+
+struct ComposeView: UIViewControllerRepresentable {
+    let deepLinkUrl: URL?
+    
+    init(deepLinkUrl: URL? = nil) {
+        self.deepLinkUrl = deepLinkUrl
+    }
+
+    func makeUIViewController(context: Context) -> UIViewController {
+        let deepLinkNav = deepLinkUrl?.extractDeepLinkNav()
+        let composeController = MainViewControllerKt.MainViewController(
+            nativeViewFactory: IOSNativeViewFactory.shared,
+            deepLinkNav: deepLinkNav
+        )
+
+        composeController.view.backgroundColor = UIColor.systemBackground
+        return composeController
+    }
+    
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
+        if let url = deepLinkUrl {
+            _ = url.extractDeepLinkNav()
+            // Since we can't call methods on the generated UIViewController,
+            // we need to recreate it by forcing SwiftUI to rebuild
+            // This is handled by the .id() modifier in the parent
+        }
+    }
+}
+
+// Extension to convert iOS URL to your DeepLinkNav object
+extension URL {
+    func extractDeepLinkNav() -> RootComponent.DeepLinkNav? {
+        let pathSegments = self.pathComponents.filter { $0 != "/" && !$0.isEmpty }
+        let normalizedScheme = self.scheme?.lowercased() ?? ""
+        let normalizedHost = self.host?.lowercased() ?? ""
+
+        let segmentsWithHost: [String]
+        if (normalizedScheme == "mvp" || normalizedScheme == "razumly")
+            && !normalizedHost.isEmpty
+            && !normalizedHost.contains(".") {
+            segmentsWithHost = [normalizedHost] + pathSegments
+        } else {
+            segmentsWithHost = pathSegments
+        }
+
+        let effectiveSegments: [String]
+        if segmentsWithHost.first?.lowercased() == "mvp" {
+            effectiveSegments = Array(segmentsWithHost.dropFirst())
+        } else {
+            effectiveSegments = segmentsWithHost
+        }
+
+        let queryItems = URLComponents(url: self, resolvingAgainstBaseURL: false)?.queryItems
+        let queryScreen = queryItems?
+            .first(where: { $0.name.caseInsensitiveCompare("screen") == .orderedSame })?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if effectiveSegments.isInviteRoute || queryScreen == "invites" {
+            return RootComponent.DeepLinkNavInvites()
+        }
+
+        let queryEventId = queryItems?
+            .first(where: { $0.name == "eventId" })?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let queryMatchId = queryItems?
+            .first(where: { $0.name == "matchId" })?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        if !queryEventId.isEmpty && !queryMatchId.isEmpty {
+            return RootComponent.DeepLinkNavMatch.init(eventId: queryEventId, matchId: queryMatchId)
+        }
+
+        if effectiveSegments.count >= 4 {
+            let route = effectiveSegments[0].lowercased()
+            let eventId = effectiveSegments[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            let matchRoute = effectiveSegments[2].lowercased()
+            let matchId = effectiveSegments[3].trimmingCharacters(in: .whitespacesAndNewlines)
+            if (route == "event" || route == "events" || route == "tournament" || route == "tournaments")
+                && (matchRoute == "match" || matchRoute == "matches")
+                && !eventId.isEmpty
+                && !matchId.isEmpty {
+                return RootComponent.DeepLinkNavMatch.init(eventId: eventId, matchId: matchId)
+            }
+        }
+
+        if effectiveSegments.count >= 2
+            && (effectiveSegments[0].lowercased() == "match" || effectiveSegments[0].lowercased() == "matches")
+            && !queryEventId.isEmpty {
+            let matchId = effectiveSegments[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !matchId.isEmpty {
+                return RootComponent.DeepLinkNavMatch.init(eventId: queryEventId, matchId: matchId)
+            }
+        }
+
+        if effectiveSegments.count >= 2 {
+            let route = effectiveSegments[0].lowercased()
+            let eventId = effectiveSegments[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            if route == "event" || route == "events" || route == "tournament" || route == "tournaments" {
+                if !eventId.isEmpty {
+                    return RootComponent.DeepLinkNavEvent.init(eventId: eventId)
+                }
+            }
+        }
+
+        switch effectiveSegments.count {
+        case 2 where effectiveSegments[0].lowercased() == "host" && effectiveSegments[1].lowercased() == "onboarding":
+            let isRefresh = queryItems?.first(where: { $0.name == "refresh" })?.value == "true"
+            let isReturn = queryItems?.first(where: { $0.name == "success" })?.value == "true"
+            
+            if isRefresh {
+                return RootComponent.DeepLinkNavRefresh()
+            } else if isReturn {
+                return RootComponent.DeepLinkNavReturn()
+            }
+            return nil
+            
+        default:
+            return nil
+        }
+    }
+}
+
+private extension Array where Element == String {
+    var isInviteRoute: Bool {
+        let segments = map { $0.lowercased() }
+        guard let first = segments.first else { return false }
+        let second = segments.count > 1 ? segments[1] : nil
+        return first == "invite"
+            || first == "invites"
+            || first == "invitations"
+            || (first == "profile" && (second == "invite" || second == "invites" || second == "invitations"))
+    }
+}

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MvpWear" parent="@android:style/Theme.DeviceDefault">
+        <item name="android:windowBackground">#050607</item>
+        <item name="android:colorAccent">#49E694</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+    </style>
+</resources>

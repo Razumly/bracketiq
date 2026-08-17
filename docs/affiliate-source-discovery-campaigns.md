@@ -4,6 +4,8 @@ The source of record is the Census Bureau's [City and Town Population Totals: 20
 
 The catalog generator filters workbook rows by the configured population threshold, joins stable place GEOIDs from the national places Gazetteer, and writes deterministic JSON. Runtime code does not download Census data. Eugene and Salem are current snapshot evidence only.
 
+Repository layout: run all commands in this guide from `apps/site`. Paths that start with `src/`, `scripts/`, `prisma/`, or `public/` are relative to `apps/site`.
+
 ```bash
 npm run affiliate:discovery:setup
 ```

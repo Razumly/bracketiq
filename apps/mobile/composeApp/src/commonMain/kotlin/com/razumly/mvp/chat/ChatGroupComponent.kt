@@ -1,0 +1,506 @@
+package com.razumly.mvp.chat
+
+import com.razumly.mvp.core.network.userMessage
+import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.lifecycle.doOnDestroy
+import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
+import com.razumly.mvp.chat.data.IChatGroupRepository
+import com.razumly.mvp.chat.data.IMessageRepository
+import com.razumly.mvp.chat.data.MessageHistoryPage
+import com.razumly.mvp.chat.data.isUnreadFor
+import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
+import com.razumly.mvp.core.data.dataTypes.MessageMVP
+import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.repositories.ChatTermsConsentState
+import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
+import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.presentation.INavigationHandler
+import com.razumly.mvp.core.presentation.LatestPlayerInviteSearch
+import com.razumly.mvp.core.util.newId
+import io.github.aakira.napier.Napier
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
+
+enum class ChatFeedbackKind {
+    SUCCESS,
+    WARNING,
+}
+
+data class ChatFeedback(
+    val message: String,
+    val kind: ChatFeedbackKind,
+)
+
+interface ChatGroupComponent {
+    val currentUser: UserData
+    val messageInput: StateFlow<String>
+    val chatGroup: StateFlow<ChatGroupWithRelations?>
+    val isChatLoading: StateFlow<Boolean>
+    val canLoadOlderMessages: StateFlow<Boolean>
+    val isLoadingOlderMessages: StateFlow<Boolean>
+    val errorState: StateFlow<String?>
+    val feedback: StateFlow<ChatFeedback?>
+    val suggestedPlayers: StateFlow<List<UserData>>
+    val friends: StateFlow<List<UserData>>
+    val isChatMuted: StateFlow<Boolean>
+    val chatTermsState: StateFlow<ChatTermsConsentState>
+    val isCheckingChatTerms: StateFlow<Boolean>
+    val showChatTermsPrompt: StateFlow<Boolean>
+
+    fun onBack()
+    fun onMessageInputChange(newText: String)
+    fun loadOlderMessages()
+    fun sendMessage()
+    fun dismissFeedback()
+    fun deleteChat()
+    fun leaveChat()
+    fun searchPlayers(query: String)
+    fun addUserToChat(user: UserData)
+    fun removeUserFromChat(user: UserData)
+    fun toggleChatMute()
+    fun reportChat(notes: String, leaveChat: Boolean)
+    fun dismissChatTermsPrompt()
+    fun acceptChatTermsPrompt()
+}
+
+
+@OptIn(ExperimentalCoroutinesApi::class, ExperimentalTime::class)
+class DefaultChatGroupComponent(
+    componentContext: ComponentContext,
+    private val userRepository: IUserRepository,
+    private val chatGroupRepository: IChatGroupRepository,
+    messageUserId: String?,
+    initialChatId: String?,
+    private val messagesRepository: IMessageRepository,
+    private val pushNotificationsRepository: IPushNotificationsRepository,
+    private val navigationHandler: INavigationHandler,
+) : ChatGroupComponent, ComponentContext by componentContext {
+
+    private val normalizedMessageUserId = messageUserId
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+    private val normalizedInitialChatId = initialChatId
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+
+    private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
+    private var ownedActiveChatId: String? = null
+
+    private val _errorState = MutableStateFlow<String?>(null)
+    override val errorState = _errorState.asStateFlow()
+    private val _feedback = MutableStateFlow<ChatFeedback?>(null)
+    override val feedback = _feedback.asStateFlow()
+    private val playerInviteSearch = LatestPlayerInviteSearch(
+        scope = scope,
+        searchPlayers = userRepository::searchPlayers,
+        excludedUserId = { currentUser.id },
+        onFailure = { error -> _errorState.value = error.userMessage() },
+    )
+    override val suggestedPlayers = playerInviteSearch.suggestions
+    private val _friends = MutableStateFlow<List<UserData>>(listOf())
+    override val friends = _friends.asStateFlow()
+    private val _isChatMuted = MutableStateFlow(false)
+    override val isChatMuted: StateFlow<Boolean> = _isChatMuted.asStateFlow()
+    override val chatTermsState = userRepository.chatTermsConsentState
+    override val isCheckingChatTerms = userRepository.chatTermsConsentLoading
+    private val _showChatTermsPrompt = MutableStateFlow(false)
+    override val showChatTermsPrompt = _showChatTermsPrompt.asStateFlow()
+    private val _isChatLoading = MutableStateFlow(true)
+    override val isChatLoading = _isChatLoading.asStateFlow()
+    private val _canLoadOlderMessages = MutableStateFlow(false)
+    override val canLoadOlderMessages = _canLoadOlderMessages.asStateFlow()
+    private val _isLoadingOlderMessages = MutableStateFlow(false)
+    override val isLoadingOlderMessages = _isLoadingOlderMessages.asStateFlow()
+    private var messageHistoryChatId: String? = null
+    private var nextMessageHistoryIndex = 0
+
+    override val chatGroup = chatGroupRepository.getChatGroupFlow(
+        messageUserId = normalizedMessageUserId,
+        chatId = normalizedInitialChatId,
+    )
+        .map { result ->
+            _isChatLoading.value = false
+            val chatGroup = result.getOrElse {
+                _errorState.value = it.userMessage()
+                null
+            }
+            chatGroup?.copy(
+                messages = chatGroup.messages.sortedWith(
+                    compareBy<MessageMVP> { message -> message.sentTime }
+                        .thenBy { message -> message.id },
+                ),
+            )
+        }
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
+    private val _messageInput = MutableStateFlow("")
+    override val messageInput: StateFlow<String> = _messageInput
+
+    private val currentUserState = userRepository.currentUser
+        .map { result -> result.getOrNull() ?: UserData() }
+        .stateIn(scope, SharingStarted.Eagerly, UserData())
+    override val currentUser: UserData
+        get() = currentUserState.value
+    init {
+        lifecycle.doOnDestroy(::clearOwnedActiveChat)
+        lifecycle.doOnDestroy(playerInviteSearch::invalidate)
+        scope.launch {
+            chatTermsState
+                .map { state -> state.accepted }
+                .distinctUntilChanged()
+                .collect { accepted ->
+                    if (accepted) {
+                        _showChatTermsPrompt.value = false
+                        chatGroupRepository.refreshChatGroupsAndMessages().onFailure {
+                            _errorState.value = it.userMessage("Failed to load chat.")
+                        }
+                    }
+                }
+        }
+        scope.launch {
+            currentUserState
+                .map { user -> user.friendIds }
+                .distinctUntilChanged()
+                .collect { friendIds ->
+                    _friends.value = if (friendIds.isEmpty()) {
+                        emptyList()
+                    } else {
+                        userRepository.getUsers(friendIds).getOrElse {
+                            _errorState.value = it.userMessage()
+                            emptyList()
+                        }
+                    }
+                }
+        }
+        scope.launch {
+            chatGroup
+                .map { it?.chatGroup?.id?.trim().orEmpty() }
+                .distinctUntilChanged()
+                .collect { chatId ->
+                    setOwnedActiveChat(chatId.ifBlank { null })
+                    if (chatId.isBlank()) {
+                        _isChatMuted.value = false
+                        return@collect
+                    }
+                    chatGroupRepository.getCurrentUserMuteStatus(chatId).onSuccess { muted ->
+                        _isChatMuted.value = muted
+                    }.onFailure {
+                        _errorState.value = it.userMessage()
+                        _isChatMuted.value = false
+                    }
+                }
+        }
+        scope.launch {
+            chatGroup
+                .map { group ->
+                    group?.chatGroup?.id?.trim().orEmpty()
+                }
+                .distinctUntilChanged()
+                .collect { chatId ->
+                    messageHistoryChatId = chatId.takeIf(String::isNotBlank)
+                    nextMessageHistoryIndex = 0
+                    _canLoadOlderMessages.value = false
+                    if (chatId.isBlank()) {
+                        _isLoadingOlderMessages.value = false
+                        return@collect
+                    }
+                    _isLoadingOlderMessages.value = true
+                    loadMessageHistoryPage(chatId = chatId, index = 0, reportFailure = false)
+                }
+        }
+        scope.launch {
+            combine(chatGroup, currentUserState) { group, user ->
+                val chatId = group?.chatGroup?.id?.trim().orEmpty()
+                val currentUserId = user.id.trim()
+                val unreadSignature = group
+                    ?.messages
+                    ?.asSequence()
+                    ?.filter { message -> message.isUnreadFor(currentUserId) }
+                    ?.map { message -> message.id.ifBlank { "${message.userId}-${message.sentTime}" } }
+                    ?.sorted()
+                    ?.joinToString("|")
+                    .orEmpty()
+                ChatUnreadSnapshot(
+                    chatId = chatId,
+                    currentUserId = currentUserId,
+                    unreadSignature = unreadSignature,
+                )
+            }
+                .distinctUntilChanged()
+                .collect { snapshot ->
+                    if (snapshot.chatId.isBlank() ||
+                        snapshot.currentUserId.isEmpty() ||
+                        snapshot.unreadSignature.isEmpty()
+                    ) {
+                        return@collect
+                    }
+                    markCurrentChatMessagesRead(snapshot.chatId, snapshot.currentUserId)
+                }
+        }
+    }
+
+    override fun onBack() {
+        playerInviteSearch.invalidate()
+        clearOwnedActiveChat()
+        navigationHandler.navigateBack()
+    }
+
+    override fun onMessageInputChange(newText: String) {
+        _messageInput.value = newText
+    }
+
+    override fun loadOlderMessages() {
+        val chatId = chatGroup.value?.chatGroup?.id?.trim().orEmpty()
+        if (
+            chatId.isBlank() ||
+            chatId != messageHistoryChatId ||
+            !_canLoadOlderMessages.value ||
+            _isLoadingOlderMessages.value
+        ) {
+            return
+        }
+        val index = nextMessageHistoryIndex
+        _isLoadingOlderMessages.value = true
+        scope.launch {
+            loadMessageHistoryPage(chatId = chatId, index = index, reportFailure = true)
+        }
+    }
+
+    private suspend fun loadMessageHistoryPage(
+        chatId: String,
+        index: Int,
+        reportFailure: Boolean,
+    ) {
+        messagesRepository.getMessageHistoryPage(
+            chatGroupId = chatId,
+            index = index,
+        ).onSuccess { page ->
+            if (messageHistoryChatId != chatId) return@onSuccess
+            applyMessageHistoryPage(index = index, page = page)
+            if (reportFailure) {
+                _errorState.value = null
+            }
+        }.onFailure { error ->
+            if (messageHistoryChatId != chatId) return@onFailure
+            Napier.w("Failed to load messages for opened chat $chatId: ${error.message}")
+            if (reportFailure) {
+                _errorState.value = error.userMessage("Failed to load earlier messages.")
+            }
+        }
+        if (messageHistoryChatId == chatId) {
+            _isLoadingOlderMessages.value = false
+        }
+    }
+
+    private fun applyMessageHistoryPage(index: Int, page: MessageHistoryPage) {
+        nextMessageHistoryIndex = page.nextIndex
+        _canLoadOlderMessages.value = page.hasMore && page.nextIndex > index
+    }
+
+    override fun sendMessage() {
+        val text = _messageInput.value.trim()
+        if (text.isBlank()) return
+        if (!chatTermsState.value.accepted) {
+            _showChatTermsPrompt.value = true
+            return
+        }
+        val currentChatGroup = chatGroup.value ?: return
+        val chatId = currentChatGroup.chatGroup.id
+        val message = MessageMVP(
+            id = newId(),
+            userId = currentUser.id,
+            body = text,
+            attachmentUrls = listOf(),
+            chatId = chatId,
+            readByIds = listOf(currentUser.id),
+            sentTime = Clock.System.now()
+        )
+
+        _errorState.value = null
+        _feedback.value = null
+        scope.launch {
+            val createResult = messagesRepository.createMessage(message)
+            if (createResult.isFailure) {
+                _errorState.value = createResult.exceptionOrNull()?.userMessage()
+                return@launch
+            }
+            if (_messageInput.value.trim() == text) {
+                _messageInput.value = ""
+            }
+            pushNotificationsRepository.sendChatGroupNotification(
+                chatId, "New message from ${currentUser.fullName}", text
+            ).onFailure {
+                _feedback.value = ChatFeedback(
+                    message = "Message sent, but recipients may not receive a notification.",
+                    kind = ChatFeedbackKind.WARNING,
+                )
+            }
+        }
+    }
+
+    override fun dismissFeedback() {
+        _feedback.value = null
+    }
+
+    override fun deleteChat() {
+        val currentChat = chatGroup.value?.chatGroup ?: return
+        if (currentChat.hostId != currentUser.id) {
+            _errorState.value = "Only the host can delete this chat."
+            return
+        }
+        scope.launch {
+            chatGroupRepository.deleteChatGroup(currentChat.id).onSuccess {
+                clearOwnedActiveChat()
+                navigationHandler.navigateBack()
+            }.onFailure {
+                _errorState.value = it.userMessage("Failed to delete chat.")
+            }
+        }
+    }
+
+    override fun leaveChat() {
+        val currentChat = chatGroup.value?.chatGroup ?: return
+        if (currentChat.hostId == currentUser.id) {
+            _errorState.value = "Host cannot leave chat. Delete it instead."
+            return
+        }
+        scope.launch {
+            chatGroupRepository.deleteUserFromChatGroup(currentChat, currentUser.id).onSuccess {
+                clearOwnedActiveChat()
+                navigationHandler.navigateBack()
+            }.onFailure {
+                _errorState.value = it.userMessage("Failed to leave chat.")
+            }
+        }
+    }
+
+    override fun searchPlayers(query: String) {
+        playerInviteSearch.submit(query)
+    }
+
+    override fun addUserToChat(user: UserData) {
+        val currentChat = chatGroup.value?.chatGroup ?: return
+        if (currentChat.hostId != currentUser.id) {
+            _errorState.value = "Only the host can manage people."
+            return
+        }
+        if (currentChat.userIds.contains(user.id)) return
+
+        scope.launch {
+            chatGroupRepository.addUserToChatGroup(currentChat, user.id).onFailure {
+                _errorState.value = it.userMessage("Failed to add user to chat.")
+            }
+        }
+    }
+
+    override fun removeUserFromChat(user: UserData) {
+        val currentChat = chatGroup.value?.chatGroup ?: return
+        if (currentChat.hostId != currentUser.id) {
+            _errorState.value = "Only the host can manage people."
+            return
+        }
+        if (user.id == currentUser.id) {
+            _errorState.value = "Host cannot remove themselves from the chat."
+            return
+        }
+        if (!currentChat.userIds.contains(user.id)) return
+
+        scope.launch {
+            chatGroupRepository.deleteUserFromChatGroup(currentChat, user.id).onFailure {
+                _errorState.value = it.userMessage("Failed to remove user from chat.")
+            }
+        }
+    }
+
+    override fun toggleChatMute() {
+        val currentChat = chatGroup.value?.chatGroup ?: return
+        val nextMuted = !isChatMuted.value
+        scope.launch {
+            chatGroupRepository.setCurrentUserMuteStatus(currentChat.id, nextMuted).onSuccess { muted ->
+                _isChatMuted.value = muted
+            }.onFailure {
+                _errorState.value = it.userMessage("Failed to update mute setting.")
+            }
+        }
+    }
+
+    override fun reportChat(notes: String, leaveChat: Boolean) {
+        val currentChat = chatGroup.value?.chatGroup ?: return
+        scope.launch {
+            _errorState.value = null
+            _feedback.value = null
+            chatGroupRepository.reportChat(
+                chatGroupId = currentChat.id,
+                notes = notes,
+                leaveChat = leaveChat,
+            ).onSuccess { removedChatIds ->
+                if (leaveChat || removedChatIds.contains(currentChat.id)) {
+                    clearOwnedActiveChat()
+                    navigationHandler.navigateBack()
+                } else {
+                    _feedback.value = ChatFeedback(
+                        message = "Chat reported.",
+                        kind = ChatFeedbackKind.SUCCESS,
+                    )
+                }
+            }.onFailure {
+                _errorState.value = it.userMessage("Failed to report chat.")
+            }
+        }
+    }
+
+    private fun setOwnedActiveChat(chatGroupId: String?) {
+        ownedActiveChatId = chatGroupId
+        pushNotificationsRepository.setActiveChat(chatGroupId)
+    }
+
+    private fun clearOwnedActiveChat() {
+        val chatGroupId = ownedActiveChatId ?: return
+        pushNotificationsRepository.clearActiveChatIfMatches(chatGroupId)
+        ownedActiveChatId = null
+    }
+
+    override fun dismissChatTermsPrompt() {
+        _showChatTermsPrompt.value = false
+    }
+
+    override fun acceptChatTermsPrompt() {
+        scope.launch {
+            userRepository.acceptChatTermsConsent()
+                .onSuccess {
+                    _showChatTermsPrompt.value = false
+                }
+                .onFailure {
+                    _errorState.value = it.userMessage("Failed to record chat terms consent.")
+                }
+        }
+    }
+
+    private suspend fun markCurrentChatMessagesRead(chatId: String, currentUserId: String) {
+        messagesRepository.markMessagesRead(chatId, currentUserId).onFailure { error ->
+            Napier.w("Failed to mark messages as read for chat $chatId: ${error.message}")
+        }
+        chatGroupRepository.refreshChatGroupsAndMessages().onFailure { error ->
+            Napier.w("Failed to refresh chat summaries after mark-read for chat $chatId: ${error.message}")
+        }
+    }
+
+    private data class ChatUnreadSnapshot(
+        val chatId: String,
+        val currentUserId: String,
+        val unreadSignature: String,
+    )
+
+}

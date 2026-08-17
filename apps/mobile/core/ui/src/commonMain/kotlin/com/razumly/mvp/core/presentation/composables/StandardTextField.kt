@@ -1,0 +1,461 @@
+package com.razumly.mvp.core.presentation.composables
+
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.util.CurrencyAmountInputVisualTransformation
+
+private val LightReadablePlaceholder = Color(0xFF6B7785)
+private val LightReadableDisabled = Color(0xFF5E6B78)
+
+@Composable
+fun StandardTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    label: String = "",
+    placeholder: String = "",
+    isPassword: Boolean = false,
+    keyboardType: String = "default",
+    isError: Boolean = false,
+    supportingText: String = "",
+    supportingContent: (@Composable () -> Unit)? = null,
+    enabled: Boolean = true,
+    readOnly: Boolean = false,
+    trailingIcon: @Composable (() -> Unit)? = null,
+    leadingIcon: @Composable (() -> Unit)? = null,
+    textStyle: TextStyle? = null,
+    placeholderTextStyle: TextStyle? = null,
+    fontSize: TextUnit? = null,
+    containerColor: Color? = null,
+    height: Dp? = null,
+    contentPadding: PaddingValues? = null,
+    inputFilter: ((String) -> String)? = null,
+    selectionAwareInputFilter: Boolean = false,
+    inputVisualTransformation: VisualTransformation? = null,
+    onTap: (() -> Unit)? = null,
+    imeAction: ImeAction = ImeAction.Next,
+    style: PlatformTextFieldStyle = PlatformTextFieldStyle.Default,
+    externalFocusManager: PlatformFocusManager? = null,
+    onImeAction: (() -> Unit)? = null,
+    onFocusChanged: ((Boolean) -> Unit)? = null,
+) {
+    val focusManager = LocalFocusManager.current
+    val glassStyle = style == PlatformTextFieldStyle.GlassPill
+    val fieldShape = if (glassStyle) RoundedCornerShape(28.dp) else OutlinedTextFieldDefaults.shape
+    val readablePlaceholder = if (isSystemInDarkTheme()) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        LightReadablePlaceholder
+    }
+    val readableDisabled = if (isSystemInDarkTheme()) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        LightReadableDisabled
+    }
+    val interactiveReadOnly = readOnly && onTap != null && enabled
+
+    val finalTextStyle = when {
+        textStyle != null && fontSize != null -> textStyle.copy(fontSize = fontSize)
+        textStyle != null -> textStyle
+        fontSize != null -> TextStyle(fontSize = fontSize)
+        else -> MaterialTheme.typography.bodyLarge
+    }
+
+    fun runNextAction() {
+        if (onImeAction != null) {
+            onImeAction()
+        } else {
+            externalFocusManager?.handleNextAction() ?: focusManager.moveFocus(FocusDirection.Down)
+        }
+    }
+
+    fun runDoneAction() {
+        if (onImeAction != null) {
+            onImeAction()
+        } else {
+            externalFocusManager?.handleDoneAction() ?: focusManager.clearFocus()
+        }
+    }
+
+    fun runImeAction(): Boolean {
+        when (imeAction) {
+            ImeAction.Next -> runNextAction()
+            ImeAction.Done,
+            ImeAction.Go,
+            ImeAction.Search,
+            ImeAction.Send -> runDoneAction()
+            else -> return false
+        }
+        return true
+    }
+
+    val finalModifier = modifier
+        .then(if (height != null) Modifier.height(height) else Modifier)
+        .then(if (contentPadding != null) Modifier.padding(contentPadding) else Modifier)
+        .then(
+            if (onFocusChanged != null) {
+                Modifier.onFocusChanged { state -> onFocusChanged(state.isFocused) }
+            } else {
+                Modifier
+            }
+        )
+        .then(
+            if (enabled && !readOnly) {
+                Modifier.onPreviewKeyEvent { event ->
+                    event.key == Key.Enter &&
+                        event.type == KeyEventType.KeyDown &&
+                        runImeAction()
+                }
+            } else {
+                Modifier
+            }
+        )
+        .then(
+            if (externalFocusManager != null) {
+                Modifier.platformFocusable(externalFocusManager, enabled)
+            } else {
+                Modifier
+            }
+        )
+
+    val usesPasswordKeyboard = isPassword || keyboardType == "password"
+    val keyboardTypeValue = resolveComposeKeyboardType(
+        keyboardType = keyboardType,
+        usesPasswordKeyboard = usesPasswordKeyboard,
+    )
+
+    val visualTransformation = when {
+        isPassword -> PasswordVisualTransformation()
+        keyboardType == "money" -> CurrencyAmountInputVisualTransformation()
+        inputVisualTransformation != null -> inputVisualTransformation
+        else -> VisualTransformation.None
+    }
+    val keyboardOptionsValue = KeyboardOptions(
+        keyboardType = keyboardTypeValue,
+        imeAction = imeAction,
+        autoCorrectEnabled = if (usesPasswordKeyboard) false else null,
+    )
+    val supportingTextContent: (@Composable () -> Unit)? =
+        supportingContent ?: if (supportingText.isNotEmpty()) {
+            { Text(supportingText) }
+        } else {
+            null
+        }
+
+    val resolvedContainerColor = containerColor ?: MaterialTheme.colorScheme.surface
+    val defaultColors = OutlinedTextFieldDefaults.colors(
+        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+        disabledTextColor = if (interactiveReadOnly) MaterialTheme.colorScheme.onSurface else readableDisabled,
+        focusedContainerColor = resolvedContainerColor,
+        unfocusedContainerColor = resolvedContainerColor,
+        disabledContainerColor = if (interactiveReadOnly) {
+            resolvedContainerColor
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        errorContainerColor = resolvedContainerColor,
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+        disabledBorderColor = when {
+            interactiveReadOnly && isError -> MaterialTheme.colorScheme.error
+            interactiveReadOnly -> MaterialTheme.colorScheme.outline
+            else -> MaterialTheme.colorScheme.outlineVariant
+        },
+        errorBorderColor = MaterialTheme.colorScheme.error,
+        focusedLabelColor = MaterialTheme.colorScheme.primary,
+        unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledLabelColor = when {
+            interactiveReadOnly && isError -> MaterialTheme.colorScheme.error
+            interactiveReadOnly -> MaterialTheme.colorScheme.onSurfaceVariant
+            else -> readableDisabled
+        },
+        errorLabelColor = MaterialTheme.colorScheme.error,
+        focusedPlaceholderColor = readablePlaceholder,
+        unfocusedPlaceholderColor = readablePlaceholder,
+        disabledPlaceholderColor = if (interactiveReadOnly) readablePlaceholder else readableDisabled,
+        errorPlaceholderColor = readablePlaceholder,
+        focusedSupportingTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        unfocusedSupportingTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledSupportingTextColor = when {
+            interactiveReadOnly && isError -> MaterialTheme.colorScheme.error
+            interactiveReadOnly -> MaterialTheme.colorScheme.onSurfaceVariant
+            else -> readableDisabled
+        },
+        errorSupportingTextColor = MaterialTheme.colorScheme.error,
+        focusedLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        unfocusedLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledLeadingIconColor = if (interactiveReadOnly) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+            readableDisabled
+        },
+        errorLeadingIconColor = MaterialTheme.colorScheme.error,
+        focusedTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        unfocusedTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledTrailingIconColor = if (interactiveReadOnly) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+            readableDisabled
+        },
+        errorTrailingIconColor = MaterialTheme.colorScheme.error,
+        cursorColor = MaterialTheme.colorScheme.primary,
+        errorCursorColor = MaterialTheme.colorScheme.error,
+    )
+    val glassColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.55f) else Color.Transparent,
+        unfocusedBorderColor = if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.45f) else Color.Transparent,
+        disabledBorderColor = if (interactiveReadOnly && isError) {
+            MaterialTheme.colorScheme.error.copy(alpha = 0.45f)
+        } else {
+            Color.Transparent
+        },
+        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+        disabledTextColor = if (interactiveReadOnly) MaterialTheme.colorScheme.onSurface else readableDisabled,
+        focusedContainerColor = Color.Transparent,
+        unfocusedContainerColor = Color.Transparent,
+        disabledContainerColor = Color.Transparent,
+        errorContainerColor = Color.Transparent,
+        focusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledLabelColor = when {
+            interactiveReadOnly && isError -> MaterialTheme.colorScheme.error
+            interactiveReadOnly -> MaterialTheme.colorScheme.onSurfaceVariant
+            else -> readableDisabled
+        },
+        focusedPlaceholderColor = readablePlaceholder,
+        unfocusedPlaceholderColor = readablePlaceholder,
+        disabledPlaceholderColor = if (interactiveReadOnly) readablePlaceholder else readableDisabled,
+        focusedSupportingTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        unfocusedSupportingTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledSupportingTextColor = when {
+            interactiveReadOnly && isError -> MaterialTheme.colorScheme.error
+            interactiveReadOnly -> MaterialTheme.colorScheme.onSurfaceVariant
+            else -> readableDisabled
+        },
+        focusedLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        unfocusedLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledLeadingIconColor = if (interactiveReadOnly) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+            readableDisabled
+        },
+        focusedTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        unfocusedTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledTrailingIconColor = if (interactiveReadOnly) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+            readableDisabled
+        },
+        cursorColor = MaterialTheme.colorScheme.primary,
+        errorCursorColor = MaterialTheme.colorScheme.error,
+    )
+    val colors = if (glassStyle) glassColors else defaultColors
+
+    if (readOnly && onTap != null) {
+        Box(
+            modifier = finalModifier
+                .semantics {
+                    contentDescription = label.ifBlank { placeholder.ifBlank { value } }
+                    if (value.isNotBlank() && value != label) {
+                        stateDescription = value
+                    }
+                    if (isError && supportingText.isNotBlank()) {
+                        error(supportingText)
+                    }
+                }
+                .clickable(
+                    enabled = enabled,
+                    role = Role.Button,
+                ) {
+                    onTap()
+                    focusManager.clearFocus()
+                },
+        ) {
+            OutlinedTextField(
+                value = value,
+                onValueChange = {},
+                modifier = Modifier.fillMaxWidth(),
+                label = if (label.isNotEmpty()) ({ Text(label) }) else null,
+                placeholder = if (placeholder.isNotEmpty()) {
+                    { Text(placeholder, style = placeholderTextStyle ?: finalTextStyle) }
+                } else {
+                    null
+                },
+                enabled = enabled,
+                readOnly = true,
+                textStyle = finalTextStyle,
+                visualTransformation = visualTransformation,
+                isError = isError,
+                supportingText = supportingTextContent,
+                trailingIcon = trailingIcon,
+                leadingIcon = leadingIcon,
+                keyboardOptions = keyboardOptionsValue,
+                keyboardActions = KeyboardActions(
+                    onNext = { runNextAction() },
+                    onDone = { runDoneAction() },
+                    onGo = { runDoneAction() },
+                    onSearch = { runDoneAction() },
+                    onSend = { runDoneAction() },
+                ),
+                singleLine = true,
+                shape = fieldShape,
+                colors = colors,
+            )
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(fieldShape)
+                    .clickable(
+                        enabled = enabled,
+                        role = Role.Button,
+                    ) {
+                        onTap()
+                        focusManager.clearFocus()
+                    }
+                    .clearAndSetSemantics {},
+            )
+        }
+        return
+    }
+
+    val labelContent: (@Composable () -> Unit)? = if (label.isNotEmpty()) ({ Text(label) }) else null
+    val placeholderContent: (@Composable () -> Unit)? = if (placeholder.isNotEmpty()) {
+        { Text(placeholder, style = placeholderTextStyle ?: finalTextStyle) }
+    } else {
+        null
+    }
+    val keyboardActionsValue = KeyboardActions(
+        onNext = { runNextAction() },
+        onDone = { runDoneAction() },
+        onGo = { runDoneAction() },
+        onSearch = { runDoneAction() },
+        onSend = { runDoneAction() },
+    )
+
+    if (selectionAwareInputFilter && inputFilter != null) {
+        var editingValue by remember {
+            mutableStateOf(TextFieldValue(value, selection = TextRange(value.length)))
+        }
+        var lastEmittedValue by remember { mutableStateOf(value) }
+        LaunchedEffect(value) {
+            if (value != lastEmittedValue) {
+                editingValue = TextFieldValue(value, selection = TextRange(value.length))
+                lastEmittedValue = value
+            }
+        }
+
+        OutlinedTextField(
+            value = editingValue,
+            onValueChange = { newValue: TextFieldValue ->
+                val filteredValue = applyInputFilterWithSelection(newValue, inputFilter)
+                editingValue = filteredValue
+                lastEmittedValue = filteredValue.text
+                onValueChange(filteredValue.text)
+            },
+            modifier = finalModifier,
+            label = labelContent,
+            placeholder = placeholderContent,
+            enabled = enabled,
+            readOnly = readOnly,
+            textStyle = finalTextStyle,
+            visualTransformation = visualTransformation,
+            keyboardOptions = keyboardOptionsValue,
+            keyboardActions = keyboardActionsValue,
+            isError = isError,
+            supportingText = supportingTextContent,
+            trailingIcon = trailingIcon,
+            leadingIcon = leadingIcon,
+            singleLine = true,
+            shape = fieldShape,
+            colors = colors,
+        )
+    } else {
+        OutlinedTextField(
+            value = value,
+            onValueChange = { newValue: String ->
+                val filteredValue = inputFilter?.invoke(newValue) ?: newValue
+                onValueChange(filteredValue)
+            },
+            modifier = finalModifier,
+            label = labelContent,
+            placeholder = placeholderContent,
+            enabled = enabled,
+            readOnly = readOnly,
+            textStyle = finalTextStyle,
+            visualTransformation = visualTransformation,
+            keyboardOptions = keyboardOptionsValue,
+            keyboardActions = keyboardActionsValue,
+            isError = isError,
+            supportingText = supportingTextContent,
+            trailingIcon = trailingIcon,
+            leadingIcon = leadingIcon,
+            singleLine = true,
+            shape = fieldShape,
+            colors = colors,
+        )
+    }
+}
+
+internal fun applyInputFilterWithSelection(
+    value: TextFieldValue,
+    inputFilter: (String) -> String,
+): TextFieldValue {
+    val filteredText = inputFilter(value.text)
+    fun filteredOffset(offset: Int): Int = inputFilter(value.text.take(offset.coerceIn(0, value.text.length)))
+        .length
+        .coerceAtMost(filteredText.length)
+
+    return TextFieldValue(
+        text = filteredText,
+        selection = TextRange(
+            start = filteredOffset(value.selection.start),
+            end = filteredOffset(value.selection.end),
+        ),
+    )
+}

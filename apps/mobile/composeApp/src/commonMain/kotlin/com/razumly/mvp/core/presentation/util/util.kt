@@ -1,0 +1,287 @@
+@file:OptIn(ExperimentalTime::class)
+
+package com.razumly.mvp.core.presentation.util
+
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.EaseInCubic
+import androidx.compose.animation.core.EaseInQuart
+import androidx.compose.animation.core.EaseOutCubic
+import androidx.compose.animation.core.EaseOutQuart
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.snapshotFlow
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.network.apiBaseUrl
+import io.ktor.http.encodeURLQueryComponent
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.LocalTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.format.MonthNames
+import kotlinx.datetime.format.Padding
+import kotlinx.datetime.format.char
+import kotlinx.datetime.minus
+import kotlinx.datetime.toLocalDateTime
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
+
+@Composable
+expect fun getScreenWidth(): Int
+
+@Composable
+expect fun getScreenHeight(): Int
+
+// Add this to util.kt
+@OptIn(ExperimentalTime::class)
+fun formatMessageTime(sentTime: Instant): String {
+    val now = Clock.System.now()
+    val timeZone = TimeZone.currentSystemDefault()
+
+    val sentDate = sentTime.toLocalDateTime(timeZone).date
+    val currentDate = now.toLocalDateTime(timeZone).date
+
+    return when (sentDate) {
+        currentDate -> {
+            // Message sent today - show time (e.g., "2:30 PM")
+            val localTime = sentTime.toLocalDateTime(timeZone).time
+            timeFormat.format(localTime)
+        }
+        currentDate.minus(1, kotlinx.datetime.DateTimeUnit.DAY) -> {
+            // Message sent yesterday
+            "Yesterday"
+        }
+        else -> {
+            // Message sent before yesterday - show date (e.g., "27 Aug")
+            dateFormat.format(sentDate)
+        }
+    }
+}
+
+
+val timeFormat = LocalTime.Format {
+    amPmHour(Padding.NONE)
+    char(':')
+    minute()
+    char(' ')
+    amPmMarker("AM", "PM")
+}
+
+val dateFormat = LocalDate.Format {
+    day(padding = Padding.ZERO)
+    char(' ')
+    monthName(MonthNames.ENGLISH_ABBREVIATED)
+}
+
+val dateTimeFormat = LocalDateTime.Format {
+    day(padding = Padding.NONE)
+    char(' ')
+    monthName(MonthNames.ENGLISH_ABBREVIATED)
+    char(',')
+    char(' ')
+    year()
+    char('-')
+    amPmHour()
+    char(':')
+    minute()
+    char(' ')
+    amPmMarker("AM", "PM")
+}
+
+fun Int.teamSizeFormat(): String {
+    return if (this < 7) "$this" else "6+"
+}
+
+@Composable
+fun LazyListState.isScrollingUp(): State<Boolean> {
+    return produceState(initialValue = true) {
+        var lastIndex = 0
+        var lastScroll = Int.MAX_VALUE
+        snapshotFlow {
+            firstVisibleItemIndex to firstVisibleItemScrollOffset
+        }.collect { (currentIndex, currentScroll) ->
+            if (currentIndex != lastIndex || currentScroll != lastScroll) {
+                value = currentIndex < lastIndex ||
+                        (currentIndex == lastIndex && currentScroll < lastScroll)
+                lastIndex = currentIndex
+                lastScroll = currentScroll
+            }
+        }
+    }
+}
+
+fun String.toTitleCase(): String {
+    return this
+        .lowercase()
+        .split(" ")
+        .joinToString(" ") { word ->
+            word.replaceFirstChar { char ->
+                char.uppercase()
+            }
+        }.split(".").joinToString(".") { word ->
+            word.replaceFirstChar { char ->
+                char.uppercase()
+            }
+        }
+}
+
+fun String.toNameCase(): String {
+    return this
+        .trim()
+        .split(Regex("\\s+"))
+        .filter { token -> token.isNotBlank() }
+        .joinToString(" ") { token ->
+            token.replaceFirstChar { char ->
+                if (char.isLowerCase()) char.titlecase() else char.toString()
+            }
+        }
+}
+
+fun String.toEnumTitleCase(): String {
+    return this
+        .trim()
+        .replace('_', ' ')
+        .replace('-', ' ')
+        .split(Regex("\\s+"))
+        .filter { token -> token.isNotBlank() }
+        .joinToString(" ") { token ->
+            token.lowercase().replaceFirstChar { char ->
+                char.uppercase()
+            }
+        }
+}
+
+fun Event.eventTypeWithSportLabel(): String {
+    val eventTypeLabel = eventType.name.toEnumTitleCase()
+    val sportLabel = sportIds.firstOrNull()
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+
+    return if (sportLabel != null) {
+        "$eventTypeLabel: $sportLabel"
+    } else {
+        eventTypeLabel
+    }
+}
+
+fun Double.moneyFormat(): String {
+    val rounded = (this * 100).roundToInt()
+    val whole = rounded / 100
+    val fraction = abs(rounded % 100)
+    return "$$whole.${if (fraction < 10) "0" else ""}$fraction"
+}
+
+fun AnimatedContentTransitionScope<Boolean>.transitionSpec(animationDelay: Int) = if (targetState) {
+    slideInVertically(
+        initialOffsetY = { it / 4 },
+        animationSpec = tween(300, delayMillis = animationDelay, easing = EaseOutCubic)
+    ) + fadeIn(
+        animationSpec = tween(300, delayMillis = animationDelay + 100)
+    ) + expandVertically(
+        animationSpec = tween(300, delayMillis = animationDelay, easing = EaseOutCubic)
+    ) togetherWith slideOutVertically(
+        targetOffsetY = { -it / 4 },
+        animationSpec = tween(200, easing = EaseInCubic)
+    ) + fadeOut(
+        animationSpec = tween(200)
+    ) + shrinkVertically(
+        animationSpec = tween(200, easing = EaseInCubic)
+    )
+} else {
+    slideInVertically(
+        initialOffsetY = { -it / 4 },
+        animationSpec = tween(300, delayMillis = animationDelay, easing = EaseOutCubic)
+    ) + fadeIn(
+        animationSpec = tween(300, delayMillis = animationDelay + 100)
+    ) + expandVertically(
+        animationSpec = tween(300, delayMillis = animationDelay, easing = EaseOutCubic)
+    ) togetherWith slideOutVertically(
+        targetOffsetY = { it / 4 },
+        animationSpec = tween(200, easing = EaseInCubic)
+    ) + fadeOut(
+        animationSpec = tween(200)
+    ) + shrinkVertically(
+        animationSpec = tween(200, easing = EaseInCubic)
+    )
+}.using(SizeTransform(clip = false))
+
+fun AnimatedContentTransitionScope<Boolean>.buttonTransitionSpec() =
+    if (targetState) {
+        slideInVertically(
+            initialOffsetY = { it / 8 },
+            animationSpec = tween(200, easing = EaseOutQuart)
+        ) + fadeIn(
+            animationSpec = tween(150, delayMillis = 50)
+        ) togetherWith slideOutVertically(
+            targetOffsetY = { -it / 8 },
+            animationSpec = tween(150, easing = EaseInQuart)
+        ) + fadeOut(
+            animationSpec = tween(100)
+        )
+    } else {
+        slideInVertically(
+            initialOffsetY = { -it / 8 },
+            animationSpec = tween(200, easing = EaseOutQuart)
+        ) + fadeIn(
+            animationSpec = tween(150, delayMillis = 50)
+        ) togetherWith slideOutVertically(
+            targetOffsetY = { it / 8 },
+            animationSpec = tween(150, easing = EaseInQuart)
+        ) + fadeOut(
+            animationSpec = tween(100)
+        )
+    }.using(SizeTransform(clip = false))
+
+fun createEventUrl(event: Event): String {
+    return "https://bracket-iq.com/events/${event.id}"
+}
+
+fun getEventQrCodePath(eventId: String): String =
+    "/api/events/$eventId/qr?brand=event"
+
+fun getEventQrCodeUrl(eventId: String): String =
+    buildString {
+        append(apiBaseUrl.trimEnd('/'))
+        append(getEventQrCodePath(eventId))
+    }
+
+fun getImageUrl(fileId: String, width: Int? = null, height: Int? = null, trim: Boolean = false): String =
+    buildString {
+        append(apiBaseUrl.trimEnd('/'))
+        append("/api/files/")
+        append(fileId)
+        append("/preview")
+
+        val params = buildList {
+            width?.let { add("w=$it") }
+            height?.let { add("h=$it") }
+            if (trim) add("trim=true")
+        }
+        if (params.isNotEmpty()) {
+            append('?')
+            append(params.joinToString("&"))
+        }
+    }
+
+fun getInitialsAvatarUrl(name: String, size: Int): String =
+    buildString {
+        append(apiBaseUrl.trimEnd('/'))
+        append("/api/avatars/initials?name=")
+        append(name.trim().ifBlank { "Organization" }.encodeURLQueryComponent())
+        append("&size=")
+        append(size.coerceAtLeast(16))
+        append("&format=png")
+    }

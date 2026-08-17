@@ -2,6 +2,8 @@
 
 This registry tracks candidate sites for BracketIQ affiliate event and rental imports. Keep implementation notes here as each scraper is added. The implementation plan lives in `docs/admin-affiliate-scraping-execplan.md`.
 
+Repository layout: run all `npm`, Prisma, and site script commands from `apps/site`. Paths that start with `src/`, `scripts/`, `prisma/`, or `public/` are relative to `apps/site`. Paths that start with `docs/` or `.agents/` are relative to the repository root.
+
 Status values:
 
 - `Not started`: no scraper work has begun.

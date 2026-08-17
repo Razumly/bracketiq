@@ -1,0 +1,54 @@
+package com.razumly.mvp.core.network.dto
+
+import kotlinx.serialization.json.JsonNull
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+
+class ExplicitNullPatchTest {
+
+    @Test
+    fun team_and_bulk_match_patch_payloads_preserve_requested_null_clears() {
+        val previousTeam = encodeExplicitNullPatchObject(
+            serializer = TeamUpdateDto.serializer(),
+            value = TeamUpdateDto(headCoachId = "coach_1", divisionTypeId = "division_open"),
+        )
+        val updatedTeam = encodeExplicitNullPatchObject(
+            serializer = TeamUpdateDto.serializer(),
+            value = TeamUpdateDto(),
+        )
+        val teamClearFields = explicitNullFieldsForPatch(
+            previous = previousTeam,
+            updated = updatedTeam,
+            clearableFields = setOf("headCoachId", "divisionTypeId"),
+        )
+        val teamPayload = encodeExplicitNullPatchObject(
+            serializer = TeamUpdateDto.serializer(),
+            value = TeamUpdateDto(),
+            explicitNullFields = teamClearFields,
+        )
+
+        val previousMatch = encodeExplicitNullPatchObject(
+            serializer = BulkMatchUpdateEntryDto.serializer(),
+            value = BulkMatchUpdateEntryDto(id = "match_1", fieldId = "field_1"),
+        )
+        val updatedMatch = encodeExplicitNullPatchObject(
+            serializer = BulkMatchUpdateEntryDto.serializer(),
+            value = BulkMatchUpdateEntryDto(id = "match_1"),
+        )
+        val matchClearFields = explicitNullFieldsForPatch(
+            previous = previousMatch,
+            updated = updatedMatch,
+            clearableFields = setOf("fieldId"),
+        )
+        val matchPayload = encodeExplicitNullPatchObject(
+            serializer = BulkMatchUpdateEntryDto.serializer(),
+            value = BulkMatchUpdateEntryDto(id = "match_1"),
+            explicitNullFields = matchClearFields,
+        )
+
+        assertEquals(JsonNull, teamPayload["headCoachId"])
+        assertEquals(JsonNull, teamPayload["divisionTypeId"])
+        assertEquals(JsonNull, matchPayload["fieldId"])
+    }
+}

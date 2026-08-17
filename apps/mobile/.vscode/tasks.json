@@ -1,0 +1,47 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "iOS: Build (xcworkspace Debug Simulator)",
+      "type": "shell",
+      "command": "xcodebuild",
+      "args": [
+        "-workspace",
+        "iosApp/iosApp.xcworkspace",
+        "-scheme",
+        "iosApp",
+        "-configuration",
+        "Debug",
+        "-sdk",
+        "iphonesimulator",
+        "-destination",
+        "generic/platform=iOS Simulator",
+        "build",
+        "CODE_SIGNING_ALLOWED=NO"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "iOS: Refresh SourceKit Build Server",
+      "type": "shell",
+      "command": "xcode-build-server",
+      "args": [
+        "config",
+        "-workspace",
+        "iosApp/iosApp.xcworkspace",
+        "-scheme",
+        "iosApp"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

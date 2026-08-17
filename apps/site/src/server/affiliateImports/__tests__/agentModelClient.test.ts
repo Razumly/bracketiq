@@ -1,0 +1,183 @@
+/** @jest-environment node */
+
+import {
+  AFFILIATE_MAPPING_SYSTEM_PROMPT,
+  OpenAICompatibleAffiliateMappingModelClient,
+} from '../agentModelClient';
+import { buildAffiliateSportsCatalogSnapshot } from '../affiliateSportsCatalog';
+const HASH_A = 'a'.repeat(64);
+const HASH_B = 'b'.repeat(64);
+const HASH_C = 'c'.repeat(64);
+const sportsCatalog = buildAffiliateSportsCatalogSnapshot(
+  [{ id: 'sport_1', name: 'Grass Soccer' }],
+  '2026-01-01T00:00:00.000Z',
+);
+
+const draft = {
+  schemaVersion: 2,
+  contextContractVersion: 2,
+  intakeId: 'intake_1',
+  sourceKey: 'river-city',
+  runId: 'run_1',
+  policyDisposition: 'BLOCKED',
+  implementationMode: 'BLOCKED',
+  listingKind: null,
+  evidence: [{
+    artifactKind: 'ROBOTS',
+    artifactSha256: HASH_A,
+    pageUrl: 'https://rivercity.example/robots.txt',
+    supports: ['policyDisposition'],
+  }],
+  organization: {
+    name: null,
+    website: null,
+    description: null,
+    city: null,
+    address: null,
+  },
+  mapping: null,
+  expectedCandidates: [],
+  logo: {
+    disposition: 'MISSING',
+    artifactSha256: null,
+    sourceUrl: null,
+  },
+  warnings: [],
+  unresolvedQuestions: [],
+  sportDeterminations: [],
+};
+
+describe('OpenAI-compatible open-weight mapping client', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('sends a deterministic schema-constrained request and parses the draft', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    global.fetch = jest.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify(draft) } }],
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    const client = new OpenAICompatibleAffiliateMappingModelClient({
+      endpoint: 'http://127.0.0.1:8080',
+      bearerToken: 'private-token',
+      model: 'gpt-oss-20b',
+      revision: {
+        family: 'gpt-oss',
+        upstreamRepository: 'openai/gpt-oss-20b',
+        upstreamRevision: 'revision-1',
+        artifactSha256: HASH_B,
+        adapterRevision: null,
+        promptTemplateRevision: 'prompt-v1',
+      },
+    });
+    expect(await client.createDraft({
+      contextContractVersion: 2,
+      jobId: 'job_1',
+      intakeId: 'intake_1',
+      sourceKey: 'river-city',
+      workerId: 'worker_1',
+      claimedAt: '2026-01-01T00:00:00.000Z',
+      runId: 'run_1',
+      evidenceRunIds: ['run_1'],
+      sportsCatalog,
+      policyDisposition: 'BLOCKED',
+      targetKindHints: [],
+      artifacts: [{
+        artifactId: 'artifact_robots',
+        kind: 'ROBOTS',
+        sha256: HASH_A,
+        pageUrl: 'https://rivercity.example/robots.txt',
+        intakeId: 'intake_1',
+        runId: 'run_1',
+      }],
+      evidenceExcerpts: [{
+        kind: 'ROBOTS',
+        sha256: HASH_A,
+        pageUrl: 'https://rivercity.example/robots.txt',
+        content: 'Disallow: /',
+        truncated: false,
+      }],
+      instructionsRevision: 'v2',
+    })).toEqual(draft);
+    expect(requests[0].url).toBe('http://127.0.0.1:8080/v1/chat/completions');
+    const body = JSON.parse(String(requests[0].init?.body));
+    expect(body).toEqual(expect.objectContaining({
+      model: 'gpt-oss-20b',
+      temperature: 0,
+      response_format: {
+        type: 'json_schema',
+        schema: expect.objectContaining({ type: 'object' }),
+      },
+    }));
+    expect((requests[0].init?.headers as Record<string, string>).authorization).toBe(
+      'Bearer private-token',
+    );
+    expect(AFFILIATE_MAPPING_SYSTEM_PROMPT).toContain(
+      'only supported target kinds are EVENT, RENTAL, and CLUB',
+    );
+    expect(AFFILIATE_MAPPING_SYSTEM_PROMPT).toContain('Never create a TEAM mapping');
+  });
+
+  it('requires operator-supplied authentication and rejects non-JSON output', async () => {
+    expect(() => new OpenAICompatibleAffiliateMappingModelClient({
+      endpoint: 'http://127.0.0.1:8080',
+      bearerToken: '',
+      model: 'model',
+      revision: {
+        family: 'fixture',
+        upstreamRepository: 'fixture/model',
+        upstreamRevision: 'v1',
+        artifactSha256: HASH_C,
+        adapterRevision: null,
+        promptTemplateRevision: 'v1',
+      },
+    })).toThrow('bearer token is required');
+
+    global.fetch = jest.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: '```json\\n{}\\n```' } }],
+    }), { status: 200 })) as typeof fetch;
+    const client = new OpenAICompatibleAffiliateMappingModelClient({
+      endpoint: 'http://127.0.0.1:8080',
+      bearerToken: 'token',
+      model: 'model',
+      revision: {
+        family: 'fixture',
+        upstreamRepository: 'fixture/model',
+        upstreamRevision: 'v1',
+        artifactSha256: HASH_C,
+        adapterRevision: null,
+        promptTemplateRevision: 'v1',
+      },
+    });
+    await expect(client.createDraft({
+      contextContractVersion: 2,
+      jobId: 'job',
+      intakeId: 'intake',
+      sourceKey: 'source',
+      workerId: 'worker_1',
+      claimedAt: '2026-01-01T00:00:00.000Z',
+      runId: 'run',
+      evidenceRunIds: ['run'],
+      sportsCatalog,
+      policyDisposition: 'BLOCKED',
+      targetKindHints: [],
+      artifacts: [{
+        artifactId: 'artifact_robots',
+        kind: 'ROBOTS',
+        sha256: HASH_A,
+        pageUrl: 'https://rivercity.example/robots.txt',
+        intakeId: 'intake',
+        runId: 'run',
+      }],
+      instructionsRevision: 'v2',
+    })).rejects.toThrow('non-JSON draft content');
+  });
+});

@@ -1,0 +1,81 @@
+name: Publish site production image
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: publish-site-production-image
+  cancel-in-progress: false
+
+jobs:
+  verify-ci:
+    name: Verify successful site CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Require the main branch
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Production images can only be published from main." >&2
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Verify site CI passed for this commit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_WORKFLOW_FILE: site-ci.yml
+        run: apps/site/deploy/vm/bin/verify-ci.sh "$GITHUB_SHA"
+
+  publish:
+    needs: verify-ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Sign in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish immutable site image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./apps/site
+          file: ./apps/site/Dockerfile
+          push: true
+          tags: ghcr.io/razumly/bracketiq-site:${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=site
+          cache-to: type=gha,mode=max,scope=site
+          build-args: |
+            NEXT_PUBLIC_APP_URL=https://bracket-iq.com
+            NEXT_PUBLIC_SITE_URL=https://bracket-iq.com
+            NEXT_PUBLIC_WEB_BASE_URL=https://bracket-iq.com
+            NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${{ secrets.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}
+            NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID=${{ vars.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID }}
+            NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+            NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN=${{ secrets.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN }}
+            NEXT_PUBLIC_MVP_ANDROID_DEEP_LINK=${{ vars.NEXT_PUBLIC_MVP_ANDROID_DEEP_LINK }}
+            NEXT_PUBLIC_MVP_ANDROID_PLAY_STORE_URL=${{ vars.NEXT_PUBLIC_MVP_ANDROID_PLAY_STORE_URL }}
+            NEXT_PUBLIC_MVP_IOS_APP_STORE_URL=${{ vars.NEXT_PUBLIC_MVP_IOS_APP_STORE_URL }}
+            NEXT_PUBLIC_MVP_IOS_DEEP_LINK=${{ vars.NEXT_PUBLIC_MVP_IOS_DEEP_LINK }}

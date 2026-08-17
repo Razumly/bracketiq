@@ -1,0 +1,6 @@
+# Default ownership for shared product and repository files.
+* @camka14
+
+# Application ownership boundaries.
+/apps/site/ @camka14
+/apps/mobile/ @camka14

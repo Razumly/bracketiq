@@ -1,0 +1,266 @@
+package com.razumly.mvp.di
+
+import com.arkivanov.decompose.ComponentContext
+import com.razumly.mvp.chat.ChatGroupComponent
+import com.razumly.mvp.chat.ChatListComponent
+import com.razumly.mvp.chat.DefaultChatGroupComponent
+import com.razumly.mvp.chat.DefaultChatListComponent
+import com.razumly.mvp.app.RootComponent
+import com.razumly.mvp.app.RootComponent.DeepLinkNav
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.presentation.AppConfig
+import com.razumly.mvp.core.presentation.DefaultPlayerInteractionComponent
+import com.razumly.mvp.core.presentation.INavigationHandler
+import com.razumly.mvp.core.presentation.PlayerInteractionComponent
+import com.razumly.mvp.eventCreate.CreateEventComponent
+import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
+import com.razumly.mvp.eventDetail.DefaultEventDetailComponent
+import com.razumly.mvp.eventDetail.EventDetailComponent
+import com.razumly.mvp.eventManagement.DefaultEventManagementComponent
+import com.razumly.mvp.eventManagement.EventManagementComponent
+import com.razumly.mvp.eventSearch.DefaultEventSearchComponent
+import com.razumly.mvp.eventSearch.EventSearchComponent
+import com.razumly.mvp.matchDetail.DefaultMatchContentComponent
+import com.razumly.mvp.matchDetail.MatchContentComponent
+import com.razumly.mvp.profile.DefaultProfileComponent
+import com.razumly.mvp.profile.ProfileComponent
+import com.razumly.mvp.profile.ProfileStartDestination
+import com.razumly.mvp.profile.profileDetails.DefaultProfileDetailsComponent
+import com.razumly.mvp.profile.profileDetails.ProfileDetailsComponent
+import com.razumly.mvp.profileCompletion.DefaultProfileCompletionComponent
+import com.razumly.mvp.profileCompletion.ProfileCompletionComponent
+import com.razumly.mvp.refundManager.DefaultRefundManagerComponent
+import com.razumly.mvp.refundManager.RefundManagerComponent
+import com.razumly.mvp.organizationDetail.DefaultOrganizationDetailComponent
+import com.razumly.mvp.organizationDetail.OrganizationDetailComponent
+import com.razumly.mvp.teamManagement.DefaultTeamManagementComponent
+import com.razumly.mvp.teamManagement.TeamManagementComponent
+import com.razumly.mvp.userAuth.AuthComponent
+import com.razumly.mvp.userAuth.DefaultAuthComponent
+import org.koin.dsl.module
+
+val componentModule = module {
+    factory { (componentContext: ComponentContext, deepLinkNav: DeepLinkNav?) ->
+        RootComponent(
+            componentContext = componentContext,
+            permissionsController = get(),
+            locationTracker = get(),
+            deepLinkNavStart = deepLinkNav,
+            userRepository = get(),
+            eventRepository = get(),
+            matchRepository = get(),
+            pushNotificationsRepository = get(),
+            chatGroupRepository = get(),
+            appUpdateRepository = get(),
+            currentUserDataSource = get(),
+        )
+    }
+
+    factory<AuthComponent> { (componentContext: ComponentContext, navHandler: INavigationHandler) ->
+        DefaultAuthComponent(
+            componentContext = componentContext,
+            userRepository = get(),
+            navigationHandler = navHandler,
+        )
+    }
+
+    factory<MatchContentComponent> { (componentContext: ComponentContext, config: AppConfig.MatchDetail) ->
+        DefaultMatchContentComponent(
+            componentContext = componentContext,
+            selectedMatchId = config.matchId,
+            selectedEventId = config.eventId,
+            eventRepository = get(),
+            matchRepository = get(),
+            userRepository = get(),
+            teamRepository = get(),
+            preloadedMatch = config.preloadedMatch,
+        )
+    }
+
+    factory<EventDetailComponent> { (componentContext: ComponentContext, eventId: String, navHandler: INavigationHandler) ->
+        DefaultEventDetailComponent(
+            componentContext = componentContext,
+            eventId = eventId,
+            eventRepository = get(),
+            userRepository = get(),
+            matchRepository = get(),
+            teamRepository = get(),
+            sportsRepository = get(),
+            fieldRepository = get(),
+            billingRepository = get(),
+            imageRepository = get(),
+            currentUserDataSource = get(),
+            apiClient = get(),
+            notificationsRepository = get(),
+            navigationHandler = navHandler,
+            permissionsController = get(),
+        )
+    }
+
+    factory<CreateEventComponent> { (
+        componentContext: ComponentContext,
+        onCreatedEvent: (Event, Boolean) -> Unit,
+        bootstrap: com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto,
+    ) ->
+        DefaultCreateEventComponent(
+            componentContext = componentContext,
+            onEventCreated = onCreatedEvent,
+            bootstrap = bootstrap,
+            userRepository = get(),
+            eventRepository = get(),
+            fieldRepository = get(),
+            sportsRepository = get(),
+            billingRepository = get(),
+            imageRepository = get(),
+        )
+    }
+
+    factory<EventSearchComponent> { (componentContext: ComponentContext, eventId: String?, navHandler: INavigationHandler) ->
+        DefaultEventSearchComponent(
+            componentContext = componentContext,
+            locationTracker = get(),
+            eventRepository = get(),
+            matchRepository = get(),
+            billingRepository = get(),
+            fieldRepository = get(),
+            teamRepository = get(),
+            sportsRepository = get(),
+            userRepository = get(),
+            eventId = eventId,
+            navigationHandler = navHandler,
+            permissionsController = get(),
+            currentUserDataSource = get(),
+        )
+    }
+
+    factory<ChatListComponent> { (componentContext: ComponentContext, navHandler: INavigationHandler) ->
+        DefaultChatListComponent(
+            componentContext = componentContext,
+            chatGroupRepository = get(),
+            userRepository = get(),
+            navigationHandler = navHandler
+        )
+    }
+
+    factory<ChatGroupComponent> { (
+        componentContext: ComponentContext,
+        messageUserId: String?,
+        chatId: String?,
+        navHandler: INavigationHandler,
+    ) ->
+        DefaultChatGroupComponent(
+            componentContext = componentContext,
+            messageUserId = messageUserId,
+            initialChatId = chatId,
+            userRepository = get(),
+            messagesRepository = get(),
+            pushNotificationsRepository = get(),
+            chatGroupRepository = get(),
+            navigationHandler = navHandler,
+        )
+    }
+
+    factory<ProfileComponent> { params ->
+        val componentContext: ComponentContext = params.get()
+        val navHandler: INavigationHandler = params.get()
+        val startDestination = runCatching { params.get<ProfileStartDestination>() }
+            .getOrDefault(ProfileStartDestination.HOME)
+
+        DefaultProfileComponent(
+            componentContext = componentContext,
+            userRepository = get(),
+            billingRepository = get(),
+            imageRepository = get(),
+            eventRepository = get(),
+            teamRepository = get(),
+            pushNotificationsRepository = get(),
+            currentUserDataSource = get(),
+            navigationHandler = navHandler,
+            initialDestination = startDestination,
+        )
+    }
+
+    factory<ProfileCompletionComponent> { (componentContext: ComponentContext) ->
+        DefaultProfileCompletionComponent(
+            componentContext = componentContext,
+            userRepository = get(),
+            imageRepository = get(),
+        )
+    }
+
+    factory<OrganizationDetailComponent> { (
+        componentContext: ComponentContext,
+        organizationId: String,
+        initialTab: com.razumly.mvp.core.presentation.OrganizationDetailTab,
+        navHandler: INavigationHandler,
+    ) ->
+        DefaultOrganizationDetailComponent(
+            componentContext = componentContext,
+            organizationId = organizationId,
+            initialTab = initialTab,
+            billingRepository = get(),
+            eventRepository = get(),
+            teamRepository = get(),
+            fieldRepository = get(),
+            matchRepository = get(),
+            userRepository = get(),
+            navigationHandler = navHandler,
+        )
+    }
+
+    factory<TeamManagementComponent> { (
+        componentContext: ComponentContext,
+        freeAgents: List<String>,
+        eventId: String?,
+        selectedFreeAgentId: String?,
+        navHandler: INavigationHandler,
+    ) ->
+        DefaultTeamManagementComponent(
+            componentContext = componentContext,
+            billingRepository = get(),
+            teamRepository = get(),
+            userRepository = get(),
+            sportsRepository = get(),
+            _legacyFreeAgents = freeAgents,
+            eventId = eventId,
+            selectedFreeAgentId = selectedFreeAgentId,
+            eventRepository = get(),
+            navigationHandler = navHandler,
+        )
+    }
+
+    factory<RefundManagerComponent> { (componentContext: ComponentContext, navHandler: INavigationHandler) ->
+        DefaultRefundManagerComponent(
+            componentContext = componentContext,
+            userRepository = get(),
+            billingRepository = get(),
+            navigationHandler = navHandler,
+        )
+    }
+
+    factory<EventManagementComponent> { (componentContext: ComponentContext, navHandler: INavigationHandler) ->
+        DefaultEventManagementComponent(
+            componentContext = componentContext,
+            eventRepository = get(),
+            navigationHandler = navHandler,
+            userRepository = get(),
+        )
+    }
+
+    factory<ProfileDetailsComponent> { params ->
+        DefaultProfileDetailsComponent(
+            componentContext = params.get(),
+            userRepository = get(),
+            imageRepository = get(),
+            onNavigateBack = params.get(),
+            navigationHandler = params.get(),
+        )
+    }
+
+    factory<PlayerInteractionComponent> { params ->
+        DefaultPlayerInteractionComponent(
+            componentContext = params.get(),
+            userRepository = get(),
+        )
+    }
+}

@@ -1,0 +1,25 @@
+name: Triage new issues
+
+on:
+  issues:
+    types:
+      - opened
+
+permissions:
+  issues: write
+
+concurrency:
+  group: triage-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  label:
+    name: Add needs-triage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add the triage label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: gh issue edit "$ISSUE_NUMBER" --repo "$REPOSITORY" --add-label needs-triage

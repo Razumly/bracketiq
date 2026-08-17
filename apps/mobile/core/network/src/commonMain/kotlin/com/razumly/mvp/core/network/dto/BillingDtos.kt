@@ -1,0 +1,174 @@
+package com.razumly.mvp.core.network.dto
+
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
+import com.razumly.mvp.core.data.dataTypes.dtos.RefundRequestDTO
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class InclusivePriceQuoteRequestDto(
+    val direction: String,
+    val amountCents: Int,
+    val eventType: String? = null,
+)
+
+@Serializable
+data class InclusivePriceBreakdownDto(
+    val hostReceivesCents: Int,
+    val processingFeeCents: Int,
+    val platformFeeCents: Int,
+    val totalPriceCents: Int,
+    val platformFeePercentage: Double,
+)
+
+@Serializable
+data class InclusivePriceQuoteResponseDto(
+    val version: Int,
+    val direction: String,
+    val breakdown: InclusivePriceBreakdownDto,
+)
+
+@Serializable
+data class BillingUserRefDto(
+    val id: String? = null,
+    val email: String? = null,
+)
+
+@Serializable
+data class BillingEventRefDto(
+    val id: String? = null,
+    val eventType: String? = null,
+    @SerialName("price") val priceCents: Int? = null,
+    val hostId: String? = null,
+    val organizationId: String? = null,
+)
+
+@Serializable
+data class BillingTeamRefDto(
+    val id: String? = null,
+    val teamId: String? = null,
+    val name: String? = null,
+    val registrantId: String? = null,
+    val userId: String? = null,
+    val parentId: String? = null,
+    val registrantType: String? = null,
+    val rosterRole: String? = null,
+    val consentDocumentId: String? = null,
+    val consentStatus: String? = null,
+)
+
+@Serializable
+data class BillingTimeSlotRefDto(
+    val id: String? = null,
+    @SerialName("price") val priceCents: Int? = null,
+    val startDate: String? = null,
+    val endDate: String? = null,
+    val scheduledFieldId: String? = null,
+    val scheduledFieldIds: List<String> = emptyList(),
+    val hostRequiredTemplateIds: List<String> = emptyList(),
+)
+
+@Serializable
+data class BillingRentalSelectionDto(
+    val key: String? = null,
+    val scheduledFieldIds: List<String>,
+    val dayOfWeek: Int? = null,
+    val daysOfWeek: List<Int> = emptyList(),
+    val startTimeMinutes: Int? = null,
+    val endTimeMinutes: Int? = null,
+    val startDate: String,
+    val endDate: String,
+    val timeZone: String? = null,
+    val repeating: Boolean = false,
+)
+
+@Serializable
+data class RegistrationQuestionAnswerDto(
+    val questionId: String,
+    val answer: String,
+)
+
+@Serializable
+data class PurchaseIntentRequestDto(
+    val purchaseType: String? = null,
+    val user: BillingUserRefDto? = null,
+    val event: BillingEventRefDto? = null,
+    val team: BillingTeamRefDto? = null,
+    val teamRegistration: BillingTeamRefDto? = null,
+    val divisionId: String? = null,
+    val divisionTypeId: String? = null,
+    val divisionTypeKey: String? = null,
+    val timeSlot: BillingTimeSlotRefDto? = null,
+    val rentalSelections: List<BillingRentalSelectionDto> = emptyList(),
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
+    val productId: String? = null,
+    val billingAddress: BillingAddressDto? = null,
+    val discountCode: String? = null,
+    val answers: List<RegistrationQuestionAnswerDto> = emptyList(),
+)
+
+@Serializable
+data class BillingAddressDto(
+    val line1: String? = null,
+    val line2: String? = null,
+    val city: String? = null,
+    val state: String? = null,
+    val postalCode: String? = null,
+    val countryCode: String? = null,
+) {
+    fun toBillingAddressDraft(): BillingAddressDraft = BillingAddressDraft(
+        line1 = line1.orEmpty(),
+        line2 = line2,
+        city = city.orEmpty(),
+        state = state.orEmpty(),
+        postalCode = postalCode.orEmpty(),
+        countryCode = countryCode ?: "US",
+    )
+
+    companion object {
+        fun fromDraft(address: BillingAddressDraft): BillingAddressDto {
+            val normalized = address.normalized()
+            return BillingAddressDto(
+                line1 = normalized.line1,
+                line2 = normalized.line2,
+                city = normalized.city,
+                state = normalized.state,
+                postalCode = normalized.postalCode,
+                countryCode = normalized.countryCode,
+            )
+        }
+    }
+}
+
+@Serializable
+data class StripeHostLinkRequestDto(
+    val refreshUrl: String,
+    val returnUrl: String,
+    val user: BillingUserRefDto? = null,
+    val organizationEmail: String? = null,
+)
+
+@Serializable
+data class BillingRefundRequestDto(
+    val payloadEvent: BillingEventRefDto,
+    val userId: String? = null,
+    val reason: String? = null,
+)
+
+@Serializable
+data class RefundAllRequestDto(
+    val eventId: String,
+)
+
+@Serializable
+data class RefundRequestsResponseDto(
+    val refunds: List<RefundRequestDTO> = emptyList(),
+)
+
+@Serializable
+data class UpdateRefundRequestDto(
+    val status: String,
+    val expectedScopeVersion: Int? = null,
+    val expectedScopeHash: String? = null,
+)

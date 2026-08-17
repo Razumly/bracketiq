@@ -1,0 +1,123 @@
+package com.razumly.mvp.profile
+
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import com.arkivanov.decompose.ExperimentalDecomposeApi
+import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.decompose.extensions.compose.experimental.stack.ChildStack
+import com.arkivanov.decompose.extensions.compose.subscribeAsState
+import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
+import com.razumly.mvp.core.presentation.composables.DiscountCodeDialog
+import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
+import com.razumly.mvp.core.presentation.util.backAnimation
+import com.razumly.mvp.core.util.LocalLoadingHandler
+import com.razumly.mvp.core.util.LocalPopupHandler
+import com.razumly.mvp.profile.profileDetails.ProfileDetailsScreen
+
+@OptIn(ExperimentalDecomposeApi::class)
+@Composable
+fun ProfileScreen(component: ProfileComponent) {
+    PreparePaymentProcessor(component)
+
+    val childStack by component.childStack.subscribeAsState()
+    val billingAddressPrompt by component.billingAddressPrompt.collectAsState()
+    val discountCodePrompt by component.discountCodePrompt.collectAsState()
+    val popupHandler = LocalPopupHandler.current
+    val loadingHandler = LocalLoadingHandler.current
+
+    LaunchedEffect(component, loadingHandler) {
+        component.setLoadingHandler(loadingHandler)
+    }
+
+    LaunchedEffect(component, popupHandler) {
+        component.errorState.collect { error ->
+            if (error != null) {
+                popupHandler.showPopup(error)
+            }
+        }
+    }
+
+    val componentContext = component as ComponentContext
+
+    ChildStack(
+        stack = childStack,
+        animation = backAnimation(
+            backHandler = componentContext.backHandler,
+            onBack = component::onBackClicked,
+        ),
+    ) { child ->
+        when (val instance = child.instance) {
+            is ProfileComponent.Child.ProfileHome -> {
+                ProfileHomeScreen(component = instance.component)
+            }
+
+            is ProfileComponent.Child.ProfileDetails -> {
+                ProfileDetailsScreen(component = instance.component)
+            }
+
+            is ProfileComponent.Child.Payments -> {
+                ProfilePaymentsScreen(component = instance.component)
+            }
+
+            is ProfileComponent.Child.PaymentPlans -> {
+                ProfilePaymentPlansScreen(component = instance.component)
+            }
+
+            is ProfileComponent.Child.Memberships -> {
+                ProfileMembershipsScreen(component = instance.component)
+            }
+
+            is ProfileComponent.Child.EventTemplates -> {
+                ProfileEventTemplatesScreen(component = instance.component)
+            }
+
+            is ProfileComponent.Child.Children -> {
+                ProfileChildrenScreen(component = instance.component)
+            }
+
+            is ProfileComponent.Child.Connections -> {
+                ProfileConnectionsScreen(component = instance.component)
+            }
+
+            is ProfileComponent.Child.Documents -> {
+                ProfileDocumentsScreen(component = instance.component)
+            }
+
+            is ProfileComponent.Child.Discounts -> {
+                ProfileDiscountsScreen(component = instance.component)
+            }
+
+            is ProfileComponent.Child.MySchedule -> {
+                ProfileMyScheduleScreen(component = instance.component)
+            }
+
+            is ProfileComponent.Child.Invites -> {
+                ProfileInvitesScreen(component = instance.component)
+            }
+
+            is ProfileComponent.Child.Notifications -> {
+                ProfileNotificationsScreen(component = instance.component)
+            }
+        }
+    }
+
+    billingAddressPrompt?.let { address ->
+        BillingAddressDialog(
+            initialAddress = address,
+            onConfirm = component::submitBillingAddress,
+            onDismiss = component::dismissBillingAddressPrompt,
+        )
+    }
+
+    discountCodePrompt?.let { prompt ->
+        DiscountCodeDialog(
+            title = prompt.title,
+            description = prompt.description,
+            initialCode = prompt.initialCode,
+            onContinue = component::continueFromDiscountCodePrompt,
+            onDismiss = component::dismissDiscountCodePrompt,
+        )
+    }
+}
