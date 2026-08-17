@@ -34,6 +34,9 @@ describe('CI quality gates', () => {
     const packageJson = JSON.parse(
       fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'),
     ) as { scripts?: Record<string, string> };
-    expect(packageJson.scripts?.['test:ci']).toContain('coverage:check-routes');
+    const testCiScript = packageJson.scripts?.['test:ci'];
+    expect(testCiScript).toContain('--maxWorkers=2');
+    expect(testCiScript).not.toContain('--runInBand');
+    expect(testCiScript).toContain('coverage:check-routes');
   });
 });
