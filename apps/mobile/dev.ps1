@@ -5,11 +5,8 @@ param(
     [ValidateSet("android", "backend")]
     [string]$Mode = "android",
 
-    # Optional: override backend repo directory. Otherwise tries:
-    # 1) $env:MVP_SITE_DIR
-    # 2) ../mvp-site (sibling to this repo)
-    # 3) ~/Documents/Code/mvp-site
-    # 4) legacy personal workspace locations
+    # Optional: override the backend directory.
+    # The default is ../site in this monorepo.
     [string]$BackendDir = $env:MVP_SITE_DIR,
 
     # Optional: override the port used by the backend. Defaults to MVP_API_BASE_URL port (if present),
@@ -98,10 +95,7 @@ function Resolve-BackendDir([string]$Provided) {
     if ($Provided) { $candidates.Add($Provided) }
     if ($env:MVP_SITE_DIR) { $candidates.Add($env:MVP_SITE_DIR) }
 
-    $candidates.Add((Join-Path $RepoRoot "..\\mvp-site"))
-    $candidates.Add((Join-Path $HOME "Documents\\Code\\mvp-site"))
-    $candidates.Add((Join-Path $HOME "Projects\\MVP\\mvp-site"))
-    $candidates.Add((Join-Path $HOME "StudioProjects\\mvp-site"))
+    $candidates.Add((Join-Path $RepoRoot "..\site"))
 
     foreach ($candidate in $candidates) {
         try {
@@ -116,8 +110,8 @@ function Resolve-BackendDir([string]$Provided) {
         }
     }
 
-    throw ("Could not find the backend repo (mvp-site). " +
-        "Set `$env:MVP_SITE_DIR to the mvp-site path, clone it to ~/Documents/Code/mvp-site, or place it at ../mvp-site relative to this repo.")
+    throw ("Could not find apps/site. " +
+        "Set `$env:MVP_SITE_DIR only when the backend is outside this monorepo.")
 }
 
 $script:BootstrapLockPath = $null
@@ -180,7 +174,7 @@ function Get-BackendPackageManager([string]$Dir) {
     $supported = @("package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock")
     $lockFiles = @($supported | Where-Object { Test-Path -LiteralPath (Join-Path $Dir $_) })
     if ($lockFiles.Count -ne 1) {
-        throw "mvp-site must contain exactly one supported lockfile; found $($lockFiles.Count)."
+        throw "The backend directory must contain exactly one supported lockfile; found $($lockFiles.Count)."
     }
 
     $pm = switch ($lockFiles[0]) {
@@ -468,7 +462,7 @@ function Stop-ManagedBackendOrFail([string]$Dir, [int]$Port) {
     $requestedPortListeners = @(Get-ListeningProcessIds $Port)
     if (-not (Test-Path -LiteralPath $statePath)) {
         if ($requestedPortListeners.Count -gt 0) {
-            throw "Port $Port is already used by an unmanaged process. Stop it explicitly before launching mvp-site."
+            throw "Port $Port is already used by an unmanaged process. Stop it explicitly before launching the backend."
         }
         return
     }
@@ -691,7 +685,7 @@ try {
     $databaseUrl = Get-ComposeDatabaseUrl $backendRepo
     Install-BackendDependencies $backendRepo $packageManager $databaseUrl
 
-    Write-Host "Applying tracked mvp-site migrations..." -ForegroundColor Cyan
+    Write-Host "Applying tracked backend migrations..." -ForegroundColor Cyan
     Invoke-PackageManager `
         $backendRepo `
         $packageManager.Name `

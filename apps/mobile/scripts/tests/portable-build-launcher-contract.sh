@@ -40,6 +40,7 @@ if rg --fixed-strings --quiet -- '/mnt/c/Users/samue' "$backend_script"; then
   fail "ensure-local-backend.sh must not contain a developer-specific Windows path"
 fi
 require_text "$backend_script" 'MVP_SITE_DIR'
+require_text "$backend_script" '$REPO_ROOT/../site'
 require_text "$backend_script" 'if [[ "${BASH_SOURCE[0]}" == "$0" ]]'
 require_text "$emulator_script" 'export ANDROID_HOME="$SDK_DIR"'
 
@@ -53,6 +54,12 @@ printf '{}\n' > "$explicit_backend/package.json"
 # Sourcing is intentionally supported so path resolution can be verified without
 # starting Docker, installing dependencies, or launching the backend.
 source "$backend_script"
+default_backend="$(MVP_SITE_DIR= resolve_backend_dir)"
+expected_default_backend="$(cd "$repo_root/../site" && pwd)"
+if [[ "$default_backend" != "$expected_default_backend" ]]; then
+  fail "default backend did not resolve the monorepo apps/site directory"
+fi
+
 resolved_backend="$(MVP_SITE_DIR="$explicit_backend" resolve_backend_dir)"
 expected_backend="$(cd "$explicit_backend" && pwd)"
 if [[ "$resolved_backend" != "$expected_backend" ]]; then

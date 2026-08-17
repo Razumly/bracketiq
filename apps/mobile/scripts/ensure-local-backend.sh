@@ -49,12 +49,7 @@ resolve_backend_dir() {
   if [[ -n "${MVP_SITE_DIR:-}" ]]; then
     candidates+=("${MVP_SITE_DIR}")
   fi
-  candidates+=(
-    "$REPO_ROOT/../mvp-site"
-    "$HOME/Documents/Code/mvp-site"
-    "$HOME/Projects/MVP/mvp-site"
-    "$HOME/StudioProjects/mvp-site"
-  )
+  candidates+=("$REPO_ROOT/../site")
 
   local candidate
   for candidate in "${candidates[@]}"; do
@@ -228,7 +223,7 @@ detect_package_manager() {
   done
 
   if [[ "${#lockfiles[@]}" -ne 1 ]]; then
-    fail "mvp-site must contain exactly one supported lockfile (package-lock.json, npm-shrinkwrap.json, pnpm-lock.yaml, or yarn.lock); found ${#lockfiles[@]}."
+    fail "The backend directory must contain exactly one supported lockfile (package-lock.json, npm-shrinkwrap.json, pnpm-lock.yaml, or yarn.lock); found ${#lockfiles[@]}."
   fi
 
   local pm
@@ -275,7 +270,7 @@ enforce_declared_package_manager() {
   local pm="$2"
   local pm_version="$3"
   local declared_pm
-  declared_pm="$(read_declared_package_manager "$backend_dir/package.json")" || fail "Could not read packageManager from mvp-site/package.json."
+  declared_pm="$(read_declared_package_manager "$backend_dir/package.json")" || fail "Could not read packageManager from the backend package.json."
   [[ -n "$declared_pm" ]] || return 0
 
   local declared_name="$declared_pm"
@@ -659,7 +654,7 @@ stop_managed_backend_or_fail() {
 
   if [[ -z "$state" ]]; then
     if [[ "$port_in_use" -eq 1 ]]; then
-      fail "Port $port is already used by an unmanaged process. Stop it explicitly before launching mvp-site."
+      fail "Port $port is already used by an unmanaged process. Stop it explicitly before launching the backend."
     fi
     return 0
   fi
@@ -951,7 +946,7 @@ main() {
   configure_node_path
 
   local backend_dir
-  backend_dir="$(resolve_backend_dir)" || fail "Could not find mvp-site. Set MVP_SITE_DIR or place it beside mvp-app, under ~/Documents/Code, ~/Projects/MVP, or ~/StudioProjects."
+  backend_dir="$(resolve_backend_dir)" || fail "Could not find apps/site. Set MVP_SITE_DIR only when the backend is outside this monorepo."
 
   local port
   port="$(resolve_backend_port)"
@@ -975,7 +970,7 @@ main() {
 
   ensure_backend_dependencies "$backend_dir" "$pm" "$lockfile" "$pm_version" "$database_url"
 
-  log "Applying tracked mvp-site migrations"
+  log "Applying tracked site migrations"
   run_package_script "$backend_dir" "$pm" "migrate:deploy" "$database_url"
 
   start_backend_server "$backend_dir" "$pm" "$port" "$database_url"

@@ -1,3 +1,7 @@
+# BracketIQ mobile
+
+BracketIQ mobile is the Kotlin Multiplatform client for Android, iOS, Wear OS, and watchOS. It consumes the backend in `../site` through the HTTP API.
+
 This is a Kotlin Multiplatform project targeting Android, iOS.
 
 * `/composeApp` is for code that will be shared across your Compose Multiplatform applications.

@@ -12,15 +12,15 @@
   writing standard.
 
 # ExecPlans
-When writing complex features or significant refactors, use an ExecPlan (as described in `PLANS.md` at the repository root) from design to implementation.
+When writing complex features or significant refactors, use an ExecPlan as described in the root `../../PLANS.md`.
 
 ## Project Structure & Module Organization
 `composeApp/` hosts the shared Kotlin Multiplatform app; keep cross-platform logic under `composeApp/src/commonMain/kotlin/com/razumly/mvp/<feature>` (e.g., `chat`, `eventMap`). Platform overrides stay in `androidMain` and `iosMain`, while `iosApp/` provides the Swift entry point and Podfile. Generated Room snapshots belong in `composeApp/schemas/`; treat `build/` and other Gradle outputs as ephemeral. Root scripts (`build.gradle.kts`, `settings.gradle.kts`, `gradle/`) centralize plugin versions; edit them only when updating shared build logic.
 
 ## Backend & Data Contract Source of Truth
-The backend and database definitions live in `mvp-site`. On Windows for this workspace, use `C:\Users\samue\Documents\Code\mvp-site\`. From WSL, use `/mnt/c/Users/samue/Documents/Code/mvp-site/`. On macOS, use `/Users/elesesy/StudioProjects/mvp-site/`. For all API endpoint usage and request/response data types in this repo, reference that project as the source of truth. Do not invent or drift endpoint paths, payloads, or shared data models without first aligning with `mvp-site`.
+The backend and database definitions live in the sibling `../site` directory. Use that directory as the source of truth for API endpoints, request and response types, and persistence behavior. Do not invent or drift endpoint paths, payloads, or shared data models without first aligning with `apps/site`. Use `MVP_SITE_DIR` only for an explicit backend checkout outside this monorepo.
 
-When live DigitalOcean Postgres commands from `mvp-site` time out or fail to connect, the likely cause is that this machine's current public IP is missing from the DigitalOcean managed database firewall. Use the DigitalOcean MCP database firewall tools to add the current IP while preserving existing App Platform and IP rules, then retry the live DB operation.
+When live DigitalOcean Postgres commands from `apps/site` time out or fail to connect, check whether the current public IP is allowed by the managed database firewall. Preserve existing App Platform and IP rules when an authorized firewall change is required.
 
 ## Local Data Flow
 Room is the mobile app's local source of truth for fetched API data. Repository methods that refresh remote data should write API results into Room first, and screens/components should observe Room flows for rendered state instead of rendering directly from one-off network responses. Keep this pattern for new list/detail fetches unless a feature is explicitly transient and documented as such.
@@ -76,16 +76,6 @@ Follow the observed format `<Type>: <Sentence case summary>` (e.g., `Refactor: S
 ## Security & Configuration Tips
 Store secrets in `secrets.properties` with fallbacks in `local.defaults.properties`, and never commit personal keys. Keep `google-services.json` and `sdk.*` values scoped to trusted environments via Gradle properties or CI secrets. When mocking payments or location flows, gate constants behind build-config flags instead of checking them into `commonMain`.
 
-## Agent skills
+## Shared agent rules
 
-### Issue tracker
-
-Issues live in GitHub Issues for `camka14/mvp-app`. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Use the default five triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Use a single-context layout with root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+Read the root `../../AGENTS.md` for the issue tracker, triage labels, domain documents, backend compatibility rules, and operational boundaries.

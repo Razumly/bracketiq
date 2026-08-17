@@ -30,7 +30,7 @@ data class PaginationResponseDto(
     val hasMore: Boolean? = null,
 )
 
-/** The single mobile mapping for the current mvp-site organization response contract. */
+/** The single mobile mapping for the current BracketIQ site organization response contract. */
 @Serializable
 data class OrganizationApiDto(
     val id: String? = null,

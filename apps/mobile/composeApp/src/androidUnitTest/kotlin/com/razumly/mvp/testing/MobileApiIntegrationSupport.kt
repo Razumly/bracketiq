@@ -494,7 +494,7 @@ private fun resolveReachableBackendBaseUrl(): String {
         "http://localhost:3010",
     )
     return candidates.firstOrNull(::isReachable)
-        ?: error("Unable to connect to the local mvp-site backend on ports 3000 or 3010.")
+        ?: error("Unable to connect to the local BracketIQ site backend on ports 3000 or 3010.")
 }
 
 private fun isReachable(baseUrl: String): Boolean {
@@ -510,19 +510,14 @@ private fun isReachable(baseUrl: String): Boolean {
 
 private fun resolveBackendDir(): File {
     val workingDir = File(System.getProperty("user.dir") ?: ".")
-    val userHome = System.getProperty("user.home")?.takeIf(String::isNotBlank)?.let(::File)
     val candidates = listOfNotNull(
         System.getenv("MVP_SITE_DIR")?.takeIf(String::isNotBlank)?.let(::File),
-        File(workingDir, "../mvp-site"),
-        File(workingDir, "../../mvp-site"),
-        userHome?.let { File(it, "Documents/Code/mvp-site") },
-        File("/mnt/c/Users/samue/Documents/Code/mvp-site"),
-        File("/Users/elesesy/StudioProjects/mvp-site"),
+        File(workingDir, "../site"),
     ).map { candidate -> candidate.canonicalFile }
 
     return candidates.firstOrNull { candidate ->
         candidate.isDirectory && File(candidate, "package.json").isFile
-    } ?: error("Unable to locate the mvp-site workspace for targeted backend seeding.")
+    } ?: error("Unable to locate apps/site for targeted backend seeding.")
 }
 
 private fun isWindows(): Boolean {

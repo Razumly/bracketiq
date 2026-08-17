@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
+Issues and specs for this product live in GitHub Issues for `Razumly/bracketiq`. Use the `gh` CLI for all operations.
 
 ## Conventions
 
@@ -11,7 +11,9 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`
 
-Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone.
+Infer the repository from the canonical monorepo remote when inside a clone. Use `--repo Razumly/bracketiq` when a command runs elsewhere.
+
+Use the organization [BracketIQ Project](https://github.com/orgs/Razumly/projects/1) for shared planning. Classify each item with exactly one `Area`: `Shared`, `Backend`, `Web`, `Mobile`, or `Operations`.
 
 ## Issue completion
 

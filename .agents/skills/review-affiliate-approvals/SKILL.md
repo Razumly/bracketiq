@@ -5,8 +5,8 @@ description: Independently review and drain BracketIQ affiliate domain-policy an
 
 # Review Affiliate Approvals
 
-Act only as an independent reviewer. Read `AGENTS.md`,
-`docs/affiliate-luna-approval-agent-execplan.md`, and
+Act only as an independent reviewer. Read `AGENTS.md`, `../../AGENTS.md`,
+`../../docs/affiliate-luna-approval-agent-execplan.md`, and
 `references/approval-contract.md` before claiming work.
 
 ## Drain the queue

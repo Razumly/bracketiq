@@ -6,6 +6,8 @@ Maintain this document in accordance with `PLANS.md` at the repository root. Thi
 
 The pre-training gold-data, end-to-end evaluation, untouched-base benchmark, and training-readiness work is specified in `docs/affiliate-source-mapping-pretraining-validation-execplan.md`. Complete that child plan before launching the adapter-training milestone in this plan.
 
+Repository layout: run all `npm`, Prisma, and site script commands from `apps/site`. Paths that start with `src/`, `scripts/`, `prisma/`, or `public/` are relative to `apps/site`. Paths that start with `docs/` or `.agents/` are relative to the repository root.
+
 ## Purpose / Big Picture
 
 BracketIQ has a durable source-intake system, a database-backed mapping contract, and a queue that can hand one reviewed website to an external mapping worker. Today a developer or Codex agent still reads the stored HTML and Markdown, decides how the site maps to BracketIQ, creates or repairs the source setup code, runs the scraper, and prepares the result for review.

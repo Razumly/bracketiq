@@ -4,6 +4,8 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 This document follows `PLANS.md` in the repository root and must be maintained in accordance with that file. The separate source registry for this work lives at `docs/admin-affiliate-scrape-sources.md`.
 
+Repository layout: run all `npm`, Prisma, and site script commands from `apps/site`. Paths that start with `src/`, `scripts/`, `prisma/`, or `public/` are relative to `apps/site`. Paths that start with `docs/` or `.agents/` are relative to the repository root.
+
 ## Purpose / Big Picture
 
 BracketIQ should let an internal admin discover local sports events and rentals from approved public websites, review the discovered items, and publish selected items into BracketIQ as affiliate link listings. A published affiliate event should be a real row in `Events` with no host user, an `organizationId` pointing at a private source organization for the scraped website, a behavioral `eventType`, and `affiliateUrl` set to the official source URL. It should appear in discovery like a normal event, but its primary call to action should open the official source URL instead of starting BracketIQ's internal join, registration, payment, or rental booking flow.

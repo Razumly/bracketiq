@@ -1,142 +1,116 @@
-# BracketIQ — Multi-sport Event Platform
+# BracketIQ
 
-Full-stack Next.js app that lets organizers and players run pickup games, leagues, and tournaments for any sport. Built with TypeScript, Mantine UI, Prisma + Postgres, and self-hosted Next.js APIs for auth, data, media, and billing.
+[![Site CI](https://github.com/Razumly/bracketiq/actions/workflows/site-ci.yml/badge.svg?branch=main)](https://github.com/Razumly/bracketiq/actions/workflows/site-ci.yml)
+[![Mobile CI](https://github.com/Razumly/bracketiq/actions/workflows/mobile-ci.yml/badge.svg?branch=main)](https://github.com/Razumly/bracketiq/actions/workflows/mobile-ci.yml)
 
-Live: https://bracket-iq.com — Open Graph preview at `/opengraph-image`.
+BracketIQ is one product with separate site and mobile applications. This repository keeps both applications, shared product documentation, issues, and automation in one place. The applications keep independent build tools and release processes.
 
-## Highlights
-- Create and manage multi-sport events (pickup, leagues, brackets) with scheduling and field/court slots
-- Team and roster management with real-time chat for coordination
-- Stripe-powered payments and receipts via server-side API routes
-- Image uploads via the storage provider (local dev or DigitalOcean Spaces)
-- Mantine-driven UI, responsive layouts, and Next.js App Router
+## Repository layout
 
-## Tech Stack
-- Next.js 16 (App Router) + TypeScript
-- Mantine UI + Emotion
-- Prisma + Postgres
-- Auth: self-hosted JWT/session flow
-- Storage: local filesystem in dev, DigitalOcean Spaces (S3-compatible) in prod
-- Jest + Testing Library for UI/service tests
+- `apps/site` — Next.js web application, API routes, Prisma schema, and site deployment files.
+- `apps/mobile` — Kotlin Multiplatform application, Android and iOS wrappers, Wear OS, and watchOS.
+- `docs` — shared product documentation and architecture decisions.
+- `plans` — current and historical execution plans.
+- `.github/workflows` — repository CI and site image publication.
 
-## Getting Started
-1) Use Node 20.9+ (Next.js 16 requires it)
+Pre-migration documents can refer to the former `mvp-site` and `mvp-app` repository names and paths. Treat those references as historical evidence.
+
+## Common commands
+
+The root package provides stable entry points without combining the application dependency graphs:
+
 ```bash
-nvm install 20.9.0
-nvm use
+npm run build:site
+npm run lint:site
+npm run test:site
+npm run typecheck:site
+npm run test:mobile
 ```
-2) Install dependencies
+
+## Application boundary
+
+`apps/site` owns the backend, Prisma schema, HTTP API, and web UI. `apps/mobile` consumes the backend through the HTTP API and keeps its own Kotlin data models and Room cache. The applications do not import runtime source from each other. A contract change must update and validate both sides in one repository change.
+
+Site deployment publishes an immutable container image. Android and iOS keep their existing store release workflows and version rules. Shared documentation and issue decisions stay at the repository root.
+
+## Work tracking
+
+Use [GitHub Issues](https://github.com/Razumly/bracketiq/issues) for scoped work. The shared [BracketIQ Project](https://github.com/orgs/Razumly/projects/1) uses the `Area` field with `Shared`, `Backend`, `Web`, `Mobile`, and `Operations` values. New issues receive `needs-triage` automatically.
+
+## Releases
+
+Site and mobile releases remain independent. Use `site-v<version>` tags for site releases and `mobile-v<version>` tags for mobile releases. A tag points to the monorepo commit that produced that application release. The migrated mobile history keeps its original tags with the `mobile-` prefix.
+
+## Site and backend
+
+Use Node.js 20 or the version in `apps/site/.nvmrc`. Use a local or approved non-production Postgres database.
+
 ```bash
-npm install
-```
-3) Environment
-- Update `.env` / `.env.local` with at minimum:
-  - `DATABASE_URL`
-  - `AUTH_SECRET`
-- Optional (recommended for full feature parity):
-  - Google OAuth (login button on `/login`):
-  - `GOOGLE_OAUTH_CLIENT_ID`
-  - `GOOGLE_OAUTH_CLIENT_SECRET`
-  - Mobile Google OAuth token audience allow-list:
-  - `GOOGLE_MOBILE_ANDROID_CLIENT_ID`
-  - `GOOGLE_MOBILE_IOS_CLIENT_ID`
-  - Mobile Apple OAuth token audience allow-list:
-  - `APPLE_MOBILE_BUNDLE_ID` (defaults to `com.razumly.mvp` if omitted)
-  - `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`
-  - `NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID` (optional; enables Google Maps Advanced Markers)
-  - `GOOGLE_MAPS_API_KEY` (server-only; enable Places API (New) and Geocoding API, and restrict it to the server egress IP)
-  - `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
-  - `STORAGE_PROVIDER` (`local` or `spaces`)
-  - `STORAGE_ROOT` (for local storage)
-  - `DO_SPACES_ENDPOINT`, `DO_SPACES_REGION`, `DO_SPACES_BUCKET`, `DO_SPACES_KEY`, `DO_SPACES_SECRET`
-    - Use a region endpoint for `DO_SPACES_ENDPOINT` (for example `https://sfo3.digitaloceanspaces.com`), not a bucket-prefixed host.
-  - BoldSign (PDF template builder + embedded signing):
-  - `BOLDSIGN_API_KEY`
-  - `BOLDSIGN_API_BASE_URL` (optional, defaults to `https://api.boldsign.com`)
-  - `BOLDSIGN_DEV_REDIRECT_BASE_URL` (optional override; in dev this is auto-set from ngrok by `npm run dev`)
-  - `BOLDSIGN_RECONCILE_SECRET` (required for scheduled reconcile cron auth in production)
-  - `STRIPE_CONNECT_CLIENT_ID` (required for Stripe Connect OAuth onboarding + fallback management flows)
-  - `STRIPE_CONNECT_REDIRECT_URI` (optional, full callback URL override for Stripe Connect OAuth; use when Stripe app settings require a specific host)
-  - QuickBooks Online accounting connection:
-  - `INTUIT_CLIENT_ID`
-  - `INTUIT_CLIENT_SECRET`
-  - `INTUIT_REDIRECT_URI` (optional, full callback URL override; defaults to `/api/integrations/quickbooks/callback` on the current origin)
-  - `INTUIT_ENVIRONMENT` (`sandbox` or `production`; defaults to `sandbox`)
-  - `INTUIT_SCOPES` (optional; defaults to `com.intuit.quickbooks.accounting`)
-  - `INTEGRATION_TOKEN_ENCRYPTION_KEY` (optional; falls back to `AUTH_SECRET` for encrypted integration tokens)
-  - Email delivery:
-  - Gmail API OAuth sender:
-  - `GMAIL_OAUTH_CLIENT_ID`, `GMAIL_OAUTH_CLIENT_SECRET`, `GMAIL_OAUTH_REFRESH_TOKEN`
-  - `GMAIL_SENDER_EMAIL` (mailbox authorized by OAuth, for example `noreply@razumly.com`)
-  - `SMTP_FROM`, `SMTP_FROM_NAME`, `SMTP_REPLY_TO` (message headers; `SMTP_FROM` may be a verified Gmail send-as alias)
-  - Demo request notifications:
-  - `DEMO_REQUEST_TO` (comma-separated inbox list)
-  - SMTP fallback:
-  - `SMTP_URL` (or configure host/port/user/password below)
-  - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_SECURE`
-  - Gmail fallback: `GMAIL_USER`, `GMAIL_PASSWORD`
-  - Invite link/app prompt URL controls:
-  - `PUBLIC_WEB_BASE_URL` (canonical origin used in invite emails; recommended in production)
-  - `NEXT_PUBLIC_MVP_IOS_APP_STORE_URL`
-  - `NEXT_PUBLIC_MVP_ANDROID_PLAY_STORE_URL`
-  - `NEXT_PUBLIC_MVP_IOS_DEEP_LINK`
-  - `NEXT_PUBLIC_MVP_ANDROID_DEEP_LINK`
-  - `NEXT_PUBLIC_SHOW_APP_PROMPT` (`0` to disable mobile prompt)
-  - Optional DB TLS override for self-signed cert chains: `PG_SSL_REJECT_UNAUTHORIZED=false`
-4) Run locally
-```bash
+cd apps/site
+npm ci
+npm run prisma:check
 npm run dev
-# open http://localhost:3000
 ```
 
-`npm run dev` now starts ngrok (when available) and injects a public redirect URL for BoldSign (`BOLDSIGN_DEV_REDIRECT_BASE_URL`) to avoid browser Private Network Access blocks after signing. To disable this behavior: `MVP_DEV_ENABLE_NGROK=0 npm run dev`.
-It also injects `PUBLIC_WEB_BASE_URL` (for canonical web links), `STRIPE_CONNECT_REDIRECT_URI` (for Stripe OAuth callback), and `INTUIT_REDIRECT_URI` (for QuickBooks OAuth callback), so localhost is not sent as `redirect_uri`.
-The default reserved dev tunnel is `https://untarnished-berserkly-everette.ngrok-free.dev`; override it with `NGROK_DOMAIN` or `MVP_DEV_NGROK_DOMAIN` if needed. VS Code launch configs require ngrok and Stripe listener startup so broken webhook forwarding fails immediately.
-The ngrok host is also included in `next.config.mjs` `allowedDevOrigins` so Next.js dev HMR and internal `/_next/*` resources can load from the tunnel after Stripe Connect redirects back to the local app. Stripe CLI still handles webhook forwarding; this Next setting is separate because it protects browser-origin requests.
+The local site listens on `http://localhost:3000` by default. Check the server with:
 
-For automatic tunneling, install and authenticate ngrok on your machine first (`ngrok config add-authtoken <token>`). If ngrok is not available, dev server still starts but BoldSign localhost redirect issues will remain.
-When running in WSL, the dev wrapper also attempts to resolve Windows-installed ngrok (`where ngrok` / `Get-Command ngrok`). You can force a specific binary path with `NGROK_BIN=/mnt/c/.../ngrok.exe npm run dev`.
-
-## Scripts
-- `npm run dev` — start dev server with ngrok-assisted BoldSign redirect support
-- `npm run dev:plain` — start plain Next.js dev server without ngrok wrapper
-- `npm run build` — production build
-- `npm start` — run built app
-- `npm run start:tunnel` — run built app with ngrok and Stripe webhook forwarding
-- `npm run test` — Jest suite
-- `npm run lint` — Next.js lint
-
-- `npm run gmail:oauth:url` - print the Google consent URL for the Gmail API sender account
-- `npm run gmail:oauth:token -- --code "<code>"` - exchange a Google OAuth callback code for `GMAIL_OAUTH_REFRESH_TOKEN`
-
-## Local Stripe Webhooks
-- Preferred local dev run: `npm run dev`
-  - This wrapper starts `stripe listen` automatically and forwards billing and Connect events to `http://localhost:3000/api/billing/webhook`, including `account.updated` for local Stripe Connect onboarding sync.
-  - It also injects the session webhook secret into `STRIPE_WEBHOOK_SECRET` for that dev process.
-- Production-style local run: `npm run build && npm run start:tunnel`
-  - This uses the same ngrok and Stripe listener wrapper, then starts the built app like `npm start`.
-- Manual listener (if using `npm run dev:plain`):
 ```bash
-stripe listen \
-  --events account.updated,charge.dispute.closed,payment_intent.processing,payment_intent.succeeded,payment_intent.payment_failed,invoice.created,invoice.paid,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted \
-  --forward-to http://localhost:3000/api/billing/webhook
-```
-- Manual trigger test:
-```bash
-stripe trigger payment_intent.succeeded
-```
-- If webhook signature checks fail in local-only debugging, you can temporarily allow unverified payloads:
-```bash
-STRIPE_WEBHOOK_ALLOW_UNVERIFIED_DEV=true
+curl --fail http://127.0.0.1:3000/api/health/live
+curl --fail http://127.0.0.1:3000/api/health/ready
 ```
 
-## Architecture
-- `src/app` — routes (App Router) and metadata; OG image at `opengraph-image.tsx`
-- `src/components` — UI components (Mantine, chat widgets)
-- `src/context` — chat/state providers
-- `src/lib` — service modules + API client wrappers
-- `src/server` — server-only helpers and repositories
-- `public` — static assets
+Run site validation from `apps/site`:
 
-## Operations
-- BoldSign reconcile schedule on the OVH VM: `docs/ops/boldsign-reconcile-cron.md`
+```bash
+npm run test:ci
+npx tsc --noEmit
+npm run build
+```
+
+## Android and shared mobile code
+
+Use JDK 17. Run Gradle from `apps/mobile`.
+
+```bash
+cd apps/mobile
+./scripts/tests/google-sign-in-release-resource-contract.sh
+./scripts/tests/android-release-api-base-url-contract.sh
+./gradlew :composeApp:testDebugUnitTest --continue --stacktrace
+./gradlew :composeApp:assembleDebug --stacktrace
+```
+
+## iOS
+
+Use macOS, Xcode, CocoaPods, and JDK 17.
+
+```bash
+cd apps/mobile/iosApp
+pod install
+cd ..
+./scripts/tests/ios-release-api-base-url-contract.sh
+./gradlew bootIOSSimulator
+./gradlew :composeApp:iosSimulatorArm64Test :core:database:iosSimulatorArm64Test --continue --stacktrace
+```
+
+## Local mobile-to-backend work
+
+The mobile tooling resolves the backend to the sibling `apps/site` directory. A normal monorepo clone does not need `MVP_SITE_DIR`.
+
+From `apps/mobile`, start or verify the local backend through the checked-in launcher only when that runtime change is intended:
+
+```bash
+./scripts/ensure-local-backend.sh
+```
+
+Set `MVP_SITE_DIR` only when you intentionally use a backend checkout outside this repository. The backend HTTP interface remains the boundary between applications. Do not share runtime TypeScript or Kotlin source across that boundary.
+
+For the real mobile API integration check, start a non-production backend first. Then run:
+
+```bash
+cd apps/mobile
+MVP_TEST_BACKEND_URL=http://127.0.0.1:3000 \
+MVP_TEST_ALLOW_DB_SEED=true \
+  ./gradlew :composeApp:testDebugUnitTest \
+  --tests 'com.razumly.mvp.eventDetail.EventLifecycleMobileApiIntegrationTest' \
+  --stacktrace
+```

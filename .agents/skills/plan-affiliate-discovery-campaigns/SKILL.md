@@ -9,9 +9,9 @@ Claim one ranked coverage job at a time. Finish it before claiming another. Cont
 
 Before the first claim, read:
 
-- `AGENTS.md`
-- `docs/affiliate-coverage-agent-execplan.md`
-- `docs/affiliate-source-discovery-campaigns.md`
+- `AGENTS.md` and `../../AGENTS.md`
+- `../../docs/affiliate-coverage-agent-execplan.md`
+- `../../docs/affiliate-source-discovery-campaigns.md`
 - `src/server/affiliateImports/sourceDiscoveryRules.ts`
 - `references/completion-contract.md` in this skill
 

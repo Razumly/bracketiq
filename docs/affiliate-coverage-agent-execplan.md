@@ -4,6 +4,8 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 Maintain this document in accordance with `PLANS.md` at the repository root.
 
+Repository layout: run all `npm`, Prisma, and site script commands from `apps/site`. Paths that start with `src/`, `scripts/`, `prisma/`, or `public/` are relative to `apps/site`. Paths that start with `docs/` or `.agents/` are relative to the repository root.
+
 ## Purpose / Big Picture
 
 BracketIQ already has deterministic discovery campaigns, an intake capture worker, mapping agents, and an independent review agent. The missing role is a worker that asks whether a market has enough source coverage, creates focused follow-up campaigns when it finds a gap, and manually checks campaign intake pages that the provider could not capture. After this change, a Luna goal can claim one coverage task at a time, create bounded league, tournament, association, or other focused campaigns, attach durable manual browser evidence to a failed intake, and continue until its queue is empty.

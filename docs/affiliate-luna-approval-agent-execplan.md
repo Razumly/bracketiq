@@ -4,6 +4,8 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 This document must be maintained in accordance with `PLANS.md`.
 
+Repository layout: run all `npm`, Prisma, and site script commands from `apps/site`. Paths that start with `src/`, `scripts/`, `prisma/`, or `public/` are relative to `apps/site`. Paths that start with `docs/` or `.agents/` are relative to the repository root.
+
 ## Purpose / Big Picture
 
 BracketIQ currently pauses newly discovered domains at policy review and mapping packages at source review. After this change, a second Codex CLI process pinned to Luna at `max` reasoning can independently inspect those approval items, apply evidence-backed decisions, and keep the capture-to-mapping pipeline moving without waiting for the operator to approve every routine item. The launcher does not request fast mode or a specific service tier. The reviewer remains separate from the ingestion worker and leaves a durable decision record.

@@ -2,6 +2,8 @@
 
 Work through every eligible `AffiliateSourceIntakes` mapping job and leave each one either fully configured for repeatable affiliate scraping and organization review, expanded into evidenced official organization intakes, accurately marked failed/blocked, or explicitly deferred with a concrete reason. Stop only when `npm run affiliate:mapping:queue-status -- --live` reports `claimableJobs = 0`, `eligibleReadyIntakesWithoutJob = 0`, `claimedWithoutLease = 0`, `queuedCaptureRuns = 0`, and `runningCaptureRuns = 0`.
 
+Repository layout: this goal runs with `apps/site` as its working directory. Paths in result `generatedPaths` are relative to the repository root. Prefix site package paths with `apps/site/`; keep shared registry notes under root `docs/`.
+
 Use the existing process and data contract as authoritative:
 
 - `.agents/skills/ingest-affiliate-intakes/SKILL.md`
