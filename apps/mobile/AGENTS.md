@@ -75,3 +75,17 @@ Follow the observed format `<Type>: <Sentence case summary>` (e.g., `Refactor: S
 
 ## Security & Configuration Tips
 Store secrets in `secrets.properties` with fallbacks in `local.defaults.properties`, and never commit personal keys. Keep `google-services.json` and `sdk.*` values scoped to trusted environments via Gradle properties or CI secrets. When mocking payments or location flows, gate constants behind build-config flags instead of checking them into `commonMain`.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for `camka14/mvp-app`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default five triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Use a single-context layout with root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
