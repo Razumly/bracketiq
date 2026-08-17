@@ -1,0 +1,1564 @@
+/** @jest-environment node */
+
+import { NextRequest } from 'next/server';
+
+const mockStripePaymentIntentCreate = jest.fn();
+const mockStripePaymentIntentList = jest.fn();
+const StripeMock = jest.fn().mockImplementation(() => ({
+  paymentIntents: {
+    create: (...args: unknown[]) => mockStripePaymentIntentCreate(...args),
+    list: (...args: unknown[]) => mockStripePaymentIntentList(...args),
+  },
+}));
+
+const prismaMock = {
+  products: {
+    findUnique: jest.fn(),
+  },
+  authUser: {
+    findUnique: jest.fn(),
+  },
+  userData: {
+    findUnique: jest.fn(),
+  },
+  teams: {
+    findUnique: jest.fn(),
+  },
+  divisions: {
+    findMany: jest.fn(),
+    findFirst: jest.fn(),
+  },
+  templateDocuments: {
+    findMany: jest.fn(),
+  },
+  signedDocuments: {
+    findMany: jest.fn(),
+  },
+  eventRegistrations: {
+    findMany: jest.fn(),
+    findUnique: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    deleteMany: jest.fn(),
+  },
+  $queryRaw: jest.fn(),
+  $transaction: jest.fn(),
+  $executeRaw: jest.fn(),
+};
+
+const requireSessionMock = jest.fn();
+const reserveRentalCheckoutWindowLocksMock = jest.fn();
+const releaseRentalCheckoutWindowLocksMock = jest.fn();
+const resolveCanonicalRentalCheckoutMock = jest.fn();
+const loadUserBillingProfileMock = jest.fn();
+const resolveBillingAddressInputMock = jest.fn();
+const upsertUserBillingAddressMock = jest.fn();
+const validateUsBillingAddressMock = jest.fn();
+const calculateTaxQuoteMock = jest.fn();
+const buildDestinationTransferDataMock = jest.fn();
+const canManageCanonicalTeamMock = jest.fn();
+const claimOrCreateEventTeamSnapshotMock = jest.fn();
+const loadCanonicalTeamByIdMock = jest.fn();
+
+jest.mock('stripe', () => ({
+  __esModule: true,
+  default: StripeMock,
+}));
+jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
+jest.mock('@/lib/permissions', () => ({ requireSession: requireSessionMock }));
+jest.mock('@/server/repositories/rentalCheckoutLocks', () => ({
+  reserveRentalCheckoutWindowLocks: (...args: unknown[]) => reserveRentalCheckoutWindowLocksMock(...args),
+  releaseRentalCheckoutWindowLocks: (...args: unknown[]) => releaseRentalCheckoutWindowLocksMock(...args),
+}));
+jest.mock('@/server/rentalCheckoutAccess', () => ({
+  resolveCanonicalRentalCheckout: (...args: unknown[]) => resolveCanonicalRentalCheckoutMock(...args),
+}));
+jest.mock('@/lib/billingAddress', () => ({
+  loadUserBillingProfile: (...args: unknown[]) => loadUserBillingProfileMock(...args),
+  resolveBillingAddressInput: (...args: unknown[]) => resolveBillingAddressInputMock(...args),
+  upsertUserBillingAddress: (...args: unknown[]) => upsertUserBillingAddressMock(...args),
+  validateUsBillingAddress: (...args: unknown[]) => validateUsBillingAddressMock(...args),
+}));
+jest.mock('@/lib/stripeTax', () => {
+  const actual = jest.requireActual('@/lib/stripeTax');
+  return {
+    ...actual,
+    calculateTaxQuote: (...args: unknown[]) => calculateTaxQuoteMock(...args),
+  };
+});
+jest.mock('@/lib/stripeConnectAccounts', () => ({
+  buildDestinationTransferData: (...args: unknown[]) => buildDestinationTransferDataMock(...args),
+}));
+jest.mock('@/server/teams/teamMembership', () => ({
+  canManageCanonicalTeam: (...args: unknown[]) => canManageCanonicalTeamMock(...args),
+  claimOrCreateEventTeamSnapshot: (...args: unknown[]) => claimOrCreateEventTeamSnapshotMock(...args),
+  loadCanonicalTeamById: (...args: unknown[]) => loadCanonicalTeamByIdMock(...args),
+}));
+
+import { POST } from '@/app/api/billing/purchase-intent/route';
+import { CONFIRMED_ORGANIZER_LIABLE_EVENT_TAX_RULES } from '@/lib/taxPolicy';
+
+const jsonPost = (body: unknown) =>
+  new NextRequest('http://localhost/api/billing/purchase-intent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+const canonicalRentalResult = (options?: {
+  start?: Date;
+  end?: Date;
+  hostRequiredTemplateIds?: string[];
+  totalAmountCents?: number;
+}) => ({
+  ok: true as const,
+  checkout: {
+    window: {
+      eventId: 'event_1',
+      fieldIds: ['field_1'],
+      start: options?.start ?? new Date('2099-03-18T12:00:00.000Z'),
+      end: options?.end ?? new Date('2099-03-18T13:00:00.000Z'),
+      timeZone: 'UTC',
+      noFixedEndDateTime: false,
+      organizationId: 'organization_1',
+      eventType: 'EVENT',
+      parentEvent: null,
+    },
+    windows: [{
+      eventId: 'event_1',
+      fieldIds: ['field_1'],
+      start: options?.start ?? new Date('2099-03-18T12:00:00.000Z'),
+      end: options?.end ?? new Date('2099-03-18T13:00:00.000Z'),
+      timeZone: 'UTC',
+      noFixedEndDateTime: false,
+      organizationId: 'organization_1',
+      eventType: 'EVENT',
+      parentEvent: null,
+    }],
+    organization: { id: 'organization_1', ownerId: 'owner_1', publicPageEnabled: true },
+    totalAmountCents: options?.totalAmountCents ?? 2500,
+    availabilitySlotIds: ['availability_1'],
+    requiredTemplateIds: [],
+    hostRequiredTemplateIds: options?.hostRequiredTemplateIds ?? [],
+    event: null,
+  },
+});
+
+describe('POST /api/billing/purchase-intent', () => {
+  beforeEach(() => {
+    jest.resetAllMocks();
+    prismaMock.$executeRaw.mockResolvedValue(0);
+    StripeMock.mockImplementation(() => ({
+      paymentIntents: {
+        create: (...args: unknown[]) => mockStripePaymentIntentCreate(...args),
+        list: (...args: unknown[]) => mockStripePaymentIntentList(...args),
+      },
+    }));
+    requireSessionMock.mockResolvedValue({ userId: 'user_1', isAdmin: false });
+    prismaMock.authUser.findUnique.mockResolvedValue({ emailVerifiedAt: new Date('2026-01-01T00:00:00.000Z') });
+    prismaMock.userData.findUnique.mockResolvedValue({ dateOfBirth: new Date('1990-01-01T00:00:00.000Z') });
+    prismaMock.products.findUnique.mockResolvedValue(null);
+    prismaMock.teams.findUnique.mockResolvedValue({ id: 'team_1' });
+    prismaMock.divisions.findMany.mockResolvedValue([]);
+    prismaMock.divisions.findFirst.mockResolvedValue(null);
+    prismaMock.eventRegistrations.findMany.mockResolvedValue([]);
+    prismaMock.eventRegistrations.findUnique.mockResolvedValue(null);
+    prismaMock.eventRegistrations.create.mockResolvedValue({});
+    prismaMock.eventRegistrations.update.mockResolvedValue({});
+    prismaMock.eventRegistrations.deleteMany.mockResolvedValue({ count: 0 });
+    canManageCanonicalTeamMock.mockResolvedValue(true);
+    claimOrCreateEventTeamSnapshotMock.mockResolvedValue({ id: 'event_team_1' });
+    loadCanonicalTeamByIdMock.mockResolvedValue({
+      id: 'canonical_team_1',
+      $id: 'canonical_team_1',
+      name: 'Canonical Team',
+      sport: null,
+      playerRegistrations: [],
+      staffAssignments: [],
+    });
+    prismaMock.$queryRaw.mockResolvedValue([
+      {
+        id: 'event_1',
+        start: new Date('2026-03-18T12:00:00.000Z'),
+        minAge: null,
+        maxAge: null,
+        sportId: null,
+        registrationByDivisionType: false,
+        divisions: [],
+        maxParticipants: null,
+        teamSignup: false,
+      },
+    ]);
+    prismaMock.$transaction.mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
+      const tx = {
+        $queryRaw: prismaMock.$queryRaw,
+        $executeRaw: prismaMock.$executeRaw,
+        teams: {
+          findUnique: prismaMock.teams.findUnique,
+        },
+        userData: {
+          findUnique: prismaMock.userData.findUnique,
+        },
+        divisions: {
+          findFirst: prismaMock.divisions.findFirst,
+        },
+        eventRegistrations: {
+          findMany: prismaMock.eventRegistrations.findMany,
+          findUnique: prismaMock.eventRegistrations.findUnique,
+          create: prismaMock.eventRegistrations.create,
+          update: prismaMock.eventRegistrations.update,
+          deleteMany: prismaMock.eventRegistrations.deleteMany,
+        },
+      };
+      return callback(tx);
+    });
+    resolveCanonicalRentalCheckoutMock.mockResolvedValue(canonicalRentalResult());
+    reserveRentalCheckoutWindowLocksMock.mockResolvedValue({
+      ok: true,
+      ownerToken: 'rental:user_1:event_1',
+      lockIds: ['rental-checkout:field_1:2099-03-18T12:00:00.000Z:2099-03-18T13:00:00.000Z'],
+      expiresAt: new Date('2099-03-18T12:10:00.000Z'),
+    });
+    releaseRentalCheckoutWindowLocksMock.mockResolvedValue(undefined);
+    loadUserBillingProfileMock.mockResolvedValue({
+      billingAddress: {
+        line1: '123 Main St',
+        city: 'Seattle',
+        state: 'WA',
+        postalCode: '98101',
+        countryCode: 'US',
+      },
+      email: 'buyer@example.com',
+    });
+    resolveBillingAddressInputMock.mockReturnValue(null);
+    upsertUserBillingAddressMock.mockResolvedValue(null);
+    validateUsBillingAddressMock.mockImplementation((value: unknown) => value);
+    calculateTaxQuoteMock.mockResolvedValue({
+      customerId: 'cus_123',
+      calculationId: 'taxcalc_123',
+      subtotalCents: 2500,
+      taxAmountCents: 213,
+      totalChargeCents: 3043,
+      processingFeeCents: 250,
+      stripeFeeCents: 80,
+      stripeProcessingFeeCents: 30,
+      stripeTaxServiceFeeCents: 50,
+      feePercentage: 10,
+      purchaseType: 'event',
+      hostReceivesCents: 2500,
+      taxCategory: 'EVENT_REGISTRATION',
+    });
+    buildDestinationTransferDataMock.mockResolvedValue(null);
+    mockStripePaymentIntentList.mockResolvedValue({ data: [] });
+    mockStripePaymentIntentCreate.mockResolvedValue({
+      id: 'pi_123',
+      client_secret: 'pi_123_secret_456',
+    });
+    process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = 'pk_test_mock';
+  });
+
+  it('blocks rental checkout when required rental document has not been signed', async () => {
+    resolveCanonicalRentalCheckoutMock.mockResolvedValueOnce(canonicalRentalResult({
+      hostRequiredTemplateIds: ['tmpl_rental_1'],
+    }));
+    prismaMock.templateDocuments.findMany.mockResolvedValue([
+      {
+        id: 'tmpl_rental_1',
+        title: 'Rental Agreement',
+        signOnce: false,
+      },
+    ]);
+    prismaMock.signedDocuments.findMany.mockResolvedValue([]);
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+      timeSlot: { $id: 'slot_1', price: 2500, hostRequiredTemplateIds: ['tmpl_rental_1'] },
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(String(data.error ?? '')).toContain('must be signed');
+  });
+
+  it('creates a payment intent when rental document is already signed', async () => {
+    resolveCanonicalRentalCheckoutMock.mockResolvedValueOnce(canonicalRentalResult({
+      hostRequiredTemplateIds: ['tmpl_rental_1'],
+    }));
+    prismaMock.templateDocuments.findMany.mockResolvedValue([
+      {
+        id: 'tmpl_rental_1',
+        title: 'Rental Agreement',
+        signOnce: false,
+      },
+    ]);
+    prismaMock.signedDocuments.findMany.mockResolvedValue([
+      { status: 'SIGNED' },
+    ]);
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+      timeSlot: { $id: 'slot_1', price: 2500, hostRequiredTemplateIds: ['tmpl_rental_1'] },
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.paymentIntent).toBe('pi_123_secret_456');
+    expect(reserveRentalCheckoutWindowLocksMock).toHaveBeenCalled();
+  });
+
+  it('passes the authoritative rental selection array through canonical pricing and exact holds', async () => {
+    const secondWindow = {
+      eventId: 'event_1',
+      fieldIds: ['field_2'],
+      start: new Date('2099-03-20T15:00:00.000Z'),
+      end: new Date('2099-03-20T16:00:00.000Z'),
+      timeZone: 'UTC',
+      noFixedEndDateTime: false,
+      organizationId: 'organization_1',
+      eventType: 'EVENT',
+      parentEvent: null,
+    };
+    const canonical = canonicalRentalResult({ totalAmountCents: 5000 });
+    canonical.checkout.windows = [canonical.checkout.window, secondWindow];
+    canonical.checkout.availabilitySlotIds = ['availability_1', 'availability_2'];
+    resolveCanonicalRentalCheckoutMock.mockResolvedValueOnce(canonical);
+    const rentalSelections = [
+      {
+        scheduledFieldIds: ['field_1'],
+        startDate: '2099-03-18T12:00:00.000Z',
+        endDate: '2099-03-18T13:00:00.000Z',
+        timeZone: 'UTC',
+      },
+      {
+        scheduledFieldIds: ['field_2'],
+        startDate: '2099-03-20T15:00:00.000Z',
+        endDate: '2099-03-20T16:00:00.000Z',
+        timeZone: 'UTC',
+      },
+    ];
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: { $id: 'event_1', price: 5000, eventType: 'EVENT' },
+      timeSlot: {
+        $id: 'aggregate_legacy_slot',
+        price: 5000,
+        startDate: '2099-03-18T12:00:00.000Z',
+        endDate: '2099-03-20T16:00:00.000Z',
+      },
+      rentalSelections,
+    }));
+
+    expect(res.status).toBe(200);
+    expect(resolveCanonicalRentalCheckoutMock).toHaveBeenCalledWith(expect.objectContaining({
+      rentalSelections,
+    }));
+    expect(reserveRentalCheckoutWindowLocksMock).toHaveBeenCalledWith(expect.objectContaining({
+      windows: [canonical.checkout.window, secondWindow],
+    }));
+    expect(mockStripePaymentIntentCreate).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        time_slot_id: 'availability_1',
+        time_slot_start: '2099-03-18T12:00:00.000Z',
+        time_slot_end: '2099-03-18T13:00:00.000Z',
+      }),
+    }));
+  });
+
+  it('releases the same exact rental window set when payment intent creation fails', async () => {
+    const secondWindow = {
+      ...canonicalRentalResult().checkout.window,
+      fieldIds: ['field_2'],
+      start: new Date('2099-03-20T15:00:00.000Z'),
+      end: new Date('2099-03-20T16:00:00.000Z'),
+    };
+    const canonical = canonicalRentalResult();
+    canonical.checkout.windows = [canonical.checkout.window, secondWindow];
+    resolveCanonicalRentalCheckoutMock.mockResolvedValueOnce(canonical);
+    mockStripePaymentIntentCreate.mockRejectedValueOnce(new Error('Stripe unavailable'));
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+      timeSlot: { $id: 'slot_1', price: 2500 },
+      rentalSelections: [
+        {
+          scheduledFieldIds: ['field_1'],
+          startDate: '2099-03-18T12:00:00.000Z',
+          endDate: '2099-03-18T13:00:00.000Z',
+        },
+        {
+          scheduledFieldIds: ['field_2'],
+          startDate: '2099-03-20T15:00:00.000Z',
+          endDate: '2099-03-20T16:00:00.000Z',
+        },
+      ],
+    }));
+
+    expect(res.status).toBe(502);
+    expect(releaseRentalCheckoutWindowLocksMock).toHaveBeenCalledWith({
+      client: prismaMock,
+      windows: [canonical.checkout.window, secondWindow],
+      userId: 'user_1',
+    });
+  });
+
+  it('blocks unverified users before creating a paid event payment intent', async () => {
+    prismaMock.authUser.findUnique.mockResolvedValueOnce({ emailVerifiedAt: null });
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(data).toEqual(expect.objectContaining({
+      code: 'EMAIL_VERIFICATION_REQUIRED',
+      error: 'Verify your email before registering for paid events or teams.',
+    }));
+    expect(prismaMock.eventRegistrations.create).not.toHaveBeenCalled();
+    expect(mockStripePaymentIntentCreate).not.toHaveBeenCalled();
+  });
+
+  it('blocks paid event checkout when the registrant is outside event age limits', async () => {
+    prismaMock.$queryRaw.mockResolvedValueOnce([
+      {
+        id: 'event_1',
+        start: new Date('2026-03-18T12:00:00.000Z'),
+        minAge: null,
+        maxAge: 12,
+        sportId: null,
+        registrationByDivisionType: false,
+        divisions: [],
+        maxParticipants: null,
+        teamSignup: false,
+        eventType: 'EVENT',
+        includePlayoffs: null,
+        parentEvent: null,
+        timeSlotIds: [],
+      },
+    ]);
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(String(data.error ?? '')).toContain('limited to ages');
+    expect(prismaMock.eventRegistrations.create).not.toHaveBeenCalled();
+    expect(mockStripePaymentIntentCreate).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 when rental checkout lock reservation conflicts', async () => {
+    reserveRentalCheckoutWindowLocksMock.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      error: 'Selected fields and time range are temporarily reserved by another checkout.',
+      conflictFieldIds: ['field_1'],
+    });
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+      timeSlot: { $id: 'slot_1', price: 2500 },
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(String(data.error ?? '')).toContain('temporarily reserved');
+    expect(data.conflictFieldIds).toEqual(['field_1']);
+  });
+
+  it('does not let the direct payment endpoint bypass canonical rental inventory validation', async () => {
+    resolveCanonicalRentalCheckoutMock.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      error: 'One or more selected fields are unavailable for rental.',
+    });
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: { $id: 'event_1', hostId: 'user_1', price: 1, eventType: 'EVENT' },
+      timeSlot: {
+        $id: 'forged_slot',
+        price: 1,
+        scheduledFieldIds: ['forged_field'],
+      },
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toContain('unavailable');
+    expect(reserveRentalCheckoutWindowLocksMock).not.toHaveBeenCalled();
+    expect(mockStripePaymentIntentCreate).not.toHaveBeenCalled();
+  });
+
+  it('rejects rental checkout payment intents for past start times', async () => {
+    resolveCanonicalRentalCheckoutMock.mockResolvedValueOnce(canonicalRentalResult({
+      start: new Date('2001-03-18T12:00:00.000Z'),
+      end: new Date('2001-03-18T13:00:00.000Z'),
+    }));
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+      timeSlot: { $id: 'slot_1', price: 2500 },
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toBe('Rental selections must start in the future.');
+    expect(reserveRentalCheckoutWindowLocksMock).not.toHaveBeenCalled();
+    expect(mockStripePaymentIntentCreate).not.toHaveBeenCalled();
+  });
+
+  it('blocks rental checkout when any required rental document template is unsigned', async () => {
+    resolveCanonicalRentalCheckoutMock.mockResolvedValueOnce(canonicalRentalResult({
+      hostRequiredTemplateIds: ['tmpl_rental_1', 'tmpl_rental_2'],
+    }));
+    prismaMock.templateDocuments.findMany.mockResolvedValue([
+      {
+        id: 'tmpl_rental_1',
+        title: 'Rental Agreement',
+        signOnce: false,
+      },
+      {
+        id: 'tmpl_rental_2',
+        title: 'Damage Waiver',
+        signOnce: false,
+      },
+    ]);
+    prismaMock.signedDocuments.findMany
+      .mockResolvedValueOnce([{ status: 'SIGNED' }])
+      .mockResolvedValueOnce([]);
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+      timeSlot: {
+        $id: 'slot_1',
+        price: 2500,
+        hostRequiredTemplateIds: ['tmpl_rental_1', 'tmpl_rental_2', 'tmpl_rental_1'],
+      },
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(String(data.error ?? '')).toContain('Damage Waiver');
+  });
+
+  it('uses host-required templates for rental checkout verification when provided', async () => {
+    resolveCanonicalRentalCheckoutMock.mockResolvedValueOnce(canonicalRentalResult({
+      hostRequiredTemplateIds: ['tmpl_host_only'],
+    }));
+    prismaMock.templateDocuments.findMany.mockResolvedValue([
+      {
+        id: 'tmpl_host_only',
+        title: 'Host Rental Contract',
+        signOnce: false,
+      },
+    ]);
+    prismaMock.signedDocuments.findMany.mockResolvedValue([]);
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+      timeSlot: {
+        $id: 'slot_1',
+        price: 2500,
+        requiredTemplateIds: ['tmpl_participant_only'],
+        hostRequiredTemplateIds: ['tmpl_host_only'],
+      },
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(String(data.error ?? '')).toContain('Host Rental Contract');
+    expect(prismaMock.templateDocuments.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ['tmpl_host_only'] } },
+      }),
+    );
+  });
+
+  it('does not require rental signing when only participant template ids are present', async () => {
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+      timeSlot: {
+        $id: 'slot_1',
+        price: 2500,
+        requiredTemplateIds: ['tmpl_participant_only'],
+      },
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.paymentIntent).toBe('pi_123_secret_456');
+    expect(prismaMock.templateDocuments.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.signedDocuments.findMany).not.toHaveBeenCalled();
+  });
+
+  it('creates STARTED registration reservation before event checkout payment intent', async () => {
+    const now = new Date('2026-03-18T12:00:00.000Z');
+    prismaMock.eventRegistrations.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 'event_1__self__user_1', createdAt: now },
+      ]);
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.paymentIntent).toBe('pi_123_secret_456');
+    expect(data.registrationId).toBe('event_1__self__user_1');
+    expect(data.registrationHoldExpiresAt).toEqual(expect.any(String));
+    expect(data.registrationHoldTtlSeconds).toBe(600);
+    expect(prismaMock.eventRegistrations.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          id: 'event_1__self__user_1',
+          eventId: 'event_1',
+          registrantId: 'user_1',
+          registrantType: 'SELF',
+          status: 'STARTED',
+        }),
+      }),
+    );
+  });
+
+  it('creates an event-team snapshot before reserving paid canonical team checkout', async () => {
+    prismaMock.$queryRaw.mockResolvedValueOnce([
+      {
+        id: 'event_1',
+        start: new Date('2026-03-18T12:00:00.000Z'),
+        minAge: null,
+        maxAge: null,
+        sportId: null,
+        registrationByDivisionType: false,
+        divisions: [],
+        maxParticipants: null,
+        teamSignup: true,
+        eventType: 'EVENT',
+        includePlayoffs: null,
+        parentEvent: null,
+        timeSlotIds: [],
+      },
+    ]);
+    prismaMock.teams.findUnique.mockResolvedValueOnce(null);
+    loadCanonicalTeamByIdMock.mockResolvedValueOnce({
+      id: 'canonical_team_1',
+      $id: 'canonical_team_1',
+      name: 'Rain Team',
+      sport: null,
+      playerRegistrations: [],
+      staffAssignments: [],
+    });
+    claimOrCreateEventTeamSnapshotMock.mockResolvedValueOnce({ id: 'event_team_1' });
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: {
+        $id: 'event_1',
+        name: 'Paid Team Event',
+        price: 2500,
+        eventType: 'EVENT',
+        teamSignup: true,
+      },
+      team: { $id: 'canonical_team_1', name: 'Rain Team' },
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.paymentIntent).toBe('pi_123_secret_456');
+    expect(loadCanonicalTeamByIdMock).toHaveBeenCalledWith('canonical_team_1', expect.any(Object));
+    expect(canManageCanonicalTeamMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        teamId: 'canonical_team_1',
+        userId: 'user_1',
+        isAdmin: false,
+      }),
+      expect.any(Object),
+    );
+    expect(claimOrCreateEventTeamSnapshotMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: 'event_1',
+        canonicalTeamId: 'canonical_team_1',
+        createdBy: 'user_1',
+        upsertRegistration: false,
+      }),
+    );
+    expect(prismaMock.eventRegistrations.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          id: 'event_1__team__event_team_1',
+          eventId: 'event_1',
+          registrantId: 'event_team_1',
+          parentId: 'canonical_team_1',
+          eventTeamId: 'event_team_1',
+          registrantType: 'TEAM',
+          status: 'STARTED',
+        }),
+      }),
+    );
+    const createParams = mockStripePaymentIntentCreate.mock.calls[0]?.[0];
+    expect(createParams.metadata).toEqual(expect.objectContaining({
+      team_id: 'event_team_1',
+      registration_id: 'event_1__team__event_team_1',
+    }));
+  });
+
+  it('reuses a cancelled placeholder registration row for paid canonical team checkout', async () => {
+    prismaMock.$queryRaw.mockResolvedValueOnce([
+      {
+        id: 'event_1',
+        start: new Date('2026-03-18T12:00:00.000Z'),
+        minAge: null,
+        maxAge: null,
+        sportId: null,
+        registrationByDivisionType: false,
+        divisions: [],
+        maxParticipants: null,
+        teamSignup: true,
+        eventType: 'EVENT',
+        includePlayoffs: null,
+        parentEvent: null,
+        timeSlotIds: [],
+      },
+    ]);
+    prismaMock.teams.findUnique.mockResolvedValueOnce(null);
+    loadCanonicalTeamByIdMock.mockResolvedValueOnce({
+      id: 'canonical_team_1',
+      $id: 'canonical_team_1',
+      name: 'Rain Team',
+      sport: null,
+      playerRegistrations: [],
+      staffAssignments: [],
+    });
+    claimOrCreateEventTeamSnapshotMock.mockResolvedValueOnce({ id: 'event_team_1' });
+    prismaMock.eventRegistrations.findUnique.mockResolvedValueOnce({
+      id: 'event_1__team__event_team_1',
+      status: 'CANCELLED',
+      createdAt: new Date('2026-03-18T11:55:00.000Z'),
+      divisionId: null,
+      divisionTypeId: null,
+      divisionTypeKey: null,
+    });
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: {
+        $id: 'event_1',
+        name: 'Paid Team Event',
+        price: 2500,
+        eventType: 'EVENT',
+        teamSignup: true,
+      },
+      team: { $id: 'canonical_team_1', name: 'Rain Team' },
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.paymentIntent).toBe('pi_123_secret_456');
+    expect(prismaMock.eventRegistrations.create).not.toHaveBeenCalled();
+    expect(prismaMock.eventRegistrations.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'event_1__team__event_team_1' },
+        data: expect.objectContaining({
+          registrantId: 'event_team_1',
+          parentId: 'canonical_team_1',
+          eventTeamId: 'event_team_1',
+          registrantType: 'TEAM',
+          status: 'STARTED',
+        }),
+      }),
+    );
+  });
+
+  it('skips Stripe Tax for zero-tax sports event jurisdictions and still charges customer fees', async () => {
+    loadUserBillingProfileMock.mockResolvedValueOnce({
+      billingAddress: null,
+      email: 'buyer@example.com',
+    });
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: {
+        $id: 'event_1',
+        name: 'Friday Pickup',
+        price: 2500,
+        eventType: 'EVENT',
+        address: '123 Main St, Hoboken, NJ 07030',
+        location: 'Hoboken, NJ',
+      },
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(calculateTaxQuoteMock).not.toHaveBeenCalled();
+    expect(data.taxMode).toBe('ZERO_TAX');
+    expect(data.taxReasonCode).toBe('sports_participant_state_exempt');
+    expect(data.taxJurisdictionState).toBe('NJ');
+    expect(data.taxCalculationId).toBeUndefined();
+    expect(data.feeBreakdown).toEqual(expect.objectContaining({
+      eventPrice: 2500,
+      processingFee: 24,
+      taxAmount: 0,
+      stripeTaxServiceFee: 0,
+      purchaseType: 'event',
+    }));
+    expect(data.feeBreakdown.stripeProcessingFee).toBeGreaterThan(0);
+    expect(data.feeBreakdown.totalCharge).toBe(2500);
+
+    const createParams = mockStripePaymentIntentCreate.mock.calls[0]?.[0];
+    expect(createParams).toEqual(expect.objectContaining({
+      amount: data.feeBreakdown.totalCharge,
+      receipt_email: 'buyer@example.com',
+    }));
+    expect(createParams.customer).toBeUndefined();
+    expect(createParams.hooks).toBeUndefined();
+    expect(createParams.metadata).toEqual(expect.objectContaining({
+      tax_mode: 'ZERO_TAX',
+      tax_reason_code: 'sports_participant_state_exempt',
+      tax_jurisdiction_state: 'NJ',
+      taxability: 'NOT_TAXABLE',
+      tax_liability_party: 'NONE',
+      tax_collection_strategy: 'NO_TAX',
+      tax_cents: '0',
+      stripe_tax_service_fee_cents: '0',
+    }));
+  });
+
+  it('transfers organizer manual tax to the connected account when a reviewed rule allows organizer liability', async () => {
+    const organizerRules = CONFIRMED_ORGANIZER_LIABLE_EVENT_TAX_RULES as Array<{
+      stateCode: string;
+      purchaseTypes: string[];
+      taxCategories: string[];
+      allowedCollectionStrategies: Array<'ORGANIZER_MANUAL_TAX'>;
+      ruleId: string;
+      ruleVersion: string;
+    }>;
+    const originalRuleCount = organizerRules.length;
+    organizerRules.push({
+      stateCode: 'ID',
+      purchaseTypes: ['event'],
+      taxCategories: ['EVENT_PARTICIPANT'],
+      allowedCollectionStrategies: ['ORGANIZER_MANUAL_TAX'],
+      ruleId: 'test-id-organizer-liable',
+      ruleVersion: 'test-2026-05-08',
+    });
+    buildDestinationTransferDataMock.mockResolvedValueOnce({
+      destination: 'acct_connected_123',
+      amount: 2673,
+    });
+    loadUserBillingProfileMock.mockResolvedValueOnce({
+      billingAddress: null,
+      email: 'buyer@example.com',
+    });
+
+    try {
+      const res = await POST(jsonPost({
+        user: { $id: 'user_1' },
+        event: {
+          $id: 'event_1',
+          name: 'Boise Pickup',
+          price: 2500,
+          eventType: 'EVENT',
+          address: '123 Main St, Boise, ID 83702',
+          location: 'Boise, ID',
+          taxHandling: 'ORGANIZER_MANUAL_TAX',
+          organizerManualTaxRateBps: 600,
+        },
+      }));
+      const data = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(calculateTaxQuoteMock).not.toHaveBeenCalled();
+      expect(data.taxLiabilityParty).toBe('ORGANIZER');
+      expect(data.taxCollectionStrategy).toBe('ORGANIZER_MANUAL_TAX');
+      expect(data.feeBreakdown).toEqual(expect.objectContaining({
+        eventPrice: 2500,
+        taxAmount: 150,
+        hostReceives: 2523,
+      }));
+      expect(buildDestinationTransferDataMock).toHaveBeenCalledWith({
+        organizationId: null,
+        hostUserId: null,
+        transferAmountCents: 2673,
+      });
+
+      const createParams = mockStripePaymentIntentCreate.mock.calls[0]?.[0];
+      expect(createParams).toEqual(expect.objectContaining({
+        amount: data.feeBreakdown.totalCharge,
+      }));
+      expect(createParams.customer).toBeUndefined();
+      expect(createParams.hooks).toBeUndefined();
+      expect(createParams.transfer_data).toEqual({
+        destination: 'acct_connected_123',
+        amount: 2673,
+      });
+      expect(createParams.metadata).toEqual(expect.objectContaining({
+        tax_liability_party: 'ORGANIZER',
+        tax_collection_strategy: 'ORGANIZER_MANUAL_TAX',
+        tax_policy_rule_id: 'test-id-organizer-liable',
+        tax_policy_rule_version: 'test-2026-05-08',
+        organizer_manual_tax_rate_bps: '600',
+        tax_cents: '150',
+        transfer_amount_cents: '2673',
+      }));
+    } finally {
+      organizerRules.splice(originalRuleCount);
+    }
+  });
+
+  it('reuses an existing STARTED reservation when purchase-intent creation is retried', async () => {
+    const now = new Date('2026-03-18T12:00:00.000Z');
+    prismaMock.eventRegistrations.findUnique.mockResolvedValueOnce({
+      id: 'event_1__self__user_1',
+      status: 'STARTED',
+      createdAt: now,
+      divisionId: null,
+      divisionTypeId: null,
+      divisionTypeKey: null,
+    });
+    prismaMock.eventRegistrations.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 'event_1__self__user_1', createdAt: now },
+      ]);
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+    }));
+    const payload = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(payload.paymentIntent).toBe('pi_123_secret_456');
+    expect(payload.registrationId).toBe('event_1__self__user_1');
+    expect(payload.registrationHoldExpiresAt).toBe('2026-03-18T12:10:00.000Z');
+    expect(payload.registrationHoldTtlSeconds).toBe(600);
+    expect(prismaMock.eventRegistrations.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects event checkout when reservation queue position exceeds capacity', async () => {
+    type RegistrationRow = {
+      id: string;
+      eventId: string;
+      registrantType: string;
+      status: string;
+      createdAt: Date | null;
+      updatedAt: Date | null;
+    };
+    const registrations: RegistrationRow[] = [
+      {
+        id: 'event_1__self__existing_user',
+        eventId: 'event_1',
+        registrantType: 'SELF',
+        status: 'ACTIVE',
+        createdAt: new Date('2020-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2020-01-01T00:00:00.000Z'),
+      },
+    ];
+
+    prismaMock.$queryRaw.mockImplementation(async () => [
+      {
+        id: 'event_1',
+        start: new Date('2026-03-18T12:00:00.000Z'),
+        minAge: null,
+        maxAge: null,
+        sportId: null,
+        registrationByDivisionType: false,
+        divisions: [],
+        maxParticipants: 1,
+        teamSignup: false,
+      },
+    ]);
+
+    prismaMock.eventRegistrations.findUnique.mockImplementation(async ({ where }: any) => {
+      const id = String(where?.id ?? '');
+      const row = registrations.find((entry) => entry.id === id);
+      if (!row) return null;
+      return {
+        id: row.id,
+        status: row.status,
+        createdAt: row.createdAt,
+        divisionId: null,
+        divisionTypeId: null,
+        divisionTypeKey: null,
+      };
+    });
+
+    prismaMock.eventRegistrations.findMany.mockImplementation(async ({ where, select }: any) => {
+      let rows = registrations.filter((entry) => entry.eventId === where?.eventId);
+      if (Array.isArray(where?.OR)) {
+        const cutoff = where.OR.find((item: any) => item?.createdAt?.lt)?.createdAt?.lt;
+        rows = rows.filter((entry) => (
+          entry.createdAt == null || (cutoff instanceof Date && entry.createdAt < cutoff)
+        ));
+      } else if (Array.isArray(where?.status?.in)) {
+        rows = rows.filter((entry) => where.status.in.includes(entry.status));
+      }
+      if (typeof where?.registrantType === 'string') {
+        rows = rows.filter((entry) => entry.registrantType === where.registrantType);
+      } else if (Array.isArray(where?.registrantType?.in)) {
+        rows = rows.filter((entry) => where.registrantType.in.includes(entry.registrantType));
+      }
+      return rows.map((entry) => {
+        if (!select) return { ...entry };
+        const projected: Record<string, unknown> = {};
+        if (select.id) projected.id = entry.id;
+        if (select.createdAt) projected.createdAt = entry.createdAt;
+        return projected;
+      });
+    });
+
+    prismaMock.eventRegistrations.create.mockImplementation(async ({ data }: any) => {
+      registrations.push({
+        id: String(data.id),
+        eventId: String(data.eventId),
+        registrantType: String(data.registrantType),
+        status: String(data.status),
+        createdAt: data.createdAt instanceof Date ? data.createdAt : new Date(),
+        updatedAt: data.updatedAt instanceof Date ? data.updatedAt : new Date(),
+      });
+      return data;
+    });
+
+    prismaMock.eventRegistrations.deleteMany.mockImplementation(async ({ where }: any) => {
+      const id = String(where?.id ?? '');
+      const status = String(where?.status ?? '');
+      const before = registrations.length;
+      for (let index = registrations.length - 1; index >= 0; index -= 1) {
+        const row = registrations[index];
+        if (row.id === id && row.status === status) {
+          registrations.splice(index, 1);
+        }
+      }
+      return { count: before - registrations.length };
+    });
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(String(data.error ?? '')).toContain('Event is full');
+    expect(prismaMock.eventRegistrations.deleteMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'event_1__self__user_1',
+          status: 'STARTED',
+        }),
+      }),
+    );
+  });
+
+  it('rejects event checkout when selected division is full even if event has room', async () => {
+    prismaMock.$queryRaw.mockResolvedValueOnce([
+      {
+        id: 'event_1',
+        start: new Date('2026-03-18T12:00:00.000Z'),
+        minAge: null,
+        maxAge: null,
+        sportId: null,
+        registrationByDivisionType: false,
+        divisions: ['div_a', 'div_b'],
+        maxParticipants: 5,
+        teamSignup: false,
+      },
+    ]);
+    prismaMock.divisions.findMany.mockResolvedValueOnce([
+      {
+        id: 'div_a',
+        key: 'div_a',
+        name: 'Division A',
+        sportId: null,
+        divisionTypeId: 'adult',
+        divisionTypeName: 'Adult',
+        ratingType: 'AGE',
+        gender: 'C',
+        ageCutoffDate: null,
+        ageCutoffLabel: null,
+        ageCutoffSource: null,
+      },
+      {
+        id: 'div_b',
+        key: 'div_b',
+        name: 'Division B',
+        sportId: null,
+        divisionTypeId: 'adult',
+        divisionTypeName: 'Adult',
+        ratingType: 'AGE',
+        gender: 'C',
+        ageCutoffDate: null,
+        ageCutoffLabel: null,
+        ageCutoffSource: null,
+      },
+    ]);
+    prismaMock.divisions.findFirst.mockResolvedValueOnce({
+      id: 'div_a',
+      maxParticipants: 1,
+    });
+    prismaMock.eventRegistrations.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 'event_1__self__existing_user', createdAt: new Date('2026-03-18T11:59:00.000Z') },
+        { id: 'event_1__self__user_1', createdAt: new Date('2026-03-18T12:00:00.000Z') },
+      ]);
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+      divisionId: 'div_a',
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(String(data.error ?? '')).toContain('Selected division is full');
+    expect(prismaMock.eventRegistrations.deleteMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'event_1__self__user_1',
+          status: 'STARTED',
+        }),
+      }),
+    );
+  });
+
+  it('accepts mobile-wrapped division ids and stores the canonical division id', async () => {
+    prismaMock.$queryRaw.mockResolvedValueOnce([
+      {
+        id: 'event_1',
+        start: new Date('2026-03-18T12:00:00.000Z'),
+        minAge: null,
+        maxAge: null,
+        sportId: null,
+        registrationByDivisionType: false,
+        divisions: ['div_a'],
+        maxParticipants: 5,
+        teamSignup: false,
+      },
+    ]);
+    prismaMock.divisions.findMany.mockResolvedValueOnce([
+      {
+        id: 'div_a',
+        key: 'div_a',
+        name: 'Division A',
+        sportId: null,
+        divisionTypeId: 'adult',
+        divisionTypeName: 'Adult',
+        ratingType: 'AGE',
+        gender: 'C',
+        ageCutoffDate: null,
+        ageCutoffLabel: null,
+        ageCutoffSource: null,
+      },
+    ]);
+    prismaMock.divisions.findFirst.mockResolvedValueOnce({
+      id: 'div_a',
+      maxParticipants: 5,
+    });
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+      divisionId: 'event_1__division__div_a',
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.paymentIntent).toBe('pi_123_secret_456');
+    expect(prismaMock.eventRegistrations.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          divisionId: 'div_a',
+          registrantId: 'user_1',
+          registrantType: 'SELF',
+          status: 'STARTED',
+        }),
+      }),
+    );
+  });
+
+  it('allows only one reservation when two users race for the final event slot', async () => {
+    type RegistrationRow = {
+      id: string;
+      eventId: string;
+      registrantId: string;
+      registrantType: string;
+      status: string;
+      createdAt: Date | null;
+      updatedAt: Date | null;
+    };
+
+    const registrations: RegistrationRow[] = [];
+    let transactionQueue = Promise.resolve();
+
+    prismaMock.$queryRaw.mockImplementation(async () => [
+      {
+        id: 'event_1',
+        start: new Date('2026-03-18T12:00:00.000Z'),
+        minAge: null,
+        maxAge: null,
+        sportId: null,
+        registrationByDivisionType: false,
+        divisions: [],
+        maxParticipants: 1,
+        teamSignup: false,
+      },
+    ]);
+
+    prismaMock.eventRegistrations.findUnique.mockImplementation(async ({ where }: any) => {
+      const id = String(where?.id ?? '');
+      const row = registrations.find((entry) => entry.id === id);
+      if (!row) return null;
+      return {
+        id: row.id,
+        status: row.status,
+        createdAt: row.createdAt,
+      };
+    });
+
+    prismaMock.eventRegistrations.findMany.mockImplementation(async ({ where, select }: any) => {
+      let rows = registrations.filter((entry) => entry.eventId === where?.eventId);
+
+      if (typeof where?.status === 'string') {
+        rows = rows.filter((entry) => entry.status === where.status);
+      } else if (Array.isArray(where?.status?.in)) {
+        rows = rows.filter((entry) => where.status.in.includes(entry.status));
+      }
+
+      if (Array.isArray(where?.OR)) {
+        const cutoff = where.OR.find((item: any) => item?.createdAt?.lt)?.createdAt?.lt;
+        rows = rows.filter((entry) => {
+          if (entry.createdAt == null) return true;
+          if (cutoff instanceof Date) return entry.createdAt < cutoff;
+          return false;
+        });
+      }
+
+      if (typeof where?.registrantType === 'string') {
+        rows = rows.filter((entry) => entry.registrantType === where.registrantType);
+      } else if (Array.isArray(where?.registrantType?.in)) {
+        rows = rows.filter((entry) => where.registrantType.in.includes(entry.registrantType));
+      }
+
+      return rows.map((entry) => {
+        if (!select) return { ...entry };
+        const projected: Record<string, unknown> = {};
+        if (select.id) projected.id = entry.id;
+        if (select.status) projected.status = entry.status;
+        if (select.createdAt) projected.createdAt = entry.createdAt;
+        return projected;
+      });
+    });
+
+    prismaMock.eventRegistrations.create.mockImplementation(async ({ data }: any) => {
+      registrations.push({
+        id: String(data.id),
+        eventId: String(data.eventId),
+        registrantId: String(data.registrantId),
+        registrantType: String(data.registrantType),
+        status: String(data.status),
+        createdAt: data.createdAt instanceof Date ? data.createdAt : new Date(),
+        updatedAt: data.updatedAt instanceof Date ? data.updatedAt : new Date(),
+      });
+      return data;
+    });
+
+    prismaMock.eventRegistrations.update.mockImplementation(async ({ where, data }: any) => {
+      const id = String(where?.id ?? '');
+      const row = registrations.find((entry) => entry.id === id);
+      if (!row) return null;
+      if (typeof data?.status === 'string') row.status = data.status;
+      if (data?.updatedAt instanceof Date) row.updatedAt = data.updatedAt;
+      return {
+        id: row.id,
+        status: row.status,
+        createdAt: row.createdAt,
+      };
+    });
+
+    prismaMock.eventRegistrations.deleteMany.mockImplementation(async ({ where }: any) => {
+      const ids = Array.isArray(where?.id?.in)
+        ? where.id.in.map((value: unknown) => String(value))
+        : where?.id != null
+          ? [String(where.id)]
+          : [];
+      const requiredStatus = typeof where?.status === 'string' ? where.status : null;
+      const beforeCount = registrations.length;
+      for (let index = registrations.length - 1; index >= 0; index -= 1) {
+        const entry = registrations[index];
+        const idMatches = ids.length === 0 || ids.includes(entry.id);
+        const statusMatches = !requiredStatus || entry.status === requiredStatus;
+        if (idMatches && statusMatches) {
+          registrations.splice(index, 1);
+        }
+      }
+      return { count: beforeCount - registrations.length };
+    });
+
+    prismaMock.$transaction.mockImplementation((callback: (tx: any) => Promise<unknown>) => {
+      const tx = {
+        $queryRaw: prismaMock.$queryRaw,
+        $executeRaw: prismaMock.$executeRaw,
+        teams: {
+          findUnique: prismaMock.teams.findUnique,
+        },
+        userData: {
+          findUnique: prismaMock.userData.findUnique,
+        },
+        divisions: {
+          findFirst: prismaMock.divisions.findFirst,
+        },
+        eventRegistrations: {
+          findMany: prismaMock.eventRegistrations.findMany,
+          findUnique: prismaMock.eventRegistrations.findUnique,
+          create: prismaMock.eventRegistrations.create,
+          update: prismaMock.eventRegistrations.update,
+          deleteMany: prismaMock.eventRegistrations.deleteMany,
+        },
+      };
+
+      const run = transactionQueue.then(() => callback(tx));
+      transactionQueue = run.then(() => undefined, () => undefined);
+      return run;
+    });
+
+    const [firstResponse, secondResponse] = await Promise.all([
+      POST(jsonPost({
+        user: { $id: 'user_1' },
+        event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+      })),
+      POST(jsonPost({
+        user: { $id: 'user_2' },
+        event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+      })),
+    ]);
+
+    const firstPayload = await firstResponse.json();
+    const secondPayload = await secondResponse.json();
+    const statusCodes = [firstResponse.status, secondResponse.status].sort((left, right) => left - right);
+
+    expect(statusCodes).toEqual([200, 409]);
+    expect(
+      [String(firstPayload.error ?? ''), String(secondPayload.error ?? '')]
+        .some((message) => message.includes('Event is full')),
+    ).toBe(true);
+    expect(registrations.filter((entry) => entry.status === 'STARTED')).toHaveLength(1);
+  });
+
+  it('allows only one reservation when two users race for the final division slot', async () => {
+    type RegistrationRow = {
+      id: string;
+      eventId: string;
+      registrantId: string;
+      registrantType: string;
+      status: string;
+      divisionId: string | null;
+      createdAt: Date | null;
+      updatedAt: Date | null;
+    };
+
+    const registrations: RegistrationRow[] = [];
+    let transactionQueue = Promise.resolve();
+
+    prismaMock.$queryRaw.mockImplementation(async () => [
+      {
+        id: 'event_1',
+        start: new Date('2026-03-18T12:00:00.000Z'),
+        minAge: null,
+        maxAge: null,
+        sportId: null,
+        registrationByDivisionType: false,
+        divisions: ['div_a'],
+        maxParticipants: 10,
+        teamSignup: false,
+      },
+    ]);
+    prismaMock.divisions.findMany.mockResolvedValue([
+      {
+        id: 'div_a',
+        key: 'div_a',
+        name: 'Division A',
+        sportId: null,
+        divisionTypeId: 'adult',
+        divisionTypeName: 'Adult',
+        ratingType: 'AGE',
+        gender: 'C',
+        ageCutoffDate: null,
+        ageCutoffLabel: null,
+        ageCutoffSource: null,
+      },
+    ]);
+    prismaMock.divisions.findFirst.mockResolvedValue({
+      id: 'div_a',
+      maxParticipants: 1,
+    });
+
+    prismaMock.eventRegistrations.findUnique.mockImplementation(async ({ where }: any) => {
+      const id = String(where?.id ?? '');
+      const row = registrations.find((entry) => entry.id === id);
+      if (!row) return null;
+      return {
+        id: row.id,
+        status: row.status,
+        createdAt: row.createdAt,
+        divisionId: row.divisionId,
+        divisionTypeId: null,
+        divisionTypeKey: null,
+      };
+    });
+
+    prismaMock.eventRegistrations.findMany.mockImplementation(async ({ where, select }: any) => {
+      let rows = registrations.filter((entry) => entry.eventId === where?.eventId);
+
+      if (typeof where?.status === 'string') {
+        rows = rows.filter((entry) => entry.status === where.status);
+      } else if (Array.isArray(where?.status?.in)) {
+        rows = rows.filter((entry) => where.status.in.includes(entry.status));
+      }
+
+      if (Array.isArray(where?.OR)) {
+        const cutoff = where.OR.find((item: any) => item?.createdAt?.lt)?.createdAt?.lt;
+        rows = rows.filter((entry) => {
+          if (entry.createdAt == null) return true;
+          if (cutoff instanceof Date) return entry.createdAt < cutoff;
+          return false;
+        });
+      }
+
+      if (typeof where?.divisionId === 'string') {
+        rows = rows.filter((entry) => entry.divisionId === where.divisionId);
+      }
+
+      if (typeof where?.registrantType === 'string') {
+        rows = rows.filter((entry) => entry.registrantType === where.registrantType);
+      } else if (Array.isArray(where?.registrantType?.in)) {
+        rows = rows.filter((entry) => where.registrantType.in.includes(entry.registrantType));
+      }
+
+      return rows.map((entry) => {
+        if (!select) return { ...entry };
+        const projected: Record<string, unknown> = {};
+        if (select.id) projected.id = entry.id;
+        if (select.status) projected.status = entry.status;
+        if (select.createdAt) projected.createdAt = entry.createdAt;
+        return projected;
+      });
+    });
+
+    prismaMock.eventRegistrations.create.mockImplementation(async ({ data }: any) => {
+      registrations.push({
+        id: String(data.id),
+        eventId: String(data.eventId),
+        registrantId: String(data.registrantId),
+        registrantType: String(data.registrantType),
+        status: String(data.status),
+        divisionId: data.divisionId == null ? null : String(data.divisionId),
+        createdAt: data.createdAt instanceof Date ? data.createdAt : new Date(),
+        updatedAt: data.updatedAt instanceof Date ? data.updatedAt : new Date(),
+      });
+      return data;
+    });
+
+    prismaMock.eventRegistrations.update.mockImplementation(async ({ where, data }: any) => {
+      const id = String(where?.id ?? '');
+      const row = registrations.find((entry) => entry.id === id);
+      if (!row) return null;
+      if (typeof data?.status === 'string') row.status = data.status;
+      if (typeof data?.divisionId === 'string' || data?.divisionId === null) {
+        row.divisionId = data.divisionId == null ? null : String(data.divisionId);
+      }
+      if (data?.updatedAt instanceof Date) row.updatedAt = data.updatedAt;
+      return {
+        id: row.id,
+        status: row.status,
+        createdAt: row.createdAt,
+      };
+    });
+
+    prismaMock.eventRegistrations.deleteMany.mockImplementation(async ({ where }: any) => {
+      const ids = Array.isArray(where?.id?.in)
+        ? where.id.in.map((value: unknown) => String(value))
+        : where?.id != null
+          ? [String(where.id)]
+          : [];
+      const requiredStatus = typeof where?.status === 'string' ? where.status : null;
+      const beforeCount = registrations.length;
+      for (let index = registrations.length - 1; index >= 0; index -= 1) {
+        const entry = registrations[index];
+        const idMatches = ids.length === 0 || ids.includes(entry.id);
+        const statusMatches = !requiredStatus || entry.status === requiredStatus;
+        if (idMatches && statusMatches) {
+          registrations.splice(index, 1);
+        }
+      }
+      return { count: beforeCount - registrations.length };
+    });
+
+    prismaMock.$transaction.mockImplementation((callback: (tx: any) => Promise<unknown>) => {
+      const tx = {
+        $queryRaw: prismaMock.$queryRaw,
+        $executeRaw: prismaMock.$executeRaw,
+        teams: {
+          findUnique: prismaMock.teams.findUnique,
+        },
+        userData: {
+          findUnique: prismaMock.userData.findUnique,
+        },
+        divisions: {
+          findFirst: prismaMock.divisions.findFirst,
+        },
+        eventRegistrations: {
+          findMany: prismaMock.eventRegistrations.findMany,
+          findUnique: prismaMock.eventRegistrations.findUnique,
+          create: prismaMock.eventRegistrations.create,
+          update: prismaMock.eventRegistrations.update,
+          deleteMany: prismaMock.eventRegistrations.deleteMany,
+        },
+      };
+
+      const run = transactionQueue.then(() => callback(tx));
+      transactionQueue = run.then(() => undefined, () => undefined);
+      return run;
+    });
+
+    const [firstResponse, secondResponse] = await Promise.all([
+      POST(jsonPost({
+        user: { $id: 'user_1' },
+        event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+        divisionId: 'div_a',
+      })),
+      POST(jsonPost({
+        user: { $id: 'user_2' },
+        event: { $id: 'event_1', price: 2500, eventType: 'EVENT' },
+        divisionId: 'div_a',
+      })),
+    ]);
+
+    const firstPayload = await firstResponse.json();
+    const secondPayload = await secondResponse.json();
+    const statusCodes = [firstResponse.status, secondResponse.status].sort((left, right) => left - right);
+
+    expect(statusCodes).toEqual([200, 409]);
+    expect(
+      [String(firstPayload.error ?? ''), String(secondPayload.error ?? '')]
+        .some((message) => message.includes('Selected division is full')),
+    ).toBe(true);
+    expect(registrations.filter((entry) => entry.status === 'STARTED' && entry.divisionId === 'div_a')).toHaveLength(1);
+  });
+});
