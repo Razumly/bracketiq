@@ -24,6 +24,12 @@ class MockEditorRevisionConflictError extends Error {
   }
 }
 
+class MockEditorInputError extends Error {
+  constructor(message: string) {
+    super(message);
+  }
+}
+
 jest.mock('@/lib/permissions', () => ({ requireSession: (...args: any[]) => requireSessionMock(...args) }));
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/server/accessControl', () => ({
@@ -46,7 +52,7 @@ jest.mock('@/server/events/eventEditorSave', () => ({
   saveEventEditor: (...args: any[]) => saveEventEditorMock(...args),
   EditorCapabilityError: class extends Error {},
   EditorImmutableFieldError: class extends Error {},
-  EditorInputError: class extends Error {},
+  EditorInputError: MockEditorInputError,
   EditorPermissionError: class extends Error {},
   EditorRevisionConflictError: MockEditorRevisionConflictError,
 }));
@@ -60,7 +66,10 @@ import {
   EventCreateOperationConflictError,
   EventCreateOperationPayloadMismatchError,
 } from '@/server/events/eventCreateOperationReplay';
-import { EditorRevisionConflictError } from '@/server/events/eventEditorSave';
+import {
+  EditorInputError,
+  EditorRevisionConflictError,
+} from '@/server/events/eventEditorSave';
 
 const request = (url: string, method = 'GET', body?: unknown) => new NextRequest(url, {
   method,
@@ -109,6 +118,25 @@ describe('canonical editor routes', () => {
       command,
       expect.objectContaining({ sendStaffInvites: expect.any(Function) }),
     );
+  });
+  it('maps invalid staff input to a client-correctable create response', async () => {
+    const command = {
+      contractVersion: 2,
+      createOperationId: 'create-operation-invalid-staff',
+      draft: { basics: { name: 'Fixture' } },
+    };
+    parseCreateMock.mockReturnValue(command);
+    createEventEditorMock.mockRejectedValue(
+      new EditorInputError('Organization events can only assign active organization hosts and officials.'),
+    );
+
+    const response = await createPost(request('http://localhost/api/events/editor', 'POST', command));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'Organization events can only assign active organization hosts and officials.',
+      code: 'INVALID_EDITOR_INPUT',
+    });
   });
 
   it('maps a create payload mismatch to a typed conflict without retrying persistence', async () => {

@@ -105,6 +105,10 @@ export async function POST(request: NextRequest) {
   try {
     command = parseCreateEventEditorCommand(body);
   } catch (error) {
+    console.error(
+      '[event-editor] invalid create command',
+      error instanceof Error ? error.message : error,
+    );
     return NextResponse.json({ error: 'Invalid editor command.', code: 'INVALID_EDITOR_COMMAND', details: error instanceof Error ? error.message : error }, { status: 400 });
   }
   try {

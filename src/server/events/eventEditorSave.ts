@@ -7,6 +7,7 @@ import { hasOrgPermission, canManageEvent } from '@/server/accessControl';
 import { ORG_PERMISSIONS } from '@/lib/organizationPermissions';
 import {
   EVENT_STAFF_CONTRACT_VERSION,
+  EventStaffInputError,
   reconcileEventStaffDesiredState,
   type EventStaffPutInput,
 } from './eventStaffReconciliation';
@@ -290,12 +291,20 @@ const saveWithinTransaction = async (
   const questionIdMap = await reconcileQuestions(tx, eventId, draft, actor.userId);
   const staffRevision = existingSnapshot?.staffRevision
     ?? (await loadEventEditorSnapshot(eventId, { actor, client: tx })).staffRevision;
-  const staffResult = await reconcileEventStaffDesiredState(
-    tx,
-    eventId,
-    staffInputFor(draft, staffRevision ?? ''),
-    actor.userId,
-  );
+  let staffResult;
+  try {
+    staffResult = await reconcileEventStaffDesiredState(
+      tx,
+      eventId,
+      staffInputFor(draft, staffRevision ?? ''),
+      actor.userId,
+    );
+  } catch (error) {
+    if (error instanceof EventStaffInputError) {
+      throw new EditorInputError(error.message);
+    }
+    throw error;
+  }
   return { questionIdMap, emailCandidates: staffResult.emailCandidates };
 };
 

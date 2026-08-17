@@ -389,7 +389,7 @@ export const editorResourcesSchema = z.object({
 }).strict();
 
 export const editorStaffSchema = z.object({
-  officialSchedulingMode: z.enum(['SCHEDULE', 'STAFFING', 'TEAM_STAFFING']),
+  officialSchedulingMode: z.enum(['SCHEDULE', 'STAFFING', 'TEAM_STAFFING', 'OFF']),
   teamOfficialsMaySwap: z.boolean(),
   teamCheckInMode: z.enum(['OFF', 'EVENT', 'MATCH']),
   teamCheckInOpenMinutesBefore: z.number().int().nonnegative(),

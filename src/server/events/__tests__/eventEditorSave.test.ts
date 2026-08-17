@@ -23,6 +23,7 @@ jest.mock('../eventEditorSnapshot', () => ({
 }));
 jest.mock('../eventStaffReconciliation', () => ({
   EVENT_STAFF_CONTRACT_VERSION: 1,
+  EventStaffInputError: class EventStaffInputError extends Error {},
   reconcileEventStaffDesiredState: jest.fn().mockResolvedValue({ emailCandidates: [] }),
 }));
 
@@ -32,9 +33,13 @@ import type * as EditorContractAdapters from '@/app/events/[id]/schedule/compone
 import { acquireEventLock } from '@/server/repositories/locks';
 import { upsertEventFromPayload } from '@/server/repositories/events';
 import { buildEventEditorSnapshot, loadCreateEventEditorSnapshot, loadEventEditorSnapshot } from '../eventEditorSnapshot';
-import { reconcileEventStaffDesiredState } from '../eventStaffReconciliation';
+import {
+  EventStaffInputError,
+  reconcileEventStaffDesiredState,
+} from '../eventStaffReconciliation';
 import {
   createEventEditor,
+  EditorInputError,
   EditorRevisionConflictError,
   saveEventEditor,
 } from '../eventEditorSave';
@@ -198,6 +203,22 @@ describe('saveEventEditor', () => {
     expect((prisma as any).$transaction).toHaveBeenCalledTimes(1);
     expect(tx.registrationQuestions.create).not.toHaveBeenCalled();
     expect(reconcileEventStaffDesiredState).not.toHaveBeenCalled();
+  });
+  it('maps invalid staff assignments to an actionable editor input error', async () => {
+    const tx = txFor();
+    (upsertEventFromPayload as jest.Mock).mockResolvedValue('event_1');
+    (reconcileEventStaffDesiredState as jest.Mock).mockRejectedValueOnce(
+      new EventStaffInputError('Organization staff assignment is invalid.'),
+    );
+
+    const error = await saveEventEditor(
+      { userId: 'host_1' },
+      commandFor([]),
+      'event_1',
+    ).then(() => null, (failure) => failure);
+
+    expect(error).toBeInstanceOf(EditorInputError);
+    expect(error).toHaveProperty('message', 'Organization staff assignment is invalid.');
   });
 
   it('maps a new question client id once and updates its canonical row on repeat', async () => {

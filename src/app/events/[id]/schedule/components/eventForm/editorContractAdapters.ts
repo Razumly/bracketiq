@@ -122,7 +122,9 @@ const draftFromRecord = (
     ? 'TEAM_STAFFING'
     : normalizedSchedulingMode === 'STAFFING'
       ? 'STAFFING'
-      : 'SCHEDULE';
+      : normalizedSchedulingMode === 'OFF'
+        ? 'OFF'
+        : 'SCHEDULE';
   const normalizedOfficialIds = stringArray(event.officialIds);
   const eventOfficials = objectArray(event.eventOfficials).length > 0
     ? objectArray(event.eventOfficials)

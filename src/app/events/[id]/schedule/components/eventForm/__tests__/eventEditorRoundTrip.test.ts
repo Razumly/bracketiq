@@ -18,6 +18,26 @@ describe('event editor draft round trips', () => {
 
     expect(roundTrippedDraft).toEqual(initialDraft);
   });
+  it('preserves OFF official scheduling mode through the editor adapter', () => {
+    const sourceEvent = eventEditorFixtures[0].event;
+    const event = {
+      ...sourceEvent,
+      officialSchedulingMode: 'OFF',
+      officialIds: [],
+      eventOfficials: [],
+    } as unknown as Event;
+
+    const draft = legacyEventToEditorDraft(event);
+
+    expect(draft.staff.officialSchedulingMode).toBe('OFF');
+    expect(
+      createEventEditorCommandSchema.parse({
+        contractVersion: 2,
+        createOperationId: 'create-operation-off-adapter',
+        draft,
+      }).draft.staff.officialSchedulingMode,
+    ).toBe('OFF');
+  });
 
   it('projects hydrated division metadata before strict command parsing', () => {
     const sourceEvent = eventEditorFixtures.find(({ name }) => name === 'tournament with pools and playoffs')!.event;
