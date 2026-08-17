@@ -10,9 +10,10 @@ import { E2E_EVENT_IDS } from "./fixtures/test-ids";
 const openAdvancedEditor = async (page: Page) => {
   await seedLocationStorage(page);
   await page.goto(
-    `/events/${E2E_EVENT_IDS.createFlow}/schedule?create=1&orgId=${SEED_ORG.id}`,
+    `/events/${E2E_EVENT_IDS.createFlow}/schedule?create=1&orgId=${SEED_ORG.id}&skipTemplatePrompt=1`,
     { waitUntil: "domcontentloaded" },
   );
+
   await expect(page.getByText("Event setup", { exact: true })).toBeVisible({
     timeout: 30000,
   });
@@ -61,6 +62,18 @@ test.describe("event editor section navigation", () => {
     });
     expect(navigationStyle).toEqual({ position: "sticky", top: "80px" });
 
+    await sectionNavigation
+      .getByRole("button", { name: "Event Details" })
+      .click();
+    await waitForSectionAtScrollOffset(page, "section-event-details");
+    await expect
+      .poll(() =>
+        sectionNavigation
+          .getByRole("button", { name: "Event Details" })
+          .getAttribute("class"),
+      )
+      .toMatch(/bg-slate-900/);
+
     await page.locator("#section-division-settings").evaluate((element) => {
       element.scrollIntoView({ block: "center", inline: "nearest" });
     });
@@ -75,25 +88,10 @@ test.describe("event editor section navigation", () => {
       sectionNavigation.getByRole("button", { name: "Divisions" }),
     ).toBeVisible();
 
-    await page.locator("#section-division-settings").evaluate((element) => {
-      element.scrollIntoView({ block: "center", inline: "nearest" });
-    });
     await expect
       .poll(() =>
         sectionNavigation
           .getByRole("button", { name: "Divisions" })
-          .getAttribute("class"),
-      )
-      .toMatch(/bg-slate-900/);
-
-    await sectionNavigation
-      .getByRole("button", { name: "Event Details" })
-      .click();
-    await waitForSectionAtScrollOffset(page, "section-event-details");
-    await expect
-      .poll(() =>
-        sectionNavigation
-          .getByRole("button", { name: "Event Details" })
           .getAttribute("class"),
       )
       .toMatch(/bg-slate-900/);

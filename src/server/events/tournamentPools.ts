@@ -280,13 +280,17 @@ export const assignRegisteredTeamToTournamentPool = async (params: {
           "teamIds"
         FROM "Divisions"
         WHERE "eventId" = ${params.eventId}
-          AND COALESCE("kind", 'LEAGUE') <> 'PLAYOFF'
+          AND "role" = 'PHASE'
+          AND "phase" = 'POOL'
+          AND "status" = 'ACTIVE'
         FOR UPDATE
       `
     : await params.client.divisions.findMany({
         where: {
           eventId: params.eventId,
-          kind: 'LEAGUE',
+          role: 'PHASE',
+          phase: 'POOL',
+          status: 'ACTIVE',
         },
         select: {
           id: true,
@@ -299,15 +303,37 @@ export const assignRegisteredTeamToTournamentPool = async (params: {
           teamIds: true,
         },
       });
-
   const pools = generatedPoolsForBracket(rows, bracketDivisionId);
   if (!pools.length) {
     throw new TournamentPoolValidationError('No pools are configured for the selected tournament division.');
   }
+  const persistPhaseParticipant = async (poolId: string): Promise<string> => {
+    const participantDelegate = params.client?.eventDivisionPhaseParticipants;
+    if (typeof participantDelegate?.upsert === 'function') {
+      const participantId = `phase-participant-${params.eventId}-${poolId}-${eventTeamId}`;
+      await participantDelegate.upsert({
+        where: { id: participantId },
+        create: {
+          id: participantId,
+          eventId: params.eventId,
+          phaseDivisionId: poolId,
+          eventTeamId,
+          sourceEntryDivisionId: null,
+        },
+        update: {
+          eventId: params.eventId,
+          phaseDivisionId: poolId,
+          eventTeamId,
+          sourceEntryDivisionId: null,
+        },
+      });
+    }
+    return poolId;
+  };
 
   const alreadyAssigned = pools.find((pool) => Array.isArray(pool.teamIds) && pool.teamIds.includes(eventTeamId));
   if (alreadyAssigned) {
-    return alreadyAssigned.id;
+    return persistPhaseParticipant(alreadyAssigned.id);
   }
 
   const eligiblePools = pools.filter((pool) => {
@@ -340,7 +366,7 @@ export const assignRegisteredTeamToTournamentPool = async (params: {
     },
   });
 
-  return selected.id;
+  return persistPhaseParticipant(selected.id);
 };
 
 export const getTournamentPoolIdsForBracket = async (params: {
@@ -366,13 +392,17 @@ export const getTournamentPoolIdsForBracket = async (params: {
           "teamIds"
         FROM "Divisions"
         WHERE "eventId" = ${params.eventId}
-          AND COALESCE("kind", 'LEAGUE') <> 'PLAYOFF'
+          AND "role" = 'PHASE'
+          AND "phase" = 'POOL'
+          AND "status" = 'ACTIVE'
         FOR UPDATE
       `
     : await params.client.divisions.findMany({
         where: {
           eventId: params.eventId,
-          kind: 'LEAGUE',
+          role: 'PHASE',
+          phase: 'POOL',
+          status: 'ACTIVE',
         },
         select: {
           id: true,
@@ -403,7 +433,9 @@ export const removeRegisteredTeamFromTournamentPools = async (params: {
   const rows = await params.client.divisions.findMany({
     where: {
       eventId: params.eventId,
-      kind: 'LEAGUE',
+      role: 'PHASE',
+      phase: 'POOL',
+      status: 'ACTIVE',
     },
     select: {
       id: true,
@@ -423,5 +455,15 @@ export const removeRegisteredTeamFromTournamentPools = async (params: {
         },
       })),
   );
+  const participantDelegate = params.client?.eventDivisionPhaseParticipants;
+  if (typeof participantDelegate?.deleteMany === 'function') {
+    await participantDelegate.deleteMany({
+      where: {
+        eventId: params.eventId,
+        phaseDivisionId: { in: rowsContainingTeam.map((row: { id: string }) => row.id) },
+        eventTeamId,
+      },
+    });
+  }
   return removedPoolId;
 };

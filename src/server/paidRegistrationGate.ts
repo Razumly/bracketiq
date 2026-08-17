@@ -66,6 +66,8 @@ export const resolveEventRegistrationPriceCents = async ({
     const division = await client.divisions.findFirst({
       where: {
         eventId,
+        role: 'ENTRY',
+        status: 'ACTIVE',
         OR: [
           { id: { in: candidates } },
           { key: { in: candidates } },
@@ -86,6 +88,8 @@ export const resolveEventRegistrationPriceCents = async ({
   const pricedDivision = await client.divisions.findFirst({
     where: {
       eventId,
+      role: 'ENTRY',
+      status: 'ACTIVE',
       price: { gt: 0 },
       OR: [
         { kind: 'LEAGUE' },

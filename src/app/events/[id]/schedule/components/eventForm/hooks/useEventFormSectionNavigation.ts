@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { SECTION_ANIMATION_DURATION_MS } from '../constants';
 
 type SectionNavigationItem = {
     id: string;
@@ -61,8 +62,32 @@ export const useEventFormSectionNavigation = ({
                         return;
                     }
                 }
-                setRequestedActiveSectionId((previous) => (previous === pendingTarget ? previous : pendingTarget));
+                sectionNavTargetRef.current = null;
+                if (sectionNavSettleTimerRef.current) {
+                    clearTimeout(sectionNavSettleTimerRef.current);
+                    sectionNavSettleTimerRef.current = null;
+                }
+                setRequestedActiveSectionId((previous) => (
+                    previous === pendingTarget ? previous : pendingTarget
+                ));
                 return;
+            }
+            const documentHeight = document.documentElement.scrollHeight;
+            const isAtDocumentEnd = documentHeight > window.innerHeight
+                && window.scrollY + window.innerHeight >= documentHeight - 2;
+            if (isAtDocumentEnd) {
+                const lastVisibleSection = [...visibleItems].reverse().find((section) => {
+                    const sectionElement = document.getElementById(section.id);
+                    if (!sectionElement) return false;
+                    const rect = sectionElement.getBoundingClientRect();
+                    return rect.height > 0 && rect.top < window.innerHeight;
+                });
+                if (lastVisibleSection) {
+                    setRequestedActiveSectionId((previous) => (
+                        previous === lastVisibleSection.id ? previous : lastVisibleSection.id
+                    ));
+                    return;
+                }
             }
             const viewportMiddle = window.innerHeight / 2;
             let currentSection: string | null = null;
@@ -87,7 +112,9 @@ export const useEventFormSectionNavigation = ({
             }
             const nextActiveSection = currentSection ?? closestSection;
             if (nextActiveSection) {
-                setRequestedActiveSectionId((previous) => (previous === nextActiveSection ? previous : nextActiveSection));
+                setRequestedActiveSectionId((previous) => (
+                    previous === nextActiveSection ? previous : nextActiveSection
+                ));
             }
         };
 
@@ -105,22 +132,31 @@ export const useEventFormSectionNavigation = ({
     }, []);
 
     const scrollToSection = useCallback((sectionId: string) => {
-        expandSection(sectionId);
         const target = document.getElementById(sectionId);
         if (!target) return;
+        expandSection(sectionId);
         if (sectionNavSettleTimerRef.current) {
             clearTimeout(sectionNavSettleTimerRef.current);
         }
         sectionNavTargetRef.current = sectionId;
         setRequestedActiveSectionId(sectionId);
-        const nextTop = target.getBoundingClientRect().top + window.scrollY - scrollOffset;
-        const scrollTop = Math.max(nextTop, 0);
-        const settleMs = Math.min(1600, Math.max(700, Math.abs(window.scrollY - scrollTop) * 0.9));
-        window.scrollTo({ top: scrollTop, behavior: 'smooth' });
-        sectionNavSettleTimerRef.current = setTimeout(() => {
-            sectionNavTargetRef.current = null;
-            sectionNavSettleTimerRef.current = null;
-        }, settleMs);
+
+        const scrollToExpandedSection = () => {
+            const expandedTarget = document.getElementById(sectionId);
+            if (!expandedTarget) {
+                sectionNavTargetRef.current = null;
+                return;
+            }
+            const nextTop = expandedTarget.getBoundingClientRect().top + window.scrollY - scrollOffset;
+            const scrollTop = Math.max(nextTop, 0);
+            const settleMs = Math.min(1600, Math.max(700, Math.abs(window.scrollY - scrollTop) * 0.9));
+            window.scrollTo({ top: scrollTop, behavior: 'smooth' });
+            sectionNavSettleTimerRef.current = setTimeout(() => {
+                sectionNavTargetRef.current = null;
+                sectionNavSettleTimerRef.current = null;
+            }, settleMs);
+        };
+        window.setTimeout(scrollToExpandedSection, SECTION_ANIMATION_DURATION_MS);
     }, [expandSection, scrollOffset]);
 
     return {

@@ -647,7 +647,7 @@ const seed = async (): Promise<void> => {
       fieldIds: [SEED_FIELD.id],
       timeSlotIds: [SEED_RENTAL_SLOT.id],
       leagueScoringConfigId: null,
-      sportId: SEED_SPORT.id,
+      sportIds: [SEED_SPORT.id],
       organizationId: SEED_ORG.id,
       autoCancellation: false,
       eventType: "EVENT" as const,

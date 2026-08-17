@@ -99,6 +99,17 @@ enum DivisionScopeEnum {
   ORGANIZATION
   EVENT
 }
+enum DivisionRoleEnum {
+  ENTRY
+  PHASE
+}
+
+enum DivisionPhaseEnum {
+  LEAGUE
+  POOL
+  BRACKET
+  PLAYOFF
+}
 
 enum DivisionStatusEnum {
   ACTIVE
@@ -577,6 +588,7 @@ model Matches {
   start              DateTime?
   end                DateTime?
   locked             Boolean   @default(false)
+  placementState     String    @default("UNPLACED")
   division           String?
   team1Points        Int[]
   team2Points        Int[]
@@ -790,7 +802,6 @@ model EventEditorCreateOperations {
 
   @@index([actorUserId, createdAt])
 }
-
 model Divisions {
   id                                  String             @id
   createdAt                           DateTime?
@@ -802,6 +813,8 @@ model Divisions {
   eventId                             String?
   organizationId                      String?
   scope                               DivisionScopeEnum  @default(EVENT)
+  role                                DivisionRoleEnum   @default(ENTRY)
+  phase                               DivisionPhaseEnum?
   status                              DivisionStatusEnum @default(ACTIVE)
   sourceDivisionId                    String?
   sportId                             String?
@@ -864,6 +877,35 @@ model Divisions {
   @@index([price])
   @@index([sportId])
   @@index([key])
+}
+model EventDivisionPhaseSources {
+  id               String             @id
+  eventId          String
+  entryDivisionId  String
+  phaseDivisionId  String
+  phase            DivisionPhaseEnum
+  sortOrder        Int?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@unique([entryDivisionId, phaseDivisionId])
+  @@index([eventId, phase, sortOrder])
+  @@index([entryDivisionId])
+  @@index([phaseDivisionId])
+}
+
+model EventDivisionPhaseParticipants {
+  id                    String   @id
+  eventId               String
+  phaseDivisionId       String
+  eventTeamId           String
+  sourceEntryDivisionId String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@unique([phaseDivisionId, eventTeamId])
+  @@index([eventId, phaseDivisionId])
+  @@index([eventTeamId])
 }
 
 model UserData {

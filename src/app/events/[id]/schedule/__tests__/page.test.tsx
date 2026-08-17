@@ -308,9 +308,22 @@ const buildEditorSnapshot = (
   mode: 'CREATE' | 'EDIT',
   draftOverride?: unknown,
 ) => {
+  const matches = Array.isArray(sourceEvent.matches) ? sourceEvent.matches : [];
+  const matchCount = matches.length;
+  const placed = matches.filter((match: any) => (
+    match?.placementState === 'PLACED'
+    || Boolean(match?.fieldId)
+    || Boolean(match?.field)
+  )).length;
+  const matchDemand = {
+    total: matchCount,
+    byDivision: {},
+    byPhase: {},
+    placed,
+    unplaced: matchCount - placed,
+  };
   const { legacyEventToEditorDraft } = require('../components/eventForm/editorContractAdapters');
   const draft = draftOverride ?? legacyEventToEditorDraft(sourceEvent);
-  const matchCount = Array.isArray(sourceEvent.matches) ? sourceEvent.matches.length : 0;
   return {
     contractVersion: 3,
     eventId: mode === 'CREATE' ? null : (sourceEvent.$id ?? sourceEvent.id ?? 'event_1'),
@@ -343,6 +356,7 @@ const buildEditorSnapshot = (
     },
     scheduleState: {
       sourceType: typeof sourceEvent.sourceType === 'string' ? sourceEvent.sourceType : null,
+      matchDemand,
       matchCount,
       revision: `test-schedule-revision-${matchCount}`,
       hasProtectedHistory: false,
@@ -3106,6 +3120,68 @@ describe('League schedule page', () => {
 
     confirmSpy.mockRestore();
   });
+
+  it.each(['LEAGUE', 'TOURNAMENT'] as const)(
+    'enables scheduling after create-only %s graph creation',
+    async (eventType) => {
+      useSearchParamsMock.mockReturnValue({
+        get: (key: string) => (key === 'mode' ? 'edit' : null),
+      });
+      const sourceMatch = buildApiEvent().matches[0];
+      const unplacedMatch = {
+        ...sourceMatch,
+        id: `${eventType.toLowerCase()}_unplaced_match`,
+        $id: `${eventType.toLowerCase()}_unplaced_match`,
+        placementState: 'UNPLACED',
+        fieldId: null,
+        field: null,
+        start: null,
+        end: null,
+      };
+      const createOnlyEvent = buildApiEvent({
+        id: 'event_1',
+        $id: 'event_1',
+        eventType,
+        state: 'UNPUBLISHED',
+        matches: [unplacedMatch],
+      });
+      const eventWithoutMatches = { ...createOnlyEvent };
+      delete (eventWithoutMatches as any).matches;
+      latestEditorEvent = createOnlyEvent;
+      mockEventFormDraft = createOnlyEvent;
+      mockEventFormDirtyState = true;
+      apiRequestMock.mockImplementation((path: string) => {
+        if (path === '/api/events/event_1') {
+          return Promise.resolve({ event: eventWithoutMatches });
+        }
+        if (path === '/api/events/event_1/matches') {
+          return Promise.resolve({ matches: [unplacedMatch] });
+        }
+        return Promise.resolve({});
+      });
+      (eventService.getEvent as jest.Mock).mockResolvedValue(eventWithoutMatches);
+      (eventService.getEventById as jest.Mock).mockResolvedValue(eventWithoutMatches);
+
+      renderWithMantine(<LeagueSchedulePage />);
+
+      const saveButton = await screen.findByRole('button', { name: /^save$/i });
+      await waitFor(() => expect(saveButton).toBeEnabled());
+      fireEvent.click(saveButton);
+
+      let editorSaveCall: [string, any] | undefined;
+      await waitFor(() => {
+        editorSaveCall = [...apiRequestMock.mock.calls].reverse().find(([path, options]) => (
+          path === '/api/events/event_1/editor'
+          && (options as { method?: string } | undefined)?.method === 'PUT'
+        )) as [string, any] | undefined;
+        expect(editorSaveCall).toBeDefined();
+      });
+      expect(editorSaveCall?.[1]?.body?.scheduleTransition).toEqual({
+        mode: 'BUILD_IF_MISSING',
+        expectedScheduleRevision: 'test-schedule-revision-1',
+      });
+    },
+  );
 
   it('offers Build schedule from the normal view of an unscheduled league', async () => {
     const unscheduledEvent = buildApiEvent({

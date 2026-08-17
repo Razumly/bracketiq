@@ -70,6 +70,8 @@ export default async function GuestRegistrationPage({ params, searchParams }: Pa
     (prisma as any).divisions.findMany({
       where: {
         eventId,
+        role: 'ENTRY',
+        status: 'ACTIVE',
         OR: [
           { kind: 'LEAGUE' },
           { kind: null },

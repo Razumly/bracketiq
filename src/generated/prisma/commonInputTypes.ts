@@ -375,6 +375,20 @@ export type EnumDivisionScopeEnumFilter<$PrismaModel = never> = {
   not?: Prisma.NestedEnumDivisionScopeEnumFilter<$PrismaModel> | $Enums.DivisionScopeEnum
 }
 
+export type EnumDivisionRoleEnumFilter<$PrismaModel = never> = {
+  equals?: $Enums.DivisionRoleEnum | Prisma.EnumDivisionRoleEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DivisionRoleEnum[] | Prisma.ListEnumDivisionRoleEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DivisionRoleEnum[] | Prisma.ListEnumDivisionRoleEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDivisionRoleEnumFilter<$PrismaModel> | $Enums.DivisionRoleEnum
+}
+
+export type EnumDivisionPhaseEnumNullableFilter<$PrismaModel = never> = {
+  equals?: $Enums.DivisionPhaseEnum | Prisma.EnumDivisionPhaseEnumFieldRefInput<$PrismaModel> | null
+  in?: $Enums.DivisionPhaseEnum[] | Prisma.ListEnumDivisionPhaseEnumFieldRefInput<$PrismaModel> | null
+  notIn?: $Enums.DivisionPhaseEnum[] | Prisma.ListEnumDivisionPhaseEnumFieldRefInput<$PrismaModel> | null
+  not?: Prisma.NestedEnumDivisionPhaseEnumNullableFilter<$PrismaModel> | $Enums.DivisionPhaseEnum | null
+}
+
 export type EnumDivisionStatusEnumFilter<$PrismaModel = never> = {
   equals?: $Enums.DivisionStatusEnum | Prisma.EnumDivisionStatusEnumFieldRefInput<$PrismaModel>
   in?: $Enums.DivisionStatusEnum[] | Prisma.ListEnumDivisionStatusEnumFieldRefInput<$PrismaModel>
@@ -402,6 +416,26 @@ export type EnumDivisionScopeEnumWithAggregatesFilter<$PrismaModel = never> = {
   _max?: Prisma.NestedEnumDivisionScopeEnumFilter<$PrismaModel>
 }
 
+export type EnumDivisionRoleEnumWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.DivisionRoleEnum | Prisma.EnumDivisionRoleEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DivisionRoleEnum[] | Prisma.ListEnumDivisionRoleEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DivisionRoleEnum[] | Prisma.ListEnumDivisionRoleEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDivisionRoleEnumWithAggregatesFilter<$PrismaModel> | $Enums.DivisionRoleEnum
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumDivisionRoleEnumFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumDivisionRoleEnumFilter<$PrismaModel>
+}
+
+export type EnumDivisionPhaseEnumNullableWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.DivisionPhaseEnum | Prisma.EnumDivisionPhaseEnumFieldRefInput<$PrismaModel> | null
+  in?: $Enums.DivisionPhaseEnum[] | Prisma.ListEnumDivisionPhaseEnumFieldRefInput<$PrismaModel> | null
+  notIn?: $Enums.DivisionPhaseEnum[] | Prisma.ListEnumDivisionPhaseEnumFieldRefInput<$PrismaModel> | null
+  not?: Prisma.NestedEnumDivisionPhaseEnumNullableWithAggregatesFilter<$PrismaModel> | $Enums.DivisionPhaseEnum | null
+  _count?: Prisma.NestedIntNullableFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumDivisionPhaseEnumNullableFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumDivisionPhaseEnumNullableFilter<$PrismaModel>
+}
+
 export type EnumDivisionStatusEnumWithAggregatesFilter<$PrismaModel = never> = {
   equals?: $Enums.DivisionStatusEnum | Prisma.EnumDivisionStatusEnumFieldRefInput<$PrismaModel>
   in?: $Enums.DivisionStatusEnum[] | Prisma.ListEnumDivisionStatusEnumFieldRefInput<$PrismaModel>
@@ -410,6 +444,23 @@ export type EnumDivisionStatusEnumWithAggregatesFilter<$PrismaModel = never> = {
   _count?: Prisma.NestedIntFilter<$PrismaModel>
   _min?: Prisma.NestedEnumDivisionStatusEnumFilter<$PrismaModel>
   _max?: Prisma.NestedEnumDivisionStatusEnumFilter<$PrismaModel>
+}
+
+export type EnumDivisionPhaseEnumFilter<$PrismaModel = never> = {
+  equals?: $Enums.DivisionPhaseEnum | Prisma.EnumDivisionPhaseEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DivisionPhaseEnum[] | Prisma.ListEnumDivisionPhaseEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DivisionPhaseEnum[] | Prisma.ListEnumDivisionPhaseEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDivisionPhaseEnumFilter<$PrismaModel> | $Enums.DivisionPhaseEnum
+}
+
+export type EnumDivisionPhaseEnumWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.DivisionPhaseEnum | Prisma.EnumDivisionPhaseEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DivisionPhaseEnum[] | Prisma.ListEnumDivisionPhaseEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DivisionPhaseEnum[] | Prisma.ListEnumDivisionPhaseEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDivisionPhaseEnumWithAggregatesFilter<$PrismaModel> | $Enums.DivisionPhaseEnum
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumDivisionPhaseEnumFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumDivisionPhaseEnumFilter<$PrismaModel>
 }
 
 export type EnumAuthMfaChallengePurposeEnumFilter<$PrismaModel = never> = {
@@ -1955,6 +2006,20 @@ export type NestedEnumDivisionScopeEnumFilter<$PrismaModel = never> = {
   not?: Prisma.NestedEnumDivisionScopeEnumFilter<$PrismaModel> | $Enums.DivisionScopeEnum
 }
 
+export type NestedEnumDivisionRoleEnumFilter<$PrismaModel = never> = {
+  equals?: $Enums.DivisionRoleEnum | Prisma.EnumDivisionRoleEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DivisionRoleEnum[] | Prisma.ListEnumDivisionRoleEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DivisionRoleEnum[] | Prisma.ListEnumDivisionRoleEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDivisionRoleEnumFilter<$PrismaModel> | $Enums.DivisionRoleEnum
+}
+
+export type NestedEnumDivisionPhaseEnumNullableFilter<$PrismaModel = never> = {
+  equals?: $Enums.DivisionPhaseEnum | Prisma.EnumDivisionPhaseEnumFieldRefInput<$PrismaModel> | null
+  in?: $Enums.DivisionPhaseEnum[] | Prisma.ListEnumDivisionPhaseEnumFieldRefInput<$PrismaModel> | null
+  notIn?: $Enums.DivisionPhaseEnum[] | Prisma.ListEnumDivisionPhaseEnumFieldRefInput<$PrismaModel> | null
+  not?: Prisma.NestedEnumDivisionPhaseEnumNullableFilter<$PrismaModel> | $Enums.DivisionPhaseEnum | null
+}
+
 export type NestedEnumDivisionStatusEnumFilter<$PrismaModel = never> = {
   equals?: $Enums.DivisionStatusEnum | Prisma.EnumDivisionStatusEnumFieldRefInput<$PrismaModel>
   in?: $Enums.DivisionStatusEnum[] | Prisma.ListEnumDivisionStatusEnumFieldRefInput<$PrismaModel>
@@ -1982,6 +2047,26 @@ export type NestedEnumDivisionScopeEnumWithAggregatesFilter<$PrismaModel = never
   _max?: Prisma.NestedEnumDivisionScopeEnumFilter<$PrismaModel>
 }
 
+export type NestedEnumDivisionRoleEnumWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.DivisionRoleEnum | Prisma.EnumDivisionRoleEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DivisionRoleEnum[] | Prisma.ListEnumDivisionRoleEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DivisionRoleEnum[] | Prisma.ListEnumDivisionRoleEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDivisionRoleEnumWithAggregatesFilter<$PrismaModel> | $Enums.DivisionRoleEnum
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumDivisionRoleEnumFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumDivisionRoleEnumFilter<$PrismaModel>
+}
+
+export type NestedEnumDivisionPhaseEnumNullableWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.DivisionPhaseEnum | Prisma.EnumDivisionPhaseEnumFieldRefInput<$PrismaModel> | null
+  in?: $Enums.DivisionPhaseEnum[] | Prisma.ListEnumDivisionPhaseEnumFieldRefInput<$PrismaModel> | null
+  notIn?: $Enums.DivisionPhaseEnum[] | Prisma.ListEnumDivisionPhaseEnumFieldRefInput<$PrismaModel> | null
+  not?: Prisma.NestedEnumDivisionPhaseEnumNullableWithAggregatesFilter<$PrismaModel> | $Enums.DivisionPhaseEnum | null
+  _count?: Prisma.NestedIntNullableFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumDivisionPhaseEnumNullableFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumDivisionPhaseEnumNullableFilter<$PrismaModel>
+}
+
 export type NestedEnumDivisionStatusEnumWithAggregatesFilter<$PrismaModel = never> = {
   equals?: $Enums.DivisionStatusEnum | Prisma.EnumDivisionStatusEnumFieldRefInput<$PrismaModel>
   in?: $Enums.DivisionStatusEnum[] | Prisma.ListEnumDivisionStatusEnumFieldRefInput<$PrismaModel>
@@ -1990,6 +2075,23 @@ export type NestedEnumDivisionStatusEnumWithAggregatesFilter<$PrismaModel = neve
   _count?: Prisma.NestedIntFilter<$PrismaModel>
   _min?: Prisma.NestedEnumDivisionStatusEnumFilter<$PrismaModel>
   _max?: Prisma.NestedEnumDivisionStatusEnumFilter<$PrismaModel>
+}
+
+export type NestedEnumDivisionPhaseEnumFilter<$PrismaModel = never> = {
+  equals?: $Enums.DivisionPhaseEnum | Prisma.EnumDivisionPhaseEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DivisionPhaseEnum[] | Prisma.ListEnumDivisionPhaseEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DivisionPhaseEnum[] | Prisma.ListEnumDivisionPhaseEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDivisionPhaseEnumFilter<$PrismaModel> | $Enums.DivisionPhaseEnum
+}
+
+export type NestedEnumDivisionPhaseEnumWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.DivisionPhaseEnum | Prisma.EnumDivisionPhaseEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DivisionPhaseEnum[] | Prisma.ListEnumDivisionPhaseEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DivisionPhaseEnum[] | Prisma.ListEnumDivisionPhaseEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDivisionPhaseEnumWithAggregatesFilter<$PrismaModel> | $Enums.DivisionPhaseEnum
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumDivisionPhaseEnumFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumDivisionPhaseEnumFilter<$PrismaModel>
 }
 
 export type NestedEnumAuthMfaChallengePurposeEnumFilter<$PrismaModel = never> = {

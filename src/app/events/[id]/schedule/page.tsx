@@ -224,6 +224,12 @@ const normalizeEventFieldIdsForSave = (event: Partial<Event> | null | undefined)
       .filter((fieldId): fieldId is string => Boolean(fieldId)),
   ));
 };
+type CreateEditorBootstrapQuery = {
+  key: string;
+  url: string;
+};
+
+
 
 const getMatchFieldIdForSave = (match: Match): string | null => (
   normalizeIdToken(match.fieldId)
@@ -371,6 +377,8 @@ function EventScheduleContent() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [editorDraftEventType, setEditorDraftEventType] = useState<string | null>(null);
+  const [editorDraftBootstrapKey, setEditorDraftBootstrapKey] = useState<string | null>(null);
+
   const [showCreateWithoutScheduleRecovery, setShowCreateWithoutScheduleRecovery] = useState(false);
   const [eventTypeTransitionConfirmation, setEventTypeTransitionConfirmation] =
     useState<EventTypeTransitionConfirmation | null>(null);
@@ -448,6 +456,10 @@ function EventScheduleContent() {
   const createBootstrapRef = useRef<EventEditorCreateBootstrap | null>(null);
   const createBootstrapKeyRef = useRef<string | null>(null);
   const pendingCreateCommandRef = useRef<CreateEventEditorCommand | null>(null);
+  const createBootstrapRequestRef = useRef<{
+    key: string;
+    promise: Promise<EventEditorCreateBootstrap>;
+  } | null>(null);
   const { location: userLocation, locationInfo: userLocationInfo } = useLocation();
   const rentalCoordinates = useMemo<[number, number] | undefined>(() => {
     const lat = rentalLatParam ? Number(rentalLatParam) : undefined;
@@ -704,6 +716,101 @@ function EventScheduleContent() {
   );
   const isEditingEvent = isTemplateEvent || ((isPreview || isEditParam) && canManageEvent);
   const canEditMatches = Boolean(canManageEvent && isEditingEvent);
+  const buildCreateEditorBootstrapQuery = useCallback((
+    draft: EventEditorDraft | null = null,
+  ): CreateEditorBootstrapQuery => {
+    const query = new URLSearchParams();
+    const hasDraft = Boolean(draft);
+    const sportValue = hasDraft
+      ? draft?.basics.sportIds[0]
+      : activeEvent?.sportIds?.[0] as string | Sport | undefined;
+    const sportId = typeof sportValue === 'string' ? sportValue : sportValue?.$id;
+    const fallbackSportId = typeof defaultSport === 'string' ? defaultSport : defaultSport.$id;
+    const organizationValue = hasDraft
+      ? (isRentalFlow ? undefined : draft?.basics.organizationId)
+      : activeEvent?.organizationId as string | Organization | undefined;
+    const organizationId = typeof organizationValue === 'string' ? organizationValue : organizationValue?.$id;
+    const effectiveOrganizationId = hasDraft ? organizationId : organizationId ?? resolvedHostOrgId;
+    const eventType = draft?.basics.eventType ?? activeEvent?.eventType;
+    const parentEventId = hasDraft ? draft?.basics.parentEvent : parentEventIdParam;
+    const templateId = hasDraft ? draft?.resources.requiredTemplateIds[0] : templateIdParam;
+    const rentalBookingId = hasDraft ? draft?.resources.rentalBookingId : rentalBookingIdParam;
+    const start = hasDraft
+      ? draft?.basics.start
+      : selectedTemplateStartDate?.toISOString()
+        ?? normalizedRentalStart
+        ?? (typeof activeEvent?.start === 'string' ? activeEvent.start : null);
+
+    if (eventType) query.set('eventType', eventType);
+    if (effectiveOrganizationId) query.set('organizationId', effectiveOrganizationId);
+    if (sportId ?? (!hasDraft ? fallbackSportId : undefined)) {
+      query.set('sportId', sportId ?? fallbackSportId);
+    }
+    if (parentEventId) query.set('parentEventId', parentEventId);
+    if (templateId) query.set('templateId', templateId);
+    if (rentalBookingId) query.set('rentalBookingId', rentalBookingId);
+    if (start) query.set('start', start);
+
+    const key = query.toString();
+    return {
+      key,
+      url: key ? `/api/events/editor?${key}` : '/api/events/editor',
+    };
+  }, [
+    activeEvent?.eventType,
+    activeEvent?.organizationId,
+    activeEvent?.sportIds,
+    activeEvent?.start,
+    defaultSport,
+    isRentalFlow,
+    normalizedRentalStart,
+    parentEventIdParam,
+    rentalBookingIdParam,
+    resolvedHostOrgId,
+    selectedTemplateStartDate,
+    templateIdParam,
+  ]);
+  const loadCreateBootstrapForQuery = useCallback((
+    query: CreateEditorBootstrapQuery,
+  ): Promise<EventEditorCreateBootstrap> => {
+    const cached = createBootstrapRef.current;
+    if (cached && createBootstrapKeyRef.current === query.key) {
+      return Promise.resolve(cached);
+    }
+
+    const existingRequest = createBootstrapRequestRef.current;
+    if (existingRequest?.key === query.key) {
+      return existingRequest.promise;
+    }
+
+    pendingCreateCommandRef.current = null;
+    const requestPromise = apiRequest<EventEditorCreateBootstrap>(query.url);
+    const trackedRequest = requestPromise.finally(() => {
+      if (createBootstrapRequestRef.current?.key === query.key
+        && createBootstrapRequestRef.current.promise === trackedRequest) {
+        createBootstrapRequestRef.current = null;
+      }
+    });
+    createBootstrapRequestRef.current = {
+      key: query.key,
+      promise: trackedRequest,
+    };
+    return trackedRequest;
+  }, []);
+  const commitCreateBootstrap = useCallback((
+    query: CreateEditorBootstrapQuery,
+    result: EventEditorCreateBootstrap,
+    hydrateEditorSnapshot: boolean,
+  ) => {
+    createBootstrapRef.current = result;
+    createBootstrapKeyRef.current = query.key;
+    pendingCreateCommandRef.current = null;
+    setCreateBootstrap(result);
+    if (hydrateEditorSnapshot) {
+      setEditorSnapshot(result.snapshot);
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const targetId = isCreateMode ? null : normalizeIdToken(
@@ -714,6 +821,7 @@ function EventScheduleContent() {
       setCreateBootstrap(null);
       createBootstrapRef.current = null;
       createBootstrapKeyRef.current = null;
+      createBootstrapRequestRef.current = null;
       pendingCreateCommandRef.current = null;
       return () => {
         cancelled = true;
@@ -721,48 +829,31 @@ function EventScheduleContent() {
     }
     const loadEditorSnapshot = async () => {
       try {
-        const query = new URLSearchParams();
         if (isCreateMode) {
-          const sportValue = activeEvent?.sportIds?.[0] as string | Sport | undefined;
-          const sportId = typeof sportValue === 'string' ? sportValue : sportValue?.$id;
-          const fallbackSportId = typeof defaultSport === 'string' ? defaultSport : defaultSport.$id;
-          const organizationValue = activeEvent?.organizationId as string | Organization | undefined;
-          const organizationId = typeof organizationValue === 'string' ? organizationValue : organizationValue?.$id;
-          const start = selectedTemplateStartDate?.toISOString()
-            ?? normalizedRentalStart
-            ?? (typeof activeEvent?.start === 'string' ? activeEvent.start : null);
-          if (activeEvent?.eventType) query.set('eventType', activeEvent.eventType);
-          if (organizationId ?? resolvedHostOrgId) query.set('organizationId', organizationId ?? resolvedHostOrgId ?? '');
-          if (sportId ?? fallbackSportId) query.set('sportId', sportId ?? fallbackSportId);
-          if (parentEventIdParam) query.set('parentEventId', parentEventIdParam);
-          if (templateIdParam) query.set('templateId', templateIdParam);
-          if (rentalBookingIdParam) query.set('rentalBookingId', rentalBookingIdParam);
-          if (start) query.set('start', start);
-          const bootstrapKey = query.toString();
-          const cached = createBootstrapRef.current;
-          if (cached && createBootstrapKeyRef.current === bootstrapKey) {
-            setCreateBootstrap(cached);
-            setEditorSnapshot(cached.snapshot);
-            return;
-          }
-          const result = await apiRequest<EventEditorCreateBootstrap>(`/api/events/editor?${bootstrapKey}`);
-          if (!cancelled) {
-            createBootstrapRef.current = result;
-            createBootstrapKeyRef.current = bootstrapKey;
-            pendingCreateCommandRef.current = null;
-            setCreateBootstrap(result);
-            setEditorSnapshot(result.snapshot);
+          const draft = editorDraftRef.current;
+          const query = buildCreateEditorBootstrapQuery(draft);
+          const hydrateEditorSnapshot = !createBootstrapRef.current;
+          const result = await loadCreateBootstrapForQuery(query);
+          const currentQuery = buildCreateEditorBootstrapQuery(editorDraftRef.current);
+          if (!cancelled && currentQuery.key === query.key) {
+            commitCreateBootstrap(query, result, hydrateEditorSnapshot);
           }
         } else {
+          createBootstrapRequestRef.current = null;
           createBootstrapRef.current = null;
           createBootstrapKeyRef.current = null;
           pendingCreateCommandRef.current = null;
           setCreateBootstrap(null);
-          const result = await apiRequest<EventEditorSnapshot>(`/api/events/${encodeURIComponent(targetId as string)}/editor`);
+          const result = await apiRequest<EventEditorSnapshot>(
+            `/api/events/${encodeURIComponent(targetId as string)}/editor`,
+          );
           if (!cancelled) setEditorSnapshot(result);
         }
       } catch (snapshotError) {
         if (!cancelled) {
+          createBootstrapRef.current = null;
+          createBootstrapKeyRef.current = null;
+          pendingCreateCommandRef.current = null;
           setEditorSnapshot(null);
           setCreateBootstrap(null);
           setError(snapshotError instanceof Error ? snapshotError.message : 'Unable to load the event editor.');
@@ -774,12 +865,10 @@ function EventScheduleContent() {
       cancelled = true;
     };
   }, [
-    activeEvent?.$id,
-    activeEvent?.eventType,
-    activeEvent?.organizationId,
-    activeEvent?.sportIds,
-    activeEvent?.start,
-    defaultSport,
+    buildCreateEditorBootstrapQuery,
+    commitCreateBootstrap,
+    editorDraftBootstrapKey,
+    loadCreateBootstrapForQuery,
     eventId,
     isCreateMode,
     isEditingEvent,
@@ -4287,9 +4376,13 @@ function EventScheduleContent() {
     setActiveTab(defaultTab);
   }, [defaultTab]);
   const handleEditorDraftStateChange = useCallback((state: { draft: EventEditorDraft }) => {
-    editorDraftRef.current = cloneValue(state.draft) as EventEditorDraft;
-    setEditorDraftEventType(state.draft.basics.eventType);
-  }, []);
+    const draft = cloneValue(state.draft) as EventEditorDraft;
+    editorDraftRef.current = draft;
+    setEditorDraftEventType(draft.basics.eventType);
+    if (isCreateMode) {
+      setEditorDraftBootstrapKey(buildCreateEditorBootstrapQuery(draft).key);
+    }
+  }, [buildCreateEditorBootstrapQuery, isCreateMode]);
   const getDraftFromForm = useCallback(
     async ({ allowCurrentEventFallback = false }: { allowCurrentEventFallback?: boolean } = {}): Promise<EventEditorDraft | null> => {
       const formApi = eventFormRef.current;
@@ -4396,7 +4489,7 @@ function EventScheduleContent() {
               mode: 'RECONCILE' as const,
               expectedScheduleRevision: currentSnapshot.scheduleState.revision,
             }
-          : ['LEAGUE', 'TOURNAMENT'].includes(scheduleType) && currentSnapshot.scheduleState.matchCount === 0
+          : ['LEAGUE', 'TOURNAMENT'].includes(scheduleType) && currentSnapshot.scheduleState.matchDemand?.placed === 0
             ? {
                 mode: 'BUILD_IF_MISSING' as const,
                 expectedScheduleRevision: currentSnapshot.scheduleState.revision,
@@ -4404,13 +4497,19 @@ function EventScheduleContent() {
             : { mode: 'PRESERVE' as const }
         : null;
       if (effectiveMode === 'CREATE') {
+        const bootstrapQuery = buildCreateEditorBootstrapQuery(contractDraft);
+        // Capture the source revision from the same synchronous draft that will
+        // be submitted; an asynchronously maintained bootstrap may be stale.
+        const bootstrapForCreate = await apiRequest<EventEditorCreateBootstrap>(
+          bootstrapQuery.url,
+        );
         const pending = pendingCreateCommandRef.current;
-        const createOperationId = pending?.createOperationId ?? createBootstrap?.createOperationId;
-        const expectedRevisions = createBootstrap?.snapshot
+        const createOperationId = pending?.createOperationId ?? bootstrapForCreate?.createOperationId;
+        const expectedRevisions = bootstrapForCreate?.snapshot
           ? {
-              editorRevision: createBootstrap.snapshot.editorRevision,
-              staffRevision: createBootstrap.snapshot.staffRevision,
-              scheduleRevision: createBootstrap.snapshot.scheduleState.revision,
+              editorRevision: bootstrapForCreate.snapshot.editorRevision,
+              staffRevision: bootstrapForCreate.snapshot.staffRevision,
+              scheduleRevision: bootstrapForCreate.snapshot.scheduleState.revision,
             }
           : pending?.expectedRevisions;
         if (!createOperationId || !expectedRevisions) {
@@ -4499,6 +4598,8 @@ function EventScheduleContent() {
     [
       activeMatches,
       activeEvent,
+      buildCreateEditorBootstrapQuery,
+      commitCreateBootstrap,
       createBootstrap,
       editorSnapshot,
       event,
@@ -4506,6 +4607,7 @@ function EventScheduleContent() {
       eventId,
       handlePreviewEventUpdate,
       isRentalFlow,
+      loadCreateBootstrapForQuery,
     ],
   );
 

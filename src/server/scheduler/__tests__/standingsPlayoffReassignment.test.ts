@@ -3,7 +3,10 @@
 import { scheduleEvent } from '@/server/scheduler/scheduleEvent';
 import {
   applyLeagueDivisionPlayoffReassignment,
+  buildPlayoffEntrantsByDivision,
   computeLeagueDivisionStandings,
+  getLeagueDivisionById,
+  getPlayoffDivisionById,
   isPlayoffMatch,
   normalizeLeaguePlayoffPlacementMappings,
   validateDivisionPlayoffMapping,
@@ -48,6 +51,71 @@ const getPlayoffMatches = (league: League | Tournament, playoffDivisionId: strin
 );
 
 describe('standings playoff reassignment', () => {
+  it('resolves Entry Division identifiers to persisted Phase Divisions', () => {
+    const leaguePhase = new Division(
+      'event__division__open__phase__league',
+      'Open — League',
+      [],
+      null,
+      4,
+      4,
+      'LEAGUE',
+      [],
+      null,
+      null,
+      null,
+      null,
+      [],
+      null,
+      {},
+      'PHASE',
+      'LEAGUE',
+    );
+    const playoffPhase = new Division(
+      'event__division__open__phase__playoff',
+      'Open — Playoff',
+      [],
+      null,
+      4,
+      4,
+      'PLAYOFF',
+      [],
+      null,
+      null,
+      null,
+      null,
+      [],
+      null,
+      {},
+      'PHASE',
+      'PLAYOFF',
+    );
+    const team = new Team({
+      id: 'event_team_1',
+      captainId: 'captain_1',
+      division: leaguePhase,
+      name: 'Open Team',
+      matches: [],
+    });
+    leaguePhase.playoffTeamCount = 1;
+    leaguePhase.playoffPlacementDivisionIds = ['event__division__open'];
+    leaguePhase.standingsConfirmedAt = new Date('2026-01-01T00:00:00.000Z');
+    const league = {
+      divisions: [leaguePhase],
+      playoffDivisions: [playoffPhase],
+      includePlayoffs: true,
+      singleDivision: true,
+      splitLeaguePlayoffDivisions: true,
+      playoffTeamCount: 1,
+      teams: { [team.id]: team },
+      matches: {},
+    } as unknown as League;
+
+    expect(getLeagueDivisionById(league, 'event__division__open')).toBe(leaguePhase);
+    expect(getPlayoffDivisionById(league, 'event__division__open')).toBe(playoffPhase);
+    expect(validateDivisionPlayoffMapping(league, leaguePhase)).toEqual([]);
+    expect(buildPlayoffEntrantsByDivision(league).get(playoffPhase.id)).toEqual([team]);
+  });
   it('keeps explicitly assigned league teams in standings when the division has no matches', () => {
     const division = new Division(
       'division_open',

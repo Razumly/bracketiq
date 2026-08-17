@@ -150,6 +150,31 @@ describe('useEventResourceController', () => {
         ]));
     });
 
+    it('renames legacy generic local placeholders when a sport label resolves', async () => {
+        const legacyField = {
+            $id: 'local_1',
+            name: 'Resource 1',
+            location: 'Initial Gym',
+        } as Field;
+        const eventData = buildEventData({
+            fields: [legacyField],
+            fieldCount: 1,
+        });
+        const { result } = renderHook(() => useResourceHarness({
+            activeEditingEvent: buildEvent({
+                $id: eventData.$id,
+                eventType: 'EVENT',
+                location: eventData.location,
+                fields: [legacyField],
+            }),
+            eventData,
+        }));
+
+        await waitFor(() => expect(result.current.formValues.fields).toEqual([
+            expect.objectContaining({ $id: 'local_1', name: 'Court 1', location: 'Initial Gym' }),
+        ]));
+    });
+
     it('creates local resources for a parent Weekly Event', async () => {
         const eventData = buildEventData({
             eventType: 'WEEKLY_EVENT',

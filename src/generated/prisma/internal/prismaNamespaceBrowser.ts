@@ -64,6 +64,8 @@ export const ModelName = {
   MatchOperationReceipts: 'MatchOperationReceipts',
   EventEditorCreateOperations: 'EventEditorCreateOperations',
   Divisions: 'Divisions',
+  EventDivisionPhaseSources: 'EventDivisionPhaseSources',
+  EventDivisionPhaseParticipants: 'EventDivisionPhaseParticipants',
   UserData: 'UserData',
   SensitiveUserData: 'SensitiveUserData',
   AuthMfaChallenges: 'AuthMfaChallenges',
@@ -247,6 +249,7 @@ export const MatchesScalarFieldEnum = {
   start: 'start',
   end: 'end',
   locked: 'locked',
+  placementState: 'placementState',
   division: 'division',
   team1Points: 'team1Points',
   team2Points: 'team2Points',
@@ -448,6 +451,8 @@ export const DivisionsScalarFieldEnum = {
   eventId: 'eventId',
   organizationId: 'organizationId',
   scope: 'scope',
+  role: 'role',
+  phase: 'phase',
   status: 'status',
   sourceDivisionId: 'sourceDivisionId',
   sportId: 'sportId',
@@ -500,6 +505,33 @@ export const DivisionsScalarFieldEnum = {
 } as const
 
 export type DivisionsScalarFieldEnum = (typeof DivisionsScalarFieldEnum)[keyof typeof DivisionsScalarFieldEnum]
+
+
+export const EventDivisionPhaseSourcesScalarFieldEnum = {
+  id: 'id',
+  eventId: 'eventId',
+  entryDivisionId: 'entryDivisionId',
+  phaseDivisionId: 'phaseDivisionId',
+  phase: 'phase',
+  sortOrder: 'sortOrder',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type EventDivisionPhaseSourcesScalarFieldEnum = (typeof EventDivisionPhaseSourcesScalarFieldEnum)[keyof typeof EventDivisionPhaseSourcesScalarFieldEnum]
+
+
+export const EventDivisionPhaseParticipantsScalarFieldEnum = {
+  id: 'id',
+  eventId: 'eventId',
+  phaseDivisionId: 'phaseDivisionId',
+  eventTeamId: 'eventTeamId',
+  sourceEntryDivisionId: 'sourceEntryDivisionId',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type EventDivisionPhaseParticipantsScalarFieldEnum = (typeof EventDivisionPhaseParticipantsScalarFieldEnum)[keyof typeof EventDivisionPhaseParticipantsScalarFieldEnum]
 
 
 export const UserDataScalarFieldEnum = {

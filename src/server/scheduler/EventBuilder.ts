@@ -1,9 +1,13 @@
-import crypto from 'crypto';
-import { Brackets } from './Brackets';
-import { OfficialStaffingPlanner } from './officialStaffing';
-import { Schedule } from './Schedule';
-import { resolveScheduledMatchDurationMs } from './divisionPhaseRules';
-import { resolveMatchTimingPolicy } from './matchTimingPolicy';
+import crypto from "crypto";
+import { Brackets } from "./Brackets";
+import { OfficialStaffingPlanner } from "./officialStaffing";
+import { Schedule } from "./Schedule";
+import {
+  applyDivisionPhaseRulesToMatch,
+  resolveScheduledMatchDurationMs,
+} from "./divisionPhaseRules";
+import { resolveMatchTimingPolicy } from "./matchTimingPolicy";
+import { topologicallySortMatchGraph } from "./matchGraph";
 import {
   Division,
   League,
@@ -17,7 +21,7 @@ import {
   LeagueDivisionConfig,
   PlayoffDivisionConfig,
   usesTeamOfficialScheduling,
-} from './types';
+} from "./types";
 
 const createId = () => crypto.randomUUID();
 
@@ -38,13 +42,18 @@ export class EventBuilder {
   context: SchedulerContext;
   schedule: Schedule<Match, any, any, Division>;
   private includePlaceholderTeams: boolean;
+  private shouldPlaceMatches = true;
   private regularPlaceholderIds: Set<string> = new Set();
   private playoffPlaceholderIds: Set<string> = new Set();
   private nextPlaceholderOrdinal: number = 1;
   private participants: Record<string, Team | UserData> = {};
   private officialStaffingPlanner: OfficialStaffingPlanner | null = null;
 
-  constructor(event: League | Tournament, context: SchedulerContext, options: EventBuilderOptions = {}) {
+  constructor(
+    event: League | Tournament,
+    context: SchedulerContext,
+    options: EventBuilderOptions = {},
+  ) {
     this.context = context;
     this.event = event;
     this.includePlaceholderTeams = options.includePlaceholderTeams !== false;
@@ -58,7 +67,24 @@ export class EventBuilder {
       { endTime: this.event.end, timeSlots: this.event.timeSlots },
     );
     this.officialStaffingPlanner = new OfficialStaffingPlanner(this.event);
-    this.resetState();
+    this.hydratePlaceholderIdentitySets();
+  }
+  private hydratePlaceholderIdentitySets(): void {
+    for (const team of Object.values(this.event.teams)) {
+      const kind = String(team.kind ?? "")
+        .trim()
+        .toUpperCase();
+      const isPlaceholder =
+        kind === "PLACEHOLDER" ||
+        (team.captainId.trim().length === 0 &&
+          /^(Place Holder|Seed )/i.test(team.name.trim()));
+      if (!isPlaceholder) continue;
+      if (/^Seed \d+$/i.test(team.name.trim())) {
+        this.playoffPlaceholderIds.add(team.id);
+      } else {
+        this.regularPlaceholderIds.add(team.id);
+      }
+    }
   }
 
   private get isLeague(): boolean {
@@ -67,11 +93,11 @@ export class EventBuilder {
 
   private get isTournamentPoolPlay(): boolean {
     return (
-      !(this.event instanceof League)
-      && String(this.event.eventType ?? '').toUpperCase() === 'TOURNAMENT'
-      && this.event.includePlayoffs === true
-      && Array.isArray(this.event.playoffDivisions)
-      && this.event.playoffDivisions.length > 0
+      !(this.event instanceof League) &&
+      String(this.event.eventType ?? "").toUpperCase() === "TOURNAMENT" &&
+      this.event.includePlayoffs === true &&
+      Array.isArray(this.event.playoffDivisions) &&
+      this.event.playoffDivisions.length > 0
     );
   }
 
@@ -81,6 +107,35 @@ export class EventBuilder {
     }
     return this.isTournamentPoolPlay;
   }
+  private phasePlayoffDivisionFor(sourceDivision?: Division): Division | null {
+    const playoffDivisions = this.event.playoffDivisions ?? [];
+    if (!playoffDivisions.length) {
+      return null;
+    }
+    if (sourceDivision) {
+      const sourceId = sourceDivision.id.toLowerCase();
+      const sourceBaseId = sourceId.replace(
+        /__phase__(league|pool|bracket|playoff)$/,
+        "",
+      );
+      const generated = playoffDivisions.find(
+        (division) =>
+          (division.phase === "PLAYOFF" || division.phase === "BRACKET") &&
+          division.id.toLowerCase() === `${sourceBaseId}__phase__playoff`,
+      );
+      if (generated) {
+        return generated;
+      }
+    }
+    return (
+      playoffDivisions.find(
+        (division) =>
+          division.phase === "PLAYOFF" || division.phase === "BRACKET",
+      ) ??
+      playoffDivisions[0] ??
+      null
+    );
+  }
 
   private schedulingDivisions(): Division[] {
     const divisions: Division[] = [...this.event.divisions];
@@ -88,7 +143,7 @@ export class EventBuilder {
       return divisions;
     }
     const seen = new Set(divisions.map((division) => division.id));
-    for (const playoffDivision of (this.event.playoffDivisions ?? [])) {
+    for (const playoffDivision of this.event.playoffDivisions ?? []) {
       if (seen.has(playoffDivision.id)) {
         continue;
       }
@@ -97,10 +152,24 @@ export class EventBuilder {
     }
     return divisions;
   }
+  private placementDivisions(): Division[] {
+    const divisions = this.schedulingDivisions();
+    const seen = new Set(divisions.map((division) => division.id));
+    for (const playoffDivision of this.event.playoffDivisions ?? []) {
+      if (seen.has(playoffDivision.id)) continue;
+      seen.add(playoffDivision.id);
+      divisions.push(playoffDivision);
+    }
+    return divisions;
+  }
 
   buildSchedule(): League | Tournament {
+    this.buildMatchGraph();
+    return this.placeMatchGraph();
+  }
+  buildMatchGraph(): League | Tournament {
+    this.shouldPlaceMatches = false;
     this.resetState();
-    this.ensureFieldsAvailable();
 
     const participantTargets = this.includePlaceholderTeams
       ? this.desiredParticipantCapacity()
@@ -108,13 +177,12 @@ export class EventBuilder {
     const participants = this.prepareParticipants(participantTargets);
     if (Object.keys(participants).length < 2) {
       if (!this.includePlaceholderTeams) {
-        for (const field of Object.values(this.event.fields)) {
-          field.matches = [];
-        }
         this.event.matches = {};
         return this.event;
       }
-      throw new Error('Event requires at least two participants to schedule');
+      throw new Error(
+        "Event requires at least two participants to build a Match Graph",
+      );
     }
 
     this.participants = participants;
@@ -130,51 +198,124 @@ export class EventBuilder {
     this.officialStaffingPlanner = new OfficialStaffingPlanner(this.event);
 
     const durationMs = this.matchDuration();
-    const scheduledMatches: Match[] = [];
-
+    const graphMatches: Match[] = [];
     const usesPreliminaryPhase = this.isLeague || this.isTournamentPoolPlay;
     if (usesPreliminaryPhase) {
-      const regularMatches = this.scheduleRegularSeason(Object.values(participants));
-      scheduledMatches.push(...regularMatches);
+      const regularMatches = this.scheduleRegularSeason(
+        Object.values(participants),
+      );
+      graphMatches.push(...regularMatches);
       if (this.eventHasAdvancementBracket(Object.values(participants).length)) {
-        const maxEnd = this.maxEndTime(regularMatches);
-        if (maxEnd) {
-          this.schedule.advanceTo(new Date(maxEnd.getTime() + this.matchBuffer()));
-        }
-        const playoffMatches = this.schedulePlayoffs(Object.values(participants), durationMs);
-        scheduledMatches.push(...playoffMatches);
-      }
-
-      this.assignChronologicalMatchIds(scheduledMatches);
-      this.stripPlaceholderAssignments(scheduledMatches);
-      for (const field of Object.values(this.event.fields)) {
-        field.matches = [...scheduledMatches];
-      }
-      this.event.matches = {};
-      for (const match of scheduledMatches) {
-        this.event.matches[match.id] = match;
+        graphMatches.push(
+          ...this.schedulePlayoffs(Object.values(participants), durationMs),
+        );
       }
     } else {
-      const playoffMatches = this.schedulePlayoffs(Object.values(participants), durationMs);
-      scheduledMatches.push(...playoffMatches);
+      graphMatches.push(
+        ...this.schedulePlayoffs(Object.values(participants), durationMs),
+      );
     }
-
-    this.stripPlaceholderAssignments(scheduledMatches);
-    this.assignUserOfficials(scheduledMatches);
-    if (usesTeamOfficialScheduling(this.event)) {
-      this.assignTeamOfficials(scheduledMatches);
+    for (const match of graphMatches) {
+      applyDivisionPhaseRulesToMatch(this.event, match);
+      match.placementState = "UNPLACED";
+      this.event.matches[match.id] = match;
     }
-    if (usesPreliminaryPhase) {
-      for (const field of Object.values(this.event.fields)) {
-        field.matches = [...scheduledMatches];
-      }
-      this.event.matches = {};
-      for (const match of scheduledMatches) {
-        this.event.matches[match.id] = match;
-      }
-    }
-
     return this.event;
+  }
+
+  placeMatchGraph(options: { preserveMatchIds?: boolean } = {}): League | Tournament {
+    this.shouldPlaceMatches = true;
+    this.ensureFieldsAvailable();
+    const matches = Object.values(this.event.matches);
+    if (!matches.length) {
+      return this.event;
+    }
+    const canonicalDivisions = new Map(
+      this.schedulingDivisions().map((division) => [division.id, division]),
+    );
+    for (const match of matches) {
+      const canonicalDivision = canonicalDivisions.get(match.division.id);
+      if (canonicalDivision) {
+        match.division = canonicalDivision;
+      }
+    }
+
+    for (const field of Object.values(this.event.fields)) {
+      field.matches = [];
+    }
+    for (const team of Object.values(this.event.teams)) {
+      team.matches = [];
+    }
+    for (const official of this.event.officials) {
+      official.matches = [];
+    }
+
+    const scheduleParticipants = this.participantsForSchedule(this.event.teams);
+    this.schedule = new Schedule(
+      this.event.start,
+      this.event.fields,
+      scheduleParticipants,
+      this.placementDivisions(),
+      undefined,
+      { endTime: this.event.end, timeSlots: this.event.timeSlots },
+    );
+    this.officialStaffingPlanner = new OfficialStaffingPlanner(this.event);
+
+    const orderedMatches = this.orderMatchesForPlacement(matches);
+    const regularMatches = orderedMatches.filter(
+      (match) => !this.isBracketPhase(match.division.phase, match.division.kind),
+    );
+    const playoffMatches = orderedMatches.filter((match) =>
+      this.isBracketPhase(match.division.phase, match.division.kind),
+    );
+    for (const match of regularMatches) {
+      this.placeGraphMatch(match);
+    }
+    const regularEnd = this.maxEndTime(regularMatches);
+    if (regularEnd) {
+      this.schedule.advanceTo(
+        new Date(regularEnd.getTime() + this.matchBuffer()),
+      );
+    }
+    for (const match of playoffMatches) {
+      this.placeGraphMatch(match);
+    }
+
+    if (!options.preserveMatchIds) {
+      this.assignChronologicalMatchIds(orderedMatches);
+    }
+    this.stripPlaceholderAssignments(orderedMatches);
+    this.assignUserOfficials(orderedMatches);
+    if (usesTeamOfficialScheduling(this.event)) {
+      this.assignTeamOfficials(orderedMatches);
+    }
+    for (const field of Object.values(this.event.fields)) {
+      field.matches = [...orderedMatches];
+    }
+    this.event.matches = Object.fromEntries(
+      orderedMatches.map((match) => [match.id, match]),
+    );
+    return this.event;
+  }
+  private isBracketPhase(
+    phase: Division["phase"],
+    kind?: Division["kind"],
+  ): boolean {
+    return phase === "BRACKET" || phase === "PLAYOFF" || kind === "PLAYOFF";
+  }
+
+  private orderMatchesForPlacement(matches: Match[]): Match[] {
+    return topologicallySortMatchGraph(matches);
+  }
+
+  private placeGraphMatch(match: Match): void {
+    const durationMs = resolveScheduledMatchDurationMs(
+      this.event,
+      match,
+      this.matchDuration(),
+    );
+    this.scheduleMatch(match, durationMs);
+    this.attachMatchToParticipants(match);
   }
 
   private leagueHasPlayoffs(participantCount: number): boolean {
@@ -186,10 +327,13 @@ export class EventBuilder {
       const league = this.event as League;
       if (!league.playoffDivisions.length) {
         throw new Error(
-          'Split playoff divisions are enabled but no playoff divisions are configured. Add at least one playoff division or disable split playoffs.',
+          "Split playoff divisions are enabled but no playoff divisions are configured. Add at least one playoff division or disable split playoffs.",
         );
       }
-      return league.playoffDivisions.some((division) => this.resolvePlayoffParticipantCount(division, participantCount) >= 2);
+      return league.playoffDivisions.some(
+        (division) =>
+          this.resolvePlayoffParticipantCount(division, participantCount) >= 2,
+      );
     }
     return participantCount > 1;
   }
@@ -203,9 +347,14 @@ export class EventBuilder {
     }
     const playoffDivisions = this.event.playoffDivisions ?? [];
     if (!playoffDivisions.length) {
-      throw new Error('Pool play is enabled but no bracket divisions are configured.');
+      throw new Error(
+        "Pool play is enabled but no bracket divisions are configured.",
+      );
     }
-    return playoffDivisions.some((division) => this.resolvePlayoffParticipantCount(division, participantCount) >= 2);
+    return playoffDivisions.some(
+      (division) =>
+        this.resolvePlayoffParticipantCount(division, participantCount) >= 2,
+    );
   }
 
   private resetState(): void {
@@ -230,32 +379,45 @@ export class EventBuilder {
 
   private ensureFieldsAvailable(): void {
     if (!Object.keys(this.event.fields).length) {
-      throw new Error('Unable to schedule event because no fields are configured.');
+      throw new Error(
+        "Unable to schedule event because no fields are configured.",
+      );
     }
   }
 
   private defaultDivision(): Division {
     if (this.event.divisions.length) return this.event.divisions[0];
-    return new Division('OPEN', 'OPEN');
+    return new Division("OPEN", "OPEN");
   }
 
-  private prepareParticipants(
-    placeholderTargets?: { total: number; byDivision: Map<string, number> | null },
-  ): Record<string, Team> {
+  private prepareParticipants(placeholderTargets?: {
+    total: number;
+    byDivision: Map<string, number> | null;
+  }): Record<string, Team> {
     for (const team of Object.values(this.event.teams)) {
       team.matches = [];
     }
     if (placeholderTargets) {
-      this.ensurePlaceholderCapacity(placeholderTargets.total, placeholderTargets.byDivision);
+      this.ensurePlaceholderCapacity(
+        placeholderTargets.total,
+        placeholderTargets.byDivision,
+      );
     }
     return this.event.teams;
   }
 
-  private participantsForSchedule(teams: Record<string, Team>): Record<string, Team | UserData> {
-    const participants: Record<string, Team | UserData> = { ...teams };
+  private participantsForSchedule(
+    teams: Record<string, Team>,
+  ): Record<string, Team | UserData> {
+    const participants: Record<string, Team | UserData> = {};
+    for (const [teamId, team] of Object.entries(teams)) {
+      if (this.playoffPlaceholderIds.has(teamId)) continue;
+      participants[teamId] = team;
+    }
     const officialDivisions = this.schedulingDivisions();
     for (const official of this.event.officials) {
-      if (!official.divisions.length) official.divisions = [...officialDivisions];
+      if (!official.divisions.length)
+        official.divisions = [...officialDivisions];
       official.matches = [];
       participants[official.id] = official;
     }
@@ -278,16 +440,20 @@ export class EventBuilder {
   ): void {
     if (targetCount < 2) targetCount = 2;
     if (Object.keys(this.event.teams).length >= targetCount) return;
-    const divisions = this.event.singleDivision || this.event.divisions.length === 0
-      ? [this.defaultDivision()]
-      : [...this.event.divisions];
+    const divisions =
+      this.event.singleDivision || this.event.divisions.length === 0
+        ? [this.defaultDivision()]
+        : [...this.event.divisions];
     const placeholderCounts = new Map<string, number>();
     for (const division of divisions) {
       placeholderCounts.set(division.id, 0);
     }
     for (const team of Object.values(this.event.teams)) {
       const divisionId = team.division?.id ?? this.defaultDivision().id;
-      placeholderCounts.set(divisionId, (placeholderCounts.get(divisionId) ?? 0) + 1);
+      placeholderCounts.set(
+        divisionId,
+        (placeholderCounts.get(divisionId) ?? 0) + 1,
+      );
     }
 
     if (divisionTargets && divisionTargets.size && !this.event.singleDivision) {
@@ -295,7 +461,9 @@ export class EventBuilder {
         if (!Number.isFinite(target)) continue;
         const normalizedTarget = Math.max(0, Math.trunc(target));
         if (normalizedTarget < 1) continue;
-        const division = divisions.find((entry) => entry.id === divisionId) ?? this.defaultDivision();
+        const division =
+          divisions.find((entry) => entry.id === divisionId) ??
+          this.defaultDivision();
         const currentCount = placeholderCounts.get(division.id) ?? 0;
         const missing = Math.max(0, normalizedTarget - currentCount);
         for (let index = 0; index < missing; index += 1) {
@@ -324,13 +492,17 @@ export class EventBuilder {
     }
   }
 
-  private addPlaceholderTeam(division: Division, placeholderCounts: Map<string, number>): void {
+  private addPlaceholderTeam(
+    division: Division,
+    placeholderCounts: Map<string, number>,
+  ): void {
     const placeholderId = createId();
     const ordinal = this.nextPlaceholderOrdinal;
     this.nextPlaceholderOrdinal += 1;
     const placeholder = new Team({
       id: placeholderId,
-      captainId: '',
+      captainId: "",
+      kind: "PLACEHOLDER",
       division,
       matches: [],
       playerIds: [],
@@ -338,21 +510,30 @@ export class EventBuilder {
     });
     this.event.teams[placeholderId] = placeholder;
     this.regularPlaceholderIds.add(placeholderId);
-    placeholderCounts.set(division.id, (placeholderCounts.get(division.id) ?? 0) + 1);
+    placeholderCounts.set(
+      division.id,
+      (placeholderCounts.get(division.id) ?? 0) + 1,
+    );
   }
 
   private generatePlaceholderId(prefix: string): string {
     let index = 1;
     while (true) {
       const candidate = `${prefix}-${index}`;
-      if (!this.event.teams[candidate] && !this.regularPlaceholderIds.has(candidate) && !this.playoffPlaceholderIds.has(candidate)) {
+      if (
+        !this.event.teams[candidate] &&
+        !this.regularPlaceholderIds.has(candidate) &&
+        !this.playoffPlaceholderIds.has(candidate)
+      ) {
         return candidate;
       }
       index += 1;
     }
   }
 
-  private groupsByDivision(participants: Team[]): Array<{ division: Division; teams: Team[] }> {
+  private groupsByDivision(
+    participants: Team[],
+  ): Array<{ division: Division; teams: Team[] }> {
     const grouped = new Map<string, { division: Division; teams: Team[] }>();
     for (const team of participants) {
       const division = team.division ?? this.defaultDivision();
@@ -380,14 +561,22 @@ export class EventBuilder {
     return ordered;
   }
 
-  private buildLeaguePlayoffPlaceholders(count: number, division: Division): Team[] {
+  private buildLeaguePlayoffPlaceholders(
+    count: number,
+    division: Division,
+  ): Team[] {
     const placeholders: Team[] = [];
-    const safeDivisionId = division.id.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const safeDivisionId = division.id
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-");
     for (let seedIndex = 0; seedIndex < count; seedIndex += 1) {
-      const placeholderId = this.generatePlaceholderId(`playoff-${safeDivisionId}`);
+      const placeholderId = this.generatePlaceholderId(
+        `playoff-${safeDivisionId}`,
+      );
       const placeholder = new Team({
         id: placeholderId,
-        captainId: '',
+        captainId: "",
+        kind: "PLACEHOLDER",
         division,
         matches: [],
         playerIds: [],
@@ -400,7 +589,10 @@ export class EventBuilder {
     return placeholders;
   }
 
-  private desiredParticipantCapacity(): { total: number; byDivision: Map<string, number> | null } {
+  private desiredParticipantCapacity(): {
+    total: number;
+    byDivision: Map<string, number> | null;
+  } {
     const maxParticipants = this.event.maxParticipants ?? 0;
     const teamCount = Object.keys(this.event.teams).length;
     if (this.event.singleDivision || this.event.divisions.length === 0) {
@@ -413,20 +605,28 @@ export class EventBuilder {
     const participantsByDivision = new Map<string, number>();
     for (const team of Object.values(this.event.teams)) {
       const divisionId = team.division?.id ?? this.defaultDivision().id;
-      participantsByDivision.set(divisionId, (participantsByDivision.get(divisionId) ?? 0) + 1);
+      participantsByDivision.set(
+        divisionId,
+        (participantsByDivision.get(divisionId) ?? 0) + 1,
+      );
     }
 
-    const configuredDivisions = this.event.divisions.length ? this.event.divisions : [this.defaultDivision()];
-    const divisionFallbackCapacity = maxParticipants > 0
-      ? Math.ceil(maxParticipants / Math.max(configuredDivisions.length, 1))
-      : 0;
+    const configuredDivisions = this.event.divisions.length
+      ? this.event.divisions
+      : [this.defaultDivision()];
+    const divisionFallbackCapacity =
+      maxParticipants > 0
+        ? Math.ceil(maxParticipants / Math.max(configuredDivisions.length, 1))
+        : 0;
 
     const byDivision = new Map<string, number>();
     for (const division of configuredDivisions) {
       const currentCount = participantsByDivision.get(division.id) ?? 0;
-      const configuredCapacity = typeof division.maxParticipants === 'number' && Number.isFinite(division.maxParticipants)
-        ? Math.max(0, Math.trunc(division.maxParticipants))
-        : divisionFallbackCapacity;
+      const configuredCapacity =
+        typeof division.maxParticipants === "number" &&
+        Number.isFinite(division.maxParticipants)
+          ? Math.max(0, Math.trunc(division.maxParticipants))
+          : divisionFallbackCapacity;
       byDivision.set(division.id, Math.max(currentCount, configuredCapacity));
       participantsByDivision.delete(division.id);
     }
@@ -435,7 +635,10 @@ export class EventBuilder {
       byDivision.set(divisionId, count);
     }
 
-    const divisionCapacityTotal = Array.from(byDivision.values()).reduce((sum, count) => sum + Math.max(0, count), 0);
+    const divisionCapacityTotal = Array.from(byDivision.values()).reduce(
+      (sum, count) => sum + Math.max(0, count),
+      0,
+    );
     return {
       total: Math.max(teamCount, divisionCapacityTotal, 2),
       byDivision,
@@ -443,33 +646,55 @@ export class EventBuilder {
   }
 
   private matchDuration(): number {
-    const matchRulesOverride = this.event.matchRulesOverride && typeof this.event.matchRulesOverride === 'object'
-      ? this.event.matchRulesOverride as Record<string, unknown>
-      : {};
-    return resolveMatchTimingPolicy({
-      usesSets: this.event.usesSets,
-      segmentCount: typeof matchRulesOverride.segmentCount === 'number' ? matchRulesOverride.segmentCount : null,
-      segmentLengthMinutes: typeof matchRulesOverride.segmentLengthMinutes === 'number' ? matchRulesOverride.segmentLengthMinutes : null,
-      segmentBreakMinutes: typeof matchRulesOverride.segmentBreakMinutes === 'number' ? matchRulesOverride.segmentBreakMinutes : null,
-      setsPerMatch: this.event.setsPerMatch,
-      setDurationMinutes: this.event.setDurationMinutes,
-      matchDurationMinutes: this.event.matchDurationMinutes,
-    }).durationMinutes * MINUTE_MS;
+    const matchRulesOverride =
+      this.event.matchRulesOverride &&
+      typeof this.event.matchRulesOverride === "object"
+        ? (this.event.matchRulesOverride as Record<string, unknown>)
+        : {};
+    return (
+      resolveMatchTimingPolicy({
+        usesSets: this.event.usesSets,
+        segmentCount:
+          typeof matchRulesOverride.segmentCount === "number"
+            ? matchRulesOverride.segmentCount
+            : null,
+        segmentLengthMinutes:
+          typeof matchRulesOverride.segmentLengthMinutes === "number"
+            ? matchRulesOverride.segmentLengthMinutes
+            : null,
+        segmentBreakMinutes:
+          typeof matchRulesOverride.segmentBreakMinutes === "number"
+            ? matchRulesOverride.segmentBreakMinutes
+            : null,
+        setsPerMatch: this.event.setsPerMatch,
+        setDurationMinutes: this.event.setDurationMinutes,
+        matchDurationMinutes: this.event.matchDurationMinutes,
+      }).durationMinutes * MINUTE_MS
+    );
   }
 
   private matchBuffer(): number {
-    return resolveMatchTimingPolicy({
-      usesSets: this.event.usesSets,
-      setsPerMatch: this.event.setsPerMatch,
-      setDurationMinutes: this.event.setDurationMinutes,
-      matchDurationMinutes: this.event.matchDurationMinutes,
-      restTimeMinutes: this.event.restTimeMinutes,
-    }).breakMinutes * MINUTE_MS;
+    return (
+      resolveMatchTimingPolicy({
+        usesSets: this.event.usesSets,
+        setsPerMatch: this.event.setsPerMatch,
+        setDurationMinutes: this.event.setDurationMinutes,
+        matchDurationMinutes: this.event.matchDurationMinutes,
+        restTimeMinutes: this.event.restTimeMinutes,
+      }).breakMinutes * MINUTE_MS
+    );
   }
 
-  private resolveMatchDivision(team1: Team | null, team2: Team | null): Division {
+  private resolveMatchDivision(
+    team1: Team | null,
+    team2: Team | null,
+  ): Division {
     if (!this.event.singleDivision) {
-      if (team1?.division && team2?.division && team1.division.id === team2.division.id) {
+      if (
+        team1?.division &&
+        team2?.division &&
+        team1.division.id === team2.division.id
+      ) {
         return team1.division;
       }
       if (team1?.division) {
@@ -483,7 +708,7 @@ export class EventBuilder {
   }
 
   private normalizePositiveInt(value: unknown, fallback: number): number {
-    const parsed = typeof value === 'number' ? value : Number(value);
+    const parsed = typeof value === "number" ? value : Number(value);
     if (!Number.isFinite(parsed)) {
       return fallback;
     }
@@ -491,7 +716,7 @@ export class EventBuilder {
   }
 
   private normalizePositiveDuration(value: unknown, fallback: number): number {
-    const parsed = typeof value === 'number' ? value : Number(value);
+    const parsed = typeof value === "number" ? value : Number(value);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       return Math.max(1, Math.trunc(fallback));
     }
@@ -499,42 +724,61 @@ export class EventBuilder {
   }
 
   private normalizeNonNegativeInt(value: unknown, fallback: number): number {
-    const parsed = typeof value === 'number' ? value : Number(value);
+    const parsed = typeof value === "number" ? value : Number(value);
     if (!Number.isFinite(parsed)) {
       return fallback;
     }
     return Math.max(0, Math.trunc(parsed));
   }
 
-  private resolveRegularSeasonConfig(division?: Division): RegularSeasonMatchConfig {
-    const divisionConfig: LeagueDivisionConfig | null = (this.isLeague || this.isTournamentPoolPlay)
-      ? division?.leagueConfig ?? null
-      : null;
-    const usesSets = typeof divisionConfig?.usesSets === 'boolean'
-      ? divisionConfig.usesSets
-      : Boolean(this.event.usesSets);
-    const matchRulesOverride = this.event.matchRulesOverride && typeof this.event.matchRulesOverride === 'object'
-      ? this.event.matchRulesOverride as Record<string, unknown>
-      : {};
-    const gamesPerOpponent = (this.isLeague || this.isTournamentPoolPlay)
-      ? this.normalizePositiveInt(divisionConfig?.gamesPerOpponent, this.event.gamesPerOpponent || 1)
-      : 1;
+  private resolveRegularSeasonConfig(
+    division?: Division,
+  ): RegularSeasonMatchConfig {
+    const divisionConfig: LeagueDivisionConfig | null =
+      this.isLeague || this.isTournamentPoolPlay
+        ? (division?.leagueConfig ?? null)
+        : null;
+    const usesSets =
+      typeof divisionConfig?.usesSets === "boolean"
+        ? divisionConfig.usesSets
+        : Boolean(this.event.usesSets);
+    const matchRulesOverride =
+      this.event.matchRulesOverride &&
+      typeof this.event.matchRulesOverride === "object"
+        ? (this.event.matchRulesOverride as Record<string, unknown>)
+        : {};
+    const gamesPerOpponent =
+      this.isLeague || this.isTournamentPoolPlay
+        ? this.normalizePositiveInt(
+            divisionConfig?.gamesPerOpponent,
+            this.event.gamesPerOpponent || 1,
+          )
+        : 1;
     const restTimeMinutes = this.normalizeNonNegativeInt(
       divisionConfig?.restTimeMinutes,
       this.event.restTimeMinutes ?? 0,
     );
     const timing = resolveMatchTimingPolicy({
       usesSets,
-      segmentCount: divisionConfig?.setsPerMatch
-        ?? (typeof matchRulesOverride.segmentCount === 'number' ? matchRulesOverride.segmentCount : null),
-      segmentLengthMinutes: divisionConfig?.setDurationMinutes
-        ?? (typeof matchRulesOverride.segmentLengthMinutes === 'number' ? matchRulesOverride.segmentLengthMinutes : null),
-      segmentBreakMinutes: typeof matchRulesOverride.segmentBreakMinutes === 'number'
-        ? matchRulesOverride.segmentBreakMinutes
-        : null,
+      segmentCount:
+        divisionConfig?.setsPerMatch ??
+        (typeof matchRulesOverride.segmentCount === "number"
+          ? matchRulesOverride.segmentCount
+          : null),
+      segmentLengthMinutes:
+        divisionConfig?.setDurationMinutes ??
+        (typeof matchRulesOverride.segmentLengthMinutes === "number"
+          ? matchRulesOverride.segmentLengthMinutes
+          : null),
+      segmentBreakMinutes:
+        typeof matchRulesOverride.segmentBreakMinutes === "number"
+          ? matchRulesOverride.segmentBreakMinutes
+          : null,
       setsPerMatch: divisionConfig?.setsPerMatch ?? this.event.setsPerMatch,
-      setDurationMinutes: divisionConfig?.setDurationMinutes ?? this.event.setDurationMinutes,
-      matchDurationMinutes: divisionConfig?.matchDurationMinutes ?? this.event.matchDurationMinutes,
+      setDurationMinutes:
+        divisionConfig?.setDurationMinutes ?? this.event.setDurationMinutes,
+      matchDurationMinutes:
+        divisionConfig?.matchDurationMinutes ?? this.event.matchDurationMinutes,
       restTimeMinutes,
     });
     return {
@@ -543,7 +787,10 @@ export class EventBuilder {
       bufferMs: timing.breakMinutes * MINUTE_MS,
       usesSets,
       setsPerMatch: usesSets
-        ? this.normalizePositiveInt(divisionConfig?.setsPerMatch, this.event.setsPerMatch || 1)
+        ? this.normalizePositiveInt(
+            divisionConfig?.setsPerMatch,
+            this.event.setsPerMatch || 1,
+          )
         : 1,
     };
   }
@@ -552,7 +799,9 @@ export class EventBuilder {
     team1: Team | null,
     team2: Team | null,
     divisionOverride?: Division,
-    config: RegularSeasonMatchConfig = this.resolveRegularSeasonConfig(divisionOverride),
+    config: RegularSeasonMatchConfig = this.resolveRegularSeasonConfig(
+      divisionOverride,
+    ),
   ): Match {
     const setCount = config.usesSets ? config.setsPerMatch : 1;
     return new Match({
@@ -580,7 +829,10 @@ export class EventBuilder {
     });
   }
 
-  private scheduleRegularSeasonForDivision(participants: Team[], division?: Division): Match[] {
+  private scheduleRegularSeasonForDivision(
+    participants: Team[],
+    division?: Division,
+  ): Match[] {
     const config = this.resolveRegularSeasonConfig(division);
     const rounds = this.roundRobinRounds(participants, config.gamesPerOpponent);
     const scheduled: Match[] = [];
@@ -588,16 +840,25 @@ export class EventBuilder {
       const roundScheduled: Match[] = [];
       for (const [home, away] of roundPairs) {
         const match = this.createMatch(home, away, division, config);
-        this.scheduleMatch(
-          match,
-          resolveScheduledMatchDurationMs(this.event, match, config.durationMs),
-        );
+        if (this.shouldPlaceMatches) {
+          this.scheduleMatch(
+            match,
+            resolveScheduledMatchDurationMs(
+              this.event,
+              match,
+              config.durationMs,
+            ),
+          );
+        }
         this.attachMatchToParticipants(match);
         scheduled.push(match);
         roundScheduled.push(match);
       }
-      if (roundScheduled.length) {
-        const lastEnd = roundScheduled.reduce((acc, match) => (match.end > acc ? match.end : acc), roundScheduled[0].end);
+      if (this.shouldPlaceMatches && roundScheduled.length) {
+        const lastEnd = roundScheduled.reduce(
+          (acc, match) => (match.end > acc ? match.end : acc),
+          roundScheduled[0].end,
+        );
         this.schedule.advanceTo(new Date(lastEnd.getTime() + config.bufferMs));
       }
     }
@@ -610,7 +871,10 @@ export class EventBuilder {
     }
 
     if (this.event.singleDivision) {
-      return this.scheduleRegularSeasonForDivision(participants, this.defaultDivision());
+      return this.scheduleRegularSeasonForDivision(
+        participants,
+        this.defaultDivision(),
+      );
     }
 
     const groupedByDivision = this.groupsByDivision(participants);
@@ -629,7 +893,10 @@ export class EventBuilder {
     return scheduled;
   }
 
-  private roundRobinRounds(participants: Team[], gamesPerOpponent: number): Array<Array<[Team, Team]>> {
+  private roundRobinRounds(
+    participants: Team[],
+    gamesPerOpponent: number,
+  ): Array<Array<[Team, Team]>> {
     const teams = [...participants];
     if (teams.length < 2) return [];
     if (teams.length % 2 === 1) teams.push(null as any);
@@ -646,7 +913,11 @@ export class EventBuilder {
         pairings.push([home, away]);
       }
       baseRounds.push(pairings);
-      working = [working[0], working[working.length - 1], ...working.slice(1, -1)];
+      working = [
+        working[0],
+        working[working.length - 1],
+        ...working.slice(1, -1),
+      ];
     }
     const fullSchedule: Array<Array<[Team, Team]>> = [];
     for (let repeat = 0; repeat < gamesPerOpponent; repeat += 1) {
@@ -664,119 +935,185 @@ export class EventBuilder {
   private schedulePlayoffs(participants: Team[], durationMs: number): Match[] {
     if (participants.length < 2) return [];
     if (!this.isLeague && !this.isTournamentPoolPlay) {
-      const bracketBuilder = new Brackets(this.event as Tournament, this.context);
+      const bracketBuilder = new Brackets(
+        this.event as Tournament,
+        this.context,
+        {
+          placeMatches: this.shouldPlaceMatches,
+        },
+      );
       bracketBuilder.buildBrackets();
       this.schedule = bracketBuilder.bracketSchedule;
       this.event = bracketBuilder.tournament as League | Tournament;
-      return Object.values(this.event.matches).sort((a, b) => (a.matchId || 0) - (b.matchId || 0));
+      return Object.values(this.event.matches).sort(
+        (a, b) => (a.matchId || 0) - (b.matchId || 0),
+      );
     }
 
     if (this.useSplitPlayoffDivisions) {
       const scheduledMatches: Match[] = [];
-      const playoffStart = this.schedule.currentTime.getTime() > this.event.start.getTime()
-        ? this.schedule.currentTime
-        : this.event.start;
+      const playoffStart =
+        this.schedule.currentTime.getTime() > this.event.start.getTime()
+          ? this.schedule.currentTime
+          : this.event.start;
       const playoffDivisions = this.event.playoffDivisions ?? [];
       for (const playoffDivision of playoffDivisions) {
-        const playoffCount = this.resolvePlayoffParticipantCount(playoffDivision, participants.length);
+        const playoffCount = this.resolvePlayoffParticipantCount(
+          playoffDivision,
+          participants.length,
+        );
         if (playoffCount < 2) {
           continue;
         }
         // Ensure each playoff division begins from the shared playoff start anchor.
         this.schedule.currentTime = new Date(playoffStart);
-        const seeded = this.buildLeaguePlayoffPlaceholders(playoffCount, playoffDivision);
+        const seeded = this.buildLeaguePlayoffPlaceholders(
+          playoffCount,
+          playoffDivision,
+        );
         const config = this.resolvePlayoffTournamentConfig(playoffDivision);
         scheduledMatches.push(
-          ...this.scheduleLeaguePlayoffBracket(seeded, [playoffDivision], durationMs, playoffStart, config),
+          ...this.scheduleLeaguePlayoffBracket(
+            seeded,
+            [playoffDivision],
+            durationMs,
+            playoffStart,
+            config,
+          ),
         );
       }
       return scheduledMatches;
     }
 
-    const resolveDivisionPlayoffCount = (division: Division, teamCount: number): number => (
-      this.resolvePlayoffParticipantCount(division, teamCount)
-    );
+    const resolveDivisionPlayoffCount = (
+      division: Division,
+      teamCount: number,
+    ): number => this.resolvePlayoffParticipantCount(division, teamCount);
     const seeded: Team[] = [];
     if (this.event.singleDivision) {
       const league = this.event as League;
-      const playoffCount = Math.min(league.playoffTeamCount || participants.length, participants.length);
+      const playoffDivision =
+        this.phasePlayoffDivisionFor(this.defaultDivision()) ??
+        this.defaultDivision();
+      const playoffCount = Math.min(
+        league.playoffTeamCount || participants.length,
+        participants.length,
+      );
       if (playoffCount < 2) return [];
-      seeded.push(...this.buildLeaguePlayoffPlaceholders(playoffCount, this.defaultDivision()));
+      seeded.push(
+        ...this.buildLeaguePlayoffPlaceholders(playoffCount, playoffDivision),
+      );
       if (seeded.length < 2) {
         return [];
       }
-      const playoffStart = this.schedule.currentTime.getTime() > this.event.start.getTime()
-        ? this.schedule.currentTime
-        : this.event.start;
-      const config = this.resolvePlayoffTournamentConfig();
+      const playoffStart =
+        this.schedule.currentTime.getTime() > this.event.start.getTime()
+          ? this.schedule.currentTime
+          : this.event.start;
+      const config = this.resolvePlayoffTournamentConfig(playoffDivision);
       return this.scheduleLeaguePlayoffBracket(
         seeded,
-        this.event.divisions.length ? [...this.event.divisions] : [this.defaultDivision()],
+        [playoffDivision],
         durationMs,
         playoffStart,
         config,
       );
     }
 
-    const playoffStart = this.schedule.currentTime.getTime() > this.event.start.getTime()
-      ? this.schedule.currentTime
-      : this.event.start;
+    const playoffStart =
+      this.schedule.currentTime.getTime() > this.event.start.getTime()
+        ? this.schedule.currentTime
+        : this.event.start;
     const scheduledMatches: Match[] = [];
     const groupedByDivision = this.groupsByDivision(participants);
     for (const { division, teams } of groupedByDivision) {
-      const divisionPlayoffCount = resolveDivisionPlayoffCount(division, teams.length);
+      const playoffDivision =
+        this.phasePlayoffDivisionFor(division) ?? division;
+      const divisionPlayoffCount = resolveDivisionPlayoffCount(
+        playoffDivision,
+        teams.length,
+      );
       if (divisionPlayoffCount < 2) {
         continue;
       }
       this.schedule.currentTime = new Date(playoffStart);
-      const divisionSeeds = this.buildLeaguePlayoffPlaceholders(divisionPlayoffCount, division);
-      const config = this.resolvePlayoffTournamentConfig(division);
+      const divisionSeeds = this.buildLeaguePlayoffPlaceholders(
+        divisionPlayoffCount,
+        playoffDivision,
+      );
+      const config = this.resolvePlayoffTournamentConfig(playoffDivision);
       scheduledMatches.push(
-        ...this.scheduleLeaguePlayoffBracket(divisionSeeds, [division], durationMs, playoffStart, config),
+        ...this.scheduleLeaguePlayoffBracket(
+          divisionSeeds,
+          [playoffDivision],
+          durationMs,
+          playoffStart,
+          config,
+        ),
       );
     }
     return scheduledMatches;
   }
 
-  private resolvePlayoffTournamentConfig(division?: Division): PlayoffDivisionConfig {
-    const fallbackDivision = division ?? (!this.useSplitPlayoffDivisions ? this.defaultDivision() : undefined);
+  private resolvePlayoffTournamentConfig(
+    division?: Division,
+  ): PlayoffDivisionConfig {
+    const fallbackDivision =
+      division ??
+      (!this.useSplitPlayoffDivisions ? this.defaultDivision() : undefined);
     // Single-division events own their bracket settings at the event level. A
     // stale generated division config must not override those settings.
-    const divisionConfig = this.event.singleDivision ? null : fallbackDivision?.playoffConfig ?? null;
+    const divisionConfig = this.event.singleDivision
+      ? null
+      : (fallbackDivision?.playoffConfig ?? null);
     const normalizePositiveInt = (value: unknown, fallback: number): number => {
-      const parsed = typeof value === 'number' ? value : Number(value);
+      const parsed = typeof value === "number" ? value : Number(value);
       if (!Number.isFinite(parsed)) {
         return fallback;
       }
       return Math.max(1, Math.trunc(parsed));
     };
-    const normalizeNonNegativeInt = (value: unknown, fallback: number): number => {
-      const parsed = typeof value === 'number' ? value : Number(value);
+    const normalizeNonNegativeInt = (
+      value: unknown,
+      fallback: number,
+    ): number => {
+      const parsed = typeof value === "number" ? value : Number(value);
       if (!Number.isFinite(parsed)) {
         return fallback;
       }
       return Math.max(0, Math.trunc(parsed));
     };
-    const normalizeOptionalNonNegativeInt = (value: unknown, fallback: unknown): number | undefined => {
-      const parsed = value === null || value === undefined || value === ''
-        ? NaN
-        : typeof value === 'number'
-          ? value
-          : Number(value);
+    const normalizeOptionalNonNegativeInt = (
+      value: unknown,
+      fallback: unknown,
+    ): number | undefined => {
+      const parsed =
+        value === null || value === undefined || value === ""
+          ? NaN
+          : typeof value === "number"
+            ? value
+            : Number(value);
       if (Number.isFinite(parsed)) {
         return Math.max(0, Math.trunc(parsed));
       }
-      const parsedFallback = fallback === null || fallback === undefined || fallback === ''
-        ? NaN
-        : typeof fallback === 'number'
-          ? fallback
-          : Number(fallback);
-      return Number.isFinite(parsedFallback) ? Math.max(0, Math.trunc(parsedFallback)) : undefined;
+      const parsedFallback =
+        fallback === null || fallback === undefined || fallback === ""
+          ? NaN
+          : typeof fallback === "number"
+            ? fallback
+            : Number(fallback);
+      return Number.isFinite(parsedFallback)
+        ? Math.max(0, Math.trunc(parsedFallback))
+        : undefined;
     };
-    const normalizePoints = (value: unknown, length: number, fallback: number[]): number[] => {
+    const normalizePoints = (
+      value: unknown,
+      length: number,
+      fallback: number[],
+    ): number[] => {
       const values = Array.isArray(value)
         ? value
-            .map((entry) => (typeof entry === 'number' ? entry : Number(entry)))
+            .map((entry) => (typeof entry === "number" ? entry : Number(entry)))
             .filter((entry) => Number.isFinite(entry))
             .map((entry) => Math.max(1, Math.trunc(entry)))
         : [...fallback];
@@ -787,27 +1124,38 @@ export class EventBuilder {
       return next;
     };
 
-    const doubleElimination = typeof divisionConfig?.doubleElimination === 'boolean'
-      ? divisionConfig.doubleElimination
-      : Boolean(this.event.doubleElimination);
+    const doubleElimination =
+      typeof divisionConfig?.doubleElimination === "boolean"
+        ? divisionConfig.doubleElimination
+        : Boolean(this.event.doubleElimination);
     const winnerSetCount = normalizePositiveInt(
       divisionConfig?.winnerSetCount,
-      typeof this.event.winnerSetCount === 'number' && Number.isFinite(this.event.winnerSetCount)
+      typeof this.event.winnerSetCount === "number" &&
+        Number.isFinite(this.event.winnerSetCount)
         ? this.event.winnerSetCount
         : 1,
     );
-    const fallbackLoserSetCount = typeof this.event.loserSetCount === 'number' && Number.isFinite(this.event.loserSetCount)
-      ? this.event.loserSetCount
-      : 1;
-    const rawLoserSetCount = normalizePositiveInt(divisionConfig?.loserSetCount, fallbackLoserSetCount);
+    const fallbackLoserSetCount =
+      typeof this.event.loserSetCount === "number" &&
+      Number.isFinite(this.event.loserSetCount)
+        ? this.event.loserSetCount
+        : 1;
+    const rawLoserSetCount = normalizePositiveInt(
+      divisionConfig?.loserSetCount,
+      fallbackLoserSetCount,
+    );
     const loserSetCount = doubleElimination ? rawLoserSetCount : 1;
     const enforceSingleSet = !this.event.usesSets;
     const normalizedWinnerSetCount = enforceSingleSet ? 1 : winnerSetCount;
     const normalizedLoserSetCount = enforceSingleSet ? 1 : loserSetCount;
-    const winnerPointsFallback = Array.isArray(this.event.winnerBracketPointsToVictory)
+    const winnerPointsFallback = Array.isArray(
+      this.event.winnerBracketPointsToVictory,
+    )
       ? this.event.winnerBracketPointsToVictory
       : [];
-    const loserPointsFallback = Array.isArray(this.event.loserBracketPointsToVictory)
+    const loserPointsFallback = Array.isArray(
+      this.event.loserBracketPointsToVictory,
+    )
       ? this.event.loserBracketPointsToVictory
       : [];
     const fallbackFieldCount = (() => {
@@ -815,7 +1163,10 @@ export class EventBuilder {
       if (configuredFieldCount > 0) {
         return configuredFieldCount;
       }
-      if (typeof this.event.fieldCount === 'number' && Number.isFinite(this.event.fieldCount)) {
+      if (
+        typeof this.event.fieldCount === "number" &&
+        Number.isFinite(this.event.fieldCount)
+      ) {
         return Math.max(1, Math.trunc(this.event.fieldCount));
       }
       return 1;
@@ -835,16 +1186,18 @@ export class EventBuilder {
         normalizedLoserSetCount,
         loserPointsFallback,
       ),
-      prize: typeof divisionConfig?.prize === 'string'
-        ? divisionConfig.prize
-        : (this.event.prize ?? ''),
+      prize:
+        typeof divisionConfig?.prize === "string"
+          ? divisionConfig.prize
+          : (this.event.prize ?? ""),
       fieldCount: normalizePositiveInt(
         divisionConfig?.fieldCount,
         fallbackFieldCount,
       ),
       restTimeMinutes: normalizeNonNegativeInt(
         divisionConfig?.restTimeMinutes,
-        typeof this.event.restTimeMinutes === 'number' && Number.isFinite(this.event.restTimeMinutes)
+        typeof this.event.restTimeMinutes === "number" &&
+          Number.isFinite(this.event.restTimeMinutes)
           ? this.event.restTimeMinutes
           : 0,
       ),
@@ -869,7 +1222,9 @@ export class EventBuilder {
     if (seeded.length < 2) {
       return [];
     }
-    const teamLookup = Object.fromEntries(seeded.map((team) => [team.id, team]));
+    const teamLookup = Object.fromEntries(
+      seeded.map((team) => [team.id, team]),
+    );
     const tournamentFields: Record<string, PlayingField> = {};
     for (const [fieldId, field] of Object.entries(this.event.fields)) {
       tournamentFields[fieldId] = new PlayingField({
@@ -896,7 +1251,7 @@ export class EventBuilder {
     }
 
     const playoffTournament = new Tournament({
-      id: `${this.event.id}-${tournamentDivisions.map((division) => division.id).join('-') || 'playoffs'}`,
+      id: `${this.event.id}-${tournamentDivisions.map((division) => division.id).join("-") || "playoffs"}`,
       name: `${this.event.name} Playoffs`,
       start: playoffStart,
       end: this.event.end,
@@ -922,9 +1277,11 @@ export class EventBuilder {
       eventType: this.event.eventType,
       timeSlots: this.event.timeSlots,
       restTimeMinutes: config.restTimeMinutes,
-      matchDurationMinutes: config.matchDurationMinutes ?? this.event.matchDurationMinutes,
+      matchDurationMinutes:
+        config.matchDurationMinutes ?? this.event.matchDurationMinutes,
       usesSets: this.event.usesSets,
-      setDurationMinutes: config.setDurationMinutes ?? this.event.setDurationMinutes,
+      setDurationMinutes:
+        config.setDurationMinutes ?? this.event.setDurationMinutes,
       officialSchedulingMode: this.event.officialSchedulingMode,
       officialPositions: this.event.officialPositions,
       matchRulesOverride: this.event.matchRulesOverride,
@@ -932,26 +1289,37 @@ export class EventBuilder {
       resolvedMatchRules: this.event.resolvedMatchRules,
       eventOfficials: this.event.eventOfficials,
       doTeamsOfficiate: usesTeamOfficialScheduling(this.event),
-      teamOfficialsMaySwap: usesTeamOfficialScheduling(this.event) ? this.event.teamOfficialsMaySwap : false,
+      teamOfficialsMaySwap: usesTeamOfficialScheduling(this.event)
+        ? this.event.teamOfficialsMaySwap
+        : false,
     });
-
-    const bracketBuilder = new Brackets(playoffTournament, this.context);
+    const bracketBuilder = new Brackets(playoffTournament, this.context, {
+      placeMatches: this.shouldPlaceMatches,
+    });
     bracketBuilder.bracketSchedule.advanceTo(playoffStart);
     bracketBuilder.buildBrackets();
 
-    const bracketMatches = Object.values(bracketBuilder.tournament.matches).sort((a, b) => (a.matchId || 0) - (b.matchId || 0));
+    const bracketMatches = Object.values(
+      bracketBuilder.tournament.matches,
+    ).sort((a, b) => (a.matchId || 0) - (b.matchId || 0));
     const scheduledMatches: Match[] = [];
     const playoffBufferMs = Math.max(config.restTimeMinutes, 0) * MINUTE_MS;
-    const playoffSetDurationMs = this.normalizePositiveDuration(
-      config.setDurationMinutes,
-      this.event.setDurationMinutes || Math.max(1, Math.round(durationMs / MINUTE_MS)),
-    ) * MINUTE_MS;
-    const playoffMatchDurationMs = this.normalizePositiveDuration(
-      config.matchDurationMinutes,
-      this.event.matchDurationMinutes || Math.max(1, Math.round(durationMs / MINUTE_MS)),
-    ) * MINUTE_MS;
+    const playoffSetDurationMs =
+      this.normalizePositiveDuration(
+        config.setDurationMinutes,
+        this.event.setDurationMinutes ||
+          Math.max(1, Math.round(durationMs / MINUTE_MS)),
+      ) * MINUTE_MS;
+    const playoffMatchDurationMs =
+      this.normalizePositiveDuration(
+        config.matchDurationMinutes,
+        this.event.matchDurationMinutes ||
+          Math.max(1, Math.round(durationMs / MINUTE_MS)),
+      ) * MINUTE_MS;
     for (const match of bracketMatches) {
-      match.unschedule();
+      if (this.shouldPlaceMatches) {
+        match.unschedule();
+      }
       if (match.team1) {
         match.team1 = teamLookup[match.team1.id] ?? match.team1;
       }
@@ -959,19 +1327,23 @@ export class EventBuilder {
         match.team2 = teamLookup[match.team2.id] ?? match.team2;
       }
       if (match.teamOfficial) {
-        match.teamOfficial = teamLookup[match.teamOfficial.id] ?? match.teamOfficial;
+        match.teamOfficial =
+          teamLookup[match.teamOfficial.id] ?? match.teamOfficial;
       }
       match.bufferMs = playoffBufferMs;
       const playoffDurationMs = this.event.usesSets
-        ? playoffSetDurationMs * Math.max(
+        ? playoffSetDurationMs *
+          Math.max(
             1,
             match.losersBracket ? config.loserSetCount : config.winnerSetCount,
           )
         : playoffMatchDurationMs;
-      this.scheduleMatch(
-        match,
-        resolveScheduledMatchDurationMs(this.event, match, playoffDurationMs),
-      );
+      if (this.shouldPlaceMatches) {
+        this.scheduleMatch(
+          match,
+          resolveScheduledMatchDurationMs(this.event, match, playoffDurationMs),
+        );
+      }
       this.attachMatchToParticipants(match);
       scheduledMatches.push(match);
     }
@@ -981,9 +1353,13 @@ export class EventBuilder {
   private scheduleMatch(match: Match, durationMs: number): void {
     match.requiresTeamOfficial = usesTeamOfficialScheduling(this.event);
     const planner = this.officialStaffingPlanner;
-    if (this.event.officialSchedulingMode === 'STAFFING' && planner?.hasStaffingRequirement()) {
+    if (
+      this.event.officialSchedulingMode === "STAFFING" &&
+      planner?.hasStaffingRequirement()
+    ) {
       this.schedule.scheduleEventWithOptions(match, durationMs, {
-        canUseCandidate: ({ resource, start, end }) => planner.previewSchedulingCandidate(match, resource, start, end),
+        canUseCandidate: ({ resource, start, end }) =>
+          planner.previewSchedulingCandidate(match, resource, start, end),
       });
       planner.commitScheduledMatch(match);
       return;
@@ -991,23 +1367,34 @@ export class EventBuilder {
     this.schedule.scheduleEvent(match, durationMs);
   }
 
-  private resolvePlayoffParticipantCount(division: Division, fallbackTeamCount: number): number {
+  private resolvePlayoffParticipantCount(
+    division: Division,
+    fallbackTeamCount: number,
+  ): number {
     if (fallbackTeamCount < 2) {
       return 0;
     }
     const explicitDivisionCount = (() => {
-      if (typeof division.playoffTeamCount === 'number' && Number.isFinite(division.playoffTeamCount)) {
+      if (
+        typeof division.playoffTeamCount === "number" &&
+        Number.isFinite(division.playoffTeamCount)
+      ) {
         return Math.max(0, Math.trunc(division.playoffTeamCount));
       }
-      if (typeof division.maxParticipants === 'number' && Number.isFinite(division.maxParticipants)) {
+      if (
+        typeof division.maxParticipants === "number" &&
+        Number.isFinite(division.maxParticipants)
+      ) {
         return Math.max(0, Math.trunc(division.maxParticipants));
       }
       return null;
     })();
     const eventPlayoffTeamCount = this.event.playoffTeamCount;
-    const leagueCount = typeof eventPlayoffTeamCount === 'number' && Number.isFinite(eventPlayoffTeamCount)
-      ? Math.max(0, Math.trunc(eventPlayoffTeamCount))
-      : 0;
+    const leagueCount =
+      typeof eventPlayoffTeamCount === "number" &&
+      Number.isFinite(eventPlayoffTeamCount)
+        ? Math.max(0, Math.trunc(eventPlayoffTeamCount))
+        : 0;
     const configured = explicitDivisionCount ?? leagueCount;
     const fallback = configured > 0 ? configured : fallbackTeamCount;
     return Math.min(fallback, fallbackTeamCount);
@@ -1015,7 +1402,10 @@ export class EventBuilder {
 
   private maxEndTime(matches: Match[]): Date | null {
     if (!matches.length) return null;
-    return matches.reduce((latest, match) => (match.end > latest ? match.end : latest), matches[0].end);
+    return matches.reduce(
+      (latest, match) => (match.end > latest ? match.end : latest),
+      matches[0].end,
+    );
   }
 
   private stripPlaceholderAssignments(matches: Match[]): void {
@@ -1026,7 +1416,11 @@ export class EventBuilder {
       if (match.team2 && this.playoffPlaceholderIds.has(match.team2.id)) {
         match.team2 = null;
       }
-      if (match.teamOfficial && this.playoffPlaceholderIds.has(match.teamOfficial.id)) match.teamOfficial = null;
+      if (
+        match.teamOfficial &&
+        this.playoffPlaceholderIds.has(match.teamOfficial.id)
+      )
+        match.teamOfficial = null;
     }
     if (this.playoffPlaceholderIds.size) {
       const nextTeams: Record<string, Team> = {};
@@ -1043,7 +1437,7 @@ export class EventBuilder {
       if (startDiff !== 0) return startDiff;
       const endDiff = a.end.getTime() - b.end.getTime();
       if (endDiff !== 0) return endDiff;
-      const fieldDiff = (a.field?.id ?? '').localeCompare(b.field?.id ?? '');
+      const fieldDiff = (a.field?.id ?? "").localeCompare(b.field?.id ?? "");
       if (fieldDiff !== 0) return fieldDiff;
       return a.id.localeCompare(b.id);
     });
@@ -1053,21 +1447,24 @@ export class EventBuilder {
   }
 
   private assignUserOfficials(matches: Match[]): void {
-    const planner = this.officialStaffingPlanner ?? new OfficialStaffingPlanner(this.event);
+    const planner =
+      this.officialStaffingPlanner ?? new OfficialStaffingPlanner(this.event);
     this.officialStaffingPlanner = planner;
-    if (this.event.officialSchedulingMode === 'TEAM_STAFFING') {
+    if (this.event.officialSchedulingMode === "TEAM_STAFFING") {
       return;
     }
     if (!planner.hasRequiredSlots()) {
       return;
     }
-    if (this.event.officialSchedulingMode === 'STAFFING') {
+    if (this.event.officialSchedulingMode === "STAFFING") {
       if (!planner.hasStaffingRequirement()) {
         return;
       }
-      const unstafedMatch = matches.find((match) => !planner.hasCommittedAssignments(match));
+      const unstafedMatch = matches.find(
+        (match) => !planner.hasCommittedAssignments(match),
+      );
       if (unstafedMatch) {
-        throw new Error('Unable to fully staff all matches without conflicts.');
+        throw new Error("Unable to fully staff all matches without conflicts.");
       }
       return;
     }
@@ -1075,7 +1472,9 @@ export class EventBuilder {
   }
 
   private assignTeamOfficials(matches: Match[]): void {
-    const teams = Object.values(this.event.teams).filter((team) => team.captainId.trim().length > 0);
+    const teams = Object.values(this.event.teams).filter(
+      (team) => team.captainId.trim().length > 0,
+    );
     const unassigned = [...teams];
     const divisionById = new Map(
       this.schedulingDivisions().map((division) => [division.id, division]),
@@ -1085,11 +1484,16 @@ export class EventBuilder {
       if (startDiff !== 0) return startDiff;
       const endDiff = a.end.getTime() - b.end.getTime();
       if (endDiff !== 0) return endDiff;
-      return (a.field?.id ?? '').localeCompare(b.field?.id ?? '');
+      return (a.field?.id ?? "").localeCompare(b.field?.id ?? "");
     });
     for (const match of ordered) {
       this.attachMatchToParticipants(match);
-      if (match.teamOfficial || !match.division || !(match.team1 && match.team2)) continue;
+      if (
+        match.teamOfficial ||
+        !match.division ||
+        !(match.team1 && match.team2)
+      )
+        continue;
       const candidateDivisionIds = new Set([
         match.division.id,
         ...match.division.playoffPlacementDivisionIds,
@@ -1099,14 +1503,21 @@ export class EventBuilder {
         .filter((division): division is Division => Boolean(division));
       const availableTeamsById = new Map<string, Team>();
       for (const division of candidateDivisions) {
-        const freeTeams = this.schedule.freeParticipants(division, match.start, match.end)
-          .filter((participant) => participant instanceof Team && participant.captainId.trim().length > 0) as Team[];
+        const freeTeams = this.schedule
+          .freeParticipants(division, match.start, match.end)
+          .filter(
+            (participant) =>
+              participant instanceof Team &&
+              participant.captainId.trim().length > 0,
+          ) as Team[];
         for (const team of freeTeams) {
           availableTeamsById.set(team.id, team);
         }
       }
       const availableTeams = Array.from(availableTeamsById.values());
-      const filtered = availableTeams.filter((team) => team !== match.team1 && team !== match.team2);
+      const filtered = availableTeams.filter(
+        (team) => team !== match.team1 && team !== match.team2,
+      );
       let candidate: Team | null = null;
       for (let i = 0; i < unassigned.length; i += 1) {
         const candidateTeam = unassigned[0];

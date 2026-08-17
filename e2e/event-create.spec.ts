@@ -29,9 +29,24 @@ test("creates an event from the schedule create flow", async ({ page }) => {
       console.log("[e2e] script request", req.url());
     }
   });
-  page.on("response", (res) => {
+  page.on("response", async (res) => {
     if (res.request().resourceType() === "script" && !res.ok()) {
       console.log("[e2e] script response error", res.status(), res.url());
+    }
+    if (res.url().includes("/api/events/editor") && res.request().method() === "GET") {
+      const body = await res.json().catch(() => null);
+      const snapshot = body?.snapshot;
+      console.log(
+        "[e2e] editor bootstrap",
+        res.url(),
+        JSON.stringify({
+          editorRevision: snapshot?.editorRevision,
+          scheduleRevision: snapshot?.scheduleState?.revision,
+          basics: snapshot?.draft?.basics,
+          schedule: snapshot?.draft?.schedule,
+          resources: snapshot?.draft?.resources,
+        }),
+      );
     }
     if (res.url().includes("/api/")) {
       console.log(
@@ -58,9 +73,12 @@ test("creates an event from the schedule create flow", async ({ page }) => {
   });
 
   await seedLocationStorage(page);
-  await page.goto(`/events/${eventId}/schedule?create=1&orgId=${SEED_ORG.id}`, {
-    waitUntil: "domcontentloaded",
-  });
+  await page.goto(
+    `/events/${eventId}/schedule?create=1&orgId=${SEED_ORG.id}&skipTemplatePrompt=1`,
+    {
+      waitUntil: "domcontentloaded",
+    },
+  );
   console.log("[e2e] url after goto", page.url());
   await page.waitForTimeout(5000);
   console.log("[e2e] url after 5s", page.url());
@@ -70,14 +88,17 @@ test("creates an event from the schedule create flow", async ({ page }) => {
     .waitFor({ state: "detached", timeout: 10000 })
     .catch(() => null);
 
-  const eventNameInput = page.getByPlaceholder("Enter event name");
-  await expect(eventNameInput).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText("Event setup", { exact: true })).toBeVisible({
+    timeout: 30000,
+  });
   await acceptTermsIfNeeded(page);
 
+  const eventNameInput = page.getByPlaceholder("Enter event name");
+  if (!(await eventNameInput.isVisible().catch(() => false))) {
+    await page.getByText("Advanced Setup", { exact: true }).click();
+  }
+  await expect(eventNameInput).toBeVisible({ timeout: 30000 });
   await eventNameInput.fill("E2E Create Event");
-
-  const locationInput = page.getByLabel("Location");
-  await expect(locationInput).not.toHaveValue("");
 
   const selectImageButton = page
     .getByRole("button", { name: /select image/i })
@@ -92,6 +113,7 @@ test("creates an event from the schedule create flow", async ({ page }) => {
   await expect(sportInput).toBeEnabled();
   await sportInput.click();
   await page.getByRole("option", { name: "Indoor Volleyball" }).click();
+  await page.waitForTimeout(1000);
 
   const sidebar = page.getByRole("complementary");
   await sidebar.getByRole("button", { name: "Divisions" }).click();
@@ -109,15 +131,21 @@ test("creates an event from the schedule create flow", async ({ page }) => {
   await ageInput.click();
   await page.getByRole("option", { name: "18+" }).click();
 
+  const maxParticipantsInput = page.getByRole("textbox", {
+    name: "Max Participants",
+  });
+  await maxParticipantsInput.fill("16");
+
   await page.getByRole("button", { name: "Add Division" }).click();
 
-  const scheduleRequestPromise = page.waitForRequest(
+  const editorRequestPromise = page.waitForRequest(
     (req) =>
-      req.url().includes("/api/events/schedule") && req.method() === "POST",
+      new URL(req.url()).pathname === "/api/events/editor" &&
+      req.method() === "POST",
   );
-  const scheduleResponsePromise = page.waitForResponse(
+  const editorResponsePromise = page.waitForResponse(
     (res) =>
-      res.url().includes("/api/events/schedule") &&
+      new URL(res.url()).pathname === "/api/events/editor" &&
       res.request().method() === "POST",
   );
 
@@ -127,39 +155,78 @@ test("creates an event from the schedule create flow", async ({ page }) => {
   await createEventButton.waitFor({ state: "attached" });
   await createEventButton.click({ force: true });
 
-  const scheduleRequest = await scheduleRequestPromise;
-  const scheduleResponse = await scheduleResponsePromise;
-  expect(scheduleResponse.ok()).toBeTruthy();
-
-  const payload = scheduleRequest.postDataJSON() as {
-    eventDocument?: Record<string, unknown>;
+  const editorRequest = await editorRequestPromise;
+  const editorResponse = await editorResponsePromise;
+  const payload = editorRequest.postDataJSON() as {
+    createOperationId?: unknown;
+    expectedRevisions?: {
+      editorRevision?: unknown;
+      staffRevision?: unknown;
+      scheduleRevision?: unknown;
+    };
+    draft?: {
+      basics?: {
+        eventType?: unknown;
+        hostId?: unknown;
+        imageId?: unknown;
+        organizationId?: unknown;
+        sportIds?: unknown;
+        start?: unknown;
+      };
+      resources?: {
+        fieldIds?: unknown;
+        timeSlotIds?: unknown;
+        requiredTemplateIds?: unknown;
+        rentalBookingId?: unknown;
+        rentalBookingItemId?: unknown;
+      };
+      schedule?: {
+        mode?: unknown;
+        endConstraint?: unknown;
+        generatedScheduleEnd?: unknown;
+      };
+    };
   };
-  const eventDocument = payload.eventDocument ?? {};
-  const payloadId = eventDocument.id as string | undefined;
+  const draft = payload.draft ?? {};
+  const basics = draft.basics ?? {};
+  const expectedRevisions = payload.expectedRevisions ?? {};
 
-  expect(payloadId).toBe(eventId);
-  expect(eventDocument.$id).toBeUndefined();
-  expect(eventDocument.hostId).toBe(SEED_USERS.host.id);
-  expect(eventDocument.sportId).toBe(SEED_SPORT.id);
-  expect(eventDocument.eventType).toBe("EVENT");
-  expect(eventDocument.imageId).toBe(SEED_IMAGE.id);
-  if (Array.isArray(eventDocument.divisions)) {
-    expect(
-      eventDocument.divisions.some(
-        (divisionId) =>
-          typeof divisionId === "string" &&
-          divisionId.toLowerCase().includes("open"),
-      ),
-    ).toBeTruthy();
-  }
-  expect(eventDocument.teamSizeLimit).toBe(2);
-  expect(eventDocument.organizationId).toBe(SEED_ORG.id);
+  expect(
+    editorResponse.ok(),
+    `editor response ${editorResponse.status()}: ${await editorResponse.text()} submitted=${JSON.stringify({
+      expectedRevisions: payload.expectedRevisions,
+      basics: draft.basics,
+      schedule: draft.schedule,
+      resources: draft.resources,
+    })}`,
+  ).toBeTruthy();
 
-  const normalizedFieldIds = Array.isArray(eventDocument.fieldIds)
-    ? eventDocument.fieldIds
+  expect(payload.createOperationId).toEqual(expect.any(String));
+  expect(expectedRevisions.editorRevision).toEqual(expect.any(String));
+  expect(expectedRevisions.scheduleRevision).toEqual(expect.any(String));
+  expect(basics.hostId).toBe(SEED_USERS.host.id);
+  expect(basics.sportIds).toContain(SEED_SPORT.id);
+  expect(basics.eventType).toBe("EVENT");
+  expect(basics.imageId).toBe(SEED_IMAGE.id);
+  expect(basics.organizationId).toBe(SEED_ORG.id);
+  expect(draft.participation?.teamSizeLimit).toBe(2);
+
+  const divisionDetails = Array.isArray(draft.competition?.divisionDetails)
+    ? draft.competition.divisionDetails
     : [];
-  const normalizedTimeSlotIds = Array.isArray(eventDocument.timeSlotIds)
-    ? eventDocument.timeSlotIds
+  expect(
+    divisionDetails.some(
+      (division) =>
+        typeof division === "object" &&
+        JSON.stringify(division).toLowerCase().includes("open"),
+    ),
+  ).toBeTruthy();
+
+  const normalizedFieldIds = Array.isArray(draft.resources?.fieldIds)
+    ? draft.resources.fieldIds
+    : [];
+  const normalizedTimeSlotIds = Array.isArray(draft.resources?.timeSlotIds)
+    ? draft.resources.timeSlotIds
     : [];
   expect(
     normalizedFieldIds.every((fieldId) => typeof fieldId === "string"),

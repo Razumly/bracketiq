@@ -199,6 +199,9 @@ const createClient = () => {
         },
       ]),
     },
+    eventDivisionPhaseParticipants: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
   };
 };
 
@@ -233,6 +236,117 @@ describe('loadEventForMatchMutation', () => {
       where: { matchId: { in: ['match_target'] } },
     });
   });
+  it('hydrates phase-owned division participants and match phase identity', async () => {
+    const client = createClient();
+    const entryId = 'event__division__open';
+    const phaseId = `${entryId}__phase__league`;
+    const event = await client.events.findUnique();
+    Object.assign(event, {
+      eventType: 'LEAGUE',
+      includePlayoffs: false,
+    });
+    client.divisions.findMany.mockResolvedValue([
+      {
+        id: entryId,
+        key: 'open',
+        name: 'Open Entry',
+        kind: 'LEAGUE',
+        role: 'ENTRY',
+        phase: null,
+        teamIds: ['team_1'],
+        fieldIds: ['field_1'],
+      },
+      {
+        id: phaseId,
+        key: 'open__phase__league',
+        name: 'Open — League',
+        kind: 'LEAGUE',
+        role: 'PHASE',
+        phase: 'LEAGUE',
+        sourceDivisionId: entryId,
+        teamIds: [],
+        fieldIds: ['field_1'],
+      },
+    ]);
+    client.eventDivisionPhaseParticipants.findMany.mockResolvedValue([
+      { phaseDivisionId: phaseId, eventTeamId: 'team_1' },
+      { phaseDivisionId: phaseId, eventTeamId: 'team_2' },
+    ]);
+    const matches = await client.matches.findMany({ where: { eventId: 'event_1' } });
+    matches.forEach((match: any) => {
+      match.division = phaseId;
+    });
+
+    const loaded = await loadEventForMatchMutation('event_1', 'match_target', client as any);
+
+    expect(loaded.divisions).toHaveLength(1);
+    expect(loaded.divisions[0]).toEqual(expect.objectContaining({
+      id: phaseId,
+      role: 'PHASE',
+      phase: 'LEAGUE',
+      teamIds: ['team_1', 'team_2'],
+    }));
+    expect(loaded.teams.team_1.division?.id).toBe(phaseId);
+    expect(loaded.matches.match_target.division.id).toBe(phaseId);
+  });
+  it('maps single-division tournament teams to their persisted pool phases', async () => {
+    const client = createClient();
+    const event = await client.events.findUnique();
+    const entryId = 'event_1__division__open';
+    const poolAId = 'event_1__division__open_pool_a';
+    const poolBId = 'event_1__division__open_pool_b';
+    Object.assign(event, {
+      eventType: 'TOURNAMENT',
+      includePlayoffs: true,
+      singleDivision: true,
+      divisions: [entryId],
+    });
+    client.divisions.findMany.mockResolvedValue([
+      {
+        id: entryId,
+        key: 'open',
+        name: 'Open Entry',
+        kind: 'LEAGUE',
+        role: 'ENTRY',
+        phase: null,
+        teamIds: ['team_1', 'team_2'],
+        fieldIds: ['field_1'],
+      },
+      {
+        id: poolAId,
+        key: 'open_pool_a',
+        name: 'Open Entry — Pool A',
+        kind: 'LEAGUE',
+        role: 'PHASE',
+        phase: 'POOL',
+        sourceDivisionId: entryId,
+        teamIds: [],
+        fieldIds: ['field_1'],
+      },
+      {
+        id: poolBId,
+        key: 'open_pool_b',
+        name: 'Open Entry — Pool B',
+        kind: 'LEAGUE',
+        role: 'PHASE',
+        phase: 'POOL',
+        sourceDivisionId: entryId,
+        teamIds: [],
+        fieldIds: ['field_1'],
+      },
+    ]);
+    client.eventDivisionPhaseParticipants.findMany.mockResolvedValue([
+      { phaseDivisionId: poolAId, eventTeamId: 'team_1' },
+      { phaseDivisionId: poolBId, eventTeamId: 'team_2' },
+    ]);
+
+    const loaded = await loadEventForMatchMutation('event_1', 'match_target', client as any);
+
+    expect(loaded.divisions.map((division) => division.id)).toEqual([poolAId, poolBId]);
+    expect(loaded.teams.team_1.division?.id).toBe(poolAId);
+    expect(loaded.teams.team_2.division?.id).toBe(poolBId);
+  });
+
 
   it('keeps a tied best-of-three match unresolved after two completed sets', async () => {
     const client = createClient();
@@ -334,5 +448,84 @@ describe('loadEventForMatchMutation', () => {
     const loaded = await loadEventForMatchMutation('event_1', 'match_target', client as any);
 
     expect(loaded.matches.match_target.winnerEventTeamId).toBe('team_1');
+  });
+  it('exposes entry details while retaining phase divisions for scheduler hydration', async () => {
+    const client = createClient();
+    const event = await client.events.findUnique();
+    const entryId = 'event_1__division__open';
+    Object.assign(event, {
+      eventType: 'LEAGUE',
+      includePlayoffs: true,
+      singleDivision: true,
+      playoffTeamCount: 4,
+      divisions: [entryId],
+    });
+    client.divisions.findMany.mockResolvedValue([
+      {
+        id: entryId,
+        key: 'open',
+        name: 'Open Entry',
+        kind: 'LEAGUE',
+        role: 'ENTRY',
+        phase: null,
+        sortOrder: 0,
+        fieldIds: ['field_1'],
+        teamIds: ['team_1', 'team_2'],
+        maxParticipants: 8,
+      },
+      {
+        id: `${entryId}__phase__league`,
+        key: 'open__phase__league',
+        name: 'Open Entry — League',
+        kind: 'LEAGUE',
+        role: 'PHASE',
+        phase: 'LEAGUE',
+        sourceDivisionId: entryId,
+        sortOrder: 0,
+        fieldIds: ['field_1'],
+        teamIds: ['team_1', 'team_2'],
+        maxParticipants: 8,
+      },
+      {
+        id: `${entryId}__phase__playoff`,
+        key: 'open__phase__playoff',
+        name: 'Open Entry — Playoff',
+        kind: 'PLAYOFF',
+        role: 'PHASE',
+        phase: 'PLAYOFF',
+        sourceDivisionId: entryId,
+        sortOrder: 1,
+        fieldIds: ['field_1'],
+        playoffTeamCount: 4,
+        standingsOverrides: {
+          doubleElimination: false,
+          winnerSetCount: 1,
+          loserSetCount: 1,
+          fieldCount: 1,
+          restTimeMinutes: 0,
+        },
+      },
+    ]);
+
+    const loaded = await loadEventForMatchMutation('event_1', 'match_target', client as any);
+
+    expect(loaded.divisions.map((division) => division.id)).toEqual([
+      `${entryId}__phase__league`,
+    ]);
+    expect(loaded.playoffDivisions.map((division) => division.id)).toEqual([
+      `${entryId}__phase__playoff`,
+    ]);
+    expect((loaded as any).divisionDetails).toEqual([
+      expect.objectContaining({
+        id: entryId,
+        name: 'Open Entry',
+        role: 'ENTRY',
+      }),
+    ]);
+    expect((loaded as any).playoffDivisionDetails).toEqual([]);
+    expect(loaded.fields.field_1.divisions.map((division) => division.id)).toEqual([
+      `${entryId}__phase__league`,
+      `${entryId}__phase__playoff`,
+    ]);
   });
 });

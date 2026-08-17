@@ -219,6 +219,7 @@ const getDivisionDetailsForEvents = async (
       eventId: { in: eventIds },
       scope: 'EVENT',
       status: 'ACTIVE',
+      role: 'ENTRY',
       OR: [
         { kind: 'LEAGUE' },
         { kind: null },

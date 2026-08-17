@@ -199,6 +199,7 @@ export const resolveWeeklyOccurrence = async (
       eventId: params.event.id,
       scope: 'EVENT',
       status: 'ACTIVE',
+      role: 'ENTRY',
       OR: [
         { kind: 'LEAGUE' },
         { kind: null },

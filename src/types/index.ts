@@ -35,6 +35,7 @@ export type DivisionGender = 'M' | 'F' | 'C';
 export type DivisionRatingType = 'AGE' | 'SKILL';
 export type DivisionKind = 'LEAGUE' | 'PLAYOFF';
 export type DivisionCompetitionPhase = 'LEAGUE' | 'POOL' | 'BRACKET' | 'PLAYOFF';
+export type DivisionRole = 'ENTRY' | 'PHASE';
 export type DivisionPhaseSettings = {
   matchRulesOverride?: MatchRulesConfig | null;
   autoCreatePointMatchIncidents?: boolean;
@@ -52,7 +53,6 @@ export interface DivisionType {
   ratingType: DivisionRatingType;
   sportKey?: string;
 }
-
 export interface Division {
   id: string;
   name: string;
@@ -61,6 +61,8 @@ export interface Division {
   eventId?: string;
   organizationId?: string;
   scope?: DivisionScope;
+  role?: DivisionRole;
+  phase?: DivisionCompetitionPhase | null;
   status?: DivisionStatus;
   sourceDivisionId?: string;
   sportId?: string;

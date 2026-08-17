@@ -861,7 +861,11 @@ const getDivisionLabelsByEventId = async (events: Array<Record<string, any>>): P
     return new Map();
   }
   const rows = await (prisma as any).divisions.findMany({
-    where: { eventId: { in: eventIds } },
+    where: {
+      eventId: { in: eventIds },
+      role: 'ENTRY',
+      status: 'ACTIVE',
+    },
     select: { eventId: true, id: true, key: true, name: true },
     orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }],
   });
@@ -1567,6 +1571,8 @@ const getBracketCapableEventCards = async (
       ? (prisma as any).divisions.findMany({
           where: {
             eventId: { in: eventIds },
+            role: 'PHASE',
+            status: 'ACTIVE',
             kind: 'PLAYOFF',
           },
           select: { eventId: true },
@@ -1795,11 +1801,11 @@ export const getPublicOrganizationEventForRegistration = async (
       ? (prisma as any).sports.findUnique({ where: { id: event.sportIds[0] } })
       : Promise.resolve(null),
     (prisma as any).divisions.findMany({
-      where: { eventId, kind: { not: 'PLAYOFF' } },
+      where: { eventId, role: 'ENTRY', status: 'ACTIVE', kind: { not: 'PLAYOFF' } },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }],
     }),
     (prisma as any).divisions.findMany({
-      where: { eventId, kind: 'PLAYOFF' },
+      where: { eventId, role: 'PHASE', status: 'ACTIVE', kind: 'PLAYOFF' },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }],
     }),
     normalizeIdList(event.fieldIds).length

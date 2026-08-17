@@ -377,6 +377,9 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
                     : undefined;
             })(),
             playoffPlacementDivisionIds: (() => {
+                if (source.eventType === 'TOURNAMENT' && source.leagueData.includePlayoffs) {
+                    return [detail.id] as string[];
+                }
                 if (!splitLeaguePlayoffDivisions) {
                     return [] as string[];
                 }
@@ -585,7 +588,7 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
             splitLeaguePlayoffDivisions: isAffiliateEvent ? false : splitLeaguePlayoffDivisions,
             registrationByDivisionType: isAffiliateEvent ? false : source.registrationByDivisionType,
             divisions: normalizedDivisionKeys,
-            divisionDetails: (tournamentPoolPlayEnabled ? [] : normalizedDivisionDetailsForPayload).map((detail) => ({
+            divisionDetails: normalizedDivisionDetailsForPayload.map((detail) => ({
                 ...detail,
                 price: normalizePriceCents(detail.price),
                 maxParticipants: Math.max(2, Math.trunc(detail.maxParticipants || 2)),

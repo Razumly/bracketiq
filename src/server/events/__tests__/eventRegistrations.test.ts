@@ -754,6 +754,64 @@ describe('syncDivisionTeamMembershipFromRegistrations', () => {
       }),
     }));
   });
+  it('keeps phase divisions out of registration-owned team membership', async () => {
+    const entryDivisionId = buildEventDivisionId('event_1', 'c_skill_open');
+    const phaseDivisionId = 'event_1__division__pool__open';
+    const updateMock = jest.fn().mockResolvedValue({});
+    const entryDivision = {
+      id: entryDivisionId,
+      key: 'c_skill_open',
+      kind: 'LEAGUE',
+      role: 'ENTRY',
+      status: 'ACTIVE',
+      teamIds: ['stale_entry_team'],
+    };
+    const phaseDivision = {
+      id: phaseDivisionId,
+      key: 'pool_open',
+      kind: 'LEAGUE',
+      role: 'PHASE',
+      status: 'ACTIVE',
+      teamIds: ['phase_team'],
+    };
+    const findManyMock = jest.fn().mockImplementation(({ where }: { where?: { role?: string } }) => (
+      Promise.resolve(where?.role === 'ENTRY' ? [entryDivision] : [entryDivision, phaseDivision])
+    ));
+
+    const activeTeamIds = await syncDivisionTeamMembershipFromRegistrations({
+      id: 'event_1',
+      eventType: 'LEAGUE',
+      teamSignup: true,
+      singleDivision: true,
+      divisions: [entryDivisionId],
+    }, {
+      divisions: {
+        findMany: findManyMock,
+        update: updateMock,
+      },
+      eventRegistrations: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            registrantId: 'entry_team_1',
+            divisionId: entryDivisionId,
+          },
+        ]),
+      },
+    } as any);
+
+    expect(activeTeamIds).toEqual(['entry_team_1']);
+    expect(findManyMock).toHaveBeenCalledWith(expect.objectContaining({
+      where: { eventId: 'event_1', role: 'ENTRY', status: 'ACTIVE' },
+    }));
+    expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: entryDivisionId },
+      data: expect.objectContaining({ teamIds: ['entry_team_1'] }),
+    }));
+    expect(updateMock).not.toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: phaseDivisionId },
+    }));
+  });
+
 
   it('preserves placeholder slots when syncing registered team assignments', async () => {
     const firstDivisionId = buildEventDivisionId('event_1', 'c_skill_open');

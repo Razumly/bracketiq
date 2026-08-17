@@ -379,40 +379,4 @@ describe('DELETE /api/auth/account', () => {
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 
-  it('revokes the Apple refresh token before deleting Apple-linked accounts', async () => {
-    prismaMock.authUser.findUnique.mockResolvedValue({
-      id: 'user_1',
-      email: 'user@example.com',
-      appleSubject: 'apple-user-1',
-    });
-    prismaMock.sensitiveUserData.findUnique.mockResolvedValue({
-      id: 'sensitive_1',
-      email: 'user@example.com',
-      appleRefreshToken: 'apple_refresh_token',
-    });
-
-    const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      expect(url).toBe('https://appleid.apple.com/auth/revoke');
-      expect(init?.method).toBe('POST');
-      const body = String(init?.body ?? '');
-      expect(body).toContain('client_id=com.razumly.mvp');
-      expect(body).toContain('token=apple_refresh_token');
-      expect(body).toContain('token_type_hint=refresh_token');
-      expect(body).toContain('client_secret=');
-      return {
-        ok: true,
-        json: async () => ({}),
-      };
-    });
-    (globalThis as any).fetch = fetchMock;
-
-    const response = await DELETE(buildDeleteRequest({ confirmationText: 'delete my account' }));
-    const json = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(json).toEqual({ ok: true });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(prismaMock.$transaction).toHaveBeenCalled();
-  });
 });

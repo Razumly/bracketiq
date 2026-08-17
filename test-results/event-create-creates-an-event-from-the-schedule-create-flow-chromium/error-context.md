@@ -1,0 +1,257 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e3]:
+      - navigation [ref=e4]:
+        - generic [ref=e6]:
+          - link "BracketIQ logo BracketIQ" [ref=e7] [cursor=pointer]:
+            - /url: /onboarding
+            - img "BracketIQ logo" [ref=e8]
+            - generic [ref=e9]: BracketIQ
+          - generic [ref=e10]:
+            - link "Info" [ref=e11] [cursor=pointer]:
+              - /url: /info
+            - link "Guides" [ref=e12] [cursor=pointer]:
+              - /url: /guides
+            - link "Discover" [ref=e13] [cursor=pointer]:
+              - /url: /discover
+            - link "My Organizations" [ref=e14] [cursor=pointer]:
+              - /url: /organizations
+            - link "My Schedule" [ref=e15] [cursor=pointer]:
+              - /url: /my-schedule
+          - generic [ref=e16]:
+            - link "Get The Mobile App" [ref=e17] [cursor=pointer]:
+              - /url: /mobile-app
+              - img [ref=e18]
+              - text: Get The Mobile App
+            - link "H Host User" [ref=e20] [cursor=pointer]:
+              - /url: /profile
+              - generic [ref=e21]: H
+              - generic [ref=e22]: Host User
+            - button "Send feedback" [ref=e23]:
+              - img [ref=e24]
+              - generic [ref=e26]: Feedback
+            - button "Open AI assistant" [ref=e27]:
+              - img [ref=e28]
+      - generic [ref=e32]:
+        - generic [ref=e33]:
+          - heading "Create Event" [level=2] [ref=e34]
+          - generic [ref=e35]:
+            - button "Changes (1)" [ref=e36] [cursor=pointer]:
+              - generic [ref=e37]:
+                - img [ref=e39]
+                - generic [ref=e42]: Changes (1)
+            - button "Discard Changes" [ref=e43] [cursor=pointer]:
+              - generic [ref=e45]: Discard Changes
+            - button "Create event" [ref=e46] [cursor=pointer]:
+              - generic [ref=e50]: Create event
+            - button "Cancel" [ref=e51] [cursor=pointer]:
+              - generic [ref=e53]: Cancel
+        - alert [ref=e54]:
+          - generic [ref=e55]:
+            - generic [ref=e57]: Failed to create event. Event editor data changed. Reload and try again.
+            - button [ref=e58] [cursor=pointer]:
+              - img [ref=e59]
+        - generic [ref=e61]:
+          - generic [ref=e63]:
+            - generic [ref=e64]:
+              - paragraph [ref=e65]: Event setup
+              - paragraph [ref=e66]: Both modes edit the same event draft.
+            - radiogroup "Event setup mode" [ref=e67]:
+              - generic [ref=e69]:
+                - radio "Simple Setup"
+                - generic [ref=e70] [cursor=pointer]: Simple Setup
+              - generic [ref=e71]:
+                - radio "Advanced Setup" [checked]
+                - generic [ref=e72] [cursor=pointer]: Advanced Setup
+          - generic [ref=e76]:
+            - complementary [ref=e77]:
+              - generic [ref=e78]:
+                - paragraph [ref=e79]: Sections
+                - paragraph [ref=e80]: Jump to any section. Changes are preserved as you move.
+                - generic [ref=e81]:
+                  - button "Basic Information" [ref=e82]:
+                    - generic [ref=e84]: Basic Information
+                  - button "Event Details" [ref=e85]:
+                    - generic [ref=e87]: Event Details
+                  - button "Manual Payments" [ref=e88]:
+                    - generic [ref=e90]: Manual Payments
+                  - button "Staff" [ref=e91]:
+                    - generic [ref=e93]: Staff
+                  - button "Divisions" [ref=e94]:
+                    - generic [ref=e96]: Divisions
+            - generic [ref=e99]:
+              - generic "Basic Information" [ref=e100]:
+                - generic [ref=e101]:
+                  - heading "Basic Information" [level=3] [ref=e104]
+                  - button "Collapse" [expanded] [ref=e105] [cursor=pointer]:
+                    - generic [ref=e107]: Collapse
+                - generic [ref=e110]:
+                  - generic [ref=e111]:
+                    - generic [ref=e112]: Event Image
+                    - generic [ref=e114]:
+                      - img "Selected image" [ref=e115]
+                      - generic [ref=e116]:
+                        - button "Change image" [ref=e117] [cursor=pointer]:
+                          - img [ref=e119]
+                        - button "Remove image" [ref=e122] [cursor=pointer]:
+                          - img [ref=e124]
+                  - generic [ref=e127]:
+                    - generic [ref=e128]:
+                      - generic [ref=e129]: Event Name *
+                      - textbox "Event Name" [ref=e131]:
+                        - /placeholder: Enter event name
+                        - text: E2E Create Event
+                    - generic [ref=e133]:
+                      - generic [ref=e134]: Tags
+                      - textbox "Tags" [ref=e138]:
+                        - /placeholder: Enter tag
+                    - generic [ref=e140]:
+                      - generic [ref=e141]: Sports *
+                      - generic [ref=e142]:
+                        - generic [ref=e144]:
+                          - generic [ref=e145]:
+                            - generic [ref=e146]: Indoor Volleyball
+                            - button [ref=e147] [cursor=pointer]:
+                              - img
+                          - textbox "Sports" [ref=e148]:
+                            - /placeholder: Select one or more sports
+                        - generic:
+                          - img
+                  - generic [ref=e149]:
+                    - generic [ref=e150]: Description
+                    - textbox "Description" [ref=e152]:
+                      - /placeholder: Describe your event...
+              - generic "Event Details" [ref=e153]:
+                - generic [ref=e154]:
+                  - heading "Event Details" [level=3] [ref=e157]
+                  - button "Expand" [ref=e158] [cursor=pointer]:
+                    - generic [ref=e160]: Expand
+              - generic "Manual Payments" [ref=e161]:
+                - generic [ref=e162]:
+                  - heading "Manual Payments" [level=3] [ref=e165]
+                  - button "Expand" [ref=e166] [cursor=pointer]:
+                    - generic [ref=e168]: Expand
+              - generic "Staff" [ref=e169]:
+                - generic [ref=e170]:
+                  - heading "Staff" [level=3] [ref=e173]
+                  - button "Expand" [ref=e174] [cursor=pointer]:
+                    - generic [ref=e176]: Expand
+              - generic "Divisions" [ref=e177]:
+                - generic [ref=e178]:
+                  - heading "Divisions" [level=3] [ref=e181]
+                  - button "Collapse" [expanded] [ref=e182] [cursor=pointer]:
+                    - generic [ref=e184]: Collapse
+                - generic [ref=e187]:
+                  - generic [ref=e188]:
+                    - generic [ref=e190]:
+                      - switch "Single Division (all skill levels play together)" [checked]
+                      - generic [ref=e195]: Single Division (all skill levels play together)
+                    - generic [ref=e197]:
+                      - switch "Register by Division Type When enabled, users pick a division type and are auto-assigned to one matching division."
+                      - generic [ref=e201]:
+                        - generic [ref=e202]: Register by Division Type
+                        - paragraph [ref=e203]: When enabled, users pick a division type and are auto-assigned to one matching division.
+                  - generic [ref=e205]:
+                    - generic [ref=e206]:
+                      - heading "Single Division" [level=6] [ref=e207]
+                      - paragraph [ref=e208]: Price, capacity, and payment plans apply to every selected division.
+                    - generic [ref=e209]:
+                      - generic [ref=e211]:
+                        - generic [ref=e212]: Max Participants
+                        - generic [ref=e213]:
+                          - textbox "Max Participants" [ref=e214]: "16"
+                          - generic [ref=e216]:
+                            - button [ref=e217] [cursor=pointer]:
+                              - img [ref=e218]
+                            - button [ref=e220] [cursor=pointer]:
+                              - img [ref=e221]
+                      - generic [ref=e224]:
+                        - generic [ref=e225]: Registration price
+                        - generic [ref=e226]:
+                          - generic [ref=e227]: $
+                          - textbox "Registration price" [ref=e228]:
+                            - /placeholder: "0.00"
+                  - paragraph [ref=e230]: New Division
+                  - generic [ref=e231]:
+                    - generic [ref=e232]:
+                      - generic [ref=e233]:
+                        - generic [ref=e234]: Gender
+                        - generic [ref=e235]:
+                          - textbox "Gender" [ref=e236] [cursor=pointer]:
+                            - /placeholder: Select gender
+                          - generic:
+                            - img
+                      - generic [ref=e237]:
+                        - generic [ref=e238]: Skill Division
+                        - generic [ref=e239]:
+                          - textbox "Skill Division" [ref=e240]:
+                            - /placeholder: Select skill division
+                            - text: Open
+                          - generic:
+                            - img
+                      - generic [ref=e241]:
+                        - generic [ref=e242]: Age Division
+                        - generic [ref=e243]:
+                          - textbox "Age Division" [ref=e244]:
+                            - /placeholder: Select age division
+                            - text: 18+
+                          - generic:
+                            - img
+                      - generic [ref=e245]:
+                        - generic [ref=e246]: Division Name
+                        - textbox "Division Name" [disabled] [ref=e248]:
+                          - /placeholder: Division display name
+                    - paragraph [ref=e250]: Division price, capacity, and payment plan mirror event-level values while single division is enabled.
+                  - button "Add Division" [ref=e252] [cursor=pointer]:
+                    - generic [ref=e254]: Add Division
+                  - generic [ref=e255]:
+                    - paragraph [ref=e256]: Divisions
+                    - generic [ref=e259]:
+                      - generic [ref=e260]:
+                        - generic [ref=e261]:
+                          - paragraph [ref=e262]: Mens Open 18+
+                          - generic [ref=e264]: Event
+                        - paragraph [ref=e265]: "Division Type: Event"
+                        - paragraph [ref=e266]: Open 18+
+                        - paragraph [ref=e267]: "Price: Free • Max participants: 16"
+                        - paragraph [ref=e268]: "Payment plan: disabled"
+                        - paragraph [ref=e269]: Age 18+ as of 07/01/2026
+                      - generic [ref=e270]:
+                        - button "Edit" [ref=e271] [cursor=pointer]:
+                          - generic [ref=e273]: Edit
+                        - button "Remove" [ref=e274] [cursor=pointer]:
+                          - generic [ref=e276]: Remove
+    - contentinfo [ref=e278]:
+      - generic [ref=e279]:
+        - generic [ref=e280]:
+          - paragraph [ref=e281]: BracketIQ by Razumly
+          - paragraph [ref=e282]: Discover events, manage teams, and run leagues and tournaments in one place.
+        - generic [ref=e283]:
+          - link "Events" [ref=e284] [cursor=pointer]:
+            - /url: /find-events
+          - link "Clubs" [ref=e285] [cursor=pointer]:
+            - /url: /find-clubs
+          - link "Facilities" [ref=e286] [cursor=pointer]:
+            - /url: /find-facilities
+          - link "Guides" [ref=e287] [cursor=pointer]:
+            - /url: /guides
+          - link "Blog" [ref=e288] [cursor=pointer]:
+            - /url: /blog
+          - link "Privacy Policy" [ref=e289] [cursor=pointer]:
+            - /url: /privacy-policy
+          - link "Feedback" [ref=e290] [cursor=pointer]:
+            - /url: /feedback
+          - link "Terms & EULA" [ref=e291] [cursor=pointer]:
+            - /url: /terms
+          - link "Delete Data" [ref=e292] [cursor=pointer]:
+            - /url: /delete-data
+          - link "support@bracket-iq.com" [ref=e293] [cursor=pointer]:
+            - /url: mailto:support@bracket-iq.com
+          - generic [ref=e294]: 2026 BracketIQ
+  - alert [ref=e295]
+  - button "Open chat" [ref=e296]:
+    - img [ref=e298]
+```

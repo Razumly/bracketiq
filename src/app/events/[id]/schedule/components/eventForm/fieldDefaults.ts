@@ -84,6 +84,31 @@ type DefaultFieldState = {
     allDefaultFieldIds: string[];
 };
 
+export const normalizeGeneratedLocalFieldNames = (
+    fields: Field[],
+    resourceLabelSingular: string,
+): Field[] => {
+    const normalizedResourceLabel = normalizeResourceText(resourceLabelSingular) || 'Resource';
+    let localFieldIndex = 0;
+
+    return fields.map((field) => {
+        if (!isEventLocalField(field)) {
+            return field;
+        }
+
+        const index = localFieldIndex;
+        localFieldIndex += 1;
+        if (!isGeneratedLocalFieldPlaceholder(field, index, normalizedResourceLabel)) {
+            return field;
+        }
+
+        const defaultName = `${normalizedResourceLabel} ${index + 1}`;
+        return normalizeResourceText(field.name) === defaultName
+            ? field
+            : { ...field, name: defaultName };
+    });
+};
+
 export const buildDefaultFieldState = ({
     base,
     activeEditingEvent,
@@ -111,10 +136,16 @@ export const buildDefaultFieldState = ({
         )
         : [];
     const inputEventFields = Array.isArray(base.fields)
-        ? sortFieldsByCreatedAt(sanitizeFieldsForForm(base.fields))
+        ? normalizeGeneratedLocalFieldNames(
+            sortFieldsByCreatedAt(sanitizeFieldsForForm(base.fields)),
+            resourceLabelSingular,
+        )
         : [];
     const activeEventFields = Array.isArray(activeEditingEvent?.fields)
-        ? sortFieldsByCreatedAt(sanitizeFieldsForForm(activeEditingEvent.fields))
+        ? normalizeGeneratedLocalFieldNames(
+            sortFieldsByCreatedAt(sanitizeFieldsForForm(activeEditingEvent.fields)),
+            resourceLabelSingular,
+        )
         : inputEventFields;
     const activeEventLocalFields = activeEventFields.filter(isEventLocalField);
     const supportsOrganizationFieldSelectionForDefault = supportsOrganizationFieldSelectionForEvent(

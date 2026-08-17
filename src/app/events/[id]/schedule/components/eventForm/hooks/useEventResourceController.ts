@@ -19,6 +19,7 @@ import {
 } from '../divisionForm';
 import {
     defaultFieldLocationForEvent,
+    normalizeGeneratedLocalFieldNames,
     sanitizeFieldsForForm,
     withEventFieldLocationDefault,
 } from '../fieldDefaults';
@@ -314,14 +315,17 @@ export const useEventResourceController = ({
         }
         setFields((previous) => {
             const retainedFields = previous.filter((field) => !isEventLocalField(field));
-            const normalizedLocalFields: Field[] = previous
-                .filter(isEventLocalField)
-                .slice(0, fieldCount)
-                .map((field) => withEventFieldLocationDefault(
-                    field,
-                    eventFieldLocation,
-                    previousEventLocation,
-                ));
+            const normalizedLocalFields = normalizeGeneratedLocalFieldNames(
+                previous
+                    .filter(isEventLocalField)
+                    .slice(0, fieldCount)
+                    .map((field) => withEventFieldLocationDefault(
+                        field,
+                        eventFieldLocation,
+                        previousEventLocation,
+                    )),
+                resourceLabelSingular,
+            );
 
             if (normalizedLocalFields.length < fieldCount) {
                 for (let index = normalizedLocalFields.length; index < fieldCount; index += 1) {
@@ -402,7 +406,10 @@ export const useEventResourceController = ({
             return;
         }
         setFields((previous) => {
-            const incoming = sanitizeFieldsForForm(activeEditingEvent.fields as Field[]);
+            const incoming = normalizeGeneratedLocalFieldNames(
+                sanitizeFieldsForForm(activeEditingEvent.fields as Field[]),
+                resourceLabelSingular,
+            );
             const byId = new Map<string, Field>();
             [...previous, ...incoming].forEach((field) => {
                 if (field?.$id) {
@@ -411,7 +418,7 @@ export const useEventResourceController = ({
             });
             return Array.from(byId.values());
         }, { shouldDirty: false });
-    }, [activeEditingEvent?.fields, hasRestrictedImmutableFields, isEditMode, setFields]);
+    }, [activeEditingEvent?.fields, hasRestrictedImmutableFields, isEditMode, resourceLabelSingular, setFields]);
 
     const rentalResourceFields = useMemo(
         () => buildRentalResourceFields(rentalResourceOptions),

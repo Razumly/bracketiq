@@ -21,7 +21,8 @@ type MockClient = {
   fields: { findUnique: jest.Mock; findMany: jest.Mock; count: jest.Mock; upsert: jest.Mock; deleteMany: jest.Mock };
   matches: { findMany: jest.Mock; deleteMany: jest.Mock; update: jest.Mock };
   divisions: { findMany: jest.Mock; deleteMany: jest.Mock; upsert: jest.Mock };
-  teams: { upsert: jest.Mock };
+  eventDivisionPhaseSources: { findMany: jest.Mock; deleteMany: jest.Mock; upsert: jest.Mock };
+  eventDivisionPhaseParticipants: { findMany: jest.Mock; deleteMany: jest.Mock; upsert: jest.Mock };
   timeSlots: { findMany: jest.Mock; upsert: jest.Mock; deleteMany: jest.Mock };
   rentalBookingItems: { findMany: jest.Mock; updateMany: jest.Mock };
   rentalBookings: { updateMany: jest.Mock };
@@ -71,6 +72,16 @@ const createMockClient = (): MockClient => ({
     update: jest.fn().mockResolvedValue(undefined),
   },
   divisions: {
+    findMany: jest.fn().mockResolvedValue([]),
+    deleteMany: jest.fn().mockResolvedValue(undefined),
+    upsert: jest.fn().mockResolvedValue(undefined),
+  },
+  eventDivisionPhaseSources: {
+    findMany: jest.fn().mockResolvedValue([]),
+    deleteMany: jest.fn().mockResolvedValue(undefined),
+    upsert: jest.fn().mockResolvedValue(undefined),
+  },
+  eventDivisionPhaseParticipants: {
     findMany: jest.fn().mockResolvedValue([]),
     deleteMany: jest.fn().mockResolvedValue(undefined),
     upsert: jest.fn().mockResolvedValue(undefined),
@@ -852,6 +863,25 @@ describe('upsertEventFromPayload', () => {
       includePlayoffs: true,
       singleDivision: false,
       divisions: [bracketDivisionId],
+      divisionDetails: [
+        {
+          id: bracketDivisionId,
+          key: 'm_skill_open_age_18plus',
+          kind: 'LEAGUE',
+          name: 'Mens Open 18+',
+          divisionTypeId: 'skill_open_age_18plus',
+          divisionTypeName: 'Mens Open 18+',
+          ratingType: 'SKILL',
+          gender: 'M',
+          maxParticipants: 16,
+          playoffTeamCount: 8,
+          poolCount: 2,
+          usesSets: true,
+          setDurationMinutes: 20,
+          setsPerMatch: 3,
+          pointsToVictory: [25, 25, 15],
+        },
+      ],
       playoffDivisionDetails: [
         {
           id: bracketDivisionId,
@@ -887,7 +917,13 @@ describe('upsertEventFromPayload', () => {
 
     const divisionUpserts = client.divisions.upsert.mock.calls.map(([args]) => args);
     const bracketUpsert = divisionUpserts.find((args) => args.where.id === bracketDivisionId);
-    const poolUpserts = divisionUpserts.filter((args) => args.where.id !== bracketDivisionId);
+    const poolDivisionIds = [
+      divisionId('m_skill_open_age_18plus_pool_a'),
+      divisionId('m_skill_open_age_18plus_pool_b'),
+    ];
+    const poolUpserts = divisionUpserts.filter((args) => poolDivisionIds.includes(args.where.id));
+    const poolPhaseIds = poolDivisionIds.map((poolId) => `${poolId}__phase__pool`);
+    const phaseSourceUpserts = client.eventDivisionPhaseSources.upsert.mock.calls.map(([args]) => args.create);
 
     expect(bracketUpsert?.create).toEqual(expect.objectContaining({
       kind: 'PLAYOFF',
@@ -901,6 +937,16 @@ describe('upsertEventFromPayload', () => {
       }),
     }));
     expect(poolUpserts).toHaveLength(2);
+    expect(divisionUpserts.map((args) => args.where.id)).toEqual(
+      expect.arrayContaining([...poolDivisionIds, ...poolPhaseIds, bracketDivisionId]),
+    );
+    expect(phaseSourceUpserts).toEqual(
+      expect.arrayContaining(poolDivisionIds.map((poolId, index) => expect.objectContaining({
+        entryDivisionId: poolId,
+        phaseDivisionId: poolPhaseIds[index],
+        phase: 'POOL',
+      }))),
+    );
     poolUpserts.forEach((args) => {
       expect(args.create).toEqual(expect.objectContaining({
         kind: 'LEAGUE',
@@ -988,6 +1034,15 @@ describe('upsertEventFromPayload', () => {
         fieldIds: [],
         playoffPlacementDivisionIds: [],
       },
+      {
+        id: `${openDivisionId}__phase__playoff`,
+        key: 'open__phase__playoff',
+        name: 'Open — Playoff',
+        kind: 'PLAYOFF',
+        role: 'PHASE',
+        fieldIds: [],
+        playoffPlacementDivisionIds: [],
+      },
     ]);
 
     const payload = {
@@ -1037,7 +1092,7 @@ describe('upsertEventFromPayload', () => {
     expect(client.divisions.deleteMany).toHaveBeenCalledWith({
       where: { id: { in: [upperPlayoffDivisionId, lowerPlayoffDivisionId] } },
     });
-    expect(client.divisions.upsert).toHaveBeenCalledTimes(1);
+    expect(client.divisions.upsert.mock.calls.filter(([args]) => args.create?.role === 'ENTRY')).toHaveLength(1);
     expect(client.divisions.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: openDivisionId },
@@ -1137,7 +1192,7 @@ describe('upsertEventFromPayload', () => {
     await upsertEventFromPayload(payload, client as any);
 
     const fieldUpsertArg = client.fields.upsert.mock.calls[0][0];
-    expect(client.divisions.upsert).toHaveBeenCalledTimes(2);
+    expect(client.divisions.upsert.mock.calls.filter(([args]) => args.create?.role === 'ENTRY')).toHaveLength(2);
   });
 
   it('defaults new local field locations to the event location when omitted', async () => {
@@ -1232,7 +1287,7 @@ describe('upsertEventFromPayload', () => {
     await upsertEventFromPayload(payload, client as any);
 
     const fieldUpsertArg = client.fields.upsert.mock.calls[0][0];
-    expect(client.divisions.upsert).toHaveBeenCalledTimes(3);
+    expect(client.divisions.upsert.mock.calls.filter(([args]) => args.create?.role === 'ENTRY')).toHaveLength(3);
   });
 
   it('uses beginner/advanced defaults for soccer when divisions are omitted', async () => {
@@ -1254,7 +1309,7 @@ describe('upsertEventFromPayload', () => {
     await upsertEventFromPayload(payload, client as any);
 
     const fieldUpsertArg = client.fields.upsert.mock.calls[0][0];
-    expect(client.divisions.upsert).toHaveBeenCalledTimes(2);
+    expect(client.divisions.upsert.mock.calls.filter(([args]) => args.create?.role === 'ENTRY')).toHaveLength(2);
   });
 
   it('persists division pricing, capacity, playoffs, and payment-plan fields from division details', async () => {

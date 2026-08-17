@@ -56,7 +56,7 @@ export const buildDivisionDiscoveryWhere = (input: DivisionDiscoveryWhereInput):
     scope: input.scope,
     status: 'ACTIVE',
     ...(input.scope === 'EVENT'
-      ? { eventId: { not: null }, OR: [{ kind: 'LEAGUE' }, { kind: null }] }
+      ? { eventId: { not: null }, role: 'ENTRY', OR: [{ kind: 'LEAGUE' }, { kind: null }] }
       : { organizationId: { not: null } }),
     ...(sports.length ? { sportId: { in: sports } } : {}),
     ...(genders.length ? { gender: { in: genders } } : {}),

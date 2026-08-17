@@ -9,7 +9,9 @@ import type {
   RegistrationPaymentMode,
   ResolvedMatchRules,
   TeamCheckInMode,
+  DivisionCompetitionPhase,
   DivisionPhaseSettingsMap,
+  DivisionRole,
 } from '@/types';
 import {
   getDateTimePartsInTimeZone,
@@ -139,11 +141,12 @@ export interface SchedulableEvent {
   getDependencies(): SchedulableEvent[];
   getDependants(): SchedulableEvent[];
 }
-
 export class Division implements Group {
   id: string;
   name: string;
   kind: 'LEAGUE' | 'PLAYOFF';
+  role: DivisionRole;
+  phase: DivisionCompetitionPhase | null;
   fieldIds: string[];
   teamIds: string[];
   price: number | null;
@@ -173,10 +176,14 @@ export class Division implements Group {
     teamIds?: string[],
     leagueConfig?: LeagueDivisionConfig | null,
     phaseSettings?: DivisionPhaseSettingsMap | null,
+    role: DivisionRole = 'ENTRY',
+    phase: DivisionCompetitionPhase | null = null,
   ) {
     this.id = id;
     this.name = name ?? id;
     this.kind = kind ?? 'LEAGUE';
+    this.role = role;
+    this.phase = phase;
     this.fieldIds = Array.isArray(fieldIds) ? fieldIds : [];
     this.price = typeof price === 'number' && Number.isFinite(price) ? price : null;
     this.maxParticipants = typeof maxParticipants === 'number' && Number.isFinite(maxParticipants)
@@ -388,6 +395,7 @@ export class PlayingField implements Resource {
 export class Team implements Participant {
   id: string;
   captainId: string;
+  kind: string | null;
   name: string;
   division: Division;
   matches: Match[];
@@ -398,6 +406,7 @@ export class Team implements Participant {
   constructor(params: {
     id: string;
     captainId: string;
+    kind?: string | null;
     division: Division;
     name?: string;
     matches?: Match[];
@@ -407,8 +416,9 @@ export class Team implements Participant {
   }) {
     this.id = params.id;
     this.captainId = params.captainId;
+    this.kind = params.kind ?? null;
     this.division = params.division;
-    this.name = params.name ?? '';
+    this.name = params.name ?? "";
     this.matches = params.matches ?? [];
     this.playerIds = params.playerIds ?? [];
     this.players = params.players ?? [];
@@ -472,10 +482,13 @@ export class UserData implements Participant {
   }
 }
 
+export type MatchPlacementState = 'UNPLACED' | 'PLACED';
+
 export class Match implements SchedulableEvent {
   id: string;
   matchId: number | null;
   locked: boolean;
+  placementState: MatchPlacementState;
   team1Seed: number | null;
   team2Seed: number | null;
   team1Points: number[];
@@ -517,6 +530,7 @@ export class Match implements SchedulableEvent {
     id: string;
     matchId?: number | null;
     locked?: boolean;
+    placementState?: MatchPlacementState;
     team1Seed?: number | null;
     team2Seed?: number | null;
     team1Points?: number[];
@@ -557,6 +571,7 @@ export class Match implements SchedulableEvent {
     this.id = params.id;
     this.matchId = params.matchId ?? null;
     this.locked = params.locked ?? false;
+    this.placementState = params.placementState ?? (params.field ? 'PLACED' : 'UNPLACED');
     this.team1Seed = params.team1Seed ?? null;
     this.team2Seed = params.team2Seed ?? null;
     this.team1Points = params.team1Points ?? [];
@@ -600,6 +615,7 @@ export class Match implements SchedulableEvent {
       this.field.deleteEvent(this);
       this.field = null;
     }
+    this.placementState = 'UNPLACED';
   }
 
   getMatches(): Match[] {

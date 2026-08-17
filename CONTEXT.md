@@ -142,6 +142,10 @@ _Avoid_: Market, Supply Target
 The versioned minimum of Fresh Published Supply required for one market, one Sport, and one applicable source profile.
 _Avoid_: Coverage Cell, queue target
 
+**Replenishment Demand**:
+A versioned record that opens when a Supply Target falls below its minimum and closes only when that same Supply Contract's target is restored. Search Saturation, queue exhaustion, recovery work, and an in-flight campaign do not close it.
+_Avoid_: Coverage gap, Mapping Queue deficit
+
 **Market Tier**:
 A versioned Large, Medium, or Small classification based on the summed populations of the checked-in cities grouped into a market. It determines Supply Target minimums independently of rollout cohort.
 _Avoid_: Rollout cohort, city population band

@@ -198,21 +198,16 @@ const toResolvedSelection = (option: EventDivisionOption | null): ResolvedDivisi
 const buildDivisionOptions = async (
   event: RegistrationEventContext,
 ): Promise<EventDivisionOption[]> => {
-  const useTournamentBracketDivisions = isTournamentPoolPlayEnabled(event);
-
   const rows = await prisma.divisions.findMany({
-    where: useTournamentBracketDivisions
-      ? {
-          eventId: event.id,
-          kind: 'PLAYOFF',
-        }
-      : {
-          eventId: event.id,
-          OR: [
-            { kind: 'LEAGUE' },
-            { kind: null },
-          ],
-        },
+    where: {
+      eventId: event.id,
+      role: 'ENTRY',
+      status: 'ACTIVE',
+      OR: [
+        { kind: 'LEAGUE' },
+        { kind: null },
+      ],
+    },
     orderBy: [
       { sortOrder: 'asc' },
       { createdAt: 'asc' },

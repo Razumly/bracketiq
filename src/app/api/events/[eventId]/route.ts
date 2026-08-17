@@ -599,6 +599,8 @@ const getDivisionDetailsForEvent = async (
       key: true,
       name: true,
       kind: true,
+      role: true,
+      phase: true,
       sportId: true,
       price: true,
       maxParticipants: true,
@@ -643,7 +645,9 @@ const getDivisionDetailsForEvent = async (
   const allPoolRows = await prisma.divisions.findMany({
     where: {
       eventId,
-      kind: 'LEAGUE',
+      role: 'PHASE',
+      phase: 'POOL',
+      status: 'ACTIVE',
     },
     select: {
       id: true,
@@ -656,9 +660,36 @@ const getDivisionDetailsForEvent = async (
       teamIds: true,
     },
   });
+  const phaseParticipantDelegate = (prisma as any).eventDivisionPhaseParticipants;
+  const phaseParticipantRows = typeof phaseParticipantDelegate?.findMany === 'function'
+    ? await phaseParticipantDelegate.findMany({
+      where: { eventId },
+      select: { phaseDivisionId: true, eventTeamId: true },
+    })
+    : [];
+  const phaseParticipantTeamIdsByDivision = new Map<string, string[]>();
+  for (const participant of Array.isArray(phaseParticipantRows) ? phaseParticipantRows : []) {
+    const phaseDivisionId = normalizeDivisionKey(participant.phaseDivisionId);
+    const eventTeamId = normalizeEntityId(participant.eventTeamId);
+    if (!phaseDivisionId || !eventTeamId) continue;
+    const teamIds = phaseParticipantTeamIdsByDivision.get(phaseDivisionId) ?? [];
+    if (!teamIds.includes(eventTeamId)) teamIds.push(eventTeamId);
+    phaseParticipantTeamIdsByDivision.set(phaseDivisionId, teamIds);
+  }
+  const hydratedRows = rows.map((row) => {
+    if (String((row as any).role ?? '').toUpperCase() !== 'PHASE') return row;
+    return {
+      ...row,
+      teamIds: phaseParticipantTeamIdsByDivision.get(normalizeDivisionKey(row.id) ?? row.id) ?? [],
+    };
+  });
+  const hydratedPoolRows = allPoolRows.map((row) => ({
+    ...row,
+    teamIds: phaseParticipantTeamIdsByDivision.get(normalizeDivisionKey(row.id) ?? row.id) ?? [],
+  }));
   const rowsById = new Map<string, (typeof rows)[number]>();
   const rowsByKey = new Map<string, (typeof rows)[number]>();
-  rows.forEach((row) => {
+  hydratedRows.forEach((row) => {
     const rowId = normalizeDivisionKey(row.id);
     if (rowId) {
       rowsById.set(rowId, row);
@@ -695,6 +726,7 @@ const getDivisionDetailsForEvent = async (
       return ageEligibility.applies ? ageEligibility.cutoffDate.toISOString() : null;
     })();
     const kind = normalizeDivisionKind((row as any)?.kind, 'LEAGUE');
+    const isPhaseRow = String((row as any)?.role ?? '').toUpperCase() === 'PHASE';
     const standingsConfirmedAt = (() => {
       const parsed = parseDateInput((row as any)?.standingsConfirmedAt);
       return parsed ? parsed.toISOString() : null;
@@ -711,7 +743,7 @@ const getDivisionDetailsForEvent = async (
         : normalizeDivisionPlayoffConfigFields(row);
     const leagueConfig = normalizeLeagueDivisionConfig(row);
     const generatedPools = kind === 'PLAYOFF'
-      ? generatedPoolsForBracket(allPoolRows, row?.id ?? divisionId)
+      ? generatedPoolsForBracket(hydratedPoolRows, row?.id ?? divisionId)
       : [];
     const poolCount = generatedPools.length || null;
     const poolTeamCounts = Array.from(
@@ -786,7 +818,7 @@ const getDivisionDetailsForEvent = async (
       ageCutoffLabel: row?.ageCutoffLabel ?? ageEligibility.message ?? null,
       ageCutoffSource: row?.ageCutoffSource ?? (ageEligibility.applies ? ageEligibility.cutoffRule.source : null),
       fieldIds: normalizeFieldIds(row?.fieldIds ?? []),
-      teamIds: kind === 'PLAYOFF' ? [] : normalizeTeamIds((row as any)?.teamIds),
+      teamIds: isPhaseRow ? normalizeTeamIds((row as any)?.teamIds) : (kind === 'PLAYOFF' ? [] : normalizeTeamIds((row as any)?.teamIds)),
     };
   });
 };
@@ -794,6 +826,7 @@ const getDivisionDetailsForEvent = async (
 const getDivisionKeysForEventKind = async (
   eventId: string,
   kind: 'LEAGUE' | 'PLAYOFF',
+  role: 'ENTRY' | 'PHASE' = 'ENTRY',
   client: any = prisma,
 ): Promise<string[]> => {
   const rows = await client.divisions.findMany({
@@ -801,12 +834,12 @@ const getDivisionKeysForEventKind = async (
       eventId,
       scope: 'EVENT',
       status: 'ACTIVE',
+      role,
       ...(kind === 'LEAGUE'
-        ? { OR: [{ kind: 'LEAGUE' }, { kind: null }] }
+        ? { kind: 'LEAGUE' }
         : { kind }),
     },
     orderBy: [
-      { sortOrder: 'asc' },
       { createdAt: 'asc' },
       { name: 'asc' },
       { id: 'asc' },
@@ -829,17 +862,15 @@ const getTournamentPoolDivisionKeysForEvent = async (eventId: string): Promise<s
       eventId,
       scope: 'EVENT',
       status: 'ACTIVE',
+      role: 'PHASE',
+      phase: 'POOL',
     },
     select: {
       id: true,
-      kind: true,
-      playoffPlacementDivisionIds: true,
     },
   });
 
   return rows
-    .filter((row) => normalizeDivisionKind(row.kind, 'LEAGUE') !== 'PLAYOFF')
-    .filter((row) => normalizePlacementDivisionIds(row.playoffPlacementDivisionIds, eventId).length > 0)
     .map((row) => normalizeDivisionKey(row.id))
     .filter((value): value is string => Boolean(value));
 };
@@ -848,13 +879,12 @@ const getVisibleDivisionKeysForEventResponse = async (
   eventId: string,
   event: { eventType?: unknown; includePlayoffs?: unknown },
 ): Promise<string[]> => {
-  const baseDivisionKeys = await getDivisionKeysForEventKind(eventId, 'LEAGUE');
+  const baseDivisionKeys = await getDivisionKeysForEventKind(eventId, 'LEAGUE', 'ENTRY');
   const isTournamentPoolPlay = String(event.eventType ?? '').toUpperCase() === 'TOURNAMENT'
     && Boolean(event.includePlayoffs);
   if (!isTournamentPoolPlay) {
     return baseDivisionKeys;
   }
-
   const poolDivisionKeys = await getTournamentPoolDivisionKeysForEvent(eventId);
   return poolDivisionKeys.length ? poolDivisionKeys : baseDivisionKeys;
 };
@@ -1073,7 +1103,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ eve
   const capabilities = await projectEventAuthorityCapabilities(optionalSession, event);
   const [divisionKeys, playoffDivisionKeys] = await Promise.all([
     getVisibleDivisionKeysForEventResponse(eventId, event),
-    getDivisionKeysForEventKind(eventId, 'PLAYOFF'),
+    getDivisionKeysForEventKind(eventId, 'PLAYOFF', 'PHASE'),
   ]);
   const [
     divisionFieldIds,

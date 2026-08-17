@@ -6,6 +6,7 @@ import { canManageEvent } from '@/server/accessControl';
 import { acquireEventLock } from '@/server/repositories/locks';
 import { loadEventWithRelations, saveMatches } from '@/server/repositories/events';
 import { applyLeagueDivisionPlayoffReassignment, getLeagueDivisionById } from '@/server/scheduler/standings';
+import { persistPhaseParticipantAssignments } from '@/server/repositories/eventDivisionPhases';
 import {
   buildDivisionStandingsResponse,
   getDivisionValidation,
@@ -83,10 +84,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
 
       division.standingsConfirmedAt = confirmedAt;
       division.standingsConfirmedBy = session.userId;
-
       let reassignedPlayoffDivisionIds: string[] = [];
       let seededTeamIds: string[] = [];
       let teamIdsByPlayoffDivision: Record<string, string[]> = {};
+      let phaseTeamIdsByDivision: Record<string, string[]> = {};
       if (applyReassignment) {
         const reassignment = applyLeagueDivisionPlayoffReassignment(
           standingsEvent,
@@ -95,20 +96,35 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
         reassignedPlayoffDivisionIds = reassignment.affectedPlayoffDivisionIds;
         seededTeamIds = reassignment.seededTeamIds;
         teamIdsByPlayoffDivision = reassignment.teamIdsByPlayoffDivision;
+        phaseTeamIdsByDivision = reassignment.phaseTeamIdsByDivision ?? {};
 
-        if (reassignedPlayoffDivisionIds.length) {
+        const phaseDivisionIds = Array.from(
+          new Set([
+            ...reassignedPlayoffDivisionIds,
+            ...Object.keys(phaseTeamIdsByDivision),
+          ]),
+        );
+        if (phaseDivisionIds.length) {
           const now = new Date();
           await Promise.all(
-            reassignedPlayoffDivisionIds.map((playoffDivisionId) =>
+            phaseDivisionIds.map((phaseDivisionId) =>
               tx.divisions.update({
-                where: { id: playoffDivisionId },
+                where: { id: phaseDivisionId },
                 data: {
-                  teamIds: teamIdsByPlayoffDivision[playoffDivisionId] ?? [],
+                  teamIds:
+                    phaseTeamIdsByDivision[phaseDivisionId] ??
+                    teamIdsByPlayoffDivision[phaseDivisionId] ??
+                    [],
                   updatedAt: now,
                 } as any,
               }),
             ),
           );
+          await persistPhaseParticipantAssignments({
+            client: tx as any,
+            eventId,
+            teamIdsByPhaseDivision: phaseTeamIdsByDivision,
+          });
         }
         if (reassignedPlayoffDivisionIds.length || seededTeamIds.length) {
           await saveMatches(eventId, Object.values(standingsEvent.matches), tx);

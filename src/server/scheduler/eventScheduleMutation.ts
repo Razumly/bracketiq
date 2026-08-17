@@ -6,6 +6,7 @@ import {
   saveEventSchedule,
   saveMatches,
 } from "@/server/repositories/events";
+import { persistPhaseParticipantAssignments } from "@/server/repositories/eventDivisionPhases";
 import {
   collectMatchScheduleChanges,
   type MatchScheduleNotificationPlan,
@@ -18,14 +19,21 @@ import {
   type StandingsAdvancementEvent,
 } from "./standings";
 import { rescheduleEventMatchesPreservingLocks } from "./reschedulePreservingLocks";
+import { EventBuilder } from "./EventBuilder";
+import {
+  assertPhaseOwnedMatchGraph,
+  assertUnplacedMatchGraph,
+  matchDemandFromGraph,
+  rekeyMatchGraph,
+  type MatchDemand,
+} from "./matchGraph";
+import { League, Match, SchedulerContext, Tournament } from "./types";
 import { scheduleEvent, ScheduleError } from "./scheduleEvent";
 import type {
   EventEditorMatchProjection,
   EventEditorScheduleWarning,
 } from "@/contracts/eventEditor";
-import { League, Match, SchedulerContext, Tournament } from "./types";
 import { serializeMatches } from "./serialize";
-
 export type EventScheduleMutationMode =
   | "BUILD"
   | "REBUILD"
@@ -113,6 +121,120 @@ const buildContext = (): SchedulerContext => {
     },
   };
 };
+export type CreateOnlyMatchGraphPersistenceOptions = {
+  tx: Prisma.TransactionClient;
+  eventId: string;
+  includePlaceholderTeams?: boolean;
+};
+
+export type CreateOnlyMatchGraphPersistenceResult = {
+  event: League | Tournament;
+  matches: Match[];
+  demand: MatchDemand;
+};
+
+const isSyntheticGraphTeam = (team: Match["team1"]): boolean =>
+  Boolean(
+    team &&
+      team.captainId.trim().length === 0 &&
+      /^(Place Holder|Seed )/i.test(team.name.trim()),
+  );
+const persistGraphPlaceholderTeams = async (
+  tx: Prisma.TransactionClient,
+  eventId: string,
+  event: League | Tournament,
+): Promise<void> => {
+  const placeholderTeams = Object.values(event.teams).filter(
+    isSyntheticGraphTeam,
+  );
+  if (!placeholderTeams.length) return;
+  const teams = (tx as any).teams;
+  if (typeof teams?.upsert !== "function") {
+    throw new EventScheduleInputError(
+      "The Match Graph placeholder teams could not be persisted.",
+    );
+  }
+  const now = new Date();
+  for (const team of placeholderTeams) {
+    await teams.upsert({
+      where: { id: team.id },
+      create: {
+        id: team.id,
+        createdAt: now,
+        updatedAt: now,
+        eventId,
+        kind: "PLACEHOLDER",
+        playerIds: [],
+        playerRegistrationIds: [],
+        division: team.division.id,
+        divisionTypeId: null,
+        name: team.name,
+        captainId: "",
+        managerId: "",
+        headCoachId: null,
+        coachIds: [],
+        staffAssignmentIds: [],
+        parentTeamId: null,
+        pending: [],
+        teamSize: 0,
+        profileImageId: null,
+        sport: null,
+      },
+      update: {
+        updatedAt: now,
+        eventId,
+        kind: "PLACEHOLDER",
+        division: team.division.id,
+        name: team.name,
+        captainId: "",
+        managerId: "",
+      },
+    });
+  }
+};
+
+export const persistCreateOnlyMatchGraph = async (
+  options: CreateOnlyMatchGraphPersistenceOptions,
+): Promise<CreateOnlyMatchGraphPersistenceResult> => {
+  const event = await loadEventWithRelations(options.eventId, options.tx);
+  if (!(event instanceof League) && !(event instanceof Tournament)) {
+    throw new EventScheduleUnsupportedError(
+      "Only League and Tournament events support Match Graph creation.",
+    );
+  }
+
+  const graphEvent = new EventBuilder(event, buildContext(), {
+    includePlaceholderTeams: options.includePlaceholderTeams !== false,
+  }).buildMatchGraph();
+  const generatedMatches = Object.values(graphEvent.matches);
+  if (!generatedMatches.length) {
+    throw new EventScheduleInputError(
+      "The scheduler did not produce any Match Graph nodes.",
+    );
+  }
+  assertPhaseOwnedMatchGraph(generatedMatches);
+  assertUnplacedMatchGraph(generatedMatches);
+  const matches = rekeyMatchGraph(options.eventId, generatedMatches);
+
+  matches.forEach((match) => {
+    match.placementState = "UNPLACED";
+    match.field = null;
+    match.official = null;
+    match.officialAssignments = [];
+    match.teamOfficial = null;
+  });
+  graphEvent.matches = Object.fromEntries(
+    matches.map((match) => [match.id, match]),
+  );
+  await persistGraphPlaceholderTeams(options.tx, options.eventId, graphEvent);
+  await saveMatches(options.eventId, matches, options.tx);
+
+  return {
+    event: graphEvent,
+    matches,
+    demand: matchDemandFromGraph(matches),
+  };
+};
 
 const isLeagueEvent = (event: { eventType?: unknown }): event is League =>
   typeof event.eventType === "string" &&
@@ -130,9 +252,11 @@ const applyConfirmedAdvancementReassignments = (
 ): {
   affectedPlayoffDivisionIds: string[];
   teamIdsByPlayoffDivision: Record<string, string[]>;
+  phaseTeamIdsByDivision: Record<string, string[]>;
 } => {
   const affectedPlayoffDivisionIds = new Set<string>();
   const teamIdsByPlayoffDivision: Record<string, string[]> = {};
+  const phaseTeamIdsByDivision: Record<string, string[]> = {};
 
   for (const division of league.divisions) {
     if (!division.standingsConfirmedAt) continue;
@@ -149,14 +273,19 @@ const applyConfirmedAdvancementReassignments = (
         teamIdsByPlayoffDivision[playoffDivisionId] = teamIds;
       },
     );
+    Object.entries(reassignment.phaseTeamIdsByDivision).forEach(
+      ([phaseDivisionId, teamIds]) => {
+        phaseTeamIdsByDivision[phaseDivisionId] = teamIds;
+      },
+    );
   }
 
   return {
     affectedPlayoffDivisionIds: Array.from(affectedPlayoffDivisionIds),
     teamIdsByPlayoffDivision,
+    phaseTeamIdsByDivision,
   };
 };
-
 const updateConfirmedPlayoffDivisions = async (
   tx: Prisma.TransactionClient,
   event: League | Tournament,
@@ -164,20 +293,33 @@ const updateConfirmedPlayoffDivisions = async (
 ): Promise<void> => {
   if (!shouldApplyConfirmedAdvancementReassignments(event)) return;
   const reassignment = applyConfirmedAdvancementReassignments(event, context);
-  if (!reassignment.affectedPlayoffDivisionIds.length) return;
+  const divisionIds = Array.from(
+    new Set([
+      ...reassignment.affectedPlayoffDivisionIds,
+      ...Object.keys(reassignment.phaseTeamIdsByDivision),
+    ]),
+  );
+  if (!divisionIds.length) return;
   const now = new Date();
   await Promise.all(
-    reassignment.affectedPlayoffDivisionIds.map((playoffDivisionId) =>
+    divisionIds.map((divisionId) =>
       tx.divisions.update({
-        where: { id: playoffDivisionId },
+        where: { id: divisionId },
         data: {
           teamIds:
-            reassignment.teamIdsByPlayoffDivision[playoffDivisionId] ?? [],
+            reassignment.phaseTeamIdsByDivision[divisionId] ??
+            reassignment.teamIdsByPlayoffDivision[divisionId] ??
+            [],
           updatedAt: now,
         },
       }),
     ),
   );
+  await persistPhaseParticipantAssignments({
+    client: tx as any,
+    eventId: event.id,
+    teamIdsByPhaseDivision: reassignment.phaseTeamIdsByDivision,
+  });
 };
 
 const deleteSyntheticScheduleTeams = async (
@@ -315,6 +457,15 @@ const editorMatchProjectionsFor = (
     };
   });
 };
+const isReusableUnplacedMatchGraph = (matches: Match[]): boolean =>
+  matches.length > 0 &&
+  matches.every(
+    (match) =>
+      match.placementState === "UNPLACED" &&
+      match.field === null &&
+      match.division.role === "PHASE" &&
+      Boolean(match.division.phase),
+  );
 
 export const reconcileEventSchedule = async (
   options: EventScheduleMutationOptions,
@@ -351,7 +502,11 @@ export const reconcileEventSchedule = async (
   ) {
     throw new EventScheduleProtectedHistoryError();
   }
-  if (mode === "BUILD" && previousMatches.length > 0) {
+  if (
+    mode === "BUILD" &&
+    previousMatches.length > 0 &&
+    !isReusableUnplacedMatchGraph(previousMatches)
+  ) {
     throw new EventScheduleUnsupportedError(
       "A schedule already exists; use rebuild.",
     );
@@ -389,7 +544,18 @@ export const reconcileEventSchedule = async (
     warnings?: EventEditorScheduleWarning[];
   };
   let scheduleWarnings: EventEditorScheduleWarning[] = [];
-  if (mode === "RESCHEDULE_PRESERVING_LOCKS" && previousMatches.length > 0) {
+  if (
+    (mode === "BUILD" || mode === "REBUILD") &&
+    isReusableUnplacedMatchGraph(previousMatches)
+  ) {
+    const placedEvent = new EventBuilder(event, context, {
+      includePlaceholderTeams: false,
+    }).placeMatchGraph({ preserveMatchIds: true });
+    scheduled = {
+      event: placedEvent,
+      matches: Object.values(placedEvent.matches),
+    };
+  } else if (mode === "RESCHEDULE_PRESERVING_LOCKS" && previousMatches.length > 0) {
     try {
       scheduled = rescheduleEventMatchesPreservingLocks(event);
       scheduleWarnings = scheduled.warnings ?? [];

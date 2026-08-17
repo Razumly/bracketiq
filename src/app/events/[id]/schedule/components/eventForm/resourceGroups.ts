@@ -363,7 +363,9 @@ export const isGeneratedLocalFieldPlaceholder = (
     }
     const normalizedResourceSingular = resourceSingular.toLocaleLowerCase();
     const isPlaceholderPrefix = (value: string): boolean => (
-        value === 'field' || value === normalizedResourceSingular
+        value === 'field'
+        || value === 'resource'
+        || value === normalizedResourceSingular
     );
     if (typeof index === 'number') {
         const suffix = ` ${index + 1}`;

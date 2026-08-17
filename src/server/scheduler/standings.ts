@@ -1,3 +1,5 @@
+import { extractDivisionTokenFromId } from '@/lib/divisionTypes';
+
 import { Brackets } from './Brackets';
 import { deriveStandingsMatchResult } from '@/lib/standingsMatchScoring';
 import {
@@ -79,6 +81,41 @@ const getPlayoffDivisions = (event: StandingsAdvancementEvent): Division[] => (
   Array.isArray(event.playoffDivisions) ? event.playoffDivisions : []
 );
 
+const stripPhaseSuffix = (value: string): string =>
+  value.replace(/__phase__(league|pool|bracket|playoff)$/i, '');
+
+const findDivisionById = (
+  divisions: Division[],
+  divisionId: string,
+): Division | null => {
+  const normalizedDivisionId = normalizeToken(divisionId);
+  if (!normalizedDivisionId) {
+    return null;
+  }
+
+  const directMatch = divisions.find(
+    (division) => normalizeToken(division.id) === normalizedDivisionId,
+  );
+  if (directMatch) {
+    return directMatch;
+  }
+
+  const inputBaseId = stripPhaseSuffix(normalizedDivisionId);
+  const inputToken = extractDivisionTokenFromId(inputBaseId);
+  return (
+    divisions.find((division) => {
+      const divisionBaseId = stripPhaseSuffix(normalizeToken(division.id) ?? '');
+      if (divisionBaseId === inputBaseId) {
+        return true;
+      }
+      return Boolean(
+        inputToken &&
+          extractDivisionTokenFromId(divisionBaseId) === inputToken,
+      );
+    }) ?? null
+  );
+};
+
 export const isPlayoffMatch = (match: Match): boolean => (
   Boolean(match.previousLeftMatch || match.previousRightMatch || match.winnerNextMatch || match.loserNextMatch)
 );
@@ -116,31 +153,15 @@ const getMatchDivisionId = (match: Match): string | null => {
   return normalizeToken(match.team2?.division?.id);
 };
 
-export const getLeagueDivisionById = (league: StandingsAdvancementEvent, divisionId: string): Division | null => {
-  const normalizedDivisionId = normalizeToken(divisionId);
-  if (!normalizedDivisionId) {
-    return null;
-  }
-  for (const division of league.divisions) {
-    if (normalizeToken(division.id) === normalizedDivisionId) {
-      return division;
-    }
-  }
-  return null;
-};
+export const getLeagueDivisionById = (
+  league: StandingsAdvancementEvent,
+  divisionId: string,
+): Division | null => findDivisionById(league.divisions, divisionId);
 
-export const getPlayoffDivisionById = (league: StandingsAdvancementEvent, divisionId: string): Division | null => {
-  const normalizedDivisionId = normalizeToken(divisionId);
-  if (!normalizedDivisionId) {
-    return null;
-  }
-  for (const division of getPlayoffDivisions(league)) {
-    if (normalizeToken(division.id) === normalizedDivisionId) {
-      return division;
-    }
-  }
-  return null;
-};
+export const getPlayoffDivisionById = (
+  league: StandingsAdvancementEvent,
+  divisionId: string,
+): Division | null => findDivisionById(getPlayoffDivisions(league), divisionId);
 
 const getPlayoffAssignmentDivisionById = (league: StandingsAdvancementEvent, divisionId: string): Division | null => {
   const playoffDivision = getPlayoffDivisionById(league, divisionId);
@@ -153,7 +174,10 @@ const getPlayoffAssignmentDivisionById = (league: StandingsAdvancementEvent, div
   return null;
 };
 
-export const getLeagueDivisionTeamIds = (league: StandingsAdvancementEvent, divisionId: string): Set<string> => {
+export const getLeagueDivisionTeamIds = (
+  league: StandingsAdvancementEvent,
+  divisionId: string,
+): Set<string> => {
   const normalizedDivisionId = normalizeToken(divisionId);
   const teamIds = new Set<string>();
   if (!normalizedDivisionId) {
@@ -161,6 +185,23 @@ export const getLeagueDivisionTeamIds = (league: StandingsAdvancementEvent, divi
   }
 
   const division = getLeagueDivisionById(league, divisionId);
+  const resolvedDivisionId =
+    normalizeToken(division?.id) ?? normalizedDivisionId;
+  const matchesResolvedDivision = (candidateId: unknown): boolean => {
+    const normalizedCandidateId = normalizeToken(candidateId);
+    if (!normalizedCandidateId) {
+      return false;
+    }
+    if (normalizedCandidateId === resolvedDivisionId) {
+      return true;
+    }
+    return (
+      normalizeToken(
+        getLeagueDivisionById(league, normalizedCandidateId)?.id,
+      ) === resolvedDivisionId
+    );
+  };
+
   const configuredTeamIds = Array.isArray(division?.teamIds)
     ? division.teamIds
         .map((entry) => String(entry ?? '').trim())
@@ -174,7 +215,12 @@ export const getLeagueDivisionTeamIds = (league: StandingsAdvancementEvent, divi
   const hasConfiguredMembership = league.divisions.some(
     (entry) => Array.isArray(entry.teamIds) && entry.teamIds.length > 0,
   );
-  if (!league.singleDivision && division && hasConfiguredMembership && !isTournamentPoolPlayStandingsEvent(league)) {
+  if (
+    !league.singleDivision &&
+    division &&
+    hasConfiguredMembership &&
+    !isTournamentPoolPlayStandingsEvent(league)
+  ) {
     return teamIds;
   }
 
@@ -187,7 +233,7 @@ export const getLeagueDivisionTeamIds = (league: StandingsAdvancementEvent, divi
   }
 
   for (const team of Object.values(league.teams)) {
-    if (normalizeToken(team.division?.id) === normalizedDivisionId) {
+    if (matchesResolvedDivision(team.division?.id)) {
       teamIds.add(team.id);
     }
   }
@@ -201,21 +247,27 @@ export const getLeagueDivisionTeamIds = (league: StandingsAdvancementEvent, divi
       .map((entry) => normalizeToken(entry.id))
       .filter((entry): entry is string => Boolean(entry)),
   );
-  const parentDivisionIds = new Set(
-    (division.playoffPlacementDivisionIds ?? [])
-      .map((entry) => normalizeToken(entry))
-      .filter((entry): entry is string => Boolean(entry && playoffDivisionIds.has(entry))),
-  );
+  const parentDivisionIds = new Set<string>();
+  for (const parentId of division.playoffPlacementDivisionIds ?? []) {
+    const resolvedParentId = normalizeToken(
+      getPlayoffDivisionById(league, parentId)?.id ?? parentId,
+    );
+    if (resolvedParentId && playoffDivisionIds.has(resolvedParentId)) {
+      parentDivisionIds.add(resolvedParentId);
+    }
+  }
   if (!parentDivisionIds.size) {
     return teamIds;
   }
 
   const siblingHasExplicitMembership = league.divisions.some((entry) => {
-    if (normalizeToken(entry.id) === normalizedDivisionId || !entry.teamIds?.length) {
+    if (normalizeToken(entry.id) === resolvedDivisionId || !entry.teamIds?.length) {
       return false;
     }
     return (entry.playoffPlacementDivisionIds ?? []).some((parentId) => {
-      const normalizedParentId = normalizeToken(parentId);
+      const normalizedParentId = normalizeToken(
+        getPlayoffDivisionById(league, parentId)?.id ?? parentId,
+      );
       return Boolean(normalizedParentId && parentDivisionIds.has(normalizedParentId));
     });
   });
@@ -224,7 +276,10 @@ export const getLeagueDivisionTeamIds = (league: StandingsAdvancementEvent, divi
   }
 
   for (const team of Object.values(league.teams)) {
-    const teamDivisionId = normalizeToken(team.division?.id);
+    const teamDivisionId = normalizeToken(
+      getLeagueDivisionById(league, team.division?.id ?? '')?.id ??
+        team.division?.id,
+    );
     if (teamDivisionId && parentDivisionIds.has(teamDivisionId)) {
       teamIds.add(team.id);
     }
@@ -237,16 +292,28 @@ export const getLeagueDivisionTeamIds = (league: StandingsAdvancementEvent, divi
   return teamIds;
 };
 
-export const getLeagueRegularSeasonMatches = (league: StandingsAdvancementEvent, divisionId?: string): Match[] => {
+export const getLeagueRegularSeasonMatches = (
+  league: StandingsAdvancementEvent,
+  divisionId?: string,
+): Match[] => {
   const normalizedDivisionId = normalizeToken(divisionId);
+  const resolvedDivisionId = normalizedDivisionId
+    ? normalizeToken(getLeagueDivisionById(league, divisionId ?? '')?.id) ??
+      normalizedDivisionId
+    : null;
   return Object.values(league.matches).filter((match) => {
     if (isPlayoffMatch(match)) {
       return false;
     }
-    if (!normalizedDivisionId) {
+    if (!resolvedDivisionId) {
       return true;
     }
-    return getMatchDivisionId(match) === normalizedDivisionId;
+    const matchDivisionId = getMatchDivisionId(match);
+    const resolvedMatchDivisionId = matchDivisionId
+      ? normalizeToken(getLeagueDivisionById(league, matchDivisionId)?.id) ??
+        matchDivisionId
+      : null;
+    return resolvedMatchDivisionId === resolvedDivisionId;
   });
 };
 
@@ -417,7 +484,11 @@ export const normalizeLeaguePlayoffPlacementMappings = (league: League): string[
     const nextMapping: string[] = [];
     for (let index = 0; index < playoffTeamCount; index += 1) {
       const mappedDivisionToken = normalizeToken(currentMapping[index]);
-      const mappedDivisionId = mappedDivisionToken ? playoffDivisionIdsByToken.get(mappedDivisionToken) : null;
+      const mappedDivision = mappedDivisionToken
+        ? getPlayoffDivisionById(league, mappedDivisionToken)
+        : null;
+      const mappedDivisionId = mappedDivision?.id
+        ?? (mappedDivisionToken ? playoffDivisionIdsByToken.get(mappedDivisionToken) : null);
       if (mappedDivisionId) {
         nextMapping.push(mappedDivisionId);
         continue;
@@ -453,7 +524,6 @@ export const validateDivisionPlayoffMapping = (league: StandingsAdvancementEvent
     return errors;
   }
 
-  const playoffDivisionIds = new Set(getPlayoffDivisions(league).map((entry) => normalizeToken(entry.id)).filter((entry): entry is string => Boolean(entry)));
   const mapping = Array.isArray(division.playoffPlacementDivisionIds)
     ? division.playoffPlacementDivisionIds
     : [];
@@ -464,7 +534,7 @@ export const validateDivisionPlayoffMapping = (league: StandingsAdvancementEvent
       errors.push(`Position ${index + 1} must be mapped to a playoff division.`);
       continue;
     }
-    if (!playoffDivisionIds.has(referencedDivisionId)) {
+    if (!getPlayoffDivisionById(league, referencedDivisionId)) {
       errors.push(`Position ${index + 1} references an unknown playoff division.`);
     }
   }
@@ -504,7 +574,6 @@ export const validatePlayoffDivisionReferenceCapacities = (league: StandingsAdva
     if (playoffTeamCount <= 0) {
       continue;
     }
-
     const mapping = Array.isArray(division.playoffPlacementDivisionIds)
       ? division.playoffPlacementDivisionIds
       : [];
@@ -514,7 +583,13 @@ export const validatePlayoffDivisionReferenceCapacities = (league: StandingsAdva
       if (!referencedDivisionId) {
         continue;
       }
-      referenceCounts.set(referencedDivisionId, (referenceCounts.get(referencedDivisionId) ?? 0) + 1);
+      const resolvedDivisionId = normalizeToken(
+        getPlayoffDivisionById(league, referencedDivisionId)?.id,
+      ) ?? referencedDivisionId;
+      referenceCounts.set(
+        resolvedDivisionId,
+        (referenceCounts.get(resolvedDivisionId) ?? 0) + 1,
+      );
     }
   }
 
@@ -588,7 +663,13 @@ export const buildPlayoffEntrantsByDivision = (
       const mapping = Array.isArray(division.playoffPlacementDivisionIds)
         ? division.playoffPlacementDivisionIds
         : [];
-      const playoffDivisionId = normalizeToken(mapping[placementIndex]);
+      const mappedPlayoffDivision = getPlayoffDivisionById(
+        league,
+        mapping[placementIndex] ?? '',
+      );
+      const playoffDivisionId = normalizeToken(
+        mappedPlayoffDivision?.id ?? mapping[placementIndex],
+      );
       if (!playoffDivisionId) {
         continue;
       }
@@ -1135,13 +1216,23 @@ const buildTemplateBracket = (
   return findPlayoffRootMatch(matches);
 };
 
-const getPlayoffMatchesForDivision = (league: StandingsAdvancementEvent, divisionId: string): Match[] => {
+const getPlayoffMatchesForDivision = (
+  league: StandingsAdvancementEvent,
+  divisionId: string,
+): Match[] => {
   const normalizedDivisionId = normalizeToken(divisionId);
   if (!normalizedDivisionId) {
     return [];
   }
+  const resolvedDivisionId =
+    normalizeToken(
+      getPlayoffDivisionById(league, divisionId)?.id ??
+        getLeagueDivisionById(league, divisionId)?.id,
+    ) ?? normalizedDivisionId;
   return Object.values(league.matches).filter(
-    (match) => normalizeToken(match.division?.id) === normalizedDivisionId && isPlayoffMatch(match),
+    (match) =>
+      normalizeToken(match.division?.id) === resolvedDivisionId &&
+      isPlayoffMatch(match),
   );
 };
 
@@ -1149,13 +1240,14 @@ const assignTeamsToSameDivisionPlayoffMatches = (
   league: StandingsAdvancementEvent,
   divisionId: string,
   teams: Team[],
+  playoffDivisionId = divisionId,
 ): string[] => {
   const leagueDivision = getLeagueDivisionById(league, divisionId);
   if (!leagueDivision) {
     return [];
   }
 
-  const playoffMatches = getPlayoffMatchesForDivision(league, leagueDivision.id);
+  const playoffMatches = getPlayoffMatchesForDivision(league, playoffDivisionId);
   if (!playoffMatches.length) {
     return [];
   }
@@ -1286,6 +1378,7 @@ export const applyLeagueDivisionPlayoffReassignment = (
   affectedPlayoffDivisionIds: string[];
   seededTeamIds: string[];
   teamIdsByPlayoffDivision: Record<string, string[]>;
+  phaseTeamIdsByDivision: Record<string, string[]>;
 } => {
   const leagueDivision = getLeagueDivisionById(league, divisionId);
   if (!leagueDivision) {
@@ -1293,8 +1386,19 @@ export const applyLeagueDivisionPlayoffReassignment = (
   }
 
   const playoffTeamCount = getDivisionPlayoffTeamCount(league, leagueDivision);
+  const emptyResult: {
+    affectedPlayoffDivisionIds: string[];
+    seededTeamIds: string[];
+    teamIdsByPlayoffDivision: Record<string, string[]>;
+    phaseTeamIdsByDivision: Record<string, string[]>;
+  } = {
+    affectedPlayoffDivisionIds: [],
+    seededTeamIds: [],
+    teamIdsByPlayoffDivision: {},
+    phaseTeamIdsByDivision: {},
+  };
   if (playoffTeamCount <= 0) {
-    return { affectedPlayoffDivisionIds: [], seededTeamIds: [], teamIdsByPlayoffDivision: {} };
+    return emptyResult;
   }
 
   if (!usesSplitAdvancementDivisions(league)) {
@@ -1306,15 +1410,32 @@ export const applyLeagueDivisionPlayoffReassignment = (
       .slice(0, playoffTeamCount)
       .map((standing) => standing.team)
       .filter((team): team is Team => Boolean(team));
+    const normalizedLeagueDivisionId = normalizeToken(leagueDivision.id);
+    const baseDivisionId = normalizedLeagueDivisionId?.endsWith('__phase__league')
+      ? normalizedLeagueDivisionId.slice(0, -'__phase__league'.length)
+      : normalizedLeagueDivisionId;
+    const playoffDivision = (league.playoffDivisions ?? []).find((candidate) => {
+      const sourceDivisionId = normalizeToken((candidate as any).sourceDivisionId);
+      const candidateId = normalizeToken(candidate.id);
+      return (
+        sourceDivisionId === baseDivisionId ||
+        candidateId === `${baseDivisionId}__phase__playoff`
+      );
+    });
+    const playoffPhaseDivisionId = playoffDivision?.id ?? leagueDivision.id;
     const assignedTeamIds = assignTeamsToSameDivisionPlayoffMatches(
       league,
       leagueDivision.id,
       entrants,
+      playoffPhaseDivisionId,
     );
     return {
       affectedPlayoffDivisionIds: [],
       seededTeamIds: Array.from(new Set(assignedTeamIds)),
       teamIdsByPlayoffDivision: {},
+      phaseTeamIdsByDivision: playoffPhaseDivisionId
+        ? { [playoffPhaseDivisionId]: Array.from(new Set(assignedTeamIds)) }
+        : {},
     };
   }
 
@@ -1322,7 +1443,15 @@ export const applyLeagueDivisionPlayoffReassignment = (
     new Set(
       (leagueDivision.playoffPlacementDivisionIds ?? [])
         .slice(0, playoffTeamCount)
-        .map((entry) => normalizeToken(entry))
+        .map((entry) => {
+          const normalizedEntry = normalizeToken(entry);
+          if (!normalizedEntry) {
+            return null;
+          }
+          return normalizeToken(
+            getPlayoffDivisionById(league, normalizedEntry)?.id,
+          ) ?? normalizedEntry;
+        })
         .filter((entry): entry is string => Boolean(entry)),
     ),
   );
@@ -1333,6 +1462,7 @@ export const applyLeagueDivisionPlayoffReassignment = (
 
   const seededTeamIds: string[] = [];
   const teamIdsByPlayoffDivision: Record<string, string[]> = {};
+  const phaseTeamIdsByDivision: Record<string, string[]> = {};
 
   for (const playoffDivisionId of affectedPlayoffDivisionIds) {
     const playoffDivision = getPlayoffDivisionById(league, playoffDivisionId);
@@ -1361,14 +1491,15 @@ export const applyLeagueDivisionPlayoffReassignment = (
       ),
     );
     playoffDivision.teamIds = normalizedAssignedTeamIds;
+    phaseTeamIdsByDivision[playoffDivision.id] = normalizedAssignedTeamIds;
     teamIdsByPlayoffDivision[playoffDivision.id] = normalizedAssignedTeamIds;
     seededTeamIds.push(...assignedTeamIds);
   }
-
   return {
     affectedPlayoffDivisionIds,
     seededTeamIds: Array.from(new Set(seededTeamIds)),
     teamIdsByPlayoffDivision,
+    phaseTeamIdsByDivision,
   };
 };
 

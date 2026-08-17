@@ -94,11 +94,28 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
     }
     this.hasSlots = this.globalSlots.length > 0 || Array.from(this.resourceSlots.values()).some((slots) => slots.length);
   }
+  private resourcesForGroup(group: G): R[] {
+    const direct = this.resources.get(group);
+    if (direct) return direct;
+    for (const [candidate, resources] of this.resources) {
+      if (candidate.id === group.id) return resources;
+    }
+    return [];
+  }
+
+  private participantsForGroup(group: G): P[] {
+    const direct = this.participants.get(group);
+    if (direct) return direct;
+    for (const [candidate, participants] of this.participants) {
+      if (candidate.id === group.id) return participants;
+    }
+    return [];
+  }
 
   getParticipantConflicts(): Map<P, E[]> {
     const conflicts = new Map<P, E[]>();
     for (const group of this.currentGroups) {
-      const groupParticipants = this.participants.get(group) ?? [];
+      const groupParticipants = this.participantsForGroup(group);
       for (const participant of groupParticipants) {
         const participantEvents = participant.getEvents() as E[];
         for (const event of participantEvents) {
@@ -188,8 +205,8 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
   }
 
   freeParticipants(group: G, start: Date, end: Date): P[] {
-    let freeParticipants = this.participants.get(group) ?? [];
-    const groupResources = this.resources.get(group) ?? [];
+    let freeParticipants = this.participantsForGroup(group);
+    const groupResources = this.resourcesForGroup(group);
     for (const resource of groupResources) {
       for (const event of resource.getEvents()) {
         if (overlaps(event.start, event.end, start, end)) {
@@ -203,7 +220,7 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
   private participantPoolForCurrentGroups(): P[] {
     const byId = new Map<string, P>();
     for (const group of this.currentGroups) {
-      for (const participant of this.participants.get(group) ?? []) {
+      for (const participant of this.participantsForGroup(group)) {
         byId.set(participant.id, participant);
       }
     }
@@ -236,6 +253,19 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
   ): void {
     this.currentGroups = event.getGroups() as G[];
     this.assertPossibleParticipantCapacity(event);
+    if (
+      !this.currentGroups.some(
+        (group) => this.resourcesForGroup(group).length > 0,
+      )
+    ) {
+      const groupIds = this.currentGroups
+        .map((group) => group.id)
+        .filter((id) => id.length > 0);
+      const suffix = groupIds.length ? ` for divisions: ${groupIds.join(", ")}` : "";
+      throw new Error(
+        `Unable to schedule event because no fields are available${suffix}.`,
+      );
+    }
     let earliestStart = this.getEarliestStartTime(event);
     earliestStart = this.nextValidStartTime(earliestStart, durationMs);
 
@@ -254,6 +284,7 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
           event.start = earliestStart;
           event.end = new Date(earliestStart.getTime() + durationMs);
           resource.addEvent(event);
+          (event as any).placementState = 'PLACED';
           return;
         }
       }
@@ -368,7 +399,7 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
     let freeResource: R | null = null;
     const resources: R[] = [];
     for (const group of this.currentGroups) {
-      resources.push(...(this.resources.get(group) ?? []));
+      resources.push(...this.resourcesForGroup(group));
     }
     resources.sort((a, b) => a.getEvents().length - b.getEvents().length);
 
@@ -392,7 +423,7 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
   currentEvents(start: Date, end: Date): SchedulableEvent[] {
     const events: SchedulableEvent[] = [];
     for (const group of this.currentGroups) {
-      for (const resource of this.resources.get(group) ?? []) {
+      for (const resource of this.resourcesForGroup(group)) {
         for (const event of resource.getEvents()) {
           if (overlaps(event.start, event.end, start, end)) {
             events.push(event);
@@ -559,7 +590,7 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
     if (!this.hasSlots) return candidate;
     const resources: R[] = [];
     for (const group of this.currentGroups) {
-      resources.push(...(this.resources.get(group) ?? []));
+      resources.push(...this.resourcesForGroup(group));
     }
     if (!resources.length) {
       const groupIds = this.currentGroups

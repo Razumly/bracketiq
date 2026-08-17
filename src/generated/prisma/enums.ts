@@ -143,6 +143,24 @@ export const DivisionScopeEnum = {
 export type DivisionScopeEnum = (typeof DivisionScopeEnum)[keyof typeof DivisionScopeEnum]
 
 
+export const DivisionRoleEnum = {
+  ENTRY: 'ENTRY',
+  PHASE: 'PHASE'
+} as const
+
+export type DivisionRoleEnum = (typeof DivisionRoleEnum)[keyof typeof DivisionRoleEnum]
+
+
+export const DivisionPhaseEnum = {
+  LEAGUE: 'LEAGUE',
+  POOL: 'POOL',
+  BRACKET: 'BRACKET',
+  PLAYOFF: 'PLAYOFF'
+} as const
+
+export type DivisionPhaseEnum = (typeof DivisionPhaseEnum)[keyof typeof DivisionPhaseEnum]
+
+
 export const DivisionStatusEnum = {
   ACTIVE: 'ACTIVE',
   INACTIVE: 'INACTIVE',

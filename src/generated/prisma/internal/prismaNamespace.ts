@@ -397,6 +397,8 @@ export const ModelName = {
   MatchOperationReceipts: 'MatchOperationReceipts',
   EventEditorCreateOperations: 'EventEditorCreateOperations',
   Divisions: 'Divisions',
+  EventDivisionPhaseSources: 'EventDivisionPhaseSources',
+  EventDivisionPhaseParticipants: 'EventDivisionPhaseParticipants',
   UserData: 'UserData',
   SensitiveUserData: 'SensitiveUserData',
   AuthMfaChallenges: 'AuthMfaChallenges',
@@ -511,7 +513,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "appReleases" | "fields" | "facilities" | "matches" | "matchSegments" | "broadcastOverlays" | "broadcastOverlayStates" | "broadcastOverlayActions" | "broadcastOverlayAccessTokens" | "matchIncidents" | "matchOperationReceipts" | "eventEditorCreateOperations" | "divisions" | "userData" | "sensitiveUserData" | "authMfaChallenges" | "invites" | "teamInviteEventSyncs" | "staffMembers" | "organizationRoles" | "organizationRolePermissions" | "organizationRoleCompensationRates" | "staffCompensationRates" | "eventStaffAssignments" | "staffScheduleAssignments" | "teamStaffLaborEntries" | "financialLineItems" | "staffPayRun" | "staffPayRunItem" | "eventOfficials" | "teamCheckIns" | "matchRosterEntries" | "teams" | "canonicalTeams" | "teamRegistrations" | "registrationQuestions" | "registrationQuestionResponses" | "teamJoinRequests" | "teamStaffAssignments" | "eventTeamStaffAssignments" | "messages" | "chatGroup" | "moderationReport" | "aiConversationPointer" | "aiPendingConfirmation" | "pushDeviceTarget" | "lockFiles" | "paymentIntents" | "bills" | "billPayments" | "billPaymentProofs" | "rentalBookings" | "rentalBookingItems" | "affiliateScrapeSources" | "affiliateScrapeMappings" | "affiliateScrapeRuns" | "affiliateSourceIntakes" | "affiliateSourceIntakePages" | "affiliateSourceIntakeRuns" | "affiliateSourceIntakeArtifacts" | "affiliateSourceDiscoveryCampaigns" | "affiliateCoverageAgentJobs" | "affiliateCoverageCities" | "affiliateCoverageCells" | "affiliateCoverageCellAssessments" | "affiliateSourceDiscoveryQueryExecutions" | "affiliateSourceDiscoveryRuns" | "affiliateSourceDiscoveryResults" | "affiliateSourceDomainPolicies" | "affiliateSourceMappingJobs" | "affiliateApprovalJobs" | "affiliateImportCandidates" | "eventTags" | "eventTagAssignments" | "organizationTags" | "organizationTagAssignments" | "refundRequests" | "discounts" | "discountCodes" | "discountCodeRedemptions" | "discountCodeReservations" | "organizationAccountingConnections" | "accountingSyncRecords" | "organizationFinanceCategoryAccountingMappings" | "stripeAccounts" | "events" | "organizations" | "organizationReviews" | "organizationDomains" | "organizationClaims" | "organizationClaimEvidence" | "organizationClaimEvents" | "organizationReviewResponses" | "products" | "subscriptions" | "timeSlots" | "leagueScoringConfigs" | "eventTemplates" | "eventTemplateResources" | "eventTemplateTimeSlots" | "eventTemplateRentalResourceHints" | "eventTemplateLeagueScoringConfigs" | "sports" | "templateDocuments" | "signedDocuments" | "boldSignWebhookEvents" | "boldSignSyncOperations" | "parentChildLinks" | "eventRegistrations" | "authUser" | "feedbackSubmissions" | "file"
+    modelProps: "appReleases" | "fields" | "facilities" | "matches" | "matchSegments" | "broadcastOverlays" | "broadcastOverlayStates" | "broadcastOverlayActions" | "broadcastOverlayAccessTokens" | "matchIncidents" | "matchOperationReceipts" | "eventEditorCreateOperations" | "divisions" | "eventDivisionPhaseSources" | "eventDivisionPhaseParticipants" | "userData" | "sensitiveUserData" | "authMfaChallenges" | "invites" | "teamInviteEventSyncs" | "staffMembers" | "organizationRoles" | "organizationRolePermissions" | "organizationRoleCompensationRates" | "staffCompensationRates" | "eventStaffAssignments" | "staffScheduleAssignments" | "teamStaffLaborEntries" | "financialLineItems" | "staffPayRun" | "staffPayRunItem" | "eventOfficials" | "teamCheckIns" | "matchRosterEntries" | "teams" | "canonicalTeams" | "teamRegistrations" | "registrationQuestions" | "registrationQuestionResponses" | "teamJoinRequests" | "teamStaffAssignments" | "eventTeamStaffAssignments" | "messages" | "chatGroup" | "moderationReport" | "aiConversationPointer" | "aiPendingConfirmation" | "pushDeviceTarget" | "lockFiles" | "paymentIntents" | "bills" | "billPayments" | "billPaymentProofs" | "rentalBookings" | "rentalBookingItems" | "affiliateScrapeSources" | "affiliateScrapeMappings" | "affiliateScrapeRuns" | "affiliateSourceIntakes" | "affiliateSourceIntakePages" | "affiliateSourceIntakeRuns" | "affiliateSourceIntakeArtifacts" | "affiliateSourceDiscoveryCampaigns" | "affiliateCoverageAgentJobs" | "affiliateCoverageCities" | "affiliateCoverageCells" | "affiliateCoverageCellAssessments" | "affiliateSourceDiscoveryQueryExecutions" | "affiliateSourceDiscoveryRuns" | "affiliateSourceDiscoveryResults" | "affiliateSourceDomainPolicies" | "affiliateSourceMappingJobs" | "affiliateApprovalJobs" | "affiliateImportCandidates" | "eventTags" | "eventTagAssignments" | "organizationTags" | "organizationTagAssignments" | "refundRequests" | "discounts" | "discountCodes" | "discountCodeRedemptions" | "discountCodeReservations" | "organizationAccountingConnections" | "accountingSyncRecords" | "organizationFinanceCategoryAccountingMappings" | "stripeAccounts" | "events" | "organizations" | "organizationReviews" | "organizationDomains" | "organizationClaims" | "organizationClaimEvidence" | "organizationClaimEvents" | "organizationReviewResponses" | "products" | "subscriptions" | "timeSlots" | "leagueScoringConfigs" | "eventTemplates" | "eventTemplateResources" | "eventTemplateTimeSlots" | "eventTemplateRentalResourceHints" | "eventTemplateLeagueScoringConfigs" | "sports" | "templateDocuments" | "signedDocuments" | "boldSignWebhookEvents" | "boldSignSyncOperations" | "parentChildLinks" | "eventRegistrations" | "authUser" | "feedbackSubmissions" | "file"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -1474,6 +1476,154 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         count: {
           args: Prisma.DivisionsCountArgs<ExtArgs>
           result: runtime.Types.Utils.Optional<Prisma.DivisionsCountAggregateOutputType> | number
+        }
+      }
+    }
+    EventDivisionPhaseSources: {
+      payload: Prisma.$EventDivisionPhaseSourcesPayload<ExtArgs>
+      fields: Prisma.EventDivisionPhaseSourcesFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.EventDivisionPhaseSourcesFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseSourcesPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.EventDivisionPhaseSourcesFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseSourcesPayload>
+        }
+        findFirst: {
+          args: Prisma.EventDivisionPhaseSourcesFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseSourcesPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.EventDivisionPhaseSourcesFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseSourcesPayload>
+        }
+        findMany: {
+          args: Prisma.EventDivisionPhaseSourcesFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseSourcesPayload>[]
+        }
+        create: {
+          args: Prisma.EventDivisionPhaseSourcesCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseSourcesPayload>
+        }
+        createMany: {
+          args: Prisma.EventDivisionPhaseSourcesCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.EventDivisionPhaseSourcesCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseSourcesPayload>[]
+        }
+        delete: {
+          args: Prisma.EventDivisionPhaseSourcesDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseSourcesPayload>
+        }
+        update: {
+          args: Prisma.EventDivisionPhaseSourcesUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseSourcesPayload>
+        }
+        deleteMany: {
+          args: Prisma.EventDivisionPhaseSourcesDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.EventDivisionPhaseSourcesUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.EventDivisionPhaseSourcesUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseSourcesPayload>[]
+        }
+        upsert: {
+          args: Prisma.EventDivisionPhaseSourcesUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseSourcesPayload>
+        }
+        aggregate: {
+          args: Prisma.EventDivisionPhaseSourcesAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateEventDivisionPhaseSources>
+        }
+        groupBy: {
+          args: Prisma.EventDivisionPhaseSourcesGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.EventDivisionPhaseSourcesGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.EventDivisionPhaseSourcesCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.EventDivisionPhaseSourcesCountAggregateOutputType> | number
+        }
+      }
+    }
+    EventDivisionPhaseParticipants: {
+      payload: Prisma.$EventDivisionPhaseParticipantsPayload<ExtArgs>
+      fields: Prisma.EventDivisionPhaseParticipantsFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.EventDivisionPhaseParticipantsFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseParticipantsPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.EventDivisionPhaseParticipantsFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseParticipantsPayload>
+        }
+        findFirst: {
+          args: Prisma.EventDivisionPhaseParticipantsFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseParticipantsPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.EventDivisionPhaseParticipantsFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseParticipantsPayload>
+        }
+        findMany: {
+          args: Prisma.EventDivisionPhaseParticipantsFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseParticipantsPayload>[]
+        }
+        create: {
+          args: Prisma.EventDivisionPhaseParticipantsCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseParticipantsPayload>
+        }
+        createMany: {
+          args: Prisma.EventDivisionPhaseParticipantsCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.EventDivisionPhaseParticipantsCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseParticipantsPayload>[]
+        }
+        delete: {
+          args: Prisma.EventDivisionPhaseParticipantsDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseParticipantsPayload>
+        }
+        update: {
+          args: Prisma.EventDivisionPhaseParticipantsUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseParticipantsPayload>
+        }
+        deleteMany: {
+          args: Prisma.EventDivisionPhaseParticipantsDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.EventDivisionPhaseParticipantsUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.EventDivisionPhaseParticipantsUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseParticipantsPayload>[]
+        }
+        upsert: {
+          args: Prisma.EventDivisionPhaseParticipantsUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventDivisionPhaseParticipantsPayload>
+        }
+        aggregate: {
+          args: Prisma.EventDivisionPhaseParticipantsAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateEventDivisionPhaseParticipants>
+        }
+        groupBy: {
+          args: Prisma.EventDivisionPhaseParticipantsGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.EventDivisionPhaseParticipantsGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.EventDivisionPhaseParticipantsCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.EventDivisionPhaseParticipantsCountAggregateOutputType> | number
         }
       }
     }
@@ -8908,6 +9058,7 @@ export const MatchesScalarFieldEnum = {
   start: 'start',
   end: 'end',
   locked: 'locked',
+  placementState: 'placementState',
   division: 'division',
   team1Points: 'team1Points',
   team2Points: 'team2Points',
@@ -9109,6 +9260,8 @@ export const DivisionsScalarFieldEnum = {
   eventId: 'eventId',
   organizationId: 'organizationId',
   scope: 'scope',
+  role: 'role',
+  phase: 'phase',
   status: 'status',
   sourceDivisionId: 'sourceDivisionId',
   sportId: 'sportId',
@@ -9161,6 +9314,33 @@ export const DivisionsScalarFieldEnum = {
 } as const
 
 export type DivisionsScalarFieldEnum = (typeof DivisionsScalarFieldEnum)[keyof typeof DivisionsScalarFieldEnum]
+
+
+export const EventDivisionPhaseSourcesScalarFieldEnum = {
+  id: 'id',
+  eventId: 'eventId',
+  entryDivisionId: 'entryDivisionId',
+  phaseDivisionId: 'phaseDivisionId',
+  phase: 'phase',
+  sortOrder: 'sortOrder',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type EventDivisionPhaseSourcesScalarFieldEnum = (typeof EventDivisionPhaseSourcesScalarFieldEnum)[keyof typeof EventDivisionPhaseSourcesScalarFieldEnum]
+
+
+export const EventDivisionPhaseParticipantsScalarFieldEnum = {
+  id: 'id',
+  eventId: 'eventId',
+  phaseDivisionId: 'phaseDivisionId',
+  eventTeamId: 'eventTeamId',
+  sourceEntryDivisionId: 'sourceEntryDivisionId',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type EventDivisionPhaseParticipantsScalarFieldEnum = (typeof EventDivisionPhaseParticipantsScalarFieldEnum)[keyof typeof EventDivisionPhaseParticipantsScalarFieldEnum]
 
 
 export const UserDataScalarFieldEnum = {
@@ -11714,6 +11894,34 @@ export type ListEnumDivisionScopeEnumFieldRefInput<$PrismaModel> = FieldRefInput
 
 
 /**
+ * Reference to a field of type 'DivisionRoleEnum'
+ */
+export type EnumDivisionRoleEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DivisionRoleEnum'>
+
+
+
+/**
+ * Reference to a field of type 'DivisionRoleEnum[]'
+ */
+export type ListEnumDivisionRoleEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DivisionRoleEnum[]'>
+
+
+
+/**
+ * Reference to a field of type 'DivisionPhaseEnum'
+ */
+export type EnumDivisionPhaseEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DivisionPhaseEnum'>
+
+
+
+/**
+ * Reference to a field of type 'DivisionPhaseEnum[]'
+ */
+export type ListEnumDivisionPhaseEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DivisionPhaseEnum[]'>
+
+
+
+/**
  * Reference to a field of type 'DivisionStatusEnum'
  */
 export type EnumDivisionStatusEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DivisionStatusEnum'>
@@ -12843,6 +13051,8 @@ export type GlobalOmitConfig = {
   matchOperationReceipts?: Prisma.MatchOperationReceiptsOmit
   eventEditorCreateOperations?: Prisma.EventEditorCreateOperationsOmit
   divisions?: Prisma.DivisionsOmit
+  eventDivisionPhaseSources?: Prisma.EventDivisionPhaseSourcesOmit
+  eventDivisionPhaseParticipants?: Prisma.EventDivisionPhaseParticipantsOmit
   userData?: Prisma.UserDataOmit
   sensitiveUserData?: Prisma.SensitiveUserDataOmit
   authMfaChallenges?: Prisma.AuthMfaChallengesOmit

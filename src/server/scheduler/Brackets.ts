@@ -27,6 +27,10 @@ type BuiltBracketNode =
   | { kind: 'team'; team: Team; seed: number }
   | { kind: 'match'; match: Match };
 
+type BracketsOptions = {
+  placeMatches?: boolean;
+};
+
 export class Brackets {
   tournament: Tournament;
   context: SchedulerContext;
@@ -43,11 +47,11 @@ export class Brackets {
   seededEntrants: SeededEntrant[] = [];
   bracketSchedule: Schedule<Match, PlayingField, Team | UserData, Division>;
   officialStaffingPlanner: OfficialStaffingPlanner;
-
-  constructor(tournament: Tournament, context: SchedulerContext) {
+  private placeMatches: boolean;
+  constructor(tournament: Tournament, context: SchedulerContext, options: BracketsOptions = {}) {
     this.tournament = tournament;
     this.context = context;
-
+    this.placeMatches = options.placeMatches !== false;
     const matches = Object.values(this.tournament.matches);
     for (const match of matches) {
       if (typeof match.matchId === 'number') {
@@ -442,9 +446,14 @@ export class Brackets {
     let count = 1;
     for (const match of [...matches].reverse()) {
       match.matchId = count;
+      if (!this.placeMatches) {
+        match.placementState = 'UNPLACED';
+        this.tournament.matches[match.id] = match;
+        count += 1;
+        continue;
+      }
       let matchDurationMs = this.fallbackMatchDurationMs(match);
       try {
-        match.requiresTeamOfficial = usesTeamOfficialScheduling(this.tournament);
         matchDurationMs = resolveScheduledMatchDurationMs(
           this.tournament,
           match,

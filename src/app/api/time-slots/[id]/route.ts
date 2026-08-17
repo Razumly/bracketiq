@@ -395,7 +395,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             where: { id: { in: allSlotIds }, archivedAt: null },
           }),
           tx.divisions.findMany({
-            where: { eventId: { in: referencingEvents.map((event) => event.id) } },
+            where: {
+              eventId: { in: referencingEvents.map((event) => event.id) },
+              role: 'ENTRY',
+              status: 'ACTIVE',
+            },
             select: { eventId: true, id: true, key: true },
           }),
         ]);

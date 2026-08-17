@@ -3,7 +3,7 @@ import {
   resolveMatchRulesForContext,
   resolveMatchRulesForDivisionPhase,
 } from '@/server/matches/matchOperations';
-
+import { resolveMatchTimingPolicy } from './matchTimingPolicy';
 import type { Division, League, Match, Tournament } from './types';
 
 type SchedulerEvent = League | Tournament;
@@ -16,28 +16,96 @@ const hasBracketLinks = (match: Match): boolean => Boolean(
   || match.loserNextMatch
 );
 
+const durationMinutesFromSnapshot = (
+  event: SchedulerEvent,
+  match: Match,
+  phase: ReturnType<typeof resolveDivisionCompetitionPhase>,
+): number | null => {
+  const snapshot = match.matchRulesSnapshot;
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    return null;
+  }
+  const rules = snapshot as {
+    scoringModel?: unknown;
+    segmentCount?: unknown;
+  };
+  const division = match.division;
+  const bracketMatch = hasBracketLinks(match);
+  const divisionConfig = bracketMatch || division.kind === 'PLAYOFF'
+    ? division.playoffConfig
+    : division.leagueConfig;
+  const phaseSettings = division.phaseSettings?.[phase] ?? {};
+  const usesSets = bracketMatch || division.kind === 'PLAYOFF'
+    ? event.usesSets
+    : division.leagueConfig?.usesSets ?? event.usesSets;
+  const segmentCount = Number(rules.segmentCount);
+  const configuredSegmentLength = phaseSettings.segmentLengthMinutes
+    ?? divisionConfig?.setDurationMinutes
+    ?? event.setDurationMinutes
+    ?? null;
+  const configuredSegmentBreak = phaseSettings.segmentBreakMinutes ?? 0;
+
+  if (usesSets || phaseSettings.segmentLengthMinutes != null) {
+    const timedDuration = calculateTimedMatchDurationMinutes({
+      segmentCount,
+      segmentLengthMinutes: configuredSegmentLength,
+      segmentBreakMinutes: configuredSegmentBreak,
+    });
+    if (timedDuration != null) {
+      return timedDuration;
+    }
+  }
+  const timing = resolveMatchTimingPolicy({
+    scoringModel:
+      typeof rules.scoringModel === 'string' ? rules.scoringModel : undefined,
+    usesSets,
+    segmentCount: Number.isFinite(segmentCount) ? segmentCount : null,
+    setsPerMatch: division.kind === 'LEAGUE' && !bracketMatch
+      ? division.leagueConfig?.setsPerMatch
+      : event.setsPerMatch
+      ?? (Number.isFinite(segmentCount) ? segmentCount : null),
+    segmentLengthMinutes: configuredSegmentLength,
+    setDurationMinutes: configuredSegmentLength,
+    matchDurationMinutes: divisionConfig?.matchDurationMinutes
+      ?? event.matchDurationMinutes,
+    segmentBreakMinutes: configuredSegmentBreak,
+    restTimeMinutes: divisionConfig?.restTimeMinutes
+      ?? event.restTimeMinutes,
+  });
+  return timing.durationMinutes;
+};
+
 export const applyDivisionPhaseRulesToMatch = (
   event: SchedulerEvent,
   match: Match,
 ): number | null => {
-  if (match.matchRulesSnapshot) {
-    match.resolvedMatchRules = match.matchRulesSnapshot as NonNullable<typeof match.resolvedMatchRules>;
-    return null;
-  }
-
   const division = match.division;
   const bracketMatch = hasBracketLinks(match);
-  const phase = resolveDivisionCompetitionPhase({
-    eventType: event.eventType,
-    divisionKind: division.kind,
-    hasBracketLinks: bracketMatch,
-  });
-  const usesSets = division.kind === 'LEAGUE'
-    ? division.leagueConfig?.usesSets ?? event.usesSets
-    : event.usesSets;
-  const setsPerMatch = division.leagueConfig?.setsPerMatch ?? event.setsPerMatch ?? null;
-  const winnerSetCount = division.playoffConfig?.winnerSetCount ?? event.winnerSetCount ?? null;
-  const loserSetCount = division.playoffConfig?.loserSetCount ?? event.loserSetCount ?? null;
+  const phase =
+    division.phase ??
+    resolveDivisionCompetitionPhase({
+      eventType: event.eventType,
+      divisionKind: division.kind,
+      hasBracketLinks: bracketMatch,
+    });
+
+  if (match.matchRulesSnapshot) {
+    match.resolvedMatchRules = match.matchRulesSnapshot as NonNullable<typeof match.resolvedMatchRules>;
+    return durationMinutesFromSnapshot(event, match, phase);
+  }
+  const playoffConfig = bracketMatch || division.kind === 'PLAYOFF'
+    ? division.playoffConfig
+    : null;
+  const usesSets = playoffConfig
+    ? event.usesSets
+    : division.kind === 'LEAGUE'
+      ? division.leagueConfig?.usesSets ?? event.usesSets
+      : event.usesSets;
+  const setsPerMatch = playoffConfig
+    ? event.setsPerMatch ?? null
+    : division.leagueConfig?.setsPerMatch ?? event.setsPerMatch ?? null;
+  const winnerSetCount = playoffConfig?.winnerSetCount ?? event.winnerSetCount ?? null;
+  const loserSetCount = playoffConfig?.loserSetCount ?? event.loserSetCount ?? null;
   const phaseRules = resolveMatchRulesForDivisionPhase({
     phase,
     phaseSettings: division.phaseSettings,
@@ -46,8 +114,8 @@ export const applyDivisionPhaseRulesToMatch = (
     usesSets,
     setsPerMatch,
     winnerSetCount,
-    matchDurationMinutes: division.leagueConfig?.matchDurationMinutes
-      ?? division.playoffConfig?.matchDurationMinutes
+    matchDurationMinutes: playoffConfig?.matchDurationMinutes
+      ?? division.leagueConfig?.matchDurationMinutes
       ?? event.matchDurationMinutes,
     officialPositions: event.officialPositions,
   });

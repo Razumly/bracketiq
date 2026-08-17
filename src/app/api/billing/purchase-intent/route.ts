@@ -386,6 +386,8 @@ const reserveEventRegistrationSlot = async ({
       ? await (tx as any).divisions.findMany({
           where: {
             eventId,
+            role: 'ENTRY',
+            status: 'ACTIVE',
             OR: [
               { kind: 'LEAGUE' },
               { kind: null },
@@ -619,6 +621,8 @@ const reserveEventRegistrationSlot = async ({
       const selectedDivision = await tx.divisions.findFirst({
         where: {
           eventId,
+          role: 'ENTRY',
+          status: 'ACTIVE',
           OR: [
             { id: divisionSelection.divisionId },
             { key: divisionSelection.divisionId },

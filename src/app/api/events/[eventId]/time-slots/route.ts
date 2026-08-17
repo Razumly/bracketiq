@@ -95,7 +95,7 @@ export async function PATCH(
         );
       }
       const divisions = await tx.divisions.findMany({
-        where: { eventId },
+        where: { eventId, role: 'ENTRY', status: 'ACTIVE' },
         select: { id: true, key: true },
       });
       const divisionIdByReference = new Map<string, string>();

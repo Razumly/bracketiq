@@ -83,6 +83,16 @@ export type EventEditorCreateOperations = Prisma.EventEditorCreateOperationsMode
  */
 export type Divisions = Prisma.DivisionsModel
 /**
+ * Model EventDivisionPhaseSources
+ *
+ */
+export type EventDivisionPhaseSources = Prisma.EventDivisionPhaseSourcesModel
+/**
+ * Model EventDivisionPhaseParticipants
+ *
+ */
+export type EventDivisionPhaseParticipants = Prisma.EventDivisionPhaseParticipantsModel
+/**
  * Model UserData
  *
  */

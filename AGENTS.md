@@ -168,20 +168,16 @@ We persist raw string IDs for associations (for example `teamIds`, `friendIds`, 
 - **Run quickly during development**: `npm run test:watch`
 - **CI quality checks**: `npm run test:ci`
 - **Type checks**: `npx tsc --noEmit`
+- **Prisma-backed tests and E2E seeding**: Against the test database, run `npm run migrate:deploy`, then `npx prisma migrate status`; proceed with Prisma-backed tests or `npm run seed:e2e` only when the status reports no pending migrations.
 
-### When to Write Tests
-
-- **Every new function or feature** ships with at least one Jest test (happy-path + failure mode).
-- **Bug fixes** include a regression test first.
-- **UI components** with business logic get component tests using `@testing-library/react`.
-
-### Test Review Checklist
-
-- Does the change include Jest coverage for new/modified logic?
-- Are mocks/spies reset to avoid test bleed?
-- Are async tests using `await`/`waitFor`?
-- Is coverage meaningful (assert on outputs/side-effects)?
-- Do not run Jest suites concurrently from multiple agents in the same checkout; shared `.next`/cache artifacts can cause flaky results.
+- **Test selection**: Follow [`CODING_STANDARDS.md`](CODING_STANDARDS.md). Add Jest coverage when it proves an observable behavior that typechecking or the build cannot prove, such as a state transition, output transformation, authorization decision, persistence effect, failure path, race, or complete user workflow.
+- **Do not add redundant tests**: Do not add presence-only tests, static-page copy/link tests, tests that only restate TypeScript relationships, or tests that assert implementation details without an observable outcome.
+- **Do not simulate providers**: Do not mock or hand-build third-party SDKs, HTTP responses, OAuth/token exchanges, hosted widgets, maps, payment flows, or webhook payloads. Validate provider integrations through explicit sandbox, manual smoke, or separately owned contract checks instead.
+- **UI tests**: Exercise the interaction and assert the resulting state, output, or side effect. Do not retain a test only to satisfy coverage.
+- **Bug fixes**: Include a regression test when the bug exposes a meaningful observable behavior not already covered by a stronger boundary or smoke check.
+- **Mocks**: Reset mocks and spies when they are used for internal application services, Prisma, or browser platform APIs; do not recreate a third-party provider client.
+- **Async tests**: Use `await`/`waitFor` for asynchronous application behavior.
+- **Focused validation**: Do not run Jest suites concurrently from multiple agents in the same checkout; shared `.next`/cache artifacts can cause flaky results.
 
 ## Form & Scheduling Standards
 

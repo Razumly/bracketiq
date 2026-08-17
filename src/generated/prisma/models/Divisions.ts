@@ -89,6 +89,8 @@ export type DivisionsMinAggregateOutputType = {
   eventId: string | null
   organizationId: string | null
   scope: $Enums.DivisionScopeEnum | null
+  role: $Enums.DivisionRoleEnum | null
+  phase: $Enums.DivisionPhaseEnum | null
   status: $Enums.DivisionStatusEnum | null
   sourceDivisionId: string | null
   sportId: string | null
@@ -140,6 +142,8 @@ export type DivisionsMaxAggregateOutputType = {
   eventId: string | null
   organizationId: string | null
   scope: $Enums.DivisionScopeEnum | null
+  role: $Enums.DivisionRoleEnum | null
+  phase: $Enums.DivisionPhaseEnum | null
   status: $Enums.DivisionStatusEnum | null
   sourceDivisionId: string | null
   sportId: string | null
@@ -191,6 +195,8 @@ export type DivisionsCountAggregateOutputType = {
   eventId: number
   organizationId: number
   scope: number
+  role: number
+  phase: number
   status: number
   sourceDivisionId: number
   sportId: number
@@ -307,6 +313,8 @@ export type DivisionsMinAggregateInputType = {
   eventId?: true
   organizationId?: true
   scope?: true
+  role?: true
+  phase?: true
   status?: true
   sourceDivisionId?: true
   sportId?: true
@@ -358,6 +366,8 @@ export type DivisionsMaxAggregateInputType = {
   eventId?: true
   organizationId?: true
   scope?: true
+  role?: true
+  phase?: true
   status?: true
   sourceDivisionId?: true
   sportId?: true
@@ -409,6 +419,8 @@ export type DivisionsCountAggregateInputType = {
   eventId?: true
   organizationId?: true
   scope?: true
+  role?: true
+  phase?: true
   status?: true
   sourceDivisionId?: true
   sportId?: true
@@ -558,6 +570,8 @@ export type DivisionsGroupByOutputType = {
   eventId: string | null
   organizationId: string | null
   scope: $Enums.DivisionScopeEnum
+  role: $Enums.DivisionRoleEnum
+  phase: $Enums.DivisionPhaseEnum | null
   status: $Enums.DivisionStatusEnum
   sourceDivisionId: string | null
   sportId: string | null
@@ -643,6 +657,8 @@ export type DivisionsWhereInput = {
   eventId?: Prisma.StringNullableFilter<"Divisions"> | string | null
   organizationId?: Prisma.StringNullableFilter<"Divisions"> | string | null
   scope?: Prisma.EnumDivisionScopeEnumFilter<"Divisions"> | $Enums.DivisionScopeEnum
+  role?: Prisma.EnumDivisionRoleEnumFilter<"Divisions"> | $Enums.DivisionRoleEnum
+  phase?: Prisma.EnumDivisionPhaseEnumNullableFilter<"Divisions"> | $Enums.DivisionPhaseEnum | null
   status?: Prisma.EnumDivisionStatusEnumFilter<"Divisions"> | $Enums.DivisionStatusEnum
   sourceDivisionId?: Prisma.StringNullableFilter<"Divisions"> | string | null
   sportId?: Prisma.StringNullableFilter<"Divisions"> | string | null
@@ -705,6 +721,8 @@ export type DivisionsOrderByWithRelationInput = {
   eventId?: Prisma.SortOrderInput | Prisma.SortOrder
   organizationId?: Prisma.SortOrderInput | Prisma.SortOrder
   scope?: Prisma.SortOrder
+  role?: Prisma.SortOrder
+  phase?: Prisma.SortOrderInput | Prisma.SortOrder
   status?: Prisma.SortOrder
   sourceDivisionId?: Prisma.SortOrderInput | Prisma.SortOrder
   sportId?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -770,6 +788,8 @@ export type DivisionsWhereUniqueInput = Prisma.AtLeast<{
   eventId?: Prisma.StringNullableFilter<"Divisions"> | string | null
   organizationId?: Prisma.StringNullableFilter<"Divisions"> | string | null
   scope?: Prisma.EnumDivisionScopeEnumFilter<"Divisions"> | $Enums.DivisionScopeEnum
+  role?: Prisma.EnumDivisionRoleEnumFilter<"Divisions"> | $Enums.DivisionRoleEnum
+  phase?: Prisma.EnumDivisionPhaseEnumNullableFilter<"Divisions"> | $Enums.DivisionPhaseEnum | null
   status?: Prisma.EnumDivisionStatusEnumFilter<"Divisions"> | $Enums.DivisionStatusEnum
   sourceDivisionId?: Prisma.StringNullableFilter<"Divisions"> | string | null
   sportId?: Prisma.StringNullableFilter<"Divisions"> | string | null
@@ -832,6 +852,8 @@ export type DivisionsOrderByWithAggregationInput = {
   eventId?: Prisma.SortOrderInput | Prisma.SortOrder
   organizationId?: Prisma.SortOrderInput | Prisma.SortOrder
   scope?: Prisma.SortOrder
+  role?: Prisma.SortOrder
+  phase?: Prisma.SortOrderInput | Prisma.SortOrder
   status?: Prisma.SortOrder
   sourceDivisionId?: Prisma.SortOrderInput | Prisma.SortOrder
   sportId?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -902,6 +924,8 @@ export type DivisionsScalarWhereWithAggregatesInput = {
   eventId?: Prisma.StringNullableWithAggregatesFilter<"Divisions"> | string | null
   organizationId?: Prisma.StringNullableWithAggregatesFilter<"Divisions"> | string | null
   scope?: Prisma.EnumDivisionScopeEnumWithAggregatesFilter<"Divisions"> | $Enums.DivisionScopeEnum
+  role?: Prisma.EnumDivisionRoleEnumWithAggregatesFilter<"Divisions"> | $Enums.DivisionRoleEnum
+  phase?: Prisma.EnumDivisionPhaseEnumNullableWithAggregatesFilter<"Divisions"> | $Enums.DivisionPhaseEnum | null
   status?: Prisma.EnumDivisionStatusEnumWithAggregatesFilter<"Divisions"> | $Enums.DivisionStatusEnum
   sourceDivisionId?: Prisma.StringNullableWithAggregatesFilter<"Divisions"> | string | null
   sportId?: Prisma.StringNullableWithAggregatesFilter<"Divisions"> | string | null
@@ -964,6 +988,8 @@ export type DivisionsCreateInput = {
   eventId?: string | null
   organizationId?: string | null
   scope?: $Enums.DivisionScopeEnum
+  role?: $Enums.DivisionRoleEnum
+  phase?: $Enums.DivisionPhaseEnum | null
   status?: $Enums.DivisionStatusEnum
   sourceDivisionId?: string | null
   sportId?: string | null
@@ -1026,6 +1052,8 @@ export type DivisionsUncheckedCreateInput = {
   eventId?: string | null
   organizationId?: string | null
   scope?: $Enums.DivisionScopeEnum
+  role?: $Enums.DivisionRoleEnum
+  phase?: $Enums.DivisionPhaseEnum | null
   status?: $Enums.DivisionStatusEnum
   sourceDivisionId?: string | null
   sportId?: string | null
@@ -1088,6 +1116,8 @@ export type DivisionsUpdateInput = {
   eventId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   organizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   scope?: Prisma.EnumDivisionScopeEnumFieldUpdateOperationsInput | $Enums.DivisionScopeEnum
+  role?: Prisma.EnumDivisionRoleEnumFieldUpdateOperationsInput | $Enums.DivisionRoleEnum
+  phase?: Prisma.NullableEnumDivisionPhaseEnumFieldUpdateOperationsInput | $Enums.DivisionPhaseEnum | null
   status?: Prisma.EnumDivisionStatusEnumFieldUpdateOperationsInput | $Enums.DivisionStatusEnum
   sourceDivisionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   sportId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1150,6 +1180,8 @@ export type DivisionsUncheckedUpdateInput = {
   eventId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   organizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   scope?: Prisma.EnumDivisionScopeEnumFieldUpdateOperationsInput | $Enums.DivisionScopeEnum
+  role?: Prisma.EnumDivisionRoleEnumFieldUpdateOperationsInput | $Enums.DivisionRoleEnum
+  phase?: Prisma.NullableEnumDivisionPhaseEnumFieldUpdateOperationsInput | $Enums.DivisionPhaseEnum | null
   status?: Prisma.EnumDivisionStatusEnumFieldUpdateOperationsInput | $Enums.DivisionStatusEnum
   sourceDivisionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   sportId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1212,6 +1244,8 @@ export type DivisionsCreateManyInput = {
   eventId?: string | null
   organizationId?: string | null
   scope?: $Enums.DivisionScopeEnum
+  role?: $Enums.DivisionRoleEnum
+  phase?: $Enums.DivisionPhaseEnum | null
   status?: $Enums.DivisionStatusEnum
   sourceDivisionId?: string | null
   sportId?: string | null
@@ -1274,6 +1308,8 @@ export type DivisionsUpdateManyMutationInput = {
   eventId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   organizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   scope?: Prisma.EnumDivisionScopeEnumFieldUpdateOperationsInput | $Enums.DivisionScopeEnum
+  role?: Prisma.EnumDivisionRoleEnumFieldUpdateOperationsInput | $Enums.DivisionRoleEnum
+  phase?: Prisma.NullableEnumDivisionPhaseEnumFieldUpdateOperationsInput | $Enums.DivisionPhaseEnum | null
   status?: Prisma.EnumDivisionStatusEnumFieldUpdateOperationsInput | $Enums.DivisionStatusEnum
   sourceDivisionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   sportId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1336,6 +1372,8 @@ export type DivisionsUncheckedUpdateManyInput = {
   eventId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   organizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   scope?: Prisma.EnumDivisionScopeEnumFieldUpdateOperationsInput | $Enums.DivisionScopeEnum
+  role?: Prisma.EnumDivisionRoleEnumFieldUpdateOperationsInput | $Enums.DivisionRoleEnum
+  phase?: Prisma.NullableEnumDivisionPhaseEnumFieldUpdateOperationsInput | $Enums.DivisionPhaseEnum | null
   status?: Prisma.EnumDivisionStatusEnumFieldUpdateOperationsInput | $Enums.DivisionStatusEnum
   sourceDivisionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   sportId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1406,6 +1444,8 @@ export type DivisionsCountOrderByAggregateInput = {
   eventId?: Prisma.SortOrder
   organizationId?: Prisma.SortOrder
   scope?: Prisma.SortOrder
+  role?: Prisma.SortOrder
+  phase?: Prisma.SortOrder
   status?: Prisma.SortOrder
   sourceDivisionId?: Prisma.SortOrder
   sportId?: Prisma.SortOrder
@@ -1494,6 +1534,8 @@ export type DivisionsMaxOrderByAggregateInput = {
   eventId?: Prisma.SortOrder
   organizationId?: Prisma.SortOrder
   scope?: Prisma.SortOrder
+  role?: Prisma.SortOrder
+  phase?: Prisma.SortOrder
   status?: Prisma.SortOrder
   sourceDivisionId?: Prisma.SortOrder
   sportId?: Prisma.SortOrder
@@ -1545,6 +1587,8 @@ export type DivisionsMinOrderByAggregateInput = {
   eventId?: Prisma.SortOrder
   organizationId?: Prisma.SortOrder
   scope?: Prisma.SortOrder
+  role?: Prisma.SortOrder
+  phase?: Prisma.SortOrder
   status?: Prisma.SortOrder
   sourceDivisionId?: Prisma.SortOrder
   sportId?: Prisma.SortOrder
@@ -1655,6 +1699,14 @@ export type EnumDivisionScopeEnumFieldUpdateOperationsInput = {
   set?: $Enums.DivisionScopeEnum
 }
 
+export type EnumDivisionRoleEnumFieldUpdateOperationsInput = {
+  set?: $Enums.DivisionRoleEnum
+}
+
+export type NullableEnumDivisionPhaseEnumFieldUpdateOperationsInput = {
+  set?: $Enums.DivisionPhaseEnum | null
+}
+
 export type EnumDivisionStatusEnumFieldUpdateOperationsInput = {
   set?: $Enums.DivisionStatusEnum
 }
@@ -1717,6 +1769,8 @@ export type DivisionsSelect<ExtArgs extends runtime.Types.Extensions.InternalArg
   eventId?: boolean
   organizationId?: boolean
   scope?: boolean
+  role?: boolean
+  phase?: boolean
   status?: boolean
   sourceDivisionId?: boolean
   sportId?: boolean
@@ -1779,6 +1833,8 @@ export type DivisionsSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Ext
   eventId?: boolean
   organizationId?: boolean
   scope?: boolean
+  role?: boolean
+  phase?: boolean
   status?: boolean
   sourceDivisionId?: boolean
   sportId?: boolean
@@ -1841,6 +1897,8 @@ export type DivisionsSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Ext
   eventId?: boolean
   organizationId?: boolean
   scope?: boolean
+  role?: boolean
+  phase?: boolean
   status?: boolean
   sourceDivisionId?: boolean
   sportId?: boolean
@@ -1903,6 +1961,8 @@ export type DivisionsSelectScalar = {
   eventId?: boolean
   organizationId?: boolean
   scope?: boolean
+  role?: boolean
+  phase?: boolean
   status?: boolean
   sourceDivisionId?: boolean
   sportId?: boolean
@@ -1954,7 +2014,7 @@ export type DivisionsSelectScalar = {
   teamIds?: boolean
 }
 
-export type DivisionsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "name" | "key" | "kind" | "sortOrder" | "eventId" | "organizationId" | "scope" | "status" | "sourceDivisionId" | "sportId" | "price" | "maxParticipants" | "playoffTeamCount" | "playoffPlacementDivisionIds" | "standingsOverrides" | "phaseSettings" | "gamesPerOpponent" | "restTimeMinutes" | "usesSets" | "matchDurationMinutes" | "setDurationMinutes" | "setsPerMatch" | "pointsToVictory" | "playoffDoubleElimination" | "playoffWinnerSetCount" | "playoffLoserSetCount" | "playoffWinnerBracketPointsToVictory" | "playoffLoserBracketPointsToVictory" | "playoffPrize" | "playoffFieldCount" | "playoffRestTimeMinutes" | "playoffMatchDurationMinutes" | "playoffSetDurationMinutes" | "standingsConfirmedAt" | "standingsConfirmedBy" | "allowPaymentPlans" | "installmentCount" | "installmentDueDates" | "installmentDueRelativeDays" | "installmentAmounts" | "minRating" | "maxRating" | "divisionTypeId" | "skillDivisionTypeId" | "ageDivisionTypeId" | "ratingType" | "gender" | "description" | "registrationUrl" | "sourceUrl" | "lastVerifiedAt" | "ageCutoffDate" | "ageCutoffLabel" | "ageCutoffSource" | "fieldIds" | "teamIds", ExtArgs["result"]["divisions"]>
+export type DivisionsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "name" | "key" | "kind" | "sortOrder" | "eventId" | "organizationId" | "scope" | "role" | "phase" | "status" | "sourceDivisionId" | "sportId" | "price" | "maxParticipants" | "playoffTeamCount" | "playoffPlacementDivisionIds" | "standingsOverrides" | "phaseSettings" | "gamesPerOpponent" | "restTimeMinutes" | "usesSets" | "matchDurationMinutes" | "setDurationMinutes" | "setsPerMatch" | "pointsToVictory" | "playoffDoubleElimination" | "playoffWinnerSetCount" | "playoffLoserSetCount" | "playoffWinnerBracketPointsToVictory" | "playoffLoserBracketPointsToVictory" | "playoffPrize" | "playoffFieldCount" | "playoffRestTimeMinutes" | "playoffMatchDurationMinutes" | "playoffSetDurationMinutes" | "standingsConfirmedAt" | "standingsConfirmedBy" | "allowPaymentPlans" | "installmentCount" | "installmentDueDates" | "installmentDueRelativeDays" | "installmentAmounts" | "minRating" | "maxRating" | "divisionTypeId" | "skillDivisionTypeId" | "ageDivisionTypeId" | "ratingType" | "gender" | "description" | "registrationUrl" | "sourceUrl" | "lastVerifiedAt" | "ageCutoffDate" | "ageCutoffLabel" | "ageCutoffSource" | "fieldIds" | "teamIds", ExtArgs["result"]["divisions"]>
 
 export type $DivisionsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "Divisions"
@@ -1970,6 +2030,8 @@ export type $DivisionsPayload<ExtArgs extends runtime.Types.Extensions.InternalA
     eventId: string | null
     organizationId: string | null
     scope: $Enums.DivisionScopeEnum
+    role: $Enums.DivisionRoleEnum
+    phase: $Enums.DivisionPhaseEnum | null
     status: $Enums.DivisionStatusEnum
     sourceDivisionId: string | null
     sportId: string | null
@@ -2452,6 +2514,8 @@ export interface DivisionsFieldRefs {
   readonly eventId: Prisma.FieldRef<"Divisions", 'String'>
   readonly organizationId: Prisma.FieldRef<"Divisions", 'String'>
   readonly scope: Prisma.FieldRef<"Divisions", 'DivisionScopeEnum'>
+  readonly role: Prisma.FieldRef<"Divisions", 'DivisionRoleEnum'>
+  readonly phase: Prisma.FieldRef<"Divisions", 'DivisionPhaseEnum'>
   readonly status: Prisma.FieldRef<"Divisions", 'DivisionStatusEnum'>
   readonly sourceDivisionId: Prisma.FieldRef<"Divisions", 'String'>
   readonly sportId: Prisma.FieldRef<"Divisions", 'String'>

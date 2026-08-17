@@ -58,6 +58,7 @@ import {
   isTournamentPoolValidationError,
   removeRegisteredTeamFromTournamentPools,
 } from '@/server/events/tournamentPools';
+import { syncEventPhaseParticipantsFromEntryDivisions } from '@/server/repositories/eventDivisionPhases';
 import { isManualRegistrationPaymentMode } from '@/lib/manualRegistrationPayments';
 import { projectRelationalEventDivisionIds } from '@/server/events/eventDivisionProjection';
 
@@ -311,6 +312,8 @@ const resolveBillingDivision = async (
   return client.divisions.findFirst({
     where: {
       eventId,
+      role: 'ENTRY',
+      status: 'ACTIVE',
       OR: [
         { id: { in: candidates } },
         { key: { in: candidates } },
@@ -714,7 +717,7 @@ const placeholderNameForEventTeam = async (params: {
   let eventTeamIds = normalizeUserIdList(params.event.teamIds);
   if (!eventTeamIds.length && typeof params.tx.divisions?.findMany === 'function') {
     const divisionRows = await params.tx.divisions.findMany({
-      where: { eventId: params.event.id },
+      where: { eventId: params.event.id, role: 'ENTRY', status: 'ACTIVE' },
       orderBy: { createdAt: 'asc' },
       select: { teamIds: true },
     });
@@ -935,14 +938,12 @@ const syncDivisionTeamMembership = async (params: {
   teamId: string;
   mode: 'add' | 'remove';
   targetDivisionId: string | null;
-}, client: PrismaLike = prisma) => {
+}, client: PrismaLike = prisma): Promise<void> => {
   const rows = await client.divisions.findMany({
     where: {
       eventId: params.event.id,
-      OR: [
-        { kind: 'LEAGUE' },
-        { kind: null },
-      ],
+      role: 'ENTRY',
+      status: 'ACTIVE',
     },
     select: {
       id: true,
@@ -1677,9 +1678,8 @@ async function updateParticipants(
                   : null,
                 client: tx,
               });
-            } else {
-              await syncDivisionTeamMembershipFromRegistrations(event, tx);
             }
+            await syncDivisionTeamMembershipFromRegistrations(event, tx);
             await cancelFreeAgentRegistrationsForUsers({
               client: tx,
               eventId: event.id,

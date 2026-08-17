@@ -7,6 +7,7 @@ import {
   type WeeklyOccurrenceInput,
 } from '@/server/events/weeklyOccurrences';
 import { isTournamentPoolPlayEnabled } from '@/server/events/tournamentPools';
+import { syncEventPhaseParticipantsFromEntryDivisions } from '@/server/repositories/eventDivisionPhases';
 import { withDerivedCanonicalTeamIds } from '@/server/teams/teamMembership';
 import { acquireEventLock } from '@/server/repositories/locks';
 
@@ -457,6 +458,8 @@ const eventCapacityForDivisions = async (
     where: scopedDivisionIds.length
       ? {
           eventId: params.event.id,
+          role: 'ENTRY',
+          status: 'ACTIVE',
           OR: [
             { id: { in: scopedDivisionIds } },
             { key: { in: scopedDivisionIds } },
@@ -464,6 +467,8 @@ const eventCapacityForDivisions = async (
         }
       : {
           eventId: params.event.id,
+          role: 'ENTRY',
+          status: 'ACTIVE',
           OR: [
             { kind: 'LEAGUE' as any },
             { kind: null },
@@ -652,12 +657,29 @@ export const syncDivisionTeamMembershipFromRegistrations = async (
   if (!Boolean(event.teamSignup) || isWeeklyParentEvent(event)) {
     return [];
   }
-  if (isTournamentPoolPlayEnabled(event)) {
-    return [];
+
+  const poolPlayEnabled = isTournamentPoolPlayEnabled(event);
+  const phaseSourceDelegate = (client as any).eventDivisionPhaseSources;
+  const phaseSourceRows: Array<{ entryDivisionId?: string | null; phaseDivisionId?: string | null }> = (
+    poolPlayEnabled && typeof phaseSourceDelegate?.findMany === 'function'
+      ? await phaseSourceDelegate.findMany({
+        where: { eventId: event.id },
+        select: { entryDivisionId: true, phaseDivisionId: true },
+      })
+      : []
+  );
+  const entryIdsByPhaseId = new Map<string, string[]>();
+  for (const row of phaseSourceRows) {
+    const phaseId = normalizeId(row.phaseDivisionId)?.toLowerCase() ?? null;
+    const entryId = normalizeId(row.entryDivisionId);
+    if (!phaseId || !entryId) continue;
+    const entryIds = entryIdsByPhaseId.get(phaseId) ?? [];
+    if (!entryIds.includes(entryId)) entryIds.push(entryId);
+    entryIdsByPhaseId.set(phaseId, entryIds);
   }
 
   const divisionRows = await client.divisions.findMany({
-    where: { eventId: event.id },
+    where: { eventId: event.id, role: 'ENTRY', status: 'ACTIVE' },
     select: {
       id: true,
       key: true,
@@ -723,6 +745,13 @@ export const syncDivisionTeamMembershipFromRegistrations = async (
     if (exactIdMatch) {
       return exactIdMatch;
     }
+    const phaseEntryIds = entryIdsByPhaseId.get(normalized);
+    if (phaseEntryIds?.length === 1) {
+      return phaseEntryIds[0];
+    }
+    if (phaseEntryIds && phaseEntryIds.length > 1) {
+      return null;
+    }
 
     const keyMatch = divisionIdByUniqueKey.get(normalized);
     if (keyMatch) {
@@ -782,6 +811,10 @@ export const syncDivisionTeamMembershipFromRegistrations = async (
       });
     }),
   );
+  await syncEventPhaseParticipantsFromEntryDivisions({
+    client: client as any,
+    eventId: event.id,
+  });
 
   return activeTeamIds;
 };
@@ -829,6 +862,7 @@ export const buildEventParticipantSnapshot = async (params: {
       eventId: params.event.id,
       scope: 'EVENT',
       status: 'ACTIVE',
+      role: 'ENTRY',
       OR: [
         { kind: 'LEAGUE' as any },
         { kind: null },

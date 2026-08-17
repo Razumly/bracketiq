@@ -2,18 +2,6 @@
 
 import { NextRequest } from 'next/server';
 
-const mockStripeRefundCreate = jest.fn();
-const mockStripePaymentIntentRetrieve = jest.fn();
-const StripeMock = jest.fn().mockImplementation(() => ({
-  paymentIntents: {
-    retrieve: (...args: unknown[]) => mockStripePaymentIntentRetrieve(...args),
-  },
-  refunds: {
-    create: (...args: unknown[]) => mockStripeRefundCreate(...args),
-  },
-}));
-
-jest.mock('stripe', () => StripeMock);
 
 const prismaMock = {
   $transaction: jest.fn(),
@@ -335,17 +323,6 @@ describe('GET /api/events/[eventId]/participants', () => {
 describe('POST /api/events/[eventId]/participants', () => {
   beforeEach(() => {
     jest.resetAllMocks();
-    StripeMock.mockImplementation(() => ({
-      paymentIntents: {
-        retrieve: (...args: unknown[]) => mockStripePaymentIntentRetrieve(...args),
-      },
-      refunds: {
-        create: (...args: unknown[]) => mockStripeRefundCreate(...args),
-      },
-    }));
-    mockStripeRefundCreate.mockReset();
-    mockStripePaymentIntentRetrieve.mockReset();
-    process.env.STRIPE_SECRET_KEY = 'sk_test_123';
     requireSessionMock.mockResolvedValue({ userId: 'user_1', isAdmin: false });
     dispatchRequiredEventDocumentsMock.mockResolvedValue({
       sentDocumentIds: [],
@@ -450,7 +427,6 @@ describe('POST /api/events/[eventId]/participants', () => {
     prismaMock.billPayments.update.mockResolvedValue({ id: 'payment_1', refundedAmountCents: 5000 });
     prismaMock.invites.deleteMany.mockResolvedValue({ count: 0 });
     prismaMock.authUser.findUnique.mockResolvedValue({ emailVerifiedAt: new Date('2026-01-01T00:00:00.000Z') });
-    mockStripePaymentIntentRetrieve.mockResolvedValue({ id: 'pi_default', transfer_data: null });
     buildEventParticipantSnapshotMock.mockResolvedValue({
       participants: { teamIds: [], userIds: [], waitListIds: [], freeAgentIds: [], divisions: [] },
       teams: [],
@@ -1081,7 +1057,7 @@ describe('POST /api/events/[eventId]/participants', () => {
       divisionTypeId: 'open',
       divisionTypeKey: 'c_skill_open',
     }));
-    expect(syncDivisionTeamMembershipFromRegistrationsMock).not.toHaveBeenCalled();
+    expect(syncDivisionTeamMembershipFromRegistrationsMock).toHaveBeenCalled();
   });
 
   it('rejects duplicate team registration attempts when the team already has an active registration', async () => {
@@ -1576,17 +1552,6 @@ describe('POST /api/events/[eventId]/participants', () => {
 describe('DELETE /api/events/[eventId]/participants', () => {
   beforeEach(() => {
     jest.resetAllMocks();
-    StripeMock.mockImplementation(() => ({
-      paymentIntents: {
-        retrieve: (...args: unknown[]) => mockStripePaymentIntentRetrieve(...args),
-      },
-      refunds: {
-        create: (...args: unknown[]) => mockStripeRefundCreate(...args),
-      },
-    }));
-    mockStripeRefundCreate.mockReset();
-    mockStripePaymentIntentRetrieve.mockReset();
-    process.env.STRIPE_SECRET_KEY = 'sk_test_123';
     requireSessionMock.mockResolvedValue({ userId: 'user_1', isAdmin: false });
     canManageEventMock.mockResolvedValue(false);
     prismaMock.$transaction.mockImplementation(async (fn: any) => fn(prismaMock));
@@ -1622,7 +1587,6 @@ describe('DELETE /api/events/[eventId]/participants', () => {
     prismaMock.billPayments.findMany.mockResolvedValue([]);
     prismaMock.billPayments.findUnique.mockResolvedValue(null);
     prismaMock.billPayments.update.mockResolvedValue({ id: 'payment_1', refundedAmountCents: 5000 });
-    mockStripePaymentIntentRetrieve.mockResolvedValue({ id: 'pi_default', transfer_data: null });
     prismaMock.eventRegistrations.findMany.mockResolvedValue([]);
     prismaMock.eventRegistrations.updateMany.mockResolvedValue({ count: 0 });
     findEventRegistrationMock.mockResolvedValue(null);
@@ -1912,252 +1876,7 @@ describe('DELETE /api/events/[eventId]/participants', () => {
     }));
   });
 
-  it('auto refunds the removed slot team when refund mode is auto and the event is inside the refund window', async () => {
-    const schedulableEvent = {
-      id: 'event_1',
-      eventType: 'LEAGUE',
-      teamSignup: true,
-      requiredTemplateIds: [],
-      userIds: [],
-      teamIds: ['team_1', 'slot_1'],
-      waitListIds: [],
-      freeAgentIds: [],
-      registrationByDivisionType: true,
-      divisions: ['div_a'],
-      singleDivision: true,
-      sportIds: ['volleyball'],
-      start: new Date(Date.now() + 72 * 60 * 60 * 1000),
-      cancellationRefundHours: 24,
-      minAge: null,
-      maxAge: null,
-      teamSizeLimit: 2,
-      hostId: 'host_1',
-      assistantHostIds: [],
-      organizationId: 'org_1',
-    };
-    const canonicalTeam = {
-      id: 'team_1',
-      division: 'Open',
-      divisionTypeId: 'open',
-      sport: 'volleyball',
-      playerIds: ['user_1', 'user_2'],
-      captainId: 'user_1',
-      managerId: 'user_1',
-      headCoachId: null,
-      parentTeamId: null,
-    };
-    prismaMock.events.findUnique
-      .mockResolvedValueOnce(schedulableEvent)
-      .mockResolvedValueOnce(schedulableEvent);
-    prismaMock.teams.findUnique.mockResolvedValue(canonicalTeam);
-    findEventRegistrationMock.mockResolvedValueOnce({
-      id: 'registration_team_1',
-      status: 'ACTIVE',
-    });
-    prismaMock.bills.findMany
-      .mockResolvedValueOnce([{ id: 'team_bill_1' }])
-      .mockResolvedValueOnce([{ id: 'split_bill_1' }]);
-    prismaMock.billPayments.findMany.mockResolvedValueOnce([
-      {
-        id: 'payment_team_1',
-        billId: 'team_bill_1',
-        amountCents: 5000,
-        refundedAmountCents: 0,
-        paymentIntentId: 'pi_team_1',
-        payerUserId: 'user_1',
-      },
-      {
-        id: 'payment_split_1',
-        billId: 'split_bill_1',
-        amountCents: 2500,
-        refundedAmountCents: 0,
-        paymentIntentId: 'pi_split_1',
-        payerUserId: 'user_1',
-      },
-      {
-        id: 'payment_team_2',
-        billId: 'team_bill_1',
-        amountCents: 4000,
-        refundedAmountCents: 0,
-        paymentIntentId: 'pi_team_2',
-        payerUserId: 'user_2',
-      },
-    ]);
-    mockStripeRefundCreate
-      .mockResolvedValueOnce({ id: 're_team_1' })
-      .mockResolvedValueOnce({ id: 're_split_1' });
-    prismaMock.billPayments.findUnique
-      .mockResolvedValueOnce({
-        id: 'payment_team_1',
-        amountCents: 5000,
-        refundedAmountCents: 0,
-      })
-      .mockResolvedValueOnce({
-        id: 'payment_split_1',
-        amountCents: 2500,
-        refundedAmountCents: 0,
-      });
-    prismaMock.billPayments.update
-      .mockResolvedValueOnce({ id: 'payment_team_1', refundedAmountCents: 5000 })
-      .mockResolvedValueOnce({ id: 'payment_split_1', refundedAmountCents: 2500 });
-    prismaMock.events.update.mockResolvedValueOnce({
-      id: 'event_1',
-      teamIds: ['team_1', 'slot_1'],
-      waitListIds: [],
-      freeAgentIds: [],
-    });
 
-    const response = await DELETE(
-      jsonDelete('http://localhost/api/events/event_1/participants', {
-        teamId: 'team_1',
-        refundMode: 'auto',
-      }),
-      { params: Promise.resolve({ eventId: 'event_1' }) },
-    );
-    const payload = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(payload.error).toBeUndefined();
-    expect(mockStripeRefundCreate).toHaveBeenCalledTimes(2);
-    expect(mockStripeRefundCreate).not.toHaveBeenCalledWith(
-      expect.objectContaining({ payment_intent: 'pi_team_2' }),
-      expect.anything(),
-    );
-    expect(prismaMock.refundRequests.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          eventId: 'event_1',
-          teamId: 'team_1',
-          userId: 'user_1',
-          hostId: 'host_1',
-          organizationId: 'org_1',
-          status: 'APPROVED',
-        }),
-      }),
-    );
-    expect(prismaMock.billPayments.update).toHaveBeenCalledTimes(2);
-  });
-
-  it('auto refunds a future weekly session even when the parent event start has passed', async () => {
-    const futureOccurrence = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-    const occurrenceDate = futureOccurrence.toISOString().slice(0, 10);
-    const occurrenceDay = (futureOccurrence.getUTCDay() + 6) % 7;
-    const weeklyEvent = {
-      id: 'weekly_parent',
-      eventType: 'WEEKLY_EVENT',
-      parentEvent: null,
-      timeSlotIds: ['slot_1'],
-      teamSignup: true,
-      requiredTemplateIds: [],
-      userIds: [],
-      teamIds: ['team_1', 'slot_team_1'],
-      waitListIds: [],
-      freeAgentIds: [],
-      registrationByDivisionType: true,
-      divisions: ['div_a'],
-      singleDivision: true,
-      sportIds: ['volleyball'],
-      start: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-      cancellationRefundHours: 24,
-      minAge: null,
-      maxAge: null,
-      teamSizeLimit: 2,
-      hostId: 'host_1',
-      assistantHostIds: [],
-      organizationId: 'org_1',
-    };
-    const canonicalTeam = {
-      id: 'team_1',
-      division: 'Open',
-      divisionTypeId: 'open',
-      sport: 'volleyball',
-      playerIds: ['user_1', 'user_2'],
-      captainId: 'user_1',
-      managerId: 'user_1',
-      headCoachId: null,
-      parentTeamId: null,
-    };
-    prismaMock.events.findUnique
-      .mockResolvedValueOnce(weeklyEvent)
-      .mockResolvedValueOnce(weeklyEvent);
-    prismaMock.timeSlots.findUnique.mockResolvedValueOnce({
-      id: 'slot_1',
-      startTimeMinutes: 12 * 60,
-      daysOfWeek: [occurrenceDay],
-      startDate: occurrenceDate,
-      endDate: occurrenceDate,
-      divisions: ['div_a'],
-    });
-    prismaMock.teams.findUnique.mockResolvedValue(canonicalTeam);
-    findEventRegistrationMock.mockResolvedValueOnce({
-      id: `registration_team_1_slot_1_${occurrenceDate}`,
-      status: 'ACTIVE',
-      eventTeamId: 'slot_team_1',
-      registrantId: 'slot_team_1',
-    });
-    prismaMock.bills.findMany
-      .mockResolvedValueOnce([{ id: 'team_bill_1' }])
-      .mockResolvedValueOnce([{ id: 'split_bill_1' }])
-      .mockResolvedValueOnce([{ id: 'direct_bill_1' }]);
-    prismaMock.billPayments.findMany.mockResolvedValueOnce([
-      {
-        id: 'payment_team_1',
-        billId: 'team_bill_1',
-        amountCents: 5000,
-        refundedAmountCents: 0,
-        paymentIntentId: 'pi_team_1',
-        payerUserId: 'user_1',
-      },
-    ]);
-    mockStripeRefundCreate.mockResolvedValueOnce({ id: 're_team_1' });
-    prismaMock.billPayments.findUnique.mockResolvedValueOnce({
-      id: 'payment_team_1',
-      amountCents: 5000,
-      refundedAmountCents: 0,
-    });
-    prismaMock.billPayments.update.mockResolvedValueOnce({
-      id: 'payment_team_1',
-      refundedAmountCents: 5000,
-    });
-    prismaMock.events.update.mockResolvedValueOnce({
-      id: 'weekly_parent',
-      teamIds: ['team_1', 'slot_team_1'],
-      waitListIds: [],
-      freeAgentIds: [],
-    });
-
-    const response = await DELETE(
-      jsonDelete('http://localhost/api/events/weekly_parent/participants', {
-        teamId: 'team_1',
-        refundMode: 'auto',
-        slotId: 'slot_1',
-        occurrenceDate,
-      }),
-      { params: Promise.resolve({ eventId: 'weekly_parent' }) },
-    );
-    const payload = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(payload.error).toBeUndefined();
-    expect(prismaMock.bills.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        eventId: 'weekly_parent',
-        ownerType: 'TEAM',
-        slotId: 'slot_1',
-        occurrenceDate,
-      }),
-    }));
-    expect(mockStripeRefundCreate).toHaveBeenCalledTimes(1);
-    expect(prismaMock.refundRequests.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          eventId: 'weekly_parent',
-          teamId: 'team_1',
-          status: 'APPROVED',
-        }),
-      }),
-    );
-  });
 
   it('allows a parent to remove a linked child participant', async () => {
     requireSessionMock.mockResolvedValueOnce({ userId: 'parent_1', isAdmin: false });

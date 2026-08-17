@@ -1166,6 +1166,8 @@ export const loadOrganizationFinanceSummary = async (
       ? client.divisions.findMany({
         where: {
           eventId: { in: eventIds },
+          role: 'ENTRY',
+          status: 'ACTIVE',
           OR: [
             { kind: 'LEAGUE' },
             { kind: null },

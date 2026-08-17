@@ -360,6 +360,17 @@ export const editorSnapshotToFormValues = (
 
 export const editorDraftToLegacyEvent = (draft: EventEditorDraft, eventId?: string | null): Record<string, unknown> => {
   const { basics, participation, registration, competition, schedule, resources, staff } = draft;
+  const playoffDivisionIds = new Set(competition.playoffDivisionDetails.map((detail) => detail.id));
+  const hasTournamentBracketProxy = basics.eventType.trim().toUpperCase() === 'TOURNAMENT'
+    && competition.includePlayoffs
+    && competition.divisionDetails.some(
+      (detail) => detail.kind === 'LEAGUE' && playoffDivisionIds.has(detail.id),
+    );
+  const serializedDivisionDetails = hasTournamentBracketProxy
+    ? competition.divisionDetails.filter(
+      (detail) => !(detail.kind === 'LEAGUE' && playoffDivisionIds.has(detail.id)),
+    )
+    : competition.divisionDetails;
   return {
     ...(eventId ? { id: eventId, $id: eventId } : {}),
     ...basics,
@@ -371,6 +382,7 @@ export const editorDraftToLegacyEvent = (draft: EventEditorDraft, eventId?: stri
     requiredDocumentIds: registration.requiredDocumentIds,
     divisions: competition.divisionIds,
     ...competition,
+    divisionDetails: serializedDivisionDetails,
     end: schedule.mode === 'FIXED_END' ? schedule.endConstraint : schedule.generatedScheduleEnd ?? null,
     scheduleEndConstraint: schedule.mode === 'FIXED_END' ? schedule.endConstraint : null,
     generatedScheduleEnd: schedule.mode === 'GENERATED_END' ? schedule.generatedScheduleEnd : null,

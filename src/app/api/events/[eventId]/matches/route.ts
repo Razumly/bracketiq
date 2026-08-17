@@ -394,7 +394,7 @@ const ensureEventDivisionMembershipForTeam = async (
   divisionId: string,
 ) => {
   const rows = await tx.divisions.findMany({
-    where: { eventId },
+    where: { eventId, role: 'ENTRY', status: 'ACTIVE' },
     select: { id: true, key: true, kind: true, teamIds: true },
   });
 

@@ -25,6 +25,7 @@ describe('projectRelationalEventDivisionIds', () => {
         eventId: { in: ['event_1'] },
         scope: 'EVENT',
         status: 'ACTIVE',
+        role: 'ENTRY',
         OR: [
           { kind: 'LEAGUE' },
           { kind: null },

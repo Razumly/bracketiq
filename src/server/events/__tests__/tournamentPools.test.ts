@@ -186,7 +186,9 @@ describe('tournamentPools', () => {
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         eventId: 'event_1',
-        kind: 'LEAGUE',
+        role: 'PHASE',
+        phase: 'POOL',
+        status: 'ACTIVE',
       },
     }));
   });

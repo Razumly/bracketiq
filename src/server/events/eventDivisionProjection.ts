@@ -23,6 +23,7 @@ export async function loadRelationalEventDivisionIdsByEventId(
       eventId: { in: normalizedEventIds },
       scope: 'EVENT',
       status: 'ACTIVE',
+      role: 'ENTRY',
       OR: [
         { kind: 'LEAGUE' },
         { kind: null },

@@ -71,6 +71,7 @@ import {
   resolveSelectedRentedFieldIds,
   toFieldIdList,
 } from '../eventForm/resourceGroups';
+import { buildDefaultFieldState } from '../eventForm/fieldDefaults';
 import {
   createEmptyStaffInvite,
   formatStaffRoleLabel,
@@ -973,6 +974,37 @@ describe('event form resource grouping helpers', () => {
     expect(removeOrganizationFieldsFromPool(merged, 'host_org').map((field) => field.$id)).toEqual(['local_1']);
     expect(isGeneratedLocalFieldPlaceholder(makeField({ $id: 'local_1', name: 'Field 1' }), 0)).toBe(true);
     expect(isGeneratedLocalFieldPlaceholder(makeField({ $id: 'local_1', name: 'Custom Court' }), 0)).toBe(false);
+  });
+
+  it('renames legacy generic local placeholders to the sport resource label', () => {
+    const fields = [
+      makeField({
+        $id: 'local_1',
+        name: 'Resource 1',
+        $createdAt: '2026-01-01T00:00:00.000Z',
+      } as any),
+      makeField({
+        $id: 'local_2',
+        name: 'Court 2',
+        $createdAt: '2026-01-02T00:00:00.000Z',
+      } as any),
+    ];
+    const state = buildDefaultFieldState({
+      base: {
+        eventType: 'EVENT',
+        parentEvent: null,
+        fields,
+        selectedFieldIds: fields.map((field) => field.$id),
+      },
+      activeEditingEvent: { fields } as any,
+      immutableFields: [],
+      hasImmutableFields: false,
+      isCreateMode: false,
+      resourceLabelSingular: 'Court',
+    });
+
+    expect(state.defaultFields.map((field) => field.name)).toEqual(['Court 1', 'Court 2']);
+    expect(isGeneratedLocalFieldPlaceholder(makeField({ $id: 'local_1', name: 'Resource 1' }), 0, 'Court')).toBe(true);
   });
 
   it('resolves selected fields referenced by slots and falls back to immutable fields when restricted', () => {

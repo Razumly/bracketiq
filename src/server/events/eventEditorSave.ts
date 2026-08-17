@@ -5,7 +5,10 @@ import { acquireEventLock } from "@/server/repositories/locks";
 import { upsertEventFromPayload } from "@/server/repositories/events";
 import { hasOrgPermission, canManageEvent } from "@/server/accessControl";
 import { ORG_PERMISSIONS } from "@/lib/organizationPermissions";
-import { collectOrganizationHostIds, normalizeEntityId } from "@/lib/organizationEventAccess";
+import {
+  collectOrganizationHostIds,
+  normalizeEntityId,
+} from "@/lib/organizationEventAccess";
 import {
   EVENT_STAFF_CONTRACT_VERSION,
   EventStaffInputError,
@@ -36,6 +39,7 @@ import {
   editorMatchProjectionsFor,
   EventScheduleMutationError,
   EventScheduleRevisionConflictError,
+  persistCreateOnlyMatchGraph,
   reconcileEventSchedule,
 } from "@/server/scheduler/eventScheduleMutation";
 import {
@@ -384,12 +388,13 @@ const saveWithinTransaction = async (
       .staffRevision;
   let staffResult;
   try {
-    const staffDraft = resolvedHostId && draft.basics.hostId !== resolvedHostId
-      ? {
-          ...draft,
-          basics: { ...draft.basics, hostId: resolvedHostId },
-        }
-      : draft;
+    const staffDraft =
+      resolvedHostId && draft.basics.hostId !== resolvedHostId
+        ? {
+            ...draft,
+            basics: { ...draft.basics, hostId: resolvedHostId },
+          }
+        : draft;
     staffResult = await reconcileEventStaffDesiredState(
       tx,
       eventId,
@@ -436,12 +441,14 @@ export const saveEventEditor = async (
     ) {
       throw new EditorPermissionError();
     }
-    const currentHostId = typeof currentEvent.hostId === "string"
-      ? currentEvent.hostId.trim() || null
-      : null;
-    const nextHostId = typeof command.draft.basics.hostId === "string"
-      ? command.draft.basics.hostId.trim() || null
-      : null;
+    const currentHostId =
+      typeof currentEvent.hostId === "string"
+        ? currentEvent.hostId.trim() || null
+        : null;
+    const nextHostId =
+      typeof command.draft.basics.hostId === "string"
+        ? command.draft.basics.hostId.trim() || null
+        : null;
     if (currentHostId !== nextHostId) {
       try {
         await assertEventHostTransition({
@@ -499,9 +506,18 @@ export const saveEventEditor = async (
         currentSnapshot.scheduleState.revision,
       );
     }
+    const hasOnlyReusableUnplacedGraph =
+      currentSnapshot.scheduleState.matchCount === 0
+      || (
+        currentSnapshot.scheduleState.matchDemand?.total ===
+          currentSnapshot.scheduleState.matchCount
+        && currentSnapshot.scheduleState.matchDemand?.placed === 0
+        && currentSnapshot.scheduleState.matchDemand?.unplaced ===
+          currentSnapshot.scheduleState.matchCount
+      );
     if (
       transition.mode === "BUILD_IF_MISSING" &&
-      (currentSnapshot.scheduleState.matchCount > 0 ||
+      (!hasOnlyReusableUnplacedGraph ||
         !["LEAGUE", "TOURNAMENT"].includes(nextEventType))
     ) {
       throw new EditorScheduleIntentError(
@@ -640,19 +656,26 @@ export const createEventEditor = async (
           select: { organizationId: true, userId: true, types: true },
         }),
         tx.invites.findMany({
-          where: { organizationId, type: 'STAFF' },
-          select: { organizationId: true, userId: true, type: true, status: true },
+          where: { organizationId, type: "STAFF" },
+          select: {
+            organizationId: true,
+            userId: true,
+            type: true,
+            status: true,
+          },
         }),
       ]);
       if (!organization) {
         throw new EditorCapabilityError("Organization not found.");
       }
       if (organization.ownershipStatus?.trim().toUpperCase() !== "CLAIMED") {
-        throw new EditorPermissionError("The Organization must be claimed before creating Events.");
+        throw new EditorPermissionError(
+          "The Organization must be claimed before creating Events.",
+        );
       }
       if (
-        !actor.isAdmin
-        && !(await hasOrgPermission(
+        !actor.isAdmin &&
+        !(await hasOrgPermission(
           { ...actor, isAdmin: Boolean(actor.isAdmin) },
           organization,
           ORG_PERMISSIONS.EVENTS_MANAGE,
@@ -670,20 +693,27 @@ export const createEventEditor = async (
           "Enable event management tools before creating events.",
         );
       }
-      const eligibleHostIds = new Set(collectOrganizationHostIds({
-        ownerId: organization.ownerId,
-        staffMembers,
-        staffInvites,
-      }));
-      resolvedCreateHostId = requestedHostId
-        ?? normalizeEntityId(organization.ownerId)
-        ?? actor.userId;
+      const eligibleHostIds = new Set(
+        collectOrganizationHostIds({
+          ownerId: organization.ownerId,
+          staffMembers,
+          staffInvites,
+        }),
+      );
+      resolvedCreateHostId =
+        requestedHostId ??
+        normalizeEntityId(organization.ownerId) ??
+        actor.userId;
       if (!eligibleHostIds.has(resolvedCreateHostId)) {
         throw new EditorPermissionError(
           "The selected Event Host is not an eligible Organization Host.",
         );
       }
-    } else if (!actor.isAdmin && requestedHostId && requestedHostId !== actor.userId) {
+    } else if (
+      !actor.isAdmin &&
+      requestedHostId &&
+      requestedHostId !== actor.userId
+    ) {
       throw new EditorPermissionError(
         "The selected event host cannot create this event.",
       );
@@ -702,9 +732,12 @@ export const createEventEditor = async (
       client: tx,
     });
     if (
-      command.expectedRevisions.editorRevision !== createSnapshot.editorRevision ||
-      command.expectedRevisions.staffRevision !== createSnapshot.staffRevision ||
-      command.expectedRevisions.scheduleRevision !== createSnapshot.scheduleState.revision
+      command.expectedRevisions.editorRevision !==
+        createSnapshot.editorRevision ||
+      command.expectedRevisions.staffRevision !==
+        createSnapshot.staffRevision ||
+      command.expectedRevisions.scheduleRevision !==
+        createSnapshot.scheduleState.revision
     ) {
       throw new EditorRevisionConflictError(
         createSnapshot.editorRevision,
@@ -724,6 +757,21 @@ export const createEventEditor = async (
       createSnapshot,
       resolvedCreateHostId,
     ));
+    if (command.completion.mode === "CREATE_ONLY") {
+      const eventType = command.draft.basics.eventType.trim().toUpperCase();
+      if (["LEAGUE", "TOURNAMENT"].includes(eventType)) {
+        const graph = await persistCreateOnlyMatchGraph({
+          tx,
+          eventId: claimed.eventId,
+          includePlaceholderTeams: true,
+        });
+        scheduleOutcome = {
+          status: "NOT_REQUESTED",
+          matchCount: graph.matches.length,
+          warnings: [],
+        };
+      }
+    }
     if (command.completion.mode === "CREATE_AND_BUILD_SCHEDULE") {
       const eventType = command.draft.basics.eventType.trim().toUpperCase();
       if (!["LEAGUE", "TOURNAMENT"].includes(eventType)) {
@@ -857,7 +905,8 @@ export const createEventFromEditor = async (
   command: CreateEventEditorCommand,
   actor: EditorActor,
   options: EditorSaveOptions = {},
-): Promise<EventEditorCreateResult> => createEventEditor(actor, command, options);
+): Promise<EventEditorCreateResult> =>
+  createEventEditor(actor, command, options);
 
 export const saveEventFromEditor = async (
   eventId: string,
