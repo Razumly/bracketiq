@@ -22,7 +22,7 @@ describe('CI quality gates', () => {
 
   it('runs route-inclusive Jest coverage and TypeScript checks for pushes and pull requests', () => {
     const workflow = fs.readFileSync(
-      path.join(process.cwd(), '.github', 'workflows', 'ci.yml'),
+      path.resolve(process.cwd(), '..', '..', '.github', 'workflows', 'site-ci.yml'),
       'utf8',
     );
 
