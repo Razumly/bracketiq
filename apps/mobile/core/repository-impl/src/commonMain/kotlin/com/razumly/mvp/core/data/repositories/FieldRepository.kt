@@ -614,6 +614,7 @@ private fun RentalAvailabilityFieldDto.toRentalAvailabilityField(
     val mappedField = Field(
         fieldNumber = fieldNumber ?: 0,
         name = name.trim().takeIf(String::isNotBlank),
+        sportIds = sportIds.map(String::trim).filter(String::isNotBlank).distinct(),
         rentalSlotIds = slots.map(TimeSlot::id),
         organizationId = organizationId,
         facilityId = normalizedFacilityId,

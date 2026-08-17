@@ -5,6 +5,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import com.razumly.mvp.core.data.dataTypes.SportResourceLabels
+import com.razumly.mvp.core.data.dataTypes.GENERIC_SPORT_RESOURCE_LABELS
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -85,9 +87,10 @@ internal fun buildScheduleDetailsRows(
     event: Event,
     fieldCount: Int,
     slotCount: Int,
+    resourceLabels: SportResourceLabels = GENERIC_SPORT_RESOURCE_LABELS,
 ): List<DetailRowSpec> {
     return buildList {
-        add(DetailRowSpec("Field count", fieldCount.coerceAtLeast(0).toString()))
+        add(DetailRowSpec("${resourceLabels.singular} count", fieldCount.coerceAtLeast(0).toString()))
         add(DetailRowSpec("Weekly timeslots", slotCount.toString()))
 
         when (event.eventType) {

@@ -150,9 +150,11 @@ internal class CreateEventHarness(
             event = Event(
                 id = "bootstrap-event",
                 hostId = "user-1",
-                start = Instant.parse("2026-01-01T00:00:00Z"),
+                start = canonicalRentalOptions.minOfOrNull(RentalResourceOption::start)
+                    ?: Instant.parse("2026-01-01T00:00:00Z"),
                 timeZone = TimeZone.currentSystemDefault().id,
-                end = Instant.parse("2026-01-01T02:00:00Z"),
+                end = canonicalRentalOptions.maxOfOrNull(RentalResourceOption::end)
+                    ?: Instant.parse("2026-01-01T02:00:00Z"),
             ),
             fields = canonicalRentalOptions
                 .filter { option -> option.bookingId.trim() == bootstrap.rentalBookingId?.trim() }

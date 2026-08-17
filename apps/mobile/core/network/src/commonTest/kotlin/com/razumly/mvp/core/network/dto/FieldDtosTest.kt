@@ -15,6 +15,7 @@ class FieldDtosTest {
                     {
                       "id": "field_1",
                       "name": "Court 1",
+                      "sportIds": ["volleyball"],
                       "organizationId": "org_1"
                     }
                   ]
@@ -26,5 +27,6 @@ class FieldDtosTest {
         assertEquals("field_1", response.fields.single().id)
         assertEquals(0, response.fields.single().fieldNumber)
         assertEquals("Court 1", response.fields.single().name)
+        assertEquals(listOf("volleyball"), response.fields.single().sportIds)
     }
 }

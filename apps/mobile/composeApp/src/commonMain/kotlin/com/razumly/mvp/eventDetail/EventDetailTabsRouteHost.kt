@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.SportResourceLabels
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.EventParticipantDivisionWarning
 import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
@@ -38,6 +39,8 @@ internal data class EventDetailTabsRouteState(
     val hasScheduleView: Boolean,
     val hasStandingsView: Boolean,
     val selectedEvent: EventWithFullRelations,
+    val resourceLabels: SportResourceLabels,
+    val resourceLabelsByFieldId: Map<String, SportResourceLabels>,
     val tournamentPoolPlayEnabled: Boolean,
     val tournamentBracketDivisionOptions: List<BracketDivisionOption>,
     val joinDivisionOptions: List<BracketDivisionOption>,
@@ -421,6 +424,8 @@ internal fun EventDetailTabsRouteHost(
             showFab = showFab,
             isDetailDockExpanded = isDetailDockExpanded,
             selectedEvent = state.selectedEvent,
+            resourceLabels = state.resourceLabels,
+            resourceLabelsByFieldId = state.resourceLabelsByFieldId,
             tournamentPoolPlayEnabled = state.tournamentPoolPlayEnabled,
             selectedSchedulePoolDivisionId = state.selectedSchedulePoolDivisionId,
             selectedScheduleDivisionId = state.selectedScheduleDivisionId,

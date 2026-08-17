@@ -22,7 +22,7 @@ class CanonicalApiIdentityContractTest {
             """{"id":"facility-canonical","name":"Main Gym"}""",
         ).toFacilityOrNull()
         val sport = jsonMVP.decodeFromString<SportApiDto>(
-            """{"id":"sport-canonical","name":"Volleyball"}""",
+            """{"id":"sport-canonical","name":"Volleyball","resourceLabelSingular":"Court","resourceLabelPlural":"Courts"}""",
         ).toSportOrNull()
         val group = jsonMVP.decodeFromString<ChatGroupApiDto>(
             """{"id":"chat-canonical","hostId":"user-canonical","userIds":["user-canonical"]}""",

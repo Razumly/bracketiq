@@ -98,6 +98,7 @@ internal data class RentalFieldDto(
     val id: String? = null,
     val fieldNumber: Int? = null,
     val divisions: List<String> = emptyList(),
+    val sportIds: List<String> = emptyList(),
     val lat: Double? = null,
     val long: Double? = null,
     val heading: Double? = null,
@@ -269,6 +270,7 @@ internal fun RentalFieldDto.toFieldOrNull(
     return Field(
         fieldNumber = fieldNumber ?: 0,
         divisions = divisions.normalizeStringList(),
+        sportIds = sportIds.normalizeStringList(),
         lat = lat,
         long = long,
         heading = heading,

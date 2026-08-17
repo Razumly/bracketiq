@@ -192,6 +192,7 @@ private fun EventEditorFieldDto.toDomain(): Field? {
     return Field(
         fieldNumber = 0,
         divisions = emptyList(),
+        sportIds = sportIds.map(String::trim).filter(String::isNotBlank).distinct(),
         lat = lat ?: latitude,
         long = long ?: longitude,
         heading = heading,
@@ -708,7 +709,7 @@ private fun Field.toDto(existing: EventEditorFieldDto? = null): EventEditorField
     heading = heading,
     inUse = inUse,
     rentalSlotIds = rentalSlotIds,
-    sportIds = existing?.sportIds.orEmpty(),
+    sportIds = sportIds.map(String::trim).filter(String::isNotBlank).distinct(),
     createdBy = existing?.createdBy,
     archivedAt = existing?.archivedAt,
     archivedByUserId = existing?.archivedByUserId,

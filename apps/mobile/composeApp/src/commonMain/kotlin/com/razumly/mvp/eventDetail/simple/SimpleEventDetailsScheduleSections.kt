@@ -111,6 +111,7 @@ internal fun LazyListScope.simpleEventDetailsScheduleSection(
                     event = state.event,
                     fieldCount = state.readOnlyFieldCount,
                     slotCount = state.timeSlots.size,
+                    resourceLabels = state.resourceLabels,
                 ),
             )
             ScheduleTimeslotsReadOnlyList(
@@ -118,12 +119,14 @@ internal fun LazyListScope.simpleEventDetailsScheduleSection(
                 fieldsById = state.fieldsById,
                 divisionDetails = state.divisionDetails,
                 fallbackDivisionIds = state.fallbackDivisionIds,
+                resourceLabels = state.resourceLabels,
             )
         },
         editContent = {
             LeagueScheduleFields(
                 fieldCount = state.fieldCount,
                 fields = state.fields,
+                resourceLabels = state.resourceLabels,
                 slots = state.leagueTimeSlots,
                 availableRentalResources = state.availableRentalResources,
                 selectedRentalResourceIds = state.selectedRentalResourceIds,

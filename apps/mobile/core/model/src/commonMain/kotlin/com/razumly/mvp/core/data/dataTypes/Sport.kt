@@ -6,6 +6,8 @@ import kotlinx.serialization.Serializable
 data class Sport(
     val id: String,
     val name: String,
+    val resourceLabelSingular: String = "Resource",
+    val resourceLabelPlural: String = "Resources",
     val skillDivisionTypes: List<DivisionTypeParameterOption> = emptyList(),
     val matchRulesTemplate: MatchRulesConfigMVP? = null,
     val usePointsForWin: Boolean,
@@ -52,7 +54,56 @@ data class Sport(
     val usePenaltyPointsUnsporting: Boolean,
     val usePointPrecision: Boolean,
     val officialPositionTemplates: List<SportOfficialPositionTemplate> = emptyList(),
+) {
+    init {
+        require(resourceLabelSingular.isNotBlank() && resourceLabelSingular == resourceLabelSingular.trim() && resourceLabelSingular.length <= 40) {
+            "Sport.resourceLabelSingular must be a trimmed, nonblank string with at most 40 characters."
+        }
+        require(resourceLabelPlural.isNotBlank() && resourceLabelPlural == resourceLabelPlural.trim() && resourceLabelPlural.length <= 40) {
+            "Sport.resourceLabelPlural must be a trimmed, nonblank string with at most 40 characters."
+        }
+    }
+}
+
+@Serializable
+data class SportResourceLabels(
+    val singular: String,
+    val plural: String,
 )
+
+val GENERIC_SPORT_RESOURCE_LABELS = SportResourceLabels(
+    singular = "Resource",
+    plural = "Resources",
+)
+fun SportResourceLabels.inDiagnostic(message: String): String =
+    message
+        .replace("Resources", plural)
+        .replace("Resource", singular)
+
+fun resolveEventResourceLabels(
+    sportIds: List<String>,
+    sports: List<Sport>,
+    resourceSportIds: List<String> = emptyList(),
+): SportResourceLabels {
+    val eventSportIds = sportIds.map(String::trim).filter(String::isNotBlank).distinct()
+    val scopedSportIds = resourceSportIds
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .distinct()
+        .filter { eventSportIds.isEmpty() || it in eventSportIds }
+    val labelSportIds = when {
+        scopedSportIds.size == 1 -> scopedSportIds
+        eventSportIds.size == 1 -> eventSportIds
+        else -> emptyList()
+    }
+    val sport = labelSportIds.singleOrNull()?.let { sportId ->
+        sports.firstOrNull { it.id == sportId }
+    } ?: return GENERIC_SPORT_RESOURCE_LABELS
+    return SportResourceLabels(
+        singular = sport.resourceLabelSingular,
+        plural = sport.resourceLabelPlural,
+    )
+}
 
 @Serializable
 data class DivisionTypeParameterOption(
@@ -85,6 +136,8 @@ fun DivisionTypeParameters.skillsForSport(sportId: String?): List<DivisionTypePa
 @Serializable
 data class SportDTO(
     val name: String,
+    val resourceLabelSingular: String = "Resource",
+    val resourceLabelPlural: String = "Resources",
     val skillDivisionTypes: List<DivisionTypeParameterOption> = emptyList(),
     val matchRulesTemplate: MatchRulesConfigMVP? = null,
     val usePointsForWin: Boolean = false,
@@ -136,6 +189,8 @@ data class SportDTO(
         Sport(
             id = id,
             name = name,
+            resourceLabelSingular = resourceLabelSingular,
+            resourceLabelPlural = resourceLabelPlural,
             skillDivisionTypes = skillDivisionTypes,
             matchRulesTemplate = matchRulesTemplate,
             usePointsForWin = usePointsForWin,

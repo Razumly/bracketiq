@@ -30,7 +30,7 @@ class EventMatchEditHelpersTest {
     }
 
     @Test
-    fun validateEditableMatches_rejects_overlapping_matches_on_same_field() {
+    fun validateEditableMatches_rejects_overlapping_matches_on_same_resource() {
         val first = relation(
             match(
                 id = "match-1",
@@ -58,7 +58,7 @@ class EventMatchEditHelpersTest {
         )
 
         assertFalse(result.isValid)
-        assertEquals("Matches #1 and #2 overlap on the same field", result.errorMessage)
+        assertEquals("Matches #1 and #2 overlap on the same Resource", result.errorMessage)
     }
 
     @Test
@@ -94,7 +94,7 @@ class EventMatchEditHelpersTest {
     }
 
     @Test
-    fun validateEditableMatches_rejects_staged_schedule_match_without_field_start_and_end() {
+    fun validateEditableMatches_rejects_staged_schedule_match_without_resource_start_and_end() {
         val stagedId = "client:match-1"
         val result = validateEditableMatches(
             matches = listOf(relation(match(id = stagedId, matchId = 1))),
@@ -110,7 +110,7 @@ class EventMatchEditHelpersTest {
         )
 
         assertFalse(result.isValid)
-        assertEquals("Schedule match #1 requires field, start, and end.", result.errorMessage)
+        assertEquals("Schedule match #1 requires Resource, start, and end.", result.errorMessage)
     }
 
     @Test

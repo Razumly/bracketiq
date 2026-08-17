@@ -11,6 +11,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.Sport
+import com.razumly.mvp.core.data.dataTypes.SportResourceLabels
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
@@ -55,6 +56,7 @@ internal data class EventDetailsScheduleState(
     val supportsScheduleConfig: Boolean,
     val event: Event,
     val editEvent: Event,
+    val resourceLabels: SportResourceLabels,
     val readOnlyFieldCount: Int,
     val timeSlots: List<TimeSlot>,
     val fieldsById: Map<String, Field>,
@@ -174,6 +176,7 @@ internal fun LazyListScope.eventDetailsScheduleSection(
                     event = state.event,
                     fieldCount = state.readOnlyFieldCount,
                     slotCount = state.timeSlots.size,
+                    resourceLabels = state.resourceLabels,
                 ),
             )
             ScheduleTimeslotsReadOnlyList(
@@ -181,12 +184,14 @@ internal fun LazyListScope.eventDetailsScheduleSection(
                 fieldsById = state.fieldsById,
                 divisionDetails = state.divisionDetails,
                 fallbackDivisionIds = state.fallbackDivisionIds,
+                resourceLabels = state.resourceLabels,
             )
         },
         editContent = {
             LeagueScheduleFields(
                 fieldCount = state.fieldCount,
                 fields = state.fields,
+                resourceLabels = state.resourceLabels,
                 slots = state.leagueTimeSlots,
                 availableRentalResources = state.availableRentalResources,
                 selectedRentalResourceIds = state.selectedRentalResourceIds,
@@ -216,7 +221,7 @@ internal fun LazyListScope.eventDetailsScheduleSection(
                 allowDivisionEditsWhenReadOnly = state.allowDivisionEditsWhenReadOnly,
                 allowLocalResourceCreationWithRentalResources = state.allowLocalResourceCreationWithRentalResources,
                 fieldCountError = if (state.showValidationErrors && !state.isFieldCountValid) {
-                    "Resource count must be at least 1."
+                    "${state.resourceLabels.singular} count must be at least 1."
                 } else {
                     null
                 },

@@ -35,6 +35,7 @@ internal data class EventEditPayloadInput(
     val selectedRentalFields: List<Field>,
     val leagueScoringConfig: LeagueScoringConfigDTO,
     val originalEventStart: Instant,
+    val resourceLabelSingular: String = "Resource",
     val normalizeSlotResourceSelection: (TimeSlot, Set<String>) -> TimeSlot = { slot, _ -> slot },
     val idFactory: () -> String = ::newId,
 )
@@ -72,6 +73,7 @@ internal object EventEditPayloadBuilder {
                 event = eventDraft,
                 editableFields = input.editableFields,
                 excludedFieldIds = selectedRentalFieldIdSet,
+                resourceLabelSingular = input.resourceLabelSingular,
                 idFactory = input.idFactory,
             )
         } else {
@@ -208,6 +210,7 @@ internal object EventEditPayloadBuilder {
     private fun buildFieldDrafts(
         event: Event,
         editableFields: List<Field>,
+        resourceLabelSingular: String,
         excludedFieldIds: Set<String> = emptySet(),
         idFactory: () -> String = ::newId,
     ): FieldDraftResult {
@@ -222,7 +225,7 @@ internal object EventEditPayloadBuilder {
                 field.copy(
                     id = if (field.id.isBlank()) idFactory() else field.id,
                     fieldNumber = fieldNumber,
-                    name = field.name?.takeIf(String::isNotBlank) ?: "Field $fieldNumber",
+                    name = field.name?.takeIf(String::isNotBlank) ?: "$resourceLabelSingular $fieldNumber",
                     divisions = field.divisions
                         .normalizeDivisionIdentifiers()
                         .ifEmpty { defaultFieldDivisions(event) },
@@ -309,6 +312,7 @@ internal fun syncEditableLeagueSlotBoundaries(
 internal fun buildEditableFieldDrafts(
     event: Event,
     sourceFields: List<Field>,
+    resourceLabelSingular: String = "Resource",
     idFactory: () -> String = ::newId,
     preserveSourceValues: Boolean = false,
 ): List<Field> {
@@ -324,7 +328,7 @@ internal fun buildEditableFieldDrafts(
                 organizationId = event.organizationId,
                 id = fieldId,
             ).copy(
-                name = "Field ${index + 1}",
+                name = "$resourceLabelSingular ${index + 1}",
                 location = defaultFieldLocation(event),
             )
         }
@@ -349,7 +353,7 @@ internal fun buildEditableFieldDrafts(
         field.copy(
             id = field.id.trim().takeIf(String::isNotBlank) ?: idFactory(),
             fieldNumber = index + 1,
-            name = field.name?.takeIf(String::isNotBlank) ?: "Field ${index + 1}",
+            name = field.name?.takeIf(String::isNotBlank) ?: "$resourceLabelSingular ${index + 1}",
             divisions = field.divisions
                 .normalizeDivisionIdentifiers()
                 .ifEmpty { defaultFieldDivisions(event) },

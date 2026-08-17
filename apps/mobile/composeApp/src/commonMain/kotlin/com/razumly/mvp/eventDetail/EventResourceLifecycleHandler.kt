@@ -3,6 +3,7 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
+import com.razumly.mvp.core.data.dataTypes.resolveEventResourceLabels
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ISportsRepository
@@ -76,6 +77,10 @@ internal class EventResourceLifecycleHandler(
         editDraftCoordinator.refreshReadOnlyDraft(
             event = state.relations.event,
             sourceFields = state.fields,
+            resourceLabelSingular = resolveEventResourceLabels(
+                sportIds = state.relations.event.sportIds,
+                sports = sportsCatalogCoordinator.currentSports(),
+            ).singular,
             leagueScoringConfig = state.relations.leagueScoringConfig?.toDto()
                 ?: LeagueScoringConfigDTO(),
         )

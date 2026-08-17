@@ -41,6 +41,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.GENERIC_SPORT_RESOURCE_LABELS
+import com.razumly.mvp.core.data.dataTypes.SportResourceLabels
+import com.razumly.mvp.core.data.dataTypes.inDiagnostic
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
@@ -127,8 +130,8 @@ private fun String?.cleanLabel(): String? = this
     ?.trim()
     ?.takeIf(String::isNotBlank)
 
-private fun Field.resourceLabel(): String {
-    val rawLabel = name.cleanLabel() ?: "Resource $fieldNumber"
+private fun Field.resourceLabel(resourceSingular: String): String {
+    val rawLabel = name.cleanLabel() ?: "$resourceSingular $fieldNumber"
     val facility = facilityLabel() ?: return rawLabel
     val separators = listOf(" - ", " – ", ": ", " / ")
     val redundantPrefix = separators.firstOrNull { separator ->
@@ -160,7 +163,10 @@ private fun Field.facilityGroupKey(): String {
         ?: "ungrouped"
 }
 
-private fun buildFacilityResourceGroups(fields: List<Field>): List<FacilityResourceGroup> {
+private fun buildFacilityResourceGroups(
+    fields: List<Field>,
+    resourceLabels: SportResourceLabels,
+): List<FacilityResourceGroup> {
     return fields
         .mapIndexed { index, field -> ResourceListItem(index = index, field = field) }
         .groupBy { item -> item.field.facilityGroupKey() }
@@ -169,16 +175,19 @@ private fun buildFacilityResourceGroups(fields: List<Field>): List<FacilityResou
             val facilityLabel = firstField?.facilityLabel()
             FacilityResourceGroup(
                 key = key,
-                label = facilityLabel ?: "Resources",
+                label = facilityLabel ?: resourceLabels.plural,
                 description = firstField?.facilityDescription(),
                 hasFacility = facilityLabel != null || firstField?.facilityId.cleanLabel() != null,
-                resources = resources.sortedBy { item -> item.field.resourceLabel().lowercase() },
+                resources = resources.sortedBy { item -> item.field.resourceLabel(resourceLabels.singular).lowercase() },
             )
         }
         .sortedWith(compareBy<FacilityResourceGroup> { !it.hasFacility }.thenBy { it.label.lowercase() })
 }
 
-private fun buildFacilityRentalResourceGroups(options: List<RentalResourceOption>): List<FacilityRentalResourceGroup> {
+private fun buildFacilityRentalResourceGroups(
+    options: List<RentalResourceOption>,
+    resourceLabels: SportResourceLabels,
+): List<FacilityRentalResourceGroup> {
     return options
         .map { option -> RentalResourceListItem(option = option) }
         .groupBy { item -> item.option.field.facilityGroupKey() }
@@ -189,10 +198,12 @@ private fun buildFacilityRentalResourceGroups(options: List<RentalResourceOption
                 key = key,
                 label = firstField?.facilityLabel()
                     ?: firstOption?.organizationName.cleanLabel()
-                    ?: "Rented resources",
+                    ?: "Rented ${resourceLabels.plural.lowercase()}",
                 description = firstField?.facilityDescription(),
                 resources = resources.sortedWith(
-                    compareBy<RentalResourceListItem> { item -> item.option.field.resourceLabel().lowercase() }
+                    compareBy<RentalResourceListItem> {
+                        item -> item.option.field.resourceLabel(resourceLabels.singular).lowercase()
+                    }
                         .thenBy { item -> item.option.start }
                 ),
             )
@@ -292,6 +303,7 @@ private fun RentalResourceOption.rentalTimeLabel(timeZone: TimeZone): String {
 fun LeagueScheduleFields(
     fieldCount: Int,
     fields: List<Field>,
+    resourceLabels: SportResourceLabels = GENERIC_SPORT_RESOURCE_LABELS,
     slots: List<TimeSlot>,
     availableRentalResources: List<RentalResourceOption> = emptyList(),
     selectedRentalResourceIds: Set<String> = emptySet(),
@@ -328,9 +340,11 @@ fun LeagueScheduleFields(
     val canApplyFieldCount = parsedPendingFieldCount != null &&
         parsedPendingFieldCount > 0 &&
         parsedPendingFieldCount != fieldCount
-    val resourceGroups = remember(fields) { buildFacilityResourceGroups(fields) }
-    val rentalResourceGroups = remember(availableRentalResources) {
-        buildFacilityRentalResourceGroups(availableRentalResources)
+    val resourceGroups = remember(fields, resourceLabels) {
+        buildFacilityResourceGroups(fields, resourceLabels)
+    }
+    val rentalResourceGroups = remember(availableRentalResources, resourceLabels) {
+        buildFacilityRentalResourceGroups(availableRentalResources, resourceLabels)
     }
     val hasRentalResourceOptions = availableRentalResources.isNotEmpty()
     val rentalOptionsByFieldId = remember(availableRentalResources) {
@@ -372,8 +386,8 @@ fun LeagueScheduleFields(
                         pendingFieldCountInput = value
                     }
                 },
-                label = "Resource Count *",
-                placeholder = "Enter number of resources",
+                label = "${resourceLabels.singular} Count *",
+                placeholder = "Enter number of ${resourceLabels.plural.lowercase()}",
                 keyboardType = "number",
                 enabled = !readOnly,
                 isError = fieldCountError != null,
@@ -396,6 +410,7 @@ fun LeagueScheduleFields(
         RentalResourceGroupList(
             groups = rentalResourceGroups,
             selectedIds = selectedRentalResourceIds,
+            resourceLabels = resourceLabels,
             expandedKeys = expandedRentalResourceGroupKeys,
             onToggleGroup = { groupKey ->
                 expandedRentalResourceGroupKeys = if (groupKey in expandedRentalResourceGroupKeys) {
@@ -420,11 +435,11 @@ fun LeagueScheduleFields(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Resources (${fields.size})", style = MaterialTheme.typography.titleMedium)
+            Text("${resourceLabels.plural} (${fields.size})", style = MaterialTheme.typography.titleMedium)
             IconButton(onClick = { fieldsExpanded = !fieldsExpanded }) {
                 Icon(
                     imageVector = if (fieldsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (fieldsExpanded) "Collapse resources" else "Expand resources",
+                    contentDescription = if (fieldsExpanded) "Collapse ${resourceLabels.plural.lowercase()}" else "Expand ${resourceLabels.plural.lowercase()}",
                 )
             }
         }
@@ -443,6 +458,7 @@ fun LeagueScheduleFields(
                     readOnly = readOnly,
                     rentalBackedFieldIds = rentalBackedFieldIds,
                     onFieldNameChange = onFieldNameChange,
+                    resourceLabels = resourceLabels,
                 )
             } else {
                 LazyColumn(
@@ -456,6 +472,7 @@ fun LeagueScheduleFields(
                             item = ResourceListItem(index = index, field = field),
                             readOnly = readOnly || rentalBackedFieldIds.contains(field.id),
                             onFieldNameChange = onFieldNameChange,
+                            resourceLabels = resourceLabels,
                         )
                     }
                 }
@@ -467,11 +484,11 @@ fun LeagueScheduleFields(
         return
     }
 
-    val fieldOptions = remember(fields) {
+    val fieldOptions = remember(fields, resourceLabels.singular) {
         fields.map { field ->
             DropdownOption(
                 value = field.id,
-                label = field.resourceLabel(),
+                label = field.resourceLabel(resourceLabels.singular),
             )
         }
     }
@@ -531,7 +548,7 @@ fun LeagueScheduleFields(
     }
     if (readOnly) {
         Text(
-            text = "Timeslots are fixed by the selected rental resources.",
+            text = "Timeslots are fixed by the selected ${resourceLabels.plural.lowercase()}.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -573,6 +590,7 @@ fun LeagueScheduleFields(
                             slotDivisionOptions = slotDivisionOptions,
                             showSlotDivisions = showSlotDivisions,
                             lockSlotDivisions = lockSlotDivisions,
+                            resourceLabels = resourceLabels,
                         lockedDivisionIds = lockedDivisionIds,
                         allowDivisionEditsWhenReadOnly = allowDivisionEditsWhenReadOnly,
                         slotErrors = slotErrors,
@@ -602,6 +620,7 @@ fun LeagueScheduleFields(
                             slotDivisionOptions = slotDivisionOptions,
                             showSlotDivisions = showSlotDivisions,
                             lockSlotDivisions = lockSlotDivisions,
+                            resourceLabels = resourceLabels,
                         lockedDivisionIds = lockedDivisionIds,
                         allowDivisionEditsWhenReadOnly = allowDivisionEditsWhenReadOnly,
                         slotErrors = slotErrors,
@@ -623,6 +642,7 @@ private fun FacilityResourceGroupList(
     readOnly: Boolean,
     rentalBackedFieldIds: Set<String>,
     onFieldNameChange: (Int, String) -> Unit,
+    resourceLabels: SportResourceLabels,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(fieldListItemSpacing)) {
         groups.forEach { group ->
@@ -644,7 +664,7 @@ private fun FacilityResourceGroupList(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(group.label, style = MaterialTheme.typography.titleSmall)
                             val summary = buildList {
-                                add("${group.resources.size} resources")
+                                add("${group.resources.size} ${resourceLabels.plural.lowercase()}")
                                 group.description?.let(::add)
                             }.joinToString(" • ")
                             Text(
@@ -656,7 +676,7 @@ private fun FacilityResourceGroupList(
                         IconButton(onClick = { onToggleGroup(group.key) }) {
                             Icon(
                                 imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                contentDescription = if (expanded) "Collapse facility resources" else "Expand facility resources",
+                                contentDescription = if (expanded) "Collapse facility ${resourceLabels.plural.lowercase()}" else "Expand facility ${resourceLabels.plural.lowercase()}",
                             )
                         }
                     }
@@ -667,6 +687,7 @@ private fun FacilityResourceGroupList(
                                 item = item,
                                 readOnly = readOnly || rentalBackedFieldIds.contains(item.field.id),
                                 onFieldNameChange = onFieldNameChange,
+                                resourceLabels = resourceLabels,
                             )
                         }
                     }
@@ -684,9 +705,10 @@ private fun RentalResourceGroupList(
     onToggleGroup: (String) -> Unit,
     enabled: Boolean,
     onSelectionChange: (String, Boolean) -> Unit,
+    resourceLabels: SportResourceLabels,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(fieldListItemSpacing)) {
-        Text("Rented resources", style = MaterialTheme.typography.titleMedium)
+        Text("Rented ${resourceLabels.plural.lowercase()}", style = MaterialTheme.typography.titleMedium)
         groups.forEach { group ->
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
@@ -718,7 +740,7 @@ private fun RentalResourceGroupList(
                         IconButton(onClick = { onToggleGroup(group.key) }) {
                             Icon(
                                 imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                contentDescription = if (expanded) "Collapse rented resources" else "Expand rented resources",
+                                contentDescription = if (expanded) "Collapse rented ${resourceLabels.plural.lowercase()}" else "Expand rented ${resourceLabels.plural.lowercase()}",
                             )
                         }
                     }
@@ -730,6 +752,7 @@ private fun RentalResourceGroupList(
                                 selected = selectedIds.contains(item.option.id),
                                 enabled = enabled,
                                 onSelectionChange = onSelectionChange,
+                                resourceSingular = resourceLabels.singular,
                             )
                         }
                     }
@@ -745,6 +768,7 @@ private fun RentalResourceRow(
     selected: Boolean,
     enabled: Boolean,
     onSelectionChange: (String, Boolean) -> Unit,
+    resourceSingular: String,
 ) {
     val option = item.option
     val rowTimeZone = remember(option.timeZone) {
@@ -764,7 +788,7 @@ private fun RentalResourceRow(
             onCheckedChange = { checked -> onSelectionChange(option.id, checked) },
         )
         Column(modifier = Modifier.weight(1f)) {
-            Text(option.field.resourceLabel(), style = MaterialTheme.typography.titleSmall)
+            Text(option.field.resourceLabel(resourceSingular), style = MaterialTheme.typography.titleSmall)
             Text(
                 text = option.rentalTimeLabel(rowTimeZone),
                 style = MaterialTheme.typography.bodySmall,
@@ -779,6 +803,7 @@ private fun ResourceRow(
     item: ResourceListItem,
     readOnly: Boolean,
     onFieldNameChange: (Int, String) -> Unit,
+    resourceLabels: SportResourceLabels,
 ) {
     val field = item.field
     Column(
@@ -788,7 +813,7 @@ private fun ResourceRow(
         verticalArrangement = Arrangement.Center,
     ) {
         if (readOnly) {
-            Text(field.resourceLabel(), style = MaterialTheme.typography.titleSmall)
+            Text(field.resourceLabel(resourceLabels.singular), style = MaterialTheme.typography.titleSmall)
             field.location.cleanLabel()?.let { location ->
                 Text(
                     text = location,
@@ -797,7 +822,7 @@ private fun ResourceRow(
                 )
             }
             Text(
-                text = "Rental resource",
+                text = "Rental ${resourceLabels.singular.lowercase()}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -805,7 +830,7 @@ private fun ResourceRow(
             TextInputField(
                 modifier = Modifier.fillMaxWidth(),
                 value = field.name ?: "",
-                label = "Resource ${field.fieldNumber} Name",
+                label = "${resourceLabels.singular} ${field.fieldNumber} Name",
                 onValueChange = { onFieldNameChange(item.index, it) },
                 isError = false,
                 enabled = true,
@@ -823,6 +848,7 @@ private fun TimeslotCard(
     eventEnd: Instant?,
     eventTimeZone: TimeZone,
     fieldOptions: List<DropdownOption>,
+    resourceLabels: SportResourceLabels,
     rentalOptionsByFieldId: Map<String, RentalResourceOption>,
     slotDivisionOptions: List<DropdownOption>,
     showSlotDivisions: Boolean,
@@ -906,8 +932,8 @@ private fun TimeslotCard(
                     selectedValue = "",
                     onSelectionChange = {},
                     options = fieldOptionsForSlot,
-                    label = "Resources *",
-                    placeholder = "Select resources",
+                    label = "${resourceLabels.plural} *",
+                    placeholder = "Select ${resourceLabels.plural.lowercase()}",
                     multiSelect = true,
                     selectedValues = selectedFieldIds,
                     onMultiSelectionChange = { selected ->
@@ -922,7 +948,7 @@ private fun TimeslotCard(
                     },
                     isError = selectedFieldIds.isEmpty(),
                     supportingText = if (slotIsRentalBacked) {
-                        "Rental date and time are locked. Add regular resources here; rentals with different times are disabled."
+                        "Rental date and time are locked. Add regular ${resourceLabels.plural.lowercase()} here; rentals with different times are disabled."
                     } else {
                         ""
                     },
@@ -1107,7 +1133,7 @@ private fun TimeslotCard(
 
                 slotErrors[index]?.let { error ->
                     Text(
-                        text = error,
+                        text = resourceLabels.inDiagnostic(error),
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )

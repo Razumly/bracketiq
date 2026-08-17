@@ -53,7 +53,9 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.data.dataTypes.GENERIC_SPORT_RESOURCE_LABELS
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.SportResourceLabels
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.isScrollingUp
@@ -70,6 +72,8 @@ private const val BRACKET_LAYOUT_ANIMATION_MS = 300
 fun TournamentBracketView(
     showFab: (Boolean) -> Unit,
     topContentPadding: Dp = 0.dp,
+    resourceLabels: SportResourceLabels = GENERIC_SPORT_RESOURCE_LABELS,
+    resourceLabelsByFieldId: Map<String, SportResourceLabels> = emptyMap(),
     canManageBracket: Boolean = false,
     onMatchClick: (MatchWithRelations) -> Unit = {},
     isEditingMatches: Boolean = false,
@@ -450,6 +454,12 @@ fun TournamentBracketView(
                                                                 showEventOfficialNames = showEventOfficialNames,
                                                                 limitOfficialsToCurrentUser = limitOfficialsToCurrentUser,
                                                                 manageMode = isEditingMatches,
+                                                                resourceSingular = resourceLabelsByFieldId[
+                                                                    (
+                                                                        currentBracketMatch.field?.id
+                                                                            ?: currentBracketMatch.match.fieldId
+                                                                    ).orEmpty()
+                                                                ]?.singular ?: resourceLabels.singular,
                                                             )
                                                         }
                                                         if (oppositeMatch != null) {
@@ -482,6 +492,12 @@ fun TournamentBracketView(
                                                                 showEventOfficialNames = showEventOfficialNames,
                                                                 limitOfficialsToCurrentUser = limitOfficialsToCurrentUser,
                                                                 manageMode = isEditingMatches,
+                                                                resourceSingular = resourceLabelsByFieldId[
+                                                                    (
+                                                                        oppositeMatch.field?.id
+                                                                            ?: oppositeMatch.match.fieldId
+                                                                    ).orEmpty()
+                                                                ]?.singular ?: resourceLabels.singular,
                                                             )
                                                         }
                                                     }
@@ -525,6 +541,12 @@ fun TournamentBracketView(
                                                                         showEventOfficialNames = showEventOfficialNames,
                                                                         limitOfficialsToCurrentUser = limitOfficialsToCurrentUser,
                                                                         manageMode = isEditingMatches,
+                                                                        resourceSingular = resourceLabelsByFieldId[
+                                                                            (
+                                                                                displayMatch.field?.id
+                                                                                    ?: displayMatch.match.fieldId
+                                                                            ).orEmpty()
+                                                                        ]?.singular ?: resourceLabels.singular,
                                                                     )
                                                                 }
                                                             }

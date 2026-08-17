@@ -33,6 +33,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
+import com.razumly.mvp.core.data.dataTypes.resolveEventResourceLabels
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.updateOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.updateOfficialUserPositions
@@ -74,6 +75,9 @@ fun EventDetailScreen(
     val loadingHandler = LocalLoadingHandler.current
     val selectedEvent by component.eventWithRelations.collectAsState()
     val sports by component.sports.collectAsState()
+    val resourceLabels = remember(sports, selectedEvent.event.sportIds) {
+        resolveEventResourceLabels(selectedEvent.event.sportIds, sports)
+    }
     val eventTags by component.eventTags.collectAsState()
     val divisionTypeParameters by component.divisionTypeParameters.collectAsState()
     val currentUser by component.currentUser.collectAsState()
@@ -97,6 +101,35 @@ fun EventDetailScreen(
     val showMap by mapComponent.showMap.collectAsState()
     val editableMatches by component.editableMatches.collectAsState()
     val eventFields by component.eventFields.collectAsState()
+    val resourceLabelsByFieldId = remember(
+        sports,
+        selectedEvent.event.sportIds,
+        eventFields,
+        selectedEvent.matches,
+    ) {
+        buildMap {
+            eventFields.forEach { relation ->
+                put(
+                    relation.field.id,
+                    resolveEventResourceLabels(
+                        sportIds = selectedEvent.event.sportIds,
+                        sports = sports,
+                        resourceSportIds = relation.field.sportIds,
+                    ),
+                )
+            }
+            selectedEvent.matches.mapNotNull { it.field }.forEach { field ->
+                put(
+                    field.id,
+                    resolveEventResourceLabels(
+                        sportIds = selectedEvent.event.sportIds,
+                        sports = sports,
+                        resourceSportIds = field.sportIds,
+                    ),
+                )
+            }
+        }
+    }
     val selectedDivision by component.selectedDivision.collectAsState()
     val selectedWeeklyOccurrence by component.selectedWeeklyOccurrence.collectAsState()
     val selectedWeeklyOccurrenceSummary by component.selectedWeeklyOccurrenceSummary.collectAsState()
@@ -874,6 +907,8 @@ fun EventDetailScreen(
                                 hasScheduleView = hasScheduleView,
                                 hasStandingsView = hasStandingsView,
                                 selectedEvent = selectedEvent,
+                                resourceLabels = resourceLabels,
+                                resourceLabelsByFieldId = resourceLabelsByFieldId,
                                 tournamentPoolPlayEnabled = tournamentPoolPlayEnabled,
                                 tournamentBracketDivisionOptions = tournamentBracketDivisionOptions,
                                 joinDivisionOptions = joinDivisionOptions,
@@ -1030,6 +1065,8 @@ fun EventDetailScreen(
                 ),
                 showTeamDialog = showTeamDialog,
                 showMatchEditDialog = showMatchEditDialog,
+                resourceLabels = resourceLabels,
+                resourceLabelsByFieldId = resourceLabelsByFieldId,
                 showTeamSelectionDialog = showTeamSelectionDialog,
                 teamSelectionSportLabel = teamSelectionSportLabel,
                 validTeams = validTeams,

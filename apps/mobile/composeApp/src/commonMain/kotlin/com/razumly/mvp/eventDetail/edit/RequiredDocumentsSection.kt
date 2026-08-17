@@ -43,7 +43,7 @@ internal fun RequiredDocumentsSection(
             emptyText = "Required Documents: None",
         )
         Text(
-            text = "Set by the rental field and cannot be changed here.",
+            text = "Set by the rental resource and cannot be changed here.",
             style = MaterialTheme.typography.bodySmall,
             color = Color(localImageScheme.current.onSurfaceVariant),
         )

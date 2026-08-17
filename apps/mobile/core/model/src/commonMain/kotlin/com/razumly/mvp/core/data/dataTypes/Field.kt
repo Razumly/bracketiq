@@ -32,6 +32,7 @@ fun Facility.isActiveAffiliateRental(): Boolean =
 data class Field(
     val fieldNumber: Int = 0,
     val divisions: List<String> = emptyList(),
+    val sportIds: List<String> = emptyList(),
     val lat: Double? = null,
     val long: Double? = null,
     val heading: Double? = null,
@@ -55,6 +56,7 @@ data class Field(
             return Field(
                 fieldNumber = fieldNumber,
                 divisions = listOf(),
+                sportIds = emptyList(),
                 lat = null,
                 long = null,
                 heading = null,

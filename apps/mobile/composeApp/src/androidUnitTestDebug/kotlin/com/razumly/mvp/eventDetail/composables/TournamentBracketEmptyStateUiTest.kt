@@ -203,6 +203,7 @@ class TournamentBracketEmptyStateUiTest {
                         onClick = {},
                         modifier = Modifier.width(340.dp),
                         manageMode = true,
+                        resourceSingular = "Court",
                     )
                 }
             }
@@ -210,7 +211,7 @@ class TournamentBracketEmptyStateUiTest {
 
         val alignedRows = listOf(
             "M: 1" to "QA Blue",
-            "F: Field TBD" to "QA Gold",
+            "Court: Court TBD" to "QA Gold",
         ) + roleAndOfficialNames
         alignedRows.forEach { (leftLabel, rightLabel) ->
             val leftTop = composeRule

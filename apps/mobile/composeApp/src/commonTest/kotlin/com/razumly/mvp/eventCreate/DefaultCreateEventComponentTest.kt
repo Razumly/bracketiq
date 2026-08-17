@@ -1528,7 +1528,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
                 organizationId = "org-rental-resource-league",
                 divisions = listOf("Open"),
                 start = instant(1_700_000_000_000),
-                end = instant(1_700_086_400_000),
+                end = instant(1_700_176_400_000),
             )
         }
         advance()
@@ -1713,7 +1713,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_configured_league_slot_without_a_field_when_submitted_then_creation_is_blocked() = runTest(testDispatcher) {
+    fun given_configured_league_slot_without_a_resource_when_submitted_then_creation_is_blocked() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         harness.component.setLoadingHandler(harness.loadingHandler)
         advance()
@@ -1741,13 +1741,13 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         assertEquals(0, harness.eventRepository.createEditorCalls.size)
         assertEquals(
-            "Schedule slot 1 needs at least one field.",
+            "Schedule slot 1 needs at least one resource.",
             harness.component.errorState.value?.message,
         )
     }
 
     @Test
-    fun given_one_time_league_slot_without_a_valid_end_when_submitted_then_creation_is_blocked() = runTest(testDispatcher) {
+    fun given_one_time_league_slot_without_an_end_time_when_submitted_then_creation_is_blocked() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         harness.component.setLoadingHandler(harness.loadingHandler)
         advance()
@@ -1763,6 +1763,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
                 repeating = false,
                 startDate = instant(1_700_000_000_000),
                 endDate = null,
+                endTimeMinutes = null,
                 scheduledFieldId = localFieldId,
                 scheduledFieldIds = listOf(localFieldId),
             )
@@ -1773,9 +1774,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         advance()
 
         assertEquals(0, harness.eventRepository.createEditorCalls.size)
-        assertEquals(
-            "Schedule slot 1 needs an end date after its start.",
-            harness.component.errorState.value?.message,
+        assertTrue(
+            harness.component.errorState.value?.message.orEmpty().contains("select an end time"),
         )
     }
 

@@ -26,6 +26,8 @@ import com.razumly.mvp.core.data.repositories.EventEditorMutation
 import com.razumly.mvp.core.data.repositories.EventEditorSession
 import com.razumly.mvp.core.data.repositories.EventEditorSessionMapper
 import com.razumly.mvp.core.data.dataTypes.Sport
+import com.razumly.mvp.core.data.dataTypes.resolveEventResourceLabels
+import com.razumly.mvp.core.data.dataTypes.inDiagnostic
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -41,6 +43,8 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
+import com.razumly.mvp.core.data.dataTypes.canonicalizedOneTime
+import com.razumly.mvp.core.data.dataTypes.validateOneTimeTimeSlots
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
@@ -1060,6 +1064,7 @@ class DefaultCreateEventComponent(
         _fieldCount.value = normalized
 
         val currentEvent = newEventState.value
+        val resourceLabels = resolveEventResourceLabels(currentEvent.sportIds, _sports.value)
         val currentFields = _localFields.value
         val editableFields = currentFields.filterNot { field -> rentalFieldIds.contains(field.id) }
         val editableTargetCount = (normalized - rentalFields.size).coerceAtLeast(0)
@@ -1087,7 +1092,7 @@ class DefaultCreateEventComponent(
                     organizationId = currentEvent.organizationId,
                     id = newId(),
                 ).copy(
-                    name = "Field $fieldNumber",
+                    name = "${resourceLabels.singular} $fieldNumber",
                     divisions = defaultFieldDivisions(currentEvent),
                     location = defaultFieldLocation(currentEvent),
                 ),
@@ -1721,6 +1726,7 @@ class DefaultCreateEventComponent(
         if (!shouldUseConfiguredLeagueSlots(event)) {
             return null
         }
+        val resourceLabels = resolveEventResourceLabels(event.sportIds, _sports.value)
 
         if (
             event.eventType == EventType.WEEKLY_EVENT &&
@@ -1734,19 +1740,20 @@ class DefaultCreateEventComponent(
             .filter(String::isNotBlank)
             .toSet()
 
-        _leagueSlots.value.forEachIndexed { index, rawSlot ->
-            val slot = normalizeRentalSlotResourceSelection(rawSlot, validFieldIds)
+        val slots = _leagueSlots.value.map { slot ->
+            normalizeRentalSlotResourceSelection(slot, validFieldIds)
+        }
+        slots.forEachIndexed { index, slot ->
             val label = "Schedule slot ${index + 1}"
-            if (slot.normalizedScheduledFieldIds().none(validFieldIds::contains)) {
-                return "$label needs at least one field."
+            val selectedResourceIds = slot.normalizedScheduledFieldIds()
+            if (selectedResourceIds.isEmpty()) {
+                return "$label needs at least one ${resourceLabels.singular.lowercase()}."
+            }
+            if (selectedResourceIds.none(validFieldIds::contains)) {
+                return "$label references an unavailable ${resourceLabels.singular}."
             }
 
             if (!slot.repeating) {
-                val slotStart = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
-                val slotEnd = slot.endDate
-                if (slotEnd == null || slotEnd <= slotStart) {
-                    return "$label needs an end date after its start."
-                }
                 return@forEachIndexed
             }
 
@@ -1762,7 +1769,17 @@ class DefaultCreateEventComponent(
                 return "$label must end after it starts."
             }
         }
-
+        try {
+            validateOneTimeTimeSlots(
+                slots = slots,
+                eventStart = event.start,
+                eventEnd = event.end.takeUnless { event.noFixedEndDateTime },
+                eligibleResourceIds = validFieldIds.toList(),
+                eligibleDivisionIds = event.divisions.normalizeDivisionIdentifiers(),
+            )
+        } catch (error: IllegalArgumentException) {
+            return error.message?.let(resourceLabels::inDiagnostic) ?: "One-Time Time Slot validation failed."
+        }
         return null
     }
 
@@ -1771,6 +1788,7 @@ class DefaultCreateEventComponent(
         targetCount: Int,
         excludedFieldIds: Set<String> = emptySet(),
     ): List<Field> {
+        val resourceLabels = resolveEventResourceLabels(event.sportIds, _sports.value)
         val normalizedCount = (targetCount - excludedFieldIds.size).coerceAtLeast(0)
         val drafts = _localFields.value
             .filterNot { field -> excludedFieldIds.contains(field.id.trim()) }
@@ -1779,7 +1797,7 @@ class DefaultCreateEventComponent(
                 field.copy(
                     id = if (field.id.isBlank()) newId() else field.id,
                     fieldNumber = index + 1,
-                    name = field.name?.takeIf { it.isNotBlank() } ?: "Field ${index + 1}",
+                    name = field.name?.takeIf { it.isNotBlank() } ?: "${resourceLabels.singular} ${index + 1}",
                     divisions = field.divisions
                         .normalizeDivisionIdentifiers()
                         .ifEmpty { defaultFieldDivisions(event) },
@@ -1796,7 +1814,7 @@ class DefaultCreateEventComponent(
                 organizationId = event.organizationId,
                 id = newId(),
             ).copy(
-                name = "Field $number",
+                name = "${resourceLabels.singular} $number",
                 divisions = defaultFieldDivisions(event),
                 location = defaultFieldLocation(event),
             )
@@ -1810,6 +1828,7 @@ class DefaultCreateEventComponent(
         fieldIdReplacements: Map<String, String>,
     ): List<TimeSlot> {
         val selectedDivisionIds = event.divisions.normalizeDivisionIdentifiers()
+        val resourceLabels = resolveEventResourceLabels(event.sportIds, _sports.value)
         // A visible configured slot must be persisted or explicitly block submission.
         return _leagueSlots.value.mapIndexed { index, rawSlot ->
             val slot = normalizeRentalSlotResourceSelection(rawSlot)
@@ -1818,9 +1837,15 @@ class DefaultCreateEventComponent(
                     (fieldIdReplacements[fieldId] ?: fieldId).trim()
                 }
             if (mappedFieldIds.any(String::isBlank)) {
-                invalidConfiguredScheduleSlot(index, "contains a field that cannot be saved.")
+                invalidConfiguredScheduleSlot(index, "contains a ${resourceLabels.singular.lowercase()} that cannot be saved.")
             }
             val distinctMappedFieldIds = mappedFieldIds.distinct()
+            if (distinctMappedFieldIds.isEmpty()) {
+                invalidConfiguredScheduleSlot(
+                    index,
+                    "needs at least one ${resourceLabels.singular.lowercase()}.",
+                )
+            }
             val effectiveDivisionIds = resolveEffectiveLeagueSlotDivisionIds(
                 singleDivision = event.singleDivision,
                 selectedDivisionIds = selectedDivisionIds,
@@ -1830,30 +1855,25 @@ class DefaultCreateEventComponent(
             val startMinutes = slot.startTimeMinutes
             val endMinutes = slot.endTimeMinutes
 
-            if (distinctMappedFieldIds.isEmpty()) {
-                invalidConfiguredScheduleSlot(index, "select at least one field.")
-            }
 
             if (!slot.repeating) {
-                val slotTimeZone = slot.timeZone.toTimeZoneOrUtc(event.resolvedTimeZone())
-                val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
-                val slotEndDate = slot.endDate
-                    ?: invalidConfiguredScheduleSlot(index, "select an end date and time.")
-                if (slotEndDate <= slotStartDate) {
-                    invalidConfiguredScheduleSlot(index, "end date and time must be after its start.")
+                val canonicalSlot = try {
+                    slot.canonicalizedOneTime()
+                } catch (error: IllegalArgumentException) {
+                    invalidConfiguredScheduleSlot(
+                        index,
+                        error.message ?: "the exact interval cannot be resolved.",
+                    )
                 }
-                val slotDayOfWeek = slotStartDate.toMondayFirstDay(slotTimeZone)
-                return@mapIndexed slot.copy(
-                    id = slot.id.ifBlank { newId() },
+                val slotTimeZone = canonicalSlot.timeZone.toTimeZoneOrUtc(event.resolvedTimeZone())
+                val slotDayOfWeek = canonicalSlot.startDate.toMondayFirstDay(slotTimeZone)
+                return@mapIndexed canonicalSlot.copy(
+                    id = canonicalSlot.id.ifBlank { newId() },
                     dayOfWeek = slotDayOfWeek,
                     daysOfWeek = listOf(slotDayOfWeek),
                     divisions = effectiveDivisionIds,
-                    scheduledFieldId = distinctMappedFieldIds.first(),
+                    scheduledFieldId = distinctMappedFieldIds.firstOrNull(),
                     scheduledFieldIds = distinctMappedFieldIds,
-                    startDate = slotStartDate,
-                    endDate = slotEndDate,
-                    startTimeMinutes = slotStartDate.toMinutesOfDay(slotTimeZone),
-                    endTimeMinutes = slotEndDate.toMinutesOfDay(slotTimeZone),
                     repeating = false,
                 )
             }

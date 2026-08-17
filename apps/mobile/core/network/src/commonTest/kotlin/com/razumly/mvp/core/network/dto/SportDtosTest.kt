@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.SportOfficialPositionTemplate
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -13,6 +14,8 @@ class SportDtosTest {
         val dto = SportApiDto(
             id = "Basketball",
             name = "Basketball",
+            resourceLabelSingular = "Court",
+            resourceLabelPlural = "Courts",
             usePointsForWin = true,
             usePointsForLoss = true,
             usePointsForDraw = null,
@@ -31,6 +34,8 @@ class SportDtosTest {
         val dto = SportApiDto(
             id = "Indoor Volleyball",
             name = "Indoor Volleyball",
+            resourceLabelSingular = "Court",
+            resourceLabelPlural = "Courts",
             usePointsForWin = true,
             usePointsForLoss = true,
             usePointsForDraw = null,
@@ -49,6 +54,8 @@ class SportDtosTest {
         val dto = SportApiDto(
             id = "Custom Sport",
             name = "Custom Sport",
+            resourceLabelSingular = "Resource",
+            resourceLabelPlural = "Resources",
             usePointsForWin = true,
             usePointsForLoss = true,
             usePointsForDraw = false,
@@ -67,6 +74,8 @@ class SportDtosTest {
         val dto = SportApiDto(
             id = "Volleyball",
             name = "Volleyball",
+            resourceLabelSingular = "Court",
+            resourceLabelPlural = "Courts",
             officialPositionTemplates = listOf(
                 SportOfficialPositionTemplate(name = "R1", count = 1),
                 SportOfficialPositionTemplate(name = "Line Judge", count = 2),
@@ -83,6 +92,33 @@ class SportDtosTest {
         assertEquals(
             listOf(1, 2),
             sport.officialPositionTemplates.map(SportOfficialPositionTemplate::count),
+        )
+    }
+
+    @Test
+    fun to_sport_or_null_preserves_soccer_field_labels() {
+        val sport = SportApiDto(
+            id = "Indoor Soccer",
+            name = "Indoor Soccer",
+            resourceLabelSingular = "Field",
+            resourceLabelPlural = "Fields",
+        ).toSportOrNull()
+
+        assertNotNull(sport)
+        assertEquals("Field", sport.resourceLabelSingular)
+        assertEquals("Fields", sport.resourceLabelPlural)
+    }
+
+    @Test
+    fun to_sport_or_null_rejects_missing_or_invalid_resource_labels() {
+        assertNull(SportApiDto(id = "Volleyball", name = "Volleyball").toSportOrNull())
+        assertNull(
+            SportApiDto(
+                id = "Volleyball",
+                name = "Volleyball",
+                resourceLabelSingular = " Court ",
+                resourceLabelPlural = "Courts",
+            ).toSportOrNull(),
         )
     }
 }

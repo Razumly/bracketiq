@@ -20,6 +20,7 @@ data class RentalAvailabilityFieldDto(
     val id: String,
     val fieldNumber: Int? = null,
     val name: String = "",
+    val sportIds: List<String> = emptyList(),
     val facilityId: String? = null,
     val facilityName: String? = null,
     val rentalSlots: List<RentalAvailabilitySlotDto> = emptyList(),

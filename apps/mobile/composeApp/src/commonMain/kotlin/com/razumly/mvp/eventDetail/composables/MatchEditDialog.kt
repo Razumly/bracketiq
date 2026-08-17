@@ -47,6 +47,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
+import com.razumly.mvp.core.data.dataTypes.GENERIC_SPORT_RESOURCE_LABELS
+import com.razumly.mvp.core.data.dataTypes.SportResourceLabels
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
@@ -101,6 +103,8 @@ fun MatchEditDialog(
     users: List<UserData>,
     eventType: EventType,
     isCreateMode: Boolean,
+    resourceLabels: SportResourceLabels = GENERIC_SPORT_RESOURCE_LABELS,
+    resourceLabelsByFieldId: Map<String, SportResourceLabels> = emptyMap(),
     creationContext: MatchCreateContext,
     onDismissRequest: () -> Unit,
     onConfirm: (MatchWithRelations) -> Unit,
@@ -125,6 +129,8 @@ fun MatchEditDialog(
                 users = users,
                 eventType = eventType,
                 isCreateMode = isCreateMode,
+                resourceLabels = resourceLabels,
+                resourceLabelsByFieldId = resourceLabelsByFieldId,
                 creationContext = creationContext,
                 onDismissRequest = onDismissRequest,
                 onConfirm = onConfirm,
@@ -145,6 +151,8 @@ private fun MatchEditDialogContent(
     users: List<UserData>,
     eventType: EventType,
     isCreateMode: Boolean,
+    resourceLabels: SportResourceLabels,
+    resourceLabelsByFieldId: Map<String, SportResourceLabels>,
     creationContext: MatchCreateContext,
     onDismissRequest: () -> Unit,
     onConfirm: (MatchWithRelations) -> Unit,
@@ -949,20 +957,27 @@ private fun MatchEditDialogContent(
                 }
             }
 
-            // Field Section
+            // Resource Section
             item {
+                val selectedField = fields.find { it.field.id == editedMatch.match.fieldId }
+                val selectedResourceLabels = selectedField
+                    ?.let { resourceLabelsByFieldId[it.field.id] }
+                    ?: resourceLabels
                 FieldSelectionField(
-                    label = "Field",
-                    selectedField = fields.find { it.field.id == editedMatch.match.fieldId },
+                    label = selectedResourceLabels.singular,
+                    selectedField = selectedField,
                     expanded = showFieldDropdown,
                     onExpandedChange = { showFieldDropdown = it },
                     fields = fields,
+                    resourceLabels = resourceLabels,
+                    resourceLabelsByFieldId = resourceLabelsByFieldId,
                     onFieldSelected = { field ->
                         editedMatch = editedMatch.copy(
                             match = editedMatch.match.copy(fieldId = field?.field?.id)
                         )
                         showFieldDropdown = false
-                    })
+                    },
+                )
             }
 
             item {
@@ -1068,7 +1083,7 @@ private fun MatchEditDialogContent(
                     status = hostMatchStatusLabel(scoreDrafts, activeRules, matchStarted, resultType),
                     scoringModel = policyScoringModel,
                     fieldLabel = fields.find { field -> field.field.id == editedMatch.match.fieldId }
-                        ?.field?.fieldNumber?.let { fieldNumber -> "Field $fieldNumber" },
+                        ?.field?.fieldNumber?.let { fieldNumber -> "${resourceLabels.singular} $fieldNumber" },
                 )
             }
         }
@@ -1103,7 +1118,7 @@ private fun MatchEditDialogContent(
 
                     if (requiresScheduleFields) {
                         if (normalizeToken(editedMatch.match.fieldId).isNullOrBlank() || startTime == null || endTime == null) {
-                            validationError = "Field, start, and end are required for schedule-created matches."
+                            validationError = "${resourceLabels.singular}, start, and end are required for schedule-created matches."
                             return@Button
                         }
                         if (endTime!! <= startTime!!) {
@@ -1751,13 +1766,18 @@ fun FieldSelectionField(
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     fields: List<FieldWithMatches>,
+    resourceLabels: SportResourceLabels,
+    resourceLabelsByFieldId: Map<String, SportResourceLabels> = emptyMap(),
     onFieldSelected: (FieldWithMatches?) -> Unit
 ) {
     ExposedDropdownMenuBox(
         expanded = expanded, onExpandedChange = onExpandedChange
     ) {
         StandardTextField(
-            value = selectedField?.field?.fieldNumber?.toString() ?: "Select field",
+            value = selectedField?.let { field ->
+                val labels = resourceLabelsByFieldId[field.field.id] ?: resourceLabels
+                "${labels.singular} ${field.field.fieldNumber}"
+            } ?: "Select ${resourceLabels.singular.lowercase()}",
             onValueChange = {},
             modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
                 .fillMaxWidth(),
@@ -1769,13 +1789,15 @@ fun FieldSelectionField(
         ExposedDropdownMenu(
             expanded = expanded, onDismissRequest = { onExpandedChange(false) }) {
             DropdownMenuItem(
-                text = { Text("No field assigned") },
+                text = { Text("No ${resourceLabels.singular.lowercase()} assigned") },
                 onClick = { onFieldSelected(null) })
 
             fields.forEach { field ->
+                val labels = resourceLabelsByFieldId[field.field.id] ?: resourceLabels
                 DropdownMenuItem(
-                    text = { Text("Field ${field.field.fieldNumber}") },
-                    onClick = { onFieldSelected(field) })
+                    text = { Text("${labels.singular} ${field.field.fieldNumber}") },
+                    onClick = { onFieldSelected(field) },
+                )
             }
         }
     }

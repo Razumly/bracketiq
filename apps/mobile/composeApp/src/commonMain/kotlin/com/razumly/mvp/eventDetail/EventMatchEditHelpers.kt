@@ -86,7 +86,7 @@ internal fun validateEditableMatches(
                 if (match1.fieldId != null && match1.fieldId == match2.fieldId) {
                     return MatchEditValidationResult(
                         isValid = false,
-                        errorMessage = "Matches #${match1.matchId} and #${match2.matchId} overlap on the same field",
+                        errorMessage = "Matches #${match1.matchId} and #${match2.matchId} overlap on the same Resource",
                     )
                 }
 
@@ -125,7 +125,7 @@ internal fun validateEditableMatches(
             if (match.fieldId.normalizeMatchEditToken() == null || start == null || end == null) {
                 return MatchEditValidationResult(
                     isValid = false,
-                    errorMessage = "Schedule match #${match.matchId} requires field, start, and end.",
+                    errorMessage = "Schedule match #${match.matchId} requires Resource, start, and end.",
                 )
             }
             if (end <= start) {

@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.SportResourceLabels
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.EventParticipantDivisionWarning
@@ -54,6 +55,8 @@ internal data class EventDetailTabsHostState(
     val showFab: Boolean,
     val isDetailDockExpanded: Boolean,
     val selectedEvent: EventWithFullRelations,
+    val resourceLabels: SportResourceLabels,
+    val resourceLabelsByFieldId: Map<String, SportResourceLabels>,
     val tournamentPoolPlayEnabled: Boolean,
     val selectedSchedulePoolDivisionId: String?,
     val selectedScheduleDivisionId: String?,
@@ -194,6 +197,8 @@ private fun EventDetailBracketTab(
         TournamentBracketView(
             showFab = actions.onShowFabChanged,
             topContentPadding = state.tabContentTopOffset,
+            resourceLabels = state.resourceLabels,
+            resourceLabelsByFieldId = state.resourceLabelsByFieldId,
             canManageBracket = state.canManageMatchEditingFromDock,
             onMatchClick = { match ->
                 if (!state.canEditMatches) {
@@ -252,6 +257,7 @@ private fun WeeklyEventSchedule(
     ScheduleView(
         items = state.weeklyScheduleItems,
         fields = state.eventFields,
+        resourceLabels = state.resourceLabels,
         showFab = actions.onShowFabChanged,
         topContentPadding = state.tabContentTopOffset,
         timeZone = state.selectedEvent.event.resolvedTimeZone(),
@@ -382,6 +388,8 @@ private fun MatchSchedule(
     ScheduleView(
         items = scheduledMatches.map { match -> ScheduleItem.MatchEntry(match) },
         fields = state.eventFields,
+        resourceLabels = state.resourceLabels,
+        resourceLabelsByFieldId = state.resourceLabelsByFieldId,
         showFab = actions.onShowFabChanged,
         topContentPadding = state.tabContentTopOffset,
         timeZone = state.selectedEvent.event.resolvedTimeZone(),

@@ -123,6 +123,7 @@ fun MatchCard(
     showEventOfficialNames: Boolean = true,
     limitOfficialsToCurrentUser: Boolean = false,
     manageMode: Boolean = false,
+    resourceSingular: String = "Resource",
 ) {
     val component = LocalTournamentComponent.current
     val teams by component.divisionTeams.collectAsState()
@@ -322,6 +323,7 @@ fun MatchCard(
                                     match = match,
                                     fields = fields,
                                     showManageOfficials = showManageOfficials,
+                                    resourceSingular = resourceSingular,
                                     manageOfficialRows = manageOfficialRows,
                                     modifier = Modifier.widthIn(max = maxMatchInfoWidth),
                                 )
@@ -459,10 +461,11 @@ private fun MatchInfoSection(
     match: MatchWithRelations,
     fields: List<FieldWithMatches>,
     showManageOfficials: Boolean,
+    resourceSingular: String,
     manageOfficialRows: List<ManageOfficialRow>,
     modifier: Modifier = Modifier,
 ) {
-    val fieldLabel = resolveFieldLabel(match, fields)
+    val fieldLabel = resolveFieldLabel(match, fields, resourceSingular)
     val rowTextStyle = if (showManageOfficials) {
         fixedBracketTextStyle(
             base = MaterialTheme.typography.bodyLarge,
@@ -499,7 +502,7 @@ private fun MatchInfoSection(
         )
         HorizontalDivider(color = localColors.current.onPrimary)
         Text(
-            "F: $fieldLabel",
+            "$resourceSingular: $fieldLabel",
             modifier = Modifier
                 .fillMaxWidth()
                 .thenManageRowHeight(showManageOfficials),
@@ -526,7 +529,11 @@ private fun MatchInfoSection(
     }
 }
 
-private fun resolveFieldLabel(match: MatchWithRelations, fields: List<FieldWithMatches>): String {
+private fun resolveFieldLabel(
+    match: MatchWithRelations,
+    fields: List<FieldWithMatches>,
+    resourceSingular: String,
+): String {
     val relationName = match.field?.name?.trim().orEmpty()
     if (relationName.isNotEmpty()) {
         return relationName
@@ -534,7 +541,7 @@ private fun resolveFieldLabel(match: MatchWithRelations, fields: List<FieldWithM
 
     val relationNumber = match.field?.fieldNumber
     if (relationNumber != null && relationNumber > 0) {
-        return "Field $relationNumber"
+        return "$resourceSingular $relationNumber"
     }
 
     val mappedField = fields.firstOrNull { it.field.id == match.match.fieldId }?.field
@@ -545,10 +552,10 @@ private fun resolveFieldLabel(match: MatchWithRelations, fields: List<FieldWithM
 
     val mappedNumber = mappedField?.fieldNumber
     if (mappedNumber != null && mappedNumber > 0) {
-        return "Field $mappedNumber"
+        return "$resourceSingular $mappedNumber"
     }
 
-    return "Field TBD"
+    return "$resourceSingular TBD"
 }
 
 @Composable

@@ -200,6 +200,11 @@ internal fun computeEventValidationResult(
     leagueScoringConfig: LeagueScoringConfigDTO? = null,
     selectedSport: Sport? = null,
 ): EventValidationResult {
+    val resourceLabelSingular = if (editEvent.sportIds.distinct().size == 1) {
+        selectedSport?.resourceLabelSingular ?: "Resource"
+    } else {
+        "Resource"
+    }
     val isNameValid = editEvent.name.isNotBlank()
     val isImageValid = editEvent.imageId.isNotBlank() && isColorLoaded
     val isPriceValid = if (!requiresPositiveRegistrationPrice) {
@@ -554,7 +559,7 @@ internal fun computeEventValidationResult(
             add("Select a location.")
         }
         if (!scheduleTimeLocked && !isFieldCountValid) {
-            add("Field count must be at least 1.")
+            add("$resourceLabelSingular count must be at least 1.")
         }
         if (!isWinnerSetCountValid) {
             add("Winner set count must be 1, 3, or 5.")

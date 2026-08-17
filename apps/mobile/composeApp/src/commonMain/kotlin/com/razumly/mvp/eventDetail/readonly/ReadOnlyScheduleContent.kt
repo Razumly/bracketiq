@@ -43,6 +43,8 @@ import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.GENERIC_SPORT_RESOURCE_LABELS
+import com.razumly.mvp.core.data.dataTypes.SportResourceLabels
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -66,6 +68,7 @@ internal fun ScheduleTimeslotsReadOnlyList(
     fieldsById: Map<String, Field>,
     divisionDetails: List<DivisionDetail>,
     fallbackDivisionIds: List<String>,
+    resourceLabels: SportResourceLabels = GENERIC_SPORT_RESOURCE_LABELS,
 ) {
     Spacer(modifier = Modifier.height(8.dp))
     Text(
@@ -100,7 +103,7 @@ internal fun ScheduleTimeslotsReadOnlyList(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 daySlots.forEach { slot ->
-                    val fieldNames = resolveSlotFieldNames(slot, fieldsById)
+                    val fieldNames = resolveSlotFieldNames(slot, fieldsById, resourceLabels.singular)
                     val divisionNames = resolveSlotDivisionNames(
                         slot = slot,
                         divisionDetails = divisionDetails,
@@ -134,9 +137,9 @@ internal fun ScheduleTimeslotsReadOnlyList(
                                 verticalAlignment = Alignment.Top,
                             ) {
                                 TimeslotReadOnlyNameColumn(
-                                    title = "Fields",
+                                    title = resourceLabels.plural,
                                     values = fieldNames,
-                                    emptyText = "Fields: Not assigned",
+                                    emptyText = "${resourceLabels.plural}: Not assigned",
                                     modifier = Modifier.weight(1f),
                                 )
                                 TimeslotReadOnlyNameColumn(
@@ -310,12 +313,13 @@ private fun buildScheduleTimeslotGroups(slots: List<TimeSlot>): List<Pair<Int, L
 private fun resolveSlotFieldNames(
     slot: TimeSlot,
     fieldsById: Map<String, Field>,
+    resourceSingular: String,
 ): List<String> {
     return slot.normalizedScheduledFieldIds()
         .map { fieldId ->
             val field = fieldsById[fieldId]
             field?.name?.takeIf(String::isNotBlank)
-                ?: field?.let { resolved -> "Field ${resolved.fieldNumber}" }
+                ?: field?.let { resolved -> "$resourceSingular ${resolved.fieldNumber}" }
                 ?: fieldId
         }
         .distinct()

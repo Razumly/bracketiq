@@ -66,6 +66,8 @@ import com.kizitonwose.calendar.core.DayPosition
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.GENERIC_SPORT_RESOURCE_LABELS
+import com.razumly.mvp.core.data.dataTypes.SportResourceLabels
 import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
 import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
 import com.razumly.mvp.core.data.dataTypes.assignedOfficialUserIds
@@ -145,6 +147,8 @@ private const val EVENT_CARD_IMAGE_WIDTH_DP = 96
 fun ScheduleView(
     items: List<ScheduleItem>,
     fields: List<FieldWithMatches>,
+    resourceLabels: SportResourceLabels = GENERIC_SPORT_RESOURCE_LABELS,
+    resourceLabelsByFieldId: Map<String, SportResourceLabels> = emptyMap(),
     showFab: (Boolean) -> Unit,
     topContentPadding: Dp = 0.dp,
     trackedUserIds: Set<String> = emptySet(),
@@ -166,6 +170,9 @@ fun ScheduleView(
             showEventOfficialNames = showEventOfficialNames,
             limitOfficialsToCurrentUser = limitOfficialsToCurrentUser,
             manageMode = canManageMatches,
+            resourceSingular = resourceLabelsByFieldId[
+                (match.field?.id ?: match.match.fieldId).orEmpty()
+            ]?.singular ?: resourceLabels.singular,
         )
     },
     eventCardContent: @Composable (Event, Instant, Instant, () -> Unit) -> Unit = { event, start, end, onClick ->
@@ -299,9 +306,21 @@ fun ScheduleView(
     val dayEvents = remember(dayItems) {
         dayItems.mapNotNull { item -> item as? ScheduleItem.EventEntry }
     }
-    val matchGroups = remember(dayMatches, fieldsById, matchGroupMode, eventLabelsById) {
+    val matchGroups = remember(
+        dayMatches,
+        fieldsById,
+        matchGroupMode,
+        eventLabelsById,
+        resourceLabels,
+        resourceLabelsByFieldId,
+    ) {
         when (matchGroupMode) {
-            ScheduleMatchGroupMode.FIELD -> buildFieldScheduleGroups(dayMatches, fieldsById)
+            ScheduleMatchGroupMode.FIELD -> buildFieldScheduleGroups(
+                dayMatches,
+                fieldsById,
+                resourceLabels.singular,
+                resourceLabelsByFieldId,
+            )
             ScheduleMatchGroupMode.EVENT -> buildEventScheduleGroups(dayMatches, eventLabelsById)
         }
     }
@@ -406,6 +425,7 @@ fun ScheduleView(
                             selectedMode = groupingMode,
                             onModeSelected = { groupingMode = it },
                             canGroupByField = hasAnyMatches,
+                            resourceLabels = resourceLabels,
                             groupMode = matchGroupMode,
                             showFieldSelector = isMobileLayout &&
                                 hasAnyMatches &&
@@ -613,11 +633,12 @@ private fun ScheduleGroupingToggle(
     showFieldSelector: Boolean,
     matchGroups: List<MatchScheduleGroup>,
     selectedMatchGroupKey: String,
+    resourceLabels: SportResourceLabels,
     onMatchGroupSelected: (String) -> Unit,
 ) {
     val scrollState = rememberScrollState()
     val groupLabel = when (groupMode) {
-        ScheduleMatchGroupMode.FIELD -> "By Field"
+        ScheduleMatchGroupMode.FIELD -> "By ${resourceLabels.singular}"
         ScheduleMatchGroupMode.EVENT -> "By Event"
     }
     Box(modifier = Modifier.fillMaxWidth()) {
@@ -645,6 +666,7 @@ private fun ScheduleGroupingToggle(
                         matchGroups = matchGroups,
                         selectedMatchGroupKey = selectedMatchGroupKey,
                         onMatchGroupSelected = onMatchGroupSelected,
+                        resourceLabels = resourceLabels,
                     )
                 }
             }
@@ -657,10 +679,11 @@ private fun FieldSelectorDropdownChip(
     matchGroups: List<MatchScheduleGroup>,
     selectedMatchGroupKey: String,
     onMatchGroupSelected: (String) -> Unit,
+    resourceLabels: SportResourceLabels,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val selectedLabel = remember(matchGroups, selectedMatchGroupKey) {
-        matchGroups.firstOrNull { it.key == selectedMatchGroupKey }?.label ?: "All fields"
+        matchGroups.firstOrNull { it.key == selectedMatchGroupKey }?.label ?: "All ${resourceLabels.plural.lowercase()}"
     }
 
     Box {
@@ -677,7 +700,7 @@ private fun FieldSelectorDropdownChip(
             trailingIcon = {
                 Icon(
                     imageVector = Icons.Default.ArrowDropDown,
-                    contentDescription = "Select field"
+                    contentDescription = "Select ${resourceLabels.singular.lowercase()}"
                 )
             },
         )
@@ -687,7 +710,7 @@ private fun FieldSelectorDropdownChip(
             onDismissRequest = { expanded = false },
         ) {
             DropdownMenuItem(
-                text = { Text("All fields") },
+                text = { Text("All ${resourceLabels.plural.lowercase()}") },
                 onClick = {
                     onMatchGroupSelected(ALL_MATCH_GROUPS_KEY)
                     expanded = false
@@ -709,6 +732,8 @@ private fun FieldSelectorDropdownChip(
 private fun buildFieldScheduleGroups(
     dayMatches: List<MatchWithRelations>,
     fieldsById: Map<String, FieldWithMatches>,
+    resourceSingular: String,
+    resourceLabelsByFieldId: Map<String, SportResourceLabels>,
 ): List<MatchScheduleGroup> {
     if (dayMatches.isEmpty()) return emptyList()
 
@@ -719,7 +744,11 @@ private fun buildFieldScheduleGroups(
     return grouped.map { (fieldKey, matchesForField) ->
         MatchScheduleGroup(
             key = fieldKey,
-            label = resolveFieldLabel(matchesForField.firstOrNull(), fieldsById),
+            label = resolveFieldLabel(
+                matchesForField.firstOrNull(),
+                fieldsById,
+                resourceLabelsByFieldId[fieldKey]?.singular ?: resourceSingular,
+            ),
             matches = matchesForField.sortedBy { it.match.start }
         )
     }.sortedBy { group ->
@@ -765,8 +794,9 @@ private fun resolveFieldKey(match: MatchWithRelations): String {
 private fun resolveFieldLabel(
     match: MatchWithRelations?,
     fieldsById: Map<String, FieldWithMatches>,
+    resourceSingular: String,
 ): String {
-    if (match == null) return "Field TBD"
+    if (match == null) return "$resourceSingular TBD"
 
     val fieldId = match.match.fieldId?.trim().takeUnless { it.isNullOrEmpty() }
         ?: match.field?.id?.trim().takeUnless { it.isNullOrEmpty() }
@@ -778,7 +808,7 @@ private fun resolveFieldLabel(
         }
         val mappedNumber = mappedField?.fieldNumber
         if (mappedNumber != null && mappedNumber > 0) {
-            return "Field $mappedNumber"
+            return "$resourceSingular $mappedNumber"
         }
     }
 
@@ -789,10 +819,10 @@ private fun resolveFieldLabel(
 
     val fieldNumber = match.field?.fieldNumber
     if (fieldNumber != null && fieldNumber > 0) {
-        return "Field $fieldNumber"
+        return "$resourceSingular $fieldNumber"
     }
 
-    return "Field TBD"
+    return "$resourceSingular TBD"
 }
 
 private fun resolveEventLabel(
@@ -817,6 +847,7 @@ private fun ScheduleMatchCard(
     showEventOfficialNames: Boolean,
     limitOfficialsToCurrentUser: Boolean,
     manageMode: Boolean,
+    resourceSingular: String,
 ) {
     val component = LocalTournamentComponent.current
     val currentUser by component.currentUser.collectAsState()
@@ -861,6 +892,7 @@ private fun ScheduleMatchCard(
             showEventOfficialNames = showEventOfficialNames,
             limitOfficialsToCurrentUser = limitOfficialsToCurrentUser,
             manageMode = manageMode,
+            resourceSingular = resourceSingular,
         )
     }
 }

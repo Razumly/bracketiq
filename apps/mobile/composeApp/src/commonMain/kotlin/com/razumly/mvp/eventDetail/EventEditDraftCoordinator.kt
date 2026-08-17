@@ -80,12 +80,14 @@ internal class EventEditDraftCoordinator(
     fun refreshReadOnlyDraft(
         event: Event,
         sourceFields: List<Field>,
+        resourceLabelSingular: String = "Resource",
         leagueScoringConfig: LeagueScoringConfigDTO,
     ) {
         if (_isEditing.value) return
         val refreshedFields = buildEditableFieldDrafts(
             event = event,
             sourceFields = sourceFields,
+            resourceLabelSingular = resourceLabelSingular,
         )
         _editableFields.value = refreshedFields
         _fieldCount.value = refreshedFields.size
@@ -97,11 +99,13 @@ internal class EventEditDraftCoordinator(
         event: Event,
         sourceFields: List<Field>,
         timeSlots: List<TimeSlot>,
+        resourceLabelSingular: String = "Resource",
         leagueScoringConfig: LeagueScoringConfigDTO,
     ) {
         val seededFields = buildEditableFieldDrafts(
             event = event,
             sourceFields = sourceFields,
+            resourceLabelSingular = resourceLabelSingular,
             preserveSourceValues = true,
         )
         _editableLeagueScoringConfig.value = leagueScoringConfig
@@ -130,6 +134,7 @@ internal class EventEditDraftCoordinator(
 
     fun selectFieldCount(
         count: Int,
+        resourceLabelSingular: String = "Resource",
         idFactory: () -> String = ::newId,
     ) {
         val normalized = count.coerceAtLeast(0)
@@ -142,7 +147,7 @@ internal class EventEditDraftCoordinator(
                 field.copy(
                     id = if (field.id.isBlank()) idFactory() else field.id,
                     fieldNumber = index + 1,
-                    name = field.name?.takeIf(String::isNotBlank) ?: "Field ${index + 1}",
+                    name = field.name?.takeIf(String::isNotBlank) ?: "$resourceLabelSingular ${index + 1}",
                     divisions = field.divisions
                         .normalizeDivisionIdentifiers()
                         .ifEmpty { defaultFieldDivisions(currentEvent) },
@@ -162,7 +167,7 @@ internal class EventEditDraftCoordinator(
                 organizationId = currentEvent.organizationId,
                 id = idFactory(),
             ).copy(
-                name = "Field $fieldNumber",
+                name = "$resourceLabelSingular $fieldNumber",
                 divisions = defaultFieldDivisions(currentEvent),
                 location = defaultFieldLocation(currentEvent),
             )

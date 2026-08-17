@@ -92,7 +92,7 @@ class EventEditDraftCoordinatorTest {
 
         assertEquals(listOf("field-1"), coordinator.editedEvent.value.fieldIds)
         assertEquals(listOf("field-1"), coordinator.editableLeagueTimeSlots.value.single().scheduledFieldIds)
-        assertEquals("Field 1", coordinator.editableFields.value.single().name)
+        assertEquals("Resource 1", coordinator.editableFields.value.single().name)
         assertEquals("Main Park", coordinator.editableFields.value.single().location)
     }
 

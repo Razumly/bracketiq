@@ -7,6 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.resolveEventResourceLabels
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventEditorCanonicalState
 import com.razumly.mvp.core.data.repositories.EventEditorMutation
@@ -125,6 +126,10 @@ internal class EventEditActionHandler(
                 event = seededEvent,
                 sourceFields = canonical?.fields ?: eventFields().map { relation -> relation.field },
                 timeSlots = canonical?.timeSlots ?: eventWithRelations().timeSlots,
+                resourceLabelSingular = resolveEventResourceLabels(
+                    sportIds = seededEvent.sportIds,
+                    sports = sportsCatalogCoordinator.currentSports(),
+                ).singular,
                 leagueScoringConfig = canonical?.leagueScoringConfig
                     ?: eventWithRelations().leagueScoringConfig?.toDto()
                     ?: LeagueScoringConfigDTO(),
@@ -225,11 +230,15 @@ internal class EventEditActionHandler(
         val previousLabel = previousType.name
         val nextLabel = nextType.name
         val matchCount = session.snapshot.scheduleState.matchCount
+        val resourceLabels = resolveEventResourceLabels(
+            sportIds = session.canonicalState.event.sportIds,
+            sports = sportsCatalogCoordinator.currentSports(),
+        )
         return when {
             (nextType == EventType.LEAGUE || nextType == EventType.TOURNAMENT) && matchCount > 0 ->
                 EventTypeTransitionConfirmation(
                     message = "Changing this event from $previousLabel to $nextLabel will rebuild " +
-                        "its $matchCount scheduled matches. Match times, fields, seeds, and " +
+                        "its $matchCount scheduled matches. Match times, ${resourceLabels.plural.lowercase()}, seeds, and " +
                         "official assignments can change.",
                     actionLabel = "Change type & rebuild schedule",
                     destinationEventType = nextType,
@@ -406,7 +415,14 @@ internal class EventEditActionHandler(
         }
     }
 
-    fun selectFieldCount(count: Int) = editDraftCoordinator.selectFieldCount(count)
+    fun selectFieldCount(count: Int) {
+        val event = editDraftCoordinator.editedEvent.value
+        val resourceLabels = resolveEventResourceLabels(
+            sportIds = event.sportIds,
+            sports = sportsCatalogCoordinator.currentSports(),
+        )
+        editDraftCoordinator.selectFieldCount(count, resourceLabels.singular)
+    }
 
     fun updateLocalFieldName(index: Int, name: String) =
         editDraftCoordinator.updateLocalFieldName(index, name)
@@ -550,6 +566,10 @@ internal class EventEditActionHandler(
                 editableLeagueTimeSlots = currentTimeSlots,
                 selectedRentalFields = selectedRentalResourceFields(),
                 leagueScoringConfig = editDraftCoordinator.editableLeagueScoringConfig.value,
+                resourceLabelSingular = resolveEventResourceLabels(
+                    sportIds = editDraftCoordinator.editedEvent.value.sportIds,
+                    sports = sportsCatalogCoordinator.currentSports(),
+                ).singular,
                 originalEventStart = eventWithRelations().event.start,
                 normalizeSlotResourceSelection = { slot, validFieldIds ->
                     normalizeRentalSlotResourceSelection(slot, validFieldIds)

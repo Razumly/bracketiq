@@ -31,6 +31,8 @@ data class DivisionTypeParametersResponseDto(
 data class SportApiDto(
     val id: String? = null,
     val name: String? = null,
+    val resourceLabelSingular: String? = null,
+    val resourceLabelPlural: String? = null,
     val skillDivisionTypes: List<DivisionTypeParameterOption> = emptyList(),
     val matchRulesTemplate: MatchRulesConfigMVP? = null,
     val usePointsForWin: Boolean? = null,
@@ -81,7 +83,18 @@ data class SportApiDto(
     fun toSportOrNull(): Sport? {
         val resolvedId = id
         val resolvedName = name ?: resolvedId
-        if (resolvedId.isNullOrBlank() || resolvedName.isNullOrBlank()) {
+        val resolvedResourceLabelSingular = resourceLabelSingular
+        val resolvedResourceLabelPlural = resourceLabelPlural
+        if (
+            resolvedId.isNullOrBlank() ||
+            resolvedName.isNullOrBlank() ||
+            resolvedResourceLabelSingular.isNullOrBlank() ||
+            resolvedResourceLabelSingular != resolvedResourceLabelSingular.trim() ||
+            resolvedResourceLabelSingular.length > 40 ||
+            resolvedResourceLabelPlural.isNullOrBlank() ||
+            resolvedResourceLabelPlural != resolvedResourceLabelPlural.trim() ||
+            resolvedResourceLabelPlural.length > 40
+        ) {
             return null
         }
 
@@ -99,6 +112,8 @@ data class SportApiDto(
         return Sport(
             id = resolvedId,
             name = resolvedName,
+            resourceLabelSingular = resolvedResourceLabelSingular,
+            resourceLabelPlural = resolvedResourceLabelPlural,
             skillDivisionTypes = skillDivisionTypes,
             matchRulesTemplate = matchRulesTemplate,
             usePointsForWin = resolvedUsePointsForWin,

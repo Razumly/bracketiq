@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.SportResourceLabels
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
@@ -35,6 +36,8 @@ internal data class EventDetailOverlayHostState(
     val joinSheetsState: EventDetailJoinSheetsState,
     val showTeamDialog: TeamSelectionDialogState?,
     val showMatchEditDialog: MatchEditDialogState?,
+    val resourceLabels: SportResourceLabels,
+    val resourceLabelsByFieldId: Map<String, SportResourceLabels>,
     val showTeamSelectionDialog: Boolean,
     val teamSelectionSportLabel: String,
     val validTeams: List<TeamWithPlayers>,
@@ -204,6 +207,8 @@ internal fun EventDetailOverlayHost(
         MatchEditDialog(
             match = dialogState.match,
             teams = dialogState.teams,
+            resourceLabels = state.resourceLabels,
+            resourceLabelsByFieldId = state.resourceLabelsByFieldId,
             fields = dialogState.fields,
             allMatches = dialogState.allMatches,
             eventOfficials = dialogState.eventOfficials,
@@ -333,7 +338,7 @@ internal fun EventDetailOverlayHost(
             text = {
                 Text(
                     if (isRebuild) {
-                        "This deletes and recreates every scheduled match. Match times, fields, " +
+                        "This deletes and recreates every scheduled match. Match times, ${state.resourceLabels.plural.lowercase()}, " +
                             "seeds, and official assignments can change."
                     } else {
                         "Build a schedule from the current event settings and registered teams?"

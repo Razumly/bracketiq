@@ -68,6 +68,7 @@ import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.LeagueConfig
 import com.razumly.mvp.core.data.dataTypes.Sport
+import com.razumly.mvp.core.data.dataTypes.resolveEventResourceLabels
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
@@ -529,6 +530,9 @@ fun EventDetails(
     val selectedSportForDivisionOptions = remember(sports, editEventSportId) {
         val normalizedSportId = editEventSportId.orEmpty()
         sports.firstOrNull { sport -> sport.id == normalizedSportId }
+    }
+    val resourceLabels = remember(sports, editEvent.sportIds) {
+        resolveEventResourceLabels(editEvent.sportIds, sports)
     }
     val divisionScheduleUsesSets = selectedSportForDivisionOptions?.usePointsPerSetWin ?: editEvent.usesSets
     val baseLeagueConfig = remember(editEvent) {
@@ -2165,8 +2169,9 @@ fun EventDetails(
         scheduleTimeLocked,
         hasRentalBackedSlots,
         hasAvailableRentalResources,
+        resourceLabels,
     ) {
-        val fieldSummary = "${facilitiesFieldCount.coerceAtLeast(0)} resources"
+        val fieldSummary = "${facilitiesFieldCount.coerceAtLeast(0)} ${resourceLabels.plural.lowercase()}"
         val slotSummary = if (
             editEvent.eventType == EventType.LEAGUE ||
                 editEvent.eventType == EventType.TOURNAMENT ||
@@ -2982,6 +2987,7 @@ fun EventDetails(
                         supportsScheduleConfig = supportsScheduleConfig,
                         event = event,
                         editEvent = editEvent,
+                        resourceLabels = resourceLabels,
                         readOnlyFieldCount = readOnlyFieldCount,
                         timeSlots = eventWithRelations.timeSlots,
                         fieldsById = fieldsById,
