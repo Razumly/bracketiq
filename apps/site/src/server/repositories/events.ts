@@ -7167,6 +7167,7 @@ export const upsertEventFromPayload = async (
       client,
       id,
       eventOfficialsToPersist,
+      isAffiliateExternalEvent ? [] : resolvedOfficialPositions,
     );
   }
 
