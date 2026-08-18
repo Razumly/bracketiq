@@ -49,6 +49,56 @@ class RoomMigrationPathTest {
             ).close()
         }
     }
+    @Test
+    fun v98MatchGraphMigration_preservesPlacementAndAddsPhaseOwnerColumn() {
+        val databaseName = "room-match-graph-v98"
+        migrationHelper.createDatabase(databaseName, 98).use { database ->
+            database.execSQL(
+                """
+                INSERT INTO `MatchMVP` (
+                    `matchId`, `eventId`, `segments`, `incidents`, `team1Points`,
+                    `team2Points`, `losersBracket`, `officialIds`, `locked`, `id`,
+                    `fieldId`, `division`
+                ) VALUES
+                    (1, 'event-graph', '[]', '[]', '[]', '[]', 0, '[]', 0,
+                     'placed', 'field-1', 'entry-open'),
+                    (2, 'event-graph', '[]', '[]', '[]', '[]', 0, '[]', 0,
+                     'unplaced', NULL, 'entry-open')
+                """.trimIndent(),
+            )
+        }
+
+        migrationHelper.runMigrationsAndValidate(
+            databaseName,
+            MVP_DATABASE_VERSION,
+            true,
+            *MVP_DATABASE_MIGRATIONS,
+        ).use { database ->
+            database.query(
+                """
+                SELECT `placementState`, `phaseDivisionId`
+                FROM `MatchMVP`
+                WHERE `id` = 'placed'
+                """.trimIndent(),
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("PLACED", cursor.getString(0))
+                assertTrue(cursor.isNull(1))
+            }
+            database.query(
+                """
+                SELECT `placementState`, `phaseDivisionId`
+                FROM `MatchMVP`
+                WHERE `id` = 'unplaced'
+                """.trimIndent(),
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("UNPLACED", cursor.getString(0))
+                assertTrue(cursor.isNull(1))
+            }
+        }
+    }
+
 
     @Test
     fun v24OutboxRow_survivesTheRemainingReleasedMigrationPath() {

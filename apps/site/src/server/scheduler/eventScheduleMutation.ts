@@ -7,6 +7,7 @@ import {
   saveMatches,
 } from "@/server/repositories/events";
 import {
+  collectPhaseDivisions,
   persistPhaseParticipantAssignments,
   type PhasePersistenceClient,
 } from "@/server/repositories/eventDivisionPhases";
@@ -28,6 +29,7 @@ import {
   assertPhaseOwnedMatchGraph,
   assertUnplacedMatchGraph,
   matchDemandFromGraph,
+  matchDemandFromPersistedGraph,
   rekeyMatchGraph,
   type MatchDemand,
 } from "./matchGraph";
@@ -198,21 +200,7 @@ const persistGraphPhaseParticipants = async (
   eventId: string,
   event: League | Tournament,
 ): Promise<void> => {
-  const phaseDivisions = Array.from(
-    new Map(
-      [
-        ...(event.divisions ?? []),
-        ...(event.playoffDivisions ?? []),
-      ]
-        .filter(
-          (division) =>
-            division.role === "PHASE" &&
-            typeof division.phase === "string" &&
-            division.phase.length > 0,
-        )
-        .map((division) => [division.id, division] as const),
-    ).values(),
-  );
+  const phaseDivisions = collectPhaseDivisions(event);
   if (!phaseDivisions.length) return;
 
   const teamIdsByPhaseDivision = Object.fromEntries(
@@ -232,6 +220,67 @@ const persistGraphPhaseParticipants = async (
     teamIdsByPhaseDivision,
   });
 };
+const loadPersistedGraphDemand = async (
+  tx: Prisma.TransactionClient,
+  eventId: string,
+): Promise<MatchDemand> => {
+  const persistenceClient = tx as unknown as {
+    matches?: {
+      findMany?: (args: unknown) => Promise<unknown[]>;
+    };
+    divisions?: {
+      findMany?: (args: unknown) => Promise<unknown[]>;
+    };
+  };
+  if (
+    typeof persistenceClient.matches?.findMany !== "function" ||
+    typeof persistenceClient.divisions?.findMany !== "function"
+  ) {
+    throw new EventScheduleInputError(
+      "The persisted Match Graph demand could not be loaded.",
+    );
+  }
+
+  const [matchRows, divisionRows] = await Promise.all([
+    persistenceClient.matches.findMany({
+      where: { eventId },
+      select: {
+        division: true,
+        placementState: true,
+        fieldId: true,
+      },
+    }),
+    persistenceClient.divisions.findMany({
+      where: { eventId, scope: "EVENT", status: "ACTIVE" },
+      select: { id: true, phase: true },
+    }),
+  ]);
+  const asRecord = (row: unknown): Record<string, unknown> =>
+    row && typeof row === "object"
+      ? (row as Record<string, unknown>)
+      : {};
+  return matchDemandFromPersistedGraph(
+    matchRows.map((rawRow) => {
+      const row = asRecord(rawRow);
+      return {
+        divisionId: typeof row.division === "string" ? row.division : null,
+        placementState:
+          typeof row.placementState === "string"
+            ? row.placementState
+            : null,
+        fieldId: typeof row.fieldId === "string" ? row.fieldId : null,
+      };
+    }),
+    divisionRows.map((rawRow) => {
+      const row = asRecord(rawRow);
+      return {
+        id: typeof row.id === "string" ? row.id : "",
+        phase: typeof row.phase === "string" ? row.phase : null,
+      };
+    }),
+  );
+};
+
 
 export const persistCreateOnlyMatchGraph = async (
   options: CreateOnlyMatchGraphPersistenceOptions,
@@ -277,7 +326,7 @@ export const persistCreateOnlyMatchGraph = async (
   return {
     event: graphEvent,
     matches,
-    demand: matchDemandFromGraph(matches),
+    demand: await loadPersistedGraphDemand(options.tx, options.eventId),
   };
 };
 
@@ -465,6 +514,11 @@ const editorMatchProjectionsFor = (
       start: stringOrNull(match.start),
       end: stringOrNull(match.end),
       locked: match.locked === true,
+      placementState:
+        match.placementState === "PLACED" ? "PLACED" : "UNPLACED",
+      phase: stringOrNull(match.phase),
+      sourceDivisionId: stringOrNull(match.sourceDivisionId),
+      phaseDivisionId: stringOrNull(match.phaseDivisionId),
       division: stringOrNull(match.division),
       fieldId: stringOrNull(match.fieldId),
       team1Id: stringOrNull(match.team1Id),

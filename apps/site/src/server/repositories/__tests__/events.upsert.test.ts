@@ -2484,10 +2484,11 @@ describe('upsertEventFromPayload', () => {
           {
             positionId: 'event_pos_line',
             slotIndex: 0,
-            holderType: 'OFFICIAL',
+            holderType: 'PLAYER',
+            teamId: 'team_1',
             userId: null,
             eventOfficialId: null,
-            checkedIn: false,
+            checkedIn: true,
             hasConflict: false,
           },
         ],

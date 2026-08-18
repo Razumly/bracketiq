@@ -47,7 +47,7 @@ class RoomMigrationsIosTest {
                 "INSERT INTO `MatchOperationOutboxEntry` (`id`, `payloadJson`) VALUES ('outbox-1', '{\"score\":1}')",
             )
 
-            val migrations = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V98.take(4)
+            val migrations = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V100.take(4)
             assertEquals(listOf(32, 33, 34, 35), migrations.map { it.startVersion })
             assertEquals(listOf(33, 34, 35, 90), migrations.map { it.endVersion })
 
@@ -123,7 +123,7 @@ class RoomMigrationsIosTest {
                 """.trimIndent(),
             )
 
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V98.first { it.startVersion == 90 }
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V100.first { it.startVersion == 90 }
             assertEquals(90, migration.startVersion)
             assertEquals(91, migration.endVersion)
             migration.migrate(connection)
@@ -140,7 +140,7 @@ class RoomMigrationsIosTest {
     @Test
     fun v91CatalogMigration_createsViewerScopedExactQueryCacheTables() {
         BundledSQLiteDriver().open(":memory:").use { connection ->
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V98.first { it.startVersion == 91 }
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V100.first { it.startVersion == 91 }
             assertEquals(91, migration.startVersion)
             assertEquals(92, migration.endVersion)
             migration.migrate(connection)
@@ -195,7 +195,7 @@ class RoomMigrationsIosTest {
             connection.execute("INSERT INTO `team_user_cross_ref` VALUES ('team-array', 'existing_user')")
             connection.execute("INSERT INTO `chat_user_cross_ref` VALUES ('chat-array', 'existing_user')")
 
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V98.first { it.startVersion == 92 }
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V100.first { it.startVersion == 92 }
             assertEquals(92, migration.startVersion)
             assertEquals(93, migration.endVersion)
             migration.migrate(connection)
@@ -241,7 +241,7 @@ class RoomMigrationsIosTest {
             connection.execute("CREATE TABLE `Field` (`id` TEXT NOT NULL, PRIMARY KEY(`id`))")
             connection.execute("INSERT INTO `Field` (`id`) VALUES ('field-existing')")
 
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V98.first { it.startVersion == 96 }
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V100.first { it.startVersion == 96 }
             assertEquals(97, migration.endVersion)
             migration.migrate(connection)
 
@@ -273,7 +273,7 @@ class RoomMigrationsIosTest {
                 """.trimIndent(),
             )
 
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V98.first {
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V100.first {
                 it.startVersion == 97
             }
             assertEquals(98, migration.endVersion)
@@ -304,6 +304,86 @@ class RoomMigrationsIosTest {
             ) { statement ->
                 assertEquals("BEST_AVAILABLE_COVERAGE", statement.getText(0))
             }
+        }
+    }
+
+    @Test
+    fun v98MatchGraphMigration_preservesPlacementAndAddsPhaseOwnership() {
+        BundledSQLiteDriver().open(":memory:").use { connection ->
+            connection.execute(
+                """
+                CREATE TABLE `MatchMVP` (
+                    `id` TEXT NOT NULL,
+                    `fieldId` TEXT,
+                    PRIMARY KEY(`id`)
+                )
+                """.trimIndent(),
+            )
+            connection.execute(
+                """
+                INSERT INTO `MatchMVP` (`id`, `fieldId`) VALUES
+                    ('placed', 'field-1'),
+                    ('unplaced', NULL)
+                """.trimIndent(),
+            )
+
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V100.first {
+                it.startVersion == 98
+            }
+            assertEquals(99, migration.endVersion)
+            migration.migrate(connection)
+
+            connection.assertSingleRow(
+                "SELECT `placementState` FROM `MatchMVP` WHERE `id` = 'placed'",
+            ) { statement -> assertEquals("PLACED", statement.getText(0)) }
+            connection.assertSingleRow(
+                "SELECT `placementState` FROM `MatchMVP` WHERE `id` = 'unplaced'",
+            ) { statement -> assertEquals("UNPLACED", statement.getText(0)) }
+            connection.execute(
+                "UPDATE `MatchMVP` SET `phase` = 'POOL', `sourceDivisionId` = 'entry-open' " +
+                    "WHERE `id` = 'unplaced'",
+            )
+            connection.assertSingleRow(
+                "SELECT `phase`, `sourceDivisionId` FROM `MatchMVP` WHERE `id` = 'unplaced'",
+            ) { statement ->
+                assertEquals("POOL", statement.getText(0))
+                assertEquals("entry-open", statement.getText(1))
+            }
+        }
+    }
+    @Test
+    fun v99MatchGraphMigration_backfillsPhaseOwnerWithoutChangingEntrySelection() {
+        BundledSQLiteDriver().open(":memory:").use { connection ->
+            connection.execute(
+                """
+                CREATE TABLE `MatchMVP` (
+                    `id` TEXT NOT NULL,
+                    `division` TEXT,
+                    `sourceDivisionId` TEXT,
+                    PRIMARY KEY(`id`)
+                )
+                """.trimIndent(),
+            )
+            connection.execute(
+                """
+                INSERT INTO `MatchMVP` (`id`, `division`, `sourceDivisionId`) VALUES
+                    ('phase-match', 'phase-pool', 'entry-open'),
+                    ('entry-match', 'entry-open', NULL)
+                """.trimIndent(),
+            )
+
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V100.first {
+                it.startVersion == 99
+            }
+            assertEquals(100, migration.endVersion)
+            migration.migrate(connection)
+
+            connection.assertSingleRow(
+                "SELECT `phaseDivisionId` FROM `MatchMVP` WHERE `id` = 'phase-match'",
+            ) { statement -> assertEquals("phase-pool", statement.getText(0)) }
+            connection.assertSingleRow(
+                "SELECT `phaseDivisionId` FROM `MatchMVP` WHERE `id` = 'entry-match'",
+            ) { statement -> assertTrue(statement.isNull(0)) }
         }
     }
 

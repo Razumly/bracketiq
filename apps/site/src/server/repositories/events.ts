@@ -89,6 +89,8 @@ import {
   isTournamentPoolPlayEnabled,
 } from "@/server/events/tournamentPools";
 import {
+  collectPhaseDivisions,
+  collectScheduledDivisions,
   persistPhaseParticipantAssignments,
   syncEventDivisionPhases,
   type PhasePersistenceClient,
@@ -117,24 +119,6 @@ import {
 
 type PrismaLike = PrismaClient | any;
 
-const phaseDivisionsForSchedule = (
-  scheduled: League | Tournament,
-): Division[] =>
-  Array.from(
-    new Map(
-      [
-        ...(scheduled.divisions ?? []),
-        ...(scheduled.playoffDivisions ?? []),
-      ]
-        .filter(
-          (division) =>
-            division.role === "PHASE" &&
-            typeof division.phase === "string" &&
-            division.phase.length > 0,
-        )
-        .map((division) => [division.id, division] as const),
-    ).values(),
-  );
 
 export type EventFieldScheduleConflict = {
   fieldId: string;
@@ -765,7 +749,22 @@ export const clearRemovedEventOfficialMatchAssignments = async (
           matchFieldId,
         )
       ) {
-        return [assignment];
+        const row = assignment as Record<string, unknown>;
+        return [
+          {
+            ...row,
+            positionId: normalizeEntityId(row.positionId),
+            slotIndex: Number(row.slotIndex),
+            holderType:
+              typeof row.holderType === "string"
+                ? row.holderType.trim().toUpperCase()
+                : row.holderType,
+            userId: normalizeEntityId(row.userId),
+            eventOfficialId: normalizeEntityId(row.eventOfficialId),
+            checkedIn: row.checkedIn === true,
+            hasConflict: row.hasConflict === true,
+          },
+        ];
       }
       assignmentsChanged = true;
       if (!assignment || typeof assignment !== "object") {
@@ -4814,22 +4813,12 @@ export const persistScheduledRosterTeams = async (
   const shouldRemoveOmittedPlaceholderTeams =
     params.removeOmittedPlaceholderTeams !== false;
 
-  const scheduledDivisionIds = (() => {
-    const ids: string[] = [];
-    for (const division of params.scheduled.divisions ?? []) {
-      const normalizedId = normalizeDivisionKey(division.id);
-      if (!normalizedId || ids.includes(division.id)) {
-        continue;
-      }
-      ids.push(division.id);
-    }
-    return ids;
-  })();
-  const phaseDivisionIds = (params.scheduled.divisions ?? [])
-    .filter((division) =>
-      String((division as any).role ?? "").toUpperCase() === "PHASE" ||
-      normalizeDivisionKind(division.kind, "LEAGUE") === "PLAYOFF",
-    )
+  const scheduledDivisions = collectScheduledDivisions(params.scheduled);
+  const phaseDivisions = collectPhaseDivisions(params.scheduled);
+  const scheduledDivisionIds = scheduledDivisions
+    .map((division) => division.id)
+    .filter((divisionId) => normalizeDivisionKey(divisionId));
+  const phaseDivisionIds = phaseDivisions
     .map((division) => division.id)
     .filter((divisionId) => scheduledDivisionIds.includes(divisionId));
   const sourceDivisionIdByPhase = new Map<string, string>();
@@ -4869,12 +4858,10 @@ export const persistScheduledRosterTeams = async (
   }
   const scheduledLeagueDivisionIds = (() => {
     const ids: string[] = [];
-    for (const division of params.scheduled.divisions ?? []) {
+    for (const division of scheduledDivisions) {
       const normalizedDivisionId = normalizeDivisionKey(division.id);
       if (!normalizedDivisionId) continue;
-      const isPhaseDivision =
-        String((division as any).role ?? "").toUpperCase() === "PHASE" ||
-        normalizeDivisionKind(division.kind, "LEAGUE") === "PLAYOFF";
+      const isPhaseDivision = phaseDivisionIds.includes(division.id);
       const ownerDivisionId = isPhaseDivision
         ? sourceDivisionIdByPhase.get(normalizedDivisionId) ?? division.id
         : division.id;
@@ -4899,15 +4886,12 @@ export const persistScheduledRosterTeams = async (
   for (const divisionId of scheduledLeagueDivisionIds) {
     addDivisionAliases(divisionId, divisionId);
   }
-  for (const division of params.scheduled.divisions ?? []) {
+  for (const division of scheduledDivisions) {
     const divisionId = normalizeDivisionKey(division.id);
     if (!divisionId) continue;
-    const isPhaseDivision =
-      String((division as any).role ?? "").toUpperCase() === "PHASE" ||
-      normalizeDivisionKind(division.kind, "LEAGUE") === "PLAYOFF";
     addDivisionAliases(
       divisionId,
-      isPhaseDivision
+      phaseDivisionIds.includes(division.id)
         ? sourceDivisionIdByPhase.get(divisionId) ?? divisionId
         : divisionId,
     );
@@ -4969,7 +4953,7 @@ export const persistScheduledRosterTeams = async (
   }
 
   if (!rosterTeamIds.length) {
-    const phaseDivisions = phaseDivisionsForSchedule(params.scheduled);
+    const phaseDivisions = collectPhaseDivisions(params.scheduled);
     if (phaseDivisions.length) {
       await persistPhaseParticipantAssignments({
         client: phasePersistenceClient,
@@ -5108,7 +5092,6 @@ export const persistScheduledRosterTeams = async (
       });
     }
   }
-  const phaseDivisions = phaseDivisionsForSchedule(params.scheduled);
   if (phaseDivisions.length) {
     const teamIdsByPhaseDivision = Object.fromEntries(
       phaseDivisions.map((division) => [

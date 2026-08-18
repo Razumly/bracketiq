@@ -1275,6 +1275,32 @@ val MIGRATION_97_98_CANONICAL_STAFFING_PRIORITY = migration(
     ),
 )
 
+val MIGRATION_98_99_MATCH_GRAPH_OWNERSHIP = migration(
+    98,
+    99,
+    listOf(
+        "ALTER TABLE `MatchMVP` ADD COLUMN `placementState` TEXT NOT NULL DEFAULT 'UNPLACED'",
+        "ALTER TABLE `MatchMVP` ADD COLUMN `phase` TEXT",
+        "ALTER TABLE `MatchMVP` ADD COLUMN `sourceDivisionId` TEXT",
+        "UPDATE `MatchMVP` SET `placementState` = CASE WHEN `fieldId` IS NOT NULL THEN 'PLACED' ELSE 'UNPLACED' END",
+    ),
+)
+val MIGRATION_99_100_MATCH_GRAPH_PHASE_OWNER = migration(
+    99,
+    100,
+    listOf(
+        "ALTER TABLE `MatchMVP` ADD COLUMN `phaseDivisionId` TEXT",
+        """
+            UPDATE `MatchMVP`
+            SET `phaseDivisionId` = CASE
+                WHEN `sourceDivisionId` IS NOT NULL THEN `division`
+                ELSE NULL
+            END
+        """.trimIndent(),
+    ),
+)
+
+
 
 val MVP_DATABASE_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_3_4_OFFICIAL_TERMINOLOGY_AND_PRIVACY,
@@ -1292,4 +1318,6 @@ val MVP_DATABASE_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_95_96_DROP_MATCH_SET_RESULTS,
     MIGRATION_96_97_FIELD_SPORT_IDS,
     MIGRATION_97_98_CANONICAL_STAFFING_PRIORITY,
+    MIGRATION_98_99_MATCH_GRAPH_OWNERSHIP,
+    MIGRATION_99_100_MATCH_GRAPH_PHASE_OWNER,
 )

@@ -96,6 +96,28 @@ class MatchDtosTest {
     }
 
     @Test
+    fun match_api_dto_preserves_entry_selection_and_phase_owner_for_graph_match() {
+        val dto = MatchApiDto(
+            id = "match-graph",
+            matchId = 9,
+            eventId = "event-graph",
+            placementState = "UNPLACED",
+            phase = "POOL",
+            sourceDivisionId = "entry-division",
+            phaseDivisionId = "phase-division",
+            division = "entry-division",
+        )
+
+        val match = assertNotNull(dto.toMatchOrNull())
+
+        assertEquals("UNPLACED", match.placementState)
+        assertEquals("POOL", match.phase)
+        assertEquals("entry-division", match.sourceDivisionId)
+        assertEquals("phase-division", match.phaseDivisionId)
+        assertEquals("entry-division", match.division)
+    }
+
+    @Test
     fun bulk_match_update_entry_includes_structured_official_assignments() {
         val match = MatchMVP(
             id = "match-2",
@@ -116,6 +138,27 @@ class MatchDtosTest {
 
         assertEquals(listOf("player-1"), dto.officialIds?.map(MatchOfficialAssignment::userId))
         assertEquals(OfficialAssignmentHolderType.PLAYER, dto.officialIds?.single()?.holderType)
+    }
+    
+    @Test
+    fun bulk_match_mappers_send_phase_owner_as_match_division() {
+        val match = MatchMVP(
+            id = "match-phase",
+            eventId = "event-phase",
+            matchId = 3,
+            division = "entry-division",
+            phaseDivisionId = "phase-division",
+        )
+
+        assertEquals("phase-division", match.toBulkMatchUpdateEntryDto().division)
+        assertEquals(
+            "phase-division",
+            match.toBulkMatchCreateEntryDto(
+                clientId = "client-phase",
+                creationContext = "bracket",
+                autoPlaceholderTeam = true,
+            ).division,
+        )
     }
 
     @Test

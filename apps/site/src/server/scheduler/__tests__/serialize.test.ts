@@ -87,6 +87,34 @@ describe('scheduler API serialization', () => {
     expect(serialized.incidents[0]).not.toHaveProperty('$id');
   });
 
+  it('serializes phase ownership and explicit graph placement state', () => {
+    const division = new Division('phase', 'Phase');
+    division.role = 'PHASE';
+    division.phase = 'POOL';
+    division.sourceDivisionId = 'entry';
+    const match = new Match({
+      id: 'match_phase',
+      matchId: 3,
+      start: new Date('2026-03-01T14:00:00.000Z'),
+      end: new Date('2026-03-01T15:00:00.000Z'),
+      division,
+      bufferMs: 0,
+      eventId: 'event_1',
+    });
+    match.placementState = 'UNPLACED';
+
+    const [serialized] = serializeMatches([match]);
+
+    expect(serialized).toEqual(expect.objectContaining({
+      placementState: 'UNPLACED',
+      phase: 'POOL',
+      sourceDivisionId: 'entry',
+      phaseDivisionId: 'phase',
+      division: 'entry',
+      fieldId: null,
+    }));
+  });
+
   it('serializes every named assignment slot with stable nullable official identities', () => {
     const division = new Division('open', 'Open');
     const match = new Match({

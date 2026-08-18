@@ -64,12 +64,44 @@ type PhasePlan = {
 };
 
 type PhaseDivisionRow = {
+
   id: string;
   role?: unknown;
   phase?: unknown;
   sourceDivisionId?: string | null;
   teamIds?: unknown;
 };
+export type PhaseDivisionCandidate = {
+  id: string;
+  role?: unknown;
+  phase?: unknown;
+};
+
+export const collectScheduledDivisions = <T extends PhaseDivisionCandidate>(
+  scheduled: {
+    divisions?: readonly T[] | null;
+    playoffDivisions?: readonly T[] | null;
+  },
+): T[] => Array.from(
+  new Map(
+    [
+      ...(scheduled.divisions ?? []),
+      ...(scheduled.playoffDivisions ?? []),
+    ]
+      .filter((division) => String(division.id ?? "").trim().length > 0)
+      .map((division) => [division.id, division] as const),
+  ).values(),
+);
+
+export const collectPhaseDivisions = <T extends PhaseDivisionCandidate>(
+  scheduled: {
+    divisions?: readonly T[] | null;
+    playoffDivisions?: readonly T[] | null;
+  },
+): T[] => collectScheduledDivisions(scheduled).filter((division) => (
+  String(division.role ?? '').trim().toUpperCase() === 'PHASE'
+  && String(division.phase ?? '').trim().length > 0
+));
 
 type PhaseSourceRow = {
   entryDivisionId?: string | null;

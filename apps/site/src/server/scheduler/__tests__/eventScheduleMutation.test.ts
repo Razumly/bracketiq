@@ -198,6 +198,23 @@ describe("event schedule Match Graph persistence", () => {
     const event = buildLeague();
     const tx = {
       teams: { upsert: jest.fn().mockResolvedValue(undefined) },
+      matches: {
+        findMany: jest.fn().mockImplementation(async () =>
+          Object.values(event.matches).map((match) => ({
+            division: match.division.id,
+            placementState: match.placementState,
+            fieldId: null,
+          })),
+        ),
+      },
+      divisions: {
+        findMany: jest.fn().mockResolvedValue(
+          [...event.divisions, ...event.playoffDivisions].map((division) => ({
+            id: division.id,
+            phase: division.phase,
+          })),
+        ),
+      },
     } as any;
     (loadEventWithRelations as jest.Mock).mockResolvedValue(event);
 

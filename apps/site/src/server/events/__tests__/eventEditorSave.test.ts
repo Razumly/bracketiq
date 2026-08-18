@@ -70,6 +70,10 @@ jest.mock("@/server/scheduler/eventScheduleMutation", () => {
           start: null,
           end: null,
           locked: false,
+          placementState: "UNPLACED",
+          phase: null,
+          sourceDivisionId: null,
+          phaseDivisionId: null,
           division: null,
           fieldId: null,
           team1Id: null,
@@ -533,7 +537,7 @@ describe("saveEventEditor", () => {
     mockedReconcileEventSchedule.mockReset();
     mockedReconcileEventSchedule.mockResolvedValue({
       event: {},
-      matches: [{ id: "match-created", eventId: "event-created" }],
+      matches: [{ id: "match-created", eventId: "event-created", fieldId: null }],
       warnings: [],
       previousMatchCount: 0,
       notification: null,
@@ -663,7 +667,7 @@ describe("saveEventEditor", () => {
     (upsertEventFromPayload as jest.Mock).mockResolvedValue("event_1");
     mockedReconcileEventSchedule.mockResolvedValue({
       event: { id: "event_1", eventType: "LEAGUE" },
-      matches: [{ id: "match_1", eventId: "event_1" }],
+      matches: [{ id: "match_1", eventId: "event_1", fieldId: null }],
       warnings: [],
       previousMatchCount: 0,
       notification: null,
@@ -718,7 +722,7 @@ describe("saveEventEditor", () => {
     (upsertEventFromPayload as jest.Mock).mockResolvedValue("event_1");
     mockedReconcileEventSchedule.mockResolvedValue({
       event: { id: "event_1", eventType: "LEAGUE" },
-      matches: [{ id: "create-only-match-1", eventId: "event_1" }],
+      matches: [{ id: "create-only-match-1", eventId: "event_1", fieldId: null }],
       warnings: [],
       previousMatchCount: 3,
       notification: null,

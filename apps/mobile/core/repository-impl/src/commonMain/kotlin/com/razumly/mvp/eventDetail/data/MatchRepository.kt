@@ -1038,7 +1038,7 @@ class MatchRepository(
                     matchId = sanitizedMatch.matchId,
                     start = sanitizedMatch.start?.toString(),
                     end = sanitizedMatch.end?.toString(),
-                    division = sanitizedMatch.division,
+                    division = sanitizedMatch.phaseDivisionId ?: sanitizedMatch.division,
                     losersBracket = sanitizedMatch.losersBracket,
                     locked = sanitizedMatch.locked,
                     matchRulesSnapshot = sanitizedMatch.matchRulesSnapshot,

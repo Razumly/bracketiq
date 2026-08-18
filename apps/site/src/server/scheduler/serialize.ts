@@ -192,6 +192,9 @@ const serializeMatch = (
     checkedIn: assignment.checkedIn === true,
     hasConflict: assignment.hasConflict === true,
   }));
+  const sourceDivisionId = match.division?.sourceDivisionId ?? null;
+  const phaseDivisionId =
+    match.division?.role === "PHASE" ? match.division.id : null;
   return {
   id: match.id,
   matchId: match.matchId ?? null,
@@ -200,7 +203,10 @@ const serializeMatch = (
   end: match.end ? match.end.toISOString() : null,
   locked: Boolean(match.locked),
   placementState: match.placementState,
-  division: match.division?.id ?? null,
+  phase: match.division?.phase ?? null,
+  sourceDivisionId,
+  phaseDivisionId,
+  division: sourceDivisionId ?? match.division?.id ?? null,
   fieldId: match.field?.id ?? null,
   team1Id: match.team1?.id ?? null,
   team2Id: match.team2?.id ?? null,
