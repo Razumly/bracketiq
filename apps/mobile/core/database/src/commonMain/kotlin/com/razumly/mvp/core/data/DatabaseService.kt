@@ -21,6 +21,8 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOperationOutboxEntry
 
 interface DatabaseService {
+    suspend fun <R> withTransaction(block: suspend () -> R): R = block()
+
     val getMatchDao: MatchDao
     val getMatchOperationOutboxDao: MatchOperationOutboxDao
         get() = error("MatchOperationOutboxDao is not configured.")

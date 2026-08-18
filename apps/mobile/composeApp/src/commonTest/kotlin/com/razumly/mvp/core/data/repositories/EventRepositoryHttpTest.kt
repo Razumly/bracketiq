@@ -41,6 +41,30 @@ import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.configureMvpHttpClient
+import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode
+import com.razumly.mvp.core.network.dto.EventEditorCapabilitiesDto
+import com.razumly.mvp.core.network.dto.EventEditorCatalogsDto
+import com.razumly.mvp.core.network.dto.EventEditorBasicsDto
+import com.razumly.mvp.core.network.dto.EventEditorCompetitionDto
+import com.razumly.mvp.core.network.dto.EventEditorDraftDto
+import com.razumly.mvp.core.network.dto.EventEditorFieldDto
+import com.razumly.mvp.core.network.dto.EventEditorImmutableDto
+import com.razumly.mvp.core.network.dto.EventEditorMatchProjectionDto
+import com.razumly.mvp.core.network.dto.EventEditorParticipationDto
+import com.razumly.mvp.core.network.dto.EventEditorPaymentDto
+import com.razumly.mvp.core.network.dto.EventEditorRegistrationDto
+import com.razumly.mvp.core.network.dto.EventEditorResourcesDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus
+import com.razumly.mvp.core.network.dto.EventEditorScheduleStateDto
+import com.razumly.mvp.core.network.dto.EventEditorSaveResultDto
+import com.razumly.mvp.core.network.dto.EventEditorSnapshotDto
+import com.razumly.mvp.core.network.dto.EventEditorStaffDto
+import com.razumly.mvp.core.network.dto.EventEditorTimeSlotDto
+import kotlinx.serialization.encodeToString
 import com.razumly.mvp.core.util.jsonMVP
 import dev.icerock.moko.geo.LatLng
 import io.ktor.client.HttpClient
@@ -149,11 +173,16 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
 }
 
 private class EventRepositoryHttp_FakeUserDataDao : RoomUserDataDaoTestAdapter() {
+    val eventCrossRefs = mutableListOf<EventUserCrossRef>()
     override suspend fun upsertUserData(userData: UserData) {}
     override suspend fun upsertUsersData(usersData: List<UserData>) {}
     override suspend fun deleteUsersById(ids: List<String>) {}
-    override suspend fun upsertUserEventCrossRef(crossRef: EventUserCrossRef) {}
-    override suspend fun upsertUserEventCrossRefs(crossRefs: List<EventUserCrossRef>) {}
+    override suspend fun upsertUserEventCrossRef(crossRef: EventUserCrossRef) {
+        eventCrossRefs += crossRef
+    }
+    override suspend fun upsertUserEventCrossRefs(crossRefs: List<EventUserCrossRef>) {
+        eventCrossRefs += crossRefs
+    }
     override suspend fun upsertUserTeamCrossRefs(crossRefs: List<TeamPlayerCrossRef>) {}
     override suspend fun deleteUserData(userData: UserData) {}
     override suspend fun deleteTeamCrossRefById(userIds: List<String>) {}
@@ -407,6 +436,12 @@ private class EventRepositoryHttp_FakeDatabaseService(
     override val getEventComplianceDao: EventComplianceDao = EventRepositoryHttp_FakeComplianceDao(),
     override val getCatalogCacheDao: CatalogCacheDao = InMemoryCatalogCacheDao(),
 ) : DatabaseService {
+    var transactionCalls = 0
+    override suspend fun <R> withTransaction(block: suspend () -> R): R {
+        transactionCalls += 1
+        return block()
+    }
+
     override val getEventRegistrationDao: EventRegistrationDao get() = error("unused")
     override val getChatGroupDao: ChatGroupDao get() = error("unused")
     override val getMessageDao: MessageDao get() = error("unused")
@@ -4932,5 +4967,256 @@ class EventRepositoryHttpTest {
         assertTrue(capturedBody.contains("\"applyReassignment\":false"))
         assertFalse(result.applyReassignment)
         assertEquals("e1__division__advanced", result.division.divisionId)
+    }
+
+    @Test
+    fun given_accepted_editor_create_when_repository_returns_then_event_relations_fields_and_matches_are_cached_before_result() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val userDao = EventRepositoryHttp_FakeUserDataDao()
+        val fieldDao = EventRepositoryHttp_FakeFieldDao()
+        val matchDao = EventRepositoryHttp_FakeMatchDao()
+        val database = EventRepositoryHttp_FakeDatabaseService(
+            getEventDao = eventDao,
+            getUserDataDao = userDao,
+            getTeamDao = EventRepositoryHttp_FakeTeamDao(),
+            getMatchDao = matchDao,
+            getFieldDao = fieldDao,
+        )
+        val start = "2026-07-14T10:00:00Z"
+        val end = "2026-07-14T12:00:00Z"
+        val timeSlot = EventEditorTimeSlotDto(
+            id = "slot-created",
+            eventId = "event-created",
+            dayOfWeek = 2,
+            daysOfWeek = listOf(2),
+            startTimeMinutes = 600,
+            endTimeMinutes = 660,
+            startDate = start,
+            endDate = end,
+            timeZone = "UTC",
+            scheduledFieldId = "field-created",
+            scheduledFieldIds = listOf("field-created"),
+            repeating = false,
+        )
+        val draft = EventEditorDraftDto(
+            basics = EventEditorBasicsDto(
+                name = "Created One-Time Event",
+                description = "Created from the mobile editor.",
+                eventType = "EVENT",
+                sportIds = listOf("sport-1"),
+                start = start,
+                timeZone = "UTC",
+                location = "Gym",
+                address = "1 Main Street",
+                affiliateUrl = "",
+                hostId = "host-1",
+                state = "PUBLISHED",
+            ),
+            participation = EventEditorParticipationDto(
+                teamSignup = false,
+                singleDivision = true,
+                registrationByDivisionType = false,
+                registrationCutoffHours = 0,
+                allowTeamSplitDefault = false,
+            ),
+            registration = EventEditorRegistrationDto(
+                payment = EventEditorPaymentDto(
+                    mode = "FREE",
+                    priceCents = 0,
+                    taxHandling = "NONE",
+                    organizerManualTaxRateBps = 0,
+                    allowPaymentPlans = false,
+                ),
+            ),
+            competition = EventEditorCompetitionDto(
+                doubleElimination = false,
+                includePlayoffs = false,
+                splitLeaguePlayoffDivisions = false,
+                usesSets = false,
+            ),
+            schedule = EventEditorScheduleDto(
+                mode = "FIXED_END",
+                endConstraint = end,
+            ),
+            resources = EventEditorResourcesDto(
+                fieldIds = listOf("field-created"),
+                fields = listOf(EventEditorFieldDto(id = "field-created", name = "Court 1")),
+                timeSlotIds = listOf("slot-created"),
+                timeSlots = listOf(timeSlot),
+            ),
+            staff = EventEditorStaffDto(
+                teamCheckInMode = "OFF",
+                teamCheckInOpenMinutesBefore = 0,
+                allowMatchRosterEdits = false,
+                allowTemporaryMatchPlayers = false,
+                autoCreatePointMatchIncidents = false,
+            ),
+        )
+        val response = EventEditorSaveResultDto(
+            status = "SAVED",
+            snapshot = EventEditorSnapshotDto(
+                contractVersion = 3,
+                draft = draft,
+                mode = "CREATE",
+                eventId = "event-created",
+                editorRevision = "revision-1",
+                capabilities = EventEditorCapabilitiesDto(
+                    canUseOnlinePayments = false,
+                    canManageStaff = true,
+                    canEdit = true,
+                    supportsTeamStaffing = false,
+                ),
+                catalogs = EventEditorCatalogsDto(),
+                immutable = EventEditorImmutableDto(),
+                scheduleState = EventEditorScheduleStateDto(
+                    matchCount = 1,
+                    revision = "schedule-1",
+                    hasProtectedHistory = false,
+                ),
+            ),
+            staffEmailDelivery = "NOT_REQUESTED",
+            scheduleOutcome = EventEditorScheduleOutcomeDto(
+                status = EventEditorScheduleOutcomeStatus.BUILT,
+                matchCount = 1,
+                matches = listOf(
+                    EventEditorMatchProjectionDto(
+                        id = "match-created",
+                        matchId = 1,
+                        eventId = "event-created",
+                        start = start,
+                        end = end,
+                        fieldId = "field-created",
+                    ),
+                ),
+            ),
+        )
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/editor", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            respond(
+                content = jsonMVP.encodeToString(EventEditorSaveResultDto.serializer(), response),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repository = EventRepository(
+            database,
+            MvpApiClient(
+                HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+                "http://example.test",
+                tokenStore,
+            ),
+            EventRepositoryHttp_UnusedTeamRepository,
+            EventRepositoryHttp_FakeUserRepository(makeUser("host-1")),
+        )
+        val command = EventEditorCreateCommandDto(
+            contractVersion = 3,
+            createOperationId = "operation-1",
+            draft = draft,
+            completion = EventEditorCreateCompletionDto(EventEditorCreateCompletionMode.CREATE_ONLY),
+        )
+
+        val result = repository.createEventEditor(command).getOrThrow()
+        assertEquals(1, database.transactionCalls)
+
+        assertEquals("Created One-Time Event", eventDao.getEventById("event-created")?.name)
+        assertEquals("Court 1", fieldDao.fields["field-created"]?.name)
+        assertEquals("event-created", matchDao.matches["match-created"]?.eventId)
+        assertEquals(listOf(EventUserCrossRef("host-1", "event-created")), userDao.eventCrossRefs)
+        assertEquals("slot-created", result.session.canonicalState.timeSlots.single().id)
+    }
+
+    @Test
+    fun given_remote_editor_create_failure_when_repository_submits_then_no_rows_are_cached() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val userDao = EventRepositoryHttp_FakeUserDataDao()
+        val fieldDao = EventRepositoryHttp_FakeFieldDao()
+        val matchDao = EventRepositoryHttp_FakeMatchDao()
+        val database = EventRepositoryHttp_FakeDatabaseService(
+            getEventDao = eventDao,
+            getUserDataDao = userDao,
+            getTeamDao = EventRepositoryHttp_FakeTeamDao(),
+            getMatchDao = matchDao,
+            getFieldDao = fieldDao,
+        )
+        val engine = MockEngine {
+            respond(
+                content = """{"error":"offline"}""",
+                status = HttpStatusCode.InternalServerError,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val repository = EventRepository(
+            database,
+            MvpApiClient(
+                HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+                "http://example.test",
+                tokenStore,
+            ),
+            EventRepositoryHttp_UnusedTeamRepository,
+            EventRepositoryHttp_FakeUserRepository(makeUser("host-1")),
+        )
+        val command = EventEditorCreateCommandDto(
+            contractVersion = 3,
+            createOperationId = "failed-operation",
+            draft = EventEditorDraftDto(
+                basics = EventEditorBasicsDto(
+                    name = "Failed event",
+                    description = "",
+                    eventType = "EVENT",
+                    start = "2026-07-14T10:00:00Z",
+                    timeZone = "UTC",
+                    location = "",
+                    address = "",
+                    affiliateUrl = "",
+                    state = "UNPUBLISHED",
+                ),
+                participation = EventEditorParticipationDto(
+                    teamSignup = false,
+                    singleDivision = false,
+                    registrationByDivisionType = false,
+                    registrationCutoffHours = 0,
+                    allowTeamSplitDefault = false,
+                ),
+                registration = EventEditorRegistrationDto(
+                    payment = EventEditorPaymentDto(
+                        mode = "FREE",
+                        priceCents = 0,
+                        taxHandling = "NONE",
+                        organizerManualTaxRateBps = 0,
+                        allowPaymentPlans = false,
+                    ),
+                ),
+                competition = EventEditorCompetitionDto(
+                    doubleElimination = false,
+                    includePlayoffs = false,
+                    splitLeaguePlayoffDivisions = false,
+                    usesSets = false,
+                ),
+                schedule = EventEditorScheduleDto(
+                    mode = "FIXED_END",
+                    endConstraint = "2026-07-14T12:00:00Z",
+                ),
+                resources = EventEditorResourcesDto(),
+                staff = EventEditorStaffDto(
+                    teamCheckInMode = "OFF",
+                    teamCheckInOpenMinutesBefore = 0,
+                    allowMatchRosterEdits = false,
+                    allowTemporaryMatchPlayers = false,
+                    autoCreatePointMatchIncidents = false,
+                ),
+            ),
+            completion = EventEditorCreateCompletionDto(EventEditorCreateCompletionMode.CREATE_ONLY),
+        )
+
+        val result = repository.createEventEditor(command)
+
+        assertTrue(result.isFailure)
+        assertTrue(eventDao.getAllCachedEvents().first().isEmpty())
+        assertTrue(fieldDao.fields.isEmpty())
+        assertTrue(matchDao.matches.isEmpty())
+        assertTrue(userDao.eventCrossRefs.isEmpty())
     }
 }

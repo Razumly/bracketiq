@@ -3,6 +3,7 @@ package com.razumly.mvp.eventCreate
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.displayLabel
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -145,5 +146,19 @@ class CreateEventSelectionRulesTest {
         assertEquals(3, detail.installmentCount)
         assertEquals(listOf("2026-03-01", "2026-04-01", "2026-05-01"), detail.installmentDueDates)
         assertEquals(listOf(1000, 1000, 1000), detail.installmentAmounts)
+    }
+
+    @Test
+    fun given_one_time_event_when_labels_are_requested_then_user_facing_type_and_create_action_are_returned() {
+        assertEquals("One-Time Event", EventType.EVENT.displayLabel())
+        assertEquals(
+            "Create",
+            createEventPrimaryActionLabel(
+                isEventInfoStep = false,
+                eventType = EventType.EVENT,
+                setupMode = EventCreateSetupMode.SIMPLE,
+                nextSimplePageId = null,
+            ),
+        )
     }
 }

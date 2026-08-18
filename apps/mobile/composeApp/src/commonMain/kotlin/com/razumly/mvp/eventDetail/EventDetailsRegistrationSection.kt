@@ -50,6 +50,7 @@ import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_MANUAL
 import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_ONLINE
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.displayLabel
 import com.razumly.mvp.core.data.dataTypes.formatManualPaymentProviderInput
 import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderInputLabel
 import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderInputPlaceholder
@@ -63,7 +64,6 @@ import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.StandardTextField
-import com.razumly.mvp.core.presentation.util.toEnumTitleCase
 import com.razumly.mvp.eventDetail.composables.CancellationRefundOptions
 import com.razumly.mvp.eventDetail.composables.NumberInputField
 import com.razumly.mvp.eventDetail.composables.RegistrationOptions
@@ -196,7 +196,7 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
                         .map { eventType ->
                             DropdownOption(
                                 value = eventType.name,
-                                label = eventType.name.toEnumTitleCase(),
+                                label = eventType.displayLabel(),
                             )
                         },
                     label = when {

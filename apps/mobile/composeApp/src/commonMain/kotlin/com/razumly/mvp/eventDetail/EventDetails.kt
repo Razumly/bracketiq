@@ -76,8 +76,9 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.displayPriceRangeLabel
 import com.razumly.mvp.core.data.dataTypes.evergreenDateDisplayLabel
 import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
-import com.razumly.mvp.core.data.dataTypes.officialPositionSummary
+import com.razumly.mvp.core.data.dataTypes.enums.displayLabel
 import com.razumly.mvp.core.data.dataTypes.positionSummary
+import com.razumly.mvp.core.data.dataTypes.officialPositionSummary
 import com.razumly.mvp.core.data.dataTypes.toLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
@@ -103,7 +104,6 @@ import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.getScreenHeight
-import com.razumly.mvp.core.presentation.util.toEnumTitleCase
 import com.razumly.mvp.core.presentation.util.toNameCase
 import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
@@ -1880,7 +1880,7 @@ fun EventDetails(
     ) {
         buildList {
             add(eventSportName)
-            add(event.eventType.name.toEnumTitleCase())
+            add(event.eventType.displayLabel())
             if (event.teamSignup) add("Teams of ${event.teamSizeLimit}")
             add(if (event.singleDivision) "Single division" else "Multi division")
         }
@@ -1966,7 +1966,7 @@ fun EventDetails(
         buildList {
             addAll(readOnlyDateRows)
             add(DetailRowSpec(label = "Location", value = event.location))
-            add(DetailRowSpec(label = "Type", value = event.eventType.name.toEnumTitleCase()))
+            add(DetailRowSpec(label = "Type", value = event.eventType.displayLabel()))
             add(DetailRowSpec(label = "Sport", value = eventSportName))
         }
     }

@@ -4,12 +4,15 @@ import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
-import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
+import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
+import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
@@ -19,10 +22,14 @@ import com.razumly.mvp.core.analytics.AnalyticsTracker
 import dev.icerock.moko.geo.LatLng
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
-import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleRequestDto
+import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
+import com.razumly.mvp.core.network.dto.EventEditorMatchProjectionDto
+import com.razumly.mvp.core.network.dto.MatchSegmentApiDto
+import com.razumly.mvp.core.network.dto.MatchApiDto
+
 import com.razumly.mvp.core.network.dto.CreateEventTemplateRequestDto
 import com.razumly.mvp.core.network.dto.EventParticipantsSnapshotResponseDto
 import com.razumly.mvp.core.network.dto.EventTemplateResponseDto
@@ -42,7 +49,8 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
-import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
+import com.razumly.mvp.core.util.jsonMVP
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -84,6 +92,54 @@ internal fun mergeScheduleMatchProjection(
         incidents = scheduleMatch.incidents.ifEmpty { cachedMatch.incidents },
     )
 }
+
+private fun EventEditorMatchProjectionDto.toMatchOrNull(): MatchMVP? =
+    MatchApiDto(
+        id = id.trim().takeIf(String::isNotBlank),
+        matchId = matchId,
+        team1Id = team1Id,
+        team2Id = team2Id,
+        team1Seed = team1Seed,
+        team2Seed = team2Seed,
+        eventId = eventId.trim().takeIf(String::isNotBlank),
+        officialId = officialId,
+        fieldId = fieldId,
+        status = status,
+        resultStatus = resultStatus,
+        resultType = resultType,
+        actualStart = actualStart,
+        actualEnd = actualEnd,
+        statusReason = statusReason,
+        winnerEventTeamId = winnerEventTeamId,
+        matchRulesSnapshot = matchRulesSnapshot.decodeJsonOrNull<ResolvedMatchRulesMVP>(),
+        resolvedMatchRules = resolvedMatchRules.decodeJsonOrNull<ResolvedMatchRulesMVP>(),
+        segments = segments.mapNotNull { segment ->
+            segment.decodeJsonOrNull<MatchSegmentApiDto>()
+        },
+        incidents = incidents.mapNotNull { incident ->
+            incident.decodeJsonOrNull<MatchIncidentMVP>()
+        },
+        start = start,
+        end = end,
+        division = division,
+        team1Points = team1Points,
+        team2Points = team2Points,
+        side = side,
+        losersBracket = losersBracket,
+        winnerNextMatchId = winnerNextMatchId,
+        loserNextMatchId = loserNextMatchId,
+        previousLeftId = previousLeftId,
+        previousRightId = previousRightId,
+        officialCheckedIn = officialCheckedIn,
+        officialIds = officialIds.mapNotNull { assignment ->
+            assignment.decodeJsonOrNull<MatchOfficialAssignment>()
+        },
+        teamOfficialId = teamOfficialId,
+        locked = locked,
+    ).toMatchOrNull()
+
+private inline fun <reified T> JsonObject?.decodeJsonOrNull(): T? =
+    this?.let { value -> runCatching { jsonMVP.decodeFromJsonElement<T>(value) }.getOrNull() }
 
 class EventRepository(
     private val databaseService: DatabaseService,
@@ -258,17 +314,34 @@ class EventRepository(
             snapshot = response.snapshot,
             operationId = command.createOperationId,
         )
-        EventEditorSaveOutcome(
-            session = EventEditorSession(
-                snapshot = response.snapshot,
-                canonicalState = canonical,
-                baseline = canonical,
-                createOperationId = command.createOperationId,
-            ),
-            questionIdMap = response.questionIdMap,
-            staffEmailDelivery = response.staffEmailDelivery,
-            scheduleOutcome = response.scheduleOutcome,
-        )
+        databaseService.withTransaction {
+            val persistedEvent = roomStore.cacheAndReadEvent(
+                event = canonical.event,
+                expectedEventId = canonical.event.id,
+            )
+            participantSyncCoordinator.persistEventRelations(
+                event = persistedEvent,
+                allowWeeklyParticipantRoster = true,
+            )
+            if (canonical.fields.isNotEmpty()) {
+                databaseService.getFieldDao.upsertFields(canonical.fields)
+            }
+            persistBootstrapMatches(
+                eventId = persistedEvent.id,
+                matches = response.scheduleOutcome.matches.mapNotNull { dto -> dto.toMatchOrNull() },
+            )
+            EventEditorSaveOutcome(
+                session = EventEditorSession(
+                    snapshot = response.snapshot,
+                    canonicalState = canonical,
+                    baseline = canonical,
+                    createOperationId = command.createOperationId,
+                ),
+                questionIdMap = response.questionIdMap,
+                staffEmailDelivery = response.staffEmailDelivery,
+                scheduleOutcome = response.scheduleOutcome,
+            )
+        }
     }
 
     override suspend fun getEventEditor(eventId: String): Result<EventEditorSession> = runCatching {

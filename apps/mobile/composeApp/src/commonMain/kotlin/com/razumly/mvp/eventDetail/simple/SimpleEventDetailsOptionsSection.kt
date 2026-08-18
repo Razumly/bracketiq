@@ -26,7 +26,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.presentation.util.toEnumTitleCase
+import com.razumly.mvp.core.data.dataTypes.enums.displayLabel
 import com.razumly.mvp.eventCreate.mobileCreateEventTypes
 
 internal data class SimpleEventDetailsOptionsState(
@@ -266,7 +266,7 @@ private fun EventTypeGrid(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Text(
-                                text = eventType.name.toEnumTitleCase(),
+                                text = eventType.displayLabel(),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 textAlign = TextAlign.Center,

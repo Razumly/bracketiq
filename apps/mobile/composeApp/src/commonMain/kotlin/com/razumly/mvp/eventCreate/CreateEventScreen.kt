@@ -54,6 +54,23 @@ import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import dev.icerock.moko.geo.LatLng
 
+internal fun createEventPrimaryActionLabel(
+    isEventInfoStep: Boolean,
+    eventType: EventType,
+    setupMode: EventCreateSetupMode,
+    nextSimplePageId: EventCreateSetupPageId?,
+): String = when {
+    !isEventInfoStep && eventType == EventType.EVENT -> "Create"
+    !isEventInfoStep && (
+        eventType == EventType.LEAGUE ||
+            eventType == EventType.TOURNAMENT
+        ) -> "Create event & build schedule"
+    !isEventInfoStep -> "Create event"
+    setupMode == EventCreateSetupMode.ADVANCED -> "Review"
+    nextSimplePageId == null -> "Review"
+    else -> "Continue"
+}
+
 @OptIn(ExperimentalDecomposeApi::class)
 @Composable
 fun CreateEventScreen(
@@ -362,16 +379,12 @@ fun CreateEventScreen(
         null
     }
     val actionBackEnabled = previousSimplePageId != null || !isEventInfoStep
-    val actionPrimaryLabel = when {
-        !isEventInfoStep && (
-            newEventState.eventType == EventType.LEAGUE ||
-                newEventState.eventType == EventType.TOURNAMENT
-            ) -> "Create event & build schedule"
-        !isEventInfoStep -> "Create event"
-        setupMode == EventCreateSetupMode.ADVANCED -> "Review"
-        nextSimplePageId == null -> "Review"
-        else -> "Continue"
-    }
+    val actionPrimaryLabel = createEventPrimaryActionLabel(
+        isEventInfoStep = isEventInfoStep,
+        eventType = newEventState.eventType,
+        setupMode = setupMode,
+        nextSimplePageId = nextSimplePageId,
+    )
 
     fun handleCreateEventBack() {
         if (isEventInfoStep) {
