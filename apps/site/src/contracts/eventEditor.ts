@@ -790,6 +790,7 @@ export const eventEditorScheduleOutcomeSchema = z.discriminatedUnion("status", [
     .object({
       status: z.literal("NOT_REQUESTED"),
       matchCount: z.number().int().nonnegative(),
+      matches: z.array(editorMatchProjectionSchema).optional(),
       warnings: z.array(z.never()),
     })
     .strict(),

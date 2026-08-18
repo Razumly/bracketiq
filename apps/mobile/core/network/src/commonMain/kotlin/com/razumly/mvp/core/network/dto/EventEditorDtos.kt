@@ -81,6 +81,10 @@ data class EventEditorMatchProjectionDto(
     val start: String? = null,
     val end: String? = null,
     val locked: Boolean = false,
+    val placementState: String = "UNPLACED",
+    val phase: String? = null,
+    val sourceDivisionId: String? = null,
+    val phaseDivisionId: String? = null,
     val division: String? = null,
     val fieldId: String? = null,
     val team1Id: String? = null,
@@ -173,7 +177,10 @@ data class EventEditorScheduleOutcomeDto(
     init {
         when (status) {
             EventEditorScheduleOutcomeStatus.NOT_REQUESTED -> {
-                require(matches.isEmpty() && warnings.isEmpty())
+                require(warnings.isEmpty())
+                require(matches.isEmpty() || matches.size == matchCount) {
+                    "NOT_REQUESTED schedule outcomes must include all graph matches when matches are present."
+                }
             }
             EventEditorScheduleOutcomeStatus.BUILT,
             EventEditorScheduleOutcomeStatus.REBUILT -> {

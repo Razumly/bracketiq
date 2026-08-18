@@ -5086,7 +5086,12 @@ class EventRepositoryHttpTest {
                         eventId = "event-created",
                         start = start,
                         end = end,
-                        fieldId = "field-created",
+                        fieldId = null,
+                        placementState = "UNPLACED",
+                        phase = "POOL",
+                        sourceDivisionId = "entry-open",
+                        phaseDivisionId = "phase-pool",
+                        division = "entry-open",
                     ),
                 ),
             ),
@@ -5123,6 +5128,13 @@ class EventRepositoryHttpTest {
         assertEquals("Created One-Time Event", eventDao.getEventById("event-created")?.name)
         assertEquals("Court 1", fieldDao.fields["field-created"]?.name)
         assertEquals("event-created", matchDao.matches["match-created"]?.eventId)
+        val cachedMatch = matchDao.matches["match-created"] ?: error("Expected cached editor match")
+        assertEquals(null, cachedMatch.fieldId)
+        assertEquals("UNPLACED", cachedMatch.placementState)
+        assertEquals("POOL", cachedMatch.phase)
+        assertEquals("entry-open", cachedMatch.sourceDivisionId)
+        assertEquals("phase-pool", cachedMatch.phaseDivisionId)
+        assertEquals("entry-open", cachedMatch.division)
         assertEquals(listOf(EventUserCrossRef("host-1", "event-created")), userDao.eventCrossRefs)
         assertEquals("slot-created", result.session.canonicalState.timeSlots.single().id)
     }

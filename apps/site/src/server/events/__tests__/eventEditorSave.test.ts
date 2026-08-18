@@ -71,10 +71,14 @@ jest.mock("@/server/scheduler/eventScheduleMutation", () => {
           end: null,
           locked: false,
           placementState: "UNPLACED",
-          phase: null,
-          sourceDivisionId: null,
-          phaseDivisionId: null,
-          division: null,
+          phase: typeof match.phase === "string" ? match.phase : null,
+          sourceDivisionId: typeof match.sourceDivisionId === "string"
+            ? match.sourceDivisionId
+            : null,
+          phaseDivisionId: typeof match.phaseDivisionId === "string"
+            ? match.phaseDivisionId
+            : null,
+          division: typeof match.division === "string" ? match.division : null,
           fieldId: null,
           team1Id: null,
           team2Id: null,
@@ -590,6 +594,10 @@ describe("saveEventEditor", () => {
         id: `event-created:match:${index + 1}`,
         eventId: "event-created",
         placementState: "UNPLACED",
+        phase: "LEAGUE",
+        sourceDivisionId: "division_1",
+        phaseDivisionId: "phase_1",
+        division: "division_1",
       })),
       demand: {
         total: 6,
@@ -613,11 +621,21 @@ describe("saveEventEditor", () => {
       eventId: expect.any(String),
       includePlaceholderTeams: true,
     });
-    expect(result.scheduleOutcome).toEqual({
+    expect(result.scheduleOutcome).toEqual(expect.objectContaining({
       status: "NOT_REQUESTED",
       matchCount: 6,
+      matches: expect.arrayContaining([
+        expect.objectContaining({
+          id: "event-created:match:1",
+          placementState: "UNPLACED",
+          phase: "LEAGUE",
+          sourceDivisionId: "division_1",
+          phaseDivisionId: "phase_1",
+          division: "division_1",
+        }),
+      ]),
       warnings: [],
-    });
+    }));
   });
   it("rolls back the create receipt with a failed domain transaction", async () => {
     const { rows, tx } = createEventEditorTxFor();

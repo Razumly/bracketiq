@@ -77,6 +77,18 @@ internal fun selectedEventDetailTabGuideTarget(selectedTab: DetailTab): String =
     DetailTab.LEAGUES -> EventGuideTargets.StandingsContent
     DetailTab.PARTICIPANTS -> EventGuideTargets.ParticipantsContent
 }
+private fun MatchWithRelations.matchesDivisionIdentifier(
+    normalizedDivisionId: String,
+): Boolean {
+    val normalizedPhaseDivisionId = match.phaseDivisionId?.normalizeDivisionIdentifier()
+    return if (!normalizedPhaseDivisionId.isNullOrBlank()) {
+        normalizedPhaseDivisionId == normalizedDivisionId
+    } else {
+        listOf(match.division, match.sourceDivisionId).any { divisionId ->
+            divisionId?.normalizeDivisionIdentifier() == normalizedDivisionId
+        }
+    }
+}
 
 internal fun filterScheduleMatchesForDivision(
     matches: List<MatchWithRelations>,
@@ -90,7 +102,7 @@ internal fun filterScheduleMatchesForDivision(
     tournamentPoolPlayEnabled && !selectedSchedulePoolDivisionId.isNullOrBlank() -> {
         val normalizedPoolDivisionId = selectedSchedulePoolDivisionId.normalizeDivisionIdentifier()
         matches.filter { match ->
-            match.match.division?.normalizeDivisionIdentifier() == normalizedPoolDivisionId
+            match.matchesDivisionIdentifier(normalizedPoolDivisionId)
         }
     }
 
@@ -98,10 +110,9 @@ internal fun filterScheduleMatchesForDivision(
         val poolDivisionIds = schedulePoolDivisionOptions.map { option -> option.id }
         val normalizedScheduleDivisionId = selectedScheduleDivisionId.normalizeDivisionIdentifier()
         matches.filter { match ->
-            val normalizedMatchDivision = match.match.division?.normalizeDivisionIdentifier()
-            normalizedMatchDivision == normalizedScheduleDivisionId ||
+            match.matchesDivisionIdentifier(normalizedScheduleDivisionId) ||
                 poolDivisionIds.any { poolDivisionId ->
-                    normalizedMatchDivision == poolDivisionId.normalizeDivisionIdentifier()
+                    match.matchesDivisionIdentifier(poolDivisionId.normalizeDivisionIdentifier())
                 }
         }
     }
@@ -111,7 +122,7 @@ internal fun filterScheduleMatchesForDivision(
     else -> {
         val normalizedSelectedDivision = selectedDivisionId.normalizeDivisionIdentifier()
         matches.filter { match ->
-            match.match.division?.normalizeDivisionIdentifier() == normalizedSelectedDivision
+            match.matchesDivisionIdentifier(normalizedSelectedDivision)
         }
     }
 }

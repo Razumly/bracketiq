@@ -4569,12 +4569,9 @@ function EventScheduleContent() {
       if (effectiveMode === 'CREATE' && result.scheduleOutcome.status === 'BUILT') {
         setInfoMessage(`Schedule built with ${result.scheduleOutcome.matchCount} matches.`);
       }
-      const scheduleMatches = result.scheduleOutcome.status === 'BUILT'
-        || result.scheduleOutcome.status === 'REBUILT'
-        ? result.scheduleOutcome.matches.map((match) => normalizeApiMatch(match as unknown as Match))
-        : result.scheduleOutcome.status === 'DELETED'
-          ? []
-          : undefined;
+      const scheduleMatches = result.scheduleOutcome.status === 'DELETED'
+        ? []
+        : result.scheduleOutcome.matches?.map((match) => normalizeApiMatch(match as unknown as Match));
       const canonicalProjection = editorDraftToLegacyEvent(
         result.snapshot.draft,
         result.snapshot.eventId,

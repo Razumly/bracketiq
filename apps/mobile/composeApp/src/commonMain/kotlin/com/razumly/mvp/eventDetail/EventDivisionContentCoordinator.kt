@@ -44,25 +44,38 @@ internal class EventDivisionContentCoordinator {
     ) {
         _divisionTeams.value = relations.teams.associateBy { team -> team.team.id }
         val divisionFilter = _selectedDivision.value
-        _divisionMatches.value = if (!selectedEvent.singleDivision && !divisionFilter.isNullOrEmpty()) {
-            val normalizedDivisionFilter = divisionFilter.normalizeDivisionIdentifier()
-            relations.matches
-                .filter { match ->
-                    match.match.division?.normalizeDivisionIdentifier() == normalizedDivisionFilter &&
-                        match.hasBracketOrScheduleLinks()
-                }
-                .associateBy { match -> match.match.id }
-        } else {
-            relations.matches
-                .filter { match -> match.hasBracketOrScheduleLinks() }
-                .associateBy { match -> match.match.id }
-        }
+        _divisionMatches.value = relations.matches
+            .filter { match ->
+                (selectedEvent.singleDivision || match.isGraphMatch()) && (
+                    selectedEvent.singleDivision ||
+                        divisionFilter.isNullOrBlank() ||
+                        match.matchesDivisionIdentifier(divisionFilter)
+                    )
+            }
+            .associateBy { match -> match.match.id }
     }
 
-    private fun MatchWithRelations.hasBracketOrScheduleLinks(): Boolean {
-        return previousRightMatch != null ||
+    private fun MatchWithRelations.isGraphMatch(): Boolean =
+        !match.phaseDivisionId.isNullOrBlank() ||
+            !match.previousLeftId.isNullOrBlank() ||
+            !match.previousRightId.isNullOrBlank() ||
+            !match.winnerNextMatchId.isNullOrBlank() ||
+            !match.loserNextMatchId.isNullOrBlank() ||
+            previousRightMatch != null ||
             previousLeftMatch != null ||
             winnerNextMatch != null ||
             loserNextMatch != null
+
+    private fun MatchWithRelations.matchesDivisionIdentifier(
+        normalizedDivisionId: String,
+    ): Boolean {
+        val normalizedPhaseDivisionId = match.phaseDivisionId?.normalizeDivisionIdentifier()
+        return if (!normalizedPhaseDivisionId.isNullOrBlank()) {
+            normalizedPhaseDivisionId == normalizedDivisionId
+        } else {
+            listOf(match.division, match.sourceDivisionId).any { divisionId ->
+                divisionId?.normalizeDivisionIdentifier() == normalizedDivisionId
+            }
+        }
     }
 }

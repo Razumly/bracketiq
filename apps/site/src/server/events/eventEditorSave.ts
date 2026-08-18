@@ -768,6 +768,7 @@ export const createEventEditor = async (
         scheduleOutcome = {
           status: "NOT_REQUESTED",
           matchCount: graph.matches.length,
+          matches: editorMatchProjectionsFor(graph.matches),
           warnings: [],
         };
       }

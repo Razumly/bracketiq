@@ -93,7 +93,7 @@ internal fun mergeScheduleMatchProjection(
     )
 }
 
-private fun EventEditorMatchProjectionDto.toMatchOrNull(): MatchMVP? =
+private fun EventEditorMatchProjectionDto.toMatchOrThrow(): MatchMVP =
     MatchApiDto(
         id = id.trim().takeIf(String::isNotBlank),
         matchId = matchId,
@@ -111,16 +111,16 @@ private fun EventEditorMatchProjectionDto.toMatchOrNull(): MatchMVP? =
         actualEnd = actualEnd,
         statusReason = statusReason,
         winnerEventTeamId = winnerEventTeamId,
-        matchRulesSnapshot = matchRulesSnapshot.decodeJsonOrNull<ResolvedMatchRulesMVP>(),
-        resolvedMatchRules = resolvedMatchRules.decodeJsonOrNull<ResolvedMatchRulesMVP>(),
-        segments = segments.mapNotNull { segment ->
-            segment.decodeJsonOrNull<MatchSegmentApiDto>()
-        },
-        incidents = incidents.mapNotNull { incident ->
-            incident.decodeJsonOrNull<MatchIncidentMVP>()
-        },
+        matchRulesSnapshot = matchRulesSnapshot?.decodeJsonOrThrow<ResolvedMatchRulesMVP>(),
+        resolvedMatchRules = resolvedMatchRules?.decodeJsonOrThrow<ResolvedMatchRulesMVP>(),
+        segments = segments.map { segment -> segment.decodeJsonOrThrow<MatchSegmentApiDto>() },
+        incidents = incidents.map { incident -> incident.decodeJsonOrThrow<MatchIncidentMVP>() },
         start = start,
         end = end,
+        placementState = placementState,
+        phase = phase,
+        sourceDivisionId = sourceDivisionId,
+        phaseDivisionId = phaseDivisionId,
         division = division,
         team1Points = team1Points,
         team2Points = team2Points,
@@ -131,15 +131,16 @@ private fun EventEditorMatchProjectionDto.toMatchOrNull(): MatchMVP? =
         previousLeftId = previousLeftId,
         previousRightId = previousRightId,
         officialCheckedIn = officialCheckedIn,
-        officialIds = officialIds.mapNotNull { assignment ->
-            assignment.decodeJsonOrNull<MatchOfficialAssignment>()
+        officialIds = officialIds.map { assignment ->
+            assignment.decodeJsonOrThrow<MatchOfficialAssignment>()
         },
         teamOfficialId = teamOfficialId,
         locked = locked,
     ).toMatchOrNull()
+        ?: error("Editor schedule response contained a match without canonical identity: $id")
 
-private inline fun <reified T> JsonObject?.decodeJsonOrNull(): T? =
-    this?.let { value -> runCatching { jsonMVP.decodeFromJsonElement<T>(value) }.getOrNull() }
+private inline fun <reified T> JsonObject.decodeJsonOrThrow(): T =
+    jsonMVP.decodeFromJsonElement<T>(this)
 
 class EventRepository(
     private val databaseService: DatabaseService,
@@ -328,7 +329,7 @@ class EventRepository(
             }
             persistBootstrapMatches(
                 eventId = persistedEvent.id,
-                matches = response.scheduleOutcome.matches.mapNotNull { dto -> dto.toMatchOrNull() },
+                matches = response.scheduleOutcome.matches.map { dto -> dto.toMatchOrThrow() },
             )
             EventEditorSaveOutcome(
                 session = EventEditorSession(

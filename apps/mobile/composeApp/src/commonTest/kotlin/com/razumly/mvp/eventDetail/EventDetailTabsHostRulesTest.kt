@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.presentation.EventDetailInitialTab
@@ -187,6 +188,48 @@ class EventDetailTabsHostRulesTest {
     }
 
     @Test
+    fun givenPhaseOwnedMatch_whenFilteringSchedule_thenPhaseDivisionWinsOverEntryLabel() {
+        val matches = listOf(
+            match(id = "phase-match", division = "entry-label", phaseDivisionId = "phase-a"),
+            match(id = "other", division = "entry-label", phaseDivisionId = "phase-b"),
+        )
+
+        assertEquals(
+            listOf("phase-match"),
+            filterScheduleMatchesForDivision(
+                matches = matches,
+                tournamentPoolPlayEnabled = false,
+                selectedSchedulePoolDivisionId = null,
+                selectedScheduleDivisionId = null,
+                schedulePoolDivisionOptions = emptyList(),
+                singleDivision = false,
+                selectedDivisionId = "phase-a",
+            ).map { it.match.id },
+        )
+    }
+
+    @Test
+    fun givenPhaseOwnedUnplacedMatch_whenRefreshingDivisionContent_thenMatchRemainsVisible() {
+        val coordinator = EventDivisionContentCoordinator()
+        coordinator.restoreSelectedDivision("phase-a")
+
+        coordinator.refreshSelectedDivisionContent(
+            selectedEvent = Event(id = "event-1", singleDivision = false),
+            relations = EventWithFullRelations(
+                event = Event(id = "event-1", singleDivision = false),
+                players = emptyList(),
+                matches = listOf(
+                    match(id = "phase-match", division = "entry-label", phaseDivisionId = "phase-a"),
+                    match(id = "other", division = "entry-label", phaseDivisionId = "phase-b"),
+                ),
+                teams = emptyList(),
+            ),
+        )
+
+        assertEquals(listOf("phase-match"), coordinator.divisionMatches.value.keys.toList())
+    }
+
+    @Test
     fun givenOrdinaryDivisionSelection_whenFilteringSchedule_thenOnlyThatDivisionRemains() {
         val matches = listOf(
             match(id = "open", division = "Open"),
@@ -231,12 +274,14 @@ class EventDetailTabsHostRulesTest {
     private fun match(
         id: String,
         division: String,
+        phaseDivisionId: String? = null,
     ): MatchWithRelations = MatchWithRelations(
         match = MatchMVP(
             matchId = id.hashCode(),
             eventId = "event-1",
             id = id,
             division = division,
+            phaseDivisionId = phaseDivisionId,
         ),
         field = null,
         team1 = null,
