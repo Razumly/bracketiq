@@ -90,6 +90,7 @@ import {
 } from "@/server/events/tournamentPools";
 import {
   collectPhaseDivisions,
+  collectPhaseTeamIdsByDivision,
   collectScheduledDivisions,
   persistPhaseParticipantAssignments,
   syncEventDivisionPhases,
@@ -5093,13 +5094,9 @@ export const persistScheduledRosterTeams = async (
     }
   }
   if (phaseDivisions.length) {
-    const teamIdsByPhaseDivision = Object.fromEntries(
-      phaseDivisions.map((division) => [
-        division.id,
-        Object.values(params.scheduled.teams)
-          .filter((team) => team.division?.id === division.id)
-          .map((team) => team.id),
-      ]),
+    const teamIdsByPhaseDivision = collectPhaseTeamIdsByDivision(
+      params.scheduled,
+      params.scheduled.teams,
     );
     await persistPhaseParticipantAssignments({
       client: phasePersistenceClient,

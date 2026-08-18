@@ -8,6 +8,7 @@ import {
 } from "@/server/repositories/events";
 import {
   collectPhaseDivisions,
+  collectPhaseTeamIdsByDivision,
   persistPhaseParticipantAssignments,
   type PhasePersistenceClient,
 } from "@/server/repositories/eventDivisionPhases";
@@ -203,13 +204,9 @@ const persistGraphPhaseParticipants = async (
   const phaseDivisions = collectPhaseDivisions(event);
   if (!phaseDivisions.length) return;
 
-  const teamIdsByPhaseDivision = Object.fromEntries(
-    phaseDivisions.map((division) => [
-      division.id,
-      Object.values(event.teams)
-        .filter((team) => team.division.id === division.id)
-        .map((team) => team.id),
-    ]),
+  const teamIdsByPhaseDivision = collectPhaseTeamIdsByDivision(
+    event,
+    event.teams,
   );
   // Prisma transaction delegates share the phase persistence contract.
   const phasePersistenceClient =

@@ -102,6 +102,31 @@ export const collectPhaseDivisions = <T extends PhaseDivisionCandidate>(
   String(division.role ?? '').trim().toUpperCase() === 'PHASE'
   && String(division.phase ?? '').trim().length > 0
 ));
+type PhaseTeamCandidate = {
+  id?: string | null;
+  division?: {
+    id?: string | null;
+  } | null;
+};
+
+export const collectPhaseTeamIdsByDivision = <
+  T extends PhaseDivisionCandidate,
+  U extends PhaseTeamCandidate,
+>(
+  scheduled: {
+    divisions?: readonly T[] | null;
+    playoffDivisions?: readonly T[] | null;
+  },
+  teams: Readonly<Record<string, U>>,
+): Record<string, string[]> => Object.fromEntries(
+  collectPhaseDivisions(scheduled).map((division) => [
+    division.id,
+    Object.entries(teams)
+      .filter(([, team]) => team.division?.id === division.id)
+      .map(([teamId, team]) => team.id ?? teamId),
+  ]),
+);
+
 
 type PhaseSourceRow = {
   entryDivisionId?: string | null;
