@@ -270,6 +270,9 @@ describe("phase-owned Match Graph persistence", () => {
       .filter((row) => row.role === "PHASE");
     const sourceRows = [...(client.state.eventDivisionPhaseSources ?? new Map()).values()];
     const matchRows = [...(client.state.matches ?? new Map()).values()];
+    const participantRows = [
+      ...(client.state.eventDivisionPhaseParticipants ?? new Map()).values(),
+    ];
 
     expect(phaseRows).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -286,6 +289,13 @@ describe("phase-owned Match Graph persistence", () => {
         phase: "LEAGUE",
       }),
     ]));
+    expect(participantRows.length).toBeGreaterThan(0);
+    expect(participantRows.every((row) => (
+      row.phaseDivisionId === `${entryDivisionId}__phase__league`
+    ))).toBe(true);
+    expect(new Set(participantRows.map((row) => row.eventTeamId))).toEqual(
+      new Set([...client.state.teams.values()].map((row) => row.id)),
+    );
     expect(graphResult?.matches.length).toBeGreaterThan(0);
     expect(matchRows).toHaveLength(graphResult?.matches.length ?? 0);
     expect(matchRows.every((row) => (

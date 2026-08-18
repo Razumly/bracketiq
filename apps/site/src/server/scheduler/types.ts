@@ -155,6 +155,7 @@ export class Division implements Group {
   kind: 'LEAGUE' | 'PLAYOFF';
   role: DivisionRole;
   phase: DivisionCompetitionPhase | null;
+  sourceDivisionId: string | null;
   fieldIds: string[];
   teamIds: string[];
   price: number | null;
@@ -186,6 +187,7 @@ export class Division implements Group {
     phaseSettings?: DivisionPhaseSettingsMap | null,
     role: DivisionRole = 'ENTRY',
     phase: DivisionCompetitionPhase | null = null,
+    sourceDivisionId: string | null = null,
   ) {
     this.id = id;
     this.name = name ?? id;
@@ -193,6 +195,7 @@ export class Division implements Group {
     this.role = role;
     this.phase = phase;
     this.fieldIds = Array.isArray(fieldIds) ? fieldIds : [];
+    this.sourceDivisionId = sourceDivisionId;
     this.price = typeof price === 'number' && Number.isFinite(price) ? price : null;
     this.maxParticipants = typeof maxParticipants === 'number' && Number.isFinite(maxParticipants)
       ? Math.max(0, Math.trunc(maxParticipants))

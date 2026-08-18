@@ -87,6 +87,8 @@ const normalizePhase = (
     ? phase
     : "UNSPECIFIED";
 };
+const divisionKey = (value: unknown): string =>
+  String(value ?? "").trim().toLowerCase();
 
 const isPlacedPersistedMatch = (row: PersistedMatchGraphRow): boolean =>
   String(row.placementState ?? "")
@@ -105,7 +107,10 @@ const demandFromRows = (
   for (const row of rows) {
     const divisionId = String(row.divisionId ?? "").trim() || "UNASSIGNED";
     byDivision[divisionId] = (byDivision[divisionId] ?? 0) + 1;
-    const phase = normalizePhase(row.phase ?? phaseByDivision.get(divisionId));
+    const normalizedDivisionId = divisionKey(row.divisionId);
+    const phase = normalizePhase(
+      row.phase ?? phaseByDivision.get(normalizedDivisionId),
+    );
     byPhase[phase] = (byPhase[phase] ?? 0) + 1;
     if (isPlacedPersistedMatch(row)) placed += 1;
   }
@@ -123,7 +128,12 @@ export const matchDemandFromPersistedGraph = (
   divisions: PersistedMatchGraphDivision[] = [],
 ): MatchDemand => {
   const phaseByDivision = new Map(
-    divisions.map((division) => [division.id, division.phase ?? "UNSPECIFIED"]),
+    divisions
+      .map((division) => [
+        divisionKey(division.id),
+        division.phase ?? "UNSPECIFIED",
+      ] as const)
+      .filter(([id]) => id.length > 0),
   );
   return demandFromRows(rows, phaseByDivision);
 };

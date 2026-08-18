@@ -198,6 +198,21 @@ describe("match graph construction", () => {
     });
   });
 
+  it("normalizes persisted division identities before phase demand grouping", () => {
+    const demand = matchDemandFromPersistedGraph(
+      [
+        {
+          divisionId: "ENTRY_OPEN",
+          placementState: "UNPLACED",
+          fieldId: null,
+        },
+      ],
+      [{ id: "entry_open", phase: "LEAGUE" }],
+    );
+
+    expect(demand.byPhase).toEqual({ LEAGUE: 1 });
+  });
+
   it("builds a Tournament bracket graph with seeds and advancement dependencies before placement", () => {
     const division = new Division(
       "phase_bracket",

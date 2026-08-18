@@ -88,7 +88,11 @@ import {
   generatedPoolsForBracket,
   isTournamentPoolPlayEnabled,
 } from "@/server/events/tournamentPools";
-import { syncEventDivisionPhases } from "./eventDivisionPhases";
+import {
+  persistPhaseParticipantAssignments,
+  syncEventDivisionPhases,
+  type PhasePersistenceClient,
+} from "./eventDivisionPhases";
 import {
   DEFAULT_EVENT_TIME_ZONE,
   localDatePartsInTimeZone,
@@ -112,6 +116,25 @@ import {
 } from "@/server/eventSports";
 
 type PrismaLike = PrismaClient | any;
+
+const phaseDivisionsForSchedule = (
+  scheduled: League | Tournament,
+): Division[] =>
+  Array.from(
+    new Map(
+      [
+        ...(scheduled.divisions ?? []),
+        ...(scheduled.playoffDivisions ?? []),
+      ]
+        .filter(
+          (division) =>
+            division.role === "PHASE" &&
+            typeof division.phase === "string" &&
+            division.phase.length > 0,
+        )
+        .map((division) => [division.id, division] as const),
+    ).values(),
+  );
 
 export type EventFieldScheduleConflict = {
   fieldId: string;
@@ -2320,6 +2343,7 @@ const buildDivisions = (
       normalizeDivisionPhaseSettingsMap(matchedRow?.phaseSettings),
       role,
       phase,
+      matchedRow?.sourceDivisionId ?? null,
     );
     result.push(division);
 
@@ -4784,6 +4808,9 @@ export const persistScheduledRosterTeams = async (
     return !captainId && playerIds.length === 0;
   });
   const now = new Date();
+  // Prisma and test clients share the phase persistence delegates.
+  const phasePersistenceClient =
+    client as unknown as PhasePersistenceClient;
   const shouldRemoveOmittedPlaceholderTeams =
     params.removeOmittedPlaceholderTeams !== false;
 
@@ -4942,6 +4969,16 @@ export const persistScheduledRosterTeams = async (
   }
 
   if (!rosterTeamIds.length) {
+    const phaseDivisions = phaseDivisionsForSchedule(params.scheduled);
+    if (phaseDivisions.length) {
+      await persistPhaseParticipantAssignments({
+        client: phasePersistenceClient,
+        eventId: params.eventId,
+        teamIdsByPhaseDivision: Object.fromEntries(
+          phaseDivisions.map((division) => [division.id, []]),
+        ),
+      });
+    }
     return rosterTeamIds;
   }
 
@@ -5070,6 +5107,22 @@ export const persistScheduledRosterTeams = async (
         },
       });
     }
+  }
+  const phaseDivisions = phaseDivisionsForSchedule(params.scheduled);
+  if (phaseDivisions.length) {
+    const teamIdsByPhaseDivision = Object.fromEntries(
+      phaseDivisions.map((division) => [
+        division.id,
+        Object.values(params.scheduled.teams)
+          .filter((team) => team.division?.id === division.id)
+          .map((team) => team.id),
+      ]),
+    );
+    await persistPhaseParticipantAssignments({
+      client: phasePersistenceClient,
+      eventId: params.eventId,
+      teamIdsByPhaseDivision,
+    });
   }
 
   return rosterTeamIds;

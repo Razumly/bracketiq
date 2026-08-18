@@ -6,7 +6,10 @@ import {
   saveEventSchedule,
   saveMatches,
 } from "@/server/repositories/events";
-import { persistPhaseParticipantAssignments } from "@/server/repositories/eventDivisionPhases";
+import {
+  persistPhaseParticipantAssignments,
+  type PhasePersistenceClient,
+} from "@/server/repositories/eventDivisionPhases";
 import {
   collectMatchScheduleChanges,
   type MatchScheduleNotificationPlan,
@@ -190,6 +193,46 @@ const persistGraphPlaceholderTeams = async (
   }
 };
 
+const persistGraphPhaseParticipants = async (
+  tx: Prisma.TransactionClient,
+  eventId: string,
+  event: League | Tournament,
+): Promise<void> => {
+  const phaseDivisions = Array.from(
+    new Map(
+      [
+        ...(event.divisions ?? []),
+        ...(event.playoffDivisions ?? []),
+      ]
+        .filter(
+          (division) =>
+            division.role === "PHASE" &&
+            typeof division.phase === "string" &&
+            division.phase.length > 0,
+        )
+        .map((division) => [division.id, division] as const),
+    ).values(),
+  );
+  if (!phaseDivisions.length) return;
+
+  const teamIdsByPhaseDivision = Object.fromEntries(
+    phaseDivisions.map((division) => [
+      division.id,
+      Object.values(event.teams)
+        .filter((team) => team.division.id === division.id)
+        .map((team) => team.id),
+    ]),
+  );
+  // Prisma transaction delegates share the phase persistence contract.
+  const phasePersistenceClient =
+    tx as unknown as PhasePersistenceClient;
+  await persistPhaseParticipantAssignments({
+    client: phasePersistenceClient,
+    eventId,
+    teamIdsByPhaseDivision,
+  });
+};
+
 export const persistCreateOnlyMatchGraph = async (
   options: CreateOnlyMatchGraphPersistenceOptions,
 ): Promise<CreateOnlyMatchGraphPersistenceResult> => {
@@ -224,6 +267,11 @@ export const persistCreateOnlyMatchGraph = async (
     matches.map((match) => [match.id, match]),
   );
   await persistGraphPlaceholderTeams(options.tx, options.eventId, graphEvent);
+  await persistGraphPhaseParticipants(
+    options.tx,
+    options.eventId,
+    graphEvent,
+  );
   await saveMatches(options.eventId, matches, options.tx);
 
   return {
@@ -312,8 +360,11 @@ const updateConfirmedPlayoffDivisions = async (
       }),
     ),
   );
+  // Prisma transaction delegates share the phase persistence contract.
+  const phasePersistenceClient =
+    tx as unknown as PhasePersistenceClient;
   await persistPhaseParticipantAssignments({
-    client: tx as any,
+    client: phasePersistenceClient,
     eventId: event.id,
     teamIdsByPhaseDivision: reassignment.phaseTeamIdsByDivision,
   });

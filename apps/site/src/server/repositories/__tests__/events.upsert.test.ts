@@ -7,6 +7,9 @@ jest.mock('@/lib/prisma', () => ({
 import { persistScheduledRosterTeams, upsertEventFromPayload } from '@/server/repositories/events';
 import { buildEventDivisionId } from '@/lib/divisionTypes';
 import { WEEKLY_REPEATING_TIME_SLOT_REQUIRED_MESSAGE } from '@/lib/eventScheduling';
+// Test fixtures cover only fields used by roster persistence.
+type ScheduledRosterEvent =
+  Parameters<typeof persistScheduledRosterTeams>[0]["scheduled"];
 
 type MockClient = {
   $executeRaw: jest.Mock;
@@ -2906,4 +2909,143 @@ describe('persistScheduledRosterTeams', () => {
       },
     });
   });
+  it('clears phase participants when a schedule has no roster teams', async () => {
+    const entryDivisionId = buildEventDivisionId('event_1', 'open');
+    const phaseDivisionId = `${entryDivisionId}__phase__league`;
+    const scheduled = {
+      eventType: 'TOURNAMENT',
+      singleDivision: true,
+      divisions: [
+        { id: entryDivisionId, kind: 'LEAGUE' },
+        {
+          id: phaseDivisionId,
+          kind: 'LEAGUE',
+          role: 'PHASE',
+          phase: 'LEAGUE',
+        },
+      ],
+      teams: {},
+    } as unknown as ScheduledRosterEvent;
+    const client = {
+      events: {
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+      teams: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 2 }),
+      },
+      eventDivisionPhaseSources: {
+        findMany: jest.fn().mockResolvedValue([
+          { phaseDivisionId, entryDivisionId },
+        ]),
+      },
+      eventDivisionPhaseParticipants: {
+        deleteMany: jest.fn().mockResolvedValue(undefined),
+        upsert: jest.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await persistScheduledRosterTeams(
+      { eventId: 'event_1', scheduled },
+      client,
+    );
+
+    expect(client.eventDivisionPhaseParticipants.deleteMany).toHaveBeenCalledWith({
+      where: {
+        eventId: 'event_1',
+        phaseDivisionId: { in: [phaseDivisionId] },
+      },
+    });
+    expect(client.eventDivisionPhaseParticipants.upsert).not.toHaveBeenCalled();
+  });
+
+  it('persists roster teams in their phase participant assignments', async () => {
+    const entryDivisionId = buildEventDivisionId('event_1', 'open');
+    const phaseDivisionId = `${entryDivisionId}__phase__league`;
+    const scheduled = {
+      eventType: 'TOURNAMENT',
+      singleDivision: true,
+      divisions: [
+        { id: entryDivisionId, kind: 'LEAGUE' },
+        {
+          id: phaseDivisionId,
+          kind: 'LEAGUE',
+          role: 'PHASE',
+          phase: 'LEAGUE',
+        },
+      ],
+      teams: {
+        slot_1: {
+          id: 'slot_1',
+          captainId: '',
+          division: { id: phaseDivisionId },
+          name: 'Place Holder 1',
+          playerIds: [],
+        },
+        slot_2: {
+          id: 'slot_2',
+          captainId: '',
+          division: { id: phaseDivisionId },
+          name: 'Place Holder 2',
+          playerIds: [],
+        },
+      },
+    } as unknown as ScheduledRosterEvent;
+    const client = {
+      events: {
+        update: jest.fn().mockResolvedValue(undefined),
+        findUnique: jest.fn().mockResolvedValue({
+          teamSizeLimit: 2,
+          singleDivision: true,
+        }),
+      },
+      teams: {
+        findMany: jest.fn().mockResolvedValue([]),
+        create: jest.fn().mockResolvedValue(undefined),
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+      divisions: {
+        findMany: jest.fn().mockResolvedValue([
+          { id: phaseDivisionId, sourceDivisionId: entryDivisionId },
+        ]),
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+      eventRegistrations: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        upsert: jest.fn().mockResolvedValue({}),
+      },
+      eventDivisionPhaseSources: {
+        findMany: jest.fn().mockResolvedValue([
+          { phaseDivisionId, entryDivisionId },
+        ]),
+      },
+      eventDivisionPhaseParticipants: {
+        deleteMany: jest.fn().mockResolvedValue(undefined),
+        upsert: jest.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await persistScheduledRosterTeams(
+      { eventId: 'event_1', scheduled },
+      client,
+    );
+
+    expect(client.eventDivisionPhaseParticipants.deleteMany).toHaveBeenCalledWith({
+      where: {
+        eventId: 'event_1',
+        phaseDivisionId: { in: [phaseDivisionId] },
+      },
+    });
+    expect(client.eventDivisionPhaseParticipants.upsert).toHaveBeenCalledTimes(2);
+    expect(client.eventDivisionPhaseParticipants.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          eventId: 'event_1',
+          phaseDivisionId,
+          eventTeamId: 'slot_1',
+          sourceEntryDivisionId: entryDivisionId,
+        }),
+      }),
+    );
+  });
+
 });
