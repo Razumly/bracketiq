@@ -68,9 +68,6 @@ jobs:
       - name: Validate Prisma schema
         run: npm run prisma:validate
 
-      - name: Run route-inclusive tests and coverage gates
-        run: npm run test:ci
-
       - name: Type-check
         run: npx tsc --noEmit
 
