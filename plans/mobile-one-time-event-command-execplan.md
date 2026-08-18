@@ -348,3 +348,8 @@ Revision note: updated on 2026-08-18 after implementation and two-axis review.
 The revision records the transaction boundary, shared match conversion,
 cross-platform fixture proof, exact commands, SDK recovery, and passing test
 evidence.
+
+Post-synchronization note: local `main` at `13d519218` was already an
+ancestor of this branch. `git merge --ff-only main` reported `Already up to
+date`. The affected compile, focused Android and iOS tests, and full Android
+and iOS suites passed again after this check.
