@@ -60,9 +60,10 @@ Use an ExecPlan for complex features and significant refactors. Follow `PLANS.md
 
 ## Agent skills
 
-### Issue tracker
+### Issue tracker and workstream execution
 
 Issues are tracked in GitHub Issues for `Razumly/bracketiq`. See `docs/agents/issue-tracker.md`.
+Concurrent issue work uses Workstreams and isolated issue branches. Read `docs/agents/workstream-execution.md` before claim, implementation, or integration.
 
 ### Triage labels
 
