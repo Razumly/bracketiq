@@ -47,7 +47,7 @@ class RoomMigrationsIosTest {
                 "INSERT INTO `MatchOperationOutboxEntry` (`id`, `payloadJson`) VALUES ('outbox-1', '{\"score\":1}')",
             )
 
-            val migrations = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V97.take(4)
+            val migrations = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V98.take(4)
             assertEquals(listOf(32, 33, 34, 35), migrations.map { it.startVersion })
             assertEquals(listOf(33, 34, 35, 90), migrations.map { it.endVersion })
 
@@ -123,7 +123,7 @@ class RoomMigrationsIosTest {
                 """.trimIndent(),
             )
 
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V97.first { it.startVersion == 90 }
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V98.first { it.startVersion == 90 }
             assertEquals(90, migration.startVersion)
             assertEquals(91, migration.endVersion)
             migration.migrate(connection)
@@ -140,7 +140,7 @@ class RoomMigrationsIosTest {
     @Test
     fun v91CatalogMigration_createsViewerScopedExactQueryCacheTables() {
         BundledSQLiteDriver().open(":memory:").use { connection ->
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V97.first { it.startVersion == 91 }
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V98.first { it.startVersion == 91 }
             assertEquals(91, migration.startVersion)
             assertEquals(92, migration.endVersion)
             migration.migrate(connection)
@@ -195,7 +195,7 @@ class RoomMigrationsIosTest {
             connection.execute("INSERT INTO `team_user_cross_ref` VALUES ('team-array', 'existing_user')")
             connection.execute("INSERT INTO `chat_user_cross_ref` VALUES ('chat-array', 'existing_user')")
 
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V97.first { it.startVersion == 92 }
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V98.first { it.startVersion == 92 }
             assertEquals(92, migration.startVersion)
             assertEquals(93, migration.endVersion)
             migration.migrate(connection)
@@ -241,7 +241,7 @@ class RoomMigrationsIosTest {
             connection.execute("CREATE TABLE `Field` (`id` TEXT NOT NULL, PRIMARY KEY(`id`))")
             connection.execute("INSERT INTO `Field` (`id`) VALUES ('field-existing')")
 
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V97.first { it.startVersion == 96 }
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V98.first { it.startVersion == 96 }
             assertEquals(97, migration.endVersion)
             migration.migrate(connection)
 
@@ -250,6 +250,63 @@ class RoomMigrationsIosTest {
             ) { statement -> assertEquals("[]", statement.getText(0)) }
         }
     }
+    @Test
+    fun givenLegacyOfficialSchedulingModes_whenMigratedFromV97ToV98_thenBackfillsCanonicalStaffingPriority() {
+        BundledSQLiteDriver().open(":memory:").use { connection ->
+            connection.execute(
+                """
+                CREATE TABLE `Event` (
+                    `id` TEXT NOT NULL,
+                    `officialSchedulingMode` TEXT NOT NULL,
+                    PRIMARY KEY(`id`)
+                )
+                """.trimIndent(),
+            )
+            connection.execute(
+                """
+                INSERT INTO `Event` (`id`, `officialSchedulingMode`) VALUES
+                    ('event-off', ' OFF '),
+                    ('event-schedule', 'SCHEDULE'),
+                    ('event-staffing', 'STAFFING'),
+                    ('event-team', 'TEAM_STAFFING'),
+                    ('event-unknown', 'legacy-value')
+                """.trimIndent(),
+            )
+
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V98.first {
+                it.startVersion == 97
+            }
+            assertEquals(98, migration.endVersion)
+            migration.migrate(connection)
+
+            connection.assertSingleRow(
+                "SELECT `staffingPriority` FROM `Event` WHERE `id` = 'event-off'",
+            ) { statement ->
+                assertEquals("FULL_COVERAGE_WITH_CONFLICTS_ALLOWED", statement.getText(0))
+            }
+            connection.assertSingleRow(
+                "SELECT `staffingPriority` FROM `Event` WHERE `id` = 'event-schedule'",
+            ) { statement ->
+                assertEquals("BEST_AVAILABLE_COVERAGE", statement.getText(0))
+            }
+            connection.assertSingleRow(
+                "SELECT `staffingPriority` FROM `Event` WHERE `id` = 'event-staffing'",
+            ) { statement ->
+                assertEquals("OFFICIAL_COVERAGE_REQUIRED", statement.getText(0))
+            }
+            connection.assertSingleRow(
+                "SELECT `staffingPriority` FROM `Event` WHERE `id` = 'event-team'",
+            ) { statement ->
+                assertEquals("TEAM_COVERAGE_REQUIRED", statement.getText(0))
+            }
+            connection.assertSingleRow(
+                "SELECT `staffingPriority` FROM `Event` WHERE `id` = 'event-unknown'",
+            ) { statement ->
+                assertEquals("BEST_AVAILABLE_COVERAGE", statement.getText(0))
+            }
+        }
+    }
+
 }
 
 private fun SQLiteConnection.execute(sql: String) {

@@ -212,24 +212,10 @@ export const topologicallySortMatchGraph = (matches: Match[]): Match[] => {
           .getDependencies()
           .every((dependency) => !remaining.has(dependency.id)),
       )
-      .sort((left, right) => {
-        const phaseDiff =
-          Number(
-            left.division.phase === "PLAYOFF" ||
-              left.division.phase === "BRACKET" ||
-              left.division.kind === "PLAYOFF",
-          ) -
-          Number(
-            right.division.phase === "PLAYOFF" ||
-              right.division.phase === "BRACKET" ||
-              right.division.kind === "PLAYOFF",
-          );
-        if (phaseDiff !== 0) return phaseDiff;
-        return (
-          (sourceOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
-          (sourceOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER)
-        );
-      })[0];
+      .sort((left, right) => (
+        (sourceOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+        (sourceOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER)
+      ))[0];
     if (!next) {
       throw new Error("Match graph contains a dependency cycle.");
     }

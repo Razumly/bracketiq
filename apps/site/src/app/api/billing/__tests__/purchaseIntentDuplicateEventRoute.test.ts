@@ -41,6 +41,9 @@ const loadUserBillingProfileMock = jest.fn();
 const resolvePurchaseContextMock = jest.fn();
 const calculateTaxQuoteMock = jest.fn();
 const buildDestinationTransferDataMock = jest.fn();
+const canManageCanonicalTeamMock = jest.fn();
+const claimOrCreateEventTeamSnapshotMock = jest.fn();
+const loadCanonicalTeamByIdMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/permissions', () => ({ requireSession: requireSessionMock }));
@@ -59,6 +62,11 @@ jest.mock('@/lib/stripeTax', () => ({
 }));
 jest.mock('@/lib/stripeConnectAccounts', () => ({
   buildDestinationTransferData: (...args: unknown[]) => buildDestinationTransferDataMock(...args),
+}));
+jest.mock('@/server/teams/teamMembership', () => ({
+  canManageCanonicalTeam: (...args: unknown[]) => canManageCanonicalTeamMock(...args),
+  claimOrCreateEventTeamSnapshot: (...args: unknown[]) => claimOrCreateEventTeamSnapshotMock(...args),
+  loadCanonicalTeamById: (...args: unknown[]) => loadCanonicalTeamByIdMock(...args),
 }));
 jest.mock('@/lib/stripeCheckoutReuse', () => ({
   buildBillingAddressFingerprint: jest.fn().mockReturnValue('fp_123'),
@@ -174,6 +182,9 @@ describe('POST /api/billing/purchase-intent duplicate event registration guards'
       dateOfBirth: null,
     });
     prismaMock.teams.findUnique.mockResolvedValue({ id: 'team_1' });
+    canManageCanonicalTeamMock.mockResolvedValue(true);
+    loadCanonicalTeamByIdMock.mockResolvedValue({ id: 'team_1', name: 'Team 1' });
+    claimOrCreateEventTeamSnapshotMock.mockResolvedValue({ id: 'team_1' });
     prismaMock.divisions.findFirst.mockResolvedValue(null);
     prismaMock.divisions.findMany.mockResolvedValue([]);
     prismaMock.timeSlots.findUnique.mockResolvedValue({

@@ -280,8 +280,25 @@ private val MIGRATION_96_97_FIELD_SPORT_IDS = migration(
         "ALTER TABLE `Field` ADD COLUMN `sportIds` TEXT NOT NULL DEFAULT '[]'",
     ),
 )
+private val MIGRATION_97_98_CANONICAL_STAFFING_PRIORITY = migration(
+    97,
+    98,
+    listOf(
+        "ALTER TABLE `Event` ADD COLUMN `staffingPriority` TEXT NOT NULL DEFAULT 'BEST_AVAILABLE_COVERAGE'",
+        """
+            UPDATE `Event`
+            SET `staffingPriority` = CASE UPPER(TRIM(`officialSchedulingMode`))
+                WHEN 'STAFFING' THEN 'OFFICIAL_COVERAGE_REQUIRED'
+                WHEN 'TEAM_STAFFING' THEN 'TEAM_COVERAGE_REQUIRED'
+                WHEN 'SCHEDULE' THEN 'BEST_AVAILABLE_COVERAGE'
+                WHEN 'OFF' THEN 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED'
+                ELSE 'BEST_AVAILABLE_COVERAGE'
+            END
+        """.trimIndent(),
+    ),
+)
 
-internal val IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V97: Array<Migration> = arrayOf(
+internal val IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V98: Array<Migration> = arrayOf(
     MIGRATION_32_33_REFUND_SCOPE,
     MIGRATION_33_34_PENDING_RENTAL_ORDERS,
     MIGRATION_34_35_PENDING_RENTAL_PAYER_SCOPE,
@@ -293,4 +310,5 @@ internal val IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V97: Array<Migration> = arrayOf(
     MIGRATION_94_95_DROP_EVENT_SPORT_ID,
     MIGRATION_95_96_DROP_MATCH_SET_RESULTS,
     MIGRATION_96_97_FIELD_SPORT_IDS,
+    MIGRATION_97_98_CANONICAL_STAFFING_PRIORITY,
 )

@@ -29,7 +29,7 @@ import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
-import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.StaffingPriority
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.addOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
@@ -37,7 +37,7 @@ import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.updateOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.updateOfficialUserPositions
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.withOfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.withStaffingPriority
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
@@ -270,11 +270,11 @@ fun CreateEventScreen(
     }
     val onAddOfficialId: (String) -> Unit = remember(component) { component::addOfficialId }
     val onRemoveOfficialId: (String) -> Unit = remember(component) { component::removeOfficialId }
-    val onUpdateOfficialSchedulingMode: (OfficialSchedulingMode) -> Unit =
+    val onUpdateStaffingPriority: (StaffingPriority) -> Unit =
         remember(component) {
-            { mode ->
+            { priority ->
                 component.updateEventField {
-                    withOfficialSchedulingMode(mode)
+                    withStaffingPriority(priority)
                 }
             }
         }
@@ -610,7 +610,7 @@ fun CreateEventScreen(
                                     onUpdateAllowTemporaryMatchPlayers = onUpdateAllowTemporaryMatchPlayers,
                                     onAddOfficialId = onAddOfficialId,
                                     onRemoveOfficialId = onRemoveOfficialId,
-                                    onUpdateOfficialSchedulingMode = onUpdateOfficialSchedulingMode,
+                                    onUpdateStaffingPriority = onUpdateStaffingPriority,
                                     onLoadOfficialPositionDefaults = {
                                         onEditEvent {
                                             syncOfficialStaffing(

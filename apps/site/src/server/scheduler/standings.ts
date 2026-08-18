@@ -12,8 +12,8 @@ import {
   Team,
   Tournament,
   UserData,
-  usesTeamOfficialScheduling,
 } from './types';
+import { OfficialStaffingPlanner } from './officialStaffing';
 
 export type LeagueStanding = {
   teamId: string;
@@ -770,7 +770,11 @@ const clearPendingPlayoffAssignments = (matches: Match[]): void => {
   }
 };
 
-const assignTeamOfficialsForKnownMatches = (matches: Match[], candidates: Team[]): void => {
+const assignTeamOfficialsForKnownMatches = (
+  matches: Match[],
+  candidates: Team[],
+  candidatePoolEnabled: (match: Match) => boolean = () => true,
+): void => {
   const candidatesById = new Map<string, Team>();
   candidates.forEach((team) => {
     if (!team.id || candidatesById.has(team.id)) {
@@ -802,6 +806,13 @@ const assignTeamOfficialsForKnownMatches = (matches: Match[], candidates: Team[]
 
   for (const match of orderedMatches) {
     if (isMatchScored(match)) {
+      continue;
+    }
+    if (!match.requiresTeamOfficial || !candidatePoolEnabled(match)) {
+      if (match.teamOfficial) {
+        detachMatchFromTeam(match.teamOfficial, match);
+        match.teamOfficial = null;
+      }
       continue;
     }
 
@@ -857,6 +868,23 @@ const assignTeamOfficialsForKnownMatches = (matches: Match[], candidates: Team[]
 
     assignTeamOfficialToMatch(match, candidate);
   }
+};
+const refreshAndAssignTeamOfficials = (
+  event: StandingsAdvancementEvent,
+  matches: Match[],
+  candidates: Team[],
+): void => {
+  const planner = new OfficialStaffingPlanner(event);
+  for (const match of matches) {
+    match.requiresTeamOfficial = planner.isTeamDutyRequired(match);
+    match.reservesTeamOfficial =
+      match.requiresTeamOfficial && planner.isHardTeamCoverageRequired(match);
+  }
+  assignTeamOfficialsForKnownMatches(
+    matches,
+    candidates,
+    (match) => planner.isTeamDutyCandidatePoolEnabled(match),
+  );
 };
 
 type EntrantSlot = {
@@ -965,6 +993,7 @@ const buildTemplateEntrants = (
     entrants.push(new Team({
       id: `${league.id}__${playoffDivision.id}__seed_placeholder_${seed}`,
       captainId: '',
+      kind: 'PLACEHOLDER',
       division: playoffDivision,
       name: `Seed ${seed}`,
       matches: [],
@@ -1295,10 +1324,7 @@ const assignTeamsToSameDivisionPlayoffMatches = (
     }
   }
 
-  if (usesTeamOfficialScheduling(league)) {
-    assignTeamOfficialsForKnownMatches(playoffMatches, teams);
-  }
-
+  refreshAndAssignTeamOfficials(league, playoffMatches, teams);
   return seededTeamIds;
 };
 
@@ -1354,18 +1380,14 @@ export const assignTeamsToPlayoffDivisionMatches = (
       assignTeamToMatch(firstRoundMatch, 'team1', teams[0], team1Seed);
       assignTeamToMatch(firstRoundMatch, 'team2', teams[1], team2Seed);
     }
-    if (usesTeamOfficialScheduling(league)) {
-      assignTeamOfficialsForKnownMatches(playoffMatches, teams);
-    }
+    refreshAndAssignTeamOfficials(league, playoffMatches, teams);
     return seededTeamIds;
   }
 
   const teamLookup = Object.fromEntries(teams.map((team) => [team.id, team]));
   applyTemplateEntrantAssignments(actualRoot, templateRoot, teamLookup);
+  refreshAndAssignTeamOfficials(league, playoffMatches, teams);
 
-  if (usesTeamOfficialScheduling(league)) {
-    assignTeamOfficialsForKnownMatches(playoffMatches, teams);
-  }
 
   return seededTeamIds;
 };

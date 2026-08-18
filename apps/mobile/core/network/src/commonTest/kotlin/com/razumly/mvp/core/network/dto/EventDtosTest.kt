@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_PAYPAL
 import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_VENMO
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.StaffingPriority
 import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_MANUAL
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -528,6 +529,24 @@ class EventDtosTest {
         assertEquals(listOf("Line Judge"), event?.officialPositions?.map(EventOfficialPosition::name))
         assertEquals(listOf("official-1"), event?.eventOfficials?.map(EventOfficial::userId))
         assertEquals(listOf("official-1"), event?.officialIds)
+    }
+
+    @Test
+    fun event_api_dto_prefers_canonical_staffing_priority_over_legacy_mode() {
+        val dto = EventApiDto(
+            id = "event-canonical-staffing",
+            name = "API Event",
+            hostId = "host-canonical-staffing",
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T01:00:00Z",
+            staffingPriority = "OFFICIAL_COVERAGE_REQUIRED",
+            officialSchedulingMode = "OFF",
+        )
+
+        val event = dto.toEventOrNull()
+
+        assertEquals(StaffingPriority.OFFICIAL_COVERAGE_REQUIRED, event?.staffingPriority)
+        assertEquals(OfficialSchedulingMode.STAFFING, event?.officialSchedulingMode)
     }
 
     @Test

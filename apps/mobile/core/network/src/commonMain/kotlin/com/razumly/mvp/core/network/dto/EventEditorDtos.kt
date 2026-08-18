@@ -423,8 +423,9 @@ data class EventEditorTimeSlotDto(
 
 @Serializable
 data class EventEditorStaffDto(
-    val officialSchedulingMode: String,
-    val teamOfficialsMaySwap: Boolean,
+    val staffingPriority: String? = null,
+    val doTeamsOfficiate: Boolean? = null,
+    val teamOfficialsMaySwap: Boolean = false,
     val teamCheckInMode: String,
     val teamCheckInOpenMinutesBefore: Int,
     val allowMatchRosterEdits: Boolean,

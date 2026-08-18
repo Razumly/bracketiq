@@ -188,6 +188,17 @@ export const EventsOfficialSchedulingModeEnum = {
 export type EventsOfficialSchedulingModeEnum = (typeof EventsOfficialSchedulingModeEnum)[keyof typeof EventsOfficialSchedulingModeEnum]
 
 
+export const StaffingPriorityEnum = {
+  FULL_COVERAGE_REQUIRED: 'FULL_COVERAGE_REQUIRED',
+  TEAM_COVERAGE_REQUIRED: 'TEAM_COVERAGE_REQUIRED',
+  OFFICIAL_COVERAGE_REQUIRED: 'OFFICIAL_COVERAGE_REQUIRED',
+  BEST_AVAILABLE_COVERAGE: 'BEST_AVAILABLE_COVERAGE',
+  FULL_COVERAGE_WITH_CONFLICTS_ALLOWED: 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED'
+} as const
+
+export type StaffingPriorityEnum = (typeof StaffingPriorityEnum)[keyof typeof StaffingPriorityEnum]
+
+
 export const ProductsPeriodEnum = {
   SINGLE: 'SINGLE',
   WEEK: 'WEEK',

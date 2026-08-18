@@ -27,20 +27,28 @@ describe('event editor draft round trips', () => {
 
     expect(roundTrippedDraft).toEqual(initialDraft);
   });
-  it('preserves OFF official scheduling mode through the editor adapter', () => {
+  it.each([
+    ['STAFFING', 'OFFICIAL_COVERAGE_REQUIRED'],
+    ['TEAM_STAFFING', 'TEAM_COVERAGE_REQUIRED'],
+    ['SCHEDULE', 'BEST_AVAILABLE_COVERAGE'],
+    ['OFF', 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED'],
+  ] as const)('maps legacy %s to canonical Staffing Priority', (legacyMode, staffingPriority) => {
     const sourceEvent = eventEditorFixtures[0].event;
     const event = {
       ...sourceEvent,
-      officialSchedulingMode: 'OFF',
+      staffingPriority: undefined,
+      officialSchedulingMode: legacyMode,
       officialIds: [],
       officialPositions: [],
       eventOfficials: [],
     } as unknown as Event;
 
     const draft = legacyEventToEditorDraft(event);
+    const persistedProjection = editorDraftToLegacyEvent(draft);
 
-    expect(draft.staff.officialSchedulingMode).toBe('OFF');
-    expect(editorDraftToLegacyEvent(draft).officialSchedulingMode).toBe('OFF');
+    expect(draft.staff.staffingPriority).toBe(staffingPriority);
+    expect(persistedProjection.staffingPriority).toBe(staffingPriority);
+    expect(persistedProjection).not.toHaveProperty('officialSchedulingMode');
   });
 
   it('does not derive an event playoff count from the first multi-division league', () => {

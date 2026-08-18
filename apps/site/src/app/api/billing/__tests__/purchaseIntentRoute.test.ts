@@ -23,6 +23,7 @@ const prismaMock = {
   },
   teams: {
     findUnique: jest.fn(),
+    findMany: jest.fn(),
   },
   divisions: {
     findMany: jest.fn(),
@@ -195,6 +196,7 @@ describe('POST /api/billing/purchase-intent', () => {
         $executeRaw: prismaMock.$executeRaw,
         teams: {
           findUnique: prismaMock.teams.findUnique,
+          findMany: prismaMock.teams.findMany,
         },
         userData: {
           findUnique: prismaMock.userData.findUnique,
@@ -637,7 +639,7 @@ describe('POST /api/billing/purchase-intent', () => {
     );
   });
 
-  it('creates an event-team snapshot before reserving paid canonical team checkout', async () => {
+  it('reserves a specific Placeholder Team for paid checkout without accepting its Participant Registration', async () => {
     prismaMock.$queryRaw.mockResolvedValueOnce([
       {
         id: 'event_1',
@@ -649,8 +651,8 @@ describe('POST /api/billing/purchase-intent', () => {
         divisions: [],
         maxParticipants: null,
         teamSignup: true,
-        eventType: 'EVENT',
-        includePlayoffs: null,
+        eventType: 'TOURNAMENT',
+        includePlayoffs: false,
         parentEvent: null,
         timeSlotIds: [],
       },
@@ -664,7 +666,27 @@ describe('POST /api/billing/purchase-intent', () => {
       playerRegistrations: [],
       staffAssignments: [],
     });
-    claimOrCreateEventTeamSnapshotMock.mockResolvedValueOnce({ id: 'event_team_1' });
+    const reservedPlaceholder: {
+      id: string;
+      eventId: string;
+      kind: string;
+      parentTeamId: string | null;
+      seed: number;
+      division: string;
+    } = {
+      id: 'slot_open_1',
+      eventId: 'event_1',
+      kind: 'PLACEHOLDER',
+      parentTeamId: null,
+      seed: 1,
+      division: 'entry_open',
+    };
+    prismaMock.teams.findMany.mockResolvedValueOnce([reservedPlaceholder]);
+    claimOrCreateEventTeamSnapshotMock.mockImplementationOnce(async () => {
+      reservedPlaceholder.kind = 'REGISTERED';
+      reservedPlaceholder.parentTeamId = 'canonical_team_1';
+      return reservedPlaceholder;
+    });
 
     const res = await POST(jsonPost({
       user: { $id: 'user_1' },
@@ -672,7 +694,7 @@ describe('POST /api/billing/purchase-intent', () => {
         $id: 'event_1',
         name: 'Paid Team Event',
         price: 2500,
-        eventType: 'EVENT',
+        eventType: 'TOURNAMENT',
         teamSignup: true,
       },
       team: { $id: 'canonical_team_1', name: 'Rain Team' },
@@ -690,22 +712,22 @@ describe('POST /api/billing/purchase-intent', () => {
       }),
       expect.any(Object),
     );
-    expect(claimOrCreateEventTeamSnapshotMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventId: 'event_1',
-        canonicalTeamId: 'canonical_team_1',
-        createdBy: 'user_1',
-        upsertRegistration: false,
-      }),
-    );
+    expect(reservedPlaceholder).toEqual({
+      id: 'slot_open_1',
+      eventId: 'event_1',
+      kind: 'PLACEHOLDER',
+      parentTeamId: null,
+      seed: 1,
+      division: 'entry_open',
+    });
     expect(prismaMock.eventRegistrations.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          id: 'event_1__team__event_team_1',
+          id: 'event_1__team__slot_open_1',
           eventId: 'event_1',
-          registrantId: 'event_team_1',
+          registrantId: 'slot_open_1',
           parentId: 'canonical_team_1',
-          eventTeamId: 'event_team_1',
+          eventTeamId: 'slot_open_1',
           registrantType: 'TEAM',
           status: 'STARTED',
         }),
@@ -713,9 +735,151 @@ describe('POST /api/billing/purchase-intent', () => {
     );
     const createParams = mockStripePaymentIntentCreate.mock.calls[0]?.[0];
     expect(createParams.metadata).toEqual(expect.objectContaining({
-      team_id: 'event_team_1',
-      registration_id: 'event_1__team__event_team_1',
+      team_id: 'slot_open_1',
+      registration_id: 'event_1__team__slot_open_1',
+      event_registration_parent_id: 'canonical_team_1',
     }));
+  });
+
+  it('deterministically reuses the oldest live canonical-team placeholder hold', async () => {
+    prismaMock.$queryRaw.mockResolvedValueOnce([
+      {
+        id: 'event_1',
+        start: new Date('2026-03-18T12:00:00.000Z'),
+        minAge: null,
+        maxAge: null,
+        sportId: null,
+        registrationByDivisionType: false,
+        divisions: [],
+        maxParticipants: null,
+        teamSignup: true,
+        eventType: 'LEAGUE',
+        includePlayoffs: false,
+        parentEvent: null,
+        timeSlotIds: [],
+      },
+    ]);
+    prismaMock.teams.findUnique.mockResolvedValueOnce(null);
+    loadCanonicalTeamByIdMock.mockResolvedValueOnce({
+      id: 'canonical_team_1',
+      $id: 'canonical_team_1',
+      name: 'Rain Team',
+      sport: null,
+      playerRegistrations: [],
+      staffAssignments: [],
+    });
+    prismaMock.teams.findMany.mockResolvedValueOnce([
+      {
+        id: 'slot_open_1',
+        eventId: 'event_1',
+        kind: 'PLACEHOLDER',
+        parentTeamId: null,
+        seed: 1,
+        division: 'entry_open',
+      },
+      {
+        id: 'slot_open_2',
+        eventId: 'event_1',
+        kind: 'PLACEHOLDER',
+        parentTeamId: null,
+        seed: 2,
+        division: 'entry_open',
+      },
+    ]);
+    const now = Date.now();
+    prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([
+      {
+        id: 'hold_newer',
+        status: 'STARTED',
+        registrantId: 'slot_open_1',
+        eventTeamId: 'slot_open_1',
+        parentId: 'canonical_team_1',
+        createdAt: new Date(now - 30_000),
+      },
+      {
+        id: 'hold_older',
+        status: 'STARTED',
+        registrantId: 'slot_open_2',
+        eventTeamId: 'slot_open_2',
+        parentId: 'canonical_team_1',
+        createdAt: new Date(now - 60_000),
+      },
+    ]);
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: {
+        $id: 'event_1',
+        name: 'Paid Team Event',
+        price: 2500,
+        eventType: 'LEAGUE',
+        teamSignup: true,
+      },
+      team: { $id: 'canonical_team_1', name: 'Rain Team' },
+    }));
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.eventRegistrations.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          id: 'event_1__team__slot_open_2',
+          registrantId: 'slot_open_2',
+          eventTeamId: 'slot_open_2',
+          parentId: 'canonical_team_1',
+          status: 'STARTED',
+        }),
+      }),
+    );
+    const createParams = mockStripePaymentIntentCreate.mock.calls[0]?.[0];
+    expect(createParams.metadata).toEqual(expect.objectContaining({
+      team_id: 'slot_open_2',
+      registration_id: 'event_1__team__slot_open_2',
+    }));
+  });
+
+  it('rejects a caller-supplied Placeholder EventTeam identity', async () => {
+    prismaMock.$queryRaw.mockResolvedValueOnce([
+      {
+        id: 'event_1',
+        start: new Date('2026-03-18T12:00:00.000Z'),
+        minAge: null,
+        maxAge: null,
+        sportId: null,
+        registrationByDivisionType: false,
+        divisions: [],
+        maxParticipants: null,
+        teamSignup: true,
+        eventType: 'TOURNAMENT',
+        includePlayoffs: false,
+        parentEvent: null,
+        timeSlotIds: [],
+      },
+    ]);
+    prismaMock.teams.findUnique.mockResolvedValueOnce({
+      id: 'slot_open_1',
+      eventId: 'event_1',
+      kind: 'PLACEHOLDER',
+      parentTeamId: null,
+    });
+
+    const res = await POST(jsonPost({
+      user: { $id: 'user_1' },
+      event: {
+        $id: 'event_1',
+        name: 'Paid Team Event',
+        price: 2500,
+        eventType: 'TOURNAMENT',
+        teamSignup: true,
+      },
+      team: { $id: 'slot_open_1', name: 'Place Holder 1' },
+    }));
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: 'A Placeholder Team cannot register for an event.',
+    });
+    expect(prismaMock.eventRegistrations.create).not.toHaveBeenCalled();
+    expect(mockStripePaymentIntentCreate).not.toHaveBeenCalled();
   });
 
   it('reuses a cancelled placeholder registration row for paid canonical team checkout', async () => {

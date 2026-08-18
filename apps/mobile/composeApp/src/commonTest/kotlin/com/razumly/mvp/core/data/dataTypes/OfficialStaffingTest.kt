@@ -4,6 +4,7 @@ import com.razumly.mvp.eventCreate.createSport
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class OfficialStaffingTest {
@@ -44,6 +45,41 @@ class OfficialStaffingTest {
             listOf("official-1", "official-1", "official-2"),
             normalized.map(MatchOfficialAssignment::userId),
         )
+    }
+
+    @Test
+    fun normalized_match_official_assignments_preserves_unbound_official_slots() {
+        val normalized = listOf(
+            MatchOfficialAssignment(
+                positionId = "position-r1",
+                slotIndex = 0,
+                holderType = OfficialAssignmentHolderType.OFFICIAL,
+                userId = null,
+                eventOfficialId = null,
+            ),
+        ).normalizedMatchOfficialAssignments()
+
+        assertEquals(1, normalized.size)
+        assertNull(normalized.single().userId)
+        assertFalse(normalized.single().checkedIn)
+    }
+    @Test
+    fun normalized_match_official_assignments_preserves_bound_official_without_event_record() {
+        val normalized = listOf(
+            MatchOfficialAssignment(
+                positionId = "position-r1",
+                slotIndex = 0,
+                holderType = OfficialAssignmentHolderType.OFFICIAL,
+                userId = "official-legacy",
+                eventOfficialId = null,
+                checkedIn = true,
+            ),
+        ).normalizedMatchOfficialAssignments()
+
+        assertEquals(1, normalized.size)
+        assertEquals("official-legacy", normalized.single().userId)
+        assertNull(normalized.single().eventOfficialId)
+        assertTrue(normalized.single().checkedIn)
     }
 
     @Test

@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.StaffingPriority
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.label
@@ -44,7 +45,7 @@ import com.razumly.mvp.eventDetail.shared.DetailKeyValueList
 import com.razumly.mvp.eventDetail.shared.DetailRowSpec
 import com.razumly.mvp.eventDetail.shared.FormSectionDivider
 import com.razumly.mvp.eventDetail.shared.LabeledCheckboxRow
-import com.razumly.mvp.eventDetail.shared.OfficialSchedulingModeSelector
+import com.razumly.mvp.eventDetail.shared.StaffingPrioritySelector
 import com.razumly.mvp.eventDetail.shared.animatedCardSection
 import com.razumly.mvp.eventDetail.shared.localImageScheme
 import com.razumly.mvp.eventDetail.staff.EditableStaffCardList
@@ -122,8 +123,8 @@ internal fun LazyListScope.simpleEventDetailsStaffSection(
                     add(DetailRowSpec("Officials", state.event.officialIds.size.toString()))
                     add(
                         DetailRowSpec(
-                            "Staffing mode",
-                            state.event.officialSchedulingMode.label(),
+                            "Staffing priority",
+                            state.event.staffingPriority.label(),
                         ),
                     )
                     add(DetailRowSpec("Official positions", state.officialPositionSummary))
@@ -132,7 +133,7 @@ internal fun LazyListScope.simpleEventDetailsStaffSection(
         },
         editContent = {
             var teamOperationsExpanded by rememberSaveable(state.editEvent.id) { mutableStateOf(true) }
-            var officialSchedulingExpanded by rememberSaveable(state.editEvent.id) { mutableStateOf(true) }
+            var staffingPriorityExpanded by rememberSaveable(state.editEvent.id) { mutableStateOf(true) }
             var staffInvitesExpanded by rememberSaveable(state.editEvent.id) { mutableStateOf(true) }
 
             if (state.editEvent.teamSignup) {
@@ -183,14 +184,14 @@ internal fun LazyListScope.simpleEventDetailsStaffSection(
                 FormSectionDivider()
             }
             CollapsibleEditorSubsectionHeader(
-                title = "Official scheduling",
-                expanded = officialSchedulingExpanded,
-                onToggle = { officialSchedulingExpanded = !officialSchedulingExpanded },
+                title = "Staffing priority",
+                expanded = staffingPriorityExpanded,
+                onToggle = { staffingPriorityExpanded = !staffingPriorityExpanded },
             )
-            AnimatedVisibility(visible = officialSchedulingExpanded) {
-                OfficialSchedulingModeSelector(
-                    selectedMode = state.editEvent.officialSchedulingMode,
-                    onModeSelected = actions.onUpdateOfficialSchedulingMode,
+            AnimatedVisibility(visible = staffingPriorityExpanded) {
+                StaffingPrioritySelector(
+                    selectedPriority = state.editEvent.staffingPriority,
+                    onPrioritySelected = actions.onUpdateStaffingPriority,
                 )
             }
             FormSectionDivider()

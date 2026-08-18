@@ -268,6 +268,18 @@ _Avoid_: Immutable configuration, Rental Booking
 A Phase Division's Team officiating duties and named Official Positions for each Match, governed by one Staffing Priority.
 _Avoid_: Officiating mode
 
+**Team Duty**:
+An Officiating Plan requirement fulfilled by one Team rather than by a person holding a named Official Position.
+_Avoid_: Team Official Position
+
+**Placeholder Team**:
+An unfilled Team slot in a League or Tournament Schedule that can hold Match entrant and Team-duty assignments until an accepted Participant Registration claims it.
+_Avoid_: Fake Team, Participant Registration
+
+**Team Check-In**:
+Event-time confirmation that a registered Team is present. It is distinct from Participant Registration and from a Team's existing Schedule assignments.
+_Avoid_: Team Registration
+
 **Official Position**:
 A named officiating role with its own eligibility and certification requirements.
 _Avoid_: Official

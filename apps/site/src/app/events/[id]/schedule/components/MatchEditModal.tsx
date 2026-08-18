@@ -633,7 +633,7 @@ export default function MatchEditModal({
     setTeamOfficialId(initialTeamOfficialId);
     setTeamOfficialCheckedIn(Boolean(match.officialCheckedIn));
     setUserOfficialId(normalizeOptionalId(match.officialId) ?? getUserId(match.official));
-    const normalizedAssignments = normalizeAssignments(match.officialIds);
+    const normalizedAssignments = normalizeAssignments(match.officialAssignments ?? match.officialIds);
     if (normalizedAssignments.length > 0) {
       setOfficialAssignments(normalizedAssignments);
     } else if (officialPositions.length > 0) {
@@ -1624,6 +1624,9 @@ export default function MatchEditModal({
       .map(({ position, slotIndex }) => assignmentBySlotKey.get(`${position.id}:${slotIndex}`) ?? null)
       .filter((assignment): assignment is MatchOfficialAssignment => Boolean(assignment));
     const duplicateAssignmentUserIds = sanitizedAssignments.reduce<Set<string>>((duplicates, assignment, index) => {
+      if (!assignment.userId) {
+        return duplicates;
+      }
       if (sanitizedAssignments.findIndex((candidate) => candidate.userId === assignment.userId) !== index) {
         duplicates.add(assignment.userId);
       }
@@ -1633,7 +1636,9 @@ export default function MatchEditModal({
       setError('The same user cannot hold more than one official position in the same match.');
       return;
     }
-    const primaryOfficialAssignment = sanitizedAssignments.find((assignment) => assignment.holderType === 'OFFICIAL');
+    const primaryOfficialAssignment = sanitizedAssignments.find(
+      (assignment) => assignment.holderType === 'OFFICIAL' && Boolean(assignment.userId),
+    );
 
     const nextField = selectedField;
     updated.fieldId = fieldId ?? null;
@@ -1683,7 +1688,9 @@ export default function MatchEditModal({
       if (!teamOfficialId) {
         updated.officialCheckedIn = Boolean(primaryOfficialAssignment?.checkedIn);
       }
-      const primaryOfficialUser = primaryOfficialAssignment ? officialUserById.get(primaryOfficialAssignment.userId) : undefined;
+      const primaryOfficialUser = primaryOfficialAssignment?.userId
+        ? officialUserById.get(primaryOfficialAssignment.userId)
+        : undefined;
       if (primaryOfficialUser) {
         updated.official = { ...primaryOfficialUser };
       } else {
@@ -2162,12 +2169,14 @@ export default function MatchEditModal({
                         {assignmentSlots.map(({ position, slotIndex }) => {
                           const assignment = assignmentBySlotKey.get(`${position.id}:${slotIndex}`);
                           const currentValue =
-                            assignment && (assignment.holderType === 'PLAYER' || assignment.holderType === 'OFFICIAL')
+                            assignment
+                            && assignment.userId
+                            && (assignment.holderType === 'PLAYER' || assignment.holderType === 'OFFICIAL')
                               ? encodeAssignmentValue(
                                   assignment.holderType,
                                   assignment.holderType === 'OFFICIAL'
-                                    ? normalizeOptionalId(assignment.eventOfficialId) &&
-                                      eventOfficialById.has(normalizeOptionalId(assignment.eventOfficialId) as string)
+                                    ? normalizeOptionalId(assignment.eventOfficialId)
+                                      && eventOfficialById.has(normalizeOptionalId(assignment.eventOfficialId) as string)
                                       ? (normalizeOptionalId(assignment.eventOfficialId) as string)
                                       : (eventOfficialByUserId.get(assignment.userId)?.id ?? assignment.userId)
                                     : assignment.userId,

@@ -54,7 +54,11 @@ const buildTeams = (count: number, division: Division) => {
   return teams;
 };
 
-const scheduleTournament = (teamCount: number, doubleElimination: boolean) => {
+const scheduleTournament = (
+  teamCount: number,
+  doubleElimination: boolean,
+  restTimeMinutes = 0,
+) => {
   const division = buildDivision();
   const field = buildField(division);
   const teams = buildTeams(teamCount, division);
@@ -76,7 +80,7 @@ const scheduleTournament = (teamCount: number, doubleElimination: boolean) => {
     loserSetCount: 1,
     usesSets: false,
     matchDurationMinutes: 60,
-    restTimeMinutes: 0,
+    restTimeMinutes,
   });
   return scheduleEvent({ event: tournament }, context);
 };
@@ -111,6 +115,63 @@ describe('tournament bracket matrix', () => {
       const uniqueDoubleMatchIds = new Set(doubleMatchIds);
       expect(uniqueDoubleMatchIds.size).toBe(doubleMatchIds.length);
     }
+  });
+
+  it('places every double-elimination Match after all incoming dependencies and rest', () => {
+    const scheduled = scheduleTournament(8, true, 30);
+    const dependentMatches = scheduled.matches.filter(
+      (match) => match.getDependencies().length > 0,
+    );
+
+    expect(dependentMatches.length).toBeGreaterThan(0);
+    expect(
+      dependentMatches.some((match) => match.losersBracket),
+    ).toBe(true);
+    for (const match of dependentMatches) {
+      for (const dependency of match.getDependencies()) {
+        expect(match.start.getTime()).toBeGreaterThanOrEqual(
+          dependency.end.getTime() + dependency.bufferMs,
+        );
+      }
+      for (const dependant of match.getDependants()) {
+        expect(
+          dependant
+            .getDependencies()
+            .some((dependency) => dependency.id === match.id),
+        ).toBe(true);
+      }
+    }
+    const resetFinal = dependentMatches.find(
+      (match) =>
+        match.previousLeftMatch !== null &&
+        match.previousLeftMatch === match.previousRightMatch,
+    );
+    expect(resetFinal).toBeDefined();
+    expect(resetFinal!.start.getTime()).toBeGreaterThanOrEqual(
+      resetFinal!.previousLeftMatch!.end.getTime() +
+        resetFinal!.previousLeftMatch!.bufferMs,
+    );
+  });
+
+  it('keeps a Best Available Team-duty slot visible when automatic Team assignment is disabled', () => {
+    const scheduled = scheduleTournament(4, false);
+
+    expect(
+      scheduled.matches.every(
+        (match) =>
+          match.requiresTeamOfficial &&
+          !match.reservesTeamOfficial &&
+          match.teamOfficial === null,
+      ),
+    ).toBe(true);
+    expect(scheduled.warnings).toEqual([
+      expect.objectContaining({
+        code: 'UNRESOLVED_TEAM_DUTY',
+        matchIds: expect.arrayContaining(
+          scheduled.matches.map((match) => match.id),
+        ),
+      }),
+    ]);
   });
 
   it('rebuilds a non-pool tournament with existing registered teams plus placeholder slots', () => {

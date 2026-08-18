@@ -193,7 +193,8 @@ private fun editorCreateCommand(): EventEditorCreateCommandDto = EventEditorCrea
             rentalBookingItemId = null,
         ),
         staff = EventEditorStaffDto(
-            officialSchedulingMode = "SCHEDULE",
+            staffingPriority = "BEST_AVAILABLE_COVERAGE",
+            doTeamsOfficiate = false,
             teamOfficialsMaySwap = false,
             teamCheckInMode = "OFF",
             teamCheckInOpenMinutesBefore = 0,

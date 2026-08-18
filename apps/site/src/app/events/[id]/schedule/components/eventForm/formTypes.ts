@@ -10,12 +10,12 @@ import type {
     LeagueConfig,
     LeagueScoringConfig,
     MatchRulesConfig,
-    OfficialSchedulingMode,
     Sport,
     Team,
     TournamentConfig,
     UserData,
 } from '@/types';
+import type { StaffingPriority } from '@/server/officials/config';
 
 import type { DivisionDetailForm, PlayoffDivisionDetailForm } from './divisionForm';
 import type { PendingStaffInvite } from './staffInvites';
@@ -77,7 +77,7 @@ export type EventFormState = {
     teams: Team[];
     officials: UserData[];
     officialIds: string[];
-    officialSchedulingMode: OfficialSchedulingMode;
+    staffingPriority: StaffingPriority;
     officialPositions: EventOfficialPosition[];
     eventOfficials: EventOfficial[];
     pendingStaffInvites: PendingStaffInvite[];

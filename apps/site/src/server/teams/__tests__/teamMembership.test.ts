@@ -814,7 +814,7 @@ describe('claimOrCreateEventTeamSnapshot', () => {
     upsertEventRegistrationMock.mockResolvedValue({});
   });
 
-  it('waits for a newly created event team snapshot before updating references', async () => {
+  it('keeps the unscheduled fallback when no placeholder plan exists', async () => {
     const storedTeams = new Map<string, Record<string, unknown>>();
     const createMock = jest.fn(({ data }: { data: Record<string, unknown> }) => (
       new Promise<Record<string, unknown>>((resolve) => {
@@ -858,6 +858,7 @@ describe('claimOrCreateEventTeamSnapshot', () => {
       eventId: 'event_1',
       canonicalTeamId: 'team_1',
       createdBy: 'user_1',
+      enforceProvisionedPlaceholderScope: true,
       canonicalTeam: {
         id: 'team_1',
         name: 'Canonical Team',
@@ -1156,7 +1157,7 @@ describe('claimOrCreateEventTeamSnapshot', () => {
     }), expect.anything());
   });
 
-  it('claims the lowest numbered placeholder when generated placeholders share timestamps', async () => {
+  it('claims the lowest seeded placeholder when generated placeholders share timestamps', async () => {
     const updateMock = jest.fn(({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => (
       Promise.resolve({ id: where.id, ...data })
     ));
@@ -1171,6 +1172,7 @@ describe('claimOrCreateEventTeamSnapshot', () => {
             parentTeamId: null,
             division: 'div_a',
             divisionTypeId: 'open',
+            seed: 10,
             name: 'Place Holder 10',
             createdAt: sharedCreatedAt,
           },
@@ -1181,6 +1183,7 @@ describe('claimOrCreateEventTeamSnapshot', () => {
             parentTeamId: null,
             division: 'div_a',
             divisionTypeId: 'open',
+            seed: 2,
             name: 'Place Holder 2',
             createdAt: sharedCreatedAt,
           },
@@ -1247,6 +1250,90 @@ describe('claimOrCreateEventTeamSnapshot', () => {
       }),
     }));
     expect(tx.teams.create).not.toHaveBeenCalled();
+  });
+
+  it('idempotently accepts an exact registered slot only for its canonical owner', async () => {
+    const registeredTeam = {
+      id: 'event_team_existing',
+      eventId: 'event_1',
+      kind: 'REGISTERED',
+      parentTeamId: 'team_1',
+      division: 'div_a',
+      divisionTypeId: 'open',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+    };
+    const updateMock = jest.fn(({ where, data }: {
+      where: { id: string };
+      data: Record<string, unknown>;
+    }) => Promise.resolve({ id: where.id, ...data }));
+    const createMock = jest.fn();
+    const tx = {
+      teams: {
+        findMany: jest.fn(({ where }: { where: Record<string, unknown> }) => (
+          Promise.resolve(
+            where.kind === 'REGISTERED' && where.id === registeredTeam.id
+              ? [registeredTeam]
+              : [],
+          )
+        )),
+        update: updateMock,
+        create: createMock,
+      },
+      eventRegistrations: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      eventTeamStaffAssignments: {
+        findMany: jest.fn().mockResolvedValue([]),
+        upsert: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    const canonicalTeam = {
+      id: 'team_1',
+      name: 'Canonical Team',
+      division: 'Open',
+      divisionTypeId: 'open',
+      wins: null,
+      losses: null,
+      teamSize: 2,
+      profileImageId: null,
+      sport: 'volleyball',
+      captainId: '',
+      managerId: 'user_1',
+      headCoachId: null,
+      coachIds: [],
+      pending: [],
+      playerRegistrations: [],
+      staffAssignments: [],
+    };
+
+    await expect(claimOrCreateEventTeamSnapshot({
+      tx,
+      eventId: 'event_1',
+      eventTeamId: 'event_team_existing',
+      canonicalTeamId: 'team_1',
+      createdBy: 'user_1',
+      upsertRegistration: false,
+      canonicalTeam,
+    })).resolves.toEqual(expect.objectContaining({
+      id: 'event_team_existing',
+      parentTeamId: 'team_1',
+    }));
+    expect(createMock).not.toHaveBeenCalled();
+
+    updateMock.mockClear();
+    registeredTeam.parentTeamId = 'other_team';
+    await expect(claimOrCreateEventTeamSnapshot({
+      tx,
+      eventId: 'event_1',
+      eventTeamId: 'event_team_existing',
+      canonicalTeamId: 'team_1',
+      createdBy: 'user_1',
+      upsertRegistration: false,
+      canonicalTeam,
+    })).rejects.toThrow('Reserved Placeholder Team is no longer available.');
+    expect(updateMock).not.toHaveBeenCalled();
   });
 
   it('swaps an existing registered event team into a target placeholder slot', async () => {

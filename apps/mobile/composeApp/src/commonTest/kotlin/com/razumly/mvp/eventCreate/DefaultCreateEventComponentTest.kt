@@ -5,7 +5,7 @@ import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.Facility
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
-import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.StaffingPriority
 import com.razumly.mvp.core.data.dataTypes.SportOfficialPositionTemplate
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
@@ -689,14 +689,14 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun disabling_team_officials_moves_team_staffing_back_to_schedule_mode() = runTest(testDispatcher) {
+    fun disabling_team_officials_preserves_staffing_priority() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
         harness.component.updateEventField {
             copy(
                 doTeamsOfficiate = true,
-                officialSchedulingMode = OfficialSchedulingMode.TEAM_STAFFING,
+                staffingPriority = StaffingPriority.TEAM_COVERAGE_REQUIRED,
             )
         }
         advance()
@@ -706,7 +706,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         val updatedEvent = harness.component.newEventState.value
         assertEquals(false, updatedEvent.doTeamsOfficiate)
-        assertEquals(OfficialSchedulingMode.SCHEDULE, updatedEvent.officialSchedulingMode)
+        assertEquals(StaffingPriority.TEAM_COVERAGE_REQUIRED, updatedEvent.staffingPriority)
     }
 
     @Test

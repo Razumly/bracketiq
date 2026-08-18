@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { Brackets } from "./Brackets";
 import { OfficialStaffingPlanner } from "./officialStaffing";
+import { ScheduleError } from "./scheduleErrors";
 import { Schedule } from "./Schedule";
 import {
   applyDivisionPhaseRulesToMatch,
@@ -20,7 +21,6 @@ import {
   SchedulerContext,
   LeagueDivisionConfig,
   PlayoffDivisionConfig,
-  usesTeamOfficialScheduling,
 } from "./types";
 
 const createId = () => crypto.randomUUID();
@@ -71,15 +71,13 @@ export class EventBuilder {
   }
   private hydratePlaceholderIdentitySets(): void {
     for (const team of Object.values(this.event.teams)) {
-      const kind = String(team.kind ?? "")
+      if (String(team.kind ?? "").trim().toUpperCase() !== "PLACEHOLDER") {
+        continue;
+      }
+      const phase = String(team.division?.phase ?? team.division?.kind ?? "")
         .trim()
         .toUpperCase();
-      const isPlaceholder =
-        kind === "PLACEHOLDER" ||
-        (team.captainId.trim().length === 0 &&
-          /^(Place Holder|Seed )/i.test(team.name.trim()));
-      if (!isPlaceholder) continue;
-      if (/^Seed \d+$/i.test(team.name.trim())) {
+      if (phase === "PLAYOFF" || phase === "BRACKET") {
         this.playoffPlaceholderIds.add(team.id);
       } else {
         this.regularPlaceholderIds.add(team.id);
@@ -180,8 +178,9 @@ export class EventBuilder {
         this.event.matches = {};
         return this.event;
       }
-      throw new Error(
+      throw new ScheduleError(
         "Event requires at least two participants to build a Match Graph",
+        "PLAYING_TEAM",
       );
     }
 
@@ -262,32 +261,32 @@ export class EventBuilder {
     this.officialStaffingPlanner = new OfficialStaffingPlanner(this.event);
 
     const orderedMatches = this.orderMatchesForPlacement(matches);
-    const regularMatches = orderedMatches.filter(
-      (match) => !this.isBracketPhase(match.division.phase, match.division.kind),
-    );
-    const playoffMatches = orderedMatches.filter((match) =>
-      this.isBracketPhase(match.division.phase, match.division.kind),
-    );
-    for (const match of regularMatches) {
-      this.placeGraphMatch(match);
-    }
-    const regularEnd = this.maxEndTime(regularMatches);
-    if (regularEnd) {
-      this.schedule.advanceTo(
-        new Date(regularEnd.getTime() + this.matchBuffer()),
-      );
-    }
-    for (const match of playoffMatches) {
+    for (const match of orderedMatches) {
       this.placeGraphMatch(match);
     }
 
     if (!options.preserveMatchIds) {
       this.assignChronologicalMatchIds(orderedMatches);
     }
-    this.stripPlaceholderAssignments(orderedMatches);
     this.assignUserOfficials(orderedMatches);
-    if (usesTeamOfficialScheduling(this.event)) {
+    const planner = this.officialStaffingPlanner;
+    if (planner && orderedMatches.some((match) => planner.isTeamDutyRequired(match))) {
       this.assignTeamOfficials(orderedMatches);
+    }
+
+    if (planner?.isHardTeamCoverageRequired()) {
+      const unstaffedMatch = orderedMatches.find(
+        (match) =>
+          planner.isHardTeamCoverageRequired(match)
+          && match.requiresTeamOfficial
+          && !match.teamOfficial,
+      );
+      if (unstaffedMatch) {
+        throw new ScheduleError(
+          "Unable to fully staff all matches with Team officials.",
+          "TEAM_DUTY",
+        );
+      }
     }
     for (const field of Object.values(this.event.fields)) {
       field.matches = [...orderedMatches];
@@ -297,12 +296,8 @@ export class EventBuilder {
     );
     return this.event;
   }
-  private isBracketPhase(
-    phase: Division["phase"],
-    kind?: Division["kind"],
-  ): boolean {
-    return phase === "BRACKET" || phase === "PLAYOFF" || kind === "PLAYOFF";
-  }
+
+
 
   private orderMatchesForPlacement(matches: Match[]): Match[] {
     return topologicallySortMatchGraph(matches);
@@ -314,9 +309,32 @@ export class EventBuilder {
       match,
       this.matchDuration(),
     );
-    this.scheduleMatch(match, durationMs);
+    try {
+      this.scheduleMatch(match, durationMs);
+    } catch (error) {
+      if (
+        error instanceof ScheduleError
+        && error.restrictingFactor === "RESOURCE"
+        && match.getDependencies().some(
+          (dependency) =>
+            (dependency as { placementRestriction?: string }).placementRestriction === "TEAM_DUTY",
+        )
+      ) {
+        throw new ScheduleError(error.message, "TEAM_DUTY");
+      }
+      throw error;
+    }
+    if (
+      match.getDependencies().some(
+        (dependency) =>
+          (dependency as { placementRestriction?: string }).placementRestriction === "TEAM_DUTY",
+      )
+    ) {
+      (match as Match & { placementRestriction?: "TEAM_DUTY" }).placementRestriction = "TEAM_DUTY";
+    }
     this.attachMatchToParticipants(match);
   }
+
 
   private leagueHasPlayoffs(participantCount: number): boolean {
     if (!this.isLeague) return false;
@@ -379,8 +397,9 @@ export class EventBuilder {
 
   private ensureFieldsAvailable(): void {
     if (!Object.keys(this.event.fields).length) {
-      throw new Error(
+      throw new ScheduleError(
         "Unable to schedule event because no fields are configured.",
+        "RESOURCE",
       );
     }
   }
@@ -411,7 +430,6 @@ export class EventBuilder {
   ): Record<string, Team | UserData> {
     const participants: Record<string, Team | UserData> = {};
     for (const [teamId, team] of Object.entries(teams)) {
-      if (this.playoffPlaceholderIds.has(teamId)) continue;
       participants[teamId] = team;
     }
     const officialDivisions = this.schedulingDivisions();
@@ -804,7 +822,8 @@ export class EventBuilder {
     ),
   ): Match {
     const setCount = config.usesSets ? config.setsPerMatch : 1;
-    return new Match({
+    const division = divisionOverride ?? this.resolveMatchDivision(team1, team2);
+    const match = new Match({
       id: createId(),
       matchId: null,
       team1,
@@ -816,17 +835,19 @@ export class EventBuilder {
       official: null,
       officialAssignments: [],
       teamOfficial: null,
-      requiresTeamOfficial: usesTeamOfficialScheduling(this.event),
+      requiresTeamOfficial: false,
       winnerNextMatch: null,
       loserNextMatch: null,
       losersBracket: false,
-      division: divisionOverride ?? this.resolveMatchDivision(team1, team2),
+      division,
       field: null,
       bufferMs: config.bufferMs,
       side: null,
       officialCheckedIn: false,
       eventId: this.event.id,
     });
+    match.requiresTeamOfficial = this.officialStaffingPlanner?.isTeamDutyRequired(match) ?? false;
+    return match;
   }
 
   private scheduleRegularSeasonForDivision(
@@ -1283,13 +1304,14 @@ export class EventBuilder {
       setDurationMinutes:
         config.setDurationMinutes ?? this.event.setDurationMinutes,
       officialSchedulingMode: this.event.officialSchedulingMode,
+      staffingPriority: this.event.staffingPriority,
       officialPositions: this.event.officialPositions,
       matchRulesOverride: this.event.matchRulesOverride,
       autoCreatePointMatchIncidents: this.event.autoCreatePointMatchIncidents,
       resolvedMatchRules: this.event.resolvedMatchRules,
       eventOfficials: this.event.eventOfficials,
-      doTeamsOfficiate: usesTeamOfficialScheduling(this.event),
-      teamOfficialsMaySwap: usesTeamOfficialScheduling(this.event)
+      doTeamsOfficiate: this.event.doTeamsOfficiate,
+      teamOfficialsMaySwap: this.event.doTeamsOfficiate
         ? this.event.teamOfficialsMaySwap
         : false,
     });
@@ -1351,11 +1373,14 @@ export class EventBuilder {
   }
 
   private scheduleMatch(match: Match, durationMs: number): void {
-    match.requiresTeamOfficial = usesTeamOfficialScheduling(this.event);
     const planner = this.officialStaffingPlanner;
+    match.requiresTeamOfficial = planner?.isTeamDutyRequired(match) ?? false;
+    match.reservesTeamOfficial =
+      match.requiresTeamOfficial &&
+      Boolean(planner?.isTeamDutySlotReserved(match));
     if (
-      this.event.officialSchedulingMode === "STAFFING" &&
-      planner?.hasStaffingRequirement()
+      planner?.isHardOfficialCoverageRequired() &&
+      planner.hasRequiredSlots(match)
     ) {
       this.schedule.scheduleEventWithOptions(match, durationMs, {
         canUseCandidate: ({ resource, start, end }) =>
@@ -1400,36 +1425,6 @@ export class EventBuilder {
     return Math.min(fallback, fallbackTeamCount);
   }
 
-  private maxEndTime(matches: Match[]): Date | null {
-    if (!matches.length) return null;
-    return matches.reduce(
-      (latest, match) => (match.end > latest ? match.end : latest),
-      matches[0].end,
-    );
-  }
-
-  private stripPlaceholderAssignments(matches: Match[]): void {
-    for (const match of matches) {
-      if (match.team1 && this.playoffPlaceholderIds.has(match.team1.id)) {
-        match.team1 = null;
-      }
-      if (match.team2 && this.playoffPlaceholderIds.has(match.team2.id)) {
-        match.team2 = null;
-      }
-      if (
-        match.teamOfficial &&
-        this.playoffPlaceholderIds.has(match.teamOfficial.id)
-      )
-        match.teamOfficial = null;
-    }
-    if (this.playoffPlaceholderIds.size) {
-      const nextTeams: Record<string, Team> = {};
-      for (const team of Object.values(this.event.teams)) {
-        if (!this.playoffPlaceholderIds.has(team.id)) nextTeams[team.id] = team;
-      }
-      this.event.teams = nextTeams;
-    }
-  }
 
   private assignChronologicalMatchIds(matches: Match[]): void {
     const ordered = [...matches].sort((a, b) => {
@@ -1445,26 +1440,21 @@ export class EventBuilder {
       match.matchId = index + 1;
     });
   }
-
   private assignUserOfficials(matches: Match[]): void {
     const planner =
       this.officialStaffingPlanner ?? new OfficialStaffingPlanner(this.event);
     this.officialStaffingPlanner = planner;
-    if (this.event.officialSchedulingMode === "TEAM_STAFFING") {
+    if (!matches.some((match) => planner.hasRequiredSlots(match))) {
       return;
     }
-    if (!planner.hasRequiredSlots()) {
-      return;
-    }
-    if (this.event.officialSchedulingMode === "STAFFING") {
-      if (!planner.hasStaffingRequirement()) {
-        return;
-      }
-      const unstafedMatch = matches.find(
-        (match) => !planner.hasCommittedAssignments(match),
+    if (planner.isHardOfficialCoverageRequired()) {
+      const unstaffedMatch = matches.find(
+        (match) =>
+          planner.hasRequiredSlots(match)
+          && !planner.hasCommittedAssignments(match),
       );
-      if (unstafedMatch) {
-        throw new Error("Unable to fully staff all matches without conflicts.");
+      if (unstaffedMatch) {
+        throw new ScheduleError("Unable to fully staff all matches without conflicts.", "NAMED_OFFICIAL_POSITION");
       }
       return;
     }
@@ -1472,9 +1462,7 @@ export class EventBuilder {
   }
 
   private assignTeamOfficials(matches: Match[]): void {
-    const teams = Object.values(this.event.teams).filter(
-      (team) => team.captainId.trim().length > 0,
-    );
+    const teams = Object.values(this.event.teams);
     const unassigned = [...teams];
     const divisionById = new Map(
       this.schedulingDivisions().map((division) => [division.id, division]),
@@ -1486,37 +1474,65 @@ export class EventBuilder {
       if (endDiff !== 0) return endDiff;
       return (a.field?.id ?? "").localeCompare(b.field?.id ?? "");
     });
+    const planner = this.officialStaffingPlanner;
     for (const match of ordered) {
       this.attachMatchToParticipants(match);
       if (
-        match.teamOfficial ||
-        !match.division ||
-        !(match.team1 && match.team2)
-      )
+        match.teamOfficial
+        || !match.division
+        || !planner?.isTeamDutyRequired(match)
+      ) {
         continue;
-      const candidateDivisionIds = new Set([
-        match.division.id,
-        ...match.division.playoffPlacementDivisionIds,
-      ]);
+      }
+      if (
+        (!match.team1 || !match.team2)
+        && !planner.isHardTeamCoverageRequired(match)
+      ) {
+        continue;
+      }
+      if (!planner.isTeamDutyCandidatePoolEnabled(match)) {
+        continue;
+      }
+      const candidateDivisionIds = new Set([match.division.id]);
+      const targetDivisionId = match.division.id.trim().toLowerCase();
+      for (const sourceDivision of this.event.divisions) {
+        const mapsToTarget = sourceDivision.playoffPlacementDivisionIds.some(
+          (divisionId) => divisionId.trim().toLowerCase() === targetDivisionId,
+        );
+        if (mapsToTarget) {
+          candidateDivisionIds.add(sourceDivision.id);
+        }
+      }
+      for (const mappedDivisionId of match.division.playoffPlacementDivisionIds) {
+        candidateDivisionIds.add(mappedDivisionId);
+      }
       const candidateDivisions = Array.from(candidateDivisionIds)
         .map((divisionId) => divisionById.get(divisionId))
         .filter((division): division is Division => Boolean(division));
       const availableTeamsById = new Map<string, Team>();
       for (const division of candidateDivisions) {
         const freeTeams = this.schedule
-          .freeParticipants(division, match.start, match.end)
-          .filter(
-            (participant) =>
-              participant instanceof Team &&
-              participant.captainId.trim().length > 0,
-          ) as Team[];
+          .freeParticipants(
+            division,
+            match.start,
+            match.end,
+            match.bufferMs,
+          )
+          .filter((participant) => participant instanceof Team) as Team[];
         for (const team of freeTeams) {
+          availableTeamsById.set(team.id, team);
+        }
+      }
+      if (planner.isTeamDutyConflictAllowed()) {
+        for (const team of teams) {
+          if (!candidateDivisionIds.has(team.division?.id ?? "")) continue;
           availableTeamsById.set(team.id, team);
         }
       }
       const availableTeams = Array.from(availableTeamsById.values());
       const filtered = availableTeams.filter(
-        (team) => team !== match.team1 && team !== match.team2,
+        (team) =>
+          team.id !== match.team1?.id && team.id !== match.team2?.id,
       );
       let candidate: Team | null = null;
       for (let i = 0; i < unassigned.length; i += 1) {

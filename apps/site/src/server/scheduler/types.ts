@@ -18,6 +18,19 @@ import {
   normalizeTimeZone,
   zonedTimeToUtcDate,
 } from '@/lib/dateUtils';
+import {
+  isStaffingPriority,
+  normalizeStaffingPriority,
+  type MatchOfficialAssignment,
+  type OfficialSchedulingMode,
+  type StaffingPriority,
+} from '@/server/officials/config';
+export type {
+  MatchOfficialAssignment,
+  OfficialSchedulingMode,
+  StaffingPriority,
+} from '@/server/officials/config';
+
 
 export const MINUTE_MS = 60 * 1000;
 
@@ -59,10 +72,10 @@ export type LeagueDivisionConfig = {
   restTimeMinutes?: number;
 };
 
-export type OfficialSchedulingMode = 'STAFFING' | 'TEAM_STAFFING' | 'SCHEDULE' | 'OFF';
+
 export const usesTeamOfficialScheduling = (
-  event: { doTeamsOfficiate?: boolean; officialSchedulingMode?: OfficialSchedulingMode | string | null },
-): boolean => event.doTeamsOfficiate === true || event.officialSchedulingMode === 'TEAM_STAFFING';
+  event: { doTeamsOfficiate?: boolean },
+): boolean => event.doTeamsOfficiate === true;
 export type EventOfficialPosition = {
   id: string;
   name: string;
@@ -76,15 +89,10 @@ export type EventOfficial = {
   fieldIds: string[];
   isActive: boolean;
 };
-export type MatchOfficialAssignment = {
-  positionId: string;
-  slotIndex: number;
-  holderType: 'OFFICIAL' | 'PLAYER';
-  userId: string;
-  eventOfficialId?: string;
-  checkedIn: boolean;
-  hasConflict: boolean;
+type MatchOfficialAssignmentInput = Omit<MatchOfficialAssignment, 'eventOfficialId'> & {
+  eventOfficialId?: string | null;
 };
+
 
 export type TeamPlayerRegistration = {
   id: string;
@@ -517,6 +525,7 @@ export class Match implements SchedulableEvent {
   officialAssignments: MatchOfficialAssignment[];
   teamOfficial: Team | null;
   requiresTeamOfficial: boolean;
+  reservesTeamOfficial: boolean;
   official: UserData | null;
   team1: Team | null;
   team2: Team | null;
@@ -556,9 +565,10 @@ export class Match implements SchedulableEvent {
     bufferMs: number;
     side?: Side | null;
     officialCheckedIn?: boolean | null;
-    officialAssignments?: MatchOfficialAssignment[];
+    officialAssignments?: MatchOfficialAssignmentInput[];
     teamOfficial?: Team | null;
     requiresTeamOfficial?: boolean;
+    reservesTeamOfficial?: boolean;
     official?: UserData | null;
     team1?: Team | null;
     team2?: Team | null;
@@ -597,9 +607,13 @@ export class Match implements SchedulableEvent {
     this.bufferMs = params.bufferMs;
     this.side = params.side ?? null;
     this.officialCheckedIn = params.officialCheckedIn ?? false;
-    this.officialAssignments = params.officialAssignments ?? [];
+    this.officialAssignments = (params.officialAssignments ?? []).map((assignment) => ({
+      ...assignment,
+      eventOfficialId: assignment.eventOfficialId ?? null,
+    }));
     this.teamOfficial = params.teamOfficial ?? null;
     this.requiresTeamOfficial = params.requiresTeamOfficial ?? false;
+    this.reservesTeamOfficial = params.reservesTeamOfficial ?? false;
     this.official = params.official ?? null;
     this.team1 = params.team1 ?? null;
     this.team2 = params.team2 ?? null;
@@ -761,7 +775,7 @@ export class Match implements SchedulableEvent {
     for (const team of [this.team1, this.team2, this.teamOfficial]) {
       if (team) assignedTeams.add(team.id);
     }
-    const requiredTeamSlots = this.requiresTeamOfficial ? 3 : 2;
+    const requiredTeamSlots = this.reservesTeamOfficial ? 3 : 2;
     return Math.max(requiredTeamSlots, assignedTeams.size);
   }
 
@@ -841,6 +855,7 @@ export class Tournament {
   allowMatchRosterEdits: boolean;
   allowTemporaryMatchPlayers: boolean;
   officialSchedulingMode: OfficialSchedulingMode;
+  staffingPriority: StaffingPriority;
   officialPositions: EventOfficialPosition[];
   eventOfficials: EventOfficial[];
   matchRulesOverride: MatchRulesConfig | Record<string, unknown> | null;
@@ -926,6 +941,7 @@ export class Tournament {
     allowMatchRosterEdits?: boolean;
     allowTemporaryMatchPlayers?: boolean;
     officialSchedulingMode?: OfficialSchedulingMode;
+    staffingPriority?: StaffingPriority | null;
     officialPositions?: EventOfficialPosition[];
     eventOfficials?: EventOfficial[];
     matchRulesOverride?: MatchRulesConfig | Record<string, unknown> | null;
@@ -1004,9 +1020,14 @@ export class Tournament {
     this.minAge = params.minAge ?? null;
     this.maxAge = params.maxAge ?? null;
     this.officialSchedulingMode = params.officialSchedulingMode ?? 'SCHEDULE';
-    this.doTeamsOfficiate = this.officialSchedulingMode === 'TEAM_STAFFING'
-      ? true
-      : Boolean(params.doTeamsOfficiate);
+    const hasCanonicalStaffingPriority = isStaffingPriority(params.staffingPriority);
+    this.staffingPriority = normalizeStaffingPriority(
+      params.staffingPriority,
+      this.officialSchedulingMode,
+    );
+    this.doTeamsOfficiate = hasCanonicalStaffingPriority
+      ? Boolean(params.doTeamsOfficiate)
+      : this.officialSchedulingMode === 'TEAM_STAFFING' || Boolean(params.doTeamsOfficiate);
     this.teamOfficialsMaySwap = this.doTeamsOfficiate ? Boolean(params.teamOfficialsMaySwap) : false;
     this.teamCheckInMode = this.teamSignup ? params.teamCheckInMode ?? 'OFF' : 'OFF';
     this.teamCheckInOpenMinutesBefore = typeof params.teamCheckInOpenMinutesBefore === 'number' && Number.isFinite(params.teamCheckInOpenMinutesBefore)

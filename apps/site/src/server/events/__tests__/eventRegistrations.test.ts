@@ -270,6 +270,27 @@ describe('buildEventParticipantSnapshot', () => {
             updatedAt: new Date('2026-04-01T00:00:00.000Z'),
           },
           {
+            id: 'event_1__team__registered_empty_identity',
+            eventId: 'event_1',
+            registrantId: 'registered_empty_identity',
+            parentId: null,
+            registrantType: 'TEAM',
+            rosterRole: 'PARTICIPANT',
+            status: 'ACTIVE',
+            eventTeamId: 'registered_empty_identity',
+            ageAtEvent: null,
+            divisionId: 'div_a',
+            divisionTypeId: null,
+            divisionTypeKey: null,
+            consentDocumentId: null,
+            consentStatus: null,
+            createdBy: 'user_2',
+            slotId: null,
+            occurrenceDate: null,
+            createdAt: new Date('2026-04-01T00:00:00.000Z'),
+            updatedAt: new Date('2026-04-01T00:00:00.000Z'),
+          },
+          {
             id: 'event_1__team__placeholder_slot_1',
             eventId: 'event_1',
             registrantId: 'placeholder_slot_1',
@@ -302,6 +323,13 @@ describe('buildEventParticipantSnapshot', () => {
             parentTeamId: 'canonical_team_1',
           },
           {
+            id: 'registered_empty_identity',
+            name: 'Registration Pending Details',
+            kind: 'REGISTERED',
+            captainId: '',
+            parentTeamId: null,
+          },
+          {
             id: 'placeholder_slot_1',
             name: 'Place Holder 1',
             kind: 'PLACEHOLDER',
@@ -318,11 +346,18 @@ describe('buildEventParticipantSnapshot', () => {
       },
     } as any);
 
-    expect(snapshot.participants.teamIds).toEqual(['registered_slot_1']);
+    expect(snapshot.participants.teamIds).toEqual([
+      'registered_slot_1',
+      'registered_empty_identity',
+    ]);
     expect(snapshot.teams).toEqual([
       expect.objectContaining({ id: 'registered_slot_1', name: 'Registered Team' }),
+      expect.objectContaining({
+        id: 'registered_empty_identity',
+        name: 'Registration Pending Details',
+      }),
     ]);
-    expect(snapshot.participantCount).toBe(1);
+    expect(snapshot.participantCount).toBe(2);
   });
 
   it('uses canonical event division metadata for participant division groups', async () => {

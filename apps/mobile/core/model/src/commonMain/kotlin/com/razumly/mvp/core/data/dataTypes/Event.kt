@@ -102,6 +102,7 @@ data class Event(
     val state: String = "UNPUBLISHED",
     val pointsToVictory: List<Int> = emptyList(),
     val officialSchedulingMode: OfficialSchedulingMode = OfficialSchedulingMode.SCHEDULE,
+    val staffingPriority: StaffingPriority = StaffingPriority.BEST_AVAILABLE_COVERAGE,
     val officialPositions: List<EventOfficialPosition> = emptyList(),
     val eventOfficials: List<EventOfficial> = emptyList(),
     @Transient val officialIds: List<String> = emptyList(),

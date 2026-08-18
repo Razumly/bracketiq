@@ -4,7 +4,7 @@ import type { Event } from "@/types";
 
 import type { EventDivisionOption } from "./divisionRegistration";
 import {
-  formatOfficialSchedulingModeLabel,
+  formatStaffingPriorityLabel,
   formatReadOnlyValueList,
   type PublicDivisionGenderGroup,
 } from "./eventDetailPresentation";
@@ -44,7 +44,7 @@ type PublicEventProgramDetailsProps = {
   hostedByLabel: string;
   assistantHostNames: string[];
   officialNames: string[];
-  officialSchedulingMode?: Event["officialSchedulingMode"];
+  staffingPriority?: Event["staffingPriority"];
   officialPositionsSummary: string;
 };
 
@@ -65,7 +65,7 @@ export function PublicEventProgramDetails({
   hostedByLabel,
   assistantHostNames,
   officialNames,
-  officialSchedulingMode,
+  staffingPriority,
   officialPositionsSummary,
 }: PublicEventProgramDetailsProps) {
   const isSelected = (division: EventDivisionOption) =>
@@ -336,9 +336,9 @@ export function PublicEventProgramDetails({
                   )}
                 />
                 <PublicEventMetaPill
-                  label="Staffing mode"
-                  value={formatOfficialSchedulingModeLabel(
-                    officialSchedulingMode,
+                  label="Staffing priority"
+                  value={formatStaffingPriorityLabel(
+                    staffingPriority,
                   )}
                 />
                 <PublicEventMetaPill

@@ -25,6 +25,8 @@ import {
   type EventSearchSort,
   type OrganizationRankingMetadata,
 } from '@/server/events/recommendedEventRanking';
+import { normalizeEventStaffingResponse } from '@/server/events/eventResponse';
+
 
 export const dynamic = 'force-dynamic';
 
@@ -85,9 +87,13 @@ const isUsableUserLocation = (lat: unknown, lon: unknown): boolean => {
   return !(lat === 0 && lon === 0);
 };
 
-const toEventResponse = (row: any) => {
-  const response = { ...row };
-  (response as any).divisions = resolveRelationalEventDivisionIds((response as any).divisionDetails);
+const toEventResponse = (row: unknown): Record<string, unknown> => {
+  const response: Record<string, unknown> =
+    row && typeof row === 'object' && !Array.isArray(row)
+      ? Object.fromEntries(Object.entries(row))
+      : {};
+  response.divisions = resolveRelationalEventDivisionIds(response.divisionDetails);
+  normalizeEventStaffingResponse(response);
   return response;
 };
 

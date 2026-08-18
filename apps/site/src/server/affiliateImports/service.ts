@@ -26,6 +26,12 @@ import {
 import { syncEventTags } from "@/server/eventTags";
 import { downloadPublicRemoteImage } from "@/server/publicRemoteImage";
 import {
+  isStaffingPriority,
+  normalizeStaffingPriority,
+  STAFFING_PRIORITIES,
+  type StaffingPriority,
+} from "@/server/officials/config";
+import {
   extractAffiliateCandidatesFromPage,
   extractAffiliateFieldValuesFromPage,
   normalizeAffiliateCandidateDateTime,
@@ -129,6 +135,36 @@ const recordValue = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+
+export const affiliateStaffingPrioritySchema = {
+  type: "string",
+  enum: [...STAFFING_PRIORITIES],
+  description: [
+    "Canonical staffingPriority for an imported event.",
+    "FULL_COVERAGE_REQUIRED requires Team-duty and every named Official Position.",
+    "TEAM_COVERAGE_REQUIRED requires Team-duty only.",
+    "OFFICIAL_COVERAGE_REQUIRED requires every named Official Position only.",
+    "BEST_AVAILABLE_COVERAGE preserves the configured requirements and records unresolved gaps instead of silently changing them.",
+    "FULL_COVERAGE_WITH_CONFLICTS_ALLOWED requires Team-duty and every named Official Position while allowing explicitly marked overlaps.",
+    "doTeamsOfficiate independently controls participation and eligibility and never changes staffingPriority.",
+  ].join(" "),
+} as const;
+
+const staffingPriorityFromAffiliateCandidate = (
+  candidate: Record<string, unknown>,
+): StaffingPriority => {
+  const rawPayload = recordValue(candidate.rawPayload);
+  const canonicalValue =
+    nullableString(candidate.staffingPriority)?.toUpperCase() ??
+    nullableString(rawPayload.staffingPriority)?.toUpperCase();
+  if (isStaffingPriority(canonicalValue)) return canonicalValue;
+
+  const legacyMode =
+    candidate.officialSchedulingMode ?? rawPayload.officialSchedulingMode;
+  return legacyMode === undefined
+    ? "FULL_COVERAGE_WITH_CONFLICTS_ALLOWED"
+    : normalizeStaffingPriority(undefined, legacyMode);
+};
 
 const sleep = (milliseconds: number): Promise<void> =>
   milliseconds > 0
@@ -357,11 +393,17 @@ const candidatePersistenceData = (params: {
       ? buildAffiliateEventTagNames(candidate)
       : [];
   const rawPayload = {
-    ...(candidate.rawPayload ?? {}),
-    tags: tagNames,
-    normalizedImport: buildAffiliateImportMetadata(candidate),
-    sportNames: candidateSportNames(candidate),
+    ...recordValue(candidate.rawPayload),
   };
+  if (candidate.listingKind === "EVENT") {
+    delete rawPayload.officialSchedulingMode;
+    rawPayload.staffingPriority = staffingPriorityFromAffiliateCandidate(
+      candidate as unknown as Record<string, unknown>,
+    );
+  }
+  rawPayload.tags = tagNames;
+  rawPayload.normalizedImport = buildAffiliateImportMetadata(candidate);
+  rawPayload.sportNames = candidateSportNames(candidate);
   return {
     sourceId,
     runId,
@@ -2140,7 +2182,9 @@ const buildAffiliateEventData = async (
     parentEvent: null,
     autoCancellation: null,
     eventType,
-    officialSchedulingMode: "OFF",
+    staffingPriority: staffingPriorityFromAffiliateCandidate(
+      candidate as Record<string, unknown>,
+    ),
     doTeamsOfficiate: false,
     teamOfficialsMaySwap: false,
     officialPositions: [],

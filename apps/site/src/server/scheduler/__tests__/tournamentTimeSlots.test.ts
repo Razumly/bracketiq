@@ -1,7 +1,7 @@
 /** @jest-environment node */
 
 import { scheduleEvent } from '@/server/scheduler/scheduleEvent';
-import { Division, PlayingField, Team, TimeSlot, Tournament } from '@/server/scheduler/types';
+import { Division, Match, PlayingField, Team, TimeSlot, Tournament } from '@/server/scheduler/types';
 
 const context = {
   log: () => {},
@@ -73,6 +73,7 @@ describe('tournament scheduling (time slots)', () => {
         repeating: true,
         startTimeMinutes: slotStart,
         endTimeMinutes: slotEnd,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       }),
       new TimeSlot({
         id: 'slot_sun',
@@ -81,6 +82,7 @@ describe('tournament scheduling (time slots)', () => {
         repeating: true,
         startTimeMinutes: slotStart,
         endTimeMinutes: slotEnd,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       }),
     ];
 
@@ -493,7 +495,7 @@ describe('tournament scheduling (time slots)', () => {
     expect(scheduled.matches.length).toBeGreaterThan(5);
   });
 
-  it('removes stale generated placeholders before rebuilding tournament pool play', () => {
+  it('preserves stable placeholder team IDs while rebuilding tournament pool play', () => {
     const bracketDivision = new Division(
       'tournament_bracket_stale',
       'CoEd Open',
@@ -525,18 +527,21 @@ describe('tournament scheduling (time slots)', () => {
     );
     const field = buildField(bracketDivision);
 
-    const staleTeams: Record<string, Team> = {};
+    const stableTeams: Record<string, Team> = {};
     for (let index = 1; index <= 4; index += 1) {
-      const id = `stale_pool_a_${index}`;
-      staleTeams[id] = new Team({
+      const id = `event_team_slot_${index}`;
+      const division = index <= 2 ? poolA : poolB;
+      stableTeams[id] = new Team({
         id,
         captainId: '',
-        division: poolA,
-        name: `Place Holder ${index}`,
+        kind: 'PLACEHOLDER',
+        division,
+        name: '',
         matches: [],
       });
     }
-    poolA.teamIds = Object.keys(staleTeams);
+    poolA.teamIds = ['event_team_slot_1', 'event_team_slot_2'];
+    poolB.teamIds = ['event_team_slot_3', 'event_team_slot_4'];
 
     const start = new Date(2026, 0, 3, 9, 0, 0);
     const timeSlot = new TimeSlot({
@@ -558,7 +563,7 @@ describe('tournament scheduling (time slots)', () => {
       maxParticipants: 4,
       teamSignup: true,
       eventType: 'TOURNAMENT',
-      teams: staleTeams,
+      teams: stableTeams,
       divisions: [poolA, poolB],
       playoffDivisions: [bracketDivision],
       includePlayoffs: true,
@@ -585,10 +590,83 @@ describe('tournament scheduling (time slots)', () => {
       return counts;
     }, {});
 
-    expect(Object.keys(scheduled.event.teams).some((teamId) => teamId.startsWith('stale_pool_a_'))).toBe(false);
+    expect(Object.keys(scheduled.event.teams).sort()).toEqual(Object.keys(stableTeams).sort());
     expect(teamCountsByDivision[poolA.id]).toBe(2);
     expect(teamCountsByDivision[poolB.id]).toBe(2);
     expect(matchCountsByDivision[poolA.id]).toBe(1);
     expect(matchCountsByDivision[poolB.id]).toBe(1);
+  });
+
+  it('restores the prior schedule graph when placement fails after mutating candidates', () => {
+    const division = buildDivision();
+    const field = buildField(division);
+    const teams = buildTeams(4, division);
+    const priorMatch = new Match({
+      id: 'prior_match',
+      matchId: 99,
+      start: new Date(2026, 0, 2, 9, 0, 0),
+      end: new Date(2026, 0, 2, 10, 0, 0),
+      division,
+      field,
+      team1: teams.team_1,
+      team2: teams.team_2,
+      bufferMs: 0,
+      eventId: 'atomic_tournament',
+    });
+    field.matches = [priorMatch];
+    teams.team_1.matches = [priorMatch];
+    teams.team_2.matches = [priorMatch];
+    const start = new Date(2026, 0, 3, 9, 0, 0);
+    const tournament = new Tournament({
+      id: 'atomic_tournament',
+      name: 'Atomic tournament',
+      start,
+      end: new Date(2026, 0, 3, 10, 0, 0),
+      maxParticipants: 4,
+      teamSignup: true,
+      eventType: 'TOURNAMENT',
+      teams,
+      divisions: [division],
+      fields: { [field.id]: field },
+      matches: { [priorMatch.id]: priorMatch },
+      timeSlots: [new TimeSlot({
+        id: 'atomic_slot',
+        dayOfWeek: 5,
+        startDate: start,
+        repeating: true,
+        startTimeMinutes: 9 * 60,
+        endTimeMinutes: 10 * 60,
+        fieldIds: [field.id],
+        divisions: [division],
+      })],
+      noFixedEndDateTime: false,
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
+      doTeamsOfficiate: false,
+      doubleElimination: false,
+      winnerSetCount: 1,
+      loserSetCount: 1,
+      usesSets: false,
+      matchDurationMinutes: 60,
+      restTimeMinutes: 0,
+    });
+    const priorMatchMap = tournament.matches;
+    const priorFieldMatches = field.matches;
+    const priorTeam1Matches = teams.team_1.matches;
+    const priorTeam2Matches = teams.team_2.matches;
+
+    expect(() => scheduleEvent({
+      event: tournament,
+      participantCount: 8,
+    }, context)).toThrow();
+
+    expect(tournament.maxParticipants).toBe(4);
+    expect(tournament.matches).toBe(priorMatchMap);
+    expect(tournament.matches).toEqual({ prior_match: priorMatch });
+    expect(field.matches).toBe(priorFieldMatches);
+    expect(field.matches).toEqual([priorMatch]);
+    expect(teams.team_1.matches).toBe(priorTeam1Matches);
+    expect(teams.team_1.matches).toEqual([priorMatch]);
+    expect(teams.team_2.matches).toBe(priorTeam2Matches);
+    expect(teams.team_2.matches).toEqual([priorMatch]);
   });
 });

@@ -7,6 +7,7 @@ import {
 import { formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
 import { stripEventTemplateSuffix } from '@/lib/eventTemplates';
 import type { Event, Field, TimeSlot } from '@/types';
+import { normalizeStaffingPriority } from '@/server/officials/config';
 
 type PrismaClientLike = typeof prisma;
 
@@ -361,7 +362,10 @@ export const mapSourceEventToTemplateBundle = (
       setsPerMatch: source.setsPerMatch ?? null,
       restTimeMinutes: source.restTimeMinutes ?? null,
       pointsToVictory: normalizeNumberArray(source.pointsToVictory),
-      officialSchedulingMode: source.officialSchedulingMode ?? 'SCHEDULE',
+      staffingPriority: normalizeStaffingPriority(
+        source.staffingPriority,
+        source.officialSchedulingMode,
+      ),
       doTeamsOfficiate: source.doTeamsOfficiate ?? null,
       teamOfficialsMaySwap: source.teamOfficialsMaySwap ?? null,
       officialPositions: Array.isArray(source.officialPositions) ? source.officialPositions : [],
@@ -459,6 +463,10 @@ export const listEventTemplates = async (
     organizationId: row.organizationId,
     sportIds: normalizeStringArray(row.sportIds),
     eventType: row.eventType,
+    staffingPriority: normalizeStaffingPriority(
+      row.staffingPriority,
+      row.officialSchedulingMode,
+    ),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     $createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt ?? '',
@@ -480,7 +488,23 @@ export const getEventTemplate = async (
   if (!template || template.archivedAt) {
     return null;
   }
-  return { template, resources, timeSlots, rentalHints, leagueScoringConfig };
+  const {
+    officialSchedulingMode: legacyOfficialSchedulingMode,
+    ...canonicalTemplate
+  } = template;
+  return {
+    template: {
+      ...canonicalTemplate,
+      staffingPriority: normalizeStaffingPriority(
+        canonicalTemplate.staffingPriority,
+        legacyOfficialSchedulingMode,
+      ),
+    },
+    resources,
+    timeSlots,
+    rentalHints,
+    leagueScoringConfig,
+  };
 };
 
 const buildFieldFromResource = (resource: any, id: string): Field => ({
@@ -635,7 +659,10 @@ export const buildSeedEventFromTemplate = (
     fieldIds: eventFieldIds,
     timeSlotIds: timeSlots.map((slot) => slot.$id),
     officialIds: [],
-    officialSchedulingMode: template.officialSchedulingMode ?? 'SCHEDULE',
+    staffingPriority: normalizeStaffingPriority(
+      template.staffingPriority,
+      template.officialSchedulingMode,
+    ),
     officialPositions: Array.isArray(template.officialPositions) ? template.officialPositions : [],
     eventOfficials: [],
     assistantHostIds: normalizeStringArray(template.assistantHostIds),

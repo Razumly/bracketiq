@@ -112,6 +112,8 @@ describe('/api/events/field/[fieldId]', () => {
         end: new Date('2026-05-01T18:00:00.000Z'),
         fieldIds: ['field_private'],
         timeSlotIds: [],
+        staffingPriority: null,
+        officialSchedulingMode: 'STAFFING',
       },
     ]);
     prismaMock.fields.findFirst.mockResolvedValue({
@@ -128,9 +130,12 @@ describe('/api/events/field/[fieldId]', () => {
 
     expect(response.status).toBe(200);
     expect(payload.events).toEqual([
-      expect.objectContaining({ id: 'event_published' }),
+      expect.objectContaining({
+        id: 'event_published',
+        staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
+      }),
     ]);
-    expect(payload.rentalSlots).toEqual([]);
+    expect(payload.events[0]).toHaveProperty('officialSchedulingMode', 'STAFFING');
     expect(prismaMock.timeSlots.findMany).not.toHaveBeenCalled();
     expect(prismaMock.rentalBookingItems.findMany).not.toHaveBeenCalled();
     expect(JSON.stringify(payload)).not.toContain('slot_private');

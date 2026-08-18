@@ -66,6 +66,10 @@ import {
   resolveWeeklyOccurrence,
   WEEKLY_OCCURRENCE_JOIN_CLOSED_ERROR,
 } from '@/server/events/weeklyOccurrences';
+import {
+  getTournamentPoolIdsForBracket,
+  isTournamentPoolPlayEnabled,
+} from '@/server/events/tournamentPools';
 import { loadBillingTaxPolicyContext } from '@/server/billingTaxContext';
 import {
   deleteRegistrationQuestionResponsesForSubjects,
@@ -297,6 +301,35 @@ const sortRegistrationsByCreatedAt = <T extends { id: string; createdAt: Date | 
   })
 );
 
+type CheckoutEventTeamSlot = {
+  id: string;
+  eventId?: string | null;
+  kind?: string | null;
+  parentTeamId?: string | null;
+  division?: string | null;
+  divisionTypeId?: string | null;
+  seed?: number | null;
+  name?: string | null;
+  createdAt?: Date | null;
+  updatedAt?: Date | null;
+};
+
+
+type CheckoutEventTeamHold = {
+  id: string;
+  status: string;
+  registrantId: string | null;
+  eventTeamId: string | null;
+  parentId: string | null;
+  createdAt: Date | null;
+};
+const checkoutEventTeamSlotOrder = (row: CheckoutEventTeamSlot): number => (
+  typeof row.seed === 'number' && Number.isFinite(row.seed)
+    ? row.seed
+    : Number.MAX_SAFE_INTEGER
+);
+
+
 const reserveEventRegistrationSlot = async ({
   eventId,
   teamId,
@@ -328,6 +361,10 @@ const reserveEventRegistrationSlot = async ({
   registrationId: string;
   teamId: string | null;
   registrationHoldExpiresAt: Date;
+  parentId: string | null;
+  divisionId: string | null;
+  divisionTypeId: string | null;
+  divisionTypeKey: string | null;
 } | { ok: false; status: number; error: string }> => {
   if (!eventId) {
     return { ok: false, status: 400, error: 'Event id is required for event checkout.' };
@@ -484,10 +521,37 @@ const reserveEventRegistrationSlot = async ({
     if (teamId) {
       const eventTeam = await tx.teams.findUnique({
         where: { id: teamId },
-        select: { id: true },
+        select: {
+          id: true,
+          eventId: true,
+          kind: true,
+          parentTeamId: true,
+        },
       });
-      if (eventTeam?.id) {
-        participantTeamId = eventTeam.id;
+      const isRequestedEventTeam = normalizeString(eventTeam?.eventId) === eventId;
+      const requestedEventTeamKind = String(eventTeam?.kind ?? '').trim().toUpperCase();
+      if (isRequestedEventTeam && requestedEventTeamKind === 'PLACEHOLDER') {
+        return { ok: false, status: 409, error: 'A Placeholder Team cannot register for an event.' };
+      }
+      if (isRequestedEventTeam && requestedEventTeamKind === 'REGISTERED') {
+        const canonicalTeamId = normalizeString(eventTeam?.parentTeamId);
+        if (!canonicalTeamId) {
+          return { ok: false, status: 409, error: 'The registered Event Team is missing its canonical Team.' };
+        }
+        const canonicalTeam = await loadCanonicalTeamById(canonicalTeamId, tx);
+        if (!canonicalTeam) {
+          return { ok: false, status: 404, error: 'Team not found.' };
+        }
+        const canManageTeam = await canManageCanonicalTeam({
+          teamId: canonicalTeamId,
+          userId: actorUserId,
+          isAdmin: actorIsAdmin,
+        }, tx);
+        if (!canManageTeam) {
+          return { ok: false, status: 403, error: 'Only the team manager can register this team.' };
+        }
+        participantTeamId = eventTeam?.id ?? teamId;
+        parentTeamId = canonicalTeamId;
       } else {
         const canonicalTeam = await loadCanonicalTeamById(teamId, tx);
         if (!canonicalTeam) {
@@ -501,20 +565,156 @@ const reserveEventRegistrationSlot = async ({
         if (!canManageTeam) {
           return { ok: false, status: 403, error: 'Only the team manager can register this team.' };
         }
-        const checkoutEventTeam = await claimOrCreateEventTeamSnapshot({
-          tx,
-          eventId,
-          canonicalTeamId: teamId,
-          createdBy: actorUserId,
-          canonicalTeam,
-          divisionId: divisionSelection.divisionId,
-          divisionTypeId: divisionSelection.divisionTypeId,
-          divisionTypeKey: divisionSelection.divisionTypeKey,
-          occurrence,
-          upsertRegistration: false,
-        });
-        participantTeamId = normalizeString((checkoutEventTeam as any)?.id);
-        parentTeamId = teamId;
+
+        const normalizedEventType = String(event.eventType ?? '').toUpperCase();
+        const requiresStableScheduledSlot =
+          normalizedEventType === 'LEAGUE' || normalizedEventType === 'TOURNAMENT';
+        if (requiresStableScheduledSlot) {
+          const tournamentPoolIds = isTournamentPoolPlayEnabled(event)
+            ? await getTournamentPoolIdsForBracket({
+                eventId,
+                bracketDivisionId: divisionSelection.divisionId,
+                client: tx,
+              })
+            : [];
+          const compatibleDivisionIds = new Set(
+            [...tournamentPoolIds, divisionSelection.divisionId]
+              .map((divisionId) => normalizeString(divisionId)?.toLowerCase() ?? null)
+              .filter((divisionId): divisionId is string => Boolean(divisionId)),
+          );
+          const targetDivisionTypeId = normalizeString(divisionSelection.divisionTypeId)?.toLowerCase() ?? null;
+          const eventTeamRows = await tx.teams.findMany({
+            where: {
+              eventId,
+              OR: [
+                { kind: 'REGISTERED', parentTeamId: teamId },
+                { kind: 'PLACEHOLDER', parentTeamId: null },
+              ],
+            },
+          }) as CheckoutEventTeamSlot[];
+          const isCompatibleSlot = (row: CheckoutEventTeamSlot) => {
+            if (!compatibleDivisionIds.size && !targetDivisionTypeId) {
+              return true;
+            }
+            const rowDivisionId = normalizeString(row.division)?.toLowerCase() ?? null;
+            const rowDivisionTypeId = normalizeString(row.divisionTypeId)?.toLowerCase() ?? null;
+            return Boolean(
+              (rowDivisionId && compatibleDivisionIds.has(rowDivisionId))
+              || (targetDivisionTypeId && rowDivisionTypeId === targetDivisionTypeId),
+            );
+          };
+          const existingRegisteredSlot = [...eventTeamRows]
+            .filter((row) => (
+              row.eventId === eventId
+              && String(row.kind ?? '').toUpperCase() === 'REGISTERED'
+              && row.parentTeamId === teamId
+              && isCompatibleSlot(row)
+            ))
+            .sort((left, right) => {
+              const leftTime = left.updatedAt?.getTime() ?? left.createdAt?.getTime() ?? 0;
+              const rightTime = right.updatedAt?.getTime() ?? right.createdAt?.getTime() ?? 0;
+              if (leftTime !== rightTime) return rightTime - leftTime;
+              return left.id.localeCompare(right.id);
+            })[0] ?? null;
+
+          if (existingRegisteredSlot) {
+            participantTeamId = existingRegisteredSlot.id;
+          } else {
+            const placeholderSlots = eventTeamRows
+              .filter((row) => (
+                row.eventId === eventId
+                && String(row.kind ?? '').toUpperCase() === 'PLACEHOLDER'
+                && row.parentTeamId == null
+                && isCompatibleSlot(row)
+              ))
+              .sort((left, right) => {
+                const orderDelta = checkoutEventTeamSlotOrder(left) - checkoutEventTeamSlotOrder(right);
+                if (orderDelta !== 0) return orderDelta;
+                const leftTime = left.createdAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+                const rightTime = right.createdAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+                if (leftTime !== rightTime) return leftTime - rightTime;
+                return left.id.localeCompare(right.id);
+              });
+            const placeholderIds = placeholderSlots.map((row) => row.id);
+            const storedHolds = placeholderIds.length && typeof tx.eventRegistrations?.findMany === 'function'
+              ? await tx.eventRegistrations.findMany({
+                  where: {
+                    eventId,
+                    registrantType: 'TEAM',
+                    rosterRole: 'PARTICIPANT',
+                    status: { in: ['STARTED', 'PENDING', 'ACTIVE'] },
+                    OR: [
+                      { registrantId: { in: placeholderIds } },
+                      { eventTeamId: { in: placeholderIds } },
+                    ],
+                    ...(occurrence
+                      ? {
+                          slotId: occurrence.slotId,
+                          occurrenceDate: occurrence.occurrenceDate,
+                        }
+                      : {
+                          slotId: null,
+                          occurrenceDate: null,
+                        }),
+                  },
+                  select: {
+                    id: true,
+                    status: true,
+                    registrantId: true,
+                    eventTeamId: true,
+                    parentId: true,
+                    createdAt: true,
+                  },
+                }) as CheckoutEventTeamHold[]
+              : [];
+            const liveHolds = sortRegistrationsByCreatedAt(storedHolds.filter((row) => (
+              row.status !== 'STARTED'
+              || Boolean(row.createdAt && row.createdAt >= cutoff)
+            )));
+            const heldPlaceholderIds = new Set(
+              liveHolds.flatMap((row) => [row.registrantId, row.eventTeamId])
+                .filter((slotId): slotId is string => Boolean(slotId && placeholderIds.includes(slotId))),
+            );
+            const reusableCanonicalHold = liveHolds.find((row) => (
+              row.parentId === teamId
+              && Boolean(
+                (row.eventTeamId && placeholderIds.includes(row.eventTeamId))
+                || (row.registrantId && placeholderIds.includes(row.registrantId)),
+              )
+            ));
+            const reusableSlotId = reusableCanonicalHold
+              ? normalizeString(reusableCanonicalHold.eventTeamId)
+                ?? normalizeString(reusableCanonicalHold.registrantId)
+              : null;
+            const selectedPlaceholder = placeholderSlots.find((row) => row.id === reusableSlotId)
+              ?? placeholderSlots.find((row) => !heldPlaceholderIds.has(row.id))
+              ?? null;
+            if (!selectedPlaceholder) {
+              return {
+                ok: false,
+                status: 409,
+                error: 'No compatible team slot is available for this event.',
+              };
+            }
+            participantTeamId = selectedPlaceholder.id;
+          }
+          parentTeamId = teamId;
+        } else {
+          const checkoutEventTeam = await claimOrCreateEventTeamSnapshot({
+            tx,
+            eventId,
+            canonicalTeamId: teamId,
+            createdBy: actorUserId,
+            canonicalTeam,
+            divisionId: divisionSelection.divisionId,
+            divisionTypeId: divisionSelection.divisionTypeId,
+            divisionTypeKey: divisionSelection.divisionTypeKey,
+            occurrence,
+            upsertRegistration: false,
+          });
+          participantTeamId = normalizeString((checkoutEventTeam as { id?: unknown } | null)?.id);
+          parentTeamId = teamId;
+        }
       }
       if (!participantTeamId) {
         return { ok: false, status: 404, error: 'Team not found.' };
@@ -794,6 +994,10 @@ const reserveEventRegistrationSlot = async ({
       registrationId,
       teamId: participantTeamId,
       registrationHoldExpiresAt: new Date(registrationHoldCreatedAt.getTime() + STARTED_REGISTRATION_TTL_MS),
+      parentId: participantParentId,
+      divisionId: divisionSelection.divisionId,
+      divisionTypeId: divisionSelection.divisionTypeId,
+      divisionTypeKey: divisionSelection.divisionTypeKey,
     };
   });
 };
@@ -1400,6 +1604,10 @@ export async function POST(req: NextRequest) {
     : (userId ?? session.userId);
   let reservedRegistrationId: string | null = null;
   let reservedRegistrationHoldExpiresAt: Date | null = null;
+  let reservedEventRegistrationParentId: string | null = null;
+  let reservedEventRegistrationDivisionId: string | null = null;
+  let reservedEventRegistrationDivisionTypeId: string | null = null;
+  let reservedEventRegistrationDivisionTypeKey: string | null = null;
   let reservedRentalWindows: RentalCheckoutWindow[] = [];
 
   if (resolvedPurchase.purchaseType === 'event') {
@@ -1423,6 +1631,10 @@ export async function POST(req: NextRequest) {
     reservedRegistrationId = reservationResult.registrationId;
     reservedRegistrationHoldExpiresAt = reservationResult.registrationHoldExpiresAt;
     checkoutTeamId = reservationResult.teamId ?? checkoutTeamId;
+    reservedEventRegistrationParentId = reservationResult.parentId;
+    reservedEventRegistrationDivisionId = reservationResult.divisionId;
+    reservedEventRegistrationDivisionTypeId = reservationResult.divisionTypeId;
+    reservedEventRegistrationDivisionTypeKey = reservationResult.divisionTypeKey;
   } else if (resolvedPurchase.purchaseType === 'team_registration') {
     const reservationResult = await reserveTeamRegistrationSlot({
       teamId,
@@ -1652,7 +1864,14 @@ export async function POST(req: NextRequest) {
     }
     appendMetadata(metadata, 'registration_id', reservedRegistrationId);
     appendMetadata(metadata, 'event_registration_registrant_type', eventRegistrationTarget.registrantType);
-    appendMetadata(metadata, 'event_registration_parent_id', eventRegistrationTarget.parentId);
+    appendMetadata(
+      metadata,
+      'event_registration_parent_id',
+      reservedEventRegistrationParentId ?? eventRegistrationTarget.parentId,
+    );
+    appendMetadata(metadata, 'event_registration_division_id', reservedEventRegistrationDivisionId);
+    appendMetadata(metadata, 'event_registration_division_type_id', reservedEventRegistrationDivisionTypeId);
+    appendMetadata(metadata, 'event_registration_division_type_key', reservedEventRegistrationDivisionTypeKey);
     appendMetadata(metadata, 'team_registration_registrant_type', teamCheckoutTarget.registrantType);
     appendMetadata(metadata, 'team_registration_parent_id', teamCheckoutTarget.parentId);
     appendMetadata(metadata, 'team_registration_roster_role', teamCheckoutTarget.rosterRole);

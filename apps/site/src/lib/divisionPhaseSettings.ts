@@ -5,6 +5,7 @@ import type {
   DivisionPhaseSettingsMap,
   MatchRulesConfig,
 } from '@/types';
+import { normalizeEventOfficialPositions } from '@/server/officials/config';
 
 const PHASES: DivisionCompetitionPhase[] = ['LEAGUE', 'POOL', 'BRACKET', 'PLAYOFF'];
 
@@ -92,6 +93,15 @@ export const normalizeDivisionPhaseSettingsMap = (value: unknown): DivisionPhase
     const segmentBreakMinutes = normalizeOptionalNonNegativeInt(rawSettings.segmentBreakMinutes);
     if (segmentBreakMinutes !== undefined) {
       settings.segmentBreakMinutes = segmentBreakMinutes;
+    }
+    if (typeof rawSettings.doTeamsOfficiate === 'boolean') {
+      settings.doTeamsOfficiate = rawSettings.doTeamsOfficiate;
+    }
+    if (Array.isArray(rawSettings.officialPositions)) {
+      settings.officialPositions = normalizeEventOfficialPositions(
+        rawSettings.officialPositions,
+        'phase',
+      );
     }
     if (Object.keys(settings).length > 0) {
       result[phase] = settings;

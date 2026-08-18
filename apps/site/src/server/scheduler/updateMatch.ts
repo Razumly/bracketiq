@@ -10,9 +10,9 @@ import {
   UserData,
   TIMES,
   MINUTE_MS,
-  usesTeamOfficialScheduling,
 } from './types';
 import { rescheduleEventMatchesPreservingLocks } from './reschedulePreservingLocks';
+import { OfficialStaffingPlanner } from './officialStaffing';
 import {
   buildLegacyOfficialAssignment,
   deriveLegacyOfficialCheckedInFromAssignments,
@@ -80,7 +80,8 @@ export const isTeamOfficialSchedulingCapacityError = (error: unknown): boolean =
 
 export const isFieldSchedulingCapacityError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error ?? '');
-  return message.includes('Unable to schedule event because no fields are available');
+  return message.includes('Unable to schedule event because no fields are available')
+    || message.includes('No compatible time slots are available for the selected fields and divisions');
 };
 
 const ensureMatchesArray = (participant?: { matches?: Match[] } | null) => {
@@ -238,8 +239,19 @@ const syncMatchParticipants = (matches: Iterable<Match>) => {
     attachMatchToParticipants(match);
   }
 };
+const applyCanonicalTeamDutyRequirements = (event: Tournament | League): void => {
+  const planner = new OfficialStaffingPlanner(event);
+  for (const match of Object.values(event.matches)) {
+    match.requiresTeamOfficial = planner.isTeamDutyRequired(match);
+    match.reservesTeamOfficial =
+      match.requiresTeamOfficial && planner.isTeamDutySlotReserved(match);
+  }
+};
+
 
 type FinalizationSnapshot = {
+  event: Tournament | League;
+  eventEnd: Date;
   matches: Array<{
     match: Match;
     team1: Team | null;
@@ -250,16 +262,26 @@ type FinalizationSnapshot = {
     official: UserData | null;
     field: PlayingField | null;
     start: Date;
+    placementState: Match['placementState'];
     end: Date;
     locked: boolean;
     status: string | null;
     resultStatus: string | null;
     actualEnd: Date | null;
+    actualStart: Date | null;
     winnerEventTeamId: string | null;
     requiresTeamOfficial: boolean;
+    reservesTeamOfficial: boolean;
+    officialAssignments: MatchOfficialAssignment[];
+    officialCheckedIn: boolean;
   }>;
   fieldMatches: Array<{ field: PlayingField; matches: Match[] }>;
   participantMatches: Array<{ participant: Team | UserData; matches: Match[] }>;
+  timeSlotDivisions: Array<{
+    slot: (Tournament | League)['timeSlots'][number];
+    divisions: Division[];
+  }>;
+  officialDivisions: Array<{ official: UserData; divisions: Division[] }>;
 };
 
 const captureFinalizationSnapshot = (event: Tournament | League): FinalizationSnapshot => {
@@ -269,6 +291,8 @@ const captureFinalizationSnapshot = (event: Tournament | League): FinalizationSn
     ...event.officials,
   ];
   return {
+    event,
+    eventEnd: event.end,
     matches: matches.map((match) => ({
       match,
       team1: match.team1,
@@ -278,21 +302,29 @@ const captureFinalizationSnapshot = (event: Tournament | League): FinalizationSn
       teamOfficial: match.teamOfficial,
       official: match.official,
       field: match.field,
+      placementState: match.placementState,
       start: match.start,
       end: match.end,
       locked: match.locked,
       status: match.status,
       resultStatus: match.resultStatus,
       actualEnd: match.actualEnd,
+      actualStart: match.actualStart,
       winnerEventTeamId: match.winnerEventTeamId,
       requiresTeamOfficial: match.requiresTeamOfficial,
+      reservesTeamOfficial: match.reservesTeamOfficial,
+      officialAssignments: match.officialAssignments,
+      officialCheckedIn: match.officialCheckedIn === true,
     })),
     fieldMatches: Object.values(event.fields).map((field) => ({ field, matches: [...field.matches] })),
     participantMatches: participants.map((participant) => ({ participant, matches: [...participant.matches] })),
+    timeSlotDivisions: event.timeSlots.map((slot) => ({ slot, divisions: slot.divisions })),
+    officialDivisions: event.officials.map((official) => ({ official, divisions: official.divisions })),
   };
 };
 
 const restoreFinalizationSnapshot = (snapshot: FinalizationSnapshot): void => {
+  snapshot.event.end = snapshot.eventEnd;
   for (const state of snapshot.matches) {
     Object.assign(state.match, {
       team1: state.team1,
@@ -302,14 +334,19 @@ const restoreFinalizationSnapshot = (snapshot: FinalizationSnapshot): void => {
       teamOfficial: state.teamOfficial,
       official: state.official,
       field: state.field,
+      placementState: state.placementState,
       start: state.start,
       end: state.end,
       locked: state.locked,
       status: state.status,
       resultStatus: state.resultStatus,
       actualEnd: state.actualEnd,
+      actualStart: state.actualStart,
       winnerEventTeamId: state.winnerEventTeamId,
       requiresTeamOfficial: state.requiresTeamOfficial,
+      reservesTeamOfficial: state.reservesTeamOfficial,
+      officialAssignments: state.officialAssignments,
+      officialCheckedIn: state.officialCheckedIn,
     });
   }
   for (const state of snapshot.fieldMatches) {
@@ -317,6 +354,12 @@ const restoreFinalizationSnapshot = (snapshot: FinalizationSnapshot): void => {
   }
   for (const state of snapshot.participantMatches) {
     state.participant.matches = [...state.matches];
+  }
+  for (const state of snapshot.timeSlotDivisions) {
+    state.slot.divisions = state.divisions;
+  }
+  for (const state of snapshot.officialDivisions) {
+    state.official.divisions = state.divisions;
   }
 };
 
@@ -329,31 +372,6 @@ const buildScheduleParticipants = (event: Tournament | League): Record<string, T
   return participants;
 };
 
-const getUpcomingMatchesInTimeRange = (
-  beginning: Date,
-  end: Date,
-  matches: Record<string, Match>,
-  mustBeNextMatch: boolean,
-): Match[] => {
-  const matchesInRange: Match[] = [];
-  for (const match of Object.values(matches)) {
-    let matchIsNext = true;
-    if (mustBeNextMatch) {
-      if (match.previousLeftMatch && !isMatchOver(match.previousLeftMatch)) {
-        matchIsNext = false;
-      }
-      if (match.previousRightMatch && !isMatchOver(match.previousRightMatch)) {
-        matchIsNext = false;
-      }
-    }
-    if (match.start >= beginning && match.end <= end && matchIsNext) {
-      matchesInRange.push(match);
-    }
-  }
-  matchesInRange.sort((a, b) => a.start.getTime() - b.start.getTime());
-  matchesInRange.sort((a, b) => (b.end.getTime() - b.start.getTime()) - (a.end.getTime() - a.start.getTime()));
-  return matchesInRange;
-};
 
 const completedSegmentWinnerIds = (match: Match): string[] => (
   (Array.isArray(match.segments) ? match.segments : [])
@@ -411,10 +429,6 @@ const resolveMatchWinner = (match: Match): Team | null => {
   return null;
 };
 
-const isMatchOver = (match: Match | null): boolean => {
-  if (!match) return false;
-  return Boolean(resolveMatchWinner(match));
-};
 
 const isValidDate = (value: Date | null | undefined): value is Date => (
   value instanceof Date && !Number.isNaN(value.getTime())
@@ -437,45 +451,6 @@ const syncUnlockedCompletedMatchScheduleWindow = (match: Match, actualEnd: Date)
   return true;
 };
 
-const teamsWaitingToStart = (teams: Team[], currentTime: Date): Team[] => {
-  const waiting: Team[] = [];
-  for (const team of teams) {
-    for (const match of team.matches ?? []) {
-      if (match.start > currentTime && match.teamOfficial !== team) {
-        waiting.push(team);
-        break;
-      }
-    }
-  }
-  return waiting;
-};
-
-const isTeamInPreviousMatch = (team: Team, match: Match): boolean => {
-  for (const prev of match.getDependencies()) {
-    if (prev.team1 === team || prev.team2 === team) {
-      return true;
-    }
-  }
-  return false;
-};
-
-const reassignTeamOfficial = (match: Match, schedule: Schedule<Match, any, any, Division>, currentTime: Date): void => {
-  if (!match.division) return;
-  if (match.teamOfficial && match.teamOfficial.matches) {
-    match.teamOfficial.matches = match.teamOfficial.matches.filter((existing) => existing.id !== match.id);
-  }
-  const freeParticipants = schedule.freeParticipants(match.division, currentTime, match.end);
-  const freeTeams = freeParticipants.filter(
-    (participant) => participant instanceof Team && participant !== match.team1 && participant !== match.team2,
-  ) as Team[];
-  for (const freeTeam of freeTeams) {
-    if (!isTeamInPreviousMatch(freeTeam, match)) {
-      match.teamOfficial = freeTeam;
-      ensureMatchesArray(freeTeam).push(match);
-      return;
-    }
-  }
-};
 
 const reassignUserOfficial = (match: Match, schedule: Schedule<Match, any, any, Division>): void => {
   if (!match.division) return;
@@ -490,12 +465,12 @@ const reassignUserOfficial = (match: Match, schedule: Schedule<Match, any, any, 
   }
 };
 
-const unscheduleMatchesOnField = (match: Match, useTeamOfficials: boolean): void => {
+const unscheduleMatchesOnField = (match: Match): void => {
   if (!match.field) return;
   const matchesOnField = match.field.matches as Match[];
   for (const matchOnField of matchesOnField) {
     if (matchOnField.locked) continue;
-    if (matchOnField.start > match.start || (useTeamOfficials && !matchOnField.teamOfficial)) {
+    if (matchOnField.start > match.start) {
       matchOnField.unschedule();
     }
   }
@@ -506,19 +481,15 @@ const processMatches = (
   bracketSchedule: Schedule<Match, any, any, Division>,
   updatedMatch: Match,
   tournament: Tournament | League,
-  useTeamOfficials: boolean,
 ): void => {
-  unscheduleMatchesOnField(updatedMatch, useTeamOfficials);
+  unscheduleMatchesOnField(updatedMatch);
   for (const field of Object.values(tournament.fields)) {
     for (const match of field.matches) {
       if (match.locked) continue;
-      if (
-        (field === updatedMatch.field && match.start > updatedMatch.start) ||
-        (useTeamOfficials && !match.teamOfficial)
-      ) {
+      if (field === updatedMatch.field && match.start > updatedMatch.start) {
         match.unschedule();
       }
-      if (match.start >= updatedMatch.end || (useTeamOfficials && !match.teamOfficial)) {
+      if (match.start >= updatedMatch.end) {
         match.unschedule();
       }
     }
@@ -526,7 +497,6 @@ const processMatches = (
 
   for (const match of [...matches].reverse()) {
     if (!match.locked && !match.field) {
-      match.requiresTeamOfficial = useTeamOfficials;
       const segmentDurationCount = Math.max(match.segments?.length ?? 0, match.team1Points.length, 1);
       bracketSchedule.scheduleEvent(match, segmentDurationCount * TIMES.SET);
       attachMatchToParticipants(match);
@@ -541,9 +511,7 @@ export const finalizeMatch = (
   currentTime: Date,
 ): FinalizeResult => {
   syncMatchParticipants(Object.values(event.matches));
-  for (const match of Object.values(event.matches)) {
-    match.requiresTeamOfficial = usesTeamOfficialScheduling(event);
-  }
+  applyCanonicalTeamDutyRequirements(event);
 
   const seededTeamIds: string[] = [];
 
@@ -576,6 +544,7 @@ export const finalizeMatch = (
   }
 
   if (event instanceof League) {
+    // Match completion may move times, but only explicit Schedule Reflow selects Team-duty replacements.
     rescheduleEventMatchesPreservingLocks(event);
     if (preserveCompletedWindow) {
       updatedMatch.locked = false;
@@ -630,87 +599,20 @@ export const finalizeMatch = (
     }
   }
 
-  const useTeamOfficials = usesTeamOfficialScheduling(event);
-  processMatches(matches, matchesSchedule, updatedMatch, event, useTeamOfficials);
+  processMatches(matches, matchesSchedule, updatedMatch, event);
 
   const conflicts = matchesSchedule.getParticipantConflicts();
   for (const [participant, conflictMatches] of conflicts.entries()) {
-    if (participant instanceof Team) {
-      if (!useTeamOfficials) continue;
-      for (const match of conflictMatches) {
-        if (participant === match.teamOfficial) {
-          reassignTeamOfficial(match, matchesSchedule, currentTime);
-        }
-      }
-    } else if (participant instanceof UserData) {
-      for (const match of conflictMatches) {
-        if (match.official === participant) {
-          reassignUserOfficial(match, matchesSchedule);
-        }
+    if (!(participant instanceof UserData)) {
+      continue;
+    }
+    for (const match of conflictMatches) {
+      if (match.official === participant) {
+        reassignUserOfficial(match, matchesSchedule);
       }
     }
   }
 
-  if (useTeamOfficials) {
-    let matchesInRange: Match[] = [];
-    if (updatedMatch.losersBracket) {
-      if (updatedMatch.winnerNextMatch) {
-        matchesInRange = getUpcomingMatchesInTimeRange(
-          updatedMatch.end,
-          updatedMatch.winnerNextMatch.start,
-          event.matches,
-          true,
-        );
-        for (const match of matchesInRange) {
-          if (!match.teamOfficial) {
-            match.teamOfficial = winner;
-            ensureMatchesArray(winner).push(match);
-            break;
-          }
-        }
-      }
-      matchesInRange = getUpcomingMatchesInTimeRange(updatedMatch.end, event.end, event.matches, false);
-    } else {
-      if (updatedMatch.loserNextMatch) {
-        matchesInRange = getUpcomingMatchesInTimeRange(
-          updatedMatch.end,
-          updatedMatch.loserNextMatch.start,
-          event.matches,
-          true,
-        );
-      }
-    }
-
-    if (!event.doubleElimination) {
-      if (updatedMatch.winnerNextMatch) {
-        matchesInRange = [updatedMatch.winnerNextMatch];
-      } else {
-        matchesInRange = [];
-      }
-    }
-
-    for (const match of matchesInRange) {
-      if (!match.teamOfficial) {
-        match.teamOfficial = loser;
-        ensureMatchesArray(loser).push(match);
-        break;
-      }
-    }
-
-    const waitingTeams = teamsWaitingToStart(Object.values(event.teams), currentTime);
-    for (const team of waitingTeams) {
-      const lastMatch = team.matches[team.matches.length - 1];
-      if (!lastMatch) continue;
-      const availableMatches = getUpcomingMatchesInTimeRange(currentTime, lastMatch.start, event.matches, true);
-      for (const match of availableMatches) {
-        if (!match.teamOfficial) {
-          match.teamOfficial = team;
-          ensureMatchesArray(team).push(match);
-          break;
-        }
-      }
-    }
-  }
 
   if (preserveCompletedWindow) {
     updatedMatch.locked = false;
@@ -729,9 +631,7 @@ export const finalizeMatchWithoutRescheduling = (
   currentTime: Date,
 ): FinalizeResult => {
   syncMatchParticipants(Object.values(event.matches));
-  for (const match of Object.values(event.matches)) {
-    match.requiresTeamOfficial = usesTeamOfficialScheduling(event);
-  }
+  applyCanonicalTeamDutyRequirements(event);
 
   const seededTeamIds: string[] = [];
   const teamOne = updatedMatch.team1;

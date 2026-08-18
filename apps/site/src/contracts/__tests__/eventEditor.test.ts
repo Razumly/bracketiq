@@ -96,7 +96,8 @@ const draft = {
     rentalBookingItemId: null,
   },
   staff: {
-    officialSchedulingMode: 'SCHEDULE' as const,
+    staffingPriority: 'BEST_AVAILABLE_COVERAGE' as const,
+    doTeamsOfficiate: false,
     teamOfficialsMaySwap: false,
     teamCheckInMode: 'OFF' as const,
     teamCheckInOpenMinutesBefore: 60,
@@ -136,21 +137,56 @@ describe('event editor contracts', () => {
     expect(parsed.draft.registration.questions[0]).toEqual(expect.objectContaining({ clientId: 'question-client-1' }));
   });
 
-  it('accepts the supported OFF official scheduling mode', () => {
+  it('accepts each canonical Staffing Priority without a legacy mode field', () => {
+    const priorities = [
+      'FULL_COVERAGE_REQUIRED',
+      'TEAM_COVERAGE_REQUIRED',
+      'OFFICIAL_COVERAGE_REQUIRED',
+      'BEST_AVAILABLE_COVERAGE',
+      'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED',
+    ] as const;
+
+    for (const staffingPriority of priorities) {
+      const parsed = createEventEditorCommandSchema.parse({
+        contractVersion: 3,
+        createOperationId: `create-operation-${staffingPriority}`,
+        expectedRevisions: expectedCreateRevisions,
+        draft: {
+          ...draft,
+          staff: {
+            ...draft.staff,
+            staffingPriority,
+          },
+        },
+        completion: createOnlyCompletion,
+      });
+      expect(parsed.draft.staff.staffingPriority).toBe(staffingPriority);
+      expect('officialSchedulingMode' in parsed.draft.staff).toBe(false);
+    }
+  });
+
+  it('accepts a legacy scheduling mode and maps it to canonical staffing fields', () => {
+    const legacyStaff = Object.fromEntries(
+      Object.entries(draft.staff).filter(
+        ([key]) => key !== 'staffingPriority' && key !== 'doTeamsOfficiate',
+      ),
+    );
     const parsed = createEventEditorCommandSchema.parse({
       contractVersion: 3,
-      createOperationId: 'create-operation-off',
+      createOperationId: 'create-operation-legacy-mode',
       expectedRevisions: expectedCreateRevisions,
       draft: {
         ...draft,
         staff: {
-          ...draft.staff,
-          officialSchedulingMode: 'OFF',
+          ...legacyStaff,
+          officialSchedulingMode: 'TEAM_STAFFING',
         },
       },
       completion: createOnlyCompletion,
     });
-    expect(parsed.draft.staff.officialSchedulingMode).toBe('OFF');
+    expect(parsed.draft.staff.staffingPriority).toBe('TEAM_COVERAGE_REQUIRED');
+    expect(parsed.draft.staff.doTeamsOfficiate).toBe(true);
+    expect('officialSchedulingMode' in parsed.draft.staff).toBe(false);
   });
 
   it('requires the bootstrap operation identity and preserves the selected start', () => {

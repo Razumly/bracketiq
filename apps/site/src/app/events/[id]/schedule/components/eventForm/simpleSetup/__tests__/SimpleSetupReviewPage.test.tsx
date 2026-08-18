@@ -162,7 +162,7 @@ const buildEventData = (name = 'Summer League'): EventFormValues => ({
     requiredTemplateIds: ['waiver'],
     hostId: 'host-1',
     assistantHostIds: [],
-    officialSchedulingMode: 'SCHEDULE',
+    staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
     officialPositions: [{ id: 'referee', name: 'Referee', count: 1, order: 0 }],
     doTeamsOfficiate: false,
     teamOfficialsMaySwap: false,

@@ -215,7 +215,7 @@ test("creates templates from complex event parameters and handles rental resourc
       imageId: SEED_IMAGE.id,
       hostId: SEED_USERS.host.id,
       organizationId: SEED_ORG.id,
-      officialSchedulingMode: "SCHEDULE",
+      staffingPriority: "FULL_COVERAGE_REQUIRED",
       officialPositions: [
         {
           id: "referee",
@@ -346,6 +346,12 @@ test("creates templates from complex event parameters and handles rental resourc
 
   const templateResponseBody = await templateResponse.json();
   const templateId = templateResponseBody?.template?.id as string;
+  expect(templateResponseBody?.template).toEqual(expect.objectContaining({
+    staffingPriority: "FULL_COVERAGE_REQUIRED",
+  }));
+  expect(templateResponseBody?.template).not.toHaveProperty(
+    "officialSchedulingMode",
+  );
   expect(templateId).toBeTruthy();
 
   const persistedTemplate = await getEventTemplateInBrowser(page, templateId);
@@ -360,6 +366,8 @@ test("creates templates from complex event parameters and handles rental resourc
     allowTeamSplitDefault: true,
     price: 4200,
   }));
+  expect(persistedTemplate.staffingPriority).toBe("FULL_COVERAGE_REQUIRED");
+  expect(persistedTemplate).not.toHaveProperty("officialSchedulingMode");
   expect(persistedTemplate.state).toBeUndefined();
   expect(persistedTemplate.teamIds).toBeUndefined();
   expect(persistedTemplate.userIds).toBeUndefined();

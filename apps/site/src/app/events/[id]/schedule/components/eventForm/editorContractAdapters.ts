@@ -1,6 +1,11 @@
 import { calculateTimedMatchDurationMinutes } from '@/lib/divisionPhaseSettings';
 import { GENERIC_RESOURCE_LABELS, getSportResourceLabels } from '@/lib/sportResourceLabels';
 import type { Event, EventOfficial, EventOfficialPosition, Field, TimeSlot } from '@/types';
+import {
+  isStaffingPriority,
+  normalizeOfficialSchedulingMode,
+  normalizeStaffingPriority,
+} from '@/server/officials/config';
 import type { EventFormValues } from './formTypes';
 import {
   EVENT_EDITOR_CONTRACT_VERSION,
@@ -138,14 +143,15 @@ const draftFromRecord = (
       : timeSlots.map((slot) => slot.$id ?? slot.id ?? slot.key),
   );
   const eventId = nullableString(event.$id) ?? nullableString(event.id);
-  const normalizedSchedulingMode = stringValue(event.officialSchedulingMode).toUpperCase();
-  const officialSchedulingMode = normalizedSchedulingMode === 'TEAM_STAFFING'
-    ? 'TEAM_STAFFING'
-    : normalizedSchedulingMode === 'STAFFING'
-      ? 'STAFFING'
-      : normalizedSchedulingMode === 'OFF'
-        ? 'OFF'
-        : 'SCHEDULE';
+  const explicitStaffingPriority = stringValue(event.staffingPriority).trim().toUpperCase();
+  const hasExplicitStaffingPriority = isStaffingPriority(explicitStaffingPriority);
+  const legacyOfficialSchedulingMode = normalizeOfficialSchedulingMode(event.officialSchedulingMode);
+  const staffingPriority = normalizeStaffingPriority(
+    explicitStaffingPriority,
+    legacyOfficialSchedulingMode,
+  );
+  const doTeamsOfficiate = booleanValue(event.doTeamsOfficiate)
+    || (!hasExplicitStaffingPriority && legacyOfficialSchedulingMode === 'TEAM_STAFFING');
   const normalizedOfficialIds = stringArray(event.officialIds);
   const eventOfficials = objectArray(event.eventOfficials).length > 0
     ? objectArray(event.eventOfficials)
@@ -277,7 +283,8 @@ const draftFromRecord = (
       rentalBookingItemId: nullableString(event.rentalBookingItemId),
     },
     staff: {
-      officialSchedulingMode,
+      staffingPriority,
+      doTeamsOfficiate,
       teamOfficialsMaySwap: booleanValue(event.teamOfficialsMaySwap),
       teamCheckInMode: ['EVENT', 'MATCH'].includes(stringValue(event.teamCheckInMode).toUpperCase())
         ? stringValue(event.teamCheckInMode).toUpperCase() as 'EVENT' | 'MATCH'
@@ -337,7 +344,6 @@ export const editorSnapshotToFormValues = (
     fields: resources.fields as unknown as Field[],
     timeSlots: resources.timeSlots as unknown as TimeSlot[],
     fieldCount: resources.fieldIds.length,
-    doTeamsOfficiate: staff.officialSchedulingMode === 'TEAM_STAFFING',
     ...staff,
     officialPositions: staff.officialPositions as unknown as EventOfficialPosition[],
     eventOfficials: staff.eventOfficials as unknown as EventOfficial[],
@@ -398,8 +404,6 @@ export const editorDraftToLegacyEvent = (draft: EventEditorDraft, eventId?: stri
     ...staff,
     pendingStaffInvites: staff.pendingInvites,
     staffInvites: staff.pendingInvites,
-    officialSchedulingMode: staff.officialSchedulingMode,
-    doTeamsOfficiate: staff.officialSchedulingMode === 'TEAM_STAFFING',
   };
 };
 

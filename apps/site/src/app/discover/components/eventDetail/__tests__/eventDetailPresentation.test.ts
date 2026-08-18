@@ -5,7 +5,7 @@ import {
     buildScheduleTimeslotGroups,
     formatMinutesTo12Hour,
     formatNotSpecifiedValue,
-    formatOfficialSchedulingModeLabel,
+    formatStaffingPriorityLabel,
     formatReadOnlyValueList,
     formatRefundSummary,
     formatRegistrationCutoffSummary,
@@ -82,10 +82,20 @@ describe('event detail presentation helpers', () => {
         expect(formatRefundSummary(null)).toBe('Automatic refunds disabled');
         expect(formatRefundSummary(0)).toBe('Until event start');
         expect(formatRefundSummary(48.9)).toBe('48h before start');
-        expect(formatOfficialSchedulingModeLabel('TEAM_STAFFING')).toBe('Team staffing');
-        expect(formatOfficialSchedulingModeLabel(undefined)).toBe('Schedule first');
+        expect(formatStaffingPriorityLabel('TEAM_COVERAGE_REQUIRED')).toBe('Team Coverage Required');
+        expect(formatStaffingPriorityLabel(undefined)).toBe('Best Available Coverage');
         expect(formatNotSpecifiedValue(3.9)).toBe('3');
         expect(formatNotSpecifiedValue(0)).toBe('Not specified');
+    });
+
+    it.each([
+        ['FULL_COVERAGE_REQUIRED', 'Full Coverage Required'],
+        ['TEAM_COVERAGE_REQUIRED', 'Team Coverage Required'],
+        ['OFFICIAL_COVERAGE_REQUIRED', 'Official Coverage Required'],
+        ['BEST_AVAILABLE_COVERAGE', 'Best Available Coverage'],
+        ['FULL_COVERAGE_WITH_CONFLICTS_ALLOWED', 'Full Coverage with Conflicts Allowed'],
+    ] as const)('formats canonical staffing priority %s', (priority, label) => {
+        expect(formatStaffingPriorityLabel(priority)).toBe(label);
     });
 
     it('formats 12-hour time boundaries and incomplete ranges', () => {

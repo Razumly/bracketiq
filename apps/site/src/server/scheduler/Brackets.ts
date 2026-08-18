@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { OfficialStaffingPlanner } from './officialStaffing';
+import { ScheduleError } from './scheduleErrors';
 import { Schedule } from './Schedule';
 import {
   Division,
@@ -11,7 +12,6 @@ import {
   Tournament,
   UserData,
   oppositeSide,
-  usesTeamOfficialScheduling,
 } from './types';
 import { resolveScheduledMatchDurationMs } from './divisionPhaseRules';
 
@@ -182,7 +182,7 @@ export class Brackets {
   private createBracketStructure(): Match {
     const totalTeams = this.seededEntrants.length;
     if (totalTeams < 2) {
-      throw new Error('Not enough teams to build a bracket');
+      throw new ScheduleError('Not enough teams to build a bracket', 'PLAYING_TEAM');
     }
 
     const bracketSize = this.nextPowerOfTwo(totalTeams);
@@ -339,23 +339,31 @@ export class Brackets {
       seenIds.add(match.id);
       queueIds.delete(match.id);
 
-      const prevMatches = match.getMatches();
-      for (const prevMatch of prevMatches) {
-        if (!prevMatch) continue;
-        if (seenIds.has(prevMatch.id)) continue;
-        if (queueIds.has(prevMatch.id)) continue;
-        if (match.losersBracket && match.losersBracket !== prevMatch.losersBracket) continue;
-        queue.push(prevMatch);
-        queueIds.add(prevMatch.id);
+      for (const previousMatch of match.getMatches()) {
+        if (!previousMatch || seenIds.has(previousMatch.id) || queueIds.has(previousMatch.id)) {
+          continue;
+        }
+        if (
+          match.losersBracket &&
+          match.losersBracket !== previousMatch.losersBracket
+        ) {
+          continue;
+        }
+        queue.push(previousMatch);
+        queueIds.add(previousMatch.id);
 
-        if (prevMatch.losersBracket) {
-          const leftPrev = prevMatch.previousLeftMatch;
-          const rightPrev = prevMatch.previousRightMatch;
-          const leftLoser = Boolean(leftPrev && leftPrev.losersBracket);
-          const rightLoser = Boolean(rightPrev && rightPrev.losersBracket);
-          if (leftLoser !== rightLoser) {
-            if (leftLoser && leftPrev) queue.push(leftPrev);
-            else if (rightLoser && rightPrev) queue.push(rightPrev);
+        if (previousMatch.losersBracket) {
+          const leftPrevious = previousMatch.previousLeftMatch;
+          const rightPrevious = previousMatch.previousRightMatch;
+          const leftIsLosersBracket = Boolean(leftPrevious?.losersBracket);
+          const rightIsLosersBracket = Boolean(rightPrevious?.losersBracket);
+          if (leftIsLosersBracket !== rightIsLosersBracket) {
+            const missingPrevious = leftIsLosersBracket
+              ? leftPrevious
+              : rightPrevious;
+            if (missingPrevious) {
+              queue.push(missingPrevious);
+            }
           }
         }
       }
@@ -442,7 +450,7 @@ export class Brackets {
       };
     };
 
-    const schedulingFailures: Array<{ matchId: number; reason: string }> = [];
+    const schedulingFailures: Array<{ matchId: number; reason: string; error: Error }> = [];
     let count = 1;
     for (const match of [...matches].reverse()) {
       match.matchId = count;
@@ -452,6 +460,9 @@ export class Brackets {
         count += 1;
         continue;
       }
+      match.reservesTeamOfficial =
+        match.requiresTeamOfficial
+        && this.officialStaffingPlanner.isTeamDutySlotReserved(match);
       let matchDurationMs = this.fallbackMatchDurationMs(match);
       try {
         matchDurationMs = resolveScheduledMatchDurationMs(
@@ -459,7 +470,7 @@ export class Brackets {
           match,
           matchDurationMs,
         );
-        if (this.tournament.officialSchedulingMode === 'STAFFING' && this.officialStaffingPlanner.hasStaffingRequirement()) {
+        if (this.officialStaffingPlanner.hasStaffingRequirement(match)) {
           this.bracketSchedule.scheduleEventWithOptions(match, matchDurationMs, {
             canUseCandidate: ({ resource, start, end }) => (
               this.officialStaffingPlanner.previewSchedulingCandidate(match, resource, start, end)
@@ -481,7 +492,7 @@ export class Brackets {
           `[scheduler][match-failure] eventId=${this.tournament.id} matchId=${count} divisionId=${divisionId} reason=${error.message}`,
         );
         this.context.error(
-          `[scheduler][match-failure] eventWindow=${formatIso(this.tournament.start)}..${formatIso(this.tournament.end)} mode=${this.tournament.officialSchedulingMode} durationMs=${matchDurationMs}`,
+          `[scheduler][match-failure] eventWindow=${formatIso(this.tournament.start)}..${formatIso(this.tournament.end)} staffingPriority=${this.tournament.staffingPriority} durationMs=${matchDurationMs}`,
         );
         this.context.error(
           `[scheduler][match-failure] matchState field=${match.field?.id ?? 'null'} start=${formatIso(match.start)} end=${formatIso(match.end)} deps=${match.getDependencies().map((dep) => dep.matchId ?? 'null').join(',') || 'none'}`,
@@ -492,7 +503,7 @@ export class Brackets {
         if (error.stack) {
           this.context.error(`[scheduler][match-failure] stack=${error.stack}`);
         }
-        schedulingFailures.push({ matchId: count, reason: error.message });
+        schedulingFailures.push({ matchId: count, reason: error.message, error });
       }
       const existingMatch = this.existingMatches[count];
       if (existingMatch) {
@@ -510,9 +521,27 @@ export class Brackets {
         .slice(0, 5)
         .map((failure) => `match ${failure.matchId}: ${failure.reason}`)
         .join('; ');
-      throw new Error(
+      const firstTypedFailure = schedulingFailures.find(
+        (failure) => failure.error instanceof ScheduleError,
+      )?.error;
+      throw new ScheduleError(
         `Failed to schedule ${schedulingFailures.length} bracket matches. ${details}`,
+        firstTypedFailure instanceof ScheduleError
+          ? firstTypedFailure.restrictingFactor
+          : 'UNKNOWN',
       );
+    }
+
+    if (
+      this.placeMatches &&
+      matches.some(
+        (match) =>
+          this.officialStaffingPlanner.isHardTeamCoverageRequired(match)
+          && match.requiresTeamOfficial
+          && !match.teamOfficial,
+      )
+    ) {
+      throw new ScheduleError('Unable to fully staff all matches with Team officials.', 'TEAM_DUTY');
     }
 
     const orderedMatches = [...matches].sort((a, b) => {
@@ -617,7 +646,7 @@ export class Brackets {
         return newMatch;
       }
       if (this.remainingTeams.length < 2) {
-        throw new Error(`Not enough teams remaining: ${this.remainingTeams.length}`);
+        throw new ScheduleError(`Not enough teams remaining: ${this.remainingTeams.length}`, 'PLAYING_TEAM');
       }
       const highSeedIndex = 0;
       let lowSeedIndex = -2 + 2 * this.seedsWithByes.length;
@@ -695,7 +724,7 @@ export class Brackets {
       end: this.tournament.start,
       official: null,
       teamOfficial: ref ?? null,
-      requiresTeamOfficial: usesTeamOfficialScheduling(this.tournament),
+      requiresTeamOfficial: false,
       loserNextMatch: null,
       losersBracket: isLoser,
       division: this.currentDivision,
@@ -710,6 +739,7 @@ export class Brackets {
       previousRightMatch: null,
       winnerNextMatch: nextWinnerMatch,
     });
+    newMatch.requiresTeamOfficial = this.officialStaffingPlanner.isTeamDutyRequired(newMatch);
 
     if (nextWinnerMatch) {
       newMatch.winnerNextMatch = nextWinnerMatch;

@@ -2998,7 +2998,7 @@ private class Cleanup(
 
 private fun officialUserIdsForMatch(match: MatchMVP): List<String> =
     (
-        match.normalizedOfficialAssignments().map { assignment -> assignment.userId } +
+        match.normalizedOfficialAssignments().mapNotNull { assignment -> assignment.userId } +
             listOfNotNull(match.officialId)
         )
         .map(String::trim)

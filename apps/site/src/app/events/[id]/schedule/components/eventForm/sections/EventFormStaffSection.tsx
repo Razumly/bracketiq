@@ -2,7 +2,7 @@ import type { ComponentProps } from 'react';
 
 import type { Event } from '@/types';
 
-import { normalizeOfficialSchedulingMode } from '../officials';
+import { normalizeStaffingPriority } from '@/server/officials/config';
 import type { EventFormValues } from '../formTypes';
 import type { useStaffOfficialController } from '../hooks/useStaffOfficialController';
 import { StaffManagementPanel } from './StaffManagementPanel';
@@ -142,17 +142,13 @@ export const EventFormStaffSection = ({
                 onTeamsOfficiateChange={(checked) => {
                     if (!checked) {
                         setValue('teamOfficialsMaySwap', false, { shouldDirty: true, shouldValidate: true });
-                        if (eventData.officialSchedulingMode === 'TEAM_STAFFING') {
-                            setValue('officialSchedulingMode', 'SCHEDULE', { shouldDirty: true, shouldValidate: true });
-                        }
                     }
                 }}
-                onSchedulingModeChange={(value) => {
-                    const nextMode = normalizeOfficialSchedulingMode(value);
-                    setValue('officialSchedulingMode', nextMode, { shouldDirty: true, shouldValidate: true });
-                    if (nextMode === 'TEAM_STAFFING' && !eventData.doTeamsOfficiate) {
-                        setValue('doTeamsOfficiate', true, { shouldDirty: true, shouldValidate: true });
-                    }
+                onStaffingPriorityChange={(value) => {
+                    setValue('staffingPriority', normalizeStaffingPriority(value), {
+                        shouldDirty: true,
+                        shouldValidate: true,
+                    });
                 }}
                 onLoadSportDefaults={handleResetOfficialPositionsFromSport}
                 onAddPosition={handleAddOfficialPosition}

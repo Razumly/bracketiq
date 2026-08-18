@@ -1,4 +1,4 @@
-import { Group, Participant, Resource, SchedulableEvent, Team, MINUTE_MS } from './types';
+import { Division, Group, Participant, Resource, SchedulableEvent, Team, MINUTE_MS } from './types';
 import {
   getDateTimePartsInTimeZone,
   normalizeTimeZone,
@@ -8,6 +8,9 @@ import {
   assertOneTimeTimeSlotWithinEventBounds,
   resolveOneTimeTimeSlot,
 } from '@/lib/timeSlotAvailability';
+import { ScheduleError } from './scheduleErrors';
+
+type ParticipantAvailability = 'AVAILABLE' | 'UNAVAILABLE' | 'TEAM_DUTY';
 
 type SlotWindow = {
   start: Date;
@@ -16,6 +19,7 @@ type SlotWindow = {
 };
 
 const NOT_ENOUGH_TIME_ALLOTTED_MESSAGE = 'Not enough time is allotted in the configured time slots to schedule this event.';
+const PHASE_DIVISION_SUFFIX = /__phase__(league|pool|bracket|playoff)$/;
 
 const overlaps = (startA: Date, endA: Date, startB: Date, endB: Date): boolean =>
   startA.getTime() < endB.getTime() && endA.getTime() > startB.getTime();
@@ -89,10 +93,11 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
     this.startTime = startTime;
     this.currentTime = currentTime ?? startTime;
     this.endTime = opts?.endTime ?? new Date(startTime.getTime() + 30 * 24 * 60 * MINUTE_MS);
-    if (opts?.timeSlots) {
-      this.prepareTimeSlots(opts.timeSlots);
+    const timeSlots = opts?.timeSlots ? Array.from(opts.timeSlots) : [];
+    if (timeSlots.length) {
+      this.prepareTimeSlots(timeSlots);
     }
-    this.hasSlots = this.globalSlots.length > 0 || Array.from(this.resourceSlots.values()).some((slots) => slots.length);
+    this.hasSlots = timeSlots.length > 0;
   }
   private resourcesForGroup(group: G): R[] {
     const direct = this.resources.get(group);
@@ -204,17 +209,77 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
     }
   }
 
-  freeParticipants(group: G, start: Date, end: Date): P[] {
+  freeParticipants(
+    group: G,
+    start: Date,
+    end: Date,
+    bufferMs = 0,
+  ): P[] {
     let freeParticipants = this.participantsForGroup(group);
+    const normalizedBufferMs = Math.max(0, bufferMs);
     const groupResources = this.resourcesForGroup(group);
     for (const resource of groupResources) {
       for (const event of resource.getEvents()) {
-        if (overlaps(event.start, event.end, start, end)) {
-          freeParticipants = freeParticipants.filter((participant) => !event.getParticipants().includes(participant));
+        if (
+          start.getTime() <
+            event.end.getTime() + Math.max(0, event.bufferMs) &&
+          end.getTime() + normalizedBufferMs > event.start.getTime()
+        ) {
+          const busyParticipantIds = new Set(
+            event.getParticipants().map((participant) => participant.id),
+          );
+          freeParticipants = freeParticipants.filter(
+            (participant) => !busyParticipantIds.has(participant.id),
+          );
         }
       }
     }
     return freeParticipants;
+  }
+
+  private groupsShareParticipantPool(left: Group, right: Group): boolean {
+    const leftId = left.id.trim().toLowerCase();
+    const rightId = right.id.trim().toLowerCase();
+    if (leftId === rightId) {
+      return true;
+    }
+    const leftDivision = left instanceof Division ? left : null;
+    const rightDivision = right instanceof Division ? right : null;
+    const leftSourceId =
+      'sourceDivisionId' in left && typeof left.sourceDivisionId === 'string'
+        ? left.sourceDivisionId.trim().toLowerCase()
+        : null;
+    const rightSourceId =
+      'sourceDivisionId' in right && typeof right.sourceDivisionId === 'string'
+        ? right.sourceDivisionId.trim().toLowerCase()
+        : null;
+    if (
+      leftSourceId === rightId ||
+      rightSourceId === leftId ||
+      leftDivision?.playoffPlacementDivisionIds.some(
+        (divisionId) => divisionId.trim().toLowerCase() === rightId,
+      ) ||
+      rightDivision?.playoffPlacementDivisionIds.some(
+        (divisionId) => divisionId.trim().toLowerCase() === leftId,
+      )
+    ) {
+      return true;
+    }
+    const leftIsAdvancementPhase =
+      leftDivision?.kind === 'PLAYOFF' ||
+      leftDivision?.phase === 'PLAYOFF' ||
+      leftDivision?.phase === 'BRACKET';
+    const rightIsAdvancementPhase =
+      rightDivision?.kind === 'PLAYOFF' ||
+      rightDivision?.phase === 'PLAYOFF' ||
+      rightDivision?.phase === 'BRACKET';
+    if (!leftIsAdvancementPhase && !rightIsAdvancementPhase) {
+      return false;
+    }
+    return (
+      leftId.replace(PHASE_DIVISION_SUFFIX, '') ===
+      rightId.replace(PHASE_DIVISION_SUFFIX, '')
+    );
   }
 
   private participantPoolForCurrentGroups(): P[] {
@@ -222,6 +287,26 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
     for (const group of this.currentGroups) {
       for (const participant of this.participantsForGroup(group)) {
         byId.set(participant.id, participant);
+      }
+    }
+    if (
+      !Array.from(byId.values()).some(
+        (participant) => participant instanceof Team,
+      )
+    ) {
+      for (const [candidateGroup, participants] of this.participants) {
+        if (
+          !this.currentGroups.some((currentGroup) =>
+            this.groupsShareParticipantPool(currentGroup, candidateGroup),
+          )
+        ) {
+          continue;
+        }
+        for (const participant of participants) {
+          if (participant instanceof Team) {
+            byId.set(participant.id, participant);
+          }
+        }
       }
     }
     if (byId.size) {
@@ -233,6 +318,38 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
       }
     }
     return Array.from(byId.values());
+  }
+
+  private participantPoolEvents(start: Date, end: Date): SchedulableEvent[] {
+    const events: SchedulableEvent[] = [];
+    const visitedResources = new Set<R>();
+    const visitedEvents = new Set<SchedulableEvent>();
+    for (const resources of this.resources.values()) {
+      for (const resource of resources) {
+        if (visitedResources.has(resource)) {
+          continue;
+        }
+        visitedResources.add(resource);
+        for (const event of resource.getEvents()) {
+          if (
+            visitedEvents.has(event) ||
+            !overlaps(event.start, event.end, start, end) ||
+            !event
+              .getGroups()
+              .some((eventGroup) =>
+                this.currentGroups.some((currentGroup) =>
+                  this.groupsShareParticipantPool(currentGroup, eventGroup),
+                ),
+              )
+          ) {
+            continue;
+          }
+          visitedEvents.add(event);
+          events.push(event);
+        }
+      }
+    }
+    return events;
   }
 
   scheduleEvent(event: E, durationMs: number): void {
@@ -262,30 +379,102 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
         .map((group) => group.id)
         .filter((id) => id.length > 0);
       const suffix = groupIds.length ? ` for divisions: ${groupIds.join(", ")}` : "";
-      throw new Error(
+      throw new ScheduleError(
         `Unable to schedule event because no fields are available${suffix}.`,
+        'RESOURCE',
       );
     }
     let earliestStart = this.getEarliestStartTime(event);
     earliestStart = this.nextValidStartTime(earliestStart, durationMs);
 
+    let sawNamedOfficialCapacityFailure = false;
+    let sawTeamDutyCapacityFailure = false;
     while (true) {
-      const adjustedStart = this.nextValidStartTime(earliestStart, durationMs);
+      let adjustedStart: Date;
+      try {
+        adjustedStart = this.nextValidStartTime(earliestStart, durationMs);
+      } catch (error) {
+        if (sawNamedOfficialCapacityFailure) {
+          throw new ScheduleError(
+            `${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} No complete position-eligible assignment is available for the scheduled match.`,
+            'NAMED_OFFICIAL_POSITION',
+          );
+        }
+        if (sawTeamDutyCapacityFailure) {
+          throw new ScheduleError(
+            `${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} Not enough teams are available to cover match and team-official slots.`,
+            'TEAM_DUTY',
+          );
+        }
+        throw error;
+      }
       if (adjustedStart.getTime() > earliestStart.getTime()) {
         earliestStart = adjustedStart;
       }
-      if (this.hasSlots && earliestStart.getTime() + durationMs > this.endTime.getTime()) {
-        throw new Error(`${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} No available time slots remaining for scheduling.`);
+      if (earliestStart.getTime() + durationMs > this.endTime.getTime()) {
+        if (sawNamedOfficialCapacityFailure) {
+          throw new ScheduleError(
+            `${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} No complete position-eligible assignment is available for the scheduled match.`,
+            'NAMED_OFFICIAL_POSITION',
+          );
+        }
+        if (sawTeamDutyCapacityFailure) {
+          throw new ScheduleError(
+            `${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} Not enough teams are available to cover match and team-official slots.`,
+            'TEAM_DUTY',
+          );
+        }
+        if (this.hasSlots) {
+          throw new ScheduleError(
+            `${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} No available time slots remaining for scheduling.`,
+            'RESOURCE',
+          );
+        }
       }
-      if (this.checkAvailabilityOfParticipants(earliestStart, new Date(earliestStart.getTime() + durationMs), event)) {
-        const resource = this.findAvailableResource(earliestStart, durationMs, event, opts?.canUseCandidate);
+      const candidateEnd = new Date(earliestStart.getTime() + durationMs);
+      const participantAvailability = this.checkAvailabilityOfParticipants(
+        earliestStart,
+        candidateEnd,
+        event,
+      );
+      if (participantAvailability === 'TEAM_DUTY') {
+        sawTeamDutyCapacityFailure = true;
+        (event as E & { placementRestriction?: 'TEAM_DUTY' }).placementRestriction = 'TEAM_DUTY';
+      }
+      const participantRetry = this.nextStartAfterKnownParticipantConflict(
+        earliestStart,
+        candidateEnd,
+        event,
+      );
+      if (participantRetry) {
+        earliestStart = participantRetry;
+        continue;
+      }
+      if (participantAvailability === 'AVAILABLE') {
+        const rawResource = this.findAvailableResource(earliestStart, durationMs, event);
+        const resource = rawResource && opts?.canUseCandidate
+          ? this.findAvailableResource(earliestStart, durationMs, event, opts.canUseCandidate)
+          : rawResource;
+        if (rawResource && opts?.canUseCandidate && !resource) {
+          sawNamedOfficialCapacityFailure = true;
+        }
         if (resource) {
           event.setResource(resource);
           event.start = earliestStart;
-          event.end = new Date(earliestStart.getTime() + durationMs);
+          event.end = candidateEnd;
           resource.addEvent(event);
-          (event as any).placementState = 'PLACED';
+          if ('placementState' in event) {
+            event.placementState = 'PLACED';
+          }
           return;
+        }
+        const resourceRetry = this.nextStartAfterResourceConflict(
+          earliestStart,
+          durationMs,
+        );
+        if (resourceRetry) {
+          earliestStart = resourceRetry;
+          continue;
         }
       }
       earliestStart = new Date(earliestStart.getTime() + MINUTE_MS);
@@ -300,7 +489,7 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
   private getEarliestStartTime(event: E): Date {
     let earliest = this.startTime.getTime() > this.currentTime.getTime() ? this.startTime : this.currentTime;
     for (const dependency of event.getDependencies() as E[]) {
-      const end = new Date(dependency.end.getTime() + event.bufferMs);
+      const end = new Date(dependency.end.getTime() + dependency.bufferMs);
       if (end.getTime() > earliest.getTime()) {
         earliest = end;
       }
@@ -320,69 +509,168 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
       }
     }
     if (currentTeamIds.size < requiredTeamParticipants) {
-      throw new Error(`${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} Not enough teams are available to cover match and team-official slots.`);
+      throw new ScheduleError(
+        `${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} Not enough teams are available to cover match and team-official slots.`,
+        (event as E & { reservesTeamOfficial?: boolean }).reservesTeamOfficial === true
+          ? 'TEAM_DUTY'
+          : 'PLAYING_TEAM',
+      );
     }
   }
 
-  private checkAvailabilityOfParticipants(start: Date, end: Date, event: E): boolean {
-    const minParticipants = event.getParticipants().length;
-    const currentEvents = this.currentEvents(start, end);
-    const currentParticipantIds = new Set<string>();
-    for (const participant of this.participantPoolForCurrentGroups()) {
-      currentParticipantIds.add(participant.id);
-    }
-    if (!currentParticipantIds.size) {
-      return minParticipants <= 0;
-    }
-
-    const busyParticipantIds = new Set<string>();
-    for (const event of currentEvents) {
-      for (const participant of event.getParticipants()) {
-        const participantId = participant?.id;
-        if (!participantId || !currentParticipantIds.has(participantId)) {
-          continue;
-        }
-        busyParticipantIds.add(participantId);
-      }
-    }
-
-    const availableParticipants = currentParticipantIds.size - busyParticipantIds.size;
-    if (availableParticipants < minParticipants) {
+  private isAnonymousParticipant(participant: Participant): boolean {
+    if (!(participant instanceof Team)) {
       return false;
     }
+    return String(participant.kind ?? '').trim().toUpperCase() === 'PLACEHOLDER';
+  }
 
-    const requiredTeamParticipants = event.getRequiredTeamParticipantCount?.() ?? 0;
+  private nextStartAfterKnownParticipantConflict(
+    start: Date,
+    end: Date,
+    event: E,
+  ): Date | null {
+    const candidateParticipantIds = new Set<string>();
+    for (const participant of event.getParticipants()) {
+      if (!this.isAnonymousParticipant(participant)) {
+        candidateParticipantIds.add(participant.id);
+      }
+    }
+    if (!candidateParticipantIds.size) {
+      return null;
+    }
+
+    const startMs = start.getTime();
+    const endMs = end.getTime();
+    const candidateBufferMs = Math.max(0, event.bufferMs);
+    let retryTimeMs: number | null = null;
+    const visitedResources = new Set<R>();
+    const visitedEvents = new Set<SchedulableEvent>();
+    for (const resources of this.resources.values()) {
+      for (const resource of resources) {
+        if (visitedResources.has(resource)) {
+          continue;
+        }
+        visitedResources.add(resource);
+        for (const scheduledEvent of resource.getEvents()) {
+          if (scheduledEvent === event || visitedEvents.has(scheduledEvent)) {
+            continue;
+          }
+          visitedEvents.add(scheduledEvent);
+          const scheduledBufferMs = Math.max(0, scheduledEvent.bufferMs);
+          const conflictsWithRestWindow =
+            startMs < scheduledEvent.end.getTime() + scheduledBufferMs &&
+            endMs + candidateBufferMs > scheduledEvent.start.getTime();
+          if (!conflictsWithRestWindow) {
+            continue;
+          }
+          for (const participant of scheduledEvent.getParticipants()) {
+            if (
+              !this.isAnonymousParticipant(participant) &&
+              candidateParticipantIds.has(participant.id)
+            ) {
+              const scheduledRetryTimeMs =
+                scheduledEvent.end.getTime() + scheduledBufferMs;
+              retryTimeMs =
+                retryTimeMs === null
+                  ? scheduledRetryTimeMs
+                  : Math.min(retryTimeMs, scheduledRetryTimeMs);
+              break;
+            }
+          }
+        }
+      }
+    }
+    return retryTimeMs === null ? null : new Date(retryTimeMs);
+  }
+
+  private checkAvailabilityOfParticipants(
+    start: Date,
+    end: Date,
+    event: E,
+  ): ParticipantAvailability {
+    const participantPool = this.participantPoolForCurrentGroups();
+    const currentParticipantIds = new Set<string>();
+    for (const participant of participantPool) {
+      currentParticipantIds.add(participant.id);
+    }
+    const minParticipants = event.getParticipants().length;
+    if (!currentParticipantIds.size) {
+      return minParticipants <= 0 ? 'AVAILABLE' : 'UNAVAILABLE';
+    }
+
+    const currentEvents = this.participantPoolEvents(start, end);
+    const busyKnownParticipantIds = new Set<string>();
+    let anonymousParticipantReservations = 0;
+    for (const scheduledEvent of currentEvents) {
+      const scheduledAnonymousParticipantIds = new Set<string>();
+      for (const participant of scheduledEvent.getParticipants()) {
+        if (this.isAnonymousParticipant(participant)) {
+          scheduledAnonymousParticipantIds.add(participant.id);
+        } else if (currentParticipantIds.has(participant.id)) {
+          busyKnownParticipantIds.add(participant.id);
+        }
+      }
+      anonymousParticipantReservations +=
+        scheduledAnonymousParticipantIds.size;
+    }
+
+    const availableParticipants =
+      currentParticipantIds.size -
+      busyKnownParticipantIds.size -
+      anonymousParticipantReservations;
+    if (availableParticipants < minParticipants) {
+      return 'UNAVAILABLE';
+    }
+
+    const requiredTeamParticipants =
+      event.getRequiredTeamParticipantCount?.() ?? 0;
     if (requiredTeamParticipants <= 0) {
-      return true;
+      return 'AVAILABLE';
     }
 
     const currentTeamIds = new Set<string>();
-    for (const participant of this.participantPoolForCurrentGroups()) {
+    for (const participant of participantPool) {
       if (participant instanceof Team) {
         currentTeamIds.add(participant.id);
       }
     }
     if (!currentTeamIds.size) {
-      return false;
+      return 'UNAVAILABLE';
     }
 
-    const busyTeamIds = new Set<string>();
-    let unassignedTeamReservations = 0;
+    const busyKnownTeamIds = new Set<string>();
+    let anonymousTeamReservations = 0;
     for (const scheduledEvent of currentEvents) {
-      const scheduledTeamIds = new Set<string>();
+      const scheduledKnownTeamIds = new Set<string>();
       for (const participant of scheduledEvent.getParticipants()) {
-        if (participant instanceof Team && currentTeamIds.has(participant.id)) {
-          scheduledTeamIds.add(participant.id);
-          busyTeamIds.add(participant.id);
+        if (
+          participant instanceof Team &&
+          !this.isAnonymousParticipant(participant) &&
+          currentTeamIds.has(participant.id)
+        ) {
+          scheduledKnownTeamIds.add(participant.id);
+          busyKnownTeamIds.add(participant.id);
         }
       }
-      const scheduledRequiredTeams = scheduledEvent.getRequiredTeamParticipantCount?.() ?? scheduledTeamIds.size;
-      unassignedTeamReservations += Math.max(0, scheduledRequiredTeams - scheduledTeamIds.size);
+      const scheduledRequiredTeams =
+        scheduledEvent.getRequiredTeamParticipantCount?.() ??
+        scheduledKnownTeamIds.size;
+      anonymousTeamReservations += Math.max(
+        0,
+        scheduledRequiredTeams - scheduledKnownTeamIds.size,
+      );
     }
-
-    const reservedTeamSlots = busyTeamIds.size + unassignedTeamReservations;
+    const reservedTeamSlots =
+      busyKnownTeamIds.size + anonymousTeamReservations;
     const availableTeamSlots = currentTeamIds.size - reservedTeamSlots;
-    return availableTeamSlots >= requiredTeamParticipants;
+
+    if (availableTeamSlots >= requiredTeamParticipants) {
+      return 'AVAILABLE';
+    }
+    return (event as E & { reservesTeamOfficial?: boolean }).reservesTeamOfficial === true
+      ? 'TEAM_DUTY'
+      : 'UNAVAILABLE';
   }
 
   private findAvailableResource(
@@ -418,6 +706,42 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
       }
     }
     return freeResource;
+  }
+
+  private nextStartAfterResourceConflict(
+    start: Date,
+    durationMs: number,
+  ): Date | null {
+    const end = new Date(start.getTime() + durationMs);
+    const visitedResources = new Set<R>();
+    let retryTimeMs: number | null = null;
+    for (const group of this.currentGroups) {
+      for (const resource of this.resourcesForGroup(group)) {
+        if (
+          visitedResources.has(resource) ||
+          !this.resourceSupportsTime(resource, start, durationMs)
+        ) {
+          continue;
+        }
+        visitedResources.add(resource);
+        let resourceHasConflict = false;
+        for (const scheduledEvent of resource.getEvents()) {
+          if (!overlaps(scheduledEvent.start, scheduledEvent.end, start, end)) {
+            continue;
+          }
+          resourceHasConflict = true;
+          const scheduledEndMs = scheduledEvent.end.getTime();
+          retryTimeMs =
+            retryTimeMs === null
+              ? scheduledEndMs
+              : Math.min(retryTimeMs, scheduledEndMs);
+        }
+        if (!resourceHasConflict) {
+          return null;
+        }
+      }
+    }
+    return retryTimeMs === null ? null : new Date(retryTimeMs);
   }
 
   currentEvents(start: Date, end: Date): SchedulableEvent[] {
@@ -533,8 +857,11 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
       return null;
     };
 
-
-
+    const timeZone = normalizeTimeZone(slot.timeZone, 'UTC');
+    const referenceParts = getDateTimePartsInTimeZone(reference, timeZone);
+    if (!referenceParts) {
+      return [];
+    }
     const normalizedDays: number[] = Array.from(
       new Set(
         (Array.isArray(slot.daysOfWeek) && slot.daysOfWeek.length
@@ -553,32 +880,58 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
     const endMinutes = slot.endTimeMinutes ?? slot.end_time_minutes ?? 0;
     const recurringStartDate = parseDate(slot.startDate);
     const recurringEndDate = parseDate(slot.endDate);
-    const recurringStartDayMs = recurringStartDate
-      ? new Date(recurringStartDate.getFullYear(), recurringStartDate.getMonth(), recurringStartDate.getDate()).getTime()
-      : null;
-    const recurringEndDayMs = recurringEndDate
-      ? new Date(recurringEndDate.getFullYear(), recurringEndDate.getMonth(), recurringEndDate.getDate()).getTime()
-      : null;
+    const calendarDay = (value: Date | null): number | null => {
+      if (!value) return null;
+      const parts = getDateTimePartsInTimeZone(value, timeZone);
+      return parts
+        ? Date.UTC(parts.year, parts.month - 1, parts.day)
+        : null;
+    };
+    const recurringStartDayMs = calendarDay(recurringStartDate);
+    const recurringEndDayMs = calendarDay(recurringEndDate);
+    const referenceNoon = new Date(
+      Date.UTC(
+        referenceParts.year,
+        referenceParts.month - 1,
+        referenceParts.day,
+        12,
+      ),
+    );
+    const referenceDay = (referenceNoon.getUTCDay() + 6) % 7;
+    const toWallClock = (slotNoon: Date, minutes: number): Date | null => {
+      const dayOffset = Math.floor(minutes / (24 * 60));
+      const minuteOfDay = ((minutes % (24 * 60)) + (24 * 60)) % (24 * 60);
+      const targetDay = new Date(
+        slotNoon.getTime() + dayOffset * 24 * 60 * MINUTE_MS,
+      );
+      const hours = Math.floor(minuteOfDay / 60);
+      const minute = minuteOfDay % 60;
+      return zonedTimeToUtcDate(
+        `${targetDay.getUTCFullYear()}-${pad2(targetDay.getUTCMonth() + 1)}-${pad2(targetDay.getUTCDate())}T${pad2(hours)}:${pad2(minute)}:00`,
+        timeZone,
+      );
+    };
 
     const ranges: Array<[Date, Date]> = [];
     for (const dayOfWeek of normalizedDays) {
-      // Time slots are stored as Monday-based indexes (0=Mon ... 6=Sun),
-      // while JS Date#getDay() uses Sunday-based indexes (0=Sun ... 6=Sat).
-      const referenceDay = (reference.getDay() + 6) % 7;
       const daysAhead = (dayOfWeek - referenceDay + 7) % 7;
-      const slotDate = new Date(reference);
-      slotDate.setHours(0, 0, 0, 0);
-      slotDate.setDate(slotDate.getDate() + daysAhead);
-      const slotDayMs = slotDate.getTime();
+      const slotNoon = new Date(
+        referenceNoon.getTime() + daysAhead * 24 * 60 * MINUTE_MS,
+      );
+      const slotDayMs = Date.UTC(
+        slotNoon.getUTCFullYear(),
+        slotNoon.getUTCMonth(),
+        slotNoon.getUTCDate(),
+      );
       if (recurringStartDayMs !== null && slotDayMs < recurringStartDayMs) {
         continue;
       }
       if (recurringEndDayMs !== null && slotDayMs > recurringEndDayMs) {
         continue;
       }
-      const start = new Date(slotDate.getTime() + startMinutes * MINUTE_MS);
-      const end = new Date(slotDate.getTime() + endMinutes * MINUTE_MS);
-      if (end.getTime() <= start.getTime()) {
+      const start = toWallClock(slotNoon, startMinutes);
+      const end = toWallClock(slotNoon, endMinutes);
+      if (!start || !end || end.getTime() <= start.getTime()) {
         continue;
       }
       ranges.push([start, end]);
@@ -598,7 +951,7 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
         .filter((id): id is string => typeof id === 'string' && id.length > 0);
       const suffix = groupIds.length ? ` for divisions: ${groupIds.join(', ')}` : '';
       // Include "no fields" so callers can treat this as a configuration error.
-      throw new Error(`Unable to schedule event because no fields are available${suffix}.`);
+      throw new ScheduleError(`Unable to schedule event because no fields are available${suffix}.`, 'RESOURCE');
     }
     let hasCompatibleSlots = false;
     let earliestAvailableStart: Date | null = null;
@@ -618,13 +971,15 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
     }
     if (earliestAvailableStart) return earliestAvailableStart;
     if (!hasCompatibleSlots) {
-      const groupIds = this.currentGroups
-        .map((group) => (group as any)?.id)
-        .filter((id): id is string => typeof id === 'string' && id.length > 0);
-      const suffix = groupIds.length ? ` for divisions: ${groupIds.join(', ')}` : '';
-      throw new Error(`Unable to schedule event because no fields are available${suffix}.`);
+      throw new ScheduleError(
+        `${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} No compatible time slots are available for the selected fields and divisions.`,
+        'RESOURCE',
+      );
     }
-    throw new Error(`${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} No available time slots remaining for scheduling.`);
+    throw new ScheduleError(
+      `${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} No available time slots remaining for scheduling.`,
+      'RESOURCE',
+    );
   }
 
   private slotsForResource(resource: R): SlotWindow[] {

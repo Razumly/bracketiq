@@ -37,7 +37,7 @@ const REFEREE_POSITION = {
 const buildEventData = (overrides: Partial<EventFormValues> = {}): EventFormValues => ({
     $id: 'event_1',
     eventType: 'EVENT',
-    officialSchedulingMode: 'STAFFING',
+    staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
     officialPositions: [REFEREE_POSITION],
     officialIds: [],
     eventOfficials: [],

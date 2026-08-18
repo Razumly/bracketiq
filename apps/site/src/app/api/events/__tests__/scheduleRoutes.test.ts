@@ -71,6 +71,7 @@ const sendEmailMock = jest.fn();
 const sendAdminEventCreatedNotificationMock = jest.fn();
 const extractRentalCheckoutWindowMock = jest.fn();
 const releaseRentalCheckoutLocksMock = jest.fn();
+const loadTeamCheckInsMock = jest.fn();
 const refreshBroadcastPresentationForEventMock = jest.fn();
 const assertCanViewEventScheduleMock = jest.fn();
 let matchOperationReceiptRows: Array<Record<string, any>> = [];
@@ -140,6 +141,9 @@ jest.mock('@/server/repositories/rentalCheckoutLocks', () => ({
 }));
 jest.mock('@/server/adminNotifications', () => ({
   sendAdminEventCreatedNotification: (...args: any[]) => sendAdminEventCreatedNotificationMock(...args),
+}));
+jest.mock('@/server/matches/teamCheckIns', () => ({
+  loadTeamCheckIns: (...args: unknown[]) => loadTeamCheckInsMock(...args),
 }));
 jest.mock('@/server/broadcast/presentation', () => ({
   refreshBroadcastPresentationForEvent: (...args: any[]) => refreshBroadcastPresentationForEventMock(...args),
@@ -350,6 +354,7 @@ describe('schedule routes', () => {
       status: 400,
       error: 'not_rental_checkout',
     });
+    loadTeamCheckInsMock.mockResolvedValue([]);
     releaseRentalCheckoutLocksMock.mockResolvedValue(undefined);
     refreshBroadcastPresentationForEventMock.mockResolvedValue(undefined);
     assertCanViewEventScheduleMock.mockResolvedValue(undefined);

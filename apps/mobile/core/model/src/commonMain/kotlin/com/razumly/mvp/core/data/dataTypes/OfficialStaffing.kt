@@ -11,6 +11,15 @@ enum class OfficialSchedulingMode {
 }
 
 @Serializable
+enum class StaffingPriority {
+    FULL_COVERAGE_REQUIRED,
+    TEAM_COVERAGE_REQUIRED,
+    OFFICIAL_COVERAGE_REQUIRED,
+    BEST_AVAILABLE_COVERAGE,
+    FULL_COVERAGE_WITH_CONFLICTS_ALLOWED,
+}
+
+@Serializable
 data class SportOfficialPositionTemplate(
     val name: String,
     val count: Int = 1,
@@ -44,7 +53,7 @@ data class MatchOfficialAssignment(
     val positionId: String,
     val slotIndex: Int,
     val holderType: OfficialAssignmentHolderType,
-    val userId: String,
+    val userId: String?,
     val eventOfficialId: String? = null,
     val checkedIn: Boolean = false,
     val hasConflict: Boolean = false,
@@ -57,30 +66,61 @@ fun OfficialSchedulingMode.label(): String = when (this) {
     OfficialSchedulingMode.OFF -> "Ignore staffing conflicts"
 }
 
+fun StaffingPriority.label(): String = when (this) {
+    StaffingPriority.FULL_COVERAGE_REQUIRED -> "Full Coverage Required"
+    StaffingPriority.TEAM_COVERAGE_REQUIRED -> "Team Coverage Required"
+    StaffingPriority.OFFICIAL_COVERAGE_REQUIRED -> "Official Coverage Required"
+    StaffingPriority.BEST_AVAILABLE_COVERAGE -> "Best Available Coverage"
+    StaffingPriority.FULL_COVERAGE_WITH_CONFLICTS_ALLOWED -> "Full Coverage with Conflicts Allowed"
+}
+
+fun OfficialSchedulingMode.toStaffingPriority(): StaffingPriority = when (this) {
+    OfficialSchedulingMode.STAFFING -> StaffingPriority.OFFICIAL_COVERAGE_REQUIRED
+    OfficialSchedulingMode.TEAM_STAFFING -> StaffingPriority.TEAM_COVERAGE_REQUIRED
+    OfficialSchedulingMode.SCHEDULE -> StaffingPriority.BEST_AVAILABLE_COVERAGE
+    OfficialSchedulingMode.OFF -> StaffingPriority.FULL_COVERAGE_WITH_CONFLICTS_ALLOWED
+}
+fun StaffingPriority.toLegacyOfficialSchedulingMode(): OfficialSchedulingMode = when (this) {
+    StaffingPriority.FULL_COVERAGE_REQUIRED -> OfficialSchedulingMode.STAFFING
+    StaffingPriority.TEAM_COVERAGE_REQUIRED -> OfficialSchedulingMode.TEAM_STAFFING
+    StaffingPriority.OFFICIAL_COVERAGE_REQUIRED -> OfficialSchedulingMode.STAFFING
+    StaffingPriority.BEST_AVAILABLE_COVERAGE -> OfficialSchedulingMode.SCHEDULE
+    StaffingPriority.FULL_COVERAGE_WITH_CONFLICTS_ALLOWED -> OfficialSchedulingMode.OFF
+}
+fun resolveStaffingPriority(
+    staffingPriority: String?,
+    legacyOfficialSchedulingMode: String?,
+): StaffingPriority {
+    staffingPriority
+        ?.trim()
+        ?.uppercase()
+        ?.let { normalized ->
+            runCatching { StaffingPriority.valueOf(normalized) }.getOrNull()
+        }
+        ?.let { return it }
+
+    val legacyMode = legacyOfficialSchedulingMode
+        ?.trim()
+        ?.uppercase()
+        ?.let { normalized ->
+            runCatching { OfficialSchedulingMode.valueOf(normalized) }.getOrNull()
+        }
+    return legacyMode?.toStaffingPriority() ?: StaffingPriority.BEST_AVAILABLE_COVERAGE
+}
+
 fun OfficialSchedulingMode.requiresTeamOfficials(): Boolean = this == OfficialSchedulingMode.TEAM_STAFFING
 
-fun Event.usesTeamOfficialScheduling(): Boolean =
-    doTeamsOfficiate == true || officialSchedulingMode.requiresTeamOfficials()
+fun Event.usesTeamOfficialScheduling(): Boolean = doTeamsOfficiate == true
 
 fun Event.withDoTeamsOfficiate(doTeamsOfficiate: Boolean): Event = copy(
     doTeamsOfficiate = doTeamsOfficiate,
     teamOfficialsMaySwap = if (doTeamsOfficiate) teamOfficialsMaySwap else false,
-    officialSchedulingMode = if (!doTeamsOfficiate && officialSchedulingMode.requiresTeamOfficials()) {
-        OfficialSchedulingMode.SCHEDULE
-    } else {
-        officialSchedulingMode
-    },
 )
 
-fun Event.withOfficialSchedulingMode(mode: OfficialSchedulingMode): Event {
-    val requiresTeamOfficials = mode.requiresTeamOfficials()
-    val nextDoTeamsOfficiate = if (requiresTeamOfficials) true else doTeamsOfficiate
-    return copy(
-        officialSchedulingMode = mode,
-        doTeamsOfficiate = nextDoTeamsOfficiate,
-        teamOfficialsMaySwap = if (nextDoTeamsOfficiate == true) teamOfficialsMaySwap else false,
-    )
-}
+fun Event.withStaffingPriority(priority: StaffingPriority): Event = copy(
+    staffingPriority = priority,
+    officialSchedulingMode = priority.toLegacyOfficialSchedulingMode(),
+)
 
 fun buildEventOfficialPositionId(
     eventId: String,
@@ -122,13 +162,22 @@ private fun normalizeIdList(values: List<String>): List<String> = values
 
 private fun MatchOfficialAssignment.normalizedOrNull(): MatchOfficialAssignment? {
     val normalizedPositionId = positionId.trim()
-    val normalizedUserId = userId.trim()
-    if (normalizedPositionId.isBlank() || normalizedUserId.isBlank() || slotIndex < 0) {
+    val normalizedUserId = userId?.trim()?.takeIf(String::isNotBlank)
+    if (normalizedPositionId.isBlank() || slotIndex < 0) {
         return null
     }
     val normalizedEventOfficialId = eventOfficialId?.trim()?.takeIf(String::isNotBlank)
-    if (holderType == OfficialAssignmentHolderType.OFFICIAL && normalizedEventOfficialId == null) {
-        return null
+    if (normalizedUserId == null) {
+        if (holderType != OfficialAssignmentHolderType.OFFICIAL || normalizedEventOfficialId != null) {
+            return null
+        }
+        return copy(
+            positionId = normalizedPositionId,
+            slotIndex = slotIndex,
+            userId = null,
+            eventOfficialId = null,
+            checkedIn = false,
+        )
     }
     if (holderType == OfficialAssignmentHolderType.PLAYER && normalizedEventOfficialId != null) {
         return null
@@ -152,7 +201,9 @@ fun List<MatchOfficialAssignment>.normalizedMatchOfficialAssignments(): List<Mat
 }
 
 private fun List<MatchOfficialAssignment>.primaryOfficialAssignment(): MatchOfficialAssignment? =
-    firstOrNull { assignment -> assignment.holderType == OfficialAssignmentHolderType.OFFICIAL }
+    firstOrNull { assignment ->
+        assignment.holderType == OfficialAssignmentHolderType.OFFICIAL && assignment.userId != null
+    }
 
 fun MatchMVP.normalizedOfficialAssignments(): List<MatchOfficialAssignment> =
     officialIds.normalizedMatchOfficialAssignments()
@@ -166,7 +217,7 @@ fun MatchMVP.primaryAssignedOfficialCheckedIn(): Boolean =
         ?: (officialCheckedIn == true)
 
 fun MatchMVP.assignedOfficialUserIds(): List<String> {
-    val assignedIds = normalizedOfficialAssignments().map(MatchOfficialAssignment::userId)
+    val assignedIds = normalizedOfficialAssignments().mapNotNull(MatchOfficialAssignment::userId)
     val legacyOfficialId = normalizeOptionalToken(officialId)
     return (assignedIds + listOfNotNull(legacyOfficialId)).distinct()
 }

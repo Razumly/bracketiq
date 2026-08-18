@@ -1232,6 +1232,13 @@ export type EnumEventsOfficialSchedulingModeEnumFilter<$PrismaModel = never> = {
   not?: Prisma.NestedEnumEventsOfficialSchedulingModeEnumFilter<$PrismaModel> | $Enums.EventsOfficialSchedulingModeEnum
 }
 
+export type EnumStaffingPriorityEnumFilter<$PrismaModel = never> = {
+  equals?: $Enums.StaffingPriorityEnum | Prisma.EnumStaffingPriorityEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.StaffingPriorityEnum[] | Prisma.ListEnumStaffingPriorityEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.StaffingPriorityEnum[] | Prisma.ListEnumStaffingPriorityEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumStaffingPriorityEnumFilter<$PrismaModel> | $Enums.StaffingPriorityEnum
+}
+
 export type EnumRegistrationPaymentModeEnumWithAggregatesFilter<$PrismaModel = never> = {
   equals?: $Enums.RegistrationPaymentModeEnum | Prisma.EnumRegistrationPaymentModeEnumFieldRefInput<$PrismaModel>
   in?: $Enums.RegistrationPaymentModeEnum[] | Prisma.ListEnumRegistrationPaymentModeEnumFieldRefInput<$PrismaModel>
@@ -1270,6 +1277,16 @@ export type EnumEventsOfficialSchedulingModeEnumWithAggregatesFilter<$PrismaMode
   _count?: Prisma.NestedIntFilter<$PrismaModel>
   _min?: Prisma.NestedEnumEventsOfficialSchedulingModeEnumFilter<$PrismaModel>
   _max?: Prisma.NestedEnumEventsOfficialSchedulingModeEnumFilter<$PrismaModel>
+}
+
+export type EnumStaffingPriorityEnumWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.StaffingPriorityEnum | Prisma.EnumStaffingPriorityEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.StaffingPriorityEnum[] | Prisma.ListEnumStaffingPriorityEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.StaffingPriorityEnum[] | Prisma.ListEnumStaffingPriorityEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumStaffingPriorityEnumWithAggregatesFilter<$PrismaModel> | $Enums.StaffingPriorityEnum
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumStaffingPriorityEnumFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumStaffingPriorityEnumFilter<$PrismaModel>
 }
 
 export type EnumOrganizationsStatusEnumFilter<$PrismaModel = never> = {
@@ -2852,6 +2869,13 @@ export type NestedEnumEventsOfficialSchedulingModeEnumFilter<$PrismaModel = neve
   not?: Prisma.NestedEnumEventsOfficialSchedulingModeEnumFilter<$PrismaModel> | $Enums.EventsOfficialSchedulingModeEnum
 }
 
+export type NestedEnumStaffingPriorityEnumFilter<$PrismaModel = never> = {
+  equals?: $Enums.StaffingPriorityEnum | Prisma.EnumStaffingPriorityEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.StaffingPriorityEnum[] | Prisma.ListEnumStaffingPriorityEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.StaffingPriorityEnum[] | Prisma.ListEnumStaffingPriorityEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumStaffingPriorityEnumFilter<$PrismaModel> | $Enums.StaffingPriorityEnum
+}
+
 export type NestedEnumRegistrationPaymentModeEnumWithAggregatesFilter<$PrismaModel = never> = {
   equals?: $Enums.RegistrationPaymentModeEnum | Prisma.EnumRegistrationPaymentModeEnumFieldRefInput<$PrismaModel>
   in?: $Enums.RegistrationPaymentModeEnum[] | Prisma.ListEnumRegistrationPaymentModeEnumFieldRefInput<$PrismaModel>
@@ -2890,6 +2914,16 @@ export type NestedEnumEventsOfficialSchedulingModeEnumWithAggregatesFilter<$Pris
   _count?: Prisma.NestedIntFilter<$PrismaModel>
   _min?: Prisma.NestedEnumEventsOfficialSchedulingModeEnumFilter<$PrismaModel>
   _max?: Prisma.NestedEnumEventsOfficialSchedulingModeEnumFilter<$PrismaModel>
+}
+
+export type NestedEnumStaffingPriorityEnumWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.StaffingPriorityEnum | Prisma.EnumStaffingPriorityEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.StaffingPriorityEnum[] | Prisma.ListEnumStaffingPriorityEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.StaffingPriorityEnum[] | Prisma.ListEnumStaffingPriorityEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumStaffingPriorityEnumWithAggregatesFilter<$PrismaModel> | $Enums.StaffingPriorityEnum
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumStaffingPriorityEnumFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumStaffingPriorityEnumFilter<$PrismaModel>
 }
 
 export type NestedEnumOrganizationsStatusEnumFilter<$PrismaModel = never> = {

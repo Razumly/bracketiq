@@ -58,9 +58,10 @@ import {
   isTournamentPoolValidationError,
   removeRegisteredTeamFromTournamentPools,
 } from '@/server/events/tournamentPools';
-import { syncEventPhaseParticipantsFromEntryDivisions } from '@/server/repositories/eventDivisionPhases';
 import { isManualRegistrationPaymentMode } from '@/lib/manualRegistrationPayments';
 import { projectRelationalEventDivisionIds } from '@/server/events/eventDivisionProjection';
+import { normalizeEventStaffingResponse } from '@/server/events/eventResponse';
+
 
 export const dynamic = 'force-dynamic';
 const RESTRICTED_EVENT_STATES = new Set(['UNPUBLISHED', 'DRAFT']);
@@ -84,8 +85,11 @@ const payloadSchema = z.object({
 const PAID_ONLINE_CHECKOUT_REQUIRED_ERROR = 'Paid online registration must be completed through checkout.';
 const ACTIVE_REGISTRATION_STATUSES = ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED', 'PAYMENT_FAILED'] as const;
 
-const toEventResponse = async (row: any) => {
+const toEventResponse = async (
+  row: { id: string } & Record<string, unknown>,
+): Promise<Record<string, unknown>> => {
   const [response] = await projectRelationalEventDivisionIds(prisma, [{ ...row }]);
+  normalizeEventStaffingResponse(response);
   return response;
 };
 
@@ -693,10 +697,9 @@ const normalizeEmail = (value: unknown): string | null => {
   const normalized = value.trim().toLowerCase();
   return normalized.length ? normalized : null;
 };
-const isSlotProvisionedTeam = (team: { kind?: unknown; captainId?: unknown; parentTeamId?: unknown }): boolean => (
+const isSlotProvisionedTeam = (team: { kind?: unknown; eventId?: unknown }): boolean => (
   String(team.kind ?? '').trim().toUpperCase() === 'PLACEHOLDER'
-  || String(team.captainId ?? '').trim().length === 0
-  || normalizeId(team.parentTeamId) !== null
+  || normalizeId(team.eventId) !== null
 );
 const isSchedulableTeamSignupEvent = (event: { eventType?: unknown; teamSignup?: unknown }): boolean => (
   Boolean(event.teamSignup)
@@ -1636,6 +1639,7 @@ async function updateParticipants(
               divisionTypeId: divisionSelection.divisionTypeId,
               divisionTypeKey: divisionSelection.divisionTypeKey,
               placeholderDivisionIds: tournamentPoolIds,
+              enforceProvisionedPlaceholderScope: isSchedulableTeamSignupEvent(event),
               occurrence: resolvedOccurrence,
             });
             const registeredEventTeamId = normalizeId((eventTeam as any)?.id) ?? teamId;
@@ -1704,9 +1708,20 @@ async function updateParticipants(
             return { bill };
           });
         } catch (error) {
-          if ((error as { code?: unknown })?.code === 'EVENT_CONFIGURATION_CHANGED') {
+          const errorCode = error && typeof error === 'object' && 'code' in error
+            ? error.code
+            : null;
+          if (errorCode === 'EVENT_TEAM_SLOT_UNAVAILABLE') {
+            return {
+              error: error instanceof Error ? error.message : 'No compatible team slot is available.',
+              code: 'EVENT_TEAM_SLOT_UNAVAILABLE',
+              status: 409,
+            };
+          }
+          if (errorCode === 'EVENT_CONFIGURATION_CHANGED') {
             return {
               error: error instanceof Error ? error.message : 'Event configuration changed. Reload and try again.',
+              code: 'EVENT_CONFIGURATION_CHANGED',
               status: 409,
             };
           }
@@ -1715,7 +1730,7 @@ async function updateParticipants(
       })();
       if ('error' in result) {
         return NextResponse.json(
-          { error: result.error, code: 'EVENT_CONFIGURATION_CHANGED' },
+          { error: result.error, code: result.code },
           { status: result.status ?? 409 },
         );
       }

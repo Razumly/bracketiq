@@ -13,6 +13,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
 
@@ -40,6 +41,58 @@ class MatchDtosTest {
         assertNotNull(match)
         assertEquals(listOf("official-1"), match.officialIds.map(MatchOfficialAssignment::userId))
         assertEquals(true, match.officialIds.single().checkedIn)
+    }
+
+    @Test
+    fun match_api_dto_prefers_canonical_official_assignments_and_preserves_unbound_slots() {
+        val dto = jsonMVP.decodeFromString<MatchApiDto>(
+            """
+            {
+              "id": "match-canonical-officials",
+              "matchId": 2,
+              "eventId": "event-1",
+              "officialIds": [
+                {
+                  "positionId": "legacy",
+                  "slotIndex": 0,
+                  "holderType": "OFFICIAL",
+                  "userId": "legacy-official",
+                  "eventOfficialId": "legacy-event-official"
+                }
+              ],
+              "officialAssignments": [
+                {
+                  "positionId": "position-r1",
+                  "slotIndex": 0,
+                  "holderType": "OFFICIAL",
+                  "userId": null,
+                  "eventOfficialId": null,
+                  "checkedIn": false,
+                  "hasConflict": false
+                },
+                {
+                  "positionId": "position-line",
+                  "slotIndex": 0,
+                  "holderType": "OFFICIAL",
+                  "userId": "official-2",
+                  "eventOfficialId": "event-official-2",
+                  "checkedIn": true,
+                  "hasConflict": false
+                }
+              ]
+            }
+            """.trimIndent(),
+        )
+
+        val match = assertNotNull(dto.toMatchOrNull())
+
+        assertEquals(
+            listOf("position-r1", "position-line"),
+            match.officialIds.map(MatchOfficialAssignment::positionId),
+        )
+        assertNull(match.officialIds.first().userId)
+        assertEquals("official-2", match.officialIds[1].userId)
+        assertTrue(match.officialIds[1].checkedIn)
     }
 
     @Test

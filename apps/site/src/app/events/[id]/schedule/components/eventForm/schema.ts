@@ -12,6 +12,7 @@ import {
     getSportResourceLabels,
 } from '@/lib/sportResourceLabels';
 import type { Field, RegistrationQuestionDraft } from '@/types';
+import { STAFFING_PRIORITIES } from '@/server/officials/config';
 import {
     registrationQuestionInputSchema,
     type RegistrationQuestionInput,
@@ -295,7 +296,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
         teams: z.array(z.any()),
         officials: z.array(z.any()),
         officialIds: z.array(z.string()),
-        officialSchedulingMode: z.enum(['STAFFING', 'TEAM_STAFFING', 'SCHEDULE', 'OFF']).default('SCHEDULE'),
+        staffingPriority: z.enum(STAFFING_PRIORITIES).default('BEST_AVAILABLE_COVERAGE'),
         officialPositions: z.array(
             z.object({
                 id: z.string().trim().min(1),

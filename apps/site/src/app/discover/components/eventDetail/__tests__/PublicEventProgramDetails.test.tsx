@@ -99,7 +99,7 @@ describe('PublicEventProgramDetails', () => {
                 canViewStaffSection
                 assistantHostNames={['Jordan Lee']}
                 officialNames={['Taylor Kim']}
-                officialSchedulingMode="MANUAL"
+                staffingPriority="FULL_COVERAGE_REQUIRED"
             />,
         );
 
@@ -107,5 +107,6 @@ describe('PublicEventProgramDetails', () => {
         expect(screen.getByText('Volleyball')).toBeInTheDocument();
         expect(screen.getByText('Jordan Lee')).toBeInTheDocument();
         expect(screen.getByText('Taylor Kim')).toBeInTheDocument();
+        expect(screen.getByText('Full Coverage Required')).toBeInTheDocument();
     });
 });

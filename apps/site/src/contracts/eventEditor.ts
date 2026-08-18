@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  normalizeOfficialSchedulingMode,
+  normalizeStaffingPriority,
+  STAFFING_PRIORITIES,
+} from "@/server/officials/config";
 
 export const EVENT_EDITOR_CONTRACT_VERSION = 3 as const;
 
@@ -583,27 +588,45 @@ export const editorResourcesSchema = z
   })
   .strict();
 
-export const editorStaffSchema = z
-  .object({
-    officialSchedulingMode: z.enum([
-      "SCHEDULE",
-      "STAFFING",
-      "TEAM_STAFFING",
-      "OFF",
-    ]),
-    teamOfficialsMaySwap: z.boolean(),
-    teamCheckInMode: z.enum(["OFF", "EVENT", "MATCH"]),
-    teamCheckInOpenMinutesBefore: z.number().int().nonnegative(),
-    allowMatchRosterEdits: z.boolean(),
-    allowTemporaryMatchPlayers: z.boolean(),
-    autoCreatePointMatchIncidents: z.boolean(),
-    officialIds: z.array(id),
-    officialPositions: z.array(officialPositionSchema),
-    eventOfficials: z.array(eventOfficialSchema),
-    assistantHostIds: z.array(id),
-    pendingInvites: z.array(staffInviteSchema),
-  })
-  .strict();
+const editorStaffSchema = z.preprocess(
+  (input) => {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      return input;
+    }
+    const record = input as Record<string, unknown>;
+    if (!Object.prototype.hasOwnProperty.call(record, "officialSchedulingMode")) {
+      return input;
+    }
+    const legacyMode = normalizeOfficialSchedulingMode(record.officialSchedulingMode);
+    const normalized = { ...record };
+    delete normalized.officialSchedulingMode;
+    normalized.staffingPriority = normalizeStaffingPriority(
+      record.staffingPriority,
+      legacyMode,
+    );
+    if (typeof record.doTeamsOfficiate !== "boolean") {
+      normalized.doTeamsOfficiate = legacyMode === "TEAM_STAFFING";
+    }
+    return normalized;
+  },
+  z
+    .object({
+      staffingPriority: z.enum(STAFFING_PRIORITIES),
+      doTeamsOfficiate: z.boolean(),
+      teamOfficialsMaySwap: z.boolean(),
+      teamCheckInMode: z.enum(["OFF", "EVENT", "MATCH"]),
+      teamCheckInOpenMinutesBefore: z.number().int().nonnegative(),
+      allowMatchRosterEdits: z.boolean(),
+      allowTemporaryMatchPlayers: z.boolean(),
+      autoCreatePointMatchIncidents: z.boolean(),
+      officialIds: z.array(id),
+      officialPositions: z.array(officialPositionSchema),
+      eventOfficials: z.array(eventOfficialSchema),
+      assistantHostIds: z.array(id),
+      pendingInvites: z.array(staffInviteSchema),
+    })
+    .strict(),
+);
 
 export const eventEditorDraftSchema = z
   .object({

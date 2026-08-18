@@ -13,58 +13,53 @@ import {
     Title,
 } from '@mantine/core';
 
-import type { EventOfficialPosition, OfficialSchedulingMode } from '@/types';
+import type { EventOfficialPosition } from '@/types';
+import type { StaffingPriority } from '@/server/officials/config';
+
+import { STAFFING_PRIORITY_OPTIONS } from '../officials';
 
 type StaffOfficialPositionEditorProps = {
-    officialSchedulingMode: OfficialSchedulingMode;
+    staffingPriority: StaffingPriority;
     officialPositions: EventOfficialPosition[];
     sportDefaultPositionCount: number;
     coverageError?: string | null;
     maxShortTextLength: number;
     comboboxProps?: ComponentProps<typeof MantineSelect>['comboboxProps'];
-    onSchedulingModeChange: (value: string | null) => void;
+    onStaffingPriorityChange: (value: string | null) => void;
     onLoadSportDefaults: () => void;
     onAddPosition: () => void;
     onUpdatePosition: (positionId: string, updates: Partial<EventOfficialPosition>) => void;
     onRemovePosition: (positionId: string) => void;
-    showSchedulingMode?: boolean;
     showPositions?: boolean;
 };
 
-const OFFICIAL_SCHEDULING_MODE_OPTIONS = [
-    { value: 'STAFFING', label: 'STAFFING - Requires each match be fully staffed with no conflicts' },
-    { value: 'TEAM_STAFFING', label: 'TEAM STAFFING - Requires each match to have a team official with no conflicts' },
-    { value: 'SCHEDULE', label: 'SCHEDULE - Matches do not need to be fully staffed' },
-    { value: 'OFF', label: 'NONE - Fully staffed matches, but conflicts allowed' },
-];
 
 export const StaffOfficialPositionEditor = ({
-    officialSchedulingMode,
+    staffingPriority,
     officialPositions,
     sportDefaultPositionCount,
     coverageError,
     maxShortTextLength,
     comboboxProps,
-    onSchedulingModeChange,
+    onStaffingPriorityChange,
     onLoadSportDefaults,
     onAddPosition,
     onUpdatePosition,
     onRemovePosition,
-    showSchedulingMode = true,
     showPositions = true,
 }: StaffOfficialPositionEditorProps) => (
     <Paper withBorder radius="md" p="md" bg="white">
         <Stack gap="sm">
-            {showSchedulingMode ? <MantineSelect
-                label="Official scheduling mode"
-                description="Choose how the scheduler should prioritize staffing requirements."
-                data={OFFICIAL_SCHEDULING_MODE_OPTIONS}
-                value={officialSchedulingMode}
-                onChange={onSchedulingModeChange}
+            <MantineSelect
+                label="Staffing Priority"
+                description="Choose how staffing shortages affect match placement."
+                data={STAFFING_PRIORITY_OPTIONS}
+                value={staffingPriority}
+                onChange={onStaffingPriorityChange}
                 comboboxProps={comboboxProps}
                 error={coverageError ?? undefined}
-            /> : null}
-            {showSchedulingMode && coverageError ? (
+            />
+            {coverageError ? (
                 <Alert color="yellow" variant="light">
                     {coverageError}
                 </Alert>

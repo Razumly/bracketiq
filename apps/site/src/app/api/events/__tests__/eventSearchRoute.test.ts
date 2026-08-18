@@ -57,7 +57,11 @@ jest.mock('@/server/officials/eventOfficials', () => ({
 
 import { POST as searchEvents } from '@/app/api/events/search/route';
 
-const eventRow = (id: string, name = 'Unrelated event') => ({
+const eventRow = (
+  id: string,
+  name = 'Unrelated event',
+  overrides: Record<string, unknown> = {},
+) => ({
   id,
   name,
   description: null,
@@ -72,6 +76,8 @@ const eventRow = (id: string, name = 'Unrelated event') => ({
   teamSignup: true,
   userIds: [],
   teamIds: [],
+  staffingPriority: 'BEST_AVAILABLE_COVERAGE',
+  ...overrides,
 });
 
 describe('POST /api/events/search', () => {
@@ -99,7 +105,10 @@ describe('POST /api/events/search', () => {
     prismaMock.canonicalTeams.findMany.mockResolvedValue([{ id: 'canonical_team' }]);
     prismaMock.eventRegistrations.findMany.mockResolvedValue([{ eventId: 'event_registered_canonical' }]);
     prismaMock.events.findMany.mockResolvedValue([
-      eventRow('event_team'),
+      eventRow('event_team', 'Unrelated event', {
+        staffingPriority: null,
+        officialSchedulingMode: 'TEAM_STAFFING',
+      }),
       eventRow('event_canonical'),
       eventRow('event_registered_canonical'),
     ]);
@@ -138,6 +147,11 @@ describe('POST /api/events/search', () => {
       'event_canonical',
       'event_registered_canonical',
     ]);
+    expect(json.events[0]).toEqual(expect.objectContaining({
+      staffingPriority: 'TEAM_COVERAGE_REQUIRED',
+      doTeamsOfficiate: true,
+    }));
+    expect(json.events[0]).toHaveProperty('officialSchedulingMode', 'TEAM_STAFFING');
   });
 
   it('includes real affiliate events in discover search results', async () => {

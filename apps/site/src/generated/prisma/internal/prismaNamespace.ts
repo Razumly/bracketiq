@@ -11009,6 +11009,7 @@ export const EventsScalarFieldEnum = {
   autoCancellation: 'autoCancellation',
   eventType: 'eventType',
   officialSchedulingMode: 'officialSchedulingMode',
+  staffingPriority: 'staffingPriority',
   doTeamsOfficiate: 'doTeamsOfficiate',
   teamOfficialsMaySwap: 'teamOfficialsMaySwap',
   teamCheckInMode: 'teamCheckInMode',
@@ -11359,6 +11360,7 @@ export const EventTemplatesScalarFieldEnum = {
   pointsToVictory: 'pointsToVictory',
   sportIds: 'sportIds',
   officialSchedulingMode: 'officialSchedulingMode',
+  staffingPriority: 'staffingPriority',
   doTeamsOfficiate: 'doTeamsOfficiate',
   teamOfficialsMaySwap: 'teamOfficialsMaySwap',
   officialPositions: 'officialPositions',
@@ -12562,6 +12564,20 @@ export type EnumEventsOfficialSchedulingModeEnumFieldRefInput<$PrismaModel> = Fi
  * Reference to a field of type 'EventsOfficialSchedulingModeEnum[]'
  */
 export type ListEnumEventsOfficialSchedulingModeEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'EventsOfficialSchedulingModeEnum[]'>
+
+
+
+/**
+ * Reference to a field of type 'StaffingPriorityEnum'
+ */
+export type EnumStaffingPriorityEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'StaffingPriorityEnum'>
+
+
+
+/**
+ * Reference to a field of type 'StaffingPriorityEnum[]'
+ */
+export type ListEnumStaffingPriorityEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'StaffingPriorityEnum[]'>
 
 
 

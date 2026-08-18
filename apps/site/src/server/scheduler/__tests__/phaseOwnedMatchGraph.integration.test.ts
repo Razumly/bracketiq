@@ -245,6 +245,7 @@ const leaguePayload = (eventId: string) => {
     eventOfficials: [],
     officialPositions: [],
     officialSchedulingMode: "OFF",
+    staffingPriority: "BEST_AVAILABLE_COVERAGE",
     assistantHostIds: [],
   };
 };
@@ -371,9 +372,9 @@ describe("phase-owned Match Graph persistence", () => {
           dayOfWeek: 1,
           daysOfWeek: [1],
           startTimeMinutes: 9 * 60,
-          endTimeMinutes: 18 * 60,
+          endTimeMinutes: 20 * 60,
           startDate: "2026-09-01T09:00:00.000Z",
-          endDate: "2026-09-01T18:00:00.000Z",
+          endDate: "2026-09-01T20:00:00.000Z",
           repeating: false,
           scheduledFieldId: "field-1",
           scheduledFieldIds: ["field-1"],

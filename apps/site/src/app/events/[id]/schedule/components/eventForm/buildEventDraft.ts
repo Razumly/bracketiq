@@ -7,6 +7,7 @@ import { resolveOrganizationEventFieldIds } from '../eventFieldSelection';
 import { resolveDraftSportForScoring } from '../eventDraftSport';
 import { resolveTournamentSetMode } from '../tournamentSetMode';
 import type { Event, Field, Organization, Sport, Team, TimeSlot, UserData } from '@/types';
+import { normalizeStaffingPriority } from '@/server/officials/config';
 import { normalizePriceCents } from '@/lib/priceUtils';
 import { normalizeOrganizerManualTaxRateBps, normalizeEventTaxHandling } from '@/lib/taxPolicy';
 import {
@@ -34,7 +35,6 @@ import {
     getEventOfficialUserIds,
     normalizeEventOfficialPositions,
     normalizeEventOfficials,
-    normalizeOfficialSchedulingMode,
     normalizeSportOfficialPositionTemplates,
 } from './officials';
 import { normalizePendingStaffInvite, type PendingStaffInvite } from './staffInvites';
@@ -680,7 +680,9 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
             players: source.players,
             officials: isAffiliateEvent ? [] : normalizedOfficials,
             officialIds: isAffiliateEvent ? [] : normalizedOfficialIds,
-            officialSchedulingMode: isAffiliateEvent ? 'OFF' : normalizeOfficialSchedulingMode(source.officialSchedulingMode),
+            staffingPriority: isAffiliateEvent
+                ? 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED'
+                : normalizeStaffingPriority(source.staffingPriority),
             officialPositions: isAffiliateEvent ? [] : normalizedOfficialPositionsForPayload,
             eventOfficials: isAffiliateEvent ? [] : normalizedEventOfficials,
             assistantHostIds: isAffiliateEvent ? [] : normalizedAssistantHostIds,

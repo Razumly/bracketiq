@@ -57,6 +57,7 @@ import {
 import {
   buildEventOfficialPositionsFromTemplates,
   buildLegacyOfficialAssignment,
+  completeMatchOfficialAssignmentSlots,
   deriveLegacyOfficialCheckedInFromAssignments,
   deriveLegacyOfficialIdFromAssignments,
   filterEventOfficialsByUserIds,
@@ -64,8 +65,10 @@ import {
   normalizeEventOfficialPositions,
   normalizeMatchOfficialAssignments,
   normalizeOfficialSchedulingMode,
+  normalizeStaffingPriority,
   normalizeSportOfficialPositionTemplates,
   type EventOfficialRecord,
+  type EventOfficialPosition,
   type MatchOfficialAssignment,
 } from "@/server/officials/config";
 import {
@@ -667,13 +670,14 @@ const shouldKeepMatchOfficialAssignment = (
     return true;
   }
   const userId = normalizeEntityId(row.userId);
-  if (!userId) {
+  const eventOfficialId = normalizeEntityId(row.eventOfficialId);
+  if (!userId && !eventOfficialId) {
+    return true;
+  }
+  if (!userId || !eventOfficialId) {
     return false;
   }
-  const eventOfficialId = normalizeEntityId(row.eventOfficialId);
-  const official = eventOfficialId
-    ? activeOfficialById.get(eventOfficialId)
-    : activeOfficialByUserId.get(userId);
+  const official = activeOfficialById.get(eventOfficialId);
   if (!official || official.userId !== userId) {
     return false;
   }
@@ -692,6 +696,7 @@ export const clearRemovedEventOfficialMatchAssignments = async (
   client: PrismaLike,
   eventId: string,
   eventOfficials: EventOfficialRecord[],
+  officialPositions?: EventOfficialPosition[],
 ): Promise<number> => {
   if (
     typeof (client as any).matches?.findMany !== "function" ||
@@ -708,7 +713,9 @@ export const clearRemovedEventOfficialMatchAssignments = async (
   const activeOfficialByUserId = new Map(
     activeOfficials.map((official) => [official.userId, official]),
   );
-  const allowedOfficialUserIds = new Set(activeOfficialByUserId.keys());
+  const configuredPositionCounts = new Map(
+    (officialPositions ?? []).map((position) => [position.id, position.count]),
+  );
   const matches = await (client as any).matches.findMany({
     where: { eventId },
     select: {
@@ -725,14 +732,81 @@ export const clearRemovedEventOfficialMatchAssignments = async (
     const rawAssignments = Array.isArray(match.officialIds)
       ? match.officialIds
       : [];
-    const nextAssignments = rawAssignments.filter((assignment) =>
-      shouldKeepMatchOfficialAssignment(
-        assignment,
-        activeOfficialById,
-        activeOfficialByUserId,
-        matchFieldId,
-      ),
-    );
+    let assignmentsChanged = false;
+    const sanitizedAssignments = rawAssignments.flatMap((assignment) => {
+      if (
+        shouldKeepMatchOfficialAssignment(
+          assignment,
+          activeOfficialById,
+          activeOfficialByUserId,
+          matchFieldId,
+        )
+      ) {
+        return [assignment];
+      }
+      assignmentsChanged = true;
+      if (!assignment || typeof assignment !== "object") {
+        return [];
+      }
+      const row = assignment as Record<string, unknown>;
+      const holderType =
+        typeof row.holderType === "string"
+          ? row.holderType.trim().toUpperCase()
+          : "";
+      const positionId = normalizeEntityId(row.positionId);
+      const slotIndex = Number(row.slotIndex);
+      const configuredSlotCount = positionId
+        ? configuredPositionCounts.get(positionId)
+        : undefined;
+      const isConfiguredSlot =
+        holderType === "OFFICIAL" &&
+        Boolean(positionId) &&
+        Number.isInteger(slotIndex) &&
+        slotIndex >= 0 &&
+        (officialPositions === undefined ||
+          (typeof configuredSlotCount === "number" &&
+            slotIndex < configuredSlotCount));
+      return isConfiguredSlot
+        ? [
+            {
+              positionId,
+              slotIndex,
+              holderType: "OFFICIAL",
+              userId: null,
+              eventOfficialId: null,
+              checkedIn: false,
+              hasConflict: false,
+            },
+          ]
+        : [];
+    });
+    const nextAssignments =
+      officialPositions === undefined
+        ? (sanitizedAssignments as MatchOfficialAssignment[])
+        : completeMatchOfficialAssignmentSlots(
+            sanitizedAssignments as MatchOfficialAssignment[],
+            officialPositions,
+          );
+    if (
+      nextAssignments.length !== sanitizedAssignments.length ||
+      nextAssignments.some((assignment, index) => {
+        const previous = sanitizedAssignments[index] as
+          | MatchOfficialAssignment
+          | undefined;
+        return (
+          !previous ||
+          assignment.positionId !== previous.positionId ||
+          assignment.slotIndex !== previous.slotIndex ||
+          assignment.holderType !== previous.holderType ||
+          assignment.userId !== previous.userId ||
+          assignment.eventOfficialId !== previous.eventOfficialId ||
+          assignment.checkedIn !== previous.checkedIn ||
+          assignment.hasConflict !== previous.hasConflict
+        );
+      })
+    ) {
+      assignmentsChanged = true;
+    }
     const nextPrimaryOfficialId = nextAssignments.length
       ? deriveLegacyOfficialIdFromAssignments(
           nextAssignments as MatchOfficialAssignment[],
@@ -754,7 +828,6 @@ export const clearRemovedEventOfficialMatchAssignments = async (
             legacyOfficial.fieldIds.length &&
             !legacyOfficial.fieldIds.includes(matchFieldId))),
     );
-    const assignmentsChanged = nextAssignments.length !== rawAssignments.length;
     if (!assignmentsChanged && !shouldClearLegacyOfficial) {
       continue;
     }
@@ -3346,9 +3419,6 @@ const buildMatches = (
   const eventOfficialsById = new Map(
     event.eventOfficials.map((official) => [official.id, official]),
   );
-  const positionCountsById = new Map(
-    event.officialPositions.map((position) => [position.id, position.count]),
-  );
   const segmentMatchIds = hydration.segmentMatchIds ?? null;
   const incidentMatchIds = hydration.incidentMatchIds ?? null;
   const matches: Record<string, Match> = {};
@@ -3367,12 +3437,32 @@ const buildMatches = (
           : divisions[0];
     const start = toOptionalDate(row.start);
     const end = toOptionalDate(row.end);
+    const hasBracketLinks = Boolean(
+      row.losersBracket ||
+        row.previousLeftId ||
+        row.previousRightId ||
+        row.winnerNextMatchId ||
+        row.loserNextMatchId,
+    );
+    const competitionPhase =
+      division.phase ??
+      resolveDivisionCompetitionPhase({
+        eventType: event.eventType,
+        divisionKind: division.kind,
+        hasBracketLinks,
+      });
+    const officialPositionsForMatch =
+      division.phaseSettings?.[competitionPhase]?.officialPositions
+      ?? event.officialPositions;
+    const positionCountsForMatch = new Map(
+      officialPositionsForMatch.map((position) => [position.id, position.count]),
+    );
     let officialAssignments: MatchOfficialAssignment[] = [];
     try {
       officialAssignments = normalizeMatchOfficialAssignments(
         (row as any).officialIds,
         {
-          positionCountsById,
+          positionCountsById: positionCountsForMatch,
           eventOfficialsById,
         },
       );
@@ -3384,9 +3474,13 @@ const buildMatches = (
         eventId: row.eventId ?? event.id,
         officialId: row.officialId ?? null,
         officialCheckedIn: row.officialCheckedIn === true,
-        officialPositions: event.officialPositions,
+        officialPositions: officialPositionsForMatch,
       });
     }
+    officialAssignments = completeMatchOfficialAssignmentSlots(
+      officialAssignments,
+      officialPositionsForMatch,
+    );
     const primaryOfficialId =
       deriveLegacyOfficialIdFromAssignments(officialAssignments) ??
       normalizeEntityId(row.officialId);
@@ -3402,20 +3496,6 @@ const buildMatches = (
           .map(serializeMatchSegmentRow)
       : [];
     const segments = shouldHydrateSegments ? persistedSegments : [];
-    const hasBracketLinks = Boolean(
-      row.losersBracket ||
-        row.previousLeftId ||
-        row.previousRightId ||
-        row.winnerNextMatchId ||
-        row.loserNextMatchId,
-    );
-    const competitionPhase =
-      division.phase ??
-      resolveDivisionCompetitionPhase({
-        eventType: event.eventType,
-        divisionKind: division.kind,
-        hasBracketLinks,
-      });
     const phaseUsesSets =
       division.kind === "LEAGUE"
         ? (division.leagueConfig?.usesSets ?? event.usesSets)
@@ -4250,15 +4330,17 @@ export const loadEventWithRelations = async (
     matchDurationMinutes: event.matchDurationMinutes,
     officialPositions,
   });
-  const officialSchedulingMode = normalizeOfficialSchedulingMode(
+  const legacyOfficialSchedulingMode = normalizeOfficialSchedulingMode(
     (event as any).officialSchedulingMode,
   );
+  const staffingPriority = normalizeStaffingPriority(
+    (event as any).staffingPriority,
+    legacyOfficialSchedulingMode,
+  );
   const doTeamsOfficiate =
-    officialSchedulingMode === "TEAM_STAFFING"
-      ? true
-      : typeof event.doTeamsOfficiate === "boolean"
-        ? event.doTeamsOfficiate
-        : false;
+    typeof event.doTeamsOfficiate === "boolean"
+      ? event.doTeamsOfficiate
+      : legacyOfficialSchedulingMode === "TEAM_STAFFING";
 
   const baseParams = {
     id: event.id,
@@ -4327,7 +4409,7 @@ export const loadEventWithRelations = async (
       Boolean(event.teamSignup) &&
       Boolean((event as any).allowMatchRosterEdits) &&
       Boolean((event as any).allowTemporaryMatchPlayers),
-    officialSchedulingMode,
+    staffingPriority,
     officialPositions,
     eventOfficials,
     matchRulesOverride: (event as any).matchRulesOverride ?? null,
@@ -4445,6 +4527,19 @@ export const saveMatches = async (
   const incidentMatchIds = new Set<string>();
   const segmentRows: Array<Record<string, unknown>> = [];
   const incidentRows: Array<Record<string, unknown>> = [];
+  let persistedOfficialPositions: EventOfficialPosition[] | null = null;
+  if (typeof client.events?.findUnique === "function") {
+    const persistedEvent = await client.events.findUnique({
+      where: { id: eventId },
+      select: { officialPositions: true },
+    });
+    if (persistedEvent) {
+      persistedOfficialPositions = normalizeEventOfficialPositions(
+        persistedEvent.officialPositions,
+        eventId,
+      );
+    }
+  }
   for (const [index, match] of matches.entries()) {
     const placementState =
       match.placementState === "PLACED" || match.field ? "PLACED" : "UNPLACED";
@@ -4457,10 +4552,34 @@ export const saveMatches = async (
     );
     const start = isPlaced ? match.start : null;
     const end = isPlaced ? match.end : null;
-    const officialAssignments =
+    const rawOfficialAssignments =
       isPlaced && Array.isArray(match.officialAssignments)
         ? match.officialAssignments
         : [];
+    const matchPhase =
+      match.division?.phase ??
+      resolveDivisionCompetitionPhase({
+        divisionKind: match.division?.kind,
+        hasBracketLinks: isBracketMatch,
+      });
+    const officialPositionsForMatch =
+      match.division?.phaseSettings?.[matchPhase]?.officialPositions
+      ?? persistedOfficialPositions;
+    const legacyOfficialAssignments =
+      !rawOfficialAssignments.length && officialPositionsForMatch
+        ? buildLegacyOfficialAssignment({
+            eventId,
+            officialId: isPlaced ? (match.official?.id ?? null) : null,
+            officialCheckedIn: isPlaced && match.officialCheckedIn === true,
+            officialPositions: officialPositionsForMatch,
+          })
+        : rawOfficialAssignments;
+    const officialAssignments = officialPositionsForMatch
+      ? completeMatchOfficialAssignmentSlots(
+          legacyOfficialAssignments,
+          officialPositionsForMatch,
+        )
+      : legacyOfficialAssignments;
     const primaryOfficialId = officialAssignments.length
       ? deriveLegacyOfficialIdFromAssignments(officialAssignments)
       : isPlaced
@@ -4817,15 +4936,7 @@ export const persistScheduledRosterTeams = async (
       where: {
         eventId: params.eventId,
         ...(rosterTeamIds.length ? { id: { notIn: rosterTeamIds } } : {}),
-        OR: [
-          { kind: "PLACEHOLDER" },
-          {
-            AND: [
-              { captainId: "" },
-              { name: { startsWith: "Place Holder", mode: "insensitive" } },
-            ],
-          },
-        ],
+        kind: "PLACEHOLDER",
       } as any,
     });
   }
@@ -5925,6 +6036,8 @@ export const upsertEventFromPayload = async (
       location: true,
       officialPositions: true as any,
       officialSchedulingMode: true as any,
+      staffingPriority: true as any,
+      doTeamsOfficiate: true as any,
       matchRulesOverride: true as any,
       autoCreatePointMatchIncidents: true,
       sportIds: true,
@@ -6712,22 +6825,35 @@ export const upsertEventFromPayload = async (
     !isManualRegistrationPayment
       ? ensureNumberArray(payload.installmentAmounts)
       : [];
-  const officialSchedulingMode = isAffiliateExternalEvent
-    ? "OFF"
-    : normalizeOfficialSchedulingMode(
-        payload.officialSchedulingMode,
-        normalizeOfficialSchedulingMode(
-          (existingEvent as any)?.officialSchedulingMode,
-        ),
+  const hasLegacyOfficialSchedulingModeInput = Object.prototype.hasOwnProperty.call(
+    payload,
+    "officialSchedulingMode",
+  );
+  const legacyOfficialSchedulingMode = normalizeOfficialSchedulingMode(
+    payload.officialSchedulingMode,
+    normalizeOfficialSchedulingMode(
+      (existingEvent as any)?.officialSchedulingMode,
+    ),
+  );
+  const staffingPriority = isAffiliateExternalEvent
+    ? "FULL_COVERAGE_WITH_CONFLICTS_ALLOWED"
+    : normalizeStaffingPriority(
+        payload.staffingPriority ??
+          (hasLegacyOfficialSchedulingModeInput
+            ? undefined
+            : (existingEvent as any)?.staffingPriority),
+        hasLegacyOfficialSchedulingModeInput
+          ? payload.officialSchedulingMode
+          : (existingEvent as any)?.officialSchedulingMode,
       );
   const requestedDoTeamsOfficiate = coerceNullableBoolean(
-    payload.doTeamsOfficiate,
+    Object.prototype.hasOwnProperty.call(payload, "doTeamsOfficiate")
+      ? payload.doTeamsOfficiate
+      : (existingEvent as any)?.doTeamsOfficiate,
   );
   const normalizedDoTeamsOfficiate = isAffiliateExternalEvent
     ? false
-    : officialSchedulingMode === "TEAM_STAFFING"
-      ? true
-      : requestedDoTeamsOfficiate;
+    : requestedDoTeamsOfficiate;
   const normalizedTeamOfficialsMaySwap =
     normalizedDoTeamsOfficiate === true
       ? coerceBoolean(payload.teamOfficialsMaySwap, false)
@@ -6887,7 +7013,10 @@ export const upsertEventFromPayload = async (
     parentEvent: normalizedParentEvent,
     autoCancellation: payload.autoCancellation ?? null,
     eventType: payload.eventType ?? null,
-    officialSchedulingMode,
+    ...(hasLegacyOfficialSchedulingModeInput
+      ? { officialSchedulingMode: legacyOfficialSchedulingMode }
+      : {}),
+    staffingPriority,
     doTeamsOfficiate: normalizedDoTeamsOfficiate ?? null,
     teamOfficialsMaySwap: normalizedTeamOfficialsMaySwap,
     teamCheckInMode: normalizedTeamCheckInMode,

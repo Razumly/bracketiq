@@ -1,6 +1,6 @@
 import { dateWithMinutesInTimeZone, Schedule } from './Schedule';
 import { assertCanonicalSchedulerTimeSlots } from './timeSlotAvailability';
-import { normalizeTimeZone } from '@/lib/dateUtils';
+import { getDateTimePartsInTimeZone, normalizeTimeZone } from '@/lib/dateUtils';
 import {
   Division,
   League,
@@ -10,9 +10,13 @@ import {
   Team,
   Tournament,
   UserData,
-  usesTeamOfficialScheduling,
 } from './types';
-import { OfficialStaffingPlanner } from './officialStaffing';
+import {
+  collectUnresolvedStaffingDiagnostics,
+  isTeamDutyCandidatePoolEnabled,
+  OfficialStaffingPlanner,
+  type StaffingDiagnostic,
+} from './officialStaffing';
 
 type SchedulerEvent = League | Tournament;
 
@@ -246,7 +250,7 @@ export type LockedScheduleWarning = {
 export type LockedPreservingRescheduleResult = {
   event: SchedulerEvent;
   matches: Match[];
-  warnings: LockedScheduleWarning[];
+  warnings: Array<LockedScheduleWarning | StaffingDiagnostic>;
 };
 
 const buildScheduleParticipants = (
@@ -334,9 +338,6 @@ const durationForReschedule = (match: Match): number => {
   return MIN_SCHEDULE_DURATION_MS;
 };
 
-const normalizeDayOfWeek = (date: Date): number => (date.getDay() + 6) % 7;
-
-const minuteOfDay = (date: Date): number => date.getHours() * 60 + date.getMinutes();
 
 const toValidDayIndex = (value: unknown): number | null => {
   const numeric = Number(value);
@@ -378,13 +379,35 @@ const normalizeSlotFieldIds = (slot: {
     ),
   );
 };
-
-const startOfDay = (date: Date): Date => {
-  const day = new Date(date);
-  day.setHours(0, 0, 0, 0);
-  return day;
+const slotPredicateTimeZone = (slot: {
+  startDate?: Date;
+  startTimeMinutes?: number;
+  timeZone?: string | null;
+}): string => {
+  const configuredTimeZone = normalizeTimeZone(slot.timeZone, 'UTC');
+  if (configuredTimeZone !== 'UTC' || typeof slot.startTimeMinutes !== 'number') {
+    return configuredTimeZone;
+  }
+  let localTimeZone: string;
+  try {
+    localTimeZone = normalizeTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone, 'UTC');
+  } catch {
+    return configuredTimeZone;
+  }
+  if (localTimeZone === 'UTC' || !slot.startDate) {
+    return configuredTimeZone;
+  }
+  const localParts = getDateTimePartsInTimeZone(slot.startDate, localTimeZone);
+  const utcParts = getDateTimePartsInTimeZone(slot.startDate, configuredTimeZone);
+  if (!localParts || !utcParts) {
+    return configuredTimeZone;
+  }
+  const localStartMinutes = localParts.hour * 60 + localParts.minute;
+  const utcStartMinutes = utcParts.hour * 60 + utcParts.minute;
+  return localStartMinutes === slot.startTimeMinutes && utcStartMinutes !== slot.startTimeMinutes
+    ? localTimeZone
+    : configuredTimeZone;
 };
-
 const slotAllowsField = (
   slot: {
     scheduledFieldIds?: unknown;
@@ -409,14 +432,29 @@ const slotAllowsDivision = (slot: { divisions?: Division[] }, divisionId: string
 };
 
 const slotAllowsDate = (
-  slot: { startDate: Date; endDate: Date | null },
+  slot: {
+    startDate: Date;
+    endDate: Date | null;
+    startTimeMinutes: number;
+    timeZone?: string | null;
+  },
   matchStart: Date,
 ): boolean => {
-  const matchDayMs = startOfDay(matchStart).getTime();
-  const slotStartMs = startOfDay(slot.startDate).getTime();
+  const timeZone = slotPredicateTimeZone(slot);
+  const matchParts = getDateTimePartsInTimeZone(matchStart, timeZone);
+  const slotStartParts = getDateTimePartsInTimeZone(slot.startDate, timeZone);
+  if (!matchParts || !slotStartParts) {
+    return false;
+  }
+  const matchDayMs = Date.UTC(matchParts.year, matchParts.month - 1, matchParts.day);
+  const slotStartMs = Date.UTC(slotStartParts.year, slotStartParts.month - 1, slotStartParts.day);
   if (matchDayMs < slotStartMs) return false;
   if (!slot.endDate) return true;
-  const slotEndMs = startOfDay(slot.endDate).getTime();
+  const slotEndParts = getDateTimePartsInTimeZone(slot.endDate, timeZone);
+  if (!slotEndParts) {
+    return false;
+  }
+  const slotEndMs = Date.UTC(slotEndParts.year, slotEndParts.month - 1, slotEndParts.day);
   return matchDayMs <= slotEndMs;
 };
 
@@ -426,19 +464,35 @@ const slotAllowsTime = (
     daysOfWeek?: number[];
     startTimeMinutes: number;
     endTimeMinutes: number;
+    timeZone?: string | null;
   },
   matchStart: Date,
   matchEnd: Date,
 ): boolean => {
+  const timeZone = slotPredicateTimeZone(slot);
+  const startParts = getDateTimePartsInTimeZone(matchStart, timeZone);
+  const endParts = getDateTimePartsInTimeZone(matchEnd, timeZone);
+  if (!startParts || !endParts) {
+    return false;
+  }
   const allowedDays = normalizeSlotDayIndexes(slot);
-  if (allowedDays.length && !allowedDays.includes(normalizeDayOfWeek(matchStart))) {
+  const dayOfWeek = (new Date(Date.UTC(
+    startParts.year,
+    startParts.month - 1,
+    startParts.day,
+  )).getUTCDay() + 6) % 7;
+  if (allowedDays.length && !allowedDays.includes(dayOfWeek)) {
     return false;
   }
-  if (startOfDay(matchStart).getTime() !== startOfDay(matchEnd).getTime()) {
+  if (
+    startParts.year !== endParts.year
+    || startParts.month !== endParts.month
+    || startParts.day !== endParts.day
+  ) {
     return false;
   }
-  const startMinutes = minuteOfDay(matchStart);
-  const endMinutes = minuteOfDay(matchEnd);
+  const startMinutes = startParts.hour * 60 + startParts.minute;
+  const endMinutes = endParts.hour * 60 + endParts.minute;
   return startMinutes >= slot.startTimeMinutes && endMinutes <= slot.endTimeMinutes;
 };
 
@@ -539,7 +593,16 @@ const latestMatchEnd = (matches: Match[]): Date | null => {
 };
 
 const isMatchCompleted = (match: Match): boolean => {
-  if (match.status === 'COMPLETE' && Boolean(match.winnerEventTeamId)) {
+  const status = String(match.status ?? '').trim().toUpperCase();
+  const resultStatus = String(match.resultStatus ?? '').trim().toUpperCase();
+  if (
+    Boolean(match.winnerEventTeamId)
+    && (
+      ['COMPLETE', 'COMPLETED', 'FINISHED', 'FINAL'].includes(status)
+      || ['COMPLETE', 'COMPLETED', 'FINAL'].includes(resultStatus)
+      || Boolean(match.actualEnd)
+    )
+  ) {
     return true;
   }
   const segments = Array.isArray(match.segments) ? match.segments : [];
@@ -642,42 +705,6 @@ const dependenciesAreScheduled = (match: Match, pendingIds: Set<string>): boolea
   return true;
 };
 
-const hasFullStaffingCoverage = (match: Match, planner: OfficialStaffingPlanner): boolean => {
-  if (!planner.requiredSlots.length) {
-    return true;
-  }
-  if (!Array.isArray(match.officialAssignments) || !match.officialAssignments.length) {
-    return false;
-  }
-  const requiredSlotKeys = new Set(
-    planner.requiredSlots.map((slot) => `${slot.positionId}:${slot.slotIndex}`),
-  );
-  const assignedSlotKeys = new Set<string>();
-  for (const assignment of match.officialAssignments) {
-    const positionId = typeof assignment?.positionId === 'string' ? assignment.positionId.trim() : '';
-    const userId = typeof assignment?.userId === 'string' ? assignment.userId.trim() : '';
-    const slotIndex = Number(assignment?.slotIndex);
-    if (
-      assignment?.holderType !== 'OFFICIAL'
-      || !positionId
-      || !userId
-      || !Number.isInteger(slotIndex)
-      || slotIndex < 0
-    ) {
-      continue;
-    }
-    assignedSlotKeys.add(`${positionId}:${slotIndex}`);
-  }
-  if (assignedSlotKeys.size < requiredSlotKeys.size) {
-    return false;
-  }
-  for (const requiredSlotKey of requiredSlotKeys) {
-    if (!assignedSlotKeys.has(requiredSlotKey)) {
-      return false;
-    }
-  }
-  return true;
-};
 
 const clearUserOfficialAssignments = (match: Match): void => {
   match.official = null;
@@ -685,64 +712,303 @@ const clearUserOfficialAssignments = (match: Match): void => {
   match.officialCheckedIn = false;
 };
 
-const assignMissingTeamOfficials = (
-  event: SchedulerEvent,
-  schedule: Schedule<Match, PlayingField, Team | UserData, Division>,
-  matches: Match[],
-): void => {
-  if (!usesTeamOfficialScheduling(event)) {
-    return;
+export type TeamDutyReflowContext = {
+  eventCheckedInTeamIds: ReadonlySet<string>;
+  checkedInTeamIdsByMatch: ReadonlyMap<string, ReadonlySet<string>>;
+};
+
+const EMPTY_TEAM_DUTY_REFLOW_CONTEXT: TeamDutyReflowContext = {
+  eventCheckedInTeamIds: new Set<string>(),
+  checkedInTeamIdsByMatch: new Map<string, ReadonlySet<string>>(),
+};
+
+const matchHasPlayingTeam = (match: Match, teamId: string): boolean => (
+  match.team1?.id === teamId || match.team2?.id === teamId
+);
+
+const matchHasTeamDuty = (match: Match, teamId: string): boolean => (
+  match.teamOfficial?.id === teamId
+);
+
+const matchHasTeamActivity = (match: Match, teamId: string): boolean => (
+  matchHasPlayingTeam(match, teamId) || matchHasTeamDuty(match, teamId)
+);
+
+const rangesOverlap = (
+  leftStart: Date,
+  leftEnd: Date,
+  rightStart: Date,
+  rightEnd: Date,
+): boolean => leftStart.getTime() < rightEnd.getTime() && leftEnd.getTime() > rightStart.getTime();
+
+const historyEndTime = (match: Match): number => (
+  match.actualEnd?.getTime() ?? match.end.getTime()
+);
+
+const teamCanServeMatchDivision = (team: Team, match: Match): boolean => {
+  const targetDivisionId = normalizeDivisionId(match.division.id);
+  if (!targetDivisionId) {
+    return false;
   }
-  const requireCaptains = isLeagueEvent(event);
-  const teams = Object.values(event.teams).filter((team) => (
-    requireCaptains ? team.captainId.trim().length > 0 : true
+  if (normalizeDivisionId(team.division.id) === targetDivisionId) {
+    return true;
+  }
+  if ((match.division.teamIds ?? []).includes(team.id)) {
+    return true;
+  }
+  return (team.division.playoffPlacementDivisionIds ?? []).some(
+    (divisionId) => normalizeDivisionId(divisionId) === targetDivisionId,
+  );
+};
+
+const teamIsCheckedInForDuty = (
+  teamId: string,
+  match: Match,
+  context: TeamDutyReflowContext,
+): boolean => {
+  if (context.eventCheckedInTeamIds.has(teamId)) {
+    return true;
+  }
+  const visitedMatchIds = new Set<string>();
+  const pendingMatches = [match];
+  while (pendingMatches.length > 0) {
+    const candidate = pendingMatches.pop() as Match;
+    if (visitedMatchIds.has(candidate.id)) {
+      continue;
+    }
+    visitedMatchIds.add(candidate.id);
+    if (context.checkedInTeamIdsByMatch.get(candidate.id)?.has(teamId)) {
+      return true;
+    }
+    pendingMatches.push(...candidate.getDependencies());
+  }
+  return false;
+};
+
+type RankedTeamDutyCandidate = {
+  team: Team;
+  rankTier: number;
+  latestLossAt: number;
+  assignmentCount: number;
+  restMs: number;
+};
+
+const rankTeamDutyCandidate = (
+  team: Team,
+  target: Match,
+  matches: Match[],
+): RankedTeamDutyCandidate => {
+  const completedPlayingMatches = matches
+    .filter((match) => (
+      match.id !== target.id
+      && matchHasPlayingTeam(match, team.id)
+      && isMatchCompleted(match)
+      && historyEndTime(match) <= target.start.getTime()
+      && Boolean(match.winnerEventTeamId)
+    ))
+    .sort((left, right) => (
+      historyEndTime(right) - historyEndTime(left)
+      || left.id.localeCompare(right.id)
+    ));
+  const latestResult = completedPlayingMatches[0] ?? null;
+  const latestResultIsLoss = Boolean(
+    latestResult
+    && latestResult.winnerEventTeamId
+    && latestResult.winnerEventTeamId !== team.id,
+  );
+  const hasRemainingMatch = matches.some((match) => (
+    match.id !== target.id
+    && matchHasPlayingTeam(match, team.id)
+    && !isMatchCompleted(match)
+    && match.start.getTime() >= target.end.getTime()
   ));
-  const unassigned = [...teams];
-  const ordered = [...matches].sort(compareScheduledOrder);
-  for (const match of ordered) {
+  const latestActivityEnd = matches.reduce<number | null>((latest, match) => {
+    if (
+      match.id === target.id
+      || !matchHasTeamActivity(match, team.id)
+      || match.end.getTime() > target.start.getTime()
+    ) {
+      return latest;
+    }
+    const end = historyEndTime(match);
+    return latest == null || end > latest ? end : latest;
+  }, null);
+
+  return {
+    team,
+    rankTier: latestResultIsLoss ? (hasRemainingMatch ? 1 : 0) : 2,
+    latestLossAt: latestResultIsLoss && latestResult
+      ? historyEndTime(latestResult)
+      : Number.NEGATIVE_INFINITY,
+    assignmentCount: matches.filter((match) => (
+      match.id !== target.id && matchHasTeamDuty(match, team.id)
+    )).length,
+    restMs: latestActivityEnd == null
+      ? Number.POSITIVE_INFINITY
+      : target.start.getTime() - latestActivityEnd,
+  };
+};
+
+const compareRankedTeamDutyCandidates = (
+  left: RankedTeamDutyCandidate,
+  right: RankedTeamDutyCandidate,
+): number => {
+  const tierComparison = left.rankTier - right.rankTier;
+  if (tierComparison !== 0) {
+    return tierComparison;
+  }
+  const recentLossComparison = left.rankTier <= 1
+    ? right.latestLossAt - left.latestLossAt
+    : 0;
+  return recentLossComparison
+    || left.assignmentCount - right.assignmentCount
+    || right.restMs - left.restMs
+    || left.team.id.localeCompare(right.team.id);
+};
+
+const eligibleTeamDutyCandidates = (
+  event: SchedulerEvent,
+  match: Match,
+  matches: Match[],
+  context: TeamDutyReflowContext,
+): Team[] => {
+  if (!isTeamDutyCandidatePoolEnabled(event, match)) {
+    return [];
+  }
+  const restMs = Math.max(0, event.restTimeMinutes) * MINUTE_MS;
+  const imminentMatchWindowEnd = match.end.getTime()
+    + Math.max(0, event.teamCheckInOpenMinutesBefore) * MINUTE_MS;
+  const requireCaptains = isLeagueEvent(event);
+
+  return Object.values(event.teams)
+    .filter((team) => {
+      const result = (
+        (!requireCaptains || team.captainId.trim().length > 0)
+        && team.id !== match.team1?.id
+        && team.id !== match.team2?.id
+        && teamCanServeMatchDivision(team, match)
+        && teamIsCheckedInForDuty(team.id, match, context)
+      );
+      return result;
+    })
+    .filter((team) => !matches.some((otherMatch) => (
+      otherMatch.id !== match.id
+      && matchHasTeamActivity(otherMatch, team.id)
+      && rangesOverlap(otherMatch.start, otherMatch.end, match.start, match.end)
+    )))
+    .filter((team) => {
+      const latestPriorEnd = matches.reduce<number | null>((latest, otherMatch) => {
+        if (
+          otherMatch.id === match.id
+          || !matchHasTeamActivity(otherMatch, team.id)
+          || otherMatch.end.getTime() > match.start.getTime()
+        ) {
+          return latest;
+        }
+        const end = historyEndTime(otherMatch);
+        return latest == null || end > latest ? end : latest;
+      }, null);
+      return latestPriorEnd == null || match.start.getTime() - latestPriorEnd >= restMs;
+    })
+    .filter((team) => !matches.some((otherMatch) => (
+      otherMatch.id !== match.id
+      && matchHasPlayingTeam(otherMatch, team.id)
+      && otherMatch.start.getTime() > match.end.getTime()
+      && otherMatch.start.getTime() < imminentMatchWindowEnd
+    )))
+    .map((team) => rankTeamDutyCandidate(team, match, matches))
+    .sort(compareRankedTeamDutyCandidates)
+    .map(({ team }) => team);
+};
+
+const assignMissingCheckedInTeamOfficials = (
+  event: SchedulerEvent,
+  matches: Match[],
+  context: TeamDutyReflowContext,
+): void => {
+  for (const match of [...matches].sort(compareScheduledOrder)) {
     attachMatchToParticipants(match);
-    if (match.teamOfficial || !match.division || !(match.team1 && match.team2)) continue;
-    const availableTeams = schedule
-      .freeParticipants(match.division, match.start, match.end)
-      .filter(
-        (participant) => (
-          participant instanceof Team
-          && (requireCaptains ? participant.captainId.trim().length > 0 : true)
-        ),
-      ) as Team[];
-    const filtered = availableTeams.filter((team) => team !== match.team1 && team !== match.team2);
-    if (!filtered.length) continue;
-
-    let candidate: Team | null = null;
-    for (let i = 0; i < unassigned.length; i += 1) {
-      const candidateTeam = unassigned[0];
-      unassigned.push(unassigned.shift() as Team);
-      if (filtered.includes(candidateTeam)) {
-        candidate = candidateTeam;
-        const idx = unassigned.indexOf(candidateTeam);
-        if (idx >= 0) unassigned.splice(idx, 1);
-        break;
-      }
+    if (match.teamOfficial || !match.requiresTeamOfficial || !(match.team1 && match.team2)) {
+      continue;
     }
+    const candidate = eligibleTeamDutyCandidates(event, match, matches, context)[0] ?? null;
     if (!candidate) {
-      candidate = filtered[0] ?? null;
+      continue;
     }
-    if (!candidate) continue;
-
     match.teamOfficial = candidate;
     appendMatchToParticipant(candidate, match);
     attachMatchToParticipants(match);
   }
 };
 
+
 export const rescheduleEventMatchesPreservingLocks = (
   event: SchedulerEvent,
+  teamDutyReflowContext: TeamDutyReflowContext = EMPTY_TEAM_DUTY_REFLOW_CONTEXT,
 ): LockedPreservingRescheduleResult => {
   assertCanonicalSchedulerTimeSlots(event);
   const allMatches = Object.values(event.matches);
   if (!allMatches.length) {
     return { event, matches: [], warnings: [] };
   }
+  const shouldReflowTeamDuties = teamDutyReflowContext !== EMPTY_TEAM_DUTY_REFLOW_CONTEXT;
+  const teamDutyReflowSnapshot = shouldReflowTeamDuties
+    ? {
+        eventEnd: event.end,
+        timeSlotDivisions: event.timeSlots.map((slot) => [slot, slot.divisions] as const),
+        fieldMatches: Object.values(event.fields).map((field) => [field, field.matches] as const),
+        teamMatches: Object.values(event.teams).map((team) => [team, team.matches] as const),
+        officialStates: event.officials.map((official) => [
+          official,
+          { matches: official.matches, divisions: official.divisions },
+        ] as const),
+        matchStates: allMatches.map((match) => [
+          match,
+          {
+            start: match.start,
+            end: match.end,
+            field: match.field,
+            placementState: match.placementState,
+            team1: match.team1,
+            team2: match.team2,
+            team1Seed: match.team1Seed,
+            team2Seed: match.team2Seed,
+            teamOfficial: match.teamOfficial,
+            requiresTeamOfficial: match.requiresTeamOfficial,
+            reservesTeamOfficial: match.reservesTeamOfficial,
+            official: match.official,
+            officialAssignments: match.officialAssignments,
+            officialCheckedIn: match.officialCheckedIn,
+            matchRulesSnapshot: match.matchRulesSnapshot,
+            resolvedMatchRules: match.resolvedMatchRules,
+          },
+        ] as const),
+      }
+    : null;
+  const restoreTeamDutyReflowSnapshot = (): void => {
+    if (!teamDutyReflowSnapshot) {
+      return;
+    }
+    event.end = teamDutyReflowSnapshot.eventEnd;
+    for (const [slot, divisions] of teamDutyReflowSnapshot.timeSlotDivisions) {
+      slot.divisions = divisions;
+    }
+    for (const [match, state] of teamDutyReflowSnapshot.matchStates) {
+      Object.assign(match, state);
+    }
+    for (const [field, matches] of teamDutyReflowSnapshot.fieldMatches) {
+      field.matches = matches;
+    }
+    for (const [team, matches] of teamDutyReflowSnapshot.teamMatches) {
+      team.matches = matches;
+    }
+    for (const [official, state] of teamDutyReflowSnapshot.officialStates) {
+      official.matches = state.matches;
+      official.divisions = state.divisions;
+    }
+  };
+
+  try {
 
   const openEndedSchedule = isOpenEndedSchedule(event);
   if (!openEndedSchedule) {
@@ -756,17 +1022,22 @@ export const rescheduleEventMatchesPreservingLocks = (
   const warnings = collectWarnings(event, lockedMatches, rescheduleEndTime);
   resetScheduleCollections(event);
   const staffingPlanner = new OfficialStaffingPlanner(event);
-  const plannerHasRequiredSlots = staffingPlanner.hasRequiredSlots();
-  const staffingModeWithRequiredSlots = event.officialSchedulingMode === 'STAFFING' && staffingPlanner.hasStaffingRequirement();
+  const plannerHasRequiredSlots = allMatches.some((match) => (
+    staffingPlanner.hasRequiredSlots(match)
+  ));
   for (const match of allMatches) {
-    match.requiresTeamOfficial = usesTeamOfficialScheduling(event);
+    match.requiresTeamOfficial = staffingPlanner.isTeamDutyRequired(match);
+    match.reservesTeamOfficial =
+      match.requiresTeamOfficial && staffingPlanner.isTeamDutySlotReserved(match);
   }
 
   for (const match of lockedMatches) {
-    if (staffingModeWithRequiredSlots && staffingPlanner && !hasFullStaffingCoverage(match, staffingPlanner)) {
-      clearUserOfficialAssignments(match);
-    }
     attachLockedMatchToField(event, match);
+  }
+  if (plannerHasRequiredSlots) {
+    staffingPlanner.seedCommittedMatches([...lockedMatches].sort(compareScheduledOrder));
+  }
+  for (const match of lockedMatches) {
     attachMatchToParticipants(match);
   }
 
@@ -787,26 +1058,6 @@ export const rescheduleEventMatchesPreservingLocks = (
     for (const match of unlockedMatches) {
       clearUserOfficialAssignments(match);
     }
-  }
-  if (staffingModeWithRequiredSlots && staffingPlanner) {
-    const lockedWithCoverage: Match[] = [];
-    const lockedWithoutCoverage: Match[] = [];
-    for (const match of [...lockedMatches].sort(compareScheduledOrder)) {
-      if (hasFullStaffingCoverage(match, staffingPlanner)) {
-        lockedWithCoverage.push(match);
-      } else {
-        lockedWithoutCoverage.push(match);
-      }
-    }
-    staffingPlanner.seedCommittedMatches(lockedWithCoverage);
-    for (const lockedMatch of lockedWithoutCoverage) {
-      staffingPlanner.assignMatch(lockedMatch);
-    }
-  } else if (plannerHasRequiredSlots) {
-    const lockedWithCommittedAssignments = [...lockedMatches]
-      .sort(compareScheduledOrder)
-      .filter((match) => staffingPlanner.hasCommittedAssignments(match));
-    staffingPlanner.seedCommittedMatches(lockedWithCommittedAssignments);
   }
   const unlockedById = new Map(unlockedMatches.map((match) => [match.id, match]));
   const pendingIds = new Set(unlockedMatches.map((match) => match.id));
@@ -832,7 +1083,7 @@ export const rescheduleEventMatchesPreservingLocks = (
 
       for (const match of nextBatch) {
         const matchDuration = durationForReschedule(match);
-        if (staffingModeWithRequiredSlots && staffingPlanner) {
+        if (staffingPlanner.hasStaffingRequirement(match)) {
           schedule.scheduleEventWithOptions(match, matchDuration, {
             canUseCandidate: ({ resource, start, end }) => (
               staffingPlanner.previewSchedulingCandidate(match, resource, start, end)
@@ -850,10 +1101,34 @@ export const rescheduleEventMatchesPreservingLocks = (
     detachedPendingAssignments.forEach(restorePendingDependencyAssignments);
   }
 
-  if (!staffingModeWithRequiredSlots && plannerHasRequiredSlots) {
-    staffingPlanner.assignMatches(unlockedMatches);
+  const matchesForPostScheduleStaffing = unlockedMatches.filter((match) => (
+    plannerHasRequiredSlots
+    && staffingPlanner.hasRequiredSlots(match)
+    && !staffingPlanner.hasStaffingRequirement(match)
+  ));
+  if (matchesForPostScheduleStaffing.length > 0) {
+    staffingPlanner.assignMatches(matchesForPostScheduleStaffing);
   }
-  assignMissingTeamOfficials(event, schedule, allMatches);
+  if (shouldReflowTeamDuties) {
+    assignMissingCheckedInTeamOfficials(event, allMatches, teamDutyReflowContext);
+  }
+  if (
+    shouldReflowTeamDuties
+    && allMatches.some((match) => staffingPlanner.isHardTeamCoverageRequired(match))
+  ) {
+    const unstaffedMatch = allMatches.find((match) => (
+      staffingPlanner.isHardTeamCoverageRequired(match)
+      && match.requiresTeamOfficial
+      && Boolean(match.team1)
+      && Boolean(match.team2)
+      && !match.teamOfficial
+    ));
+    if (unstaffedMatch) {
+      throw new Error(
+        `Unable to preserve the schedule because Match ${unstaffedMatch.id} requires a Team duty assignment.`,
+      );
+    }
+  }
 
   const latestEnd = latestMatchEnd(allMatches);
   if (latestEnd) {
@@ -867,6 +1142,10 @@ export const rescheduleEventMatchesPreservingLocks = (
   return {
     event,
     matches: allMatches.sort(compareMatches),
-    warnings,
+    warnings: [...warnings, ...collectUnresolvedStaffingDiagnostics(allMatches)],
   };
+  } catch (error) {
+    restoreTeamDutyReflowSnapshot();
+    throw error;
+  }
 };

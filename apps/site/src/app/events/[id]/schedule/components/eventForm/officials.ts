@@ -2,9 +2,14 @@ import type {
     EventOfficial,
     EventOfficialPosition,
     Field,
-    OfficialSchedulingMode,
     SportOfficialPositionTemplate,
 } from '@/types';
+import {
+    STAFFING_PRIORITIES,
+    type StaffingPriority,
+} from '@/server/officials/config';
+export { normalizeOfficialSchedulingMode } from '@/server/officials/config';
+
 import { createClientId } from '@/lib/clientId';
 import { getFieldDisplayName } from '@/lib/fieldUtils';
 
@@ -13,15 +18,22 @@ import {
     toFieldIdList,
 } from './resourceGroups';
 
-export const normalizeOfficialSchedulingMode = (value: unknown): OfficialSchedulingMode => {
-    if (value === 'NONE') {
-        return 'OFF';
-    }
-    if (value === 'STAFFING' || value === 'TEAM_STAFFING' || value === 'SCHEDULE' || value === 'OFF') {
-        return value;
-    }
-    return 'SCHEDULE';
+export const STAFFING_PRIORITY_LABELS: Readonly<Record<StaffingPriority, string>> = {
+    FULL_COVERAGE_REQUIRED: 'Full Coverage Required',
+    TEAM_COVERAGE_REQUIRED: 'Team Coverage Required',
+    OFFICIAL_COVERAGE_REQUIRED: 'Official Coverage Required',
+    BEST_AVAILABLE_COVERAGE: 'Best Available Coverage',
+    FULL_COVERAGE_WITH_CONFLICTS_ALLOWED: 'Full Coverage with Conflicts Allowed',
 };
+
+export const STAFFING_PRIORITY_OPTIONS = STAFFING_PRIORITIES.map((value) => ({
+    value,
+    label: STAFFING_PRIORITY_LABELS[value],
+}));
+
+export const formatStaffingPriorityLabel = (value: StaffingPriority): string => (
+    STAFFING_PRIORITY_LABELS[value]
+);
 
 export const normalizeSportOfficialPositionTemplates = (value: unknown): SportOfficialPositionTemplate[] => {
     if (!Array.isArray(value)) {
@@ -253,17 +265,20 @@ export const countAssignedActiveOfficialsForStaffing = (
 };
 
 type BuildOfficialStaffingCoverageErrorOptions = {
-    mode?: OfficialSchedulingMode | null;
+    priority?: StaffingPriority | null;
     requiredOfficialSlotsPerMatch: number;
     assignedActiveOfficialsForStaffing: number;
 };
 
 export const buildOfficialStaffingCoverageError = ({
-    mode,
+    priority,
     requiredOfficialSlotsPerMatch,
     assignedActiveOfficialsForStaffing,
 }: BuildOfficialStaffingCoverageErrorOptions): string | null => {
-    if (mode !== 'STAFFING') {
+    const requiresOfficialCoverage = priority === 'FULL_COVERAGE_REQUIRED'
+        || priority === 'OFFICIAL_COVERAGE_REQUIRED'
+        || priority === 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED';
+    if (!requiresOfficialCoverage) {
         return null;
     }
     if (requiredOfficialSlotsPerMatch <= 0) {
@@ -274,5 +289,5 @@ export const buildOfficialStaffingCoverageError = ({
     }
     const requiredLabel = requiredOfficialSlotsPerMatch === 1 ? 'official' : 'officials';
     const assignedLabel = assignedActiveOfficialsForStaffing === 1 ? 'is' : 'are';
-    return `STAFFING requires at least ${requiredOfficialSlotsPerMatch} ${requiredLabel} for each match, but only ${assignedActiveOfficialsForStaffing} ${assignedLabel} assigned to this event.`;
+    return `${formatStaffingPriorityLabel(priority)} requires at least ${requiredOfficialSlotsPerMatch} ${requiredLabel} for each match, but only ${assignedActiveOfficialsForStaffing} ${assignedLabel} assigned to this event.`;
 };

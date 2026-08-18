@@ -129,6 +129,14 @@ enum EventsOfficialSchedulingModeEnum {
   OFF
 }
 
+enum StaffingPriorityEnum {
+  FULL_COVERAGE_REQUIRED
+  TEAM_COVERAGE_REQUIRED
+  OFFICIAL_COVERAGE_REQUIRED
+  BEST_AVAILABLE_COVERAGE
+  FULL_COVERAGE_WITH_CONFLICTS_ALLOWED
+}
+
 enum ProductsPeriodEnum {
   SINGLE
   WEEK
@@ -2735,6 +2743,7 @@ model Events {
   autoCancellation              Boolean?
   eventType                     EventsEventTypeEnum?
   officialSchedulingMode        EventsOfficialSchedulingModeEnum @default(SCHEDULE)
+  staffingPriority              StaffingPriorityEnum             @default(BEST_AVAILABLE_COVERAGE)
   doTeamsOfficiate              Boolean?
   teamOfficialsMaySwap          Boolean?
   teamCheckInMode               String                           @default("OFF")
@@ -3099,6 +3108,7 @@ model EventTemplates {
   pointsToVictory                Int[]                            @default([])
   sportIds                       String[]                         @default([])
   officialSchedulingMode         EventsOfficialSchedulingModeEnum @default(SCHEDULE)
+  staffingPriority               StaffingPriorityEnum             @default(BEST_AVAILABLE_COVERAGE)
   doTeamsOfficiate               Boolean?
   teamOfficialsMaySwap           Boolean?
   officialPositions              Json?

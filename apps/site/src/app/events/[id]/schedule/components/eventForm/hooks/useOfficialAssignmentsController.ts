@@ -315,11 +315,11 @@ export const useOfficialAssignmentsController = ({
     );
     const officialStaffingCoverageError = useMemo(
         () => buildOfficialStaffingCoverageError({
-            mode: eventData.officialSchedulingMode,
+            priority: eventData.staffingPriority,
             requiredOfficialSlotsPerMatch,
             assignedActiveOfficialsForStaffing,
         }),
-        [assignedActiveOfficialsForStaffing, eventData.officialSchedulingMode, requiredOfficialSlotsPerMatch],
+        [assignedActiveOfficialsForStaffing, eventData.staffingPriority, requiredOfficialSlotsPerMatch],
     );
 
     return {

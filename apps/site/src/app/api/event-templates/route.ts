@@ -102,6 +102,7 @@ export async function POST(req: NextRequest) {
         organizationId: bundle.template.organizationId,
         sportIds: bundle.template.sportIds,
         eventType: bundle.template.eventType,
+        staffingPriority: bundle.template.staffingPriority,
       },
     },
     { status: 201 },

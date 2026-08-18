@@ -28,6 +28,7 @@ import {
 import {
   Division,
   League,
+  Match,
   PlayingField,
   Team,
   TimeSlot,
@@ -71,14 +72,20 @@ const buildDivision = (
     phase,
   );
 
-const buildLeague = (id = "event_graph", includePlayoffs = true) => {
+const buildLeague = (
+  id = "event_graph",
+  includePlayoffs = true,
+  restTimeMinutes = 0,
+  teamCount = 4,
+  fieldCount = 1,
+) => {
   const division = buildDivision("phase_open", "LEAGUE");
   const playoffDivision = buildDivision(
     "phase_open__phase__playoff",
     "PLAYOFF",
   );
   const teams = Object.fromEntries(
-    Array.from({ length: 4 }, (_, index) => {
+    Array.from({ length: teamCount }, (_, index) => {
       const teamId = `team_${index + 1}`;
       return [
         teamId,
@@ -91,39 +98,87 @@ const buildLeague = (id = "event_graph", includePlayoffs = true) => {
       ];
     }),
   );
-  const field = new PlayingField({
-    id: "field_1",
-    divisions: includePlayoffs ? [division, playoffDivision] : [division],
-  });
-  const timeSlot = new TimeSlot({
-    id: "slot_1",
-    dayOfWeek: 0,
-    startDate: new Date("2026-01-05T08:00:00.000Z"),
-    repeating: true,
-    startTimeMinutes: 8 * 60,
-    endTimeMinutes: 22 * 60,
-    field: field.id,
-  });
+  const fields = Object.fromEntries(
+    Array.from({ length: fieldCount }, (_, index) => {
+      const field = new PlayingField({
+        id: `field_${index + 1}`,
+        divisions: includePlayoffs ? [division, playoffDivision] : [division],
+      });
+      return [field.id, field];
+    }),
+  );
+  const timeSlots = Object.values(fields).map(
+    (field) =>
+      new TimeSlot({
+        id: `slot_${field.id}`,
+        dayOfWeek: 0,
+        startDate: new Date("2026-01-05T08:00:00.000Z"),
+        repeating: true,
+        startTimeMinutes: 8 * 60,
+        endTimeMinutes: 22 * 60,
+        field: field.id,
+      }),
+  );
   return new League({
     id,
     name: "Graph League",
     start: new Date("2026-01-05T08:00:00.000Z"),
     end: new Date("2026-01-31T22:00:00.000Z"),
-    maxParticipants: 4,
+    maxParticipants: teamCount,
     teamSignup: true,
     eventType: "LEAGUE",
     teams,
     divisions: [division],
     playoffDivisions: includePlayoffs ? [playoffDivision] : [],
-    fields: { [field.id]: field },
-    timeSlots: [timeSlot],
+    fields,
+    timeSlots,
     gamesPerOpponent: 1,
     includePlayoffs,
     playoffTeamCount: includePlayoffs ? 4 : null,
     usesSets: false,
     matchDurationMinutes: 60,
-    restTimeMinutes: 0,
+    restTimeMinutes,
   });
+};
+
+const buildReadinessGraphLeague = () => {
+  const event = buildLeague("event_readiness", false, 0, 12, 4);
+  const division = event.divisions[0];
+  const teams = Object.values(event.teams);
+  const openingMatches = Array.from({ length: 6 }, (_, index) =>
+    new Match({
+      id: `${event.id}:match:${index + 1}`,
+      matchId: index + 1,
+      placementState: "UNPLACED",
+      start: event.start,
+      end: event.start,
+      division,
+      field: null,
+      bufferMs: 0,
+      team1: teams[index * 2],
+      team2: teams[index * 2 + 1],
+      eventId: event.id,
+    }),
+  );
+  const downstream = new Match({
+    id: `${event.id}:match:7`,
+    matchId: 7,
+    placementState: "UNPLACED",
+    start: event.start,
+    end: event.start,
+    division,
+    field: null,
+    bufferMs: 0,
+    eventId: event.id,
+    previousLeftMatch: openingMatches[0],
+    previousRightMatch: openingMatches[1],
+  });
+  openingMatches[0].winnerNextMatch = downstream;
+  openingMatches[1].winnerNextMatch = downstream;
+  event.matches = Object.fromEntries(
+    [...openingMatches, downstream].map((match) => [match.id, match]),
+  );
+  return { event, openingMatches, downstream };
 };
 
 describe("event schedule Match Graph persistence", () => {
@@ -169,60 +224,124 @@ describe("event schedule Match Graph persistence", () => {
     expect(saveMatches).toHaveBeenCalledWith(event.id, result.matches, tx);
   });
 
-  it("places the persisted graph without regenerating Match identities", async () => {
-    const event = buildLeague();
-    const graphTx = {
-      teams: { upsert: jest.fn().mockResolvedValue(undefined) },
-    } as any;
-    (loadEventWithRelations as jest.Mock).mockResolvedValue(event);
-    const persistedGraph = await persistCreateOnlyMatchGraph({
-      tx: graphTx,
-      eventId: event.id,
-      includePlaceholderTeams: true,
-    });
-    const persistedIds = new Set(
-      persistedGraph.matches.map((match) => match.id),
-    );
-    (loadEventWithRelations as jest.Mock).mockResolvedValue(persistedGraph.event);
+  it("places a persisted graph by readiness without waiting for every opening Match", async () => {
+    const firstFixture = buildReadinessGraphLeague();
+    const secondFixture = buildReadinessGraphLeague();
+    const openingIds = firstFixture.openingMatches.map((match) => match.id);
+    const downstreamId = firstFixture.downstream.id;
+    const expectedIds = [...openingIds, downstreamId].sort();
+    const tx = {
+      events: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: firstFixture.event.id,
+          eventType: "LEAGUE",
+        }),
+      },
+    } as unknown as Parameters<typeof reconcileEventSchedule>[0]["tx"];
+    (loadEventWithRelations as jest.Mock)
+      .mockResolvedValueOnce(firstFixture.event)
+      .mockResolvedValueOnce(secondFixture.event);
 
-    const result = await reconcileEventSchedule({
-      tx: {
-        events: {
-          findUnique: jest.fn().mockResolvedValue({
-            id: event.id,
-            eventType: "LEAGUE",
-          }),
-        },
-      } as any,
-      eventId: event.id,
+    const firstResult = await reconcileEventSchedule({
+      tx,
+      eventId: firstFixture.event.id,
+      mode: "BUILD",
+    });
+    const secondResult = await reconcileEventSchedule({
+      tx,
+      eventId: secondFixture.event.id,
       mode: "BUILD",
     });
 
-    expect(result.matches.map((match) => match.id).sort()).toEqual(
-      [...persistedIds].sort(),
+    const firstById = new Map(
+      firstResult.matches.map((match) => [match.id, match] as const),
     );
-    expect(result.matches.every((match) =>
-      match.placementState === "PLACED" && match.field,
-    )).toBe(true);
+    const placedOpenings = openingIds.map((id) => firstById.get(id)!);
+    const downstream = firstById.get(downstreamId)!;
+    const waveOneStart = new Date("2026-01-05T08:00:00.000Z").getTime();
+    const waveTwoStart = new Date("2026-01-05T09:00:00.000Z").getTime();
+
+    expect(firstResult.matches.map((match) => match.id).sort()).toEqual(
+      expectedIds,
+    );
     expect(
-      Object.values(result.event.teams).every(
-        (team) => !/^Seed \d+$/i.test(team.name.trim()),
+      firstResult.matches.every(
+        (match) => match.placementState === "PLACED" && match.field,
       ),
     ).toBe(true);
     expect(
-      result.matches.every((match) =>
-        [match.team1, match.team2, match.teamOfficial]
-          .filter((team): team is NonNullable<typeof team> => Boolean(team))
-          .every((team) => !/^Seed \d+$/i.test(team.name.trim())),
+      placedOpenings.every(
+        (match) =>
+          match.previousLeftMatch === null &&
+          match.previousRightMatch === null,
       ),
     ).toBe(true);
+    expect(
+      placedOpenings
+        .filter((match) => match.start.getTime() === waveOneStart)
+        .map((match) => match.id),
+    ).toEqual(openingIds.slice(0, 4));
+    expect(
+      new Set(placedOpenings.slice(0, 4).map((match) => match.field!.id)).size,
+    ).toBe(4);
+    expect(
+      placedOpenings
+        .filter((match) => match.start.getTime() === waveTwoStart)
+        .map((match) => match.id),
+    ).toEqual(openingIds.slice(4));
+    expect(downstream.start.getTime()).toBe(waveTwoStart);
+    expect(downstream.start.getTime()).toBeGreaterThanOrEqual(
+      downstream.previousLeftMatch!.end.getTime(),
+    );
+    expect(downstream.start.getTime()).toBeGreaterThanOrEqual(
+      downstream.previousRightMatch!.end.getTime(),
+    );
+    expect(
+      placedOpenings.slice(4).map((match) => match.field!.id),
+    ).not.toContain(downstream.field!.id);
+    expect([
+      downstream.previousLeftMatch!.id,
+      downstream.previousRightMatch!.id,
+    ]).toEqual(openingIds.slice(0, 2));
+    expect(firstById.get(openingIds[0])!.winnerNextMatch!.id).toBe(
+      downstreamId,
+    );
+    expect(firstById.get(openingIds[1])!.winnerNextMatch!.id).toBe(
+      downstreamId,
+    );
+
+    const firstPlacementSignature = [...firstResult.matches]
+      .sort((left, right) => (left.matchId ?? 0) - (right.matchId ?? 0))
+      .map((match) => ({
+        id: match.id,
+        matchId: match.matchId,
+        start: match.start.toISOString(),
+        end: match.end.toISOString(),
+        fieldId: match.field?.id ?? null,
+        previousLeftId: match.previousLeftMatch?.id ?? null,
+        previousRightId: match.previousRightMatch?.id ?? null,
+        winnerNextId: match.winnerNextMatch?.id ?? null,
+      }));
+    const secondPlacementSignature = [...secondResult.matches]
+      .sort((left, right) => (left.matchId ?? 0) - (right.matchId ?? 0))
+      .map((match) => ({
+        id: match.id,
+        matchId: match.matchId,
+        start: match.start.toISOString(),
+        end: match.end.toISOString(),
+        fieldId: match.field?.id ?? null,
+        previousLeftId: match.previousLeftMatch?.id ?? null,
+        previousRightId: match.previousRightMatch?.id ?? null,
+        winnerNextId: match.winnerNextMatch?.id ?? null,
+      }));
+    expect(secondPlacementSignature).toEqual(firstPlacementSignature);
     expect(deletePristineScheduleByEvent).toHaveBeenCalledWith(
-      event.id,
+      firstFixture.event.id,
       expect.anything(),
     );
     expect(saveMatches).toHaveBeenCalledWith(
-      event.id,
-      result.matches,
+      firstFixture.event.id,
+      firstResult.matches,
       expect.anything(),
     );
     expect(persistScheduledRosterTeams).toHaveBeenCalled();

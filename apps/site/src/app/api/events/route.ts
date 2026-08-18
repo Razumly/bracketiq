@@ -27,6 +27,8 @@ import {
 import { resolveRelationalEventDivisionIds } from '@/lib/eventApiDivisionIds';
 import { protectAffiliateRow, withAffiliateOutboundAction } from '@/server/affiliateOutbound';
 import { loadRelationalEventDivisionIdsByEventId } from '@/server/events/eventDivisionProjection';
+import { normalizeEventStaffingResponse } from '@/server/events/eventResponse';
+
 
 export const dynamic = 'force-dynamic';
 
@@ -467,12 +469,7 @@ const toEventResponse = (row: any) => {
   if (!Array.isArray((response as any).eventOfficials)) {
     (response as any).eventOfficials = [];
   }
-  if (typeof (response as any).officialSchedulingMode !== 'string') {
-    (response as any).officialSchedulingMode = 'SCHEDULE';
-  }
-  if ((response as any).officialSchedulingMode === 'TEAM_STAFFING') {
-    (response as any).doTeamsOfficiate = true;
-  }
+  normalizeEventStaffingResponse(response as Record<string, unknown>);
   if (!Array.isArray((response as any).assistantHostIds)) {
     (response as any).assistantHostIds = [];
   }

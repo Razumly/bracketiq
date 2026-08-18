@@ -1,12 +1,19 @@
 import type { AgentPageContext } from '@/lib/agent/types';
 import type { AgentConversationOwner } from '../conversations';
+import type * as AgentTools from '../tools';
 
 const mockPrisma = {
   events: {
     findUnique: jest.fn(),
   },
+  fields: {
+    findMany: jest.fn(),
+  },
   matches: {
     findUnique: jest.fn(),
+    findMany: jest.fn(),
+  },
+  divisions: {
     findMany: jest.fn(),
   },
   teams: {
@@ -15,6 +22,12 @@ const mockPrisma = {
   },
   userData: {
     findUnique: jest.fn(),
+    findMany: jest.fn(),
+  },
+  eventRegistrations: {
+    findMany: jest.fn(),
+  },
+  eventOfficials: {
     findMany: jest.fn(),
   },
   aiPendingConfirmation: {
@@ -33,7 +46,7 @@ jest.mock('@/server/accessControl', () => ({
   canManageEvent: jest.fn(),
 }));
 
-const { executeAgentTool, executePendingConfirmation } = require('../tools') as typeof import('../tools');
+const { buildAgentTools, executeAgentTool, executePendingConfirmation } = require('../tools') as typeof AgentTools;
 const { canManageEvent } = require('@/server/accessControl') as { canManageEvent: jest.Mock };
 
 const userOwner: AgentConversationOwner = {
@@ -83,6 +96,12 @@ describe('agent tools dispatcher', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockPrisma.events.findUnique.mockResolvedValue({ name: 'Spring League' });
+    mockPrisma.fields.findMany.mockResolvedValue([]);
+    mockPrisma.divisions.findMany.mockResolvedValue([]);
+    mockPrisma.eventRegistrations.findMany.mockResolvedValue([]);
+    mockPrisma.eventOfficials.findMany.mockResolvedValue([]);
+    mockPrisma.matches.findMany.mockResolvedValue([]);
+    mockPrisma.teams.findMany.mockResolvedValue([]);
     canManageEvent.mockResolvedValue(true);
     mockPrisma.matches.findUnique.mockResolvedValue({
       matchId: 7,
@@ -140,6 +159,59 @@ describe('agent tools dispatcher', () => {
 
     expect(result.result.error).toContain('do not have access');
     expect(mockPrisma.matches.findMany).not.toHaveBeenCalled();
+  });
+
+  it('returns canonical staffing priority context without a legacy mode field', async () => {
+    mockPrisma.events.findUnique.mockResolvedValueOnce({
+      id: 'event-1',
+      name: 'Spring League',
+      start: new Date('2030-05-01T18:00:00.000Z'),
+      end: null,
+      location: 'Court 1',
+      eventType: 'LEAGUE',
+      state: 'PUBLISHED',
+      hostId: 'user-1',
+      assistantHostIds: [],
+      organizationId: null,
+      fieldIds: [],
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
+      doTeamsOfficiate: true,
+      officialPositions: [{ id: 'referee', name: 'Referee', count: 1, order: 0 }],
+      teamSignup: true,
+      singleDivision: true,
+    });
+
+    const result = await executeAgentTool({
+      name: 'get_event_schedule_context',
+      args: { eventId: 'event-1' },
+      owner: userOwner,
+      conversationId: 'conv-1',
+      pageContext: cleanScheduleContext,
+      origin: 'http://localhost:3000',
+      mode: 'prepare',
+    });
+
+    expect(result.result.event).toEqual(expect.objectContaining({
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
+      doTeamsOfficiate: true,
+      officialPositions: [{ id: 'referee', name: 'Referee', count: 1, order: 0 }],
+    }));
+    expect(result.result.event).not.toHaveProperty('officialSchedulingMode');
+  });
+
+  it('describes all five staffing priorities with independent Team-duty semantics', () => {
+    const scheduleTool = buildAgentTools(guestOwner).find((tool) => (
+      tool.type === 'function' && tool.name === 'get_event_schedule_context'
+    ));
+    const description = scheduleTool?.type === 'function' ? scheduleTool.description : '';
+
+    expect(description).toContain('FULL_COVERAGE_REQUIRED requires Team-duty and every named Official Position');
+    expect(description).toContain('TEAM_COVERAGE_REQUIRED requires Team-duty only');
+    expect(description).toContain('OFFICIAL_COVERAGE_REQUIRED requires every named Official Position only');
+    expect(description).toContain('BEST_AVAILABLE_COVERAGE');
+    expect(description).toContain('FULL_COVERAGE_WITH_CONFLICTS_ALLOWED');
+    expect(description).toContain('doTeamsOfficiate is an independent participation and eligibility policy');
+    expect(description).not.toContain('officialSchedulingMode');
   });
 
   it('builds same-origin markdown links for navigation', async () => {
@@ -224,6 +296,17 @@ describe('agent tools dispatcher', () => {
       expect.objectContaining({ path: 'leagueSlots', label: 'Weekly Timeslots' }),
     ]));
     expect(JSON.stringify(result.result)).toContain('Defines when and where the scheduler can place matches');
+    expect(result.result.fieldDefinitions).toEqual(expect.objectContaining({
+      staffingPriority: expect.objectContaining({
+        enum: [
+          'FULL_COVERAGE_REQUIRED',
+          'TEAM_COVERAGE_REQUIRED',
+          'OFFICIAL_COVERAGE_REQUIRED',
+          'BEST_AVAILABLE_COVERAGE',
+          'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED',
+        ],
+      }),
+    }));
   });
 
   it('returns EventForm capability workflows for broad format questions', async () => {

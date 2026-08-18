@@ -12,7 +12,6 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
-import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.repositories.EventRepository
 import com.razumly.mvp.core.data.repositories.FieldRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
@@ -336,12 +335,8 @@ private fun EventEditorDraftDto.toEditorDraft(
             rentalBookingItemId = resources.rentalBookingItemId,
         ),
         staff = EventEditorStaffDto(
-            officialSchedulingMode = when (event.officialSchedulingMode) {
-                OfficialSchedulingMode.STAFFING -> "STAFFING"
-                OfficialSchedulingMode.TEAM_STAFFING -> "TEAM_STAFFING"
-                OfficialSchedulingMode.SCHEDULE -> "SCHEDULE"
-                OfficialSchedulingMode.OFF -> "OFF"
-            },
+            staffingPriority = event.staffingPriority.name,
+            doTeamsOfficiate = event.doTeamsOfficiate == true,
             teamOfficialsMaySwap = event.teamOfficialsMaySwap == true,
             teamCheckInMode = event.teamCheckInMode.name,
             teamCheckInOpenMinutesBefore = event.teamCheckInOpenMinutesBefore,

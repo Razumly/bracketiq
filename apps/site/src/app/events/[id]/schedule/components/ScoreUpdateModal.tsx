@@ -1366,7 +1366,7 @@ export default function ScoreUpdateModal({
     const userId = assignment.userId || (assignment.eventOfficialId ? eventOfficialUserIdsById.get(assignment.eventOfficialId) : null);
     return userId ? userDisplayName(officialUsersById.get(userId)) ?? 'TBD' : 'TBD';
   };
-  const officialAssignments = match.officialIds ?? [];
+  const officialAssignments = match.officialAssignments ?? match.officialIds ?? [];
   const hasTeamOfficial = Boolean(teamOfficialId || teamOfficial);
   const hasOfficials = officialAssignments.length > 0 || hasTeamOfficial;
   const resultStatus = normalizedIncidentType(match.resultStatus);

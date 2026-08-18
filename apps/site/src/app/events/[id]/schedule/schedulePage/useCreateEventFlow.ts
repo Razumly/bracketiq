@@ -498,7 +498,7 @@ export function useCreateEventFlow({
         teams: [],
         officials: [],
         officialIds: [],
-        officialSchedulingMode: 'SCHEDULE',
+        staffingPriority: 'BEST_AVAILABLE_COVERAGE',
         officialPositions: [],
         eventOfficials: [],
         assistantHostIds: [],

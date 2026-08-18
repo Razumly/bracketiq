@@ -28,9 +28,10 @@ import {
 import {
   buildEventOfficialPositionsFromTemplates,
   normalizeEventOfficialPositions,
-  normalizeOfficialSchedulingMode,
   normalizeSportOfficialPositionTemplates,
 } from '@/server/officials/config';
+import { normalizeEventStaffingResponse } from '@/server/events/eventResponse';
+
 import type { LeagueDivisionConfig } from '@/server/scheduler/types';
 import { getEventParticipantIdsForEvent } from '@/server/events/eventRegistrations';
 import { generatedPoolsForBracket } from '@/server/events/tournamentPools';
@@ -59,12 +60,8 @@ const toEventResponse = (row: any) => {
   if (!Array.isArray((response as any).eventOfficials)) {
     (response as any).eventOfficials = [];
   }
-  if (typeof (response as any).officialSchedulingMode !== 'string') {
-    (response as any).officialSchedulingMode = 'SCHEDULE';
-  }
-  if ((response as any).officialSchedulingMode === 'TEAM_STAFFING') {
-    (response as any).doTeamsOfficiate = true;
-  }
+  normalizeEventStaffingResponse(response as Record<string, unknown>);
+
   if (!Array.isArray((response as any).assistantHostIds)) {
     (response as any).assistantHostIds = [];
   }
@@ -118,8 +115,7 @@ const PUBLIC_EVENT_FIELDS = [
   'allowTeamSplitDefault', 'usesSets', 'setsPerMatch', 'pointsToVictory',
   'winBy', 'maxPoints', 'matchDurationMinutes', 'setDurationMinutes',
   'restTimeMinutes', 'matchRulesOverride', 'resolvedMatchRules',
-  'teamCheckInMode', 'teamCheckInOpenMinutesBefore', 'allowMatchRosterEdits',
-  'allowTemporaryMatchPlayers',
+  'staffingPriority', 'officialSchedulingMode', 'teamCheckInMode', 'teamCheckInOpenMinutesBefore',
 ] as const;
 
 const toPublicEventResponse = (response: Record<string, unknown>): Record<string, unknown> => {
@@ -195,23 +191,14 @@ const buildEventOfficialResponse = async (event: any) => {
         }))
         .filter((row) => row.positionIds.length > 0)
     : [];
+  const normalizedEvent = normalizeEventStaffingResponse({ ...event });
   return {
-    officialSchedulingMode: normalizeOfficialSchedulingMode((event as any).officialSchedulingMode),
+    staffingPriority: normalizedEvent.staffingPriority,
     officialPositions,
     eventOfficials,
     officialIds: eventOfficials.map((official: { userId: string }) => official.userId),
   };
 };
-
-
-const DEFAULT_DIVISION_KEY = 'open';
-
-const normalizeDivisionKey = (value: unknown): string | null => {
-  if (typeof value !== 'string') return null;
-  const normalized = value.trim().toLowerCase();
-  return normalized.length ? normalized : null;
-};
-
 const normalizeDivisionKind = (value: unknown, fallback: 'LEAGUE' | 'PLAYOFF' = 'LEAGUE'): 'LEAGUE' | 'PLAYOFF' => {
   if (typeof value !== 'string') {
     return fallback;
@@ -422,6 +409,12 @@ const normalizeLeagueDivisionConfig = (value: unknown): LeagueDivisionConfigPayl
   return Object.fromEntries(
     Object.entries(config).filter(([, entry]) => entry !== undefined),
   ) as LeagueDivisionConfigPayload;
+};
+
+const normalizeDivisionKey = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  return normalized.length ? normalized : null;
 };
 
 const normalizeDivisionKeys = (value: unknown): string[] => {

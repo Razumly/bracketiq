@@ -60,7 +60,7 @@ type StaffManagementPanelProps = {
     hostDisabled: boolean;
     onRosterEditsChange: (checked: boolean) => void;
     onTeamsOfficiateChange: (checked: boolean) => void;
-    onSchedulingModeChange: (value: string | null) => void;
+    onStaffingPriorityChange: (value: string | null) => void;
     onLoadSportDefaults: () => void;
     onAddPosition: () => void;
     onUpdatePosition: (positionId: string, updates: Partial<EventOfficialPosition>) => void;
@@ -124,7 +124,7 @@ export const StaffManagementPanel = ({
     hostDisabled,
     onRosterEditsChange,
     onTeamsOfficiateChange,
-    onSchedulingModeChange,
+    onStaffingPriorityChange,
     onLoadSportDefaults,
     onAddPosition,
     onUpdatePosition,
@@ -163,21 +163,23 @@ export const StaffManagementPanel = ({
             allowMatchRosterEdits={Boolean(eventData.allowMatchRosterEdits)}
             onRosterEditsChange={onRosterEditsChange}
         /> : null}
-        {showDedicatedOfficials || showCustomOfficialPositions ? <StaffOfficialPositionEditor
-            officialSchedulingMode={eventData.officialSchedulingMode}
+        <StaffOfficialPositionEditor
+            staffingPriority={eventData.staffingPriority}
             officialPositions={eventData.officialPositions || []}
             sportDefaultPositionCount={sportDefaultPositionCount}
             coverageError={officialStaffingCoverageError}
             maxShortTextLength={maxShortTextLength}
             comboboxProps={comboboxProps}
-            onSchedulingModeChange={onSchedulingModeChange}
+            onStaffingPriorityChange={onStaffingPriorityChange}
             onLoadSportDefaults={onLoadSportDefaults}
             onAddPosition={onAddPosition}
             onUpdatePosition={onUpdatePosition}
             onRemovePosition={onRemovePosition}
-            showSchedulingMode={showDedicatedOfficials}
-            showPositions={showCustomOfficialPositions}
-        /> : null}
+            showPositions={
+                showCustomOfficialPositions
+                && eventData.staffingPriority !== 'TEAM_COVERAGE_REQUIRED'
+            }
+        />
 
         {showStaffAssignments || showDedicatedOfficials ? isOrganizationHostedEvent ? (
             <StaffOrganizationRosterPicker

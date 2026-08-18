@@ -13,6 +13,11 @@ import {
     normalizeRegistrationPaymentMode,
 } from '@/lib/manualRegistrationPayments';
 import type { Event, EventState, Division as CoreDivision, LeagueScoringConfig, Sport } from '@/types';
+import {
+    isStaffingPriority,
+    normalizeOfficialSchedulingMode,
+    normalizeStaffingPriority,
+} from '@/server/officials/config';
 
 import {
     buildTournamentConfig,
@@ -41,7 +46,6 @@ import {
     getEventOfficialUserIds,
     normalizeEventOfficialPositions,
     normalizeEventOfficials,
-    normalizeOfficialSchedulingMode,
     normalizeSportOfficialPositionTemplates,
 } from './officials';
 
@@ -371,8 +375,14 @@ export const mapEventToFormState = (event: Event): EventFormState => {
             ))),
         )
         : false;
-    const officialSchedulingMode = normalizeOfficialSchedulingMode(event.officialSchedulingMode);
-    const doTeamsOfficiate = officialSchedulingMode === 'TEAM_STAFFING' || Boolean(event.doTeamsOfficiate);
+    const explicitStaffingPriority = typeof event.staffingPriority === 'string'
+        ? event.staffingPriority.trim().toUpperCase()
+        : null;
+    const hasExplicitStaffingPriority = isStaffingPriority(explicitStaffingPriority);
+    const legacyOfficialSchedulingMode = normalizeOfficialSchedulingMode(event.officialSchedulingMode);
+    const staffingPriority = normalizeStaffingPriority(explicitStaffingPriority, legacyOfficialSchedulingMode);
+    const doTeamsOfficiate = Boolean(event.doTeamsOfficiate)
+        || (!hasExplicitStaffingPriority && legacyOfficialSchedulingMode === 'TEAM_STAFFING');
 
     const existingAffiliateUrl = event.affiliateUrl ?? '';
     const normalizedEventType = event.eventType === 'AFFILIATE' ? 'EVENT' : event.eventType;
@@ -463,7 +473,7 @@ export const mapEventToFormState = (event: Event): EventFormState => {
     teams: event.teams || [],
     officials: event.officials || [],
     officialIds: normalizedOfficialIds,
-    officialSchedulingMode,
+    staffingPriority,
     officialPositions: normalizedOfficialPositions,
     eventOfficials: normalizedEventOfficials,
     pendingStaffInvites: Array.isArray((event as { pendingStaffInvites?: PendingStaffInvite[] }).pendingStaffInvites)

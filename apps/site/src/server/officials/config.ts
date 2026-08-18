@@ -1,4 +1,12 @@
 export type OfficialSchedulingMode = 'STAFFING' | 'TEAM_STAFFING' | 'SCHEDULE' | 'OFF';
+export const STAFFING_PRIORITIES = [
+  'FULL_COVERAGE_REQUIRED',
+  'TEAM_COVERAGE_REQUIRED',
+  'OFFICIAL_COVERAGE_REQUIRED',
+  'BEST_AVAILABLE_COVERAGE',
+  'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED',
+] as const;
+export type StaffingPriority = (typeof STAFFING_PRIORITIES)[number];
 export type OfficialAssignmentHolderType = 'OFFICIAL' | 'PLAYER';
 
 export type SportOfficialPositionTemplate = {
@@ -25,14 +33,100 @@ export type MatchOfficialAssignment = {
   positionId: string;
   slotIndex: number;
   holderType: OfficialAssignmentHolderType;
-  userId: string;
-  eventOfficialId?: string;
+  userId: string | null;
+  eventOfficialId: string | null;
   checkedIn: boolean;
   hasConflict: boolean;
 };
 
-const SCHEDULING_MODES = new Set<OfficialSchedulingMode>(['STAFFING', 'TEAM_STAFFING', 'SCHEDULE', 'OFF']);
-const HOLDER_TYPES = new Set<OfficialAssignmentHolderType>(['OFFICIAL', 'PLAYER']);
+const SCHEDULING_MODE_VALUES: Readonly<Record<OfficialSchedulingMode, true>> = {
+  STAFFING: true,
+  TEAM_STAFFING: true,
+  SCHEDULE: true,
+  OFF: true,
+};
+const HOLDER_TYPE_VALUES: Readonly<Record<OfficialAssignmentHolderType, true>> = {
+  OFFICIAL: true,
+  PLAYER: true,
+};
+const STAFFING_PRIORITY_VALUES: Readonly<Record<StaffingPriority, true>> = {
+  FULL_COVERAGE_REQUIRED: true,
+  TEAM_COVERAGE_REQUIRED: true,
+  OFFICIAL_COVERAGE_REQUIRED: true,
+  BEST_AVAILABLE_COVERAGE: true,
+  FULL_COVERAGE_WITH_CONFLICTS_ALLOWED: true,
+};
+
+export const LEGACY_STAFFING_PRIORITY_BY_MODE: Readonly<Record<OfficialSchedulingMode, StaffingPriority>> = {
+  STAFFING: 'OFFICIAL_COVERAGE_REQUIRED',
+  TEAM_STAFFING: 'TEAM_COVERAGE_REQUIRED',
+  SCHEDULE: 'BEST_AVAILABLE_COVERAGE',
+  OFF: 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED',
+};
+export const LEGACY_OFFICIAL_SCHEDULING_MODE_BY_PRIORITY: Readonly<Record<StaffingPriority, OfficialSchedulingMode>> = {
+  FULL_COVERAGE_REQUIRED: 'STAFFING',
+  TEAM_COVERAGE_REQUIRED: 'TEAM_STAFFING',
+  OFFICIAL_COVERAGE_REQUIRED: 'STAFFING',
+  BEST_AVAILABLE_COVERAGE: 'SCHEDULE',
+  FULL_COVERAGE_WITH_CONFLICTS_ALLOWED: 'OFF',
+};
+
+export type StaffingPriorityPolicy = {
+  requiresTeamDutySlot: boolean;
+  isHardOfficialCoverageRequired: boolean;
+  isHardTeamCoverageRequired: boolean;
+  isOfficialAssignmentConflictAllowed: boolean;
+  isTeamDutySlotReserved: boolean;
+  isTeamDutyConflictAllowed: boolean;
+};
+
+export const STAFFING_PRIORITY_POLICY: Readonly<Record<StaffingPriority, StaffingPriorityPolicy>> = {
+  FULL_COVERAGE_REQUIRED: {
+    requiresTeamDutySlot: true,
+    isHardOfficialCoverageRequired: true,
+    isHardTeamCoverageRequired: true,
+    isOfficialAssignmentConflictAllowed: false,
+    isTeamDutySlotReserved: true,
+    isTeamDutyConflictAllowed: false,
+  },
+  TEAM_COVERAGE_REQUIRED: {
+    requiresTeamDutySlot: true,
+    isHardOfficialCoverageRequired: false,
+    isHardTeamCoverageRequired: true,
+    isOfficialAssignmentConflictAllowed: false,
+    isTeamDutySlotReserved: true,
+    isTeamDutyConflictAllowed: false,
+  },
+  OFFICIAL_COVERAGE_REQUIRED: {
+    requiresTeamDutySlot: false,
+    isHardOfficialCoverageRequired: true,
+    isHardTeamCoverageRequired: false,
+    isOfficialAssignmentConflictAllowed: false,
+    isTeamDutySlotReserved: false,
+    isTeamDutyConflictAllowed: false,
+  },
+  BEST_AVAILABLE_COVERAGE: {
+    requiresTeamDutySlot: true,
+    isHardOfficialCoverageRequired: false,
+    isHardTeamCoverageRequired: false,
+    isOfficialAssignmentConflictAllowed: false,
+    isTeamDutySlotReserved: false,
+    isTeamDutyConflictAllowed: false,
+  },
+  FULL_COVERAGE_WITH_CONFLICTS_ALLOWED: {
+    requiresTeamDutySlot: true,
+    isHardOfficialCoverageRequired: true,
+    isHardTeamCoverageRequired: true,
+    isOfficialAssignmentConflictAllowed: true,
+    isTeamDutySlotReserved: false,
+    isTeamDutyConflictAllowed: true,
+  },
+};
+
+export const getStaffingPriorityPolicy = (
+  priority: StaffingPriority,
+): StaffingPriorityPolicy => STAFFING_PRIORITY_POLICY[priority];
+
 
 const normalizeString = (value: unknown): string | null => {
   if (typeof value !== 'string') {
@@ -76,9 +170,24 @@ export const normalizeOfficialSchedulingMode = (
 ): OfficialSchedulingMode => {
   const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
   const canonical = normalized === 'NONE' ? 'OFF' : normalized;
-  return SCHEDULING_MODES.has(canonical as OfficialSchedulingMode)
+  return SCHEDULING_MODE_VALUES[canonical as OfficialSchedulingMode] === true
     ? canonical as OfficialSchedulingMode
     : fallback;
+};
+
+export const isStaffingPriority = (value: unknown): value is StaffingPriority => (
+  typeof value === 'string' && STAFFING_PRIORITY_VALUES[value as StaffingPriority] === true
+);
+
+export const normalizeStaffingPriority = (
+  value: unknown,
+  legacyMode: unknown = 'SCHEDULE',
+): StaffingPriority => {
+  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  if (isStaffingPriority(normalized)) {
+    return normalized;
+  }
+  return LEGACY_STAFFING_PRIORITY_BY_MODE[normalizeOfficialSchedulingMode(legacyMode)];
 };
 
 export const normalizeSportOfficialPositionTemplates = (value: unknown): SportOfficialPositionTemplate[] => {
@@ -258,6 +367,9 @@ export const normalizeMatchOfficialAssignments = (
   const assignments: MatchOfficialAssignment[] = [];
   const seenPositionSlots = new Set<string>();
   const seenUsers = new Set<string>();
+  const positionOrderById = new Map(
+    Array.from(options.positionCountsById.keys()).map((positionId, index) => [positionId, index]),
+  );
   for (const entry of value) {
     if (!entry || typeof entry !== 'object') {
       continue;
@@ -270,7 +382,11 @@ export const normalizeMatchOfficialAssignments = (
       : '';
     const slotIndexRaw = typeof row.slotIndex === 'number' ? row.slotIndex : Number(row.slotIndex);
     const slotIndex = Number.isFinite(slotIndexRaw) ? Math.max(0, Math.trunc(slotIndexRaw)) : -1;
-    if (!positionId || !userId || !HOLDER_TYPES.has(holderType as OfficialAssignmentHolderType)) {
+    if (
+      !positionId
+      || HOLDER_TYPE_VALUES[holderType as OfficialAssignmentHolderType] !== true
+      || (!userId && holderType !== 'OFFICIAL')
+    ) {
       continue;
     }
     const slotCount = options.positionCountsById.get(positionId);
@@ -284,11 +400,15 @@ export const normalizeMatchOfficialAssignments = (
     if (seenPositionSlots.has(slotKey)) {
       throw new Error(`Duplicate official assignment for position ${positionId} slot ${slotIndex}.`);
     }
-    if (seenUsers.has(userId)) {
+    if (userId && seenUsers.has(userId)) {
       throw new Error(`User ${userId} cannot be assigned to multiple official slots on the same match.`);
     }
     const eventOfficialId = normalizeString(row.eventOfficialId);
-    if (holderType === 'OFFICIAL') {
+    if (!userId) {
+      if (eventOfficialId) {
+        throw new Error(`Unbound official assignment for position ${positionId} cannot reference an event official id.`);
+      }
+    } else if (holderType === 'OFFICIAL') {
       if (!eventOfficialId) {
         throw new Error(`Official assignment for ${userId} must reference an event official id.`);
       }
@@ -307,25 +427,88 @@ export const normalizeMatchOfficialAssignments = (
       slotIndex,
       holderType: holderType as OfficialAssignmentHolderType,
       userId,
-      ...(eventOfficialId ? { eventOfficialId } : {}),
-      checkedIn: row.checkedIn === true,
-      hasConflict: row.hasConflict === true,
+      eventOfficialId,
+      checkedIn: userId ? row.checkedIn === true : false,
+      hasConflict: userId ? row.hasConflict === true : false,
     });
     seenPositionSlots.add(slotKey);
-    seenUsers.add(userId);
+    if (userId) {
+      seenUsers.add(userId);
+    }
   }
   return assignments.sort((left, right) => (
-    left.positionId.localeCompare(right.positionId) || left.slotIndex - right.slotIndex
+    (positionOrderById.get(left.positionId) ?? Number.MAX_SAFE_INTEGER)
+      - (positionOrderById.get(right.positionId) ?? Number.MAX_SAFE_INTEGER)
+    || left.slotIndex - right.slotIndex
   ));
 };
 
+export const completeMatchOfficialAssignmentSlots = (
+  assignments: MatchOfficialAssignment[],
+  officialPositions: EventOfficialPosition[],
+): MatchOfficialAssignment[] => {
+  const assignmentBySlot = new Map<string, MatchOfficialAssignment>();
+  for (const assignment of assignments) {
+    const key = `${assignment.positionId}:${assignment.slotIndex}`;
+    if (!assignmentBySlot.has(key)) {
+      assignmentBySlot.set(key, assignment);
+    }
+  }
+
+  const completed: MatchOfficialAssignment[] = [];
+  const orderedPositions = [...officialPositions].sort((left, right) => (
+    left.order - right.order
+    || left.name.localeCompare(right.name)
+    || left.id.localeCompare(right.id)
+  ));
+  for (const position of orderedPositions) {
+    for (let slotIndex = 0; slotIndex < position.count; slotIndex += 1) {
+      const existing = assignmentBySlot.get(`${position.id}:${slotIndex}`);
+      if (
+        existing?.userId
+        && (
+          existing.holderType === 'PLAYER'
+          || Boolean(existing.eventOfficialId)
+        )
+      ) {
+        completed.push({
+          positionId: position.id,
+          slotIndex,
+          holderType: existing.holderType,
+          userId: existing.userId,
+          eventOfficialId: existing.holderType === 'OFFICIAL'
+            ? existing.eventOfficialId
+            : null,
+          checkedIn: existing.checkedIn === true,
+          hasConflict: existing.hasConflict === true,
+        });
+      } else {
+        completed.push({
+          positionId: position.id,
+          slotIndex,
+          holderType: 'OFFICIAL',
+          userId: null,
+          eventOfficialId: null,
+          checkedIn: false,
+          hasConflict: false,
+        });
+      }
+    }
+  }
+  return completed;
+};
+
 export const deriveLegacyOfficialIdFromAssignments = (assignments: MatchOfficialAssignment[]): string | null => {
-  const primary = assignments.find((assignment) => assignment.holderType === 'OFFICIAL');
+  const primary = assignments.find((assignment) => (
+    assignment.holderType === 'OFFICIAL' && assignment.userId !== null
+  ));
   return primary?.userId ?? null;
 };
 
 export const deriveLegacyOfficialCheckedInFromAssignments = (assignments: MatchOfficialAssignment[]): boolean => {
-  const primary = assignments.find((assignment) => assignment.holderType === 'OFFICIAL');
+  const primary = assignments.find((assignment) => (
+    assignment.holderType === 'OFFICIAL' && assignment.userId !== null
+  ));
   return primary?.checkedIn === true;
 };
 

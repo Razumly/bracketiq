@@ -148,16 +148,19 @@ export default function useEventMatchOperations({
     const defaultEnd = formatLocalDateTime(new Date(now.getTime() + 60 * 60 * 1000));
     const nextMatchId = nextMatchSequenceNumber(activeMatches);
     const isTournamentEvent = String(activeEventType ?? '').toUpperCase() === 'TOURNAMENT';
-    const existingPlaceholderCount = activeMatches.reduce((count, match) => {
-      const team1Name = (match.team1 as { name?: string } | null)?.name ?? '';
-      const team2Name = (match.team2 as { name?: string } | null)?.name ?? '';
-      const nameBucket = [team1Name, team2Name].join(' ').toLowerCase();
-      return nameBucket.includes('place holder') ? count + 1 : count;
-    }, 0);
+    const existingPlaceholderIds = new Set(
+      activeMatches.flatMap((match) => [match.team1, match.team2])
+        .filter((team): team is Team => Boolean(
+          team
+          && String((team as { kind?: unknown }).kind ?? '').trim().toUpperCase() === 'PLACEHOLDER',
+        ))
+        .map((team) => team.$id),
+    );
     const placeholderTeam = isTournamentEvent
       ? ({
           $id: `${LOCAL_PLACEHOLDER_PREFIX}${clientId}`,
-          name: `Place Holder ${existingPlaceholderCount + 1}`,
+          name: `Place Holder ${existingPlaceholderIds.size + 1}`,
+          kind: 'PLACEHOLDER',
           division: normalizeIdToken(params.seed?.division as string | undefined) ?? undefined,
         } as unknown as Team)
       : undefined;

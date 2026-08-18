@@ -13,6 +13,8 @@ import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentUrl
 import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.resolveStaffingPriority
+import com.razumly.mvp.core.data.dataTypes.toLegacyOfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TimeSlotDTO
@@ -322,10 +324,12 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
         start,
     )
     val eventType = runCatching { EventType.valueOf(basics.eventType.trim().uppercase()) }.getOrDefault(EventType.EVENT)
-    val officialMode = runCatching { OfficialSchedulingMode.valueOf(staff.officialSchedulingMode.trim().uppercase()) }
-        .getOrDefault(OfficialSchedulingMode.SCHEDULE)
-    val checkInMode = runCatching { TeamCheckInMode.valueOf(staff.teamCheckInMode.trim().uppercase()) }
-        .getOrDefault(TeamCheckInMode.OFF)
+    val resolvedStaffingPriority = resolveStaffingPriority(
+        staffingPriority = staff.staffingPriority,
+        legacyOfficialSchedulingMode = null,
+    )
+    val officialMode = resolvedStaffingPriority.toLegacyOfficialSchedulingMode()
+    val effectiveDoTeamsOfficiate = staff.doTeamsOfficiate ?: false
     val regularDetails = competition.divisionDetails.map(EventEditorDivisionDetailDto::toDomain)
     val playoffDetails = competition.playoffDivisionDetails.map(EventEditorDivisionDetailDto::toDomain)
     val allDetails = regularDetails + playoffDetails
@@ -387,9 +391,11 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
         setDurationMinutes = competition.setDurationMinutes?.roundToInt(),
         setsPerMatch = competition.setsPerMatch,
         teamOfficialsMaySwap = staff.teamOfficialsMaySwap,
-        doTeamsOfficiate = officialMode == OfficialSchedulingMode.TEAM_STAFFING,
+        doTeamsOfficiate = effectiveDoTeamsOfficiate,
         officialSchedulingMode = officialMode,
-        teamCheckInMode = checkInMode,
+        teamCheckInMode = runCatching {
+            TeamCheckInMode.valueOf(staff.teamCheckInMode.trim().uppercase())
+        }.getOrDefault(TeamCheckInMode.OFF),
         teamCheckInOpenMinutesBefore = staff.teamCheckInOpenMinutesBefore,
         allowMatchRosterEdits = staff.allowMatchRosterEdits,
         allowTemporaryMatchPlayers = staff.allowTemporaryMatchPlayers,
@@ -397,6 +403,7 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
         restTimeMinutes = competition.restTimeMinutes?.roundToInt(),
         state = basics.state,
         pointsToVictory = competition.pointsToVictory,
+        staffingPriority = resolvedStaffingPriority,
         officialPositions = staff.officialPositions.map(EventEditorOfficialPositionDto::toDomain),
         eventOfficials = staff.eventOfficials.map { official -> official.toDomain(eventId) },
         officialIds = staff.officialIds,
@@ -783,10 +790,9 @@ private fun Event.toStaffDto(
     pendingStaffInvites: List<Invite>,
     pendingStaffInvitesChanged: Boolean,
 ): EventEditorStaffDto {
-    val schedulingModeChanged = officialSchedulingMode != baseline.officialSchedulingMode ||
-        doTeamsOfficiate != baseline.doTeamsOfficiate
     return existing.copy(
-        officialSchedulingMode = if (schedulingModeChanged) officialSchedulingMode.name else existing.officialSchedulingMode,
+        staffingPriority = staffingPriority.name,
+        doTeamsOfficiate = doTeamsOfficiate == true,
         teamOfficialsMaySwap = if (teamOfficialsMaySwap != baseline.teamOfficialsMaySwap) {
             teamOfficialsMaySwap == true
         } else {

@@ -2,7 +2,7 @@ import { legacyEventToEditorDraft } from '../editorContractAdapters';
 import {
   changeDivisionMode,
   changeEventType,
-  changeOfficialSchedulingMode,
+  changeStaffingPriority,
   changePoolPlay,
   changeRegistrationPaymentMode,
   changeScheduleMode,
@@ -63,9 +63,9 @@ describe('editor transitions', () => {
     expect(disabled.draft.registration.questions).toEqual([]);
     expect(disabled.confirmationFields).toEqual(['registration.questions']);
 
-    const teamStaffed = changeOfficialSchedulingMode(draft, 'TEAM_STAFFING').draft;
-    expect(teamStaffed.staff.officialSchedulingMode).toBe('TEAM_STAFFING');
-    expect('doTeamsOfficiate' in teamStaffed.staff).toBe(false);
+    const teamCoverage = changeStaffingPriority(draft, 'TEAM_COVERAGE_REQUIRED').draft;
+    expect(teamCoverage.staff.staffingPriority).toBe('TEAM_COVERAGE_REQUIRED');
+    expect(teamCoverage.staff.doTeamsOfficiate).toBe(draft.staff.doTeamsOfficiate);
 
     const multiple = changeDivisionMode(draft, false).draft;
     expect(multiple.participation.singleDivision).toBe(false);

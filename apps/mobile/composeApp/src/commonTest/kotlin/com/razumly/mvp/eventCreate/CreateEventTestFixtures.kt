@@ -408,7 +408,8 @@ internal fun createEventEditorSession(
             rentalBookingId = rentalBookingId,
         ),
         staff = EventEditorStaffDto(
-            officialSchedulingMode = event.officialSchedulingMode.name,
+            staffingPriority = event.staffingPriority.name,
+            doTeamsOfficiate = event.doTeamsOfficiate == true,
             teamOfficialsMaySwap = event.teamOfficialsMaySwap == true,
             teamCheckInMode = event.teamCheckInMode.name,
             teamCheckInOpenMinutesBefore = event.teamCheckInOpenMinutesBefore,

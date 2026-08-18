@@ -107,18 +107,19 @@ export const formatNotSpecifiedValue = (value: unknown): string => {
     return normalized.length ? normalized : 'Not specified';
 };
 
-export const formatOfficialSchedulingModeLabel = (value: Event['officialSchedulingMode']): string => {
+export const formatStaffingPriorityLabel = (value: Event['staffingPriority']): string => {
     switch (value) {
-        case 'STAFFING':
-            return 'Staffing first';
-        case 'TEAM_STAFFING':
-            return 'Team staffing';
-        case 'SCHEDULE':
-            return 'Schedule first';
-        case 'OFF':
-            return 'Ignore staffing conflicts';
+        case 'FULL_COVERAGE_REQUIRED':
+            return 'Full Coverage Required';
+        case 'TEAM_COVERAGE_REQUIRED':
+            return 'Team Coverage Required';
+        case 'OFFICIAL_COVERAGE_REQUIRED':
+            return 'Official Coverage Required';
+        case 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED':
+            return 'Full Coverage with Conflicts Allowed';
+        case 'BEST_AVAILABLE_COVERAGE':
         default:
-            return 'Schedule first';
+            return 'Best Available Coverage';
     }
 };
 

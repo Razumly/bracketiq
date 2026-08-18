@@ -42,7 +42,7 @@ const buildEventData = (overrides: Partial<EventFormValues> = {}): EventFormValu
     $id: 'event_1',
     name: 'Summer Event',
     eventType: 'EVENT',
-    officialSchedulingMode: 'SCHEDULE',
+    staffingPriority: 'BEST_AVAILABLE_COVERAGE',
     pendingStaffInvites: [],
     assistantHostIds: [],
     officialPositions: [],
@@ -175,11 +175,14 @@ describe('useEventFormSubmissionController', () => {
             'validate',
             'validatePendingStaffAssignments',
         ]);
-        expect(result.current.buildDraftEvent()).toEqual(expect.objectContaining({
+        const builtDraft = result.current.buildDraftEvent();
+        expect(builtDraft).toEqual(expect.objectContaining({
             $id: 'event_1',
             name: 'Summer Event',
             location: 'Previous Gym',
+            staffingPriority: 'BEST_AVAILABLE_COVERAGE',
         }));
+        expect(builtDraft).not.toHaveProperty('officialSchedulingMode');
         expect(mockedBuildEventDraft).toHaveBeenLastCalledWith(expect.objectContaining({
             previousEventFieldLocation: 'Previous Gym',
             source: result.current.formValues,
@@ -200,6 +203,9 @@ describe('useEventFormSubmissionController', () => {
                     id: VALID_QUESTION.id,
                     prompt: 'Emergency contact',
                 })],
+            }),
+            staff: expect.objectContaining({
+                staffingPriority: 'BEST_AVAILABLE_COVERAGE',
             }),
         }));
 
@@ -313,7 +319,7 @@ describe('useEventFormSubmissionController', () => {
         const warningSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
         const formRef = createRef<EventFormHandle>();
         const baseProps: HarnessProps = {
-            eventData: buildEventData({ officialSchedulingMode: 'STAFFING' }),
+            eventData: buildEventData({ staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED' }),
             formRef,
             officialStaffingCoverageError: 'Two officials are required.',
             trigger: jest.fn().mockResolvedValue(true),
@@ -325,7 +331,7 @@ describe('useEventFormSubmissionController', () => {
 
         await expect(formRef.current!.validate()).resolves.toBe(false);
         expect(formRef.current?.getValidationErrors()).toEqual([{
-            path: 'officialSchedulingMode',
+            path: 'staffingPriority',
             message: 'Two officials are required.',
         }]);
 

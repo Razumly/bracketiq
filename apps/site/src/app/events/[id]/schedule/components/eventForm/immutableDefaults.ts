@@ -17,6 +17,11 @@ import type {
     Sport,
     TimeSlot,
 } from '@/types';
+import {
+    isStaffingPriority,
+    normalizeOfficialSchedulingMode,
+    normalizeStaffingPriority,
+} from '@/server/officials/config';
 
 import { sanitizeFieldsForForm } from './fieldDefaults';
 import {
@@ -36,7 +41,6 @@ import {
     getEventOfficialUserIds,
     normalizeEventOfficialPositions,
     normalizeEventOfficials,
-    normalizeOfficialSchedulingMode,
 } from './officials';
 import { sanitizeMatchRulesOverrideForEditor } from './matchRulesHelpers';
 import {
@@ -151,11 +155,9 @@ export const applyImmutableEventDefaults = ({
     if (typeof defaults.registrationByDivisionType === 'boolean') {
         next.registrationByDivisionType = defaults.registrationByDivisionType;
     }
-    if (typeof (defaults as any).doTeamsOfficiate === 'boolean') {
-        next.doTeamsOfficiate = Boolean((defaults as any).doTeamsOfficiate);
-    }
-    if (typeof (defaults as any).teamOfficialsMaySwap === 'boolean') {
-        next.teamOfficialsMaySwap = next.doTeamsOfficiate ? Boolean((defaults as any).teamOfficialsMaySwap) : false;
+    const hasExplicitTeamOfficiatingDefault = typeof defaults.doTeamsOfficiate === 'boolean';
+    if (hasExplicitTeamOfficiatingDefault) {
+        next.doTeamsOfficiate = Boolean(defaults.doTeamsOfficiate);
     }
     if (typeof (defaults as any).teamCheckInMode === 'string') {
         const normalized = (defaults as any).teamCheckInMode.trim().toUpperCase();
@@ -182,11 +184,28 @@ export const applyImmutableEventDefaults = ({
     if (typeof (defaults as any).autoCreatePointMatchIncidents === 'boolean') {
         next.autoCreatePointMatchIncidents = Boolean((defaults as any).autoCreatePointMatchIncidents);
     }
-    if ((defaults as any).officialSchedulingMode !== undefined) {
-        next.officialSchedulingMode = normalizeOfficialSchedulingMode((defaults as any).officialSchedulingMode);
-        if (next.officialSchedulingMode === 'TEAM_STAFFING') {
-            next.doTeamsOfficiate = true;
-        }
+    const explicitStaffingPriority = typeof defaults.staffingPriority === 'string'
+        ? defaults.staffingPriority.trim().toUpperCase()
+        : null;
+    const hasExplicitStaffingPriority = isStaffingPriority(explicitStaffingPriority);
+    const hasLegacyOfficialSchedulingMode = defaults.officialSchedulingMode !== undefined;
+    if (hasExplicitStaffingPriority || hasLegacyOfficialSchedulingMode) {
+        next.staffingPriority = normalizeStaffingPriority(
+            explicitStaffingPriority,
+            defaults.officialSchedulingMode,
+        );
+    }
+    if (
+        !hasExplicitStaffingPriority
+        && hasLegacyOfficialSchedulingMode
+        && normalizeOfficialSchedulingMode(defaults.officialSchedulingMode) === 'TEAM_STAFFING'
+    ) {
+        next.doTeamsOfficiate = true;
+    }
+    if (typeof defaults.teamOfficialsMaySwap === 'boolean') {
+        next.teamOfficialsMaySwap = next.doTeamsOfficiate
+            ? Boolean(defaults.teamOfficialsMaySwap)
+            : false;
     }
     if (Array.isArray((defaults as any).officialPositions)) {
         next.officialPositions = normalizeEventOfficialPositions((defaults as any).officialPositions);

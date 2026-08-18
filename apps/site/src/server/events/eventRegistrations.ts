@@ -7,7 +7,6 @@ import {
   type WeeklyOccurrenceInput,
 } from '@/server/events/weeklyOccurrences';
 import { isTournamentPoolPlayEnabled } from '@/server/events/tournamentPools';
-import { syncEventPhaseParticipantsFromEntryDivisions } from '@/server/repositories/eventDivisionPhases';
 import { withDerivedCanonicalTeamIds } from '@/server/teams/teamMembership';
 import { acquireEventLock } from '@/server/repositories/locks';
 
@@ -307,18 +306,9 @@ const isRegisteredParticipant = (row: RegistrationRow): boolean => (
   && isRegisteredLifecycleStatus(row.status)
 );
 
-const isPlaceholderTeamRow = (row?: { kind?: unknown; captainId?: unknown; parentTeamId?: unknown } | null): boolean => {
-  if (!row) {
-    return false;
-  }
-  const kind = String(row.kind ?? '').trim().toUpperCase();
-  if (kind === 'PLACEHOLDER') {
-    return true;
-  }
-  const hasSlotShape = Object.prototype.hasOwnProperty.call(row, 'captainId')
-    || Object.prototype.hasOwnProperty.call(row, 'parentTeamId');
-  return hasSlotShape && !normalizeId(row.captainId) && !normalizeId(row.parentTeamId);
-};
+const isPlaceholderTeamRow = (row?: { kind?: unknown } | null): boolean => (
+  String(row?.kind ?? '').trim().toUpperCase() === 'PLACEHOLDER'
+);
 
 const normalizeIdKey = (value: unknown): string | null => normalizeId(value)?.toLowerCase() ?? null;
 
@@ -811,11 +801,6 @@ export const syncDivisionTeamMembershipFromRegistrations = async (
       });
     }),
   );
-  await syncEventPhaseParticipantsFromEntryDivisions({
-    client: client as any,
-    eventId: event.id,
-  });
-
   return activeTeamIds;
 };
 

@@ -1320,8 +1320,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
             Boolean(
               eventData.officialIds?.length ||
                 eventData.eventOfficials?.length ||
-                eventData.officialPositions?.length ||
-                eventData.doTeamsOfficiate ||
                 eventData.pendingStaffInvites?.some((invite) =>
                   invite.roles.includes("OFFICIAL"),
                 ),
@@ -1435,22 +1433,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
             shouldDirty: true,
             shouldValidate: true,
           });
-          setValue("officialSchedulingMode", "OFF", {
-            shouldDirty: true,
-            shouldValidate: true,
-          });
-          setValue("doTeamsOfficiate", false, {
-            shouldDirty: true,
-            shouldValidate: true,
-          });
-          setValue("teamOfficialsMaySwap", false, {
-            shouldDirty: true,
-            shouldValidate: true,
-          });
-          setValue("officialPositions", [], {
-            shouldDirty: true,
-            shouldValidate: true,
-          });
           setValue(
             "pendingStaffInvites",
             (eventData.pendingStaffInvites ?? []).flatMap((invite) => {
@@ -1459,12 +1441,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
             }),
             { shouldDirty: true, shouldValidate: true },
           );
-        }
-        if (resolvedUpdates.useCustomOfficialPositions === false) {
-          setValue("officialPositions", [], {
-            shouldDirty: true,
-            shouldValidate: true,
-          });
         }
         if (
           resolvedUpdates.useTeamCheckInAndRosterOperations === true &&

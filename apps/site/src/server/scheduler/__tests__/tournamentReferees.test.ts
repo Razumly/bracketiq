@@ -70,6 +70,7 @@ const buildTournament = (overrides: Partial<ConstructorParameters<typeof Tournam
     timeSlots: overrides.timeSlots ?? [],
     officials: overrides.officials ?? [],
     doTeamsOfficiate: overrides.doTeamsOfficiate ?? true,
+    staffingPriority: overrides.staffingPriority,
     doubleElimination: overrides.doubleElimination ?? false,
     winnerSetCount: overrides.winnerSetCount ?? 2,
     loserSetCount: overrides.loserSetCount ?? 1,
@@ -104,7 +105,7 @@ describe('tournament scheduling (officials)', () => {
     }
   });
 
-  it('assigns team officials based on results for future matches (single elimination)', () => {
+  it('advances results without selecting a Team-duty replacement outside explicit reflow', () => {
     const division = buildDivision();
     const teams = buildTeams(4, division);
 
@@ -131,8 +132,7 @@ describe('tournament scheduling (officials)', () => {
     const semis = matches.filter((match) => match.winnerNextMatch && match.winnerNextMatch === final);
     expect(semis).toHaveLength(2);
 
-    // Team officials are only assigned when both teams are known.
-    expect(final?.teamOfficial ?? null).toBeNull();
+    const plannedTeamOfficial = final?.teamOfficial ?? null;
 
     const semi = semis[0];
     expect(semi.team1).toBeTruthy();
@@ -147,11 +147,10 @@ describe('tournament scheduling (officials)', () => {
     semi.team2Points = [10, 10];
 
     const winner = semi.team1 as Team;
-    const loser = semi.team2 as Team;
     finalizeMatch(tournament, semi, context, new Date(semi.end));
 
     expect(final?.team1 === winner || final?.team2 === winner).toBe(true);
-    expect(final?.teamOfficial?.id).toBe(loser.id);
+    expect(final?.teamOfficial ?? null).toBe(plannedTeamOfficial);
   });
 
   it('advances a confirmed result without rebuilding the existing bracket schedule', () => {
@@ -309,6 +308,7 @@ describe('tournament scheduling (officials)', () => {
       officials: [],
       doTeamsOfficiate: true,
       doubleElimination: false,
+      staffingPriority: 'TEAM_COVERAGE_REQUIRED',
     });
 
     scheduleEvent({ event: tournament }, context);

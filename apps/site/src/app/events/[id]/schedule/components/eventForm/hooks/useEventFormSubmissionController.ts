@@ -202,7 +202,7 @@ export const useEventFormSubmissionController = ({
         ...(!isAffiliateEvent && officialStaffingCoverageError
           ? [
               {
-                path: "officialSchedulingMode",
+                path: "staffingPriority",
                 message: officialStaffingCoverageError,
               },
             ]
@@ -239,7 +239,7 @@ export const useEventFormSubmissionController = ({
         lastValidationErrorsRef.current = flattenedErrors;
         const hasStaffingCoverageError = flattenedErrors.some(
           (error) =>
-            error.path === "officialSchedulingMode" &&
+            error.path === "staffingPriority" &&
             error.message === officialStaffingCoverageError,
         );
         onValidationResult?.(
@@ -252,7 +252,7 @@ export const useEventFormSubmissionController = ({
             {
               requiredOfficialSlotsPerMatch,
               assignedActiveOfficialsForStaffing,
-              mode: capturedConfiguration.draft.staff.officialSchedulingMode,
+              priority: capturedConfiguration.draft.staff.staffingPriority,
             },
           );
         } else {

@@ -1,11 +1,25 @@
-import { Division, League, Match, PlayingField, Team, TimeSlot, Tournament, UserData, usesTeamOfficialScheduling } from './types';
-
+import { resolveDivisionCompetitionPhase } from '@/lib/divisionPhaseSettings';
+import { Division, League, Match, PlayingField, Team, TimeSlot, Tournament, UserData } from './types';
+import {
+  LEGACY_OFFICIAL_SCHEDULING_MODE_BY_PRIORITY,
+  type EventOfficialPosition,
+  type MatchOfficialAssignment,
+} from '@/server/officials/config';
 const serializeDivision = (division: Division) => ({
   id: division.id,
   name: division.name,
   kind: division.kind,
   role: division.role,
   phase: division.phase,
+  phaseSettings: Object.fromEntries(
+    Object.entries(division.phaseSettings ?? {}).map(([phase, settings]) => [
+      phase,
+      {
+        ...settings,
+        officialPositions: settings.officialPositions?.map((position) => ({ ...position })),
+      },
+    ]),
+  ),
   teamIds: [...(division.teamIds ?? [])],
   playoffTeamCount: division.playoffTeamCount,
   playoffPlacementDivisionIds: [...(division.playoffPlacementDivisionIds ?? [])],
@@ -33,6 +47,7 @@ const serializeTeam = (team: Team) => ({
   id: team.id,
   captainId: team.captainId,
   division: team.division?.id ?? team.division,
+  kind: team.kind ?? null,
   name: team.name,
   playerIds: team.playerIds ?? [],
   players: (team.players ?? []).map((player) => ({
@@ -94,8 +109,90 @@ const serializeUser = (user: UserData) => ({
 const withoutDollarPrefixedFields = <T extends Record<string, unknown>>(row: T): Omit<T, `$${string}`> => (
   Object.fromEntries(Object.entries(row).filter(([key]) => !key.startsWith('$'))) as Omit<T, `$${string}`>
 );
+const completeCanonicalOfficialSlots = (
+  assignments: MatchOfficialAssignment[],
+  officialPositions: EventOfficialPosition[],
+): MatchOfficialAssignment[] => {
+  const assignmentBySlot = new Map(
+    assignments.map((assignment) => [
+      `${assignment.positionId}:${assignment.slotIndex}`,
+      assignment,
+    ]),
+  );
+  return [...officialPositions]
+    .sort((left, right) => (
+      left.order - right.order
+      || left.name.localeCompare(right.name)
+      || left.id.localeCompare(right.id)
+    ))
+    .flatMap((position) => (
+      Array.from({ length: position.count }, (_, slotIndex) => {
+        const assignment = assignmentBySlot.get(`${position.id}:${slotIndex}`);
+        if (!assignment?.userId) {
+          return {
+            positionId: position.id,
+            slotIndex,
+            holderType: 'OFFICIAL' as const,
+            userId: null,
+            eventOfficialId: null,
+            checkedIn: false,
+            hasConflict: false,
+          };
+        }
+        return {
+          positionId: position.id,
+          slotIndex,
+          holderType: assignment.holderType,
+          userId: assignment.userId,
+          eventOfficialId: assignment.eventOfficialId ?? null,
+          checkedIn: assignment.checkedIn === true,
+          hasConflict: assignment.hasConflict === true,
+        };
+      })
+    ));
+};
+const officialPositionsForMatch = (
+  match: Match,
+  fallback: EventOfficialPosition[] | undefined,
+  eventType?: string,
+): EventOfficialPosition[] | undefined => {
+  const phase = match.division.phase ?? resolveDivisionCompetitionPhase({
+    eventType,
+    divisionKind: match.division.kind,
+    hasBracketLinks: match.getDependencies().length > 0 || match.getDependants().length > 0,
+  });
+  return match.division.phaseSettings?.[phase]?.officialPositions ?? fallback;
+};
 
-const serializeMatch = (match: Match) => ({
+
+
+const serializeMatch = (
+  match: Match,
+  officialPositions?: EventOfficialPosition[],
+  eventType?: string,
+) => {
+  const canonicalOfficialPositions = officialPositionsForMatch(
+    match,
+    officialPositions,
+    eventType,
+  );
+  const officialAssignments = (
+    canonicalOfficialPositions
+      ? completeCanonicalOfficialSlots(
+          match.officialAssignments ?? [],
+          canonicalOfficialPositions,
+        )
+      : (match.officialAssignments ?? [])
+  ).map((assignment) => ({
+    positionId: assignment.positionId,
+    slotIndex: assignment.slotIndex,
+    holderType: assignment.holderType,
+    userId: assignment.userId ?? null,
+    eventOfficialId: assignment.eventOfficialId ?? null,
+    checkedIn: assignment.checkedIn === true,
+    hasConflict: assignment.hasConflict === true,
+  }));
+  return {
   id: match.id,
   matchId: match.matchId ?? null,
   eventId: match.eventId,
@@ -120,8 +217,8 @@ const serializeMatch = (match: Match) => ({
   resolvedMatchRules: match.resolvedMatchRules ?? null,
   segments: (match.segments ?? []).map((segment) => withoutDollarPrefixedFields({ ...segment })),
   incidents: (match.incidents ?? []).map((incident) => withoutDollarPrefixedFields({ ...incident })),
-  officialId: match.official?.id ?? null,
-  officialIds: (match.officialAssignments ?? []).map((assignment) => ({ ...assignment })),
+  officialIds: officialAssignments.filter((assignment) => assignment.userId !== null),
+  officialAssignments,
   teamOfficialId: match.teamOfficial?.id ?? null,
   teamOfficialSeed: null,
   team1Points: match.team1Points ?? [],
@@ -138,7 +235,8 @@ const serializeMatch = (match: Match) => ({
   teamOfficial: match.teamOfficial ? serializeTeam(match.teamOfficial) : null,
   official: match.official ? serializeUser(match.official) : null,
   field: match.field ? serializeField(match.field) : null,
-});
+};
+};
 
 const serializeEventBase = (event: Tournament | League) => ({
   id: event.id,
@@ -149,8 +247,8 @@ const serializeEventBase = (event: Tournament | League) => ({
   location: event.location,
   coordinates: event.coordinates ?? null,
   price: event.price ?? null,
-  minAge: null,
-  maxAge: null,
+  minAge: event.minAge ?? null,
+  maxAge: event.maxAge ?? null,
   rating: event.rating ?? null,
   imageId: event.imageId,
   hostId: event.hostId,
@@ -172,7 +270,8 @@ const serializeEventBase = (event: Tournament | League) => ({
   fieldIds: Object.keys(event.fields),
   timeSlotIds: event.timeSlots.map((slot) => slot.id),
   officialIds: event.officials.map((official) => official.id),
-  officialSchedulingMode: event.officialSchedulingMode,
+  officialSchedulingMode: LEGACY_OFFICIAL_SCHEDULING_MODE_BY_PRIORITY[event.staffingPriority],
+  staffingPriority: event.staffingPriority,
   officialPositions: (event.officialPositions ?? []).map((position) => ({ ...position })),
   eventOfficials: (event.eventOfficials ?? []).map((official) => ({
     ...official,
@@ -222,13 +321,15 @@ const serializeTournamentExtras = (event: Tournament) => ({
     }
     return event.fieldCount ?? null;
   })(),
-  matches: Object.values(event.matches).map(serializeMatch),
+  matches: Object.values(event.matches).map((match) =>
+    serializeMatch(match, event.officialPositions, event.eventType),
+  ),
   usesSets: event.usesSets ?? false,
   matchDurationMinutes: event.matchDurationMinutes ?? null,
   setDurationMinutes: event.setDurationMinutes ?? null,
   setsPerMatch: event.setsPerMatch ?? null,
-  doTeamsOfficiate: usesTeamOfficialScheduling(event),
-  teamOfficialsMaySwap: usesTeamOfficialScheduling(event) ? event.teamOfficialsMaySwap ?? false : false,
+  doTeamsOfficiate: event.doTeamsOfficiate === true,
+  teamOfficialsMaySwap: event.doTeamsOfficiate === true ? event.teamOfficialsMaySwap ?? false : false,
   teamCheckInMode: event.teamSignup ? event.teamCheckInMode ?? 'OFF' : 'OFF',
   teamCheckInOpenMinutesBefore: event.teamCheckInOpenMinutesBefore ?? 60,
   allowMatchRosterEdits: event.teamSignup ? event.allowMatchRosterEdits ?? false : false,
@@ -251,4 +352,7 @@ export const serializeEvent = (event: Tournament | League) => {
   return { ...base, ...tournamentExtras, ...leagueExtras };
 };
 
-export const serializeMatches = (matches: Match[]) => matches.map(serializeMatch);
+export const serializeMatches = (
+  matches: Match[],
+  officialPositions?: EventOfficialPosition[],
+) => matches.map((match) => serializeMatch(match, officialPositions));

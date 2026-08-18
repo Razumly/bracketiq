@@ -1257,6 +1257,24 @@ val MIGRATION_96_97_FIELD_SPORT_IDS = migration(
         "ALTER TABLE `Field` ADD COLUMN `sportIds` TEXT NOT NULL DEFAULT '[]'",
     ),
 )
+val MIGRATION_97_98_CANONICAL_STAFFING_PRIORITY = migration(
+    97,
+    98,
+    listOf(
+        "ALTER TABLE `Event` ADD COLUMN `staffingPriority` TEXT NOT NULL DEFAULT 'BEST_AVAILABLE_COVERAGE'",
+        """
+            UPDATE `Event`
+            SET `staffingPriority` = CASE UPPER(TRIM(`officialSchedulingMode`))
+                WHEN 'STAFFING' THEN 'OFFICIAL_COVERAGE_REQUIRED'
+                WHEN 'TEAM_STAFFING' THEN 'TEAM_COVERAGE_REQUIRED'
+                WHEN 'SCHEDULE' THEN 'BEST_AVAILABLE_COVERAGE'
+                WHEN 'OFF' THEN 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED'
+                ELSE 'BEST_AVAILABLE_COVERAGE'
+            END
+        """.trimIndent(),
+    ),
+)
+
 
 val MVP_DATABASE_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_3_4_OFFICIAL_TERMINOLOGY_AND_PRIVACY,
@@ -1273,4 +1291,5 @@ val MVP_DATABASE_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_94_95_DROP_EVENT_SPORT_ID,
     MIGRATION_95_96_DROP_MATCH_SET_RESULTS,
     MIGRATION_96_97_FIELD_SPORT_IDS,
+    MIGRATION_97_98_CANONICAL_STAFFING_PRIORITY,
 )

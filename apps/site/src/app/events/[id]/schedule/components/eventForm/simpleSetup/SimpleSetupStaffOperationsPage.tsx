@@ -2,7 +2,7 @@
 
 import { Stack, Text, Title } from '@mantine/core';
 
-import { normalizeOfficialSchedulingMode } from '../officials';
+import { normalizeStaffingPriority } from '@/server/officials/config';
 import type { EventFormSectionsProps } from '../sections/EventFormSections';
 import { StaffManagementPanel } from '../sections/StaffManagementPanel';
 import type { EventSetupChoices } from './types';
@@ -124,26 +124,13 @@ export const SimpleSetupStaffOperationsPage = ({
                             shouldDirty: true,
                             shouldValidate: true,
                         });
-                        if (eventData.officialSchedulingMode === 'TEAM_STAFFING') {
-                            setValue('officialSchedulingMode', 'SCHEDULE', {
-                                shouldDirty: true,
-                                shouldValidate: true,
-                            });
-                        }
                     }
                 }}
-                onSchedulingModeChange={(value) => {
-                    const nextMode = normalizeOfficialSchedulingMode(value);
-                    setValue('officialSchedulingMode', nextMode, {
+                onStaffingPriorityChange={(value) => {
+                    setValue('staffingPriority', normalizeStaffingPriority(value), {
                         shouldDirty: true,
                         shouldValidate: true,
                     });
-                    if (nextMode === 'TEAM_STAFFING' && !eventData.doTeamsOfficiate) {
-                        setValue('doTeamsOfficiate', true, {
-                            shouldDirty: true,
-                            shouldValidate: true,
-                        });
-                    }
                 }}
                 onLoadSportDefaults={handleResetOfficialPositionsFromSport}
                 onAddPosition={handleAddOfficialPosition}

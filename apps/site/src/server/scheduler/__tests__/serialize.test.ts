@@ -1,5 +1,5 @@
-import { serializeMatches } from '../serialize';
-import { Division, Match, Team, UserData } from '../types';
+import { serializeEvent, serializeMatches } from '../serialize';
+import { Division, Match, Team, Tournament, UserData } from '../types';
 
 describe('scheduler API serialization', () => {
   it('includes roster players and registrations for match scoring dialogs', () => {
@@ -86,4 +86,235 @@ describe('scheduler API serialization', () => {
     expect(serialized.incidents[0]).toEqual(expect.objectContaining({ id: 'incident_1' }));
     expect(serialized.incidents[0]).not.toHaveProperty('$id');
   });
+
+  it('serializes every named assignment slot with stable nullable official identities', () => {
+    const division = new Division('open', 'Open');
+    const match = new Match({
+      id: 'match_staffing',
+      matchId: 2,
+      start: new Date('2026-03-01T12:00:00.000Z'),
+      end: new Date('2026-03-01T13:00:00.000Z'),
+      division,
+      team1: null,
+      team2: null,
+      team1Points: [],
+      team2Points: [],
+      bufferMs: 0,
+      eventId: 'event_1',
+    });
+    match.officialAssignments = [{
+      positionId: 'r1',
+      slotIndex: 0,
+      holderType: 'OFFICIAL',
+      userId: 'official_1',
+      eventOfficialId: 'event_official_1',
+      checkedIn: true,
+      hasConflict: false,
+    }];
+
+    const [serialized] = serializeMatches([match], [
+      { id: 'r1', name: 'R1', count: 1, order: 0 },
+      { id: 'line_judge', name: 'Line Judge', count: 2, order: 1 },
+    ]);
+
+    expect(serialized.officialIds).toEqual([
+      {
+        positionId: 'r1',
+        slotIndex: 0,
+        holderType: 'OFFICIAL',
+        userId: 'official_1',
+        eventOfficialId: 'event_official_1',
+        checkedIn: true,
+        hasConflict: false,
+      },
+    ]);
+    expect(serialized.officialAssignments).toEqual([
+      {
+        positionId: 'r1',
+        slotIndex: 0,
+        holderType: 'OFFICIAL',
+        userId: 'official_1',
+        eventOfficialId: 'event_official_1',
+        checkedIn: true,
+        hasConflict: false,
+      },
+      {
+        positionId: 'line_judge',
+        slotIndex: 0,
+        holderType: 'OFFICIAL',
+        userId: null,
+        eventOfficialId: null,
+        checkedIn: false,
+        hasConflict: false,
+      },
+      {
+        positionId: 'line_judge',
+        slotIndex: 1,
+        holderType: 'OFFICIAL',
+        userId: null,
+        eventOfficialId: null,
+        checkedIn: false,
+        hasConflict: false,
+      },
+    ]);
+  });
+
+  it('preserves placeholder identity and bound PLAYER holders in canonical slots', () => {
+    const division = new Division('open', 'Open');
+    const placeholder = new Team({
+      id: 'event_team_slot_1',
+      captainId: '',
+      kind: 'PLACEHOLDER',
+      division,
+    });
+    const officialPositions = [
+      { id: 'line_judge', name: 'Line Judge', count: 2, order: 0 },
+    ];
+    const match = new Match({
+      id: 'match_stable_slots',
+      start: new Date('2026-03-01T10:00:00.000Z'),
+      end: new Date('2026-03-01T11:00:00.000Z'),
+      division,
+      team1: placeholder,
+      bufferMs: 0,
+      eventId: 'event_stable_slots',
+      officialAssignments: [{
+        positionId: 'line_judge',
+        slotIndex: 1,
+        holderType: 'PLAYER',
+        userId: 'player_1',
+        eventOfficialId: null,
+        checkedIn: true,
+        hasConflict: true,
+      }],
+    });
+    const event = new Tournament({
+      id: 'event_stable_slots',
+      name: 'Stable slots',
+      start: new Date('2026-03-01T09:00:00.000Z'),
+      end: new Date('2026-03-01T12:00:00.000Z'),
+      maxParticipants: 2,
+      teamSignup: true,
+      eventType: 'TOURNAMENT',
+      registeredTeamIds: [placeholder.id],
+      teams: { [placeholder.id]: placeholder },
+      divisions: [division],
+      matches: { [match.id]: match },
+      officialPositions,
+    });
+
+    const serialized = serializeEvent(event);
+
+    expect(serialized.teams).toEqual([
+      expect.objectContaining({ id: placeholder.id, kind: 'PLACEHOLDER' }),
+    ]);
+    expect(serialized.teamIds).toEqual([placeholder.id]);
+    expect(serialized.matches[0]?.officialIds).toEqual([
+      expect.objectContaining({
+        positionId: 'line_judge',
+        slotIndex: 1,
+        holderType: 'PLAYER',
+        userId: 'player_1',
+        eventOfficialId: null,
+        checkedIn: true,
+        hasConflict: true,
+      }),
+    ]);
+    expect(serialized.matches[0]?.officialAssignments).toEqual([
+      expect.objectContaining({
+        positionId: 'line_judge',
+        slotIndex: 0,
+        holderType: 'OFFICIAL',
+        userId: null,
+        eventOfficialId: null,
+        checkedIn: false,
+        hasConflict: false,
+      }),
+      expect.objectContaining({
+        positionId: 'line_judge',
+        slotIndex: 1,
+        holderType: 'PLAYER',
+        userId: 'player_1',
+        eventOfficialId: null,
+        checkedIn: true,
+        hasConflict: true,
+      }),
+    ]);
+  });
+
+  it('serializes phase-owned named official slots instead of event defaults', () => {
+    const division = new Division('league', 'League');
+    division.phase = 'LEAGUE';
+    division.phaseSettings = {
+      LEAGUE: {
+        officialPositions: [
+          { id: 'phase_referee', name: 'Phase Referee', count: 1, order: 0 },
+        ],
+      },
+    };
+    const match = new Match({
+      id: 'match_phase_slots',
+      start: new Date('2026-03-01T10:00:00.000Z'),
+      end: new Date('2026-03-01T11:00:00.000Z'),
+      division,
+      eventId: 'event_phase_slots',
+      officialAssignments: [{
+        positionId: 'phase_referee',
+        slotIndex: 0,
+        holderType: 'OFFICIAL',
+        userId: 'official_1',
+        eventOfficialId: 'event_official_1',
+        checkedIn: false,
+        hasConflict: false,
+      }],
+    });
+    const event = new Tournament({
+      id: 'event_phase_slots',
+      name: 'Phase slots',
+      start: new Date('2026-03-01T09:00:00.000Z'),
+      end: new Date('2026-03-01T12:00:00.000Z'),
+      maxParticipants: 2,
+      teamSignup: true,
+      eventType: 'TOURNAMENT',
+      divisions: [division],
+      matches: { [match.id]: match },
+      officialPositions: [
+        { id: 'event_referee', name: 'Event Referee', count: 1, order: 0 },
+      ],
+    });
+
+    const serialized = serializeEvent(event);
+
+    expect(serialized.matches[0]?.officialIds).toEqual([
+      expect.objectContaining({
+        positionId: 'phase_referee',
+        userId: 'official_1',
+      }),
+    ]);
+  });
+
+  it('keeps canonical Team-duty policy independent from a stale legacy staffing mode', () => {
+    const event = new Tournament({
+      id: 'event_canonical_staffing',
+      name: 'Canonical staffing',
+      start: new Date('2026-03-01T09:00:00.000Z'),
+      end: new Date('2026-03-01T12:00:00.000Z'),
+      maxParticipants: 2,
+      teamSignup: true,
+      eventType: 'TOURNAMENT',
+      officialSchedulingMode: 'TEAM_STAFFING',
+      staffingPriority: 'BEST_AVAILABLE_COVERAGE',
+      doTeamsOfficiate: false,
+      teamOfficialsMaySwap: true,
+    });
+
+    const serialized = serializeEvent(event);
+
+    expect(event.doTeamsOfficiate).toBe(false);
+    expect(serialized.staffingPriority).toBe('BEST_AVAILABLE_COVERAGE');
+    expect(serialized.officialSchedulingMode).toBe('SCHEDULE');
+    expect(serialized.doTeamsOfficiate).toBe(false);
+    expect(serialized.teamOfficialsMaySwap).toBe(false);
+  });
+
 });

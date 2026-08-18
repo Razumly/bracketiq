@@ -54,11 +54,21 @@ const prismaMock = {
   $transaction: jest.fn(),
 };
 const acquireEventLockAndLoadStructureMock = jest.fn();
+const claimOrCreateEventTeamSnapshotMock = jest.fn();
+const syncDivisionTeamMembershipFromRegistrationsMock = jest.fn();
 jest.mock('@/server/events/eventRegistrations', () => {
   const actual = jest.requireActual('@/server/events/eventRegistrations');
   return {
     ...actual,
     acquireEventLockAndLoadStructure: (...args: any[]) => acquireEventLockAndLoadStructureMock(...args),
+    syncDivisionTeamMembershipFromRegistrations: (...args: unknown[]) => syncDivisionTeamMembershipFromRegistrationsMock(...args),
+  };
+});
+jest.mock('@/server/teams/teamMembership', () => {
+  const actual = jest.requireActual('@/server/teams/teamMembership');
+  return {
+    ...actual,
+    claimOrCreateEventTeamSnapshot: (...args: unknown[]) => claimOrCreateEventTeamSnapshotMock(...args),
   };
 });
 
@@ -150,6 +160,8 @@ describe('POST /api/billing/webhook', () => {
         }
         : null;
     });
+    claimOrCreateEventTeamSnapshotMock.mockResolvedValue({ id: 'slot_pool_a_2' });
+    syncDivisionTeamMembershipFromRegistrationsMock.mockResolvedValue(undefined);
     sendPurchaseReceiptEmailMock.mockResolvedValue({ sent: true });
     sendPaymentFailureEmailMock.mockResolvedValue({ sent: true });
     delete process.env.STRIPE_SECRET_KEY;
@@ -583,12 +595,37 @@ describe('POST /api/billing/webhook', () => {
     expect(sendPurchaseReceiptEmailMock).toHaveBeenCalledTimes(1);
   });
 
-  it('activates an existing paid team tournament reservation from the payment webhook', async () => {
+  it('claims the specifically reserved Placeholder Team and synchronizes Entry and Phase membership on paid ACTIVE acceptance', async () => {
     prismaMock.billPayments.findFirst
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null);
     prismaMock.bills.create.mockResolvedValueOnce({ id: 'bill_tournament_1' });
     prismaMock.billPayments.create.mockResolvedValueOnce({ id: 'bill_payment_tournament_1' });
+    const reservation = {
+      id: 'event_1__team__slot_pool_a_2',
+      status: 'STARTED',
+      registrantId: 'slot_pool_a_2',
+      eventTeamId: 'slot_pool_a_2',
+      parentId: 'canonical_team_1',
+      divisionId: 'entry_open',
+      divisionTypeId: 'open',
+      divisionTypeKey: 'c_skill_open',
+    };
+    type EventTeamState = {
+      id: string;
+      kind: string;
+      parentTeamId: string | null;
+      division: string;
+      seed: number;
+    };
+    const eventTeams: EventTeamState[] = [
+      { id: 'slot_pool_a_1', kind: 'PLACEHOLDER', parentTeamId: null, division: 'pool_a', seed: 1 },
+      { id: 'slot_pool_a_2', kind: 'PLACEHOLDER', parentTeamId: null, division: 'pool_a', seed: 2 },
+    ];
+    const divisionMembership: { entryOpen: string[]; poolA: string[] } = {
+      entryOpen: [],
+      poolA: [],
+    };
     prismaMock.$queryRaw.mockResolvedValueOnce([
       {
         id: 'event_1',
@@ -596,7 +633,30 @@ describe('POST /api/billing/webhook', () => {
         teamSignup: true,
       },
     ]);
-    prismaMock.eventRegistrations.findUnique.mockResolvedValueOnce({ status: 'STARTED' });
+    prismaMock.eventRegistrations.findUnique.mockResolvedValueOnce(reservation);
+    prismaMock.eventRegistrations.update.mockImplementationOnce(async ({ data }: {
+      data: { status?: string };
+    }) => {
+      if (data.status) reservation.status = data.status;
+      return reservation;
+    });
+    claimOrCreateEventTeamSnapshotMock.mockImplementationOnce(async ({
+      eventTeamId,
+      canonicalTeamId,
+    }: {
+      eventTeamId: string;
+      canonicalTeamId: string;
+    }) => {
+      const reservedTeam = eventTeams.find((team) => team.id === eventTeamId);
+      if (!reservedTeam) throw new Error('Reserved Placeholder Team not found.');
+      reservedTeam.kind = 'REGISTERED';
+      reservedTeam.parentTeamId = canonicalTeamId;
+      return reservedTeam;
+    });
+    syncDivisionTeamMembershipFromRegistrationsMock.mockImplementationOnce(async () => {
+      divisionMembership.entryOpen = ['slot_pool_a_2'];
+      divisionMembership.poolA = ['slot_pool_a_2'];
+    });
 
     const response = await POST(
       jsonPost(buildPaymentIntentSucceededEvent({
@@ -604,9 +664,13 @@ describe('POST /api/billing/webhook', () => {
         metadata: {
           purchase_type: 'event',
           user_id: 'user_1',
-          team_id: 'event_team_1',
+          team_id: 'slot_pool_a_2',
+          event_registration_parent_id: 'canonical_team_1',
           event_id: 'event_1',
-          registration_id: 'event_1__team__event_team_1',
+          registration_id: 'event_1__team__slot_pool_a_2',
+          event_registration_division_id: 'entry_open',
+          event_registration_division_type_id: 'open',
+          event_registration_division_type_key: 'c_skill_open',
           amount_cents: '4500',
         },
         amount: 4700,
@@ -615,16 +679,195 @@ describe('POST /api/billing/webhook', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(prismaMock.eventRegistrations.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'event_1__team__event_team_1' },
-        data: expect.objectContaining({
-          status: 'ACTIVE',
-        }),
-      }),
+    expect(reservation.status).toBe('ACTIVE');
+    expect(eventTeams).toEqual([
+      { id: 'slot_pool_a_1', kind: 'PLACEHOLDER', parentTeamId: null, division: 'pool_a', seed: 1 },
+      { id: 'slot_pool_a_2', kind: 'REGISTERED', parentTeamId: 'canonical_team_1', division: 'pool_a', seed: 2 },
+    ]);
+    expect(divisionMembership).toEqual({
+      entryOpen: ['slot_pool_a_2'],
+      poolA: ['slot_pool_a_2'],
+    });
+  });
+
+  it('keeps payment durable while rolling back a failed paid claim, then finishes the same reservation on retry', async () => {
+    const reservation = {
+      id: 'event_1__team__slot_pool_a_2',
+      status: 'STARTED',
+      registrantId: 'slot_pool_a_2',
+      eventTeamId: 'slot_pool_a_2',
+      parentId: 'canonical_team_1',
+      divisionId: 'entry_open',
+      divisionTypeId: 'open',
+      divisionTypeKey: 'c_skill_open',
+    };
+    const reservedPlaceholder: {
+      id: string;
+      kind: string;
+      parentTeamId: string | null;
+      division: string;
+      seed: number;
+    } = {
+      id: 'slot_pool_a_2',
+      kind: 'PLACEHOLDER',
+      parentTeamId: null,
+      division: 'pool_a',
+      seed: 2,
+    };
+    const activationUpdateMock = jest.fn(async ({ data }: {
+      data: { status?: string };
+    }) => {
+      if (data.status) reservation.status = data.status;
+      return reservation;
+    });
+    const transactionClient = {
+      bills: {
+        create: prismaMock.bills.create,
+      },
+      billPayments: {
+        findFirst: prismaMock.billPayments.findFirst,
+        create: prismaMock.billPayments.create,
+      },
+      events: {
+        update: prismaMock.events.update,
+      },
+      eventRegistrations: {
+        findUnique: jest.fn().mockResolvedValue(reservation),
+        create: prismaMock.eventRegistrations.create,
+        update: activationUpdateMock,
+        updateMany: prismaMock.eventRegistrations.updateMany,
+      },
+      $queryRaw: prismaMock.$queryRaw,
+    };
+    prismaMock.$transaction.mockImplementation(async (
+      callback: (tx: typeof transactionClient) => Promise<unknown>,
+    ) => {
+      const reservationStatusBefore = reservation.status;
+      const placeholderBefore = { ...reservedPlaceholder };
+      try {
+        return await callback(transactionClient);
+      } catch (error) {
+        reservation.status = reservationStatusBefore;
+        Object.assign(reservedPlaceholder, placeholderBefore);
+        throw error;
+      }
+    });
+    prismaMock.$queryRaw.mockResolvedValue([
+      {
+        id: 'event_1',
+        eventType: 'TOURNAMENT',
+        teamSignup: true,
+      },
+    ]);
+    claimOrCreateEventTeamSnapshotMock.mockImplementationOnce(async ({
+      eventTeamId,
+      canonicalTeamId,
+    }: {
+      eventTeamId: string;
+      canonicalTeamId: string;
+    }) => {
+      if (eventTeamId !== reservedPlaceholder.id) {
+        throw new Error('Webhook attempted to claim a different Placeholder Team.');
+      }
+      reservedPlaceholder.kind = 'REGISTERED';
+      reservedPlaceholder.parentTeamId = canonicalTeamId;
+      return reservedPlaceholder;
+    });
+    syncDivisionTeamMembershipFromRegistrationsMock.mockImplementationOnce(async () => {
+      throw new Error('Phase membership synchronization failed.');
+    });
+
+    const response = await POST(
+      jsonPost(buildPaymentIntentSucceededEvent({
+        intentId: 'pi_tournament_atomic_failure',
+        metadata: {
+          purchase_type: 'event',
+          user_id: 'user_1',
+          team_id: 'slot_pool_a_2',
+          event_registration_parent_id: 'canonical_team_1',
+          event_id: 'event_1',
+          registration_id: 'event_1__team__slot_pool_a_2',
+          event_registration_division_id: 'entry_open',
+          event_registration_division_type_id: 'open',
+          event_registration_division_type_key: 'c_skill_open',
+          amount_cents: '4500',
+        },
+        amount: 4700,
+        amountReceived: 4700,
+      })),
     );
-    expect(prismaMock.eventRegistrations.create).not.toHaveBeenCalled();
-    expect(sendPurchaseReceiptEmailMock).toHaveBeenCalledTimes(1);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      received: false,
+      retryable: true,
+      error: 'Event registration finalization failed.',
+    });
+    expect(prismaMock.billPayments.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'PAID',
+        paymentIntentId: 'pi_tournament_atomic_failure',
+      }),
+    }));
+    expect(reservation.status).toBe('STARTED');
+    expect(reservedPlaceholder).toEqual({
+      id: 'slot_pool_a_2',
+      kind: 'PLACEHOLDER',
+      parentTeamId: null,
+      division: 'pool_a',
+      seed: 2,
+    });
+
+    prismaMock.billPayments.findFirst.mockResolvedValue({
+      id: 'bill_payment_created_1',
+      billId: 'bill_created_1',
+      status: 'PAID',
+    });
+    claimOrCreateEventTeamSnapshotMock.mockImplementationOnce(async ({
+      eventTeamId,
+      canonicalTeamId,
+    }: {
+      eventTeamId: string;
+      canonicalTeamId: string;
+    }) => {
+      if (eventTeamId !== reservedPlaceholder.id) {
+        throw new Error('Webhook retried a different Placeholder Team.');
+      }
+      reservedPlaceholder.kind = 'REGISTERED';
+      reservedPlaceholder.parentTeamId = canonicalTeamId;
+      return reservedPlaceholder;
+    });
+
+    const retryResponse = await POST(
+      jsonPost(buildPaymentIntentSucceededEvent({
+        intentId: 'pi_tournament_atomic_failure',
+        metadata: {
+          purchase_type: 'event',
+          user_id: 'user_1',
+          team_id: 'slot_pool_a_2',
+          event_registration_parent_id: 'canonical_team_1',
+          event_id: 'event_1',
+          registration_id: 'event_1__team__slot_pool_a_2',
+          event_registration_division_id: 'entry_open',
+          event_registration_division_type_id: 'open',
+          event_registration_division_type_key: 'c_skill_open',
+          amount_cents: '4500',
+        },
+        amount: 4700,
+        amountReceived: 4700,
+      })),
+    );
+
+    expect(retryResponse.status).toBe(200);
+    expect(reservation.status).toBe('ACTIVE');
+    expect(reservedPlaceholder).toEqual({
+      id: 'slot_pool_a_2',
+      kind: 'REGISTERED',
+      parentTeamId: 'canonical_team_1',
+      division: 'pool_a',
+      seed: 2,
+    });
+    expect(prismaMock.billPayments.create).toHaveBeenCalledTimes(1);
   });
 
   it('uses weekly bill occurrence fields when activating a paid existing bill registration', async () => {

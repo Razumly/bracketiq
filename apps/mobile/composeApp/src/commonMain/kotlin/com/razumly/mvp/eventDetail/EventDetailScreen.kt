@@ -39,7 +39,7 @@ import com.razumly.mvp.core.data.dataTypes.updateOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.updateOfficialUserPositions
 import com.razumly.mvp.core.data.dataTypes.usesTeamOfficialScheduling
 import com.razumly.mvp.core.data.dataTypes.withDoTeamsOfficiate
-import com.razumly.mvp.core.data.dataTypes.withOfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.withStaffingPriority
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.presentation.EventDetailInitialTab
@@ -752,9 +752,9 @@ fun EventDetailScreen(
                                         )
                                     }
                                 },
-                                onUpdateOfficialSchedulingMode = { mode ->
+                                onUpdateStaffingPriority = { priority ->
                                     component.editEventField {
-                                        withOfficialSchedulingMode(mode)
+                                        withStaffingPriority(priority)
                                     }
                                 },
                                 onLoadOfficialPositionDefaults = {

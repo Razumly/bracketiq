@@ -67,12 +67,6 @@ jest.mock('@/server/contentFilter', () => ({
   assertEventContentAllowed: jest.fn(),
   EventContentFilterError: class EventContentFilterError extends Error {},
 }));
-jest.mock('@/server/officials/config', () => ({
-  buildEventOfficialPositionsFromTemplates: jest.fn(),
-  normalizeEventOfficialPositions: jest.fn(),
-  normalizeOfficialSchedulingMode: jest.fn(),
-  normalizeSportOfficialPositionTemplates: jest.fn(),
-}));
 jest.mock('@/server/emailVerificationGate', () => ({
   buildEmailVerificationRequiredResponse: jest.fn(),
   isUserEmailVerified: jest.fn(),
@@ -99,6 +93,7 @@ const event = (id: string, overrides: Record<string, unknown> = {}) => ({
   timeSlotIds: [],
   userIds: [],
   teamSignup: false,
+  staffingPriority: 'BEST_AVAILABLE_COVERAGE',
   ...overrides,
 });
 
@@ -114,8 +109,13 @@ describe('GET /api/events pagination', () => {
 
   it('uses a stable offset page and exposes only page rows with truthful metadata', async () => {
     prismaMock.events.findMany.mockResolvedValue([
-      event('event_1', { end: null, noFixedEndDateTime: true }),
-      event('event_2'),
+      event('event_1', {
+        end: null,
+        noFixedEndDateTime: true,
+        staffingPriority: undefined,
+        officialSchedulingMode: 'TEAM_STAFFING',
+      }),
+      event('event_2', { staffingPriority: 'FULL_COVERAGE_REQUIRED' }),
       event('event_3'),
     ]);
 
@@ -144,6 +144,11 @@ describe('GET /api/events pagination', () => {
       },
     }));
     expect(payload.events[0]).not.toHaveProperty('$id');
+    expect(payload.events[0]).toEqual(expect.objectContaining({
+      staffingPriority: 'TEAM_COVERAGE_REQUIRED',
+      doTeamsOfficiate: true,
+    }));
+    expect(payload.events[0]).toHaveProperty('officialSchedulingMode', 'TEAM_STAFFING');
   });
 
   it('normalizes malformed limits and negative offsets without removing existing list access', async () => {

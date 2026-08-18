@@ -12,6 +12,7 @@ import type { DivisionDetailForm, PlayoffDivisionDetailForm } from '../divisionF
 import type { EventFormErrorIndex } from '../errorOwnership';
 import type { EventFormValues } from '../formTypes';
 import type { AssignedStaffCard } from '../staffInvites';
+import { formatStaffingPriorityLabel } from '../officials';
 import type {
     EventSetupChoices,
     EventSetupPageId,
@@ -595,7 +596,7 @@ export const buildSimpleSetupReviewModel = ({
                 ] : []),
                 ...(choices.useDedicatedOfficials ? [
                     { label: 'Officials', value: joinOrNone(assignedOfficialCards.map((card) => card.displayName), 'None assigned') },
-                    { label: 'Official scheduling', value: eventData.officialSchedulingMode.replace(/_/g, ' ').toLowerCase() },
+                    { label: 'Staffing Priority', value: formatStaffingPriorityLabel(eventData.staffingPriority) },
                     { label: 'Teams officiate', value: yesNo(eventData.doTeamsOfficiate) },
                 ] : []),
                 ...(choices.useCustomOfficialPositions ? [{

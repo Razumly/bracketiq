@@ -8,7 +8,7 @@ import { EventFormStaffSection } from '../EventFormStaffSection';
 
 type MockStaffPanelProps = {
     onRosterEditsChange: (checked: boolean) => void;
-    onSchedulingModeChange: (value: string | null) => void;
+    onStaffingPriorityChange: (value: string | null) => void;
     onTeamsOfficiateChange: (checked: boolean) => void;
 };
 
@@ -25,7 +25,7 @@ jest.mock('../StaffManagementPanel', () => ({
             <div>
                 <button type="button" onClick={() => props.onRosterEditsChange(false)}>Disable roster edits</button>
                 <button type="button" onClick={() => props.onTeamsOfficiateChange(false)}>Disable team officiating</button>
-                <button type="button" onClick={() => props.onSchedulingModeChange('TEAM_STAFFING')}>Use team staffing</button>
+                <button type="button" onClick={() => props.onStaffingPriorityChange('TEAM_COVERAGE_REQUIRED')}>Require team coverage</button>
             </div>
         );
     },
@@ -41,7 +41,7 @@ const buildProps = (overrides: Partial<{
     control: {} as Control<EventFormValues>,
     eventData: {
         doTeamsOfficiate: false,
-        officialSchedulingMode: 'SCHEDULE',
+        staffingPriority: 'BEST_AVAILABLE_COVERAGE',
     } as EventFormValues,
     isImmutableField: jest.fn(() => false),
     isOrganizationHostedEvent: false,
@@ -75,7 +75,7 @@ describe('EventFormStaffSection', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'Disable roster edits' }));
         fireEvent.click(screen.getByRole('button', { name: 'Disable team officiating' }));
-        fireEvent.click(screen.getByRole('button', { name: 'Use team staffing' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Require team coverage' }));
 
         expect(setValue).toHaveBeenCalledWith('allowTemporaryMatchPlayers', false, {
             shouldDirty: true,
@@ -85,11 +85,20 @@ describe('EventFormStaffSection', () => {
             shouldDirty: true,
             shouldValidate: true,
         });
-        expect(setValue).toHaveBeenCalledWith('officialSchedulingMode', 'TEAM_STAFFING', {
+        expect(setValue).toHaveBeenCalledWith('staffingPriority', 'TEAM_COVERAGE_REQUIRED', {
             shouldDirty: true,
             shouldValidate: true,
         });
-        expect(setValue).toHaveBeenCalledWith('doTeamsOfficiate', true, {
+    });
+
+    it('changes only Staffing Priority when its canonical control changes', () => {
+        const setValue = jest.fn();
+        render(<EventFormStaffSection {...buildProps({ setValue })} />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Require team coverage' }));
+
+        expect(setValue).toHaveBeenCalledTimes(1);
+        expect(setValue).toHaveBeenCalledWith('staffingPriority', 'TEAM_COVERAGE_REQUIRED', {
             shouldDirty: true,
             shouldValidate: true,
         });

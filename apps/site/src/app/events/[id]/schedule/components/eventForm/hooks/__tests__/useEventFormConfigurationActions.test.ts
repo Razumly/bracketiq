@@ -55,7 +55,7 @@ const buildEventData = (overrides: Partial<EventFormValues> = {}): EventFormValu
     pendingStaffInvites: [],
     doTeamsOfficiate: false,
     teamOfficialsMaySwap: false,
-    officialSchedulingMode: 'OFF',
+    staffingPriority: 'BEST_AVAILABLE_COVERAGE',
     officialPositions: [],
     matchRulesOverride: null,
     autoCreatePointMatchIncidents: false,

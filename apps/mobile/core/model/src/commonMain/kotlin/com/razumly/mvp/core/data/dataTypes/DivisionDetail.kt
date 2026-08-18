@@ -16,6 +16,8 @@ data class DivisionPhaseSettingsMVP(
     val autoCreatePointMatchIncidents: Boolean? = null,
     val segmentLengthMinutes: Int? = null,
     val segmentBreakMinutes: Int? = null,
+    val doTeamsOfficiate: Boolean? = null,
+    val officialPositions: List<EventOfficialPosition>? = null,
 )
 
 @Serializable

@@ -987,7 +987,8 @@ internal fun buildManageOfficialRows(
         val officialLabel: String = when {
             assignment == null -> "TBD"
             else -> {
-                val resolvedUserLabel = usersById[assignment.userId]
+                val resolvedUserLabel = assignment.userId
+                    ?.let { userId -> usersById[userId] }
                     ?.let(::resolveUserLabel)
                     ?.takeIf(String::isNotBlank)
                 val currentUserFallback = if (assignment.userId == normalizedCurrentUserId) {
@@ -1008,7 +1009,8 @@ internal fun buildManageOfficialRows(
         val key = assignment.positionId to assignment.slotIndex
         if (handledKeys.contains(key)) return@forEach
         val positionLabel = assignmentLabelsByKey[key] ?: "Official"
-        val resolvedUserLabel = usersById[assignment.userId]
+        val resolvedUserLabel = assignment.userId
+            ?.let { userId -> usersById[userId] }
             ?.let(::resolveUserLabel)
             ?.takeIf(String::isNotBlank)
         val currentUserFallback = if (assignment.userId == normalizedCurrentUserId) {
@@ -1090,7 +1092,8 @@ internal fun resolveEventOfficialSummary(
         } else {
             null
         }
-        usersById[assignment.userId]
+        assignment.userId
+            ?.let { userId -> usersById[userId] }
             ?.let(::resolveUserLabel)
             ?.takeIf(String::isNotBlank)
             ?: currentUserFallbackLabel

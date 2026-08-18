@@ -464,6 +464,7 @@ describe('league scheduling (time slots)', () => {
         repeating: true,
         startTimeMinutes: 9 * 60,
         endTimeMinutes: 12 * 60,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       }),
     ];
 
@@ -855,6 +856,7 @@ describe('league scheduling (time slots)', () => {
         repeating: true,
         startTimeMinutes: slotStart,
         endTimeMinutes: slotEnd,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       }),
       new TimeSlot({
         id: 'slot_sun',
@@ -863,6 +865,7 @@ describe('league scheduling (time slots)', () => {
         repeating: true,
         startTimeMinutes: slotStart,
         endTimeMinutes: slotEnd,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       }),
     ];
 
@@ -1664,7 +1667,7 @@ describe('league scheduling (time slots)', () => {
     expect(scheduled.matches.every((match) => match.division.id === 'rec' || match.division.id === 'open')).toBe(true);
   });
 
-  it('schedules split playoff divisions when playoff timeslots are provided', () => {
+  it('places split playoff divisions without a phase-wide placement barrier', () => {
     const mixedAge = new Division('mixed_age', 'Mixed Age', [], null, 4, 2, 'LEAGUE');
     const mixedAgePlayoff = new Division('mixed_age_playoff', 'Mixed Age Playoff', [], null, 4, null, 'PLAYOFF');
     const fieldRegular = buildFieldById('field_mixed_age_regular', mixedAge);
@@ -1733,7 +1736,7 @@ describe('league scheduling (time slots)', () => {
     expect(playoffMatches.every((match) => match.field?.id === fieldPlayoff.id)).toBe(true);
     const latestRegularEnd = Math.max(...regularMatches.map((match) => match.end.getTime()));
     const earliestPlayoffStart = Math.min(...playoffMatches.map((match) => match.start.getTime()));
-    expect(earliestPlayoffStart).toBeGreaterThanOrEqual(latestRegularEnd);
+    expect(earliestPlayoffStart).toBeLessThan(latestRegularEnd);
   });
 
   it('reuses mapped regular-season slots for split playoffs when explicit playoff slots are missing', () => {
@@ -2026,7 +2029,7 @@ describe('league scheduling (time slots)', () => {
     }
   });
 
-  it('schedules placeholder-backed multi-division leagues without leaking synthetic teams', () => {
+  it('preserves placeholder-backed multi-division leagues through placement', () => {
     const rec = new Division('rec', 'Rec');
     const open = new Division('open', 'Open');
     const fieldRec = buildFieldById('field_rec', rec);
@@ -2084,13 +2087,15 @@ describe('league scheduling (time slots)', () => {
     expect(scheduled.matches.length).toBe(28);
     const scheduledLeague = scheduled.event as League;
     const rosterTeamIds = Object.keys(scheduledLeague.teams);
-    expect(rosterTeamIds).toHaveLength(10);
+    expect(rosterTeamIds).toHaveLength(20);
     expect(
       Object.values(scheduledLeague.teams).every(
-        (team) => team.name.startsWith('Place Holder ') && team.captainId.trim().length === 0,
+        (team) =>
+          String(team.kind ?? '').toUpperCase() === 'PLACEHOLDER'
+          && team.captainId.trim().length === 0,
       ),
     ).toBe(true);
-    expect(rosterTeamIds.some((teamId) => teamId.startsWith('playoff-'))).toBe(false);
+    expect(rosterTeamIds.filter((teamId) => teamId.startsWith('playoff-'))).toHaveLength(10);
 
     const isBracketMatch = (match: (typeof scheduled.matches)[number]) => Boolean(
       match.previousLeftMatch || match.previousRightMatch || match.winnerNextMatch || match.loserNextMatch,
@@ -2099,10 +2104,11 @@ describe('league scheduling (time slots)', () => {
     const playoffMatches = scheduled.matches.filter(isBracketMatch);
 
     expect(regularSeasonMatches.every((match) => match.team1 && match.team2)).toBe(true);
-    expect(playoffMatches.every((match) => !match.team1 && !match.team2)).toBe(true);
+    expect(playoffMatches.some((match) => Boolean(match.team1 && match.team2))).toBe(true);
+    expect(playoffMatches.some((match) => !match.team1 && !match.team2)).toBe(true);
   });
 
-  it('limits simultaneous playoff matches by available team-official slots during full rebuilds', () => {
+  it('uses placeholder-backed Team-duty slots during full rebuilds', () => {
     const division = buildDivision();
     const fields = {
       field_1: buildFieldById('field_1', division),
@@ -2158,7 +2164,8 @@ describe('league scheduling (time slots)', () => {
       matchesByStart.set(match.start.getTime(), (matchesByStart.get(match.start.getTime()) ?? 0) + 1);
     }
 
-    expect(Math.max(...matchesByStart.values())).toBeLessThanOrEqual(2);
+    expect(Math.max(...matchesByStart.values())).toBeLessThanOrEqual(Object.keys(fields).length);
+    expect(playoffMatches.every((match) => Boolean(match.teamOfficial))).toBe(true);
   });
 
   it('rebuilds with registered teams only when placeholders are disabled', () => {
@@ -2169,6 +2176,7 @@ describe('league scheduling (time slots)', () => {
       placeholder_1: new Team({
         id: 'placeholder_1',
         captainId: '',
+        kind: 'PLACEHOLDER',
         division,
         name: 'Place Holder 3',
         matches: [],
@@ -2176,6 +2184,7 @@ describe('league scheduling (time slots)', () => {
       placeholder_2: new Team({
         id: 'placeholder_2',
         captainId: '',
+        kind: 'PLACEHOLDER',
         division,
         name: 'Place Holder 4',
         matches: [],
@@ -2241,6 +2250,7 @@ describe('league scheduling (time slots)', () => {
       placeholder_1: new Team({
         id: 'placeholder_1',
         captainId: '',
+        kind: 'PLACEHOLDER',
         division,
         name: 'Place Holder 2',
         matches: [],

@@ -60,7 +60,7 @@ import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
-import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.StaffingPriority
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
@@ -294,7 +294,7 @@ fun EventDetails(
     onUpdateAllowTemporaryMatchPlayers: (Boolean) -> Unit = {},
     onAddOfficialId: (String) -> Unit = {},
     onRemoveOfficialId: (String) -> Unit = {},
-    onUpdateOfficialSchedulingMode: (OfficialSchedulingMode) -> Unit = {},
+    onUpdateStaffingPriority: (StaffingPriority) -> Unit = {},
     onLoadOfficialPositionDefaults: () -> Unit = {},
     onAddOfficialPosition: () -> Unit = {},
     onUpdateOfficialPositionName: (String, String) -> Unit = { _, _ -> },
@@ -2754,7 +2754,7 @@ fun EventDetails(
                         onUpdateTeamCheckInOpenMinutesBefore = onUpdateTeamCheckInOpenMinutesBefore,
                         onUpdateAllowMatchRosterEdits = onUpdateAllowMatchRosterEdits,
                         onUpdateAllowTemporaryMatchPlayers = onUpdateAllowTemporaryMatchPlayers,
-                        onUpdateOfficialSchedulingMode = onUpdateOfficialSchedulingMode,
+                        onUpdateStaffingPriority = onUpdateStaffingPriority,
                         onToggleOfficialPositionsExpanded = {
                             officialPositionsExpanded = !officialPositionsExpanded
                         },

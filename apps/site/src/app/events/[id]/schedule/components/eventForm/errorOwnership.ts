@@ -187,7 +187,7 @@ const OWNERSHIP_BY_PREFIX: Record<string, ErrorOwnership> = {
     simplePageId: "staff-operations",
     advancedSectionId: "section-officials",
   },
-  officialSchedulingMode: {
+  staffingPriority: {
     simplePageId: "staff-operations",
     advancedSectionId: "section-officials",
   },

@@ -137,7 +137,7 @@ export const EventDetailMainContent = ({
                 hostedByLabel: publicModel.hostedByLabel,
                 assistantHostNames: publicModel.assistantHostNames,
                 officialNames: publicModel.officialNames,
-                officialSchedulingMode: currentEvent.officialSchedulingMode,
+                staffingPriority: currentEvent.staffingPriority,
                 officialPositionsSummary: publicModel.officialPositionsSummary,
             }}
             summaryProps={{

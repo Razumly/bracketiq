@@ -223,7 +223,7 @@ export const useEventFormConfigurationActions = ({
             ['pendingStaffInvites', []],
             ['doTeamsOfficiate', false],
             ['teamOfficialsMaySwap', false],
-            ['officialSchedulingMode', 'OFF'],
+            ['staffingPriority', 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED'],
             ['officialPositions', []],
             ['matchRulesOverride', null],
             ['autoCreatePointMatchIncidents', false],

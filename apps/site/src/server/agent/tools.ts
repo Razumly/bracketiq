@@ -5,6 +5,7 @@ import { eventFormAgentContext, shouldIncludeEventFormAgentContext } from '@/lib
 import { prisma } from '@/lib/prisma';
 import type { AgentClientAction, AgentPageContext, AgentPendingConfirmation, AgentToolChange } from '@/lib/agent/types';
 import { canManageEvent } from '@/server/accessControl';
+import { normalizeStaffingPriority, STAFFING_PRIORITIES } from '@/server/officials/config';
 import type { AgentConversationOwner } from './conversations';
 import pageLayoutDescriptions from './pageLayoutDescriptions.json';
 
@@ -12,6 +13,20 @@ const CONFIRMATION_TTL_MS = 10 * 60 * 1000;
 const HIDDEN_EVENT_STATES = new Set(['UNPUBLISHED', 'DRAFT', 'PRIVATE', 'TEMPLATE']);
 const UUID_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi;
 const PREFIXED_OBJECT_ID_PATTERN = /\b(?:user|event|match|field|team|org|organization|division|slot|registration|participant|official|confirmation|conv|local_team|dev_user|camka_upload)[_-][a-z0-9][a-z0-9_-]{5,}\b/gi;
+
+const staffingPriorityToolField = {
+  type: 'string',
+  enum: [...STAFFING_PRIORITIES],
+  description: [
+    'Canonical staffingPriority.',
+    'FULL_COVERAGE_REQUIRED requires Team-duty and every named Official Position.',
+    'TEAM_COVERAGE_REQUIRED requires Team-duty only.',
+    'OFFICIAL_COVERAGE_REQUIRED requires every named Official Position only.',
+    'BEST_AVAILABLE_COVERAGE keeps the configured requirements and records unresolved gaps rather than silently changing them.',
+    'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED requires Team-duty and every named Official Position while permitting explicitly marked overlaps.',
+    'doTeamsOfficiate is an independent participation and eligibility policy and never changes staffingPriority.',
+  ].join(' '),
+} as const;
 
 type ToolExecutionMode = 'prepare' | 'confirm';
 
@@ -131,7 +146,7 @@ const readTools: Tool[] = [
   {
     type: 'function',
     name: 'get_event_schedule_context',
-    description: 'Read sanitized schedule context for the current event, including matches, fields, participants, officials, divisions, and viewer permissions.',
+    description: `Read sanitized schedule context for the current event, including matches, fields, participants, officials, divisions, and viewer permissions. ${staffingPriorityToolField.description}`,
     strict: false,
     parameters: {
       type: 'object',
@@ -734,7 +749,9 @@ const getEventScheduleContext = async (
       assistantHostIds: true,
       organizationId: true,
       fieldIds: true,
-      officialSchedulingMode: true,
+      staffingPriority: true,
+      doTeamsOfficiate: true,
+      officialPositions: true,
       teamSignup: true,
       singleDivision: true,
     },
@@ -830,7 +847,12 @@ const getEventScheduleContext = async (
       location: event.location,
       teamSignup: event.teamSignup,
       singleDivision: event.singleDivision,
-      officialSchedulingMode: event.officialSchedulingMode,
+      staffingPriority: normalizeStaffingPriority(event.staffingPriority),
+      doTeamsOfficiate: event.doTeamsOfficiate,
+      officialPositions: event.officialPositions,
+    },
+    fieldDefinitions: {
+      staffingPriority: staffingPriorityToolField,
     },
     viewer: {
       authenticated: owner.type === 'user',
@@ -1446,7 +1468,14 @@ export const executeAgentTool = async (params: ExecuteToolParams): Promise<Agent
     }
 
     if (params.name === 'get_event_form_context') {
-      return { result: getEventFormContext(args, params.pageContext) };
+      return {
+        result: {
+          ...getEventFormContext(args, params.pageContext),
+          fieldDefinitions: {
+            staffingPriority: staffingPriorityToolField,
+          },
+        },
+      };
     }
 
     if (params.name === 'get_event_schedule_context') {

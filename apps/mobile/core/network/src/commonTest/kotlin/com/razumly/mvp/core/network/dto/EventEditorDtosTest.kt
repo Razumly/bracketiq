@@ -96,7 +96,8 @@ class EventEditorDtosTest {
                     "schedule":{"mode":"FIXED_END","endConstraint":"2026-09-01T14:00:00Z"},
                     "resources":{"fieldIds":[],"fields":[],"timeSlotIds":[],"timeSlots":[],"requiredTemplateIds":[],"immutableFieldIds":[],"rentalBookingId":null,"rentalBookingItemId":null},
                     "staff": {
-                      "officialSchedulingMode":"SCHEDULE",
+                      "staffingPriority":"BEST_AVAILABLE_COVERAGE",
+                      "doTeamsOfficiate":false,
                       "teamOfficialsMaySwap":false,
                       "teamCheckInMode":"OFF",
                       "teamCheckInOpenMinutesBefore":0,

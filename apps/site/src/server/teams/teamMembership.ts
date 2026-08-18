@@ -119,7 +119,6 @@ type TeamRegistrationSettingsSource = {
   requiredTemplateIds?: string[] | null;
 };
 
-const PLACEHOLDER_NAME_ORDINAL_REGEX = /^\s*place\s*holder\s+(\d+)\b/i;
 
 export const normalizeId = (value: unknown): string | null => {
   if (typeof value !== 'string') {
@@ -153,16 +152,10 @@ const normalizeSortNumber = (value: unknown): number | null => {
   return numeric;
 };
 
-const placeholderClaimOrder = (row: EventTeamRow): number => {
-  const explicitSeed = normalizeSortNumber((row as EventTeamRow & { seed?: unknown }).seed);
-  if (explicitSeed !== null) {
-    return explicitSeed;
-  }
-
-  const match = String(row.name ?? '').match(PLACEHOLDER_NAME_ORDINAL_REGEX);
-  const ordinal = match ? normalizeSortNumber(match[1]) : null;
-  return ordinal ?? Number.MAX_SAFE_INTEGER;
-};
+const placeholderClaimOrder = (row: EventTeamRow): number => (
+  normalizeSortNumber((row as EventTeamRow & { seed?: unknown }).seed)
+  ?? Number.MAX_SAFE_INTEGER
+);
 
 const ACTIVE_TEAM_MEMBER_STATUSES = new Set(['ACTIVE', 'PENDING']);
 const INVITED_TEAM_MEMBER_STATUSES = new Set(['INVITED']);
@@ -1482,6 +1475,8 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
   occurrence?: { slotId: string; occurrenceDate: string } | null;
   registrationStatus?: RegistrationLifecycleStatus;
   upsertRegistration?: boolean;
+  eventTeamId?: string | null;
+  enforceProvisionedPlaceholderScope?: boolean;
 }) => {
   if (params.upsertRegistration !== false) {
     await acquireEventLockAndLoadStructure(params.tx, params.eventId, {
@@ -1503,28 +1498,43 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
     throw new Error('Event team storage is unavailable.');
   }
 
+  const explicitEventTeamId = normalizeId(params.eventTeamId);
   const targetDivisionId = normalizeId(params.divisionId);
   const targetDivisionTypeId = normalizeId(params.divisionTypeId);
   const canonicalTeamIdentityId = normalizeId((canonicalTeam as any).parentTeamId) ?? params.canonicalTeamId;
-  const existingRegisteredEventTeam = await findRegisteredEventTeamByIdForEvent({
-    eventId: params.eventId,
-    eventTeamId: params.canonicalTeamId,
-  }, params.tx) ?? await findRegisteredEventTeamForCanonical({
-    eventId: params.eventId,
-    canonicalTeamId: canonicalTeamIdentityId,
-    targetDivisionId,
-    targetDivisionTypeId,
-  }, params.tx);
-  const registeredSiblingEventTeams = canonicalTeamIdentityId
-    ? newestFirst(((await eventTeamsDelegate.findMany({
-      where: {
+  const explicitRegisteredEventTeam = explicitEventTeamId
+    ? await findRegisteredEventTeamByIdForEvent({
         eventId: params.eventId,
-        parentTeamId: canonicalTeamIdentityId,
-        kind: 'REGISTERED',
-      },
-    }) as EventTeamRow[]) ?? [])
-      .filter((row) => normalizeId(row.parentTeamId) === canonicalTeamIdentityId))
-    : [];
+        eventTeamId: explicitEventTeamId,
+      }, params.tx)
+    : null;
+  const existingRegisteredEventTeam = explicitEventTeamId
+    ? (
+      normalizeId(explicitRegisteredEventTeam?.parentTeamId) === canonicalTeamIdentityId
+        ? explicitRegisteredEventTeam
+        : null
+    )
+    : await findRegisteredEventTeamByIdForEvent({
+        eventId: params.eventId,
+        eventTeamId: params.canonicalTeamId,
+      }, params.tx) ?? await findRegisteredEventTeamForCanonical({
+        eventId: params.eventId,
+        canonicalTeamId: canonicalTeamIdentityId,
+        targetDivisionId,
+        targetDivisionTypeId,
+      }, params.tx);
+  const registeredSiblingEventTeams = explicitEventTeamId
+    ? []
+    : canonicalTeamIdentityId
+      ? newestFirst(((await eventTeamsDelegate.findMany({
+          where: {
+            eventId: params.eventId,
+            parentTeamId: canonicalTeamIdentityId,
+            kind: 'REGISTERED',
+          },
+        }) as EventTeamRow[]) ?? [])
+        .filter((row) => normalizeId(row.parentTeamId) === canonicalTeamIdentityId))
+      : [];
   const placeholderDivisionIdSet = new Set(
     normalizeIdList(params.placeholderDivisionIds)
       .map((divisionId) => divisionId.toLowerCase()),
@@ -1538,7 +1548,8 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
       || (!targetDivisionId && targetDivisionTypeId && existingDivisionTypeId === targetDivisionTypeId)
     ),
   );
-  const shouldInspectPlaceholders = !existingRegisteredEventTeam
+  const shouldInspectPlaceholders = Boolean(explicitEventTeamId)
+    || !existingRegisteredEventTeam
     || (
       !targetMatchesExistingDivision
       && Boolean(targetDivisionId || targetDivisionTypeId || placeholderDivisionIdSet.size > 0)
@@ -1546,14 +1557,64 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
   const placeholderRows = shouldInspectPlaceholders
     ? await eventTeamsDelegate.findMany({
       where: {
+        ...(explicitEventTeamId ? { id: explicitEventTeamId } : {}),
         eventId: params.eventId,
         kind: 'PLACEHOLDER',
         parentTeamId: null,
       },
     }) as EventTeamRow[]
     : [];
+  const placeholderIds = placeholderRows
+    .map((row) => normalizeId(row.id))
+    .filter((eventTeamId): eventTeamId is string => Boolean(eventTeamId));
+  const placeholderHolds = placeholderIds.length && params.tx?.eventRegistrations?.findMany
+    ? await params.tx.eventRegistrations.findMany({
+      where: {
+        eventId: params.eventId,
+        registrantType: 'TEAM',
+        rosterRole: 'PARTICIPANT',
+        status: { in: ACTIVE_EVENT_TEAM_REGISTRATION_STATUSES },
+        parentId: { not: null },
+        OR: [
+          { registrantId: { in: placeholderIds } },
+          { eventTeamId: { in: placeholderIds } },
+        ],
+      },
+      select: {
+        registrantId: true,
+        eventTeamId: true,
+        parentId: true,
+      },
+    }) as Array<{
+      registrantId?: string | null;
+      eventTeamId?: string | null;
+      parentId?: string | null;
+    }>
+    : [];
+  const heldPlaceholderIdsForCanonicalTeam = new Set<string>();
+  const unavailablePlaceholderIds = new Set<string>();
+  placeholderHolds.forEach((hold) => {
+    const ownerId = normalizeId(hold.parentId);
+    if (!ownerId) {
+      return;
+    }
+    const heldIds = [normalizeId(hold.eventTeamId), normalizeId(hold.registrantId)]
+      .filter((eventTeamId): eventTeamId is string => Boolean(eventTeamId && placeholderIds.includes(eventTeamId)));
+    if (ownerId === canonicalTeamIdentityId || ownerId === params.canonicalTeamId) {
+      heldIds.forEach((eventTeamId) => heldPlaceholderIdsForCanonicalTeam.add(eventTeamId));
+      return;
+    }
+    heldIds.forEach((eventTeamId) => unavailablePlaceholderIds.add(eventTeamId));
+  });
   const matchingPlaceholder = placeholderRows
+    .filter((row) => !unavailablePlaceholderIds.has(row.id))
     .filter((row) => {
+      if (explicitEventTeamId) {
+        return normalizeId(row.id) === explicitEventTeamId
+          && normalizeId(row.eventId) === params.eventId
+          && String(row.kind ?? '').toUpperCase() === 'PLACEHOLDER'
+          && normalizeId(row.parentTeamId) === null;
+      }
       const rowDivision = normalizeId(row.division);
       const rowDivisionTypeId = normalizeId(row.divisionTypeId);
       if (rowDivision && placeholderDivisionIdSet.has(rowDivision.toLowerCase())) {
@@ -1571,6 +1632,11 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
       return false;
     })
     .sort((left: any, right: any) => {
+      const ownedHoldOrderDelta = Number(!heldPlaceholderIdsForCanonicalTeam.has(left.id))
+        - Number(!heldPlaceholderIdsForCanonicalTeam.has(right.id));
+      if (ownedHoldOrderDelta !== 0) {
+        return ownedHoldOrderDelta;
+      }
       const claimOrderDelta = placeholderClaimOrder(left) - placeholderClaimOrder(right);
       if (claimOrderDelta !== 0) {
         return claimOrderDelta;
@@ -1582,6 +1648,20 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
       }
       return String(left.id).localeCompare(String(right.id));
     })[0] ?? null;
+  if (explicitEventTeamId && !matchingPlaceholder && !existingRegisteredEventTeam) {
+    throw new Error('Reserved Placeholder Team is no longer available.');
+  }
+  if (
+    params.enforceProvisionedPlaceholderScope
+    && shouldInspectPlaceholders
+    && placeholderRows.length > 0
+    && !matchingPlaceholder
+  ) {
+    throw Object.assign(
+      new Error('No compatible Placeholder Team is available for this registration.'),
+      { code: 'EVENT_TEAM_SLOT_UNAVAILABLE' },
+    );
+  }
   const matchingSwapTarget = matchingPlaceholder;
   const sourcePlaceholderEventTeamId = existingRegisteredEventTeam && matchingSwapTarget
     ? normalizeId(existingRegisteredEventTeam.id)
@@ -1600,7 +1680,10 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
   const matchingPlaceholderDivisionId = normalizeId(matchingSwapTarget?.division);
   const shouldPreservePlaceholderDivision = Boolean(
     matchingPlaceholderDivisionId
-    && placeholderDivisionIdSet.has(matchingPlaceholderDivisionId.toLowerCase()),
+    && (
+      Boolean(explicitEventTeamId)
+      || placeholderDivisionIdSet.has(matchingPlaceholderDivisionId.toLowerCase())
+    ),
   );
   const parentTeamId = normalizeId(existingRegisteredEventTeam?.parentTeamId)
     ?? canonicalTeamIdentityId
@@ -1610,11 +1693,15 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
     kind: 'REGISTERED',
     playerIds: activePlayerRegistrations.map((row: any) => row.userId),
     playerRegistrationIds: [],
-    division: (shouldPreservePlaceholderDivision ? matchingPlaceholderDivisionId : null)
-      ?? normalizeId(params.divisionId)
-      ?? normalizeId((canonicalTeam as any).division)
-      ?? null,
-    divisionTypeId: normalizeId(params.divisionTypeId) ?? normalizeId((canonicalTeam as any).divisionTypeId) ?? null,
+    division: explicitEventTeamId
+      ? matchingPlaceholderDivisionId
+      : (shouldPreservePlaceholderDivision ? matchingPlaceholderDivisionId : null)
+        ?? normalizeId(params.divisionId)
+        ?? normalizeId((canonicalTeam as any).division)
+        ?? null,
+    divisionTypeId: explicitEventTeamId
+      ? normalizeId(matchingSwapTarget?.divisionTypeId)
+      : normalizeId(params.divisionTypeId) ?? normalizeId((canonicalTeam as any).divisionTypeId) ?? null,
     wins: (canonicalTeam as any).wins ?? null,
     losses: (canonicalTeam as any).losses ?? null,
     name: String((canonicalTeam as any).name ?? '').trim(),

@@ -90,6 +90,7 @@ data class MatchApiDto(
     val previousLeftId: String? = null,
     val previousRightId: String? = null,
     val officialCheckedIn: Boolean? = null,
+    val officialAssignments: List<MatchOfficialAssignment>? = null,
     val officialIds: List<MatchOfficialAssignment>? = null,
     val teamOfficialId: String? = null,
     val locked: Boolean? = null,
@@ -103,6 +104,7 @@ data class MatchApiDto(
             ?: field?.resolvedId()?.trim()?.takeIf(String::isNotBlank)
         if (resolvedId.isNullOrBlank() || resolvedMatchId == null) return null
         if (resolvedEventId.isNullOrBlank()) return null
+        val resolvedOfficialAssignments = officialAssignments ?: officialIds ?: emptyList()
 
         return MatchMVP(
             id = resolvedId,
@@ -137,7 +139,7 @@ data class MatchApiDto(
             previousLeftId = previousLeftId,
             previousRightId = previousRightId,
             officialCheckedIn = officialCheckedIn,
-            officialIds = officialIds ?: emptyList(),
+            officialIds = resolvedOfficialAssignments,
             teamOfficialId = teamOfficialId,
             locked = locked ?: false,
         )

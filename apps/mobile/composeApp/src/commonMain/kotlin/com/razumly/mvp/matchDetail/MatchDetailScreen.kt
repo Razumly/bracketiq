@@ -271,7 +271,7 @@ internal fun buildMatchOfficialDetailRows(
                     slotIndex = assignment.slotIndex,
                     holderType = assignment.holderType,
                 ),
-                officialName = officialDisplayName(usersById[assignment.userId]),
+                officialName = officialDisplayName(assignment.userId?.let { userId -> usersById[userId] }),
                 checkedIn = assignment.checkedIn,
             )
         }

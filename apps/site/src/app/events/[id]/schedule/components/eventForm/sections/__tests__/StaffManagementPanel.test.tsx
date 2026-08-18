@@ -4,157 +4,78 @@ import { render, screen } from '@testing-library/react';
 import type { EventFormValues } from '../../formTypes';
 import { StaffManagementPanel } from '../StaffManagementPanel';
 
-jest.mock('../TeamOfficiatingControls', () => ({
-    TeamOfficiatingControls: () => <div data-testid="team-officiating" />,
-}));
-jest.mock('../TeamCheckInControls', () => ({
-    TeamCheckInControls: () => <div data-testid="team-operations" />,
-}));
+const mockPositionEditor = jest.fn((props: { showPositions?: boolean }) => (
+    <section>
+        <label>
+            Staffing Priority
+            <select aria-label="Staffing Priority" />
+        </label>
+        {props.showPositions ? <h2>Official Positions</h2> : null}
+    </section>
+));
+
 jest.mock('../StaffOfficialPositionEditor', () => ({
-    StaffOfficialPositionEditor: ({ showSchedulingMode, showPositions }: {
-        showSchedulingMode: boolean;
-        showPositions: boolean;
-    }) => (
-        <div
-            data-testid="official-editor"
-            data-show-scheduling={String(showSchedulingMode)}
-            data-show-positions={String(showPositions)}
-        />
-    ),
-}));
-jest.mock('../StaffNonOrganizationInvitePanel', () => ({
-    StaffNonOrganizationInvitePanel: ({ showOfficialAssignments, showHostAssignments }: {
-        showOfficialAssignments: boolean;
-        showHostAssignments: boolean;
-    }) => (
-        <div
-            data-testid="staff-picker"
-            data-show-officials={String(showOfficialAssignments)}
-            data-show-hosts={String(showHostAssignments)}
-        />
-    ),
-}));
-jest.mock('../StaffOrganizationRosterPicker', () => ({
-    StaffOrganizationRosterPicker: () => <div data-testid="organization-staff-picker" />,
-}));
-jest.mock('../StaffAssignedCardsGrid', () => ({
-    StaffAssignedCardsGrid: ({ showOfficials, showHosts }: {
-        showOfficials: boolean;
-        showHosts: boolean;
-    }) => (
-        <div
-            data-testid="assigned-staff"
-            data-show-officials={String(showOfficials)}
-            data-show-hosts={String(showHosts)}
-        />
-    ),
+    StaffOfficialPositionEditor: (props: { showPositions?: boolean }) => mockPositionEditor(props),
 }));
 
-const buildProps = (overrides: Partial<ComponentProps<typeof StaffManagementPanel>> = {}) => ({
-    control: {} as ComponentProps<typeof StaffManagementPanel>['control'],
+const buildProps = (eventData: Partial<EventFormValues>, showCustomOfficialPositions = false) => ({
+    control: {},
     eventData: {
-        teamSignup: true,
-        doTeamsOfficiate: false,
-        allowMatchRosterEdits: false,
-        officialSchedulingMode: 'SCHEDULE',
+        staffingPriority: 'BEST_AVAILABLE_COVERAGE',
         officialPositions: [],
-    } as EventFormValues,
+        ...eventData,
+    },
     isOrganizationHostedEvent: false,
     sportDefaultPositionCount: 0,
     maxMediumTextLength: 160,
     maxShortTextLength: 80,
-    organizationStaffSearch: '',
-    organizationStaffTypeFilter: 'all' as const,
-    organizationStaffStatusFilter: 'all' as const,
-    filteredOrganizationStaffEntries: [],
-    organizationStaffVisibleCount: 0,
-    nonOrgStaffSearch: '',
-    nonOrgStaffResults: [],
-    nonOrgStaffSearchLoading: false,
-    newStaffInvite: { firstName: '', lastName: '', email: '', roles: [] },
-    assignedOfficialUserIds: new Set<string>(),
-    assistantHostIds: [],
-    assignedOfficialCards: [],
-    assignedHostCards: [],
-    officialCardVisibleCount: 0,
-    hostCardVisibleCount: 0,
-    eventOfficialByUserId: new Map(),
-    availableOfficialFieldOptions: [],
-    eventOfficialsDisabled: false,
-    assistantHostsDisabled: false,
-    hostDisabled: false,
+    showStaffAssignments: false,
+    showDedicatedOfficials: false,
+    showCustomOfficialPositions,
+    showTeamOperations: false,
     onRosterEditsChange: jest.fn(),
     onTeamsOfficiateChange: jest.fn(),
-    onSchedulingModeChange: jest.fn(),
+    onStaffingPriorityChange: jest.fn(),
     onLoadSportDefaults: jest.fn(),
     onAddPosition: jest.fn(),
     onUpdatePosition: jest.fn(),
     onRemovePosition: jest.fn(),
-    onOrganizationStaffSearchChange: jest.fn(),
-    onOrganizationStaffTypeFilterChange: jest.fn(),
-    onOrganizationStaffStatusFilterChange: jest.fn(),
-    onOrganizationStaffScroll: jest.fn(),
-    onAddOfficial: jest.fn(),
-    onAddAssistantHost: jest.fn(),
-    onSetHost: jest.fn(),
-    onNonOrgStaffSearchChange: jest.fn(),
-    onInviteFieldChange: jest.fn(),
-    onInviteRoleToggle: jest.fn(),
-    onStageInvite: jest.fn(),
-    onAssignedOfficialsScroll: jest.fn(),
-    onAssignedHostsScroll: jest.fn(),
-    onRemovePendingStaffInviteRole: jest.fn(),
-    onRemoveOfficial: jest.fn(),
-    onRemoveAssistantHost: jest.fn(),
-    onUpdateEventOfficialEligibility: jest.fn(),
-    ...overrides,
-});
+} as unknown as ComponentProps<typeof StaffManagementPanel>);
 
-describe('StaffManagementPanel operation visibility', () => {
-    it('shows only team controls for team check-in and roster operations', () => {
-        render(<StaffManagementPanel {...buildProps({
-            showStaffAssignments: false,
-            showDedicatedOfficials: false,
-            showCustomOfficialPositions: false,
-            showTeamOperations: true,
-        })} />);
-
-        expect(screen.getByTestId('team-operations')).toBeInTheDocument();
-        expect(screen.queryByTestId('team-officiating')).not.toBeInTheDocument();
-        expect(screen.queryByTestId('official-editor')).not.toBeInTheDocument();
-        expect(screen.queryByTestId('staff-picker')).not.toBeInTheDocument();
-        expect(screen.queryByTestId('assigned-staff')).not.toBeInTheDocument();
+describe('StaffManagementPanel staffing priority visibility', () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
     });
 
-    it('shows official assignment and scheduling without custom position controls', () => {
-        render(<StaffManagementPanel {...buildProps({
-            showStaffAssignments: false,
-            showDedicatedOfficials: true,
-            showCustomOfficialPositions: false,
-            showTeamOperations: false,
-        })} />);
+    it('keeps Staffing Priority visible in the minimal direct-organizer workflow', () => {
+        render(<StaffManagementPanel {...buildProps({})} />);
 
-        expect(screen.getByTestId('team-officiating')).toBeInTheDocument();
-        expect(screen.getByTestId('official-editor')).toHaveAttribute('data-show-scheduling', 'true');
-        expect(screen.getByTestId('official-editor')).toHaveAttribute('data-show-positions', 'false');
-        expect(screen.getByTestId('staff-picker')).toHaveAttribute('data-show-officials', 'true');
-        expect(screen.getByTestId('staff-picker')).toHaveAttribute('data-show-hosts', 'false');
-        expect(screen.getByTestId('assigned-staff')).toHaveAttribute('data-show-officials', 'true');
-        expect(screen.getByTestId('assigned-staff')).toHaveAttribute('data-show-hosts', 'false');
+        expect(screen.getByLabelText('Staffing Priority')).toBeInTheDocument();
+        expect(screen.queryByRole('heading', { name: 'Official Positions' })).not.toBeInTheDocument();
+        expect(mockPositionEditor).toHaveBeenLastCalledWith(expect.objectContaining({
+            showPositions: false,
+        }));
     });
 
-    it('shows only host assignment surfaces for staff assignments', () => {
-        render(<StaffManagementPanel {...buildProps({
-            showStaffAssignments: true,
-            showDedicatedOfficials: false,
-            showCustomOfficialPositions: false,
-            showTeamOperations: false,
-        })} />);
+    it('shows named positions only when enabled and relevant to the selected priority', () => {
+        const { rerender } = render(
+            <StaffManagementPanel
+                {...buildProps({ staffingPriority: 'TEAM_COVERAGE_REQUIRED' }, true)}
+            />,
+        );
 
-        expect(screen.queryByTestId('official-editor')).not.toBeInTheDocument();
-        expect(screen.getByTestId('staff-picker')).toHaveAttribute('data-show-officials', 'false');
-        expect(screen.getByTestId('staff-picker')).toHaveAttribute('data-show-hosts', 'true');
-        expect(screen.getByTestId('assigned-staff')).toHaveAttribute('data-show-officials', 'false');
-        expect(screen.getByTestId('assigned-staff')).toHaveAttribute('data-show-hosts', 'true');
+        expect(screen.getByLabelText('Staffing Priority')).toBeInTheDocument();
+        expect(screen.queryByRole('heading', { name: 'Official Positions' })).not.toBeInTheDocument();
+
+        rerender(
+            <StaffManagementPanel
+                {...buildProps({ staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED' }, true)}
+            />,
+        );
+
+        expect(screen.getByRole('heading', { name: 'Official Positions' })).toBeInTheDocument();
+        expect(mockPositionEditor).toHaveBeenLastCalledWith(expect.objectContaining({
+            showPositions: true,
+        }));
     });
 });

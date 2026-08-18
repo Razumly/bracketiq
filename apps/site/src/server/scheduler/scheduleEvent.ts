@@ -1,10 +1,28 @@
 import { EventBuilder } from './EventBuilder';
+import {
+  collectUnresolvedStaffingDiagnostics,
+  type StaffingDiagnostic,
+} from './officialStaffing';
+import { ScheduleError } from './scheduleErrors';
 import { TimeSlotValidationError, type ResolvedOneTimeTimeSlot } from '@/lib/timeSlotAvailability';
-import { Division, League, Match, Tournament, TIMES, MINUTE_MS, SchedulerContext, Team, type TimeSlot } from './types';
+import {
+  Division,
+  League,
+  Match,
+  Tournament,
+  TIMES,
+  MINUTE_MS,
+  SchedulerContext,
+  Team,
+  type TimeSlot,
+} from './types';
 import {
   assertCanonicalSchedulerTimeSlots,
   calculateOneTimeAvailabilityMinutes,
 } from './timeSlotAvailability';
+
+export { ScheduleError } from './scheduleErrors';
+export type { ScheduleFailureFactor } from './scheduleErrors';
 
 export type ScheduleRequest = {
   event: League | Tournament;
@@ -16,13 +34,55 @@ export type ScheduleResult = {
   preview?: boolean;
   event: League | Tournament;
   matches: Match[];
+  warnings: StaffingDiagnostic[];
 };
 
-export class ScheduleError extends Error {}
+type SchedulerStateSnapshot = Array<{
+  target: object;
+  values: Map<PropertyKey, unknown>;
+}>;
+
+const captureSchedulerState = (event: League | Tournament): SchedulerStateSnapshot => {
+  const snapshots: SchedulerStateSnapshot = [];
+  const pending: object[] = [event];
+  const visited = new WeakSet<object>();
+  while (pending.length) {
+    const target = pending.pop();
+    if (!target || visited.has(target) || target instanceof Date) {
+      continue;
+    }
+    visited.add(target);
+    const values = new Map<PropertyKey, unknown>();
+    for (const key of Reflect.ownKeys(target)) {
+      const value = Reflect.get(target, key);
+      values.set(key, value);
+      if (typeof value === 'object' && value !== null) {
+        pending.push(value);
+      }
+    }
+    snapshots.push({ target, values });
+  }
+  return snapshots;
+};
+
+const restoreSchedulerState = (snapshots: SchedulerStateSnapshot): void => {
+  for (const { target, values } of snapshots) {
+    for (const key of Reflect.ownKeys(target)) {
+      if (!values.has(key)) {
+        Reflect.deleteProperty(target, key);
+      }
+    }
+    for (const [key, value] of values) {
+      Reflect.set(target, key, value);
+    }
+  }
+};
+
 
 const isLeague = (event: League | Tournament): event is League => {
   return event instanceof League || event.eventType === 'LEAGUE';
 };
+
 
 const normalizeTeamId = (value: unknown): string | null => {
   if (typeof value !== 'string') {
@@ -32,23 +92,9 @@ const normalizeTeamId = (value: unknown): string | null => {
   return normalized.length > 0 ? normalized : null;
 };
 
-const isPlaceholderSchedulerTeam = (team: Team | undefined): boolean => {
-  if (!team) {
-    return false;
-  }
-  const captainId = String(team.captainId ?? '').trim();
-  const name = String(team.name ?? '').trim();
-  return captainId.length === 0 || /^place\s*holder\b/i.test(name);
-};
+const isPlaceholderSchedulerTeam = (team: Team | undefined): boolean =>
+  String(team?.kind ?? '').trim().toUpperCase() === 'PLACEHOLDER';
 
-const isSyntheticSchedulePlaceholderTeam = (team: Team | undefined): boolean => {
-  if (!team) {
-    return false;
-  }
-  const captainId = String(team.captainId ?? '').trim();
-  const name = String(team.name ?? '').trim();
-  return captainId.length === 0 && /^place\s*holder\b/i.test(name);
-};
 
 const removeTeamsFromEvent = (event: League | Tournament, shouldRemove: (team: Team | undefined) => boolean): void => {
   const retainedTeams: Record<string, Team> = {};
@@ -69,10 +115,6 @@ const removeTeamsFromEvent = (event: League | Tournament, shouldRemove: (team: T
 
 const stripPlaceholderTeamsFromEvent = (event: League | Tournament): void => {
   removeTeamsFromEvent(event, isPlaceholderSchedulerTeam);
-};
-
-const stripSyntheticPlaceholderTeamsFromEvent = (event: League | Tournament): void => {
-  removeTeamsFromEvent(event, isSyntheticSchedulePlaceholderTeam);
 };
 
 const normalizeLeagueRosterTeamIds = (
@@ -431,22 +473,21 @@ const isScheduleOverrunError = (message: string): boolean => {
     || normalized.includes('not enough time is allotted');
 };
 
-export const scheduleEvent = (request: ScheduleRequest, context: SchedulerContext): ScheduleResult => {
+
+const scheduleEventMutating = (request: ScheduleRequest, context: SchedulerContext): ScheduleResult => {
   const { event } = request;
   let resolvedOneTimeSlots: ResolvedOneTimeTimeSlot[];
   try {
     resolvedOneTimeSlots = assertCanonicalSchedulerTimeSlots(event);
   } catch (error) {
     if (error instanceof TimeSlotValidationError) {
-      throw new ScheduleError(error.message);
+      throw new ScheduleError(error.message, 'RESOURCE');
     }
     throw error;
   }
   const includePlaceholderTeams = request.includePlaceholderTeams !== false;
   if (!includePlaceholderTeams) {
     stripPlaceholderTeamsFromEvent(event);
-  } else {
-    stripSyntheticPlaceholderTeamsFromEvent(event);
   }
   if (includePlaceholderTeams && typeof request.participantCount === 'number' && request.participantCount > 0) {
     event.maxParticipants = request.participantCount;
@@ -455,7 +496,7 @@ export const scheduleEvent = (request: ScheduleRequest, context: SchedulerContex
   const openEndedSchedule = isOpenEndedSchedule(event);
   applyStoredScheduleEnd(event);
   if (!openEndedSchedule && event.end.getTime() <= event.start.getTime()) {
-    throw new ScheduleError('End date/time must be after start date/time when \"No fixed end datetime scheduling\" is disabled.');
+    throw new ScheduleError('End date/time must be after start date/time when \"No fixed end datetime scheduling\" is disabled.', 'RESOURCE');
   }
   if (openEndedSchedule) {
     extendOpenEndedWindow(event);
@@ -479,6 +520,16 @@ export const scheduleEvent = (request: ScheduleRequest, context: SchedulerContex
   }
   return result;
 };
+export const scheduleEvent = (request: ScheduleRequest, context: SchedulerContext): ScheduleResult => {
+  const snapshot = captureSchedulerState(request.event);
+  try {
+    return scheduleEventMutating(request, context);
+  } catch (error) {
+    restoreSchedulerState(snapshot);
+    throw error;
+  }
+};
+
 
 const buildLeagueSchedule = (
   league: League,
@@ -509,6 +560,7 @@ const buildLeagueSchedule = (
           .join('; ');
         throw new ScheduleError(
           `Cannot schedule split-division league because a team is assigned to multiple divisions: ${conflictSummary}.`,
+          'PLAYING_TEAM',
         );
       }
 
@@ -518,6 +570,7 @@ const buildLeagueSchedule = (
           .join(', ');
         throw new ScheduleError(
           `Cannot schedule split-division league until all teams are assigned to a division. Unassigned teams: ${unassigned}.`,
+          'PLAYING_TEAM',
         );
       }
 
@@ -534,7 +587,10 @@ const buildLeagueSchedule = (
   ensureSplitPlayoffTimeSlotCoverage(league);
 
   if (!league.timeSlots.length) {
-    throw new ScheduleError(describeScheduleFailure(league, includePlaceholderTeams ? league.maxParticipants : undefined));
+    throw new ScheduleError(
+      describeScheduleFailure(league, includePlaceholderTeams ? league.maxParticipants : undefined),
+      'RESOURCE',
+    );
   }
   let updated: League | null = null;
   let extensionAttempt = 0;
@@ -562,7 +618,7 @@ const buildLeagueSchedule = (
       context.error(`schedule_event: scheduling failed (${errMsg}), attempt ${extensionAttempt + 1}`);
       if (errMsg.toLowerCase().includes('no fields')) {
         // Misconfiguration: surface this as a 4xx instead of a 500.
-        throw new ScheduleError(formatNoFieldsErrorForUser(errMsg, league));
+        throw new ScheduleError(formatNoFieldsErrorForUser(errMsg, league), 'RESOURCE');
       }
       if (errMsg.toLowerCase().includes('split playoff divisions are enabled')) {
         throw new ScheduleError(errMsg);
@@ -585,26 +641,43 @@ const buildLeagueSchedule = (
         league,
         Math.max(league.maxParticipants ?? 0, baselineTeamCount),
       );
+      const typedError = err instanceof ScheduleError ? err : null;
       if (isScheduleOverrunError(errMsg)) {
-        throw new ScheduleError(`${SCHEDULE_OVERRUN_MESSAGE} ${message}`);
+        const preservesFailureDetail = typedError
+          && typedError.restrictingFactor !== 'RESOURCE'
+          && typedError.restrictingFactor !== 'UNKNOWN';
+        throw new ScheduleError(
+          preservesFailureDetail
+            ? errMsg
+            : `${SCHEDULE_OVERRUN_MESSAGE} ${message}`,
+          typedError?.restrictingFactor ?? 'UNKNOWN',
+        );
       }
-      throw new ScheduleError(message);
+      if (typedError) {
+        throw typedError;
+      }
+      throw new ScheduleError(errMsg, 'UNKNOWN');
     }
   }
 
-  const latestEnd = latestMatchEnd(Object.values(updated.matches));
+  const matches = Object.values(updated.matches);
+  const latestEnd = latestMatchEnd(matches);
   if (latestEnd) {
     if (openEndedSchedule) {
       updated.end = latestEnd;
     } else if (latestEnd.getTime() > updated.end.getTime()) {
-      throw new ScheduleError('Scheduled matches exceed the fixed event end date/time. Increase the end date/time or enable "No fixed end datetime scheduling".');
+      throw new ScheduleError(
+        'Scheduled matches exceed the fixed event end date/time. Increase the end date/time or enable "No fixed end datetime scheduling".',
+        hasTeamDutyPlacementRestriction(matches) ? 'TEAM_DUTY' : 'RESOURCE',
+      );
     }
   }
 
   return {
     preview: false,
     event: updated,
-    matches: Object.values(updated.matches),
+    matches,
+    warnings: collectUnresolvedStaffingDiagnostics(matches),
   };
 };
 
@@ -685,23 +758,31 @@ const buildTournamentSchedule = (
     scheduled = result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (isScheduleOverrunError(message)) {
-      throw new ScheduleError(SCHEDULE_OVERRUN_MESSAGE);
+    if (error instanceof ScheduleError) {
+      throw error;
     }
-    throw error;
+    throw new ScheduleError(
+      isScheduleOverrunError(message) ? SCHEDULE_OVERRUN_MESSAGE : message,
+      'UNKNOWN',
+    );
   }
-  const latestEnd = latestMatchEnd(Object.values(scheduled.matches));
+  const matches = Object.values(scheduled.matches);
+  const latestEnd = latestMatchEnd(matches);
   if (latestEnd) {
     if (openEndedSchedule) {
       scheduled.end = latestEnd;
     } else if (latestEnd.getTime() > scheduled.end.getTime()) {
-      throw new ScheduleError('Scheduled matches exceed the fixed event end date/time. Increase the end date/time or enable "No fixed end datetime scheduling".');
+      throw new ScheduleError(
+        'Scheduled matches exceed the fixed event end date/time. Increase the end date/time or enable "No fixed end datetime scheduling".',
+        hasTeamDutyPlacementRestriction(matches) ? 'TEAM_DUTY' : 'RESOURCE',
+      );
     }
   }
   return {
     preview: false,
     event: scheduled,
-    matches: Object.values(scheduled.matches),
+    matches,
+    warnings: collectUnresolvedStaffingDiagnostics(matches),
   };
 };
 
@@ -714,6 +795,9 @@ const latestMatchEnd = (matches: Match[]): Date | null => {
   }
   return latest;
 };
+const hasTeamDutyPlacementRestriction = (matches: Match[]): boolean => matches.some(
+  (match) => (match as Match & { placementRestriction?: string }).placementRestriction === 'TEAM_DUTY',
+);
 
 const projectedDivisionTeamCounts = (event: League, fallbackTotal: number = 0): Map<string, number> => {
   const participantsByDivision = new Map<string, number>();

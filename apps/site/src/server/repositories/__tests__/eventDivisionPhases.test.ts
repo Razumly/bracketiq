@@ -2,8 +2,8 @@
 
 import {
   syncEventDivisionPhases,
-  syncEventPhaseParticipantsFromEntryDivisions,
 } from '@/server/repositories/eventDivisionPhases';
+
 
 const createClient = () => ({
   divisions: {
@@ -204,66 +204,5 @@ describe('syncEventDivisionPhases', () => {
     expect(client.divisions.upsert).not.toHaveBeenCalled();
     expect(client.eventDivisionPhaseSources.upsert).not.toHaveBeenCalled();
     expect(client.eventDivisionPhaseParticipants.upsert).not.toHaveBeenCalled();
-  });
-});
-describe('syncEventPhaseParticipantsFromEntryDivisions', () => {
-  it('rebuilds phase ownership from active entry team membership', async () => {
-    const updateMock = jest.fn().mockResolvedValue(undefined);
-    const deleteManyMock = jest.fn().mockResolvedValue(undefined);
-    const upsertMock = jest.fn().mockResolvedValue(undefined);
-    const client = {
-      divisions: {
-        findMany: jest.fn()
-          .mockResolvedValueOnce([{ id: 'entry_a', teamIds: ['team_1', 'team_2'] }])
-          .mockResolvedValueOnce([{
-            id: 'phase_a',
-            phase: 'LEAGUE',
-            sourceDivisionId: 'entry_a',
-            teamIds: ['stale_team'],
-          }]),
-        update: updateMock,
-      },
-      eventDivisionPhaseSources: {
-        findMany: jest.fn().mockResolvedValue([
-          { entryDivisionId: 'entry_a', phaseDivisionId: 'phase_a' },
-        ]),
-      },
-      eventDivisionPhaseParticipants: {
-        findMany: jest.fn().mockResolvedValue([
-          { phaseDivisionId: 'phase_a', eventTeamId: 'stale_team' },
-        ]),
-        deleteMany: deleteManyMock,
-        upsert: upsertMock,
-      },
-    };
-
-    await syncEventPhaseParticipantsFromEntryDivisions({
-      client,
-      eventId: 'event_1',
-    });
-
-    expect(client.divisions.findMany).toHaveBeenNthCalledWith(1, {
-      where: { eventId: 'event_1', role: 'ENTRY', status: 'ACTIVE' },
-      select: { id: true, teamIds: true },
-    });
-    expect(client.divisions.findMany).toHaveBeenNthCalledWith(2, {
-      where: { eventId: 'event_1', role: 'PHASE', status: 'ACTIVE' },
-      select: { id: true, phase: true, sourceDivisionId: true, teamIds: true },
-    });
-    expect(deleteManyMock).toHaveBeenCalledWith({
-      where: { eventId: 'event_1', phaseDivisionId: { in: ['phase_a'] } },
-    });
-    expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'phase_a' },
-      data: expect.objectContaining({ teamIds: ['team_1', 'team_2'] }),
-    }));
-    expect(upsertMock).toHaveBeenCalledTimes(2);
-    expect(upsertMock).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({
-        phaseDivisionId: 'phase_a',
-        eventTeamId: 'team_1',
-        sourceEntryDivisionId: 'entry_a',
-      }),
-    }));
   });
 });

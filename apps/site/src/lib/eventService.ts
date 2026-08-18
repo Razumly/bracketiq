@@ -60,6 +60,10 @@ import {
   normalizeOrganizationOwnershipStatus,
 } from "@/lib/organizationOwnership";
 import type { EventAuthorityCapabilities } from "@/server/accessControl";
+import {
+  normalizeOfficialSchedulingMode,
+  normalizeStaffingPriority,
+} from "@/server/officials/config";
 
 const readApiEntityId = (value: unknown): string | undefined => {
   if (!value || typeof value !== "object") {
@@ -349,7 +353,10 @@ class EventService {
         const row = entry as Record<string, unknown>;
         const positionId =
           typeof row.positionId === "string" ? row.positionId.trim() : "";
-        const userId = typeof row.userId === "string" ? row.userId.trim() : "";
+        const userId =
+          typeof row.userId === "string" && row.userId.trim().length > 0
+            ? row.userId.trim()
+            : null;
         const holderType =
           row.holderType === "PLAYER"
             ? "PLAYER"
@@ -359,11 +366,19 @@ class EventService {
         const slotIndex = Number(row.slotIndex);
         if (
           !positionId ||
-          !userId ||
+          (!userId && holderType !== "OFFICIAL") ||
           !holderType ||
           !Number.isInteger(slotIndex) ||
           slotIndex < 0
         ) {
+          return null;
+        }
+        const eventOfficialId =
+          typeof row.eventOfficialId === "string" &&
+          row.eventOfficialId.trim().length > 0
+            ? row.eventOfficialId.trim()
+            : null;
+        if (!userId && eventOfficialId) {
           return null;
         }
         return {
@@ -371,15 +386,9 @@ class EventService {
           slotIndex,
           holderType,
           userId,
-          eventOfficialId:
-            typeof row.eventOfficialId === "string" &&
-            row.eventOfficialId.trim().length > 0
-              ? row.eventOfficialId.trim()
-              : undefined,
-          checkedIn:
-            typeof row.checkedIn === "boolean" ? row.checkedIn : undefined,
-          hasConflict:
-            typeof row.hasConflict === "boolean" ? row.hasConflict : undefined,
+          eventOfficialId,
+          checkedIn: userId ? row.checkedIn === true : false,
+          hasConflict: userId ? row.hasConflict === true : false,
         };
       },
     );
@@ -799,22 +808,6 @@ class EventService {
     } as T;
   }
 
-  private normalizeOfficialSchedulingMode(
-    value: unknown,
-  ): Event["officialSchedulingMode"] {
-    if (value === "NONE") {
-      return "OFF";
-    }
-    if (
-      value === "STAFFING" ||
-      value === "TEAM_STAFFING" ||
-      value === "SCHEDULE" ||
-      value === "OFF"
-    ) {
-      return value;
-    }
-    return "SCHEDULE";
-  }
 
   private mapEventOfficialPositions(
     value: unknown,
@@ -1057,13 +1050,17 @@ class EventService {
     const normalizedResolvedMatchRules = normalizeObjectValue(
       row.resolvedMatchRules,
     ) as Event["resolvedMatchRules"];
-    const officialSchedulingMode = this.normalizeOfficialSchedulingMode(
+    const legacyOfficialSchedulingMode = normalizeOfficialSchedulingMode(
       row.officialSchedulingMode,
     );
-    const doTeamsOfficiate = officialSchedulingMode === "TEAM_STAFFING"
-      || (typeof row.doTeamsOfficiate === "boolean"
+    const staffingPriority = normalizeStaffingPriority(
+      row.staffingPriority,
+      legacyOfficialSchedulingMode,
+    );
+    const doTeamsOfficiate =
+      typeof row.doTeamsOfficiate === "boolean"
         ? row.doTeamsOfficiate
-        : false);
+        : legacyOfficialSchedulingMode === "TEAM_STAFFING";
 
     return {
       $id: row.id ?? row.$id,
@@ -1145,7 +1142,7 @@ class EventService {
       fieldIds: normalizedFieldIds,
       timeSlotIds: row.timeSlotIds,
       officialIds,
-      officialSchedulingMode,
+      staffingPriority,
       officialPositions,
       eventOfficials,
       assistantHostIds: Array.isArray(row.assistantHostIds)
@@ -1820,9 +1817,11 @@ class EventService {
     event.teams = teams;
     event.players = players;
     event.officialIds = officialIds;
-    event.officialSchedulingMode = this.normalizeOfficialSchedulingMode(
+    event.staffingPriority = normalizeStaffingPriority(
+      data.staffingPriority ?? event.staffingPriority,
       data.officialSchedulingMode ?? event.officialSchedulingMode,
     );
+    delete event.officialSchedulingMode;
     event.officialPositions = officialPositions;
     event.eventOfficials = eventOfficials;
     event.officials = officials;

@@ -175,4 +175,75 @@ describe("saveMatches", () => {
       }),
     );
   });
+  it("persists phase-specific official slots for bracket matches", async () => {
+    const upsert = jest.fn().mockResolvedValue(undefined);
+    const client = {
+      events: {
+        findUnique: jest.fn().mockResolvedValue({
+          officialPositions: [
+            { id: "event_referee", name: "Event Referee", count: 1, order: 0 },
+          ],
+        }),
+      },
+      matches: { upsert },
+    };
+    const phasePositions = [
+      { id: "bracket_referee", name: "Bracket Referee", count: 2, order: 0 },
+    ];
+
+    await saveMatches(
+      "event_phase_positions",
+      [
+        {
+          id: "match_bracket",
+          matchId: 1,
+          locked: true,
+          placementState: "PLACED",
+          start: new Date("2026-04-22T18:00:00.000Z"),
+          end: new Date("2026-04-22T19:00:00.000Z"),
+          field: { id: "field_1" },
+          division: {
+            id: "division_playoff",
+            kind: "PLAYOFF",
+            phase: "BRACKET",
+            phaseSettings: {
+              BRACKET: { officialPositions: phasePositions },
+            },
+          },
+          official: { id: "official_1" },
+          officialCheckedIn: true,
+          officialAssignments: [{
+            positionId: "bracket_referee",
+            slotIndex: 0,
+            holderType: "OFFICIAL",
+            userId: "official_1",
+            eventOfficialId: "event_official_1",
+            checkedIn: true,
+            hasConflict: false,
+          }],
+          team1Points: [],
+          team2Points: [],
+        },
+      ] as any,
+      client as any,
+    );
+
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        officialId: "official_1",
+        officialIds: [
+          expect.objectContaining({
+            positionId: "bracket_referee",
+            slotIndex: 0,
+            userId: "official_1",
+          }),
+          expect.objectContaining({
+            positionId: "bracket_referee",
+            slotIndex: 1,
+            userId: null,
+          }),
+        ],
+      }),
+    }));
+  });
 });

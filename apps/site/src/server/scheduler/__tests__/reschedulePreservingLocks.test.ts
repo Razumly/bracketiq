@@ -1,4 +1,7 @@
-import { rescheduleEventMatchesPreservingLocks } from '../reschedulePreservingLocks';
+import {
+  rescheduleEventMatchesPreservingLocks,
+  type TeamDutyReflowContext,
+} from '../reschedulePreservingLocks';
 import {
   Division,
   League,
@@ -41,6 +44,229 @@ const createMatch = (params: {
     officialCheckedIn: false,
     eventId: params.eventId,
   });
+
+
+type TeamDutyReflowFixture = {
+  tournament: Tournament;
+  target: Match;
+  teams: Record<string, Team>;
+  sourceDivision: Division;
+  playoffDivision: Division;
+  fields: Record<string, PlayingField>;
+};
+
+const createTeamDutyReflowFixture = (existingTeamOfficialId?: string): TeamDutyReflowFixture => {
+  const sourceDivision = new Division(
+    'source_pool',
+    'Source Pool',
+    [],
+    null,
+    null,
+    null,
+    'LEAGUE',
+    ['playoff'],
+  );
+  const playoffDivision = new Division('playoff', 'Playoff', [], null, null, null, 'PLAYOFF');
+  const outsideDivision = new Division('outside', 'Outside');
+  const divisions = [sourceDivision, playoffDivision, outsideDivision];
+  const fields = Object.fromEntries(
+    ['target', 'playing_conflict', 'officiating_conflict', 'history', 'imminent'].map((suffix) => {
+      const field = new PlayingField({
+        id: `field_${suffix}`,
+        divisions,
+        matches: [],
+        events: [],
+        rentalSlots: [],
+        name: suffix,
+      });
+      return [field.id, field];
+    }),
+  );
+  const makeTeam = (id: string, division: Division) => new Team({
+    id,
+    captainId: `captain_${id}`,
+    division,
+    name: id,
+    matches: [],
+    playerIds: [],
+  });
+  const teams = {
+    entrant_1: makeTeam('entrant_1', playoffDivision),
+    entrant_2: makeTeam('entrant_2', playoffDivision),
+    existing_unchecked: makeTeam('existing_unchecked', sourceDivision),
+    eligible_mapped: makeTeam('eligible_mapped', sourceDivision),
+    eligible_same_phase: makeTeam('eligible_same_phase', playoffDivision),
+    unchecked_mapped: makeTeam('unchecked_mapped', sourceDivision),
+    outside_checked: makeTeam('outside_checked', outsideDivision),
+    playing_conflict: makeTeam('playing_conflict', sourceDivision),
+    officiating_conflict: makeTeam('officiating_conflict', sourceDivision),
+    insufficient_rest: makeTeam('insufficient_rest', sourceDivision),
+    imminent_match: makeTeam('imminent_match', sourceDivision),
+    opponent_1: makeTeam('opponent_1', sourceDivision),
+    opponent_2: makeTeam('opponent_2', sourceDivision),
+  };
+  sourceDivision.teamIds = Object.values(teams)
+    .filter((team) => team.division.id === sourceDivision.id)
+    .map((team) => team.id);
+  playoffDivision.teamIds = Object.values(teams)
+    .filter((team) => team.division.id === playoffDivision.id)
+    .map((team) => team.id);
+  outsideDivision.teamIds = [teams.outside_checked.id];
+
+  const target = createMatch({
+    id: 'target_team_duty',
+    matchId: 10,
+    locked: true,
+    start: new Date('2026-03-02T12:00:00.000Z'),
+    end: new Date('2026-03-02T13:00:00.000Z'),
+    field: fields.field_target,
+    division: playoffDivision,
+    team1: teams.entrant_1,
+    team2: teams.entrant_2,
+    eventId: 'team_duty_reflow',
+  });
+  target.requiresTeamOfficial = true;
+  target.teamOfficial = existingTeamOfficialId
+    ? Object.values(teams).find((team) => team.id === existingTeamOfficialId) ?? null
+    : null;
+
+  const playingConflict = createMatch({
+    id: 'playing_conflict_match',
+    matchId: 11,
+    locked: true,
+    start: new Date('2026-03-02T12:00:00.000Z'),
+    end: new Date('2026-03-02T13:00:00.000Z'),
+    field: fields.field_playing_conflict,
+    division: sourceDivision,
+    team1: teams.playing_conflict,
+    team2: teams.opponent_1,
+    eventId: 'team_duty_reflow',
+  });
+  playingConflict.requiresTeamOfficial = true;
+  playingConflict.teamOfficial = teams.existing_unchecked;
+  const officiatingConflict = createMatch({
+    id: 'officiating_conflict_match',
+    matchId: 12,
+    locked: true,
+    start: new Date('2026-03-02T12:00:00.000Z'),
+    end: new Date('2026-03-02T13:00:00.000Z'),
+    field: fields.field_officiating_conflict,
+    division: sourceDivision,
+    team1: teams.opponent_1,
+    team2: teams.opponent_2,
+    eventId: 'team_duty_reflow',
+  });
+  officiatingConflict.requiresTeamOfficial = true;
+  officiatingConflict.teamOfficial = teams.officiating_conflict;
+  const recentMatch = createMatch({
+    id: 'insufficient_rest_match',
+    matchId: 13,
+    locked: true,
+    start: new Date('2026-03-02T10:50:00.000Z'),
+    end: new Date('2026-03-02T11:50:00.000Z'),
+    field: fields.field_history,
+    division: sourceDivision,
+    team1: teams.insufficient_rest,
+    team2: teams.opponent_1,
+    eventId: 'team_duty_reflow',
+  });
+  recentMatch.requiresTeamOfficial = true;
+  recentMatch.teamOfficial = teams.existing_unchecked;
+  const imminentMatch = createMatch({
+    id: 'imminent_match_conflict',
+    matchId: 14,
+    locked: true,
+    start: new Date('2026-03-02T13:10:00.000Z'),
+    end: new Date('2026-03-02T14:10:00.000Z'),
+    field: fields.field_imminent,
+    division: sourceDivision,
+    team1: teams.imminent_match,
+    team2: teams.opponent_2,
+    eventId: 'team_duty_reflow',
+  });
+  imminentMatch.requiresTeamOfficial = true;
+  imminentMatch.teamOfficial = teams.existing_unchecked;
+
+  const tournament = new Tournament({
+    id: 'team_duty_reflow',
+    name: 'Team duty reflow',
+    start: new Date('2026-03-02T10:00:00.000Z'),
+    end: new Date('2026-03-02T16:00:00.000Z'),
+    maxParticipants: Object.keys(teams).length,
+    teamSignup: true,
+    eventType: 'TOURNAMENT',
+    teams,
+    divisions: [sourceDivision, outsideDivision],
+    fields,
+    matches: {
+      [target.id]: target,
+      [playingConflict.id]: playingConflict,
+      [officiatingConflict.id]: officiatingConflict,
+      [recentMatch.id]: recentMatch,
+      [imminentMatch.id]: imminentMatch,
+    },
+    officials: [],
+    doTeamsOfficiate: true,
+    officialSchedulingMode: 'TEAM_STAFFING',
+    includePlayoffs: true,
+    playoffDivisions: [playoffDivision],
+    doubleElimination: false,
+    usesSets: false,
+    matchDurationMinutes: 60,
+    setDurationMinutes: 0,
+    restTimeMinutes: 30,
+    noFixedEndDateTime: false,
+    timeSlots: [],
+  });
+  (tournament as Tournament & { staffingPriority: 'TEAM_COVERAGE_REQUIRED' }).staffingPriority =
+    'TEAM_COVERAGE_REQUIRED';
+
+  return { tournament, target, teams, sourceDivision, playoffDivision, fields };
+};
+
+const addTeamHistoryMatch = (
+  fixture: TeamDutyReflowFixture,
+  {
+    id,
+    team,
+    opponent,
+    start,
+    end,
+    field,
+    winner,
+    teamOfficial,
+  }: {
+    id: string;
+    team: Team;
+    opponent: Team;
+    start: string;
+    end: string;
+    field: PlayingField;
+    winner?: Team;
+    teamOfficial?: Team;
+  },
+) => {
+  const match = createMatch({
+    id,
+    matchId: Object.keys(fixture.tournament.matches).length + 100,
+    locked: true,
+    start: new Date(start),
+    end: new Date(end),
+    field,
+    division: fixture.sourceDivision,
+    team1: team,
+    team2: opponent,
+    eventId: fixture.tournament.id,
+  });
+  match.status = 'COMPLETED';
+  match.resultStatus = 'FINAL';
+  match.actualEnd = new Date(end);
+  match.winnerEventTeamId = winner?.id ?? opponent.id;
+  match.requiresTeamOfficial = true;
+  match.teamOfficial = teamOfficial ?? fixture.teams.existing_unchecked;
+  fixture.tournament.matches[match.id] = match;
+  return match;
+};
 
 describe('rescheduleEventMatchesPreservingLocks', () => {
   it('keeps locked matches fixed and warns when they are outside the updated window', () => {
@@ -166,6 +392,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       includePlayoffs: false,
       playoffTeamCount: 0,
       doTeamsOfficiate: false,
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
       noFixedEndDateTime: false,
       restTimeMinutes: 5,
       timeSlots: [
@@ -334,6 +561,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       includePlayoffs: false,
       playoffTeamCount: 0,
       doTeamsOfficiate: false,
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
       noFixedEndDateTime: true,
       restTimeMinutes: 5,
       timeSlots: [mirroredSlot],
@@ -457,6 +685,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       includePlayoffs: false,
       playoffTeamCount: 0,
       doTeamsOfficiate: false,
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
       noFixedEndDateTime: false,
       restTimeMinutes: 5,
       timeSlots: [
@@ -599,6 +828,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       includePlayoffs: false,
       playoffTeamCount: 0,
       doTeamsOfficiate: false,
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
       noFixedEndDateTime: false,
       restTimeMinutes: 5,
       timeSlots: [
@@ -721,6 +951,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       includePlayoffs: true,
       playoffTeamCount: 2,
       doTeamsOfficiate: false,
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
       noFixedEndDateTime: false,
       restTimeMinutes: 5,
       timeSlots: [
@@ -870,6 +1101,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       includePlayoffs: true,
       playoffTeamCount: 4,
       doTeamsOfficiate: false,
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
       noFixedEndDateTime: false,
       restTimeMinutes: 5,
       timeSlots: [
@@ -1025,6 +1257,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       includePlayoffs: true,
       playoffTeamCount: 2,
       doTeamsOfficiate: false,
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
       noFixedEndDateTime: false,
       restTimeMinutes: 5,
       timeSlots: [
@@ -1169,6 +1402,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       includePlayoffs: true,
       playoffTeamCount: 4,
       doTeamsOfficiate: false,
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
       noFixedEndDateTime: false,
       restTimeMinutes: 5,
       timeSlots: [
@@ -1329,6 +1563,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       includePlayoffs: true,
       playoffTeamCount: 10,
       doTeamsOfficiate: false,
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
       noFixedEndDateTime: false,
       restTimeMinutes: 5,
       timeSlots: [
@@ -1465,6 +1700,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       includePlayoffs: false,
       playoffTeamCount: 0,
       doTeamsOfficiate: false,
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
       noFixedEndDateTime: true,
       restTimeMinutes: 5,
       timeSlots: [
@@ -1496,7 +1732,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     expect(result.warnings).toHaveLength(0);
   });
 
-  it('reassigns missing official and team officials when rescheduling tournament matches', () => {
+  it('reassigns missing named officials and checked-in Team duties before moving matches during explicit reflow', () => {
     const division = new Division('open', 'Open');
     const field = new PlayingField({
       id: 'field_tournament_refs',
@@ -1629,7 +1865,17 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       ],
     });
 
-    const result = rescheduleEventMatchesPreservingLocks(tournament);
+    const originalPlacements = [match1, match2, match3].map((match) => ({
+      id: match.id,
+      fieldId: match.field?.id ?? null,
+      start: match.start.getTime(),
+      end: match.end.getTime(),
+    }));
+    const checkedInTeamIds = new Set(Object.keys(tournament.teams));
+    const result = rescheduleEventMatchesPreservingLocks(tournament, {
+      eventCheckedInTeamIds: checkedInTeamIds,
+      checkedInTeamIdsByMatch: new Map(),
+    });
     expect(result.warnings).toHaveLength(0);
 
     const validOfficialIds = new Set(['official_1', 'official_2']);
@@ -1640,9 +1886,15 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       expect(match.teamOfficial?.id).not.toBe(match.team1?.id);
       expect(match.teamOfficial?.id).not.toBe(match.team2?.id);
     }
+    expect(result.matches.map((match) => ({
+      id: match.id,
+      fieldId: match.field?.id ?? null,
+      start: match.start.getTime(),
+      end: match.end.getTime(),
+    }))).toEqual(originalPlacements);
   });
 
-  it('SCHEDULE mode clears stale conflicting assignments and leaves overlap slots empty', () => {
+  it('legacy SCHEDULE clears stale conflicts and preserves the unbound named-position slot', () => {
     const division = new Division('open', 'Open');
     const field1 = new PlayingField({
       id: 'field_schedule_mode_1',
@@ -1778,7 +2030,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       timeSlots: [
         new TimeSlot({
           id: 'slot_schedule_mode',
-          dayOfWeek: 3,
+          dayOfWeek: 2,
           startDate: eventStart,
           endDate: eventEnd,
           repeating: true,
@@ -1791,14 +2043,18 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     });
 
     const result = rescheduleEventMatchesPreservingLocks(tournament);
-    expect(result.warnings).toHaveLength(0);
+    expect(result.warnings.map((warning) => warning.code)).toEqual([
+      'UNRESOLVED_TEAM_DUTY',
+      'UNRESOLVED_NAMED_OFFICIAL_POSITION',
+    ]);
 
     const assignmentTotal = result.matches.reduce(
-      (total, match) => total + match.officialAssignments.filter((assignment) => assignment.holderType === 'OFFICIAL').length,
+      (total, match) => total + match.officialAssignments.filter((assignment) => assignment.userId !== null).length,
       0,
     );
     expect(assignmentTotal).toBe(1);
-    expect(result.matches.some((match) => match.officialAssignments.length === 0)).toBe(true);
+    expect(result.matches.every((match) => match.officialAssignments.length === 1)).toBe(true);
+    expect(result.matches.some((match) => match.officialAssignments[0].userId === null)).toBe(true);
     expect(result.matches.some((match) => match.officialAssignments.some((assignment) => assignment.hasConflict))).toBe(false);
   });
 
@@ -1917,7 +2173,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       timeSlots: [
         new TimeSlot({
           id: 'slot_off_mode',
-          dayOfWeek: 4,
+          dayOfWeek: 3,
           startDate: eventStart,
           endDate: eventEnd,
           repeating: true,
@@ -1930,10 +2186,12 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     });
 
     const result = rescheduleEventMatchesPreservingLocks(tournament);
-    expect(result.warnings).toHaveLength(0);
+    expect(result.warnings.map((warning) => warning.code)).toEqual([
+      'UNRESOLVED_TEAM_DUTY',
+    ]);
 
     const assignmentTotal = result.matches.reduce(
-      (total, match) => total + match.officialAssignments.filter((assignment) => assignment.holderType === 'OFFICIAL').length,
+      (total, match) => total + match.officialAssignments.filter((assignment) => assignment.userId !== null).length,
       0,
     );
     expect(assignmentTotal).toBe(2);
@@ -1995,6 +2253,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     const match1 = createMatch({
       id: 'match_staffing_1',
       matchId: 1,
+      locked: true,
       start: new Date('2026-03-03T10:00:00.000Z'),
       end: new Date('2026-03-03T11:00:00.000Z'),
       field,
@@ -2110,6 +2369,11 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
         }),
       ],
     });
+    const lockedPlacement = {
+      fieldId: match1.field?.id ?? null,
+      start: match1.start.getTime(),
+      end: match1.end.getTime(),
+    };
 
     const result = rescheduleEventMatchesPreservingLocks(tournament);
     expect(result.warnings).toHaveLength(0);
@@ -2123,5 +2387,370 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       expect(match.official?.id).toBeTruthy();
       expect(userIds).toContain(match.official?.id ?? '');
     }
+    const rescheduledLockedMatch = result.matches.find((match) => match.id === match1.id);
+    expect({
+      fieldId: rescheduledLockedMatch?.field?.id ?? null,
+      start: rescheduledLockedMatch?.start.getTime(),
+      end: rescheduledLockedMatch?.end.getTime(),
+    }).toEqual(lockedPlacement);
+  });
+
+  it('keeps an unchecked existing Team duty unchanged and check-in context alone causes no reflow', () => {
+    const uncheckedFixture = createTeamDutyReflowFixture('existing_unchecked');
+    const uncheckedContext: TeamDutyReflowContext = {
+      eventCheckedInTeamIds: new Set(['eligible_mapped']),
+      checkedInTeamIdsByMatch: new Map([
+        [uncheckedFixture.target.id, new Set(['eligible_mapped'])],
+      ]),
+    };
+    const originalPlacement = {
+      fieldId: uncheckedFixture.target.field?.id,
+      start: uncheckedFixture.target.start.getTime(),
+      end: uncheckedFixture.target.end.getTime(),
+    };
+
+    const uncheckedResult = rescheduleEventMatchesPreservingLocks(
+      uncheckedFixture.tournament,
+      uncheckedContext,
+    );
+    const uncheckedTarget = uncheckedResult.matches.find((match) => match.id === uncheckedFixture.target.id);
+
+    expect(uncheckedTarget?.teamOfficial?.id).toBe('existing_unchecked');
+    expect({
+      fieldId: uncheckedTarget?.field?.id,
+      start: uncheckedTarget?.start.getTime(),
+      end: uncheckedTarget?.end.getTime(),
+    }).toEqual(originalPlacement);
+
+    const checkedFixture = createTeamDutyReflowFixture('existing_unchecked');
+    const checkedResult = rescheduleEventMatchesPreservingLocks(checkedFixture.tournament, {
+      eventCheckedInTeamIds: new Set(['existing_unchecked', 'eligible_mapped']),
+      checkedInTeamIdsByMatch: new Map([
+        [checkedFixture.target.id, new Set(['existing_unchecked', 'eligible_mapped'])],
+      ]),
+    });
+    const checkedTarget = checkedResult.matches.find((match) => match.id === checkedFixture.target.id);
+
+    expect({
+      teamOfficialId: checkedTarget?.teamOfficial?.id,
+      fieldId: checkedTarget?.field?.id,
+      start: checkedTarget?.start.getTime(),
+      end: checkedTarget?.end.getTime(),
+    }).toEqual({
+      teamOfficialId: uncheckedTarget?.teamOfficial?.id,
+      fieldId: uncheckedTarget?.field?.id,
+      start: uncheckedTarget?.start.getTime(),
+      end: uncheckedTarget?.end.getTime(),
+    });
+  });
+
+  it('replaces a missing Team duty only with a checked-in mapped-source Team that has no play, duty, rest, or imminent-Match conflict', () => {
+    const fixture = createTeamDutyReflowFixture();
+    const checkedInIds = new Set([
+      'eligible_mapped',
+      'outside_checked',
+      'playing_conflict',
+      'officiating_conflict',
+      'insufficient_rest',
+      'imminent_match',
+    ]);
+
+    const result = rescheduleEventMatchesPreservingLocks(fixture.tournament, {
+      eventCheckedInTeamIds: checkedInIds,
+      checkedInTeamIdsByMatch: new Map([[fixture.target.id, checkedInIds]]),
+    });
+    const target = result.matches.find((match) => match.id === fixture.target.id);
+
+    expect(target?.teamOfficial?.id).toBe('eligible_mapped');
+    expect(target?.field?.id).toBe('field_target');
+    expect(target?.start.toISOString()).toBe('2026-03-02T12:00:00.000Z');
+  });
+
+  it('allows a checked-in Team from the Match Phase Division as a replacement Team duty', () => {
+    const fixture = createTeamDutyReflowFixture();
+    const checkedInIds = new Set(['eligible_same_phase']);
+
+    const result = rescheduleEventMatchesPreservingLocks(fixture.tournament, {
+      eventCheckedInTeamIds: checkedInIds,
+      checkedInTeamIdsByMatch: new Map([[fixture.target.id, checkedInIds]]),
+    });
+
+    expect(result.matches.find((match) => match.id === fixture.target.id)?.teamOfficial?.id)
+      .toBe('eligible_same_phase');
+  });
+  it('reuses a Match check-in for reachable downstream bracket Team duty', () => {
+    const fixture = createTeamDutyReflowFixture();
+    const source = createMatch({
+      id: 'checked_in_source',
+      matchId: 9,
+      locked: true,
+      start: new Date('2026-03-02T08:00:00.000Z'),
+      end: new Date('2026-03-02T09:00:00.000Z'),
+      field: fixture.fields.field_history,
+      division: fixture.sourceDivision,
+      team1: fixture.teams.eligible_mapped,
+      team2: fixture.teams.opponent_1,
+      eventId: fixture.tournament.id,
+    });
+    source.requiresTeamOfficial = true;
+    source.teamOfficial = fixture.teams.opponent_2;
+    source.winnerNextMatch = fixture.target;
+    fixture.target.previousLeftMatch = source;
+    fixture.tournament.matches[source.id] = source;
+
+    const result = rescheduleEventMatchesPreservingLocks(fixture.tournament, {
+      eventCheckedInTeamIds: new Set(),
+      checkedInTeamIdsByMatch: new Map([
+        [source.id, new Set([fixture.teams.eligible_mapped.id])],
+      ]),
+    });
+
+    expect(result.matches.find((match) => match.id === fixture.target.id)?.teamOfficial?.id)
+      .toBe(fixture.teams.eligible_mapped.id);
+  });
+
+
+  it('does not select a Team-duty replacement outside an explicit reflow context', () => {
+    const fixture = createTeamDutyReflowFixture();
+    fixture.tournament.staffingPriority = 'BEST_AVAILABLE_COVERAGE';
+    fixture.tournament.doTeamsOfficiate = false;
+
+    const result = rescheduleEventMatchesPreservingLocks(fixture.tournament);
+    const target = result.matches.find((match) => match.id === fixture.target.id);
+
+    expect(target?.teamOfficial).toBeNull();
+    expect(target?.requiresTeamOfficial).toBe(true);
+    expect(target?.reservesTeamOfficial).toBe(false);
+    expect(result.warnings).toContainEqual(expect.objectContaining({
+      code: 'UNRESOLVED_TEAM_DUTY',
+      matchIds: [fixture.target.id],
+    }));
+  });
+
+  it('uses event-level or target-Match check-in independently for replacement eligibility', () => {
+    const eventFixture = createTeamDutyReflowFixture();
+    const eventResult = rescheduleEventMatchesPreservingLocks(eventFixture.tournament, {
+      eventCheckedInTeamIds: new Set(['eligible_mapped']),
+      checkedInTeamIdsByMatch: new Map([
+        ['unrelated_match', new Set(['outside_checked'])],
+      ]),
+    });
+    expect(eventResult.matches.find((match) => match.id === eventFixture.target.id)?.teamOfficial?.id)
+      .toBe('eligible_mapped');
+
+    const matchFixture = createTeamDutyReflowFixture();
+    const matchResult = rescheduleEventMatchesPreservingLocks(matchFixture.tournament, {
+      eventCheckedInTeamIds: new Set(),
+      checkedInTeamIdsByMatch: new Map([
+        [matchFixture.target.id, new Set(['eligible_same_phase'])],
+      ]),
+    });
+    expect(matchResult.matches.find((match) => match.id === matchFixture.target.id)?.teamOfficial?.id)
+      .toBe('eligible_same_phase');
+  });
+
+  it('derives Team-duty slots from Staffing Priority while doTeamsOfficiate only controls candidates', () => {
+    const officialOnlyFixture = createTeamDutyReflowFixture();
+    officialOnlyFixture.tournament.staffingPriority = 'OFFICIAL_COVERAGE_REQUIRED';
+    const officialOnlyResult = rescheduleEventMatchesPreservingLocks(
+      officialOnlyFixture.tournament,
+      {
+        eventCheckedInTeamIds: new Set(['eligible_mapped']),
+        checkedInTeamIdsByMatch: new Map(),
+      },
+    );
+    const officialOnlyTarget = officialOnlyResult.matches.find(
+      (match) => match.id === officialOnlyFixture.target.id,
+    );
+    expect(officialOnlyTarget?.requiresTeamOfficial).toBe(false);
+    expect(officialOnlyTarget?.reservesTeamOfficial).toBe(false);
+    expect(officialOnlyTarget?.teamOfficial).toBeNull();
+
+    const hardTeamFixture = createTeamDutyReflowFixture();
+    hardTeamFixture.tournament.doTeamsOfficiate = false;
+    const originalState = {
+      eventEnd: hardTeamFixture.tournament.end.getTime(),
+      matches: Object.values(hardTeamFixture.tournament.matches).map((match) => ({
+        id: match.id,
+        fieldId: match.field?.id ?? null,
+        start: match.start.getTime(),
+        end: match.end.getTime(),
+        placementState: match.placementState,
+        teamOfficialId: match.teamOfficial?.id ?? null,
+        requiresTeamOfficial: match.requiresTeamOfficial,
+        reservesTeamOfficial: match.reservesTeamOfficial,
+      })),
+    };
+
+    expect(() => rescheduleEventMatchesPreservingLocks(hardTeamFixture.tournament, {
+      eventCheckedInTeamIds: new Set(['eligible_mapped']),
+      checkedInTeamIdsByMatch: new Map(),
+    })).toThrow('requires a Team duty assignment');
+    expect({
+      eventEnd: hardTeamFixture.tournament.end.getTime(),
+      matches: Object.values(hardTeamFixture.tournament.matches).map((match) => ({
+        id: match.id,
+        fieldId: match.field?.id ?? null,
+        start: match.start.getTime(),
+        end: match.end.getTime(),
+        placementState: match.placementState,
+        teamOfficialId: match.teamOfficial?.id ?? null,
+        requiresTeamOfficial: match.requiresTeamOfficial,
+        reservesTeamOfficial: match.reservesTeamOfficial,
+      })),
+    }).toEqual(originalState);
+  });
+
+  it('prefers the most recent loss when multiple eliminated Teams are eligible', () => {
+    const fixture = createTeamDutyReflowFixture();
+    addTeamHistoryMatch(fixture, {
+      id: 'older_eliminated_loss',
+      team: fixture.teams.eligible_mapped,
+      opponent: fixture.teams.opponent_1,
+      start: '2026-03-02T08:00:00.000Z',
+      end: '2026-03-02T09:00:00.000Z',
+      field: fixture.fields.field_playing_conflict,
+    });
+    addTeamHistoryMatch(fixture, {
+      id: 'newer_eliminated_loss',
+      team: fixture.teams.unchecked_mapped,
+      opponent: fixture.teams.opponent_2,
+      start: '2026-03-02T10:00:00.000Z',
+      end: '2026-03-02T11:00:00.000Z',
+      field: fixture.fields.field_officiating_conflict,
+    });
+    const checkedInTeamIds = new Set(['eligible_mapped', 'unchecked_mapped']);
+
+    const result = rescheduleEventMatchesPreservingLocks(fixture.tournament, {
+      eventCheckedInTeamIds: checkedInTeamIds,
+      checkedInTeamIdsByMatch: new Map(),
+    });
+
+    expect(result.matches.find((match) => match.id === fixture.target.id)?.teamOfficial?.id)
+      .toBe('unchecked_mapped');
+  });
+
+  it('ranks eliminated and recent losers before other mapped Teams, then assignment count, longest rest, and stable ID', () => {
+    const eliminatedFixture = createTeamDutyReflowFixture();
+    addTeamHistoryMatch(eliminatedFixture, {
+      id: 'eliminated_loss',
+      team: eliminatedFixture.teams.eligible_mapped,
+      opponent: eliminatedFixture.teams.opponent_1,
+      start: '2026-03-02T09:00:00.000Z',
+      end: '2026-03-02T10:00:00.000Z',
+      field: eliminatedFixture.fields.field_playing_conflict,
+    });
+    addTeamHistoryMatch(eliminatedFixture, {
+      id: 'recent_loss',
+      team: eliminatedFixture.teams.unchecked_mapped,
+      opponent: eliminatedFixture.teams.opponent_2,
+      start: '2026-03-02T10:00:00.000Z',
+      end: '2026-03-02T11:00:00.000Z',
+      field: eliminatedFixture.fields.field_officiating_conflict,
+    });
+    const remainingMatch = addTeamHistoryMatch(eliminatedFixture, {
+      id: 'recent_loser_remaining_match',
+      team: eliminatedFixture.teams.unchecked_mapped,
+      opponent: eliminatedFixture.teams.opponent_1,
+      start: '2026-03-02T14:30:00.000Z',
+      end: '2026-03-02T15:30:00.000Z',
+      field: eliminatedFixture.fields.field_history,
+    });
+    remainingMatch.status = 'SCHEDULED';
+    remainingMatch.resultStatus = null;
+    remainingMatch.actualEnd = null;
+    remainingMatch.winnerEventTeamId = null;
+    const categoryIds = new Set(['eligible_mapped', 'unchecked_mapped', 'eligible_same_phase']);
+
+    const eliminatedResult = rescheduleEventMatchesPreservingLocks(eliminatedFixture.tournament, {
+      eventCheckedInTeamIds: categoryIds,
+      checkedInTeamIdsByMatch: new Map([[eliminatedFixture.target.id, categoryIds]]),
+    });
+    expect(eliminatedResult.matches.find((match) => match.id === eliminatedFixture.target.id)?.teamOfficial?.id)
+      .toBe('eligible_mapped');
+
+    const recentLoserFixture = createTeamDutyReflowFixture();
+    addTeamHistoryMatch(recentLoserFixture, {
+      id: 'recent_loss',
+      team: recentLoserFixture.teams.unchecked_mapped,
+      opponent: recentLoserFixture.teams.opponent_2,
+      start: '2026-03-02T10:00:00.000Z',
+      end: '2026-03-02T11:00:00.000Z',
+      field: recentLoserFixture.fields.field_officiating_conflict,
+    });
+    const futureMatch = addTeamHistoryMatch(recentLoserFixture, {
+      id: 'recent_loser_remaining_match',
+      team: recentLoserFixture.teams.unchecked_mapped,
+      opponent: recentLoserFixture.teams.opponent_1,
+      start: '2026-03-02T14:30:00.000Z',
+      end: '2026-03-02T15:30:00.000Z',
+      field: recentLoserFixture.fields.field_history,
+    });
+    futureMatch.status = 'SCHEDULED';
+    futureMatch.resultStatus = null;
+    futureMatch.actualEnd = null;
+    futureMatch.winnerEventTeamId = null;
+    const recentLoserIds = new Set(['unchecked_mapped', 'eligible_same_phase']);
+    const recentLoserResult = rescheduleEventMatchesPreservingLocks(recentLoserFixture.tournament, {
+      eventCheckedInTeamIds: recentLoserIds,
+      checkedInTeamIdsByMatch: new Map([[recentLoserFixture.target.id, recentLoserIds]]),
+    });
+    expect(recentLoserResult.matches.find((match) => match.id === recentLoserFixture.target.id)?.teamOfficial?.id)
+      .toBe('unchecked_mapped');
+
+    const assignmentCountFixture = createTeamDutyReflowFixture();
+    addTeamHistoryMatch(assignmentCountFixture, {
+      id: 'prior_team_duty',
+      team: assignmentCountFixture.teams.opponent_1,
+      opponent: assignmentCountFixture.teams.opponent_2,
+      start: '2026-03-02T09:00:00.000Z',
+      end: '2026-03-02T10:00:00.000Z',
+      field: assignmentCountFixture.fields.field_history,
+      winner: assignmentCountFixture.teams.opponent_1,
+      teamOfficial: assignmentCountFixture.teams.eligible_mapped,
+    });
+    const assignmentIds = new Set(['eligible_mapped', 'unchecked_mapped']);
+    const assignmentCountResult = rescheduleEventMatchesPreservingLocks(assignmentCountFixture.tournament, {
+      eventCheckedInTeamIds: assignmentIds,
+      checkedInTeamIdsByMatch: new Map([[assignmentCountFixture.target.id, assignmentIds]]),
+    });
+    expect(assignmentCountResult.matches.find((match) => match.id === assignmentCountFixture.target.id)?.teamOfficial?.id)
+      .toBe('unchecked_mapped');
+
+    const restFixture = createTeamDutyReflowFixture();
+    addTeamHistoryMatch(restFixture, {
+      id: 'longer_rest_win',
+      team: restFixture.teams.eligible_mapped,
+      opponent: restFixture.teams.opponent_1,
+      start: '2026-03-02T08:00:00.000Z',
+      end: '2026-03-02T09:00:00.000Z',
+      field: restFixture.fields.field_playing_conflict,
+      winner: restFixture.teams.eligible_mapped,
+    });
+    addTeamHistoryMatch(restFixture, {
+      id: 'shorter_rest_win',
+      team: restFixture.teams.unchecked_mapped,
+      opponent: restFixture.teams.opponent_2,
+      start: '2026-03-02T10:00:00.000Z',
+      end: '2026-03-02T11:00:00.000Z',
+      field: restFixture.fields.field_officiating_conflict,
+      winner: restFixture.teams.unchecked_mapped,
+    });
+    const restIds = new Set(['eligible_mapped', 'unchecked_mapped']);
+    const restResult = rescheduleEventMatchesPreservingLocks(restFixture.tournament, {
+      eventCheckedInTeamIds: restIds,
+      checkedInTeamIdsByMatch: new Map([[restFixture.target.id, restIds]]),
+    });
+    expect(restResult.matches.find((match) => match.id === restFixture.target.id)?.teamOfficial?.id)
+      .toBe('eligible_mapped');
+
+    const stableIdFixture = createTeamDutyReflowFixture();
+    const stableIds = new Set(['eligible_mapped', 'unchecked_mapped']);
+    const stableIdResult = rescheduleEventMatchesPreservingLocks(stableIdFixture.tournament, {
+      eventCheckedInTeamIds: stableIds,
+      checkedInTeamIdsByMatch: new Map([[stableIdFixture.target.id, stableIds]]),
+    });
+    expect(stableIdResult.matches.find((match) => match.id === stableIdFixture.target.id)?.teamOfficial?.id)
+      .toBe('eligible_mapped');
   });
 });

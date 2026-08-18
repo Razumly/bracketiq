@@ -2194,7 +2194,7 @@ describe('upsertEventFromPayload', () => {
     expect(client.events.upsert).not.toHaveBeenCalled();
   });
 
-  it('persists official staffing payload fields and event-official rows', async () => {
+  it('persists canonical staffing priority, named positions, and event-official rows', async () => {
     const client = createMockClient();
     client.sports.findUnique.mockResolvedValue({
       officialPositionTemplates: [
@@ -2206,7 +2206,7 @@ describe('upsertEventFromPayload', () => {
     const payload = {
       ...baseEventPayload(),
       divisions: ['OPEN'],
-      officialSchedulingMode: 'SCHEDULE',
+      staffingPriority: 'FULL_COVERAGE_REQUIRED',
       officialPositions: [
         {
           id: 'event_pos_r1',
@@ -2239,18 +2239,20 @@ describe('upsertEventFromPayload', () => {
     const eventUpsertArgs = client.events.upsert.mock.calls[0][0];
     expect(eventUpsertArgs.create).toEqual(
       expect.objectContaining({
-        officialSchedulingMode: 'SCHEDULE',
+        staffingPriority: 'FULL_COVERAGE_REQUIRED',
         officialPositions: payload.officialPositions,
       }),
     );
     expect(eventUpsertArgs.create.officialIds).toBeUndefined();
+    expect(eventUpsertArgs.create).not.toHaveProperty('officialSchedulingMode');
     expect(eventUpsertArgs.update).toEqual(
       expect.objectContaining({
-        officialSchedulingMode: 'SCHEDULE',
+        staffingPriority: 'FULL_COVERAGE_REQUIRED',
         officialPositions: payload.officialPositions,
       }),
     );
     expect(eventUpsertArgs.update.officialIds).toBeUndefined();
+    expect(eventUpsertArgs.update).not.toHaveProperty('officialSchedulingMode');
     expect(client.eventOfficials.deleteMany).toHaveBeenCalledWith({
       where: { eventId: 'event_1' },
     });
@@ -2266,6 +2268,30 @@ describe('upsertEventFromPayload', () => {
         updatedAt: expect.any(Date),
       }),
     });
+  });
+
+  it('maps explicit legacy intake mode while keeping canonical priority persisted', async () => {
+    const mockClient = createMockClient();
+    // The focused repository fake implements the delegates exercised by this upsert.
+    const client = mockClient as unknown as NonNullable<
+      Parameters<typeof upsertEventFromPayload>[1]
+    >;
+
+    await upsertEventFromPayload({
+      ...baseEventPayload(),
+      divisions: ['OPEN'],
+      officialSchedulingMode: 'TEAM_STAFFING',
+    }, client);
+
+    const eventUpsertArgs = mockClient.events.upsert.mock.calls[0][0];
+    expect(eventUpsertArgs.create).toEqual(expect.objectContaining({
+      officialSchedulingMode: 'TEAM_STAFFING',
+      staffingPriority: 'TEAM_COVERAGE_REQUIRED',
+    }));
+    expect(eventUpsertArgs.update).toEqual(expect.objectContaining({
+      officialSchedulingMode: 'TEAM_STAFFING',
+      staffingPriority: 'TEAM_COVERAGE_REQUIRED',
+    }));
   });
 
   it('persists event official rows when eventOfficials are supplied and legacy official ids are empty', async () => {
@@ -2435,19 +2461,31 @@ describe('upsertEventFromPayload', () => {
       data: {
         officialIds: [
           {
+            positionId: 'event_pos_r1',
+            slotIndex: 0,
+            holderType: 'OFFICIAL',
+            userId: null,
+            eventOfficialId: null,
+            checkedIn: false,
+            hasConflict: false,
+          },
+          {
             positionId: 'event_pos_r2',
             slotIndex: 0,
             holderType: 'OFFICIAL',
             userId: 'kept_official',
             eventOfficialId: 'event_official_kept',
             checkedIn: false,
+            hasConflict: false,
           },
           {
             positionId: 'event_pos_line',
             slotIndex: 0,
-            holderType: 'PLAYER',
-            teamId: 'team_1',
-            checkedIn: true,
+            holderType: 'OFFICIAL',
+            userId: null,
+            eventOfficialId: null,
+            checkedIn: false,
+            hasConflict: false,
           },
         ],
         officialId: 'kept_official',
@@ -2864,15 +2902,7 @@ describe('persistScheduledRosterTeams', () => {
       where: {
         eventId: 'event_1',
         id: { notIn: ['team_real'] },
-        OR: [
-          { kind: 'PLACEHOLDER' },
-          {
-            AND: [
-              { captainId: '' },
-              { name: { startsWith: 'Place Holder', mode: 'insensitive' } },
-            ],
-          },
-        ],
+        kind: 'PLACEHOLDER',
       },
     });
   });

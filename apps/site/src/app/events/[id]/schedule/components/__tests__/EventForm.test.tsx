@@ -956,6 +956,62 @@ describe('EventForm dirty state', () => {
     expect(within(progress).getByRole('button', { name: 'Staff & Operations: Current' })).toBeInTheDocument();
   });
 
+  it('keeps requirements but clears hidden assignments when Dedicated officials is turned off', async () => {
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    try {
+      const formRef = React.createRef<EventFormHandle>();
+      renderForm(jest.fn(), formRef, {
+        staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
+        doTeamsOfficiate: true,
+        teamOfficialsMaySwap: true,
+        officialIds: ['official_1'],
+        eventOfficials: [{
+          id: 'event_official_1',
+          userId: 'official_1',
+          positionIds: ['position_r1'],
+          fieldIds: [],
+          isActive: true,
+        }],
+        officialPositions: [
+          { id: 'position_r1', name: 'R1', count: 2, order: 0 },
+        ],
+      }, null, {
+        initialSetupMode: 'SIMPLE',
+      });
+
+      expect(await screen.findByRole('heading', { name: 'Options' })).toBeInTheDocument();
+      const dedicatedOfficials = screen.getByLabelText('Dedicated officials');
+      expect(dedicatedOfficials).toBeChecked();
+      fireEvent.click(dedicatedOfficials);
+
+      expect(confirmSpy).toHaveBeenCalledWith(
+        'Turning this option off clears its configured values. Continue?',
+      );
+      expect(dedicatedOfficials).not.toBeChecked();
+      expect(screen.getByLabelText('Custom official positions')).toBeDisabled();
+      expect(screen.getByLabelText('Custom official positions')).not.toBeChecked();
+      await waitFor(() => {
+        expect(getLegacyDraft(formRef)).toEqual(expect.objectContaining({
+          staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
+          doTeamsOfficiate: true,
+          teamOfficialsMaySwap: true,
+          officialIds: [],
+          eventOfficials: [],
+          officialPositions: [
+            { id: 'position_r1', name: 'R1', count: 2, order: 0 },
+          ],
+        }));
+      });
+
+      const progress = screen.getByRole('navigation', { name: 'Event setup progress' });
+      fireEvent.click(within(progress).getByRole('button', { name: 'Staff & Operations: Available' }));
+      expect(await screen.findByLabelText('Staffing Priority')).toHaveValue('OFFICIAL_COVERAGE_REQUIRED');
+      expect(screen.queryByRole('heading', { name: 'Official Positions' })).not.toBeInTheDocument();
+    } finally {
+      confirmSpy.mockRestore();
+    }
+  });
+
   it('allows a valid Documents and Questions page to advance without false blockers', async () => {
     renderForm(jest.fn(), undefined, { requiredTemplateIds: ['template_1'] }, null, {
       initialSetupMode: 'SIMPLE',
@@ -1600,7 +1656,7 @@ describe('EventForm dirty state', () => {
     await waitForStableDirtyState(onDirtyStateChange, true);
   });
 
-  it('defaults official scheduling mode to SCHEDULE when missing on the event payload', async () => {
+  it('shows all five Staffing Priority choices without exposing the legacy mode field', async () => {
     const onDirtyStateChange = jest.fn();
 
     renderForm(onDirtyStateChange);
@@ -1609,10 +1665,65 @@ describe('EventForm dirty state', () => {
       expect(onDirtyStateChange).toHaveBeenCalledWith(false);
     });
 
-    expect((screen.getByLabelText('Official scheduling mode') as HTMLSelectElement).value).toBe('SCHEDULE');
+    const priority = screen.getByLabelText('Staffing Priority') as HTMLSelectElement;
+    expect(priority.value).toBe('BEST_AVAILABLE_COVERAGE');
+    expect(
+      within(priority)
+        .getAllByRole('option')
+        .map((option) => option.textContent)
+        .filter(Boolean),
+    ).toEqual([
+      'Full Coverage Required',
+      'Team Coverage Required',
+      'Official Coverage Required',
+      'Best Available Coverage',
+      'Full Coverage with Conflicts Allowed',
+    ]);
+    expect(screen.queryByLabelText('Official scheduling mode')).not.toBeInTheDocument();
   });
 
-  it('blocks validation when STAFFING is selected without enough assigned officials', async () => {
+  it('preserves team policy and named positions when priority changes hide and restore them', async () => {
+    const onDirtyStateChange = jest.fn();
+    const formRef = React.createRef<EventFormHandle>();
+    renderForm(onDirtyStateChange, formRef, {
+      staffingPriority: 'BEST_AVAILABLE_COVERAGE',
+      doTeamsOfficiate: true,
+      teamOfficialsMaySwap: true,
+      officialPositions: [
+        { id: 'position_r1', name: 'R1', count: 2, order: 0 },
+      ],
+    });
+
+    await waitForStableDirtyState(onDirtyStateChange, false);
+    expect(screen.getByRole('heading', { name: 'Official Positions' })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Staffing Priority'), {
+      target: { value: 'TEAM_COVERAGE_REQUIRED' },
+    });
+
+    await waitForStableDirtyState(onDirtyStateChange, true);
+    expect(screen.queryByRole('heading', { name: 'Official Positions' })).not.toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: /Teams provide officials/i })).toBeChecked();
+    expect(getLegacyDraft(formRef)).toEqual(expect.objectContaining({
+      staffingPriority: 'TEAM_COVERAGE_REQUIRED',
+      doTeamsOfficiate: true,
+      teamOfficialsMaySwap: true,
+      officialPositions: [
+        { id: 'position_r1', name: 'R1', count: 2, order: 0 },
+      ],
+    }));
+    expect(getLegacyDraft(formRef)).not.toHaveProperty('officialSchedulingMode');
+
+    fireEvent.change(screen.getByLabelText('Staffing Priority'), {
+      target: { value: 'OFFICIAL_COVERAGE_REQUIRED' },
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Official Positions' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Position')).toHaveValue('R1');
+    expect(screen.getByRole('switch', { name: /Teams provide officials/i })).toBeChecked();
+  });
+
+  it('blocks validation when Official Coverage Required lacks enough assigned officials', async () => {
     const onDirtyStateChange = jest.fn();
     const formRef = React.createRef<EventFormHandle>();
 
@@ -1620,7 +1731,7 @@ describe('EventForm dirty state', () => {
       onDirtyStateChange,
       formRef,
       {
-        officialSchedulingMode: 'STAFFING',
+        staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
         officialIds: ['official_1'],
         officialPositions: [
           { id: 'position_r1', name: 'R1', count: 2, order: 0 },
@@ -1642,7 +1753,7 @@ describe('EventForm dirty state', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText(/STAFFING requires at least 2 officials for each match/i)).toBeInTheDocument();
+      expect(screen.getByText(/Official Coverage Required requires at least 2 officials for each match/i)).toBeInTheDocument();
     });
 
     let isValid = true;
@@ -1653,7 +1764,7 @@ describe('EventForm dirty state', () => {
     expect(isValid).toBe(false);
   });
 
-  it('allows TEAM STAFFING without assigned officials', async () => {
+  it('keeps Team Coverage Required independent from named officials and the Team-duty toggle', async () => {
     const onDirtyStateChange = jest.fn();
     const formRef = React.createRef<EventFormHandle>();
 
@@ -1661,7 +1772,7 @@ describe('EventForm dirty state', () => {
       onDirtyStateChange,
       formRef,
       {
-        officialSchedulingMode: 'TEAM_STAFFING',
+        staffingPriority: 'TEAM_COVERAGE_REQUIRED',
         doTeamsOfficiate: false,
         officialIds: [],
         officialPositions: [
@@ -1675,8 +1786,8 @@ describe('EventForm dirty state', () => {
       expect(onDirtyStateChange).toHaveBeenCalledWith(false);
     });
 
-    expect(screen.queryByText(/STAFFING requires at least/i)).not.toBeInTheDocument();
-    expect(screen.getByRole('switch', { name: /Teams provide officials/i })).toBeChecked();
+    expect(screen.queryByText(/Official Coverage Required requires at least/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: /Teams provide officials/i })).not.toBeChecked();
 
     let isValid = false;
     await act(async () => {

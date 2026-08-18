@@ -218,7 +218,8 @@ internal fun editorProtocolSnapshot(
                 rentalBookingItemId = "rental-item-1",
             ),
             staff = EventEditorStaffDto(
-                officialSchedulingMode = "STAFFING",
+                staffingPriority = "OFFICIAL_COVERAGE_REQUIRED",
+                doTeamsOfficiate = false,
                 teamOfficialsMaySwap = true,
                 teamCheckInMode = "MATCH",
                 teamCheckInOpenMinutesBefore = 30,

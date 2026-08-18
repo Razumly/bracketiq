@@ -289,6 +289,77 @@ describe('loadEventForMatchMutation', () => {
     expect(loaded.teams.team_1.division?.id).toBe(phaseId);
     expect(loaded.matches.match_target.division.id).toBe(phaseId);
   });
+  it('hydrates phase-specific official slots from the Match Division', async () => {
+    const client = createClient();
+    const event = await client.events.findUnique();
+    const phaseId = 'event_1__division__open__phase__bracket';
+    const phasePositions = [
+      { id: 'bracket_referee', name: 'Bracket Referee', count: 2, order: 0 },
+    ];
+    const entryId = 'event_1__division__open';
+    Object.assign(event, {
+      eventType: 'TOURNAMENT',
+      divisions: [entryId],
+      officialPositions: [
+        { id: 'event_referee', name: 'Event Referee', count: 1, order: 0 },
+      ],
+    });
+    const matches = await client.matches.findMany({ where: { eventId: 'event_1' } });
+    Object.assign(matches[0], {
+      division: phaseId,
+      officialIds: [{
+        positionId: 'bracket_referee',
+        slotIndex: 1,
+        holderType: 'PLAYER',
+        userId: 'player_1',
+        eventOfficialId: null,
+        checkedIn: true,
+        hasConflict: false,
+      }],
+    });
+    client.divisions.findMany.mockResolvedValue([
+      {
+        id: entryId,
+        key: 'open',
+        name: 'Open Entry',
+        kind: 'LEAGUE',
+        role: 'ENTRY',
+        phase: null,
+        teamIds: ['team_1', 'team_2'],
+        fieldIds: ['field_1'],
+      },
+      {
+        id: phaseId,
+        key: 'open__phase__bracket',
+        name: 'Open — Bracket',
+        kind: 'PLAYOFF',
+        role: 'PHASE',
+        phase: 'BRACKET',
+        sourceDivisionId: entryId,
+        teamIds: ['team_1', 'team_2'],
+        fieldIds: ['field_1'],
+        phaseSettings: { BRACKET: { officialPositions: phasePositions } },
+      },
+    ]);
+
+    const loaded = await loadEventForMatchMutation('event_1', 'match_target', client as any);
+
+    expect(loaded.matches.match_target.officialAssignments).toEqual([
+      expect.objectContaining({
+        positionId: 'bracket_referee',
+        slotIndex: 0,
+        userId: null,
+        holderType: 'OFFICIAL',
+      }),
+      expect.objectContaining({
+        positionId: 'bracket_referee',
+        slotIndex: 1,
+        userId: 'player_1',
+        holderType: 'PLAYER',
+      }),
+    ]);
+  });
+
   it('maps single-division tournament teams to their persisted pool phases', async () => {
     const client = createClient();
     const event = await client.events.findUnique();

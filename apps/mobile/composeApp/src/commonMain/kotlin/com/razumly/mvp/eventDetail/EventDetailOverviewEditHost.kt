@@ -60,7 +60,7 @@ import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
-import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.StaffingPriority
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
@@ -150,7 +150,7 @@ internal data class EventDetailOverviewEditHostActions(
     val onUpdateTeamCheckInOpenMinutesBefore: (Int) -> Unit,
     val onUpdateAllowMatchRosterEdits: (Boolean) -> Unit,
     val onUpdateAllowTemporaryMatchPlayers: (Boolean) -> Unit,
-    val onUpdateOfficialSchedulingMode: (OfficialSchedulingMode) -> Unit,
+    val onUpdateStaffingPriority: (StaffingPriority) -> Unit,
     val onLoadOfficialPositionDefaults: () -> Unit,
     val onAddOfficialPosition: () -> Unit,
     val onUpdateOfficialPositionName: (String, String) -> Unit,
@@ -355,7 +355,7 @@ internal fun EventDetailOverviewEditHost(
         onUpdateTeamCheckInOpenMinutesBefore = actions.onUpdateTeamCheckInOpenMinutesBefore,
         onUpdateAllowMatchRosterEdits = actions.onUpdateAllowMatchRosterEdits,
         onUpdateAllowTemporaryMatchPlayers = actions.onUpdateAllowTemporaryMatchPlayers,
-        onUpdateOfficialSchedulingMode = actions.onUpdateOfficialSchedulingMode,
+        onUpdateStaffingPriority = actions.onUpdateStaffingPriority,
         onLoadOfficialPositionDefaults = actions.onLoadOfficialPositionDefaults,
         onAddOfficialPosition = actions.onAddOfficialPosition,
         onUpdateOfficialPositionName = actions.onUpdateOfficialPositionName,

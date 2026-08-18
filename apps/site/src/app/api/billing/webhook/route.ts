@@ -15,14 +15,18 @@ import {
   type ResolvedDiscountApplication,
 } from '@/server/discounts/discountCodeResolver';
 import { upsertStripeSubscriptionMirror } from '@/lib/stripeSubscriptions';
-import { buildEventRegistrationId } from '@/server/events/eventRegistrations';
-import { acquireEventLockAndLoadStructure } from '@/server/events/eventRegistrations';
+import {
+  acquireEventLockAndLoadStructure,
+  buildEventRegistrationId,
+  syncDivisionTeamMembershipFromRegistrations,
+} from '@/server/events/eventRegistrations';
 import {
   activateFailedTeamRegistration,
   activateStartedTeamRegistration,
   cancelPendingTeamRegistration,
   markTeamRegistrationPaymentPending,
 } from '@/server/teams/teamOpenRegistration';
+import { claimOrCreateEventTeamSnapshot } from '@/server/teams/teamMembership';
 import { sendEventRegistrationHostNotification } from '@/server/registrationHostNotifications';
 
 export const dynamic = 'force-dynamic';
@@ -254,6 +258,9 @@ const ensureEventRegistrationFromPurchase = async ({
   occurrenceSlotId,
   occurrenceDate,
   now,
+  divisionId,
+  divisionTypeId,
+  divisionTypeKey,
   targetStatus = 'ACTIVE',
 }: {
   purchaseType: string | null;
@@ -265,6 +272,9 @@ const ensureEventRegistrationFromPurchase = async ({
   registrationId: string | null;
   occurrenceSlotId: string | null;
   occurrenceDate: string | null;
+  divisionId?: string | null;
+  divisionTypeId?: string | null;
+  divisionTypeKey?: string | null;
   now: Date;
   targetStatus?: 'ACTIVE' | 'PENDING';
 }): Promise<{ applied: boolean; reason?: string; registrationId?: string; activated?: boolean }> => {
@@ -310,10 +320,74 @@ const ensureEventRegistrationFromPurchase = async ({
         }
         const existingRegistration = await tx.eventRegistrations.findUnique({
           where: { id: effectiveRegistrationId },
-          select: { status: true },
+          select: {
+            id: true,
+            eventId: true,
+            registrantId: true,
+            parentId: true,
+            eventTeamId: true,
+            registrantType: true,
+            rosterRole: true,
+            status: true,
+            slotId: true,
+            occurrenceDate: true,
+            divisionId: true,
+            divisionTypeId: true,
+            divisionTypeKey: true,
+            createdBy: true,
+          },
         });
         if (!existingRegistration && (normalizedRegistrationId || schedulableTeamEventRequiresReservation)) {
           return { applied: false, reason: 'reservation_missing' };
+        }
+
+        if (schedulableTeamEventRequiresReservation && existingRegistration) {
+          const reservedEventTeamId = toStringOrNull(existingRegistration.eventTeamId);
+          const reservedRegistrantId = toStringOrNull(existingRegistration.registrantId);
+          const canonicalTeamId = toStringOrNull(existingRegistration.parentId);
+          const metadataParentId = toStringOrNull(parentId);
+          const metadataDivisionId = toStringOrNull(divisionId);
+          const metadataDivisionTypeId = toStringOrNull(divisionTypeId);
+          const metadataDivisionTypeKey = toStringOrNull(divisionTypeKey);
+          const reservationMatchesMetadata = (
+            existingRegistration.id === effectiveRegistrationId
+            && (!existingRegistration.eventId || existingRegistration.eventId === eventId)
+            && (!existingRegistration.registrantType
+              || String(existingRegistration.registrantType).toUpperCase() === 'TEAM')
+            && (!existingRegistration.rosterRole
+              || String(existingRegistration.rosterRole).toUpperCase() === 'PARTICIPANT')
+            && reservedRegistrantId === teamId
+            && reservedEventTeamId === teamId
+            && Boolean(canonicalTeamId)
+            && (!metadataParentId || metadataParentId === canonicalTeamId)
+            && toStringOrNull(existingRegistration.slotId) === occurrenceSlotId
+            && toStringOrNull(existingRegistration.occurrenceDate) === occurrenceDate
+            && (!metadataDivisionId || metadataDivisionId === toStringOrNull(existingRegistration.divisionId))
+            && (!metadataDivisionTypeId
+              || metadataDivisionTypeId === toStringOrNull(existingRegistration.divisionTypeId))
+            && (!metadataDivisionTypeKey
+              || metadataDivisionTypeKey === toStringOrNull(existingRegistration.divisionTypeKey))
+          );
+          if (!reservationMatchesMetadata || !reservedEventTeamId || !canonicalTeamId) {
+            return { applied: false, reason: 'reservation_metadata_mismatch' };
+          }
+
+          if (targetStatus === 'ACTIVE' && existingRegistration.status !== 'ACTIVE') {
+            await claimOrCreateEventTeamSnapshot({
+              tx,
+              eventId,
+              eventTeamId: reservedEventTeamId,
+              canonicalTeamId,
+              createdBy: toStringOrNull(existingRegistration.createdBy) ?? userId ?? 'system:webhook',
+              divisionId: toStringOrNull(existingRegistration.divisionId),
+              divisionTypeId: toStringOrNull(existingRegistration.divisionTypeId),
+              divisionTypeKey: toStringOrNull(existingRegistration.divisionTypeKey),
+              occurrence: occurrenceSlotId && occurrenceDate
+                ? { slotId: occurrenceSlotId, occurrenceDate }
+                : null,
+              upsertRegistration: false,
+            });
+          }
         }
 
         let activated = false;
@@ -366,6 +440,9 @@ const ensureEventRegistrationFromPurchase = async ({
             updatedAt: now,
           },
         });
+        if (schedulableTeamEventRequiresReservation && activated) {
+          await syncDivisionTeamMembershipFromRegistrations(event, tx);
+        }
 
         return { applied: true, registrationId: effectiveRegistrationId, activated };
       }
@@ -452,8 +529,10 @@ const ensureEventRegistrationFromPurchase = async ({
       return { applied: true, registrationId: effectiveRegistrationId, activated };
     });
   } catch (error) {
-    if (typeof (error as { status?: unknown })?.status === 'number'
-      && Number((error as { status: number }).status) === 404) {
+    const status = error && typeof error === 'object' && 'status' in error
+      ? error.status
+      : null;
+    if (typeof status === 'number' && status === 404) {
       return { applied: false, reason: 'event_not_found' };
     }
     console.error('Failed to apply webhook event registration', {
@@ -463,7 +542,7 @@ const ensureEventRegistrationFromPurchase = async ({
       userId,
       error,
     });
-    return { applied: false, reason: 'error' };
+    return { applied: false, reason: 'retryable_error' };
   }
 };
 
@@ -504,6 +583,9 @@ const markEventRegistrationPaymentPendingFromPurchase = (params: {
   registrationId: string | null;
   occurrenceSlotId: string | null;
   occurrenceDate: string | null;
+  divisionId?: string | null;
+  divisionTypeId?: string | null;
+  divisionTypeKey?: string | null;
   now: Date;
 }): Promise<{ applied: boolean; reason?: string }> => (
   ensureEventRegistrationFromPurchase({
@@ -1451,6 +1533,15 @@ const createInstantBillAndPayment = async ({
       occurrenceSlotId: toStringOrNull(metadata.occurrence_slot_id ?? metadata.occurrenceSlotId ?? null),
       occurrenceDate: toStringOrNull(metadata.occurrence_date ?? metadata.occurrenceDate ?? null),
       productId: toStringOrNull(metadata.product_id ?? metadata.productId ?? null),
+      eventRegistrationDivisionId: toStringOrNull(
+        metadata.event_registration_division_id ?? metadata.eventRegistrationDivisionId ?? null,
+      ),
+      eventRegistrationDivisionTypeId: toStringOrNull(
+        metadata.event_registration_division_type_id ?? metadata.eventRegistrationDivisionTypeId ?? null,
+      ),
+      eventRegistrationDivisionTypeKey: toStringOrNull(
+        metadata.event_registration_division_type_key ?? metadata.eventRegistrationDivisionTypeKey ?? null,
+      ),
     };
     const lineItems = instantBreakdown.lineItems.map((item, index) => (
       !isPaid && index === 0
@@ -1812,6 +1903,15 @@ export async function POST(req: NextRequest) {
   const occurrenceSlotId = toStringOrNull(
     metadata.occurrence_slot_id ?? metadata.occurrenceSlotId ?? metadata.slot_id ?? metadata.slotId ?? null,
   );
+  const eventRegistrationDivisionId = toStringOrNull(
+    metadata.event_registration_division_id ?? metadata.eventRegistrationDivisionId ?? null,
+  );
+  const eventRegistrationDivisionTypeId = toStringOrNull(
+    metadata.event_registration_division_type_id ?? metadata.eventRegistrationDivisionTypeId ?? null,
+  );
+  const eventRegistrationDivisionTypeKey = toStringOrNull(
+    metadata.event_registration_division_type_key ?? metadata.eventRegistrationDivisionTypeKey ?? null,
+  );
   const occurrenceDate = toStringOrNull(metadata.occurrence_date ?? metadata.occurrenceDate ?? null);
   const productId = toStringOrNull(metadata.product_id ?? metadata.productId ?? null);
   const organizationId = toStringOrNull(metadata.organization_id ?? metadata.organizationId ?? null);
@@ -1833,6 +1933,7 @@ export async function POST(req: NextRequest) {
     let resolvedBillId = billId;
     let resolvedBillPaymentId = billPaymentId;
     let shouldSendReceipt = false;
+    let retryableEventRegistrationFailure = false;
 
     if (eventType === 'payment_intent.processing') {
       if (billId || billPaymentId) {
@@ -1879,6 +1980,9 @@ export async function POST(req: NextRequest) {
         registrationId,
         occurrenceSlotId,
         occurrenceDate,
+        divisionId: eventRegistrationDivisionId,
+        divisionTypeId: eventRegistrationDivisionTypeId,
+        divisionTypeKey: eventRegistrationDivisionTypeKey,
         now,
       });
       if (
@@ -2108,6 +2212,12 @@ export async function POST(req: NextRequest) {
           const billRegistrationId = toStringOrNull(billPurchaseMetadata?.registrationId) ?? registrationId;
           const billOccurrenceSlotId = toStringOrNull(billPurchaseMetadata?.occurrenceSlotId) ?? occurrenceSlotId;
           const billOccurrenceDate = toStringOrNull(billPurchaseMetadata?.occurrenceDate) ?? occurrenceDate;
+          const billDivisionId = toStringOrNull(billPurchaseMetadata?.eventRegistrationDivisionId)
+            ?? eventRegistrationDivisionId;
+          const billDivisionTypeId = toStringOrNull(billPurchaseMetadata?.eventRegistrationDivisionTypeId)
+            ?? eventRegistrationDivisionTypeId;
+          const billDivisionTypeKey = toStringOrNull(billPurchaseMetadata?.eventRegistrationDivisionTypeKey)
+            ?? eventRegistrationDivisionTypeKey;
 
           const registrationResult = await ensureEventRegistrationFromPurchase({
             purchaseType: billPurchaseType,
@@ -2119,9 +2229,13 @@ export async function POST(req: NextRequest) {
             registrationId: billRegistrationId,
             occurrenceSlotId: billOccurrenceSlotId,
             occurrenceDate: billOccurrenceDate,
+            divisionId: billDivisionId,
+            divisionTypeId: billDivisionTypeId,
+            divisionTypeKey: billDivisionTypeKey,
             now,
             targetStatus: 'ACTIVE',
           });
+          retryableEventRegistrationFailure = registrationResult.reason === 'retryable_error';
           if (
             !registrationResult.applied &&
             registrationResult.reason &&
@@ -2219,8 +2333,16 @@ export async function POST(req: NextRequest) {
       registrationId,
       occurrenceSlotId,
       occurrenceDate,
+      divisionId: eventRegistrationDivisionId,
+      divisionTypeId: eventRegistrationDivisionTypeId,
+      divisionTypeKey: eventRegistrationDivisionTypeKey,
       now,
     });
+    if (registrationResult.applied) {
+      retryableEventRegistrationFailure = false;
+    } else if (registrationResult.reason === 'retryable_error') {
+      retryableEventRegistrationFailure = true;
+    }
     if (
       !registrationResult.applied &&
       registrationResult.reason &&
@@ -2324,6 +2446,17 @@ export async function POST(req: NextRequest) {
         });
     } else {
       console.info('Purchase receipt flow skipped: no newly paid bill payment detected.', receiptLogContext);
+    }
+
+    if (retryableEventRegistrationFailure) {
+      return NextResponse.json(
+        {
+          received: false,
+          retryable: true,
+          error: 'Event registration finalization failed.',
+        },
+        { status: 500 },
+      );
     }
   } catch (error) {
     console.error('Stripe webhook handling failed', error);

@@ -92,6 +92,7 @@ jest.mock('@/server/timeZones', () => ({
 }));
 
 import {
+  affiliateStaffingPrioritySchema,
   approveAffiliateSourceAutomation,
   buildAffiliateCandidateDedupeKey,
   deleteAffiliateCandidate,
@@ -169,6 +170,34 @@ describe('affiliate import service', () => {
     ));
     prismaMock.eventTags = undefined;
     prismaMock.eventTagAssignments = undefined;
+  });
+
+  it('defines all canonical staffing priorities with distinct coverage semantics', () => {
+    expect(affiliateStaffingPrioritySchema.enum).toEqual([
+      'FULL_COVERAGE_REQUIRED',
+      'TEAM_COVERAGE_REQUIRED',
+      'OFFICIAL_COVERAGE_REQUIRED',
+      'BEST_AVAILABLE_COVERAGE',
+      'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED',
+    ]);
+    expect(affiliateStaffingPrioritySchema.description).toContain(
+      'FULL_COVERAGE_REQUIRED requires Team-duty and every named Official Position',
+    );
+    expect(affiliateStaffingPrioritySchema.description).toContain(
+      'TEAM_COVERAGE_REQUIRED requires Team-duty only',
+    );
+    expect(affiliateStaffingPrioritySchema.description).toContain(
+      'OFFICIAL_COVERAGE_REQUIRED requires every named Official Position only',
+    );
+    expect(affiliateStaffingPrioritySchema.description).toContain(
+      'BEST_AVAILABLE_COVERAGE preserves the configured requirements and records unresolved gaps',
+    );
+    expect(affiliateStaffingPrioritySchema.description).toContain(
+      'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED requires Team-duty and every named Official Position',
+    );
+    expect(affiliateStaffingPrioritySchema.description).toContain(
+      'doTeamsOfficiate independently controls participation and eligibility',
+    );
   });
 
   it('deletes affiliate candidates and their backing target rows', async () => {
@@ -463,6 +492,16 @@ describe('affiliate import service', () => {
       }),
     }));
     expect(prismaMock.affiliateImportCandidates.create).toHaveBeenCalledTimes(5);
+    const persistedEventCandidates = prismaMock.affiliateImportCandidates.create.mock.calls
+      .map(([input]) => input.data)
+      .filter((data) => data.listingKind === 'EVENT');
+    expect(persistedEventCandidates).toHaveLength(4);
+    for (const persistedCandidate of persistedEventCandidates) {
+      expect(persistedCandidate.rawPayload).toEqual(expect.objectContaining({
+        staffingPriority: 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED',
+      }));
+      expect(persistedCandidate.rawPayload).not.toHaveProperty('officialSchedulingMode');
+    }
     expect(prismaMock.events.create).toHaveBeenCalledTimes(4);
     expect(prismaMock.facilities.upsert).toHaveBeenCalledTimes(1);
     expect(prismaMock.events.create).toHaveBeenCalledWith({
@@ -936,6 +975,7 @@ describe('affiliate import service', () => {
       rawPayload: {
         dateTimeInputs: { timeZone: 'America/Los_Angeles' },
         ...currentScheduledDateTimeProvenance('America/Los_Angeles', '2099-07-01T18:00:00.000Z'),
+        officialSchedulingMode: 'TEAM_STAFFING',
       },
       scheduleText: 'Friday and Sunday games.',
       priceText: '$850 per team.',
@@ -979,8 +1019,12 @@ describe('affiliate import service', () => {
         priceText: '$850.00',
         statusText: 'Confirm current session.',
         sportIds: ['sport_basketball'],
+        staffingPriority: 'TEAM_COVERAGE_REQUIRED',
+        doTeamsOfficiate: false,
       }),
     });
+    const createdEventPayload = prismaMock.events.create.mock.calls[0]?.[0]?.data;
+    expect(createdEventPayload).not.toHaveProperty('officialSchedulingMode');
     expect(geocodeAddressToCoordinatesMock).toHaveBeenCalledWith('819 NW Corporate Dr, Troutdale, OR 97060');
     expect(prismaMock.organizations.update).not.toHaveBeenCalled();
     expect(prismaMock.affiliateImportCandidates.update).toHaveBeenCalledWith({

@@ -13,6 +13,7 @@ import {
   snapshotMatchScheduleState,
 } from "@/server/matchScheduleNotifications";
 import { loadEventScheduleState } from "@/server/events/eventEditorSnapshot";
+import { loadTeamCheckIns } from "@/server/matches/teamCheckIns";
 import {
   applyLeagueDivisionPlayoffReassignment,
   isTournamentPoolPlayStandingsEvent,
@@ -134,11 +135,7 @@ export type CreateOnlyMatchGraphPersistenceResult = {
 };
 
 const isSyntheticGraphTeam = (team: Match["team1"]): boolean =>
-  Boolean(
-    team &&
-      team.captainId.trim().length === 0 &&
-      /^(Place Holder|Seed )/i.test(team.name.trim()),
-  );
+  String(team?.kind ?? "").trim().toUpperCase() === "PLACEHOLDER";
 const persistGraphPlaceholderTeams = async (
   tx: Prisma.TransactionClient,
   eventId: string,
@@ -329,15 +326,7 @@ const deleteSyntheticScheduleTeams = async (
   const placeholderTeams = await tx.teams.findMany({
     where: {
       eventId,
-      OR: [
-        { kind: "PLACEHOLDER" },
-        {
-          AND: [
-            { captainId: "" },
-            { name: { startsWith: "Place Holder", mode: "insensitive" } },
-          ],
-        },
-      ],
+      kind: "PLACEHOLDER",
     },
     select: { id: true },
   });
@@ -557,9 +546,35 @@ export const reconcileEventSchedule = async (
     };
   } else if (mode === "RESCHEDULE_PRESERVING_LOCKS" && previousMatches.length > 0) {
     try {
-      scheduled = rescheduleEventMatchesPreservingLocks(event);
+      const checkIns = await loadTeamCheckIns(tx, eventId);
+      const eventCheckedInTeamIds = new Set<string>();
+      const checkedInTeamIdsByMatch = new Map<string, Set<string>>();
+      for (const checkIn of checkIns) {
+        if (String(checkIn.status ?? "").trim().toUpperCase() !== "CHECKED_IN") {
+          continue;
+        }
+        const teamId = String(checkIn.eventTeamId ?? "").trim();
+        if (!teamId) {
+          continue;
+        }
+        const matchId = String(checkIn.matchId ?? "").trim();
+        if (!matchId) {
+          eventCheckedInTeamIds.add(teamId);
+          continue;
+        }
+        const checkedInTeamIds = checkedInTeamIdsByMatch.get(matchId) ?? new Set<string>();
+        checkedInTeamIds.add(teamId);
+        checkedInTeamIdsByMatch.set(matchId, checkedInTeamIds);
+      }
+      scheduled = rescheduleEventMatchesPreservingLocks(event, {
+        eventCheckedInTeamIds,
+        checkedInTeamIdsByMatch,
+      });
       scheduleWarnings = scheduled.warnings ?? [];
     } catch (error) {
+      if (error instanceof ScheduleError) {
+        throw error;
+      }
       throw new ScheduleError(
         error instanceof Error
           ? error.message

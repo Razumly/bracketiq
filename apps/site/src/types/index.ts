@@ -1,3 +1,10 @@
+import type {
+  OfficialSchedulingMode,
+  StaffingPriority,
+} from "@/server/officials/config";
+
+export type { OfficialSchedulingMode, StaffingPriority };
+
 import { formatDisplayDate, formatDisplayTime, parseLocalDateTime } from '@/lib/dateUtils';
 import { normalizeEnumValue } from '@/lib/enumUtils';
 import { formatNameParts } from '@/lib/nameCase';
@@ -41,6 +48,8 @@ export type DivisionPhaseSettings = {
   autoCreatePointMatchIncidents?: boolean;
   segmentLengthMinutes?: number | null;
   segmentBreakMinutes?: number | null;
+  doTeamsOfficiate?: boolean;
+  officialPositions?: EventOfficialPosition[];
 };
 export type DivisionPhaseSettingsMap = Partial<Record<DivisionCompetitionPhase, DivisionPhaseSettings>>;
 export type DivisionScope = 'ORGANIZATION' | 'EVENT';
@@ -138,7 +147,6 @@ export interface TournamentConfig {
   setDurationMinutes?: number | null;
 }
 
-export type OfficialSchedulingMode = 'STAFFING' | 'TEAM_STAFFING' | 'SCHEDULE' | 'OFF';
 
 export interface SportOfficialPositionTemplate {
   name: string;
@@ -164,8 +172,8 @@ export interface MatchOfficialAssignment {
   positionId: string;
   slotIndex: number;
   holderType: 'OFFICIAL' | 'PLAYER';
-  userId: string;
-  eventOfficialId?: string;
+  userId: string | null;
+  eventOfficialId?: string | null;
   checkedIn?: boolean;
   hasConflict?: boolean;
 }
@@ -531,6 +539,7 @@ export interface Match {
   team2Id?: string | null;
   officialId?: string | null;
   officialIds?: MatchOfficialAssignment[];
+  officialAssignments?: MatchOfficialAssignment[];
   teamOfficialId?: string | null;
   team1Points: number[];
   team2Points: number[];
@@ -918,6 +927,7 @@ export interface Event {
   timeSlotIds?: string[];
   officialIds?: string[];
   officialSchedulingMode?: OfficialSchedulingMode;
+  staffingPriority?: StaffingPriority;
   officialPositions?: EventOfficialPosition[];
   eventOfficials?: EventOfficial[];
   assistantHostIds?: string[];

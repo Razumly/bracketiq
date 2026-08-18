@@ -1,4 +1,5 @@
 import type { EventEditorDraft } from '@/contracts/eventEditor';
+import type { StaffingPriority } from '@/server/officials/config';
 
 export type EditorTransitionResult = {
   draft: EventEditorDraft;
@@ -129,11 +130,11 @@ export const changePoolPlay = (
   }));
 };
 
-/** Select the single canonical officiating mode; compatibility projections are derived later. */
-export const changeOfficialSchedulingMode = (
+/** Select Staffing Priority without changing Team-duty or named-position inputs. */
+export const changeStaffingPriority = (
   draft: EventEditorDraft,
-  mode: 'SCHEDULE' | 'STAFFING' | 'TEAM_STAFFING',
+  staffingPriority: StaffingPriority,
 ): EditorTransitionResult => result({
   ...draft,
-  staff: { ...draft.staff, officialSchedulingMode: mode },
+  staff: { ...draft.staff, staffingPriority },
 });

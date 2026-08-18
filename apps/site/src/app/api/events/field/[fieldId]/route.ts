@@ -4,6 +4,8 @@ import { prisma } from '@/lib/prisma';
 import { parseDateInput } from '@/server/requestParsing';
 import { getVisibleEventIds } from '@/server/eventVisibility';
 import { canManageScheduledFields } from '@/server/timeSlotAccess';
+import { normalizeEventStaffingResponse } from '@/server/events/eventResponse';
+
 
 export const dynamic = 'force-dynamic';
 
@@ -35,6 +37,10 @@ type EventRow = {
   timeSlotIds?: string[] | null;
   [key: string]: unknown;
 };
+
+const toCanonicalEventResponse = (event: EventRow): EventRow => (
+  normalizeEventStaffingResponse({ ...event }) as EventRow
+);
 
 type TimeWindow = {
   start: Date;
@@ -673,7 +679,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ fiel
     : [];
 
   return NextResponse.json({
-    events: [...filteredEvents, ...rentalBookingEvents].map((event) => event),
+    events: [...filteredEvents, ...rentalBookingEvents].map((event) =>
+      toCanonicalEventResponse(event),
+    ),
     rentalSlots: filteredRentalSlots.map((slot) => slot),
   }, { status: 200 });
 }

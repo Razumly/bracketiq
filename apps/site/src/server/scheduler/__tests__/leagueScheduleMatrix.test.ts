@@ -62,6 +62,58 @@ const buildTimeSlots = (fieldIds: string[]): TimeSlot[] => {
   return slots;
 };
 
+const buildKnownTeamRestLeague = (): League => {
+  const division = buildDivision();
+  const teams = buildTeams(5, division);
+  const fields = buildFields(division, 2);
+  const start = new Date(2026, 0, 5, 8, 0, 0);
+  const timeSlots = [
+    new TimeSlot({
+      id: 'field_1_monday',
+      dayOfWeek: 0,
+      startDate: start,
+      repeating: true,
+      startTimeMinutes: 8 * 60,
+      endTimeMinutes: 22 * 60,
+      field: 'field_1',
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }),
+    new TimeSlot({
+      id: 'field_2_monday',
+      dayOfWeek: 0,
+      startDate: start,
+      repeating: true,
+      startTimeMinutes: 10 * 60,
+      endTimeMinutes: 22 * 60,
+      field: 'field_2',
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }),
+  ];
+  return new League({
+    id: 'league_known_team_readiness',
+    name: 'Known Team Readiness',
+    start,
+    end: new Date(2026, 11, 31, 22, 0, 0),
+    maxParticipants: 5,
+    teamSignup: true,
+    eventType: 'LEAGUE',
+    teams,
+    divisions: [division],
+    officials: [],
+    fields,
+    timeSlots,
+    doTeamsOfficiate: false,
+    gamesPerOpponent: 1,
+    includePlayoffs: false,
+    playoffTeamCount: 0,
+    doubleElimination: false,
+    usesSets: false,
+    matchDurationMinutes: 60,
+    restTimeMinutes: 30,
+    leagueScoringConfig: { pointsForWin: 3, pointsForDraw: 1, pointsForLoss: 0 },
+  });
+};
+
 const projectedTeamCount = (teamCount: number): number => {
   // Scheduler always pads to at least 2 participants.
   return Math.max(teamCount, 2);
@@ -164,6 +216,115 @@ describe('league schedule matrix', () => {
       expect(match.field).toBeTruthy();
       expect(match.start.getTime()).toBeLessThan(match.end.getTime());
     }
+  });
+
+  it('places known-Team Matches at per-Team rest bounds without a global round barrier', () => {
+    const firstSchedule = scheduleEvent(
+      { event: buildKnownTeamRestLeague() },
+      context,
+    );
+    const secondSchedule = scheduleEvent(
+      { event: buildKnownTeamRestLeague() },
+      context,
+    );
+    const matchesById = [...firstSchedule.matches].sort(
+      (left, right) => (left.matchId ?? 0) - (right.matchId ?? 0),
+    );
+    const [earlyOpening, delayedOpening, readyMatch, restLimitedMatch] =
+      matchesById;
+    const restMs = 30 * 60 * 1000;
+
+    expect([
+      earlyOpening.team1!.id,
+      earlyOpening.team2!.id,
+    ].sort()).toEqual(['team_2', 'team_5']);
+    expect([
+      delayedOpening.team1!.id,
+      delayedOpening.team2!.id,
+    ].sort()).toEqual(['team_3', 'team_4']);
+    expect([
+      readyMatch.team1!.id,
+      readyMatch.team2!.id,
+    ].sort()).toEqual(['team_1', 'team_5']);
+    expect([
+      restLimitedMatch.team1!.id,
+      restLimitedMatch.team2!.id,
+    ].sort()).toEqual(['team_2', 'team_3']);
+    expect(earlyOpening.start).toEqual(new Date(2026, 0, 5, 8, 0, 0));
+    expect(delayedOpening.start).toEqual(new Date(2026, 0, 5, 9, 0, 0));
+    expect(readyMatch.start).toEqual(new Date(2026, 0, 5, 10, 0, 0));
+    expect(readyMatch.start.getTime()).toBe(delayedOpening.end.getTime());
+    expect(readyMatch.start.getTime()).toBeLessThan(
+      delayedOpening.end.getTime() + restMs,
+    );
+
+    const delayedTeamIds = [
+      delayedOpening.team1!.id,
+      delayedOpening.team2!.id,
+    ];
+    expect(
+      [readyMatch.team1!.id, readyMatch.team2!.id].some((teamId) =>
+        delayedTeamIds.includes(teamId),
+      ),
+    ).toBe(false);
+    expect(restLimitedMatch.start.getTime()).toBe(
+      delayedOpening.end.getTime() + restMs,
+    );
+    expect(restLimitedMatch.start.getTime()).toBeLessThan(
+      readyMatch.end.getTime(),
+    );
+    expect(restLimitedMatch.end.getTime()).toBeGreaterThan(
+      readyMatch.start.getTime(),
+    );
+    expect(
+      [restLimitedMatch.team1!.id, restLimitedMatch.team2!.id].some(
+        (teamId) =>
+          teamId === readyMatch.team1!.id || teamId === readyMatch.team2!.id,
+      ),
+    ).toBe(false);
+
+    for (let earlierIndex = 0; earlierIndex < matchesById.length; earlierIndex += 1) {
+      const earlier = matchesById[earlierIndex];
+      const earlierTeamIds = [earlier.team1?.id, earlier.team2?.id].filter(
+        (teamId): teamId is string => Boolean(teamId),
+      );
+      for (
+        let laterIndex = earlierIndex + 1;
+        laterIndex < matchesById.length;
+        laterIndex += 1
+      ) {
+        const later = matchesById[laterIndex];
+        const laterTeamIds = [later.team1?.id, later.team2?.id].filter(
+          (teamId): teamId is string => Boolean(teamId),
+        );
+        if (!laterTeamIds.some((teamId) => earlierTeamIds.includes(teamId))) {
+          continue;
+        }
+        expect(later.start.getTime()).toBeGreaterThanOrEqual(
+          earlier.end.getTime() + restMs,
+        );
+      }
+    }
+
+    expect(
+      [...secondSchedule.matches]
+        .sort((left, right) => (left.matchId ?? 0) - (right.matchId ?? 0))
+        .map((match) => ({
+          matchId: match.matchId,
+          start: match.start.toISOString(),
+          end: match.end.toISOString(),
+          fieldId: match.field?.id ?? null,
+          teamIds: [match.team1?.id ?? null, match.team2?.id ?? null],
+        })),
+    ).toEqual(
+      matchesById.map((match) => ({
+        matchId: match.matchId,
+        start: match.start.toISOString(),
+        end: match.end.toISOString(),
+        fieldId: match.field?.id ?? null,
+        teamIds: [match.team1?.id ?? null, match.team2?.id ?? null],
+      })),
+    );
   });
 
   it('preserves direct seed slots on carried-through bye matches', () => {
