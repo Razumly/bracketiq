@@ -3,6 +3,9 @@ package com.razumly.mvp.core.db
 import androidx.room.ConstructedBy
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import androidx.room.immediateTransaction
+import androidx.room.useWriterConnection
+
 import androidx.room.TypeConverters
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
@@ -92,6 +95,11 @@ const val MVP_DATABASE_VERSION = 100
 @TypeConverters(Converters::class)
 @ConstructedBy(MVPDatabaseCtor::class)
 abstract class MVPDatabaseService : RoomDatabase(), DatabaseService {
+    override suspend fun <R> withTransaction(block: suspend () -> R): R =
+        useWriterConnection { connection ->
+            connection.immediateTransaction { block() }
+        }
+
     abstract override val getMatchDao: MatchDao
     abstract override val getMatchOperationOutboxDao: MatchOperationOutboxDao
     abstract override val getMatchOperationTransactionDao: MatchOperationTransactionDao

@@ -336,6 +336,141 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
+    fun given_one_time_event_when_command_is_built_without_mutation_then_complete_draft_has_no_league_defaults() {
+        val baseSnapshot = editorProtocolSnapshot()
+        val snapshot = baseSnapshot.copy(
+            draft = baseSnapshot.draft.copy(
+                basics = baseSnapshot.draft.basics.copy(eventType = "EVENT"),
+                participation = baseSnapshot.draft.participation.copy(
+                    teamSignup = false,
+                    singleDivision = true,
+                ),
+                competition = baseSnapshot.draft.competition.copy(
+                    divisionDetails = baseSnapshot.draft.competition.divisionDetails.map { detail ->
+                        detail.copy(
+                            kind = "EVENT",
+                            playoffTeamCount = null,
+                        )
+                    },
+                    playoffDivisionDetails = emptyList(),
+                    winnerSetCount = 1,
+                    loserSetCount = 0,
+                    doubleElimination = false,
+                    includePlayoffs = false,
+                    splitLeaguePlayoffDivisions = false,
+                    playoffTeamCount = null,
+                    pointsToVictory = emptyList(),
+                    winnerBracketPointsToVictory = emptyList(),
+                    loserBracketPointsToVictory = emptyList(),
+                    usesSets = false,
+                    setsPerMatch = null,
+                    setDurationMinutes = null,
+                    restTimeMinutes = 15.0,
+                    matchDurationMinutes = 45.0,
+                    gamesPerOpponent = 1,
+                    leagueScoringConfig = null,
+                ),
+            ),
+        )
+        val session = EventEditorSessionMapper.fromCreateBootstrap(
+            editorProtocolBootstrap(snapshot),
+        )
+
+        val command = EventEditorSessionMapper.toCreateCommand(
+            session = session,
+            mutation = EventEditorMutation(session.canonicalState),
+        ).command
+
+        assertEquals("EVENT", command.draft.basics.eventType)
+        assertEquals(false, command.draft.competition.doubleElimination)
+        assertEquals(false, command.draft.competition.includePlayoffs)
+        assertEquals(snapshot.draft, command.draft)
+    }
+
+    @Test
+    fun given_equivalent_android_and_ios_one_time_edits_when_commands_are_built_then_serialized_commands_match() {
+        val androidSession = EventEditorSessionMapper.fromCreateBootstrap(
+            editorProtocolBootstrap(oneTimeEventPlatformSnapshot()),
+        )
+        val iosSession = EventEditorSessionMapper.fromCreateBootstrap(
+            editorProtocolBootstrap(oneTimeEventPlatformSnapshot()),
+        )
+
+        val androidCommand = EventEditorSessionMapper.toCreateCommand(
+            session = androidSession,
+            mutation = oneTimeEventEditedMutation(androidSession),
+        ).command
+        val iosCommand = EventEditorSessionMapper.toCreateCommand(
+            session = iosSession,
+            mutation = oneTimeEventEditedMutation(iosSession),
+        ).command
+
+        assertEquals(
+            jsonMVP.encodeToString(androidCommand),
+            jsonMVP.encodeToString(iosCommand),
+        )
+        assertEquals("EVENT", androidCommand.draft.basics.eventType)
+        assertEquals("Edited One-Time Event", androidCommand.draft.basics.name)
+        assertEquals("Edited question", androidCommand.draft.registration.questions.single().prompt)
+        assertEquals("Edited", androidCommand.draft.staff.pendingInvites.single().firstName)
+        assertEquals("field-1", androidCommand.draft.resources.fields.single().id)
+        assertEquals("Edited Court", androidCommand.draft.resources.fields.single().name)
+    }
+
+    private fun oneTimeEventPlatformSnapshot(): EventEditorSnapshotDto {
+        val baseSnapshot = editorProtocolSnapshot()
+        return baseSnapshot.copy(
+            draft = baseSnapshot.draft.copy(
+                basics = baseSnapshot.draft.basics.copy(
+                    eventType = "EVENT",
+                    name = "One-Time Event",
+                ),
+                participation = baseSnapshot.draft.participation.copy(
+                    teamSignup = false,
+                    singleDivision = true,
+                ),
+                competition = baseSnapshot.draft.competition.copy(
+                    divisionDetails = baseSnapshot.draft.competition.divisionDetails.map { detail ->
+                        detail.copy(kind = "EVENT", playoffTeamCount = null)
+                    },
+                    playoffDivisionDetails = emptyList(),
+                    includePlayoffs = false,
+                    playoffTeamCount = null,
+                    leagueScoringConfig = null,
+                ),
+            ),
+        )
+    }
+
+    private fun oneTimeEventEditedMutation(session: EventEditorSession): EventEditorMutation {
+        val canonical = session.canonicalState
+        return EventEditorMutation(
+            canonicalState = canonical.copy(
+                event = canonical.event.copy(
+                    name = "Edited One-Time Event",
+                    description = "Edited description",
+                    location = "Edited venue",
+                    address = "2 Main Street",
+                    priceCents = 4100,
+                    imageId = "image-edited",
+                    affiliateUrl = "https://example.test/edited",
+                    manualPaymentInstructions = "Pay online",
+                    assistantHostIds = listOf("assistant-edited"),
+                    tags = canonical.event.tags.map { tag -> tag.copy(slug = "edited") },
+                ),
+                fields = canonical.fields.map { field -> field.copy(name = "Edited Court") },
+                timeSlots = canonical.timeSlots.map { slot ->
+                    slot.copy(startTimeMinutes = 615, endTimeMinutes = 675)
+                },
+                questions = canonical.questions.map { question -> question.copy(prompt = "Edited question") },
+                pendingStaffInvites = canonical.pendingStaffInvites.map { invite ->
+                    invite.copy(firstName = "Edited")
+                },
+            ),
+        )
+    }
+
+    @Test
     fun create_command_maps_division_playoff_count_to_required_competition_field() {
         val snapshot = editorProtocolSnapshot()
         val session = EventEditorSessionMapper.fromCreateBootstrap(

@@ -2009,6 +2009,54 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun given_failed_one_time_event_when_retry_is_unchanged_then_visible_state_and_command_are_preserved() = runTest(testDispatcher) {
+        val session = createEventEditorSession(
+            event = com.razumly.mvp.core.data.dataTypes.Event(
+                id = "bootstrap-event",
+                name = "One-Time Event",
+                description = "Visible event description",
+                divisions = listOf("open"),
+                eventType = EventType.EVENT,
+                teamSignup = false,
+                singleDivision = false,
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_003_600_000),
+                location = "Main venue",
+                address = "1 Main Street",
+                organizationId = "organization-1",
+            ),
+        )
+        val harness = CreateEventHarness(bootstrapSession = session)
+        advance()
+
+        val visibleStateBeforeFailure = harness.component.newEventState.value
+        harness.eventRepository.createEditorFailure = IllegalStateException("offline")
+        harness.component.createEvent()
+        advance()
+
+        assertEquals(visibleStateBeforeFailure, harness.component.newEventState.value)
+        assertEquals(1, harness.eventRepository.attemptedCreateEventEditorCommands.size)
+        assertEquals(0, harness.eventRepository.createEventEditorCalls.size)
+        assertFalse(harness.loadingHandler.loadingState.value.isLoading)
+        assertEquals("offline", harness.component.errorState.value?.message)
+        assertEquals(
+            "EVENT",
+            harness.eventRepository.attemptedCreateEventEditorCommands.single().draft.basics.eventType,
+        )
+
+        harness.eventRepository.createEditorFailure = null
+        harness.component.createEvent()
+        advance()
+
+        assertEquals(2, harness.eventRepository.attemptedCreateEventEditorCommands.size)
+        assertEquals(
+            harness.eventRepository.attemptedCreateEventEditorCommands[0],
+            harness.eventRepository.attemptedCreateEventEditorCommands[1],
+        )
+        assertEquals(1, harness.eventRepository.createEventEditorCalls.size)
+    }
+
+    @Test
     fun switching_to_fixed_end_tournament_retains_event_end_for_repeating_slots() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()

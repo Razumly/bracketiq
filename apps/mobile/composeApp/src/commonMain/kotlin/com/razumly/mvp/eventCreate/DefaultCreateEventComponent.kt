@@ -236,6 +236,7 @@ class DefaultCreateEventComponent(
     private val _editorBootstrapError = MutableStateFlow<String?>(null)
     override val editorBootstrapError = _editorBootstrapError.asStateFlow()
     private var pendingCreateCommand: EventEditorCreateCommandDto? = null
+    private var pendingCreateSubmission: CreateEventSubmissionSnapshot? = null
     private val initialEventDraft = createInitialEventDraft(initialHostId = resolveCurrentUserId())
 
     private val _newEventState: MutableStateFlow<Event> = MutableStateFlow(initialEventDraft)
@@ -455,26 +456,45 @@ class DefaultCreateEventComponent(
                 )
                 return@launch
             }
-            validateCompletedRentalContext()?.let { error ->
-                _errorState.value = ErrorMessage(error)
-                return@launch
-            }
             val currentUserId = resolveCurrentUserId()
             if (currentUserId.isBlank()) {
                 _errorState.value = ErrorMessage("Unable to create event until your user profile is ready.")
                 return@launch
             }
-            val hostSyncedDraft = newEventState.value.withRequiredHost(currentUserId)
-            if (hostSyncedDraft != newEventState.value) {
-                _newEventState.value = hostSyncedDraft
+            val session = _editorSession.value
+                ?: run {
+                    _errorState.value = ErrorMessage("The event editor is not ready.")
+                    return@launch
+                }
+            val eventDraft = newEventState.value
+                .withRequiredHost(currentUserId)
+                .applyCreateSelectionRules()
+            if (eventDraft != newEventState.value) {
+                _newEventState.value = eventDraft
             }
-            val eventDraft = hostSyncedDraft.applyCreateSelectionRules()
-            val validationError = validateCreateEventDraft(eventDraft)
+            val submission = CreateEventSubmissionSnapshot(
+                session = session,
+                event = eventDraft,
+                localFields = _localFields.value.toList(),
+                leagueSlots = _leagueSlots.value.toList(),
+                fieldCount = _fieldCount.value,
+                useManualTimeSlots = _useManualTimeSlots.value,
+                availableRentalResources = _availableRentalResources.value.toList(),
+                selectedRentalResourceIds = _selectedRentalResourceIds.value.toSet(),
+                leagueScoringConfig = _leagueScoringConfig.value,
+                registrationQuestions = _registrationQuestionDrafts.value.toList(),
+                pendingStaffInvites = _pendingStaffInvites.value.toList(),
+            )
+            validateCompletedRentalContext(submission)?.let { error ->
+                _errorState.value = ErrorMessage(error)
+                return@launch
+            }
+            val validationError = validateCreateEventDraft(submission)
             if (validationError != null) {
                 _errorState.value = ErrorMessage(validationError)
                 return@launch
             }
-            createEventAfterPayment(eventDraft)
+            createEventAfterPayment(submission)
         }
     }
 
@@ -1163,7 +1183,10 @@ class DefaultCreateEventComponent(
             billingRepository.listRentalResourceOptions()
                 .onSuccess { options ->
                     // Match the current booking resources to the canonical bootstrap slots.
-                    val availableOptions = resolveCompletedRentalOptions(options)
+                    val availableOptions = resolveCompletedRentalOptions(
+                        options = options,
+                        leagueSlots = _leagueSlots.value,
+                    )
                     if (availableOptions == null) {
                         _availableRentalResources.value = emptyList()
                         _selectedRentalResourceIds.value = emptySet()
@@ -1293,9 +1316,10 @@ class DefaultCreateEventComponent(
     private fun normalizeRentalSlotResourceSelection(
         slot: TimeSlot,
         validFieldIds: Set<String> = _localFields.value.map { field -> field.id }.toSet(),
+        availableRentalResources: List<RentalResourceOption> = _availableRentalResources.value,
     ): TimeSlot {
         if (!slot.isRentalBacked()) {
-            val rentalFieldIds = _availableRentalResources.value
+            val rentalFieldIds = availableRentalResources
                 .map { option -> option.field.id.trim() }
                 .filter(String::isNotBlank)
                 .toSet()
@@ -1311,13 +1335,12 @@ class DefaultCreateEventComponent(
             )
         }
 
-        val availableRentalOptions = _availableRentalResources.value
-        val rentalOptionsByFieldId = availableRentalOptions
+        val rentalOptionsByFieldId = availableRentalResources
             .mapNotNull { option ->
                 option.field.id.trim().takeIf(String::isNotBlank)?.let { fieldId -> fieldId to option }
             }
             .toMap()
-        val primaryRentalFieldId = availableRentalOptions
+        val primaryRentalFieldId = availableRentalResources
             .firstOrNull { option -> slot.rentalBookingItemId == option.bookingItemId }
             ?.field
             ?.id
@@ -1340,12 +1363,14 @@ class DefaultCreateEventComponent(
         )
     }
 
-    private fun selectedRentalResourceOptions(): List<RentalResourceOption> {
-        val selectedIds = _selectedRentalResourceIds.value
-        if (selectedIds.isEmpty()) {
+    private fun selectedRentalResourceOptions(
+        availableRentalResources: List<RentalResourceOption> = _availableRentalResources.value,
+        selectedRentalResourceIds: Set<String> = _selectedRentalResourceIds.value,
+    ): List<RentalResourceOption> {
+        if (selectedRentalResourceIds.isEmpty()) {
             return emptyList()
         }
-        return _availableRentalResources.value.filter { option -> selectedIds.contains(option.id) }
+        return availableRentalResources.filter { option -> selectedRentalResourceIds.contains(option.id) }
     }
 
     private fun selectedRentalResourceFields(
@@ -1405,42 +1430,39 @@ class DefaultCreateEventComponent(
             }
     }
 
-    private suspend fun createEventAfterPayment(eventDraft: Event) {
-        val session = _editorSession.value
-            ?: run {
-                _errorState.value = ErrorMessage("The event editor is not ready.")
+    private suspend fun createEventAfterPayment(submission: CreateEventSubmissionSnapshot) {
+        pendingCreateCommand
+            ?.takeIf { pendingCreateSubmission == submission }
+            ?.let { command ->
+                submitCreateCommand(command)
                 return
             }
+
         val nextCommand = runCatching {
-            val prepared = prepareEventForCreation(eventDraft).getOrThrow()
-            validatePendingStaffInviteDrafts(_pendingStaffInvites.value).getOrThrow()
+            val prepared = prepareEventForCreation(submission).getOrThrow()
+            validatePendingStaffInviteDrafts(submission.pendingStaffInvites).getOrThrow()
             val mutation = EventEditorMutation(
                 canonicalState = EventEditorCanonicalState(
                     event = prepared.event,
                     fields = prepared.fields,
                     timeSlots = prepared.timeSlots,
-                    leagueScoringConfig = _leagueScoringConfig.value
+                    leagueScoringConfig = submission.leagueScoringConfig
                         .takeIf { prepared.event.eventType == EventType.LEAGUE },
-                    questions = _registrationQuestionDrafts.value,
-                    pendingStaffInvites = _pendingStaffInvites.value.toCanonicalInvites(
+                    questions = submission.registrationQuestions,
+                    pendingStaffInvites = submission.pendingStaffInvites.toCanonicalInvites(
                         eventId = prepared.event.id,
                     ),
-                    playoffDivisionDetails = session.canonicalState.playoffDivisionDetails,
-                    divisionFieldIds = session.canonicalState.divisionFieldIds,
+                    playoffDivisionDetails = submission.session.canonicalState.playoffDivisionDetails,
+                    divisionFieldIds = submission.session.canonicalState.divisionFieldIds,
                 ),
             )
-            EventEditorSessionMapper.toCreateCommand(session, mutation).command
+            EventEditorSessionMapper.toCreateCommand(submission.session, mutation).command
         }.getOrElse { error ->
             _errorState.value = ErrorMessage(error.userMessage("Failed to create event."))
             return
         }
-        val command = pendingCreateCommand
-            ?.takeIf { pending ->
-                pending.contractVersion == nextCommand.contractVersion &&
-                    pending.draft == nextCommand.draft &&
-                    pending.completion == nextCommand.completion
-            }
-            ?: nextCommand.copy(createOperationId = newId())
+        val command = nextCommand.copy(createOperationId = newId())
+        pendingCreateSubmission = submission
         submitCreateCommand(command)
     }
 
@@ -1462,6 +1484,7 @@ class DefaultCreateEventComponent(
             eventRepository.createEventEditor(command)
                 .onSuccess { outcome ->
                     pendingCreateCommand = null
+                    pendingCreateSubmission = null
                     _editorSession.value = outcome.session
                     applyEditorSession(outcome.session)
                     val notices = buildList {
@@ -1539,20 +1562,40 @@ class DefaultCreateEventComponent(
             )
         }
 
+    private data class CreateEventSubmissionSnapshot(
+        val session: EventEditorSession,
+        val event: Event,
+        val localFields: List<Field>,
+        val leagueSlots: List<TimeSlot>,
+        val fieldCount: Int,
+        val useManualTimeSlots: Boolean,
+        val availableRentalResources: List<RentalResourceOption>,
+        val selectedRentalResourceIds: Set<String>,
+        val leagueScoringConfig: LeagueScoringConfigDTO,
+        val registrationQuestions: List<RegistrationQuestionDraft>,
+        val pendingStaffInvites: List<PendingStaffInviteDraft>,
+    )
+
     private data class PreparedEventForCreation(
         val event: Event,
         val fields: List<Field>,
         val timeSlots: List<TimeSlot>,
     )
 
-    private suspend fun prepareEventForCreation(eventDraft: Event): Result<PreparedEventForCreation> = runCatching {
-        var preparedEvent = if (eventDraft.eventType == EventType.WEEKLY_EVENT) {
-            eventDraft.copy(noFixedEndDateTime = false)
+    private suspend fun prepareEventForCreation(
+        submission: CreateEventSubmissionSnapshot,
+    ): Result<PreparedEventForCreation> = runCatching {
+        var preparedEvent = if (submission.event.eventType == EventType.WEEKLY_EVENT) {
+            submission.event.copy(noFixedEndDateTime = false)
         } else {
-            eventDraft
+            submission.event
         }
-        var preparedFields = _localFields.value
-        var preparedTimeSlots = _leagueSlots.value
+        var preparedFields = submission.localFields
+        var preparedTimeSlots = submission.leagueSlots
+        val selectedRentalOptions = selectedRentalResourceOptions(
+            availableRentalResources = submission.availableRentalResources,
+            selectedRentalResourceIds = submission.selectedRentalResourceIds,
+        )
 
         val shouldManageLocalFields =
             (
@@ -1560,20 +1603,21 @@ class DefaultCreateEventComponent(
                     preparedEvent.eventType == EventType.TOURNAMENT ||
                     preparedEvent.eventType == EventType.WEEKLY_EVENT
                 ) &&
-            _fieldCount.value > 0
+            submission.fieldCount > 0
 
-        val selectedRentalFieldIds = selectedRentalResourceFields()
+        val selectedRentalFieldIds = selectedRentalResourceFields(selectedRentalOptions)
             .map { field -> field.id.trim() }
             .filter(String::isNotBlank)
             .distinct()
         val selectedRentalFieldIdSet = selectedRentalFieldIds.toSet()
         val fieldIdReplacements = mutableMapOf<String, String>()
         if (shouldManageLocalFields) {
-            val existingFields = _localFields.value
+            val existingFields = submission.localFields
             preparedFields = buildFieldDrafts(
                 event = preparedEvent,
-                targetCount = _fieldCount.value,
+                targetCount = submission.fieldCount,
                 excludedFieldIds = selectedRentalFieldIdSet,
+                existingFields = existingFields,
             )
             existingFields
                 .filterNot { field -> field.id.trim() in selectedRentalFieldIdSet }
@@ -1588,7 +1632,7 @@ class DefaultCreateEventComponent(
             )
         }
 
-        val hasRentalBackedSlots = _leagueSlots.value.any { slot -> slot.isRentalBacked() }
+        val hasRentalBackedSlots = submission.leagueSlots.any { slot -> slot.isRentalBacked() }
         val shouldPersistManagedSlots = if (hasRentalBackedSlots) {
             preparedEvent.eventType == EventType.EVENT ||
                 preparedEvent.eventType == EventType.LEAGUE ||
@@ -1600,10 +1644,18 @@ class DefaultCreateEventComponent(
                 preparedEvent.eventType == EventType.WEEKLY_EVENT
         }
         if (shouldPersistManagedSlots) {
-            preparedTimeSlots = if (shouldUseConfiguredLeagueSlots(event = preparedEvent)) {
+            preparedTimeSlots = if (
+                shouldUseConfiguredLeagueSlots(
+                    event = preparedEvent,
+                    leagueSlots = submission.leagueSlots,
+                    useManualTimeSlots = submission.useManualTimeSlots,
+                )
+            ) {
                 buildLeagueSlotDrafts(
                     event = preparedEvent,
                     fieldIdReplacements = fieldIdReplacements,
+                    leagueSlots = submission.leagueSlots,
+                    availableRentalResources = submission.availableRentalResources,
                 )
             } else {
                 buildAutomaticEventRangeSlotDrafts(
@@ -1615,7 +1667,7 @@ class DefaultCreateEventComponent(
             preparedEvent = preparedEvent.copy(timeSlotIds = preparedTimeSlots.map { it.id })
         }
 
-        requireCompletedRentalSlots(preparedTimeSlots)
+        requireCompletedRentalSlots(preparedTimeSlots, selectedRentalOptions)
 
         PreparedEventForCreation(
             event = preparedEvent,
@@ -1624,52 +1676,69 @@ class DefaultCreateEventComponent(
         )
     }
 
-    private fun validateCreateEventDraft(event: Event): String? {
-        validateConfiguredLeagueSlots(event)?.let { return it }
+    private fun validateCreateEventDraft(submission: CreateEventSubmissionSnapshot): String? {
+        validateConfiguredLeagueSlots(
+            event = submission.event,
+            leagueSlots = submission.leagueSlots,
+            localFields = submission.localFields,
+            useManualTimeSlots = submission.useManualTimeSlots,
+            availableRentalResources = submission.availableRentalResources,
+        )?.let { return it }
 
-        val hasRentalBackedEventSlots = event.eventType == EventType.EVENT &&
-            _leagueSlots.value.any { slot -> slot.isRentalBacked() }
+        val hasRentalBackedEventSlots = submission.event.eventType == EventType.EVENT &&
+            submission.leagueSlots.any { slot -> slot.isRentalBacked() }
         if (hasRentalBackedEventSlots) {
             return null
         }
-        val selectedDivisionIds = event.divisions.normalizeDivisionIdentifiers()
+        val selectedDivisionIds = submission.event.divisions.normalizeDivisionIdentifiers()
         if (selectedDivisionIds.isEmpty()) {
             return "Add at least one division before creating this event."
         }
         return null
     }
 
-    private fun validateCompletedRentalContext(): String? {
+    private fun validateCompletedRentalContext(
+        submission: CreateEventSubmissionSnapshot,
+    ): String? {
         rentalBookingId ?: return null
-        val canonicalOptions = resolveCompletedRentalOptions(_availableRentalResources.value)
-            ?: return completedRentalContextError()
-        val selectedOptions = selectedRentalResourceOptions()
+        val selectedOptions = selectedRentalResourceOptions(
+            availableRentalResources = submission.availableRentalResources,
+            selectedRentalResourceIds = submission.selectedRentalResourceIds,
+        )
+        val canonicalOptions = resolveCompletedRentalOptions(
+            options = submission.availableRentalResources,
+            leagueSlots = submission.leagueSlots,
+        ) ?: return completedRentalContextError()
         if (selectedOptions.map(RentalResourceOption::id).toSet() != canonicalOptions.map(RentalResourceOption::id).toSet()) {
             return completedRentalContextError()
         }
-        if (newEventState.value.eventType == EventType.WEEKLY_EVENT) {
+        if (submission.event.eventType == EventType.WEEKLY_EVENT) {
             return "A completed one-time reservation can't be attached to a weekly event. Choose Event, League, or Tournament."
         }
-        val rentalSlots = _leagueSlots.value.filter { slot -> slot.isRentalBacked() }
-        if (!completedRentalSlotsMatchCanonical(rentalSlots)) {
+        val rentalSlots = submission.leagueSlots.filter { slot -> slot.isRentalBacked() }
+        if (!completedRentalSlotsMatchCanonical(rentalSlots, selectedOptions)) {
             return "The reserved resources are no longer fully attached. Return to the organization and try again."
         }
         return null
     }
 
-    private fun requireCompletedRentalSlots(preparedTimeSlots: List<TimeSlot>) {
+    private fun requireCompletedRentalSlots(
+        preparedTimeSlots: List<TimeSlot>,
+        selectedOptions: List<RentalResourceOption>,
+    ) {
         rentalBookingId ?: return
         val preparedRentalSlots = preparedTimeSlots.filter { slot -> slot.isRentalBacked() }
-        check(completedRentalSlotsMatchCanonical(preparedRentalSlots)) {
+        check(completedRentalSlotsMatchCanonical(preparedRentalSlots, selectedOptions)) {
             "The reserved resources are no longer fully attached. Return to the organization and try again."
         }
     }
 
     private fun resolveCompletedRentalOptions(
         options: List<RentalResourceOption>,
+        leagueSlots: List<TimeSlot>,
     ): List<RentalResourceOption>? {
         val bookingId = rentalBookingId ?: return options
-        val canonicalSlots = _leagueSlots.value.filter { slot ->
+        val canonicalSlots = leagueSlots.filter { slot ->
             slot.isRentalBacked() && slot.rentalBookingId?.trim() == bookingId
         }
         val expectedItemIds = canonicalSlots
@@ -1686,9 +1755,11 @@ class DefaultCreateEventComponent(
         return matched.takeIf { rentalSlotsMatchOptions(canonicalSlots, it) }
     }
 
-    private fun completedRentalSlotsMatchCanonical(slots: List<TimeSlot>): Boolean {
+    private fun completedRentalSlotsMatchCanonical(
+        slots: List<TimeSlot>,
+        options: List<RentalResourceOption>,
+    ): Boolean {
         val bookingId = rentalBookingId ?: return true
-        val options = selectedRentalResourceOptions()
         if (options.isEmpty()) return false
         return rentalSlotsMatchOptions(
             slots = slots,
@@ -1722,26 +1793,32 @@ class DefaultCreateEventComponent(
     private fun completedRentalContextError(): String =
         "We couldn't verify every resource in this reservation. Return to the organization and try again."
 
-    private fun validateConfiguredLeagueSlots(event: Event): String? {
-        if (!shouldUseConfiguredLeagueSlots(event)) {
+    private fun validateConfiguredLeagueSlots(
+        event: Event,
+        leagueSlots: List<TimeSlot> = _leagueSlots.value,
+        localFields: List<Field> = _localFields.value,
+        useManualTimeSlots: Boolean = _useManualTimeSlots.value,
+        availableRentalResources: List<RentalResourceOption> = _availableRentalResources.value,
+    ): String? {
+        if (!shouldUseConfiguredLeagueSlots(event, leagueSlots, useManualTimeSlots)) {
             return null
         }
         val resourceLabels = resolveEventResourceLabels(event.sportIds, _sports.value)
 
         if (
             event.eventType == EventType.WEEKLY_EVENT &&
-            _leagueSlots.value.none { slot -> slot.repeating }
+            leagueSlots.none { slot -> slot.repeating }
         ) {
             return "Add at least one weekly repeating timeslot for this Weekly Event."
         }
 
-        val validFieldIds = _localFields.value
+        val validFieldIds = localFields
             .map { field -> field.id.trim() }
             .filter(String::isNotBlank)
             .toSet()
 
-        val slots = _leagueSlots.value.map { slot ->
-            normalizeRentalSlotResourceSelection(slot, validFieldIds)
+        val slots = leagueSlots.map { slot ->
+            normalizeRentalSlotResourceSelection(slot, validFieldIds, availableRentalResources)
         }
         slots.forEachIndexed { index, slot ->
             val label = "Schedule slot ${index + 1}"
@@ -1787,10 +1864,11 @@ class DefaultCreateEventComponent(
         event: Event,
         targetCount: Int,
         excludedFieldIds: Set<String> = emptySet(),
+        existingFields: List<Field> = _localFields.value,
     ): List<Field> {
         val resourceLabels = resolveEventResourceLabels(event.sportIds, _sports.value)
         val normalizedCount = (targetCount - excludedFieldIds.size).coerceAtLeast(0)
-        val drafts = _localFields.value
+        val drafts = existingFields
             .filterNot { field -> excludedFieldIds.contains(field.id.trim()) }
             .take(normalizedCount)
             .mapIndexed { index, field ->
@@ -1826,12 +1904,17 @@ class DefaultCreateEventComponent(
     private fun buildLeagueSlotDrafts(
         event: Event,
         fieldIdReplacements: Map<String, String>,
+        leagueSlots: List<TimeSlot> = _leagueSlots.value,
+        availableRentalResources: List<RentalResourceOption> = _availableRentalResources.value,
     ): List<TimeSlot> {
         val selectedDivisionIds = event.divisions.normalizeDivisionIdentifiers()
         val resourceLabels = resolveEventResourceLabels(event.sportIds, _sports.value)
         // A visible configured slot must be persisted or explicitly block submission.
-        return _leagueSlots.value.mapIndexed { index, rawSlot ->
-            val slot = normalizeRentalSlotResourceSelection(rawSlot)
+        return leagueSlots.mapIndexed { index, rawSlot ->
+            val slot = normalizeRentalSlotResourceSelection(
+                slot = rawSlot,
+                availableRentalResources = availableRentalResources,
+            )
             val mappedFieldIds = slot.normalizedScheduledFieldIds()
                 .map { fieldId ->
                     (fieldIdReplacements[fieldId] ?: fieldId).trim()
@@ -1854,7 +1937,6 @@ class DefaultCreateEventComponent(
             val normalizedDays = slot.normalizedDaysOfWeek()
             val startMinutes = slot.startTimeMinutes
             val endMinutes = slot.endTimeMinutes
-
 
             if (!slot.repeating) {
                 val canonicalSlot = try {
@@ -1917,8 +1999,12 @@ class DefaultCreateEventComponent(
         throw IllegalArgumentException("Schedule slot ${index + 1}: $reason")
     }
 
-    private fun shouldUseConfiguredLeagueSlots(event: Event): Boolean {
-        if (_leagueSlots.value.any { slot -> slot.isRentalBacked() }) {
+    private fun shouldUseConfiguredLeagueSlots(
+        event: Event,
+        leagueSlots: List<TimeSlot> = _leagueSlots.value,
+        useManualTimeSlots: Boolean = _useManualTimeSlots.value,
+    ): Boolean {
+        if (leagueSlots.any { slot -> slot.isRentalBacked() }) {
             return true
         }
         if (event.eventType == EventType.WEEKLY_EVENT) {
@@ -1933,7 +2019,7 @@ class DefaultCreateEventComponent(
         if (event.noFixedEndDateTime) {
             return true
         }
-        return _useManualTimeSlots.value
+        return useManualTimeSlots
     }
 
     private fun buildAutomaticEventRangeSlotDrafts(
