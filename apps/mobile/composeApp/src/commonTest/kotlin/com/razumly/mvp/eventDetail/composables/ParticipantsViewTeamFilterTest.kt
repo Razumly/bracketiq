@@ -50,16 +50,42 @@ class ParticipantsViewTeamFilterTest {
     }
 
     @Test
-    fun givenTeamSignupLeague_whenBuildingParticipantTeams_thenPlaceholderSlotsAreExcluded() {
+    fun given_split_league_playoffs_when_building_participant_teams_then_phase_placeholders_are_excluded() {
+        val sourceDivisionId = "event-1__division__open"
+        val playoffDivisionId = "event-1__division__playoff_gold"
         val event = Event(
             eventType = EventType.LEAGUE,
             teamSignup = true,
+            includePlayoffs = true,
+            splitLeaguePlayoffDivisions = true,
+            singleDivision = false,
+            divisions = listOf(sourceDivisionId),
+            divisionDetails = listOf(
+                DivisionDetail(id = sourceDivisionId, kind = "LEAGUE"),
+                DivisionDetail(id = playoffDivisionId, kind = "PLAYOFF"),
+            ),
         )
         val teams = listOf(
-            buildTeamWithPlayers(teamId = "actual-team"),
-            buildTeamWithPlayers(teamId = "placeholder-kind", kind = "PLACEHOLDER", parentTeamId = "parent-team"),
-            buildTeamWithPlayers(teamId = "placeholder-slot", kind = null, parentTeamId = null, captainId = ""),
-            buildTeamWithPlayers(teamId = "api-team-without-parent", kind = null, parentTeamId = null),
+            buildTeamWithPlayers(teamId = "actual-team", division = sourceDivisionId),
+            buildTeamWithPlayers(
+                teamId = "placeholder-kind",
+                kind = "PLACEHOLDER",
+                parentTeamId = "actual-team",
+                division = playoffDivisionId,
+            ),
+            buildTeamWithPlayers(
+                teamId = "placeholder-slot",
+                kind = null,
+                parentTeamId = null,
+                captainId = "",
+                division = playoffDivisionId,
+            ),
+            buildTeamWithPlayers(
+                teamId = "api-team-without-parent",
+                kind = null,
+                parentTeamId = null,
+                division = sourceDivisionId,
+            ),
         )
 
         val visibleTeamIds = visibleParticipantTeams(event, teams).map { team -> team.team.id }

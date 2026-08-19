@@ -463,6 +463,39 @@ class EventDetailDivisionOptionsTest {
         assertEquals(poolAId, presentation.selectedStandingsDataDivisionId)
     }
 
+    @Test
+    fun given_split_playoff_divisions_when_building_bracket_selector_then_options_remain_visible() {
+        val playoffOptions = listOf(
+            BracketDivisionOption(id = "playoff_gold", label = "Gold"),
+            BracketDivisionOption(id = "playoff_silver", label = "Silver"),
+        )
+        val divisionDetails = listOf(
+            DivisionDetail(id = "playoff_gold", kind = "PLAYOFF", name = "Gold"),
+            DivisionDetail(id = "playoff_silver", kind = "PLAYOFF", name = "Silver"),
+        )
+
+        val bracketSelectorState = buildSelectedDivisionPillState(
+            selectedDivisionId = "playoff_gold",
+            options = playoffOptions,
+            singleDivision = true,
+            allowPhaseSelection = true,
+            divisionDetails = divisionDetails,
+        )
+        val nonPhaseSelectorState = buildSelectedDivisionPillState(
+            selectedDivisionId = "playoff_gold",
+            options = playoffOptions,
+            singleDivision = true,
+            allowPhaseSelection = false,
+            divisionDetails = divisionDetails,
+        )
+
+        assertEquals(
+            listOf("playoff_gold", "playoff_silver"),
+            bracketSelectorState?.options?.map(BracketDivisionOption::id),
+        )
+        assertNull(nonPhaseSelectorState)
+    }
+
     private fun poolPlayEvent(
         bracketId: String,
         poolAId: String,

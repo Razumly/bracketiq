@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
@@ -113,6 +114,28 @@ class EventEditPayloadBuilderTest {
         )
 
         assertEquals(listOf("open"), fields.single().divisions)
+    }
+
+    @Test
+    fun given_split_league_playoffs_when_field_divisions_are_empty_then_registration_division_stays_eligible() {
+        val sourceDivisionId = "event-1__division__open"
+        val playoffDivisionId = "event-1__division__playoff_gold"
+        val event = leagueEvent(divisions = listOf(sourceDivisionId)).copy(
+            includePlayoffs = true,
+            splitLeaguePlayoffDivisions = true,
+            singleDivision = false,
+            divisionDetails = listOf(
+                DivisionDetail(id = sourceDivisionId, kind = "LEAGUE"),
+                DivisionDetail(id = playoffDivisionId, kind = "PLAYOFF"),
+            ),
+        )
+
+        val fields = buildEditableFieldDrafts(
+            event = event,
+            sourceFields = listOf(field(id = "field-1", divisions = emptyList())),
+        )
+
+        assertEquals(listOf(sourceDivisionId), fields.single().divisions)
     }
 
     @Test

@@ -17,6 +17,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import kotlin.test.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -72,5 +73,41 @@ class EventDetailBracketToggleUiTest {
                 "Losers bracket selected",
             ),
         )
+    }
+
+    @Test
+    fun given_split_playoff_divisions_when_opening_bracket_selector_then_each_division_is_listed() {
+        val options = listOf(
+            BracketDivisionOption(id = "playoff_gold", label = "Gold"),
+            BracketDivisionOption(id = "playoff_silver", label = "Silver"),
+        )
+        val divisionDetails = listOf(
+            DivisionDetail(id = "playoff_gold", kind = "PLAYOFF", name = "Gold"),
+            DivisionDetail(id = "playoff_silver", kind = "PLAYOFF", name = "Silver"),
+        )
+        var selectedDivisionId by mutableStateOf("playoff_gold")
+
+        composeRule.setContent {
+            MaterialTheme {
+                EventDetailDivisionSelectorBar(
+                    divisionState = buildSelectedDivisionPillState(
+                        selectedDivisionId = selectedDivisionId,
+                        options = options,
+                        singleDivision = true,
+                        allowPhaseSelection = true,
+                        divisionDetails = divisionDetails,
+                    ),
+                    poolState = null,
+                    onDivisionSelected = { divisionId -> selectedDivisionId = divisionId },
+                    onPoolSelected = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Division: Gold").assertIsDisplayed().performClick()
+        composeRule.onNodeWithText("Silver").assertIsDisplayed().performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Division: Silver").assertIsDisplayed()
     }
 }

@@ -12,7 +12,9 @@ import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderUsesUsername
 import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentUrl
 import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
+import com.razumly.mvp.core.data.util.evaluatePlayoffDivisionPlacementCapacities
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
+import com.razumly.mvp.core.data.util.resolveCanonicalPlayoffPlacementSources
 import com.razumly.mvp.eventDetail.composables.leagueScoringValidationErrors
 import kotlinx.datetime.LocalDate
 
@@ -43,6 +45,45 @@ internal fun manualPaymentLinkError(link: ManualPaymentLink): String? {
         "Enter a valid ${inputLabel.lowercase()} or HTTPS link."
     } else {
         "Enter a valid https:// payment link."
+    }
+}
+
+private fun splitLeaguePlayoffPlacementErrors(
+    event: Event,
+    sourceDivisions: List<DivisionDetail>,
+): List<String> {
+    if (
+        event.eventType != EventType.LEAGUE ||
+        !event.includePlayoffs ||
+        !event.splitLeaguePlayoffDivisions
+    ) {
+        return emptyList()
+    }
+
+    val playoffDivisions = event.divisionDetails.filter(DivisionDetail::isPlayoffDivisionKind)
+    if (playoffDivisions.isEmpty()) {
+        return listOf("Add at least one playoff division before assignments can be validated.")
+    }
+
+    return evaluatePlayoffDivisionPlacementCapacities(
+        sourceDivisions = sourceDivisions,
+        playoffDivisions = playoffDivisions,
+    ).mapNotNull { result ->
+        val label = result.name ?: result.playoffDivisionId
+        when {
+            result.capacity == null ->
+                "Playoff division \"$label\" must define a team count before assignments can be validated."
+
+            !result.sourceMappingsValid ->
+                "Playoff division \"$label\" has ${result.mappedPositionCount} assigned positions " +
+                    "and ${result.capacity} team slots. Assign every playoff position to an existing playoff division."
+
+            !result.matchesCapacity ->
+                "Playoff division \"$label\" has ${result.mappedPositionCount} mapped positions " +
+                    "but ${result.capacity} team slots."
+
+            else -> null
+        }
     }
 }
 internal fun validatePaymentPlans(
@@ -317,6 +358,7 @@ internal fun computeEventValidationResult(
     val isLeaguePlayoffTeamsValid: Boolean
     val isLeaguePointsValid: Boolean
     val isLeagueDurationValid: Boolean
+    val playoffPlacementValidationErrors: List<String>
     if (editEvent.eventType == EventType.LEAGUE) {
         val validSetCounts = setOf(1, 3, 5)
         fun validSetCount(value: Int?): Int? = value?.takeIf { count -> count in validSetCounts }
@@ -385,15 +427,64 @@ internal fun computeEventValidationResult(
             leagueDetails.isNotEmpty() &&
                 leagueDetails.all { detail -> (detail.gamesPerOpponent ?: editEvent.gamesPerOpponent ?: 1) >= 1 }
         }
-        isLeaguePlayoffTeamsValid = if (!editEvent.includePlayoffs) {
+        val validatesSplitPlayoffPlacements =
+            editEvent.includePlayoffs && editEvent.splitLeaguePlayoffDivisions
+        val canonicalSplitPlayoffSources = if (validatesSplitPlayoffPlacements) {
+            resolveCanonicalPlayoffPlacementSources(
+                sourceDivisionIds = editEvent.divisions,
+                divisionDetails = editEvent.divisionDetails,
+            )
+        } else {
+            null
+        }
+        val splitPlayoffSourcesValid =
+            !validatesSplitPlayoffPlacements || canonicalSplitPlayoffSources != null
+        val leaguePlayoffDetails = canonicalSplitPlayoffSources ?: leagueDetails
+        val singleLeaguePlayoffDetail = if (editEvent.singleDivision) {
+            leaguePlayoffDetails.firstOrNull()
+        } else {
+            null
+        }
+        val singleLeaguePlayoffCount = if (validatesSplitPlayoffPlacements) {
+            singleLeaguePlayoffDetail?.playoffTeamCount
+        } else {
+            editEvent.playoffTeamCount ?: singleLeaguePlayoffDetail?.playoffTeamCount
+        }
+        val baseLeaguePlayoffConfigValid = if (!editEvent.includePlayoffs) {
             true
         } else if (editEvent.singleDivision) {
-            (editEvent.playoffTeamCount ?: singleLeagueDetail?.playoffTeamCount ?: 0) >= 2 &&
-                (singleLeagueDetail?.let(::isPlayoffConfigValid) ?: true)
+            singleLeaguePlayoffCount?.let { count -> count >= 2 } == true &&
+                (singleLeaguePlayoffDetail?.let(::isPlayoffConfigValid) ?: true)
         } else {
-            leagueDetails.isNotEmpty() &&
-                leagueDetails.all { detail -> (detail.playoffTeamCount ?: 0) >= 2 && isPlayoffConfigValid(detail) }
+            leaguePlayoffDetails.isNotEmpty() &&
+                leaguePlayoffDetails.all { detail ->
+                    detail.playoffTeamCount?.let { count -> count >= 2 } == true &&
+                        isPlayoffConfigValid(detail)
+                }
         }
+        val splitPlayoffCountsValid = if (validatesSplitPlayoffPlacements) {
+            canonicalSplitPlayoffSources?.all { detail ->
+                detail.playoffTeamCount?.let { count -> count >= 2 } == true
+            } == true
+        } else {
+            true
+        }
+        val leaguePlayoffConfigValid =
+            baseLeaguePlayoffConfigValid && splitPlayoffSourcesValid && splitPlayoffCountsValid
+        playoffPlacementValidationErrors = when {
+            !splitPlayoffSourcesValid -> listOf(
+                "One or more league divisions are not saved correctly. " +
+                    "Save each league division before you assign playoff positions.",
+            )
+
+            leaguePlayoffConfigValid -> splitLeaguePlayoffPlacementErrors(
+                event = editEvent,
+                sourceDivisions = canonicalSplitPlayoffSources ?: leaguePlayoffDetails,
+            )
+
+            else -> emptyList()
+        }
+        isLeaguePlayoffTeamsValid = leaguePlayoffConfigValid && playoffPlacementValidationErrors.isEmpty()
         if (editEvent.singleDivision) {
             val usesSets = singleLeagueDetail?.usesSets ?: editEvent.usesSets
             isLeagueDurationValid = isDurationValid(
@@ -431,6 +522,7 @@ internal fun computeEventValidationResult(
                 }
         }
     } else if (editEvent.eventType == EventType.TOURNAMENT) {
+        playoffPlacementValidationErrors = emptyList()
         isLeagueGamesValid = true
         val details = tournamentValidationDetails(editEvent, divisionDetailsForSettings)
         isLeaguePlayoffTeamsValid = if (!editEvent.includePlayoffs) {
@@ -452,6 +544,7 @@ internal fun computeEventValidationResult(
             }
         }
     } else {
+        playoffPlacementValidationErrors = emptyList()
         isLeagueGamesValid = true
         isLeagueDurationValid = true
         isLeaguePointsValid = true
@@ -589,15 +682,19 @@ internal fun computeEventValidationResult(
             add("Points to victory must be greater than 0 for every configured set.")
         }
         if (!isLeaguePlayoffTeamsValid) {
-            add(
-                if (editEvent.eventType == EventType.TOURNAMENT) {
-                    "Each tournament division needs pool count, bracket team count, and even pool sizing when pool play is enabled."
-                } else if (editEvent.singleDivision) {
-                    "Playoff team count must be at least 2 when playoffs are enabled."
-                } else {
-                    "Each division must have a playoff team count of at least 2 when playoffs are enabled."
-                },
-            )
+            if (playoffPlacementValidationErrors.isNotEmpty()) {
+                addAll(playoffPlacementValidationErrors)
+            } else {
+                add(
+                    if (editEvent.eventType == EventType.TOURNAMENT) {
+                        "Each tournament division needs pool count, bracket team count, and even pool sizing when pool play is enabled."
+                    } else if (editEvent.singleDivision && !editEvent.splitLeaguePlayoffDivisions) {
+                        "Playoff team count must be at least 2 when playoffs are enabled."
+                    } else {
+                        "Each division must have a playoff team count of at least 2 when playoffs are enabled."
+                    },
+                )
+            }
         }
         if (!scheduleTimeLocked && !isLeagueSlotsValid) {
             add(

@@ -388,6 +388,174 @@ class MatchCardPlayoffPlaceholderTest {
     }
 
     @Test
+    fun given_split_league_target_when_building_playoff_placeholders_then_complete_capacity_is_required() {
+        val playoffDivisionId = "event_1__division__playoff_gold"
+        val openDivision = DivisionDetail(
+            id = "event_1__division__open",
+            key = "open",
+            name = "Open",
+            playoffTeamCount = 2,
+            playoffPlacementDivisionIds = listOf(playoffDivisionId, playoffDivisionId),
+        )
+        val recDivision = DivisionDetail(
+            id = "event_1__division__rec",
+            key = "rec",
+            name = "Rec",
+            playoffTeamCount = 2,
+        )
+        val playoffDivision = DivisionDetail(
+            id = playoffDivisionId,
+            key = "playoff_gold",
+            kind = "PLAYOFF",
+            name = "Gold",
+            maxParticipants = 4,
+        )
+        val matches = listOf(
+            matchWithRelations(
+                id = "m1",
+                division = playoffDivisionId,
+                team1Seed = 1,
+                team2Seed = 2,
+                previousLeftId = null,
+                previousRightId = null,
+            ),
+            matchWithRelations(
+                id = "m2",
+                division = playoffDivisionId,
+                team1Seed = 3,
+                team2Seed = 4,
+                previousLeftId = null,
+                previousRightId = null,
+            ),
+        ).associateBy { match -> match.match.id }
+
+        fun assignments(
+            open: DivisionDetail = openDivision,
+            rec: DivisionDetail = recDivision,
+            activeDivisionIds: List<String> = listOf(open.id, rec.id),
+            singleDivision: Boolean = false,
+        ) = buildPlayoffPlaceholderAssignmentsForEvent(
+            eventType = EventType.LEAGUE,
+            includePlayoffs = true,
+            singleDivision = singleDivision,
+            splitLeaguePlayoffDivisions = true,
+            eventDivisions = activeDivisionIds,
+            divisionDetails = listOf(open, rec, playoffDivision),
+            eventPlayoffTeamCount = null,
+            matches = matches,
+        )
+
+        assertEquals(emptyMap(), assignments())
+        assertEquals(
+            emptyMap(),
+            assignments(
+                open = openDivision.copy(playoffPlacementDivisionIds = emptyList()),
+                singleDivision = true,
+            ),
+        )
+        val completeRecDivision = recDivision.copy(
+            playoffPlacementDivisionIds = List(2) { playoffDivisionId },
+        )
+        assertEquals(
+            emptyMap(),
+            assignments(
+                open = openDivision.copy(playoffTeamCount = 4),
+                rec = completeRecDivision,
+            ),
+        )
+        assertEquals(
+            emptyMap(),
+            assignments(
+                open = openDivision.copy(
+                    playoffTeamCount = 4,
+                    playoffPlacementDivisionIds =
+                        List(2) { playoffDivisionId } + List(2) { playoffDivision.key },
+                ),
+                rec = completeRecDivision,
+            ),
+        )
+        assertEquals(
+            emptyMap(),
+            assignments(
+                rec = completeRecDivision,
+                activeDivisionIds = listOf(openDivision.id),
+            ),
+        )
+        assertEquals(
+            emptyMap(),
+            assignments(
+                rec = completeRecDivision,
+                activeDivisionIds = listOf(openDivision.key, recDivision.key),
+            ),
+        )
+        assertEquals(
+            4,
+            assignments(rec = completeRecDivision).size,
+        )
+    }
+
+    @Test
+    fun given_multiple_split_league_targets_when_mappings_fill_each_target_then_all_labels_are_built() {
+        val goldDivisionId = "event_1__division__playoff_gold"
+        val silverDivisionId = "event_1__division__playoff_silver"
+        val sourceDivision = DivisionDetail(
+            id = "event_1__division__open",
+            kind = "LEAGUE",
+            name = "Open",
+            playoffTeamCount = 4,
+            playoffPlacementDivisionIds = listOf(
+                goldDivisionId,
+                goldDivisionId,
+                silverDivisionId,
+                silverDivisionId,
+            ),
+        )
+        val goldDivision = DivisionDetail(
+            id = goldDivisionId,
+            kind = "PLAYOFF",
+            name = "Gold",
+            maxParticipants = 2,
+        )
+        val silverDivision = DivisionDetail(
+            id = silverDivisionId,
+            kind = "PLAYOFF",
+            name = "Silver",
+            maxParticipants = 2,
+        )
+        val matches = listOf(
+            matchWithRelations(
+                id = "gold-match",
+                division = goldDivisionId,
+                team1Seed = 1,
+                team2Seed = 2,
+                previousLeftId = null,
+                previousRightId = null,
+            ),
+            matchWithRelations(
+                id = "silver-match",
+                division = silverDivisionId,
+                team1Seed = 3,
+                team2Seed = 4,
+                previousLeftId = null,
+                previousRightId = null,
+            ),
+        ).associateBy { match -> match.match.id }
+
+        val assignments = buildPlayoffPlaceholderAssignmentsForEvent(
+            eventType = EventType.LEAGUE,
+            includePlayoffs = true,
+            singleDivision = true,
+            splitLeaguePlayoffDivisions = true,
+            eventDivisions = listOf(sourceDivision.id),
+            divisionDetails = listOf(sourceDivision, goldDivision, silverDivision),
+            eventPlayoffTeamCount = null,
+            matches = matches,
+        )
+
+        assertEquals(4, assignments.size)
+    }
+
+    @Test
     fun build_playoff_placeholder_assignments_for_event_uses_tournament_pool_mappings() {
         val bracketDivision = DivisionDetail(
             id = "bracket_open",

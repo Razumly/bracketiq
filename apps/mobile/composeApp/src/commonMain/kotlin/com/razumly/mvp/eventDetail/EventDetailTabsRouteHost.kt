@@ -306,8 +306,9 @@ internal fun EventDetailTabsRouteHost(
         val divisionState = buildSelectedDivisionPillState(
             selectedDivisionId = selectedDivisionForTab,
             options = divisionOptionsForTab,
-            divisionDetails = state.selectedEvent.event.divisionDetails,
             singleDivision = state.selectedEvent.event.singleDivision,
+            allowPhaseSelection = selectedTab == DetailTab.BRACKET,
+            divisionDetails = state.selectedEvent.event.divisionDetails,
         )
         val poolState = when (selectedTab) {
             DetailTab.SCHEDULE -> {
@@ -321,8 +322,9 @@ internal fun EventDetailTabsRouteHost(
                                 label = "All pools",
                             ),
                         ) + state.schedulePoolDivisionOptions,
-                        divisionDetails = state.selectedEvent.event.divisionDetails,
                         singleDivision = false,
+                        allowPhaseSelection = false,
+                        divisionDetails = state.selectedEvent.event.divisionDetails,
                     )
                 } else {
                     null
@@ -334,8 +336,9 @@ internal fun EventDetailTabsRouteHost(
                         selectedDivisionId = state.selectedStandingsDataDivisionId
                             ?: state.selectedStandingsPoolDivisionId,
                         options = state.standingsPoolDivisionOptions,
-                        divisionDetails = state.selectedEvent.event.divisionDetails,
                         singleDivision = false,
+                        allowPhaseSelection = false,
+                        divisionDetails = state.selectedEvent.event.divisionDetails,
                     )
                 } else {
                     null

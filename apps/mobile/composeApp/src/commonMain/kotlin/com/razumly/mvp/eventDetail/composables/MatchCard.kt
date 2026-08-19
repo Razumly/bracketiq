@@ -60,8 +60,11 @@ import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.divisionsEquivalent
+import com.razumly.mvp.core.data.util.evaluatePlayoffDivisionPlacementCapacities
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
+import com.razumly.mvp.core.data.util.resolveCanonicalPlayoffPlacementSources
 import com.razumly.mvp.core.util.resolvedTimeZone
+import com.razumly.mvp.eventDetail.isPlayoffDivisionKind
 import com.razumly.mvp.eventDetail.resolveEventMatchRules
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import kotlinx.datetime.LocalDate
@@ -1181,6 +1184,7 @@ internal fun buildPlayoffPlaceholderAssignmentsForEvent(
     return when {
         eventType == EventType.LEAGUE &&
             singleDivision &&
+            !splitLeaguePlayoffDivisions &&
             !hasPlacementMappings -> {
             buildSingleDivisionPlayoffPlaceholderAssignments(
                 slots = slots,
@@ -1365,9 +1369,14 @@ internal fun buildLeaguePlayoffPlaceholderAssignments(
         return emptyMap()
     }
 
-    val orderedDetails = orderDivisionDetailsForMappings(eventDivisions, divisionDetails)
-    if (orderedDetails.isEmpty()) {
-        return emptyMap()
+    val orderedDetails = if (splitLeaguePlayoffDivisions) {
+        resolveCanonicalPlayoffPlacementSources(
+            sourceDivisionIds = eventDivisions,
+            divisionDetails = divisionDetails,
+        ) ?: return emptyMap()
+    } else {
+        orderDivisionDetailsForMappings(eventDivisions, divisionDetails)
+            .ifEmpty { return emptyMap() }
     }
 
     val slotsByPlayoffDivision = slots
@@ -1392,6 +1401,7 @@ internal fun buildLeaguePlayoffPlaceholderAssignments(
             allDivisionDetails = divisionDetails,
             eventPlayoffTeamCount = eventPlayoffTeamCount,
             implicitSelfMappings = !splitLeaguePlayoffDivisions,
+            requireCompleteCapacity = splitLeaguePlayoffDivisions,
         )
         if (labelsByPlacement.isEmpty()) {
             continue
@@ -1576,7 +1586,22 @@ private fun buildMappedPlacementLabelsForPlayoffDivision(
     allDivisionDetails: List<DivisionDetail>,
     eventPlayoffTeamCount: Int?,
     implicitSelfMappings: Boolean = false,
+    requireCompleteCapacity: Boolean = false,
 ): Map<Int, List<String>> {
+    if (requireCompleteCapacity) {
+        val normalizedPlayoffDivisionId = playoffDivisionId.normalizeDivisionIdentifier()
+        val playoffDivisions = allDivisionDetails.filter(DivisionDetail::isPlayoffDivisionKind)
+        val capacityResult = evaluatePlayoffDivisionPlacementCapacities(
+            sourceDivisions = mappingDivisionDetails.filterNot(DivisionDetail::isPlayoffDivisionKind),
+            playoffDivisions = playoffDivisions,
+        ).firstOrNull { result ->
+            result.playoffDivisionId == normalizedPlayoffDivisionId
+        }
+        if (capacityResult?.matchesCapacity != true) {
+            return emptyMap()
+        }
+    }
+
     fun resolvePlacementMappings(detail: DivisionDetail): List<String> {
         val explicitMappings = detail.playoffPlacementDivisionIds
         val hasExplicitMapping = explicitMappings.any { divisionId ->

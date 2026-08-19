@@ -188,6 +188,13 @@ internal fun activeInclusivePriceCents(
     0
 }
 
+internal fun Event.resolveDivisionPlayoffTeamCount(divisionPlayoffTeamCount: Int?): Int? = when {
+    !includePlayoffs -> null
+    eventType == EventType.LEAGUE && splitLeaguePlayoffDivisions -> divisionPlayoffTeamCount
+    singleDivision -> playoffTeamCount ?: divisionPlayoffTeamCount
+    else -> divisionPlayoffTeamCount
+}
+
 @Composable
 internal fun EventDetailsValidationReporter(
     editView: Boolean,
@@ -435,6 +442,7 @@ fun EventDetails(
         normalizedDivisionDetails,
         editEvent.singleDivision,
         editEvent.includePlayoffs,
+        editEvent.splitLeaguePlayoffDivisions,
         editEvent.playoffTeamCount,
         editEvent.priceCents,
         editEvent.maxParticipants,
@@ -483,11 +491,7 @@ fun EventDetails(
             detail.copy(
                 price = effectiveDivisionPrice,
                 maxParticipants = effectiveMaxParticipants,
-                playoffTeamCount = when {
-                    !editEvent.includePlayoffs -> null
-                    editEvent.singleDivision -> editEvent.playoffTeamCount ?: detail.playoffTeamCount
-                    else -> detail.playoffTeamCount
-                },
+                playoffTeamCount = editEvent.resolveDivisionPlayoffTeamCount(detail.playoffTeamCount),
                 poolCount = if (tournamentPoolPlayEnabled) detail.poolCount else null,
                 poolTeamCount = if (tournamentPoolPlayEnabled && effectiveMaxParticipants != null) {
                     derivePoolTeamCount(
@@ -1176,7 +1180,7 @@ fun EventDetails(
         if (
             editEvent.eventType == EventType.LEAGUE &&
             editEvent.includePlayoffs &&
-            !editEvent.singleDivision &&
+            (!editEvent.singleDivision || editEvent.splitLeaguePlayoffDivisions) &&
             (divisionPlayoffTeamCount == null || divisionPlayoffTeamCount < 2)
         ) {
             divisionEditor = divisionEditor.copy(
@@ -1216,13 +1220,8 @@ fun EventDetails(
                 return
             }
         }
-        val normalizedPlayoffTeamCount = when {
-            !editEvent.includePlayoffs -> null
-            editEvent.singleDivision -> editEvent.playoffTeamCount ?: divisionPlayoffTeamCount
-            editEvent.eventType == EventType.LEAGUE -> divisionPlayoffTeamCount
-            editEvent.eventType == EventType.TOURNAMENT -> divisionPlayoffTeamCount
-            else -> divisionPlayoffTeamCount
-        }
+        val normalizedPlayoffTeamCount =
+            editEvent.resolveDivisionPlayoffTeamCount(divisionPlayoffTeamCount)
         val normalizedLeagueConfig = normalizeLeagueConfigWithSportMode(divisionEditor.leagueConfig).copy(
             includePlayoffs = editEvent.includePlayoffs,
             playoffTeamCount = normalizedPlayoffTeamCount,
@@ -1463,11 +1462,7 @@ fun EventDetails(
             priceCents = (detail.price ?: editEvent.priceCents).coerceAtLeast(0),
             maxParticipants = detail.maxParticipants
                 ?: editEvent.maxParticipants.takeIf { value -> value >= 2 },
-            playoffTeamCount = if (editEvent.singleDivision) {
-                editEvent.playoffTeamCount ?: detail.playoffTeamCount
-            } else {
-                detail.playoffTeamCount
-            },
+            playoffTeamCount = editEvent.resolveDivisionPlayoffTeamCount(detail.playoffTeamCount),
             poolCount = detail.poolCount,
             allowPaymentPlans = detail.allowPaymentPlans == true,
             installmentCount = maxOf(

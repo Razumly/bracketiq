@@ -283,6 +283,8 @@ data class EventApiDto(
                 maxParticipants = detail.maxParticipants?.coerceAtLeast(2),
                 playoffTeamCount = when {
                     !resolvedIncludePlayoffsOrPools -> null
+                    resolvedEventType == EventType.LEAGUE && splitLeaguePlayoffDivisions == true ->
+                        detail.playoffTeamCount
                     singleDivision != false -> resolvedEventPlayoffTeamCount
                     else -> detail.playoffTeamCount
                 },

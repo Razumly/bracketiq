@@ -87,10 +87,11 @@ private fun List<BracketDivisionOption>.selectedDivisionIdOrRaw(divisionId: Stri
 internal fun buildSelectedDivisionPillState(
     selectedDivisionId: String?,
     options: List<BracketDivisionOption>,
-    divisionDetails: List<DivisionDetail>,
     singleDivision: Boolean,
+    allowPhaseSelection: Boolean,
+    divisionDetails: List<DivisionDetail>,
 ): SelectedDivisionPillState? {
-    if (singleDivision || options.size <= 1) return null
+    if ((singleDivision && !allowPhaseSelection) || options.size <= 1) return null
     val resolvedDivisionId = options.selectedDivisionIdOrRaw(selectedDivisionId)
     val label = options.selectedDivisionLabel(resolvedDivisionId, divisionDetails)
         ?: return null
