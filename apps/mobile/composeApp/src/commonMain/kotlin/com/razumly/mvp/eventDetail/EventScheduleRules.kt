@@ -2,12 +2,22 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.RepeatingTimeSlotValidationException
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
-import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
+import com.razumly.mvp.core.data.dataTypes.enumerateRepeatingTimeSlotOccurrences
+import com.razumly.mvp.core.data.dataTypes.validateRepeatingTimeSlotOccurrences
+
+import com.razumly.mvp.core.data.dataTypes.resolveOneTimeInterval
+
+import kotlin.time.Duration.Companion.days
+import kotlin.time.Instant
+
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
+
 internal fun isScheduleEditingLocked(
     event: Event,
     timeSlots: List<TimeSlot>,
@@ -103,6 +113,61 @@ internal fun requiresFixedEndRangeValidation(
             )
 }
 
+private data class ConflictInterval(
+    val start: Instant,
+    val end: Instant,
+)
+
+private fun TimeSlot.resolveConflictWindow(): ConflictInterval? {
+    if (!repeating) {
+        return runCatching {
+            resolveOneTimeInterval().let { resolved ->
+                ConflictInterval(resolved.start, resolved.end)
+            }
+        }.getOrNull()
+    }
+    val resolvedEnd = endDate ?: (startDate + 370.days)
+    return ConflictInterval(startDate, resolvedEnd).takeIf { window ->
+        window.end > window.start
+    }
+}
+
+private fun timeSlotsOverlap(first: TimeSlot, second: TimeSlot): Boolean {
+    val firstWindow = first.resolveConflictWindow() ?: return false
+    val secondWindow = second.resolveConflictWindow() ?: return false
+    val overlapStart = if (firstWindow.start > secondWindow.start) firstWindow.start else secondWindow.start
+    val overlapEnd = if (firstWindow.end < secondWindow.end) firstWindow.end else secondWindow.end
+    if (overlapEnd <= overlapStart) {
+        return false
+    }
+
+    val firstIntervals = try {
+        if (first.repeating) {
+            first.enumerateRepeatingTimeSlotOccurrences(overlapStart, overlapEnd)
+                .map { occurrence -> ConflictInterval(occurrence.start, occurrence.end) }
+        } else {
+            listOf(firstWindow)
+        }
+    } catch (_: RepeatingTimeSlotValidationException) {
+        return false
+    }
+    val secondIntervals = try {
+        if (second.repeating) {
+            second.enumerateRepeatingTimeSlotOccurrences(overlapStart, overlapEnd)
+                .map { occurrence -> ConflictInterval(occurrence.start, occurrence.end) }
+        } else {
+            listOf(secondWindow)
+        }
+    } catch (_: RepeatingTimeSlotValidationException) {
+        return false
+    }
+    return firstIntervals.any { firstInterval ->
+        secondIntervals.any { secondInterval ->
+            firstInterval.start < secondInterval.end && secondInterval.start < firstInterval.end
+        }
+    }
+}
+
 internal fun computeLeagueSlotErrors(
     slots: List<TimeSlot>,
     singleDivision: Boolean,
@@ -118,8 +183,8 @@ internal fun computeLeagueSlotErrors(
     slots.forEachIndexed { index, slot ->
         val fieldIds = slot.normalizedScheduledFieldIds()
         val fieldIdSet = fieldIds.toSet()
+
         val days = slot.normalizedDaysOfWeek()
-        val daySet = days.toSet()
         val slotDivisionIds = slot.normalizedDivisionIds().normalizeDivisionIdentifiers()
         val slotDivisionSet = slotDivisionIds.toSet()
         val start = slot.startTimeMinutes
@@ -156,17 +221,11 @@ internal fun computeLeagueSlotErrors(
                     return@forEachIndexed
                 }
             }
-            val nonRepeatingEnd = slotEnd ?: return@forEachIndexed
-
             val hasOverlap = slots.withIndex().any { (otherIndex, other) ->
-                if (otherIndex == index || other.repeating) return@any false
+                if (otherIndex == index) return@any false
                 val otherFieldSet = other.normalizedScheduledFieldIds().toSet()
                 if (otherFieldSet.isEmpty() || otherFieldSet.intersect(fieldIdSet).isEmpty()) return@any false
-
-                val otherStart = other.startDate
-                val otherEnd = other.endDate ?: return@any false
-                if (otherEnd <= otherStart) return@any false
-                slotStart < otherEnd && otherStart < nonRepeatingEnd
+                timeSlotsOverlap(slot, other)
             }
 
             if (hasOverlap) {
@@ -180,11 +239,19 @@ internal fun computeLeagueSlotErrors(
             days.isEmpty() -> "Select at least one day."
             start == null -> "Select a start time."
             end == null -> "Select an end time."
-            end <= start -> "Timeslot must end after it starts."
+            start !in 0 until (24 * 60) -> "Select a valid start time."
+            end !in 0..(24 * 60) -> "Select a valid end time."
             else -> null
         }
         if (requiredMissing != null) {
             errors[index] = requiredMissing
+            return@forEachIndexed
+        }
+
+        try {
+            slot.validateRepeatingTimeSlotOccurrences()
+        } catch (error: RepeatingTimeSlotValidationException) {
+            errors[index] = error.message ?: "Repeating timeslot cannot be resolved."
             return@forEachIndexed
         }
 
@@ -208,17 +275,9 @@ internal fun computeLeagueSlotErrors(
 
         val hasOverlap = slots.withIndex().any { (otherIndex, other) ->
             if (otherIndex == index) return@any false
-            if (!other.repeating) return@any false
             val otherFieldSet = other.normalizedScheduledFieldIds().toSet()
             if (otherFieldSet.isEmpty() || otherFieldSet.intersect(fieldIdSet).isEmpty()) return@any false
-            val otherDays = other.normalizedDaysOfWeek()
-            if (otherDays.isEmpty() || otherDays.none(daySet::contains)) return@any false
-
-            val otherStart = other.startTimeMinutes
-            val otherEnd = other.endTimeMinutes
-            if (otherStart == null || otherEnd == null || otherEnd <= otherStart) return@any false
-            val currentEnd = end ?: return@any false
-            slotsOverlap(start!!, currentEnd, otherStart, otherEnd)
+            timeSlotsOverlap(slot, other)
         }
 
         if (hasOverlap) {
@@ -251,8 +310,4 @@ internal fun resolveEffectiveLeagueSlotDivisionIds(
         .normalizeDivisionIdentifiers()
         .filter(selectedDivisionSet::contains)
         .ifEmpty { normalizedSelectedDivisions }
-}
-
-private fun slotsOverlap(startA: Int, endA: Int, startB: Int, endB: Int): Boolean {
-    return maxOf(startA, startB) < minOf(endA, endB)
 }

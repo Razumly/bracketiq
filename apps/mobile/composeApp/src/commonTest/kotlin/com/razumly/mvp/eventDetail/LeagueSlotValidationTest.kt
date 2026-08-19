@@ -186,6 +186,46 @@ class LeagueSlotValidationTest {
         assertEquals(listOf("division_a", "division_b"), divisions)
     }
 
+    @Test
+    fun repeating_overnight_slots_overlap_across_adjacent_weekdays() {
+        val first = buildSlot(
+            id = "slot-overnight",
+            repeating = true,
+            dayOfWeek = 0,
+            daysOfWeek = listOf(0),
+            startTimeMinutes = 23 * 60,
+            endTimeMinutes = 60,
+            startDate = Instant.parse("2026-08-17T00:00:00Z"),
+            endDate = Instant.parse("2026-08-25T00:00:00Z"),
+        )
+        val second = buildSlot(
+            id = "slot-next-day",
+            repeating = true,
+            dayOfWeek = 1,
+            daysOfWeek = listOf(1),
+            startTimeMinutes = 30,
+            endTimeMinutes = 120,
+            startDate = Instant.parse("2026-08-17T00:00:00Z"),
+            endDate = Instant.parse("2026-08-25T00:00:00Z"),
+        )
+
+        val errors = computeLeagueSlotErrors(
+            slots = listOf(first, second),
+            singleDivision = false,
+            selectedDivisionIds = emptyList(),
+        )
+
+        assertEquals(
+            "Overlaps with another timeslot for one or more selected resources.",
+            errors[0],
+        )
+        assertEquals(
+            "Overlaps with another timeslot for one or more selected resources.",
+            errors[1],
+        )
+    }
+
+
     private fun buildSlot(
         id: String,
         repeating: Boolean,

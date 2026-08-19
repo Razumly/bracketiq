@@ -1,6 +1,10 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.RepeatingTimeSlotValidationException
+import com.razumly.mvp.core.data.dataTypes.resolveRepeatingOccurrence
+
+
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
@@ -9,13 +13,11 @@ import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.util.resolvedTimeZone
 import kotlin.time.Clock
-import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Instant
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
-import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.minus
 import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
@@ -50,9 +52,7 @@ internal fun buildWeeklySessionOptions(
     timeSlots.forEach { slot ->
         val slotTimeZone = slot.resolvedTimeZone(timeZone)
         val normalizedDays = slot.normalizedDaysOfWeek()
-        val startMinutes = slot.startTimeMinutes
-        val endMinutes = slot.endTimeMinutes
-        if (normalizedDays.isEmpty() || startMinutes == null || endMinutes == null || endMinutes <= startMinutes) {
+        if (normalizedDays.isEmpty()) {
             return@forEach
         }
 
@@ -91,12 +91,13 @@ internal fun buildWeeklySessionOptions(
                     return@forEach
                 }
 
-                val baseInstant = occurrenceDate.atStartOfDayIn(slotTimeZone)
-                val sessionStart = baseInstant + startMinutes.minutes
-                val sessionEnd = baseInstant + endMinutes.minutes
-                if (sessionEnd <= sessionStart) {
+                val resolved = try {
+                    slot.resolveRepeatingOccurrence(occurrenceDate)
+                } catch (_: RepeatingTimeSlotValidationException) {
                     return@forEach
                 }
+                val sessionStart = resolved.start
+                val sessionEnd = resolved.end
                 val slotId = slot.id.trim().takeIf(String::isNotBlank)
                 sessions += WeeklySessionOption(
                     id = "${slotId ?: "slot"}-${occurrenceDate}",
@@ -136,9 +137,7 @@ internal fun buildWeeklyScheduleOptions(
     timeSlots.forEach { slot ->
         val slotTimeZone = slot.resolvedTimeZone(timeZone)
         val normalizedDays = slot.normalizedDaysOfWeek()
-        val startMinutes = slot.startTimeMinutes
-        val endMinutes = slot.endTimeMinutes
-        if (normalizedDays.isEmpty() || startMinutes == null || endMinutes == null || endMinutes <= startMinutes) {
+        if (normalizedDays.isEmpty()) {
             return@forEach
         }
 
@@ -180,12 +179,13 @@ internal fun buildWeeklyScheduleOptions(
                     return@forEach
                 }
 
-                val baseInstant = occurrenceDate.atStartOfDayIn(slotTimeZone)
-                val sessionStart = baseInstant + startMinutes.minutes
-                val sessionEnd = baseInstant + endMinutes.minutes
-                if (sessionEnd <= sessionStart) {
+                val resolved = try {
+                    slot.resolveRepeatingOccurrence(occurrenceDate)
+                } catch (_: RepeatingTimeSlotValidationException) {
                     return@forEach
                 }
+                val sessionStart = resolved.start
+                val sessionEnd = resolved.end
                 val slotId = slot.id.trim().takeIf(String::isNotBlank)
                 sessions += WeeklySessionOption(
                     id = "${slotId ?: "slot"}-${occurrenceDate}",

@@ -4,6 +4,10 @@ import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { normalizeRentalTaxHandling } from '@/lib/taxPolicy';
 import {
+  assertRepeatingTimeSlotsResolvable,
+  RepeatingTimeSlotValidationError,
+} from '@/lib/repeatingTimeSlotAvailability';
+import {
   resolveOneTimeTimeSlot,
   TimeSlotValidationError,
 } from '@/lib/timeSlotAvailability';
@@ -186,7 +190,7 @@ const normalizeRepeatingEndDate = (
   if (!(endDate instanceof Date) || Number.isNaN(endDate.getTime())) {
     return null;
   }
-  return toDateOnlyValue(endDate, timeZone) > toDateOnlyValue(startDate, timeZone) ? endDate : null;
+  return toDateOnlyValue(endDate, timeZone) >= toDateOnlyValue(startDate, timeZone) ? endDate : null;
 };
 
 const resolveSlotTimeZone = async (
@@ -433,6 +437,41 @@ export async function POST(req: NextRequest) {
       if (error instanceof TimeSlotValidationError) {
         return NextResponse.json(
           { error: error.message, code: 'INVALID_TIME_SLOT', slotIds: error.slotIds },
+          { status: 400 },
+        );
+      }
+      throw error;
+    }
+  }
+  if (repeating) {
+    try {
+      assertRepeatingTimeSlotsResolvable({
+        slots: [{
+          ...data,
+          id: data.id,
+          dayOfWeek: normalizedDays[0] ?? data.dayOfWeek,
+          daysOfWeek: normalizedDays,
+          startDate,
+          endDate,
+          startTimeMinutes,
+          endTimeMinutes,
+          timeZone: slotTimeZone,
+          scheduledFieldId,
+          scheduledFieldIds,
+          repeating: true,
+        }],
+        eventStart: startDate,
+        eventEnd: null,
+      });
+    } catch (error) {
+      if (error instanceof RepeatingTimeSlotValidationError) {
+        return NextResponse.json(
+          {
+            error: error.message,
+            code: 'INVALID_TIME_SLOT',
+            slotIds: [error.slotId],
+            occurrenceDate: error.occurrenceDate,
+          },
           { status: 400 },
         );
       }

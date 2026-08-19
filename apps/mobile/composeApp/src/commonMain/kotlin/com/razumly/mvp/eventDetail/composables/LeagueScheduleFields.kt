@@ -45,6 +45,7 @@ import com.razumly.mvp.core.data.dataTypes.GENERIC_SPORT_RESOURCE_LABELS
 import com.razumly.mvp.core.data.dataTypes.SportResourceLabels
 import com.razumly.mvp.core.data.dataTypes.inDiagnostic
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.hasOvernightWindow
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
@@ -881,6 +882,7 @@ private fun TimeslotCard(
                 val normalizedLockedDivisionIds = lockedDivisionIds.normalizeDivisionIdentifiers()
                 val selectedDivisionIds = slot.normalizedDivisionIds().normalizeDivisionIdentifiers()
                 val repeating = slot.repeating
+                val overnightWindow = slot.hasOvernightWindow()
                 val slotTimeZone = slot.timeZone.toTimeZoneOrUtc(eventTimeZone)
                 val slotIsRentalBacked = slot.isRentalBacked()
                 val slotTimingReadOnly = readOnly || slotIsRentalBacked
@@ -1076,16 +1078,15 @@ private fun TimeslotCard(
                                 onUpdateSlot(index, slot.copy(endTimeMinutes = minutes))
                             },
                             modifier = Modifier.weight(1f),
-                            isError = run {
-                                val startTimeMinutes = slot.startTimeMinutes
-                                val endTimeMinutes = slot.endTimeMinutes
-                                endTimeMinutes == null ||
-                                    (
-                                        startTimeMinutes != null &&
-                                            endTimeMinutes <= startTimeMinutes
-                                        )
-                            },
+                            isError = slot.endTimeMinutes == null,
                             enabled = !slotTimingReadOnly,
+                        )
+                    }
+                    if (overnightWindow) {
+                        Text(
+                            text = "Overnight slot ends on the next local day.",
+                            color = MaterialTheme.colorScheme.tertiary,
+                            style = MaterialTheme.typography.bodySmall,
                         )
                     }
                 } else {

@@ -5,6 +5,7 @@ import type { UseFormClearErrors, UseFormGetValues } from 'react-hook-form';
 import type { LeagueSlotForm } from '@/app/discover/components/LeagueFields';
 import { eventService } from '@/lib/eventService';
 import { MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
+import { parseDateTimeInTimeZone } from '@/lib/dateUtils';
 import type { SportResourceLabels } from '@/lib/sportResourceLabels';
 import type { Event, Field, LeagueConfig, TimeSlot, TournamentConfig } from '@/types';
 
@@ -145,6 +146,10 @@ export const useEventSlotController = ({
         slotDivisionKeysRef.current = slotDivisionKeys;
     }, [slotDivisionKeys]);
 
+    const slotValidationContext = useMemo(() => ({
+        eventStart: parseDateTimeInTimeZone(eventStart, eventTimeZone),
+        eventEnd: parseDateTimeInTimeZone(eventEnd, eventTimeZone),
+    }), [eventEnd, eventStart, eventTimeZone]);
     const setLeagueSlots = useCallback((
         updater: SetStateAction<LeagueSlotForm[]>,
         options: { shouldDirty?: boolean; shouldValidate?: boolean } = {},
@@ -170,10 +175,10 @@ export const useEventSlotController = ({
             return;
         }
         setLeagueSlots(
-            (previous) => normalizeSlotState(updater(previous), eventType),
+            (previous) => normalizeSlotState(updater(previous), eventType, parentEvent, slotValidationContext),
             options,
         );
-    }, [eventType, hasImmutableTimeSlots, setLeagueSlots]);
+    }, [eventType, hasImmutableTimeSlots, parentEvent, setLeagueSlots, slotValidationContext]);
 
     const slotConflictEventId = activeEditingEvent?.$id ?? eventId ?? '';
     const slotConflictCheckKey = useMemo(() => buildSlotConflictCheckKey({
@@ -463,7 +468,7 @@ export const useEventSlotController = ({
 
         if (allowUpdateOnLockedSlots) {
             setLeagueSlots(
-                (previous) => normalizeSlotState(replaceSlot(previous), eventType),
+                (previous) => normalizeSlotState(replaceSlot(previous), eventType, parentEvent, slotValidationContext),
             );
         } else {
             updateLeagueSlots(replaceSlot);
@@ -480,7 +485,7 @@ export const useEventSlotController = ({
         setLeagueSlots,
         singleDivision,
         slotDivisionKeys,
-        slotDivisionLookup,
+        slotValidationContext,
         updateLeagueSlots,
     ]);
 
@@ -534,7 +539,12 @@ export const useEventSlotController = ({
             const initialSlots = slots.length > 0
                 ? slots
                 : [createLeagueSlotForm(undefined, slotDivisionKeysRef.current)];
-            setLeagueSlots(normalizeSlotState(initialSlots, activeEditingEvent.eventType), { shouldDirty: false });
+            setLeagueSlots(normalizeSlotState(
+                initialSlots,
+                activeEditingEvent.eventType,
+                activeEditingEvent.parentEvent,
+                slotValidationContext,
+            ), { shouldDirty: false });
         } else if (!activeEditingEvent) {
             setLeagueData({
                 gamesPerOpponent: 1,
@@ -547,12 +557,25 @@ export const useEventSlotController = ({
                 setsPerMatch: undefined,
             }, { shouldDirty: false });
             setLeagueSlots(
-                normalizeSlotState([createLeagueSlotForm(undefined, slotDivisionKeysRef.current)], 'EVENT'),
+                normalizeSlotState(
+                    [createLeagueSlotForm(undefined, slotDivisionKeysRef.current)],
+                    'EVENT',
+                    undefined,
+                    slotValidationContext,
+                ),
                 { shouldDirty: false },
             );
             setPlayoffData(buildTournamentConfig(), { shouldDirty: false });
         }
-    }, [activeEditingEvent, hasImmutableTimeSlots, isEditMode, setLeagueData, setLeagueSlots, setPlayoffData]);
+    }, [
+        activeEditingEvent,
+        hasImmutableTimeSlots,
+        isEditMode,
+        setLeagueData,
+        setLeagueSlots,
+        setPlayoffData,
+        slotValidationContext,
+    ]);
 
     useEffect(() => {
         if (!hasImmutableTimeSlots) {
@@ -566,12 +589,22 @@ export const useEventSlotController = ({
                 eventStart,
                 eventEnd,
             ));
-        const normalizedSlots = normalizeSlotState(slotForms, eventType);
+        const normalizedSlots = normalizeSlotState(slotForms, eventType, parentEvent, slotValidationContext);
         setLeagueSlots(
             (previous) => (leagueSlotsEqual(previous, normalizedSlots) ? previous : normalizedSlots),
             { shouldDirty: false },
         );
-    }, [eventEnd, eventStart, eventType, hasImmutableTimeSlots, immutableFields, immutableTimeSlots, setLeagueSlots]);
+    }, [
+        eventEnd,
+        eventStart,
+        eventType,
+        hasImmutableTimeSlots,
+        immutableFields,
+        immutableTimeSlots,
+        parentEvent,
+        setLeagueSlots,
+        slotValidationContext,
+    ]);
 
     useEffect(() => {
         if (!simpleScheduleStyle || !eventSupportsScheduleSlots || hasImmutableTimeSlots) {
@@ -591,7 +624,7 @@ export const useEventSlotController = ({
             timeZone: eventTimeZone,
             fieldIds: synchronizedFieldIds,
             divisionKeys: slotDivisionKeys,
-        }), eventType, parentEvent);
+        }), eventType, parentEvent, slotValidationContext);
         const styleChanged = previousStyle !== null && previousStyle !== simpleScheduleStyle;
         setLeagueSlots(nextSlots, {
             shouldDirty: styleChanged,
@@ -608,6 +641,7 @@ export const useEventSlotController = ({
         hasImmutableTimeSlots,
         parentEvent,
         setLeagueSlots,
+        slotValidationContext,
         simpleScheduleStyle,
         slotDivisionKeys,
     ]);

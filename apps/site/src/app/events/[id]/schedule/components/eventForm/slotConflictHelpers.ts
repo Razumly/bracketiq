@@ -1,12 +1,13 @@
 import type { Event, TimeSlot } from '@/types';
 import type { LeagueSlotForm } from '@/app/discover/components/LeagueFields';
 import { formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
+import { enumerateRepeatingTimeSlotOccurrences } from '@/lib/repeatingTimeSlotAvailability';
 
 import { formatEventDateTimeForForm } from './dateHelpers';
 import { normalizeDivisionKeys } from './divisionForm';
 import { hasParentEventRef } from './eventRules';
 import { normalizeSlotFieldIds, normalizeWeekdays } from './slotForm';
-import { slotDateTimeRangesOverlap, slotsOverlap } from './slotValidation';
+import { slotDateTimeRangesOverlap } from './slotValidation';
 
 type EventType = Event['eventType'];
 
@@ -15,7 +16,6 @@ export const CONFLICT_LOOKUP_END = '2100-01-01T00:00:00.000Z';
 
 const AUTO_RESOLVE_STEP_MINUTES = 15;
 const AUTO_RESOLVE_MAX_STEPS = 96;
-const MAX_REPEATING_CONFLICT_SCAN_DAYS = 730;
 
 export type SlotConflictSnapshot = {
     key: string;
@@ -27,6 +27,7 @@ export type SlotConflictSnapshot = {
     divisions: string[];
     startDate?: string;
     endDate?: string;
+    timeZone?: string;
     startTimeMinutes?: number;
     endTimeMinutes?: number;
     repeating: boolean;
@@ -60,6 +61,7 @@ type ComparableConflictSlot = {
     repeating?: boolean;
     startDate?: string | null;
     endDate?: string | null;
+    timeZone?: string | null;
     dayOfWeek?: number;
     daysOfWeek?: number[];
     startTimeMinutes?: number;
@@ -70,13 +72,6 @@ type ComparableConflictSlot = {
 
 const addMinutesToDate = (date: Date, minutes: number): Date => new Date(date.getTime() + minutes * 60 * 1000);
 
-const atStartOfDay = (date: Date): Date =>
-    new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
-
-const withMinutesOnDay = (day: Date, minutes: number): Date =>
-    new Date(day.getFullYear(), day.getMonth(), day.getDate(), Math.floor(minutes / 60), minutes % 60, 0, 0);
-
-const mondayFirstDay = (date: Date): number => (date.getDay() + 6) % 7;
 
 const parseEventRange = (event: Event): { start: Date; end: Date } | null => {
     const start = parseLocalDateTime(event.start ?? null);
@@ -107,49 +102,30 @@ const resolveSlotWindowRange = (
 };
 
 const repeatingSlotOverlapsEvent = (
-    slot: Pick<ComparableConflictSlot, 'dayOfWeek' | 'daysOfWeek' | 'startTimeMinutes' | 'endTimeMinutes' | 'startDate' | 'endDate'>,
+    slot: Pick<ComparableConflictSlot, 'dayOfWeek' | 'daysOfWeek' | 'startTimeMinutes' | 'endTimeMinutes' | 'startDate' | 'endDate' | 'timeZone'>,
     eventRange: { start: Date; end: Date },
-    eventStart?: string,
-    eventEnd?: string,
+    _eventStart?: string,
+    _eventEnd?: string,
 ): boolean => {
     const slotDays = normalizeWeekdays(slot);
     if (
-        !slotDays.length ||
-        typeof slot.startTimeMinutes !== 'number' ||
-        typeof slot.endTimeMinutes !== 'number' ||
-        slot.endTimeMinutes <= slot.startTimeMinutes
+        !slotDays.length
+        || typeof slot.startTimeMinutes !== 'number'
+        || typeof slot.endTimeMinutes !== 'number'
     ) {
         return false;
     }
-
-    const slotWindow = resolveSlotWindowRange(slot, eventStart, eventEnd);
-    if (!slotWindow || !slotDateTimeRangesOverlap(slotWindow.start, slotWindow.end, eventRange.start, eventRange.end)) {
+    try {
+        return enumerateRepeatingTimeSlotOccurrences({
+            slot,
+            windowStart: eventRange.start,
+            windowEnd: eventRange.end,
+        }).some((occurrence) => (
+            slotDateTimeRangesOverlap(occurrence.start, occurrence.end, eventRange.start, eventRange.end)
+        ));
+    } catch {
         return false;
     }
-
-    const overlapStart = new Date(Math.max(slotWindow.start.getTime(), eventRange.start.getTime()));
-    const overlapEnd = new Date(Math.min(slotWindow.end.getTime(), eventRange.end.getTime()));
-    if (overlapEnd.getTime() <= overlapStart.getTime()) {
-        return false;
-    }
-
-    let cursor = atStartOfDay(overlapStart);
-    const lastDay = atStartOfDay(overlapEnd);
-    let scannedDays = 0;
-
-    while (cursor.getTime() <= lastDay.getTime() && scannedDays <= MAX_REPEATING_CONFLICT_SCAN_DAYS) {
-        if (slotDays.includes(mondayFirstDay(cursor))) {
-            const slotStart = withMinutesOnDay(cursor, slot.startTimeMinutes);
-            const slotEnd = withMinutesOnDay(cursor, slot.endTimeMinutes);
-            if (slotDateTimeRangesOverlap(slotStart, slotEnd, eventRange.start, eventRange.end)) {
-                return true;
-            }
-        }
-        cursor = addMinutesToDate(cursor, 24 * 60);
-        scannedDays += 1;
-    }
-
-    return false;
 };
 
 const parseExplicitSlotRange = (
@@ -176,6 +152,7 @@ export const buildSlotConflictSnapshot = (slot: LeagueSlotForm): SlotConflictSna
         divisions: normalizeDivisionKeys(slot.divisions),
         startDate: formatLocalDateTime(slot.startDate ?? null) || undefined,
         endDate: formatLocalDateTime(slot.endDate ?? null) || undefined,
+        timeZone: slot.timeZone,
         startTimeMinutes: typeof slot.startTimeMinutes === 'number' ? slot.startTimeMinutes : undefined,
         endTimeMinutes: typeof slot.endTimeMinutes === 'number' ? slot.endTimeMinutes : undefined,
         repeating: slot.repeating !== false,
@@ -229,69 +206,53 @@ export const normalizeSlotBoundaryOverrideForForm = (
 };
 
 const repeatingSlotsOverlap = (
-    slotA: Pick<ComparableConflictSlot, 'dayOfWeek' | 'daysOfWeek' | 'startTimeMinutes' | 'endTimeMinutes' | 'startDate' | 'endDate'>,
+    slotA: Pick<ComparableConflictSlot, 'dayOfWeek' | 'daysOfWeek' | 'startTimeMinutes' | 'endTimeMinutes' | 'startDate' | 'endDate' | 'timeZone'>,
     contextA: { eventStart?: string; eventEnd?: string },
-    slotB: Pick<ComparableConflictSlot, 'dayOfWeek' | 'daysOfWeek' | 'startTimeMinutes' | 'endTimeMinutes' | 'startDate' | 'endDate'>,
+    slotB: Pick<ComparableConflictSlot, 'dayOfWeek' | 'daysOfWeek' | 'startTimeMinutes' | 'endTimeMinutes' | 'startDate' | 'endDate' | 'timeZone'>,
     contextB: { eventStart?: string; eventEnd?: string },
 ): boolean => {
     const slotADays = normalizeWeekdays(slotA);
     const slotBDays = normalizeWeekdays(slotB);
-    if (!slotADays.length || !slotBDays.length) {
-        return false;
-    }
-
     if (
-        typeof slotA.startTimeMinutes !== 'number'
+        !slotADays.length
+        || !slotBDays.length
+        || typeof slotA.startTimeMinutes !== 'number'
         || typeof slotA.endTimeMinutes !== 'number'
         || typeof slotB.startTimeMinutes !== 'number'
         || typeof slotB.endTimeMinutes !== 'number'
-        || slotA.endTimeMinutes <= slotA.startTimeMinutes
-        || slotB.endTimeMinutes <= slotB.startTimeMinutes
     ) {
-        return false;
-    }
-
-    if (!slotsOverlap(slotA.startTimeMinutes, slotA.endTimeMinutes, slotB.startTimeMinutes, slotB.endTimeMinutes)) {
         return false;
     }
 
     const slotAWindow = resolveSlotWindowRange(slotA, contextA.eventStart, contextA.eventEnd);
     const slotBWindow = resolveSlotWindowRange(slotB, contextB.eventStart, contextB.eventEnd);
-    if (!slotAWindow || !slotBWindow || !slotDateTimeRangesOverlap(slotAWindow.start, slotAWindow.end, slotBWindow.start, slotBWindow.end)) {
+    if (
+        !slotAWindow
+        || !slotBWindow
+        || !slotDateTimeRangesOverlap(slotAWindow.start, slotAWindow.end, slotBWindow.start, slotBWindow.end)
+    ) {
         return false;
     }
 
     const overlapStart = new Date(Math.max(slotAWindow.start.getTime(), slotBWindow.start.getTime()));
     const overlapEnd = new Date(Math.min(slotAWindow.end.getTime(), slotBWindow.end.getTime()));
-    if (overlapEnd.getTime() <= overlapStart.getTime()) {
+    try {
+        const firstOccurrences = enumerateRepeatingTimeSlotOccurrences({
+            slot: slotA,
+            windowStart: overlapStart,
+            windowEnd: overlapEnd,
+        });
+        const secondOccurrences = enumerateRepeatingTimeSlotOccurrences({
+            slot: slotB,
+            windowStart: overlapStart,
+            windowEnd: overlapEnd,
+        });
+        return firstOccurrences.some((first) => secondOccurrences.some((second) => (
+            slotDateTimeRangesOverlap(first.start, first.end, second.start, second.end)
+        )));
+    } catch {
         return false;
     }
-
-    let cursor = atStartOfDay(overlapStart);
-    const lastDay = atStartOfDay(overlapEnd);
-    let scannedDays = 0;
-
-    while (cursor.getTime() <= lastDay.getTime() && scannedDays <= MAX_REPEATING_CONFLICT_SCAN_DAYS) {
-        const weekday = mondayFirstDay(cursor);
-        if (slotADays.includes(weekday) && slotBDays.includes(weekday)) {
-            const slotAStart = withMinutesOnDay(cursor, slotA.startTimeMinutes);
-            const slotAEnd = withMinutesOnDay(cursor, slotA.endTimeMinutes);
-            const slotBStart = withMinutesOnDay(cursor, slotB.startTimeMinutes);
-            const slotBEnd = withMinutesOnDay(cursor, slotB.endTimeMinutes);
-            if (
-                slotDateTimeRangesOverlap(slotAStart, slotAEnd, slotBStart, slotBEnd)
-                && slotDateTimeRangesOverlap(slotAStart, slotAEnd, overlapStart, overlapEnd)
-                && slotDateTimeRangesOverlap(slotBStart, slotBEnd, overlapStart, overlapEnd)
-            ) {
-                return true;
-            }
-        }
-
-        cursor = addMinutesToDate(cursor, 24 * 60);
-        scannedDays += 1;
-    }
-
-    return false;
 };
 
 const slotOverlapsExistingSlot = (
@@ -422,6 +383,7 @@ export const snapshotToSlotForm = (slot: SlotConflictSnapshot): LeagueSlotForm =
     divisions: slot.divisions,
     startDate: slot.startDate,
     endDate: slot.endDate,
+    timeZone: slot.timeZone,
     startTimeMinutes: slot.startTimeMinutes,
     endTimeMinutes: slot.endTimeMinutes,
     repeating: slot.repeating,

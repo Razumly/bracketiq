@@ -954,7 +954,7 @@ describe('publicOrganizationCatalog', () => {
       expect(page.events).toEqual([
         expect.objectContaining({
           id: 'weekly_parent:slot_weekly:2026-05-06',
-          start: new Date(2026, 4, 6, 17, 0, 0, 0).toISOString(),
+          start: '2026-05-06T17:00:00.000Z',
           detailsUrl: '/o/scsoccer/events/weekly_parent?slotId=slot_weekly&occurrenceDate=2026-05-06',
         }),
       ]);

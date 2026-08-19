@@ -13,6 +13,13 @@ import {
   normalizeRentalTaxHandling,
 } from "@/lib/taxPolicy";
 import { assertValidOneTimeTimeSlots } from "@/lib/timeSlotAvailability";
+import { assertRepeatingTimeSlotsResolvable } from "@/lib/repeatingTimeSlotAvailability";
+import {
+  RepeatingTimeSlotValidationError,
+  type ResolvedRepeatingTimeSlot,
+  enumerateRepeatingTimeSlotOccurrences,
+} from "@/lib/repeatingTimeSlotAvailability";
+
 import {
   normalizeManualPaymentInstructions,
   normalizeManualPaymentLinks,
@@ -3063,59 +3070,44 @@ const appendBlockingEventsFromSlot = (params: {
     return;
   }
 
-  if (typeof endMinutes !== "number" || endMinutes <= startMinutes) {
-    return;
-  }
-  const days = normalizeBlockingSlotDays(params.slot);
-  if (!days.length) {
-    return;
-  }
-  const slotEndBoundary = explicitEnd ?? params.windowEnd;
   const effectiveStart = new Date(
     Math.max(slotStart.getTime(), params.windowStart.getTime()),
   );
-  const effectiveEnd = new Date(
-    Math.min(slotEndBoundary.getTime(), params.windowEnd.getTime()),
-  );
+  const effectiveEnd = new Date(params.windowEnd.getTime());
   if (effectiveEnd.getTime() <= effectiveStart.getTime()) {
     return;
   }
-  const cursor = localNoonForDateInTimeZone(effectiveStart, slotTimeZone);
-  const lastDay = localNoonForDateInTimeZone(effectiveEnd, slotTimeZone);
 
-  while (cursor.getTime() <= lastDay.getTime()) {
-    if (days.includes(mondayIndexFromUtcNoon(cursor))) {
-      const occurrenceStart = instantFromUtcNoonAndMinutes(
-        cursor,
-        startMinutes,
-        slotTimeZone,
-      );
-      const occurrenceEnd = instantFromUtcNoonAndMinutes(
-        cursor,
-        endMinutes,
-        slotTimeZone,
-      );
-      if (
-        occurrenceStart &&
-        occurrenceEnd &&
-        rangesOverlap(
-          occurrenceStart,
-          occurrenceEnd,
-          effectiveStart,
-          effectiveEnd,
-        )
-      ) {
-        appendBlockingEvent({
-          field: params.field,
-          id: `${params.blockPrefix}${params.fieldId}__${occurrenceStart.getTime()}`,
-          start: occurrenceStart,
-          end: occurrenceEnd,
-          parentId: params.parentId,
-        });
-      }
+  let occurrences: ResolvedRepeatingTimeSlot[];
+  try {
+    occurrences = enumerateRepeatingTimeSlotOccurrences({
+      slot: params.slot,
+      windowStart: effectiveStart,
+      windowEnd: effectiveEnd,
+    });
+  } catch (error) {
+    if (error instanceof RepeatingTimeSlotValidationError) {
+      return;
     }
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    throw error;
   }
+  occurrences.forEach((occurrence) => {
+    if (!rangesOverlap(
+      occurrence.start,
+      occurrence.end,
+      effectiveStart,
+      effectiveEnd,
+    )) {
+      return;
+    }
+    appendBlockingEvent({
+      field: params.field,
+      id: `${params.blockPrefix}${params.fieldId}__${occurrence.start.getTime()}`,
+      start: occurrence.start,
+      end: occurrence.end,
+      parentId: params.parentId,
+    });
+  });
 };
 
 type FieldSchedulingConflictDetail = FieldSchedulingConflict & {
@@ -7142,6 +7134,11 @@ export const upsertEventFromPayload = async (
       eventEnd: noFixedEndDateTime ? null : normalizedEnd,
       eligibleResourceIds: fieldIds,
       eligibleDivisionIds: normalizedEventDivisionIds,
+    });
+    assertRepeatingTimeSlotsResolvable({
+      slots: canonicalTimeSlots,
+      eventStart: start,
+      eventEnd: noFixedEndDateTime ? null : normalizedEnd,
     });
     await reserveRentalBookingSlotsForEvent(client, id, canonicalTimeSlots);
   }

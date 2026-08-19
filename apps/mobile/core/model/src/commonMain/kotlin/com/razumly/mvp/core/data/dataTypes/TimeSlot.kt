@@ -1,9 +1,15 @@
 package com.razumly.mvp.core.data.dataTypes
-
 import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.LocalTime
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.offsetAt
+import kotlinx.datetime.plus
+import kotlinx.datetime.minus
+
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.ExperimentalTime
@@ -26,9 +32,7 @@ private fun parseSlotInstant(value: String, timeZone: String): Instant {
         localDateTimePattern.matches(trimmed) -> trimmed
         else -> trimmed
     }
-    val zone = runCatching {
-        TimeZone.of(timeZone.trim().takeIf(String::isNotBlank) ?: "UTC")
-    }.getOrDefault(TimeZone.UTC)
+    val zone = TimeZone.of(timeZone.trim().takeIf(String::isNotBlank) ?: "UTC")
     return LocalDateTime.parse(normalized).toInstant(zone)
 }
 
@@ -147,6 +151,268 @@ fun TimeSlot.normalizedDivisionIds(): List<String> {
         .map(String::trim)
         .filter(String::isNotBlank)
         .distinct()
+}
+fun TimeSlot.hasOvernightWindow(): Boolean {
+    if (!repeating) return false
+    val start = startTimeMinutes ?: return false
+    val end = endTimeMinutes ?: return false
+    return end == 24 * 60 || end <= start
+}
+
+class RepeatingTimeSlotValidationException(message: String) : IllegalArgumentException(message)
+
+@OptIn(ExperimentalTime::class)
+data class ResolvedRepeatingTimeSlotInterval(
+    val slotId: String,
+    val occurrenceDate: LocalDate,
+    val endDate: LocalDate,
+    val start: Instant,
+    val end: Instant,
+    val durationMinutes: Long,
+    val startTimeMinutes: Int,
+    val endTimeMinutes: Int,
+    val timeZone: String,
+    val overnight: Boolean,
+    val nextWeekday: String?,
+    val resourceIds: List<String>,
+    val divisionIds: List<String>,
+)
+
+@OptIn(ExperimentalTime::class)
+private fun TimeSlot.strictTimeZone(): TimeZone {
+    val zoneId = timeZone.trim().takeIf(String::isNotBlank) ?: "UTC"
+    return try {
+        TimeZone.of(zoneId)
+    } catch (error: IllegalArgumentException) {
+        throw RepeatingTimeSlotValidationException(
+            "Repeating Time Slot \"$id\" has an invalid time zone \"$zoneId\".",
+        )
+    }
+}
+
+@OptIn(ExperimentalTime::class)
+private fun resolveStrictLocalDateTime(
+    localDateTime: LocalDateTime,
+    timeZone: TimeZone,
+    slotId: String,
+): Instant {
+    val localAsUtc = localDateTime.toInstant(TimeZone.UTC)
+    val offsets = buildSet {
+        for (dayOffset in -3..3) {
+            for (hourOffset in 0 until 24 step 6) {
+                val probe = Instant.fromEpochSeconds(
+                    localAsUtc.epochSeconds +
+                        dayOffset.toLong() * 24L * 60L * 60L +
+                        hourOffset.toLong() * 60L * 60L,
+                )
+                add(timeZone.offsetAt(probe))
+            }
+        }
+    }
+    val matches = offsets
+        .map { offset ->
+            Instant.fromEpochSeconds(localAsUtc.epochSeconds - offset.totalSeconds.toLong())
+        }
+        .filter { candidate -> candidate.toLocalDateTime(timeZone) == localDateTime }
+        .distinct()
+
+    return when {
+        matches.size == 1 -> matches.single()
+        matches.isEmpty() -> throw RepeatingTimeSlotValidationException(
+            "Repeating Time Slot \"$slotId\" uses a local time that does not exist on " +
+                "${localDateTime.date} in ${timeZone.id}.",
+        )
+        else -> throw RepeatingTimeSlotValidationException(
+            "Repeating Time Slot \"$slotId\" uses an ambiguous local time on " +
+                "${localDateTime.date} in ${timeZone.id}. Choose a different time.",
+        )
+    }
+}
+
+@OptIn(ExperimentalTime::class)
+fun TimeSlot.resolveRepeatingOccurrence(occurrenceDate: LocalDate): ResolvedRepeatingTimeSlotInterval {
+    if (!repeating) {
+        throw RepeatingTimeSlotValidationException(
+            "Repeating Time Slot \"$id\" is invalid: the slot must be marked as repeating.",
+        )
+    }
+    val zone = strictTimeZone()
+    val days = normalizedDaysOfWeek()
+    if (days.isEmpty()) {
+        throw RepeatingTimeSlotValidationException(
+            "Repeating Time Slot \"$id\" is invalid: select at least one weekday.",
+        )
+    }
+    val weekdayIndex = occurrenceDate.dayOfWeek.ordinal
+    if (weekdayIndex !in days) {
+        throw RepeatingTimeSlotValidationException(
+            "Repeating Time Slot \"$id\" is invalid: $occurrenceDate is not a selected weekday.",
+        )
+    }
+    val startMinutes = startTimeMinutes
+        ?: throw RepeatingTimeSlotValidationException(
+            "Repeating Time Slot \"$id\" is invalid: select a start time.",
+        )
+    val endMinutes = endTimeMinutes
+        ?: throw RepeatingTimeSlotValidationException(
+            "Repeating Time Slot \"$id\" is invalid: select an end time.",
+        )
+    if (startMinutes !in 0 until (24 * 60)) {
+        throw RepeatingTimeSlotValidationException(
+            "Repeating Time Slot \"$id\" is invalid: select a start time.",
+        )
+    }
+    if (endMinutes !in 0..(24 * 60)) {
+        throw RepeatingTimeSlotValidationException(
+            "Repeating Time Slot \"$id\" is invalid: select an end time.",
+        )
+    }
+    val configuredStartDate = startDate.toLocalDateTime(zone).date
+    val configuredEndDate = endDate?.toLocalDateTime(zone)?.date
+    if (configuredEndDate != null && configuredEndDate < configuredStartDate) {
+        throw RepeatingTimeSlotValidationException(
+            "Repeating Time Slot \"$id\" is invalid: the end date is before the start date.",
+        )
+    }
+    if (occurrenceDate < configuredStartDate) {
+        throw RepeatingTimeSlotValidationException(
+            "Repeating Time Slot \"$id\" is invalid: the occurrence is before " +
+                "the configured start date $configuredStartDate.",
+        )
+    }
+    if (configuredEndDate != null && occurrenceDate > configuredEndDate) {
+        throw RepeatingTimeSlotValidationException(
+            "Repeating Time Slot \"$id\" is invalid: the occurrence is after " +
+                "the configured end date $configuredEndDate.",
+        )
+    }
+
+    val overnight = endMinutes == 24 * 60 || endMinutes <= startMinutes
+    val resolvedEndDate = if (overnight) {
+        occurrenceDate.plus(DatePeriod(days = 1))
+    } else {
+        occurrenceDate
+    }
+    val startLocal = LocalDateTime(
+        occurrenceDate,
+        LocalTime(startMinutes / 60, startMinutes % 60),
+    )
+    val endLocal = LocalDateTime(
+        resolvedEndDate,
+        LocalTime(
+            if (endMinutes == 24 * 60) 0 else endMinutes / 60,
+            if (endMinutes == 24 * 60) 0 else endMinutes % 60,
+        ),
+    )
+    val resolvedStart = resolveStrictLocalDateTime(startLocal, zone, id)
+    val resolvedEnd = resolveStrictLocalDateTime(endLocal, zone, id)
+    if (resolvedEnd <= resolvedStart) {
+        throw RepeatingTimeSlotValidationException(
+            "Repeating Time Slot \"$id\" is invalid: the resolved end time is not after " +
+                "the resolved start time.",
+        )
+    }
+    val nextWeekday = if (overnight) {
+        resolvedEndDate.dayOfWeek.name
+            .lowercase()
+            .replaceFirstChar(Char::uppercase)
+    } else {
+        null
+    }
+    return ResolvedRepeatingTimeSlotInterval(
+        slotId = id,
+        occurrenceDate = occurrenceDate,
+        endDate = resolvedEndDate,
+        start = resolvedStart,
+        end = resolvedEnd,
+        durationMinutes = (resolvedEnd - resolvedStart).inWholeMinutes,
+        startTimeMinutes = startMinutes,
+        endTimeMinutes = endMinutes,
+        timeZone = zone.id,
+        overnight = overnight,
+        nextWeekday = nextWeekday,
+        resourceIds = normalizedScheduledFieldIds(),
+        divisionIds = normalizedDivisionIds(),
+    )
+}
+
+@OptIn(ExperimentalTime::class)
+fun TimeSlot.validateRepeatingTimeSlotOccurrences(maxDays: Int = 370) {
+    if (!repeating) return
+    val zone = strictTimeZone()
+    val firstDate = startDate.toLocalDateTime(zone).date
+    val configuredEndDate = endDate?.toLocalDateTime(zone)?.date
+    if (configuredEndDate != null && configuredEndDate < firstDate) {
+        throw RepeatingTimeSlotValidationException(
+            "Repeating Time Slot \"$id\" is invalid: the end date is before the start date.",
+        )
+    }
+    val validationEndDate = configuredEndDate
+        ?: firstDate.plus(DatePeriod(days = maxDays))
+    var currentDate = firstDate
+    var daysChecked = 0
+    while (currentDate <= validationEndDate && daysChecked <= maxDays) {
+        if (normalizedDaysOfWeek().contains(currentDate.dayOfWeek.ordinal)) {
+            resolveRepeatingOccurrence(currentDate)
+        }
+        currentDate = currentDate.plus(DatePeriod(days = 1))
+        daysChecked += 1
+    }
+}
+
+@OptIn(ExperimentalTime::class)
+fun TimeSlot.enumerateRepeatingTimeSlotOccurrences(
+    windowStart: Instant,
+    windowEnd: Instant,
+): List<ResolvedRepeatingTimeSlotInterval> {
+    if (!repeating || windowEnd <= windowStart) {
+        return emptyList()
+    }
+    val zone = strictTimeZone()
+    val selectedDays = normalizedDaysOfWeek()
+    val firstDate = windowStart.toLocalDateTime(zone).date.minus(DatePeriod(days = 1))
+    val lastDate = windowEnd.toLocalDateTime(zone).date.plus(DatePeriod(days = 1))
+    val occurrences = mutableListOf<ResolvedRepeatingTimeSlotInterval>()
+    var currentDate = firstDate
+    while (currentDate <= lastDate) {
+        if (selectedDays.contains(currentDate.dayOfWeek.ordinal)) {
+            val occurrence = resolveRepeatingOccurrence(currentDate)
+            if (occurrence.start < windowEnd && occurrence.end > windowStart) {
+                occurrences += occurrence
+            }
+        }
+        currentDate = currentDate.plus(DatePeriod(days = 1))
+    }
+    return occurrences
+}
+
+fun repeatingTimeSlotWindowsOverlap(
+    firstDays: List<Int>,
+    firstStart: Int,
+    firstEnd: Int,
+    secondDays: List<Int>,
+    secondStart: Int,
+    secondEnd: Int,
+): Boolean {
+    data class Segment(val dayOffset: Int, val start: Int, val end: Int)
+    fun segments(start: Int, end: Int): List<Segment> {
+        val absoluteEnd = if (end == 24 * 60 || end <= start) end + 24 * 60 else end
+        return listOf(
+            Segment(0, start, minOf(absoluteEnd, 24 * 60)),
+            Segment(1, 0, absoluteEnd - 24 * 60),
+        ).filter { segment -> segment.end > segment.start }
+    }
+    return firstDays.any { firstDay ->
+        secondDays.any { secondDay ->
+            segments(firstStart, firstEnd).any { first ->
+                segments(secondStart, secondEnd).any { second ->
+                    (firstDay + first.dayOffset) % 7 == (secondDay + second.dayOffset) % 7 &&
+                        first.start < second.end &&
+                        second.start < first.end
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalTime::class)

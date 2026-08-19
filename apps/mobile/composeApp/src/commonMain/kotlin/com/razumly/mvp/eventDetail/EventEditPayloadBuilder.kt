@@ -184,9 +184,6 @@ internal object EventEditPayloadBuilder {
             if (normalizedDays.isEmpty() || startMinutes == null || endMinutes == null) {
                 return@mapNotNull null
             }
-            if (endMinutes <= startMinutes) {
-                return@mapNotNull null
-            }
 
             val bounds = resolveRecurringSlotDateBoundsForEventDraft(
                 slot = slot,

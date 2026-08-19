@@ -1,6 +1,10 @@
 import { prisma } from '@/lib/prisma';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
-import { parseDateInput } from '@/server/requestParsing';
+import {
+  RepeatingTimeSlotValidationError,
+  resolveRepeatingTimeSlotOccurrence,
+} from '@/lib/repeatingTimeSlotAvailability';
+
 
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
@@ -60,84 +64,31 @@ const normalizeOccurrenceDateInternal = (value: unknown): string | null => {
   return normalized;
 };
 
-const parseOccurrenceDateValue = (value: string): Date | null => {
-  const normalized = normalizeOccurrenceDateInternal(value);
-  if (!normalized) {
-    return null;
-  }
-  const [year, month, day] = normalized.split('-').map(Number);
-  if ([year, month, day].some(Number.isNaN)) {
-    return null;
-  }
-  return new Date(year, (month ?? 1) - 1, day ?? 1);
-};
-
-const dateOnlyFromInput = (value: unknown): string | null => {
-  const parsed = parseDateInput(value);
-  if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-  return parsed.toISOString().slice(0, 10);
-};
-
-const normalizeSlotDays = (slot: any): number[] => {
-  const days: unknown[] = Array.isArray(slot?.daysOfWeek) && slot.daysOfWeek.length
-    ? slot.daysOfWeek
-    : Number.isInteger(slot?.dayOfWeek)
-      ? [slot.dayOfWeek]
-      : [];
-  return Array.from(
-    new Set(
-      days
-        .map((value) => Number(value))
-        .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6),
-    ),
-  );
-};
-
-const toMondayIndex = (occurrenceDate: string): number => {
-  const parsed = new Date(`${occurrenceDate}T00:00:00.000Z`);
-  return (parsed.getUTCDay() + 6) % 7;
-};
-
-const matchesSlotOccurrenceDate = (slot: any, occurrenceDate: string): boolean => {
-  const slotDays = normalizeSlotDays(slot);
-  if (!slotDays.length) {
-    return false;
-  }
-
-  if (!slotDays.includes(toMondayIndex(occurrenceDate))) {
-    return false;
-  }
-
-  const slotStartDate = dateOnlyFromInput(slot?.startDate);
-  if (!slotStartDate || occurrenceDate < slotStartDate) {
-    return false;
-  }
-
-  const slotEndDate = dateOnlyFromInput(slot?.endDate);
-  if (slotEndDate && slotEndDate > slotStartDate && occurrenceDate > slotEndDate) {
-    return false;
-  }
-
-  return true;
-};
-
 export const normalizeOccurrenceDate = (value: unknown): string | null => normalizeOccurrenceDateInternal(value);
 
 export const occurrenceDateFromDate = (value: Date): string => value.toISOString().slice(0, 10);
 
-export const resolveWeeklyOccurrenceStartAt = (slot: any, occurrenceDate: string): Date | null => {
-  const occurrenceStart = parseOccurrenceDateValue(occurrenceDate);
-  if (!occurrenceStart) {
-    return null;
+const matchesSlotOccurrenceDate = (slot: any, occurrenceDate: string): boolean => {
+  try {
+    resolveRepeatingTimeSlotOccurrence(slot, occurrenceDate);
+    return true;
+  } catch (error) {
+    if (error instanceof RepeatingTimeSlotValidationError) {
+      return false;
+    }
+    throw error;
   }
+};
 
-  const startMinutes = typeof slot?.startTimeMinutes === 'number' && Number.isFinite(slot.startTimeMinutes)
-    ? Math.max(0, Math.trunc(slot.startTimeMinutes))
-    : 0;
-  occurrenceStart.setHours(Math.floor(startMinutes / 60), startMinutes % 60, 0, 0);
-  return occurrenceStart;
+export const resolveWeeklyOccurrenceStartAt = (slot: any, occurrenceDate: string): Date | null => {
+  try {
+    return resolveRepeatingTimeSlotOccurrence(slot, occurrenceDate).start;
+  } catch (error) {
+    if (error instanceof RepeatingTimeSlotValidationError) {
+      return null;
+    }
+    throw error;
+  }
 };
 
 export const isWeeklyOccurrenceJoinClosed = (

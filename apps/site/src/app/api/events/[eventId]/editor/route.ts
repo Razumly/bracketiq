@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createId } from "@/lib/id";
 import { TimeSlotValidationError } from "@/lib/timeSlotAvailability";
+import { RepeatingTimeSlotValidationError } from "@/lib/repeatingTimeSlotAvailability";
 import { getRequestOrigin } from "@/lib/requestOrigin";
 import { requireSession } from "@/lib/permissions";
 import { parseSaveEventEditorCommand } from "@/contracts/eventEditor";
@@ -107,6 +108,17 @@ const errorResponse = (error: unknown) => {
     return NextResponse.json(
       { error: scheduleError.message, code: scheduleError.code },
       { status },
+    );
+  }
+  if (error instanceof RepeatingTimeSlotValidationError) {
+    return NextResponse.json(
+      {
+        error: error.message,
+        code: "INVALID_TIME_SLOT",
+        slotIds: [error.slotId],
+        occurrenceDate: error.occurrenceDate,
+      },
+      { status: 400 },
     );
   }
   if (error instanceof TimeSlotValidationError) {

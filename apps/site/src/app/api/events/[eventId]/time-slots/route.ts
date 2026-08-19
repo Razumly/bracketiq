@@ -7,6 +7,10 @@ import {
   assertValidOneTimeTimeSlots,
   TimeSlotValidationError,
 } from '@/lib/timeSlotAvailability';
+import {
+  assertRepeatingTimeSlotsResolvable,
+  RepeatingTimeSlotValidationError,
+} from '@/lib/repeatingTimeSlotAvailability';
 import { acquireEventLock } from '@/server/repositories/locks';
 
 export const dynamic = 'force-dynamic';
@@ -138,6 +142,11 @@ export async function PATCH(
           divisions: divisionIds,
         };
       });
+      assertRepeatingTimeSlotsResolvable({
+        slots: canonicalSlots,
+        eventStart: existing.start,
+        eventEnd: existing.noFixedEndDateTime ? null : existing.end,
+      });
       assertValidOneTimeTimeSlots({
         slots: canonicalSlots,
         fallbackTimeZone: existing.timeZone,
@@ -173,6 +182,17 @@ export async function PATCH(
   } catch (error) {
     if (error instanceof Response) {
       return error;
+    }
+    if (error instanceof RepeatingTimeSlotValidationError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: 'INVALID_TIME_SLOT',
+          slotIds: [error.slotId],
+          occurrenceDate: error.occurrenceDate,
+        },
+        { status: 400 },
+      );
     }
     if (error instanceof TimeSlotValidationError) {
       return NextResponse.json(

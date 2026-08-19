@@ -4,6 +4,12 @@ import {
     buildDivisionDisplayNameIndex,
     resolveDivisionDisplayName,
 } from '@/lib/divisionDisplay';
+import {
+    RepeatingTimeSlotValidationError,
+    type ResolvedRepeatingTimeSlot,
+    resolveRepeatingTimeSlotOccurrence,
+} from '@/lib/repeatingTimeSlotAvailability';
+
 import { getDivisionIdFromEventEntry } from './divisionRegistration';
 import { parseDateValue } from './dateValues';
 
@@ -146,7 +152,7 @@ export const buildWeeklySessionOptions = (
         ).sort((left, right) => left - right);
         const startMinutes = typeof slot.startTimeMinutes === 'number' ? slot.startTimeMinutes : null;
         const endMinutes = typeof slot.endTimeMinutes === 'number' ? slot.endTimeMinutes : null;
-        if (startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
+        if (startMinutes === null || endMinutes === null) {
             return;
         }
         const slotDivisionNames = resolveDivisionNames(
@@ -195,18 +201,24 @@ export const buildWeeklySessionOptions = (
                 if (slotEndDate && occurrence > slotEndDate) {
                     return;
                 }
-                const sessionStart = new Date(occurrence.getTime());
-                sessionStart.setHours(0, startMinutes, 0, 0);
-                const sessionEnd = new Date(occurrence.getTime());
-                sessionEnd.setHours(0, endMinutes, 0, 0);
+                const occurrenceDate = toIsoDateString(occurrence);
+                let resolved: ResolvedRepeatingTimeSlot;
+                try {
+                    resolved = resolveRepeatingTimeSlotOccurrence(slot, occurrenceDate);
+                } catch (error) {
+                    if (error instanceof RepeatingTimeSlotValidationError) {
+                        return;
+                    }
+                    throw error;
+                }
 
                 sessions.push({
-                    id: `${slot.$id}-${toIsoDateString(occurrence)}`,
+                    id: `${slot.$id}-${resolved.occurrenceDate}`,
                     slotId: String(slot.$id ?? ''),
-                    occurrenceDate: toIsoDateString(occurrence),
-                    start: sessionStart,
-                    end: sessionEnd,
-                    label: formatWeeklySessionLabel(sessionStart, sessionEnd),
+                    occurrenceDate: resolved.occurrenceDate,
+                    start: resolved.start,
+                    end: resolved.end,
+                    label: formatWeeklySessionLabel(resolved.start, resolved.end),
                     divisionLabel,
                 });
             });
@@ -264,7 +276,7 @@ export const resolveSelectedWeeklySessionOption = (
     ).sort((left, right) => left - right);
     const startMinutes = typeof matchingSlot.startTimeMinutes === 'number' ? matchingSlot.startTimeMinutes : null;
     const endMinutes = typeof matchingSlot.endTimeMinutes === 'number' ? matchingSlot.endTimeMinutes : null;
-    if (startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
+    if (startMinutes === null || endMinutes === null) {
         return null;
     }
     if (
@@ -299,10 +311,26 @@ export const resolveSelectedWeeklySessionOption = (
         sportInput,
     ).join(', ') || 'All divisions';
 
-    const start = new Date(occurrenceDate.getTime());
-    start.setHours(0, startMinutes, 0, 0);
-    const end = new Date(occurrenceDate.getTime());
-    end.setHours(0, endMinutes, 0, 0);
+    let start: Date;
+    let end: Date;
+    if (matchingSlot.repeating === false) {
+        start = new Date(occurrenceDate.getTime());
+        start.setHours(0, startMinutes, 0, 0);
+        end = new Date(occurrenceDate.getTime());
+        end.setHours(0, endMinutes, 0, 0);
+    } else {
+        let resolved: ResolvedRepeatingTimeSlot;
+        try {
+            resolved = resolveRepeatingTimeSlotOccurrence(matchingSlot, selectedOccurrenceDate);
+        } catch (error) {
+            if (error instanceof RepeatingTimeSlotValidationError) {
+                return null;
+            }
+            throw error;
+        }
+        start = resolved.start;
+        end = resolved.end;
+    }
 
     return {
         id: `${selectedSlotId}-${selectedOccurrenceDate}`,

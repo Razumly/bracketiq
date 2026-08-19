@@ -236,7 +236,7 @@ class EventEditPayloadBuilderTest {
     }
 
     @Test
-    fun buildLeagueSlotDrafts_drops_slots_without_valid_fields_or_valid_time_bounds() {
+    fun buildLeagueSlotDrafts_drops_slots_without_valid_fields_or_non_repeating_time_bounds() {
         val event = leagueEvent(
             divisions = listOf("open"),
             fieldIds = listOf("field-1"),
@@ -269,7 +269,7 @@ class EventEditPayloadBuilderTest {
             editableLeagueTimeSlots = listOf(missingField, invalidRepeatingTime, invalidNonRepeatingTime),
         )
 
-        assertEquals(emptyList(), result)
+        assertEquals(listOf("invalid-repeating"), result.map(TimeSlot::id))
     }
 
     private fun leagueEvent(

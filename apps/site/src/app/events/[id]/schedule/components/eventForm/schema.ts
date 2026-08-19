@@ -37,7 +37,7 @@ import { coordinatesAreSet } from './locationHelpers';
 import { isEventLocalField } from './resourceGroups';
 import { stringSetsEqual } from './shared';
 import { normalizeSlotFieldIds, normalizeWeekdays } from './slotForm';
-import { computeOneTimeSlotBoundsError, computeSlotError } from './slotValidation';
+import { computeOneTimeSlotBoundsError, computeRepeatingSlotTemporalError, computeSlotError } from './slotValidation';
 
 const normalizeRegistrationQuestionDraft = (
     question: RegistrationQuestionDraft,
@@ -81,8 +81,8 @@ const leagueSlotSchema: z.ZodType<LeagueSlotForm> = z.object({
     startDate: z.string().optional(),
     endDate: z.string().optional(),
     timeZone: z.string().optional(),
-    startTimeMinutes: z.number().int().nonnegative().optional(),
-    endTimeMinutes: z.number().int().positive().optional(),
+    startTimeMinutes: z.number().int().nonnegative().max(24 * 60 - 1).optional(),
+    endTimeMinutes: z.number().int().nonnegative().max(24 * 60).optional(),
     price: z.number().int().nonnegative().optional(),
     sourceType: z.string().nullable().optional(),
     rentalBookingId: z.string().nullable().optional(),
@@ -914,6 +914,21 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                             path: ['leagueSlots', index, 'endTimeMinutes'],
                         });
                     }
+                    const temporalError = computeRepeatingSlotTemporalError({
+                        slot: {
+                            ...slot,
+                            startDate: slot.startDate ?? values.start,
+                        },
+                        eventStart: resolvedEventStart,
+                        eventEnd: resolvedEventEnd,
+                    });
+                    if (temporalError) {
+                        ctx.addIssue({
+                            code: "custom",
+                            message: temporalError,
+                            path: ['leagueSlots', index, 'endTimeMinutes'],
+                        });
+                    }
                 }
                 const normalizedSlotDivisionKeys = normalizeSlotDivisionKeysWithLookup(slot.divisions, slotDivisionLookup);
                 if (!values.singleDivision && selectedDivisionKeys.length && !normalizedSlotDivisionKeys.length) {
@@ -938,7 +953,16 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                         path: ['leagueSlots', index, 'divisions'],
                     });
                 }
-                const error = computeSlotError(values.leagueSlots, index, values.eventType, values.parentEvent);
+                const error = computeSlotError(
+                    values.leagueSlots,
+                    index,
+                    values.eventType,
+                    values.parentEvent,
+                    {
+                        eventStart: resolvedEventStart,
+                        eventEnd: resolvedEventEnd,
+                    },
+                );
                 if (error) {
                     ctx.addIssue({
                         code: "custom",

@@ -1,6 +1,12 @@
 import { addMinutes } from 'date-fns';
 import type { Field, Match, Event as EventRecord, TimeSlot } from '@/types';
 import { getFacilityScopedFieldDisplayName } from '@/lib/fieldUtils';
+import {
+  RepeatingTimeSlotValidationError,
+  type ResolvedRepeatingTimeSlot,
+  resolveRepeatingTimeSlotOccurrence,
+} from '@/lib/repeatingTimeSlotAvailability';
+
 
 const ONE_HOUR_IN_MINUTES = 60;
 
@@ -12,6 +18,10 @@ const parseToDate = (value?: string | Date | null): Date | null => {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
+
+const toLocalCalendarDate = (value: Date): string => (
+  `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
+);
 
 const ensureEndDate = (start: Date, rawEnd?: string | Date | null, fallbackMinutes: number = ONE_HOUR_IN_MINUTES): Date => {
   const parsed = parseToDate(rawEnd);
@@ -835,9 +845,7 @@ export const buildFieldCalendarEvents = (fields: Field[], range: CalendarRange =
                 .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6),
             ),
           );
-          const startMinutes = typeof slot.startTimeMinutes === 'number' ? slot.startTimeMinutes : null;
-          const endMinutes = typeof slot.endTimeMinutes === 'number' ? slot.endTimeMinutes : null;
-          if (!slotDays.length || startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
+          if (!slotDays.length || slot.repeating === false) {
             return;
           }
 
@@ -863,9 +871,17 @@ export const buildFieldCalendarEvents = (fields: Field[], range: CalendarRange =
               if (slotEndBoundary && occurrence > slotEndBoundary) {
                 return;
               }
-              const effectiveStart = new Date(occurrence.getTime());
-              effectiveStart.setMinutes(startMinutes);
-              const effectiveEnd = addMinutes(effectiveStart, Math.max(1, endMinutes - startMinutes));
+              let resolved: ResolvedRepeatingTimeSlot;
+              try {
+                resolved = resolveRepeatingTimeSlotOccurrence(slot, toLocalCalendarDate(occurrence));
+              } catch (error) {
+                if (error instanceof RepeatingTimeSlotValidationError) {
+                  return;
+                }
+                throw error;
+              }
+              const effectiveStart = resolved.start;
+              const effectiveEnd = resolved.end;
               generated.push({
                 id: `field-booked-weekly-${field.$id}-${evt.$id}-${slot.$id}-${effectiveStart.getTime()}`,
                 title: 'Booked',

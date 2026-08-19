@@ -11,6 +11,10 @@ import {
   TimeSlotValidationError,
 } from '@/lib/timeSlotAvailability';
 import {
+  assertRepeatingTimeSlotsResolvable,
+  RepeatingTimeSlotValidationError,
+} from '@/lib/repeatingTimeSlotAvailability';
+import {
   localDatePartsInTimeZone,
   parseDateInputInTimeZone,
   resolveTimeZone,
@@ -80,7 +84,7 @@ const normalizeRepeatingEndDate = (
   if (!(endDate instanceof Date) || Number.isNaN(endDate.getTime())) {
     return null;
   }
-  return toDateOnlyValue(endDate, timeZone) > toDateOnlyValue(startDate, timeZone) ? endDate : null;
+  return toDateOnlyValue(endDate, timeZone) >= toDateOnlyValue(startDate, timeZone) ? endDate : null;
 };
 
 const resolveSlotTimeZone = async (
@@ -182,6 +186,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       endDate: true,
       timeZone: true,
       repeating: true,
+      dayOfWeek: true,
+      daysOfWeek: true,
       scheduledFieldId: true,
       scheduledFieldIds: true,
       startTimeMinutes: true,
@@ -299,6 +305,37 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       true,
       effectiveTimeZone,
     );
+    try {
+      assertRepeatingTimeSlotsResolvable({
+        slots: [{
+          ...existingSlot,
+          ...payload,
+          id,
+          repeating: true,
+          startDate: effectiveStartDate,
+          endDate: payload.endDate,
+          timeZone: effectiveTimeZone,
+          scheduledFieldId: effectiveScheduledFieldIds[0] ?? null,
+          scheduledFieldIds: effectiveScheduledFieldIds,
+          divisions: payloadDivisions ?? existingSlot.divisions,
+        }],
+        eventStart: effectiveStartDate,
+        eventEnd: null,
+      });
+    } catch (error) {
+      if (error instanceof RepeatingTimeSlotValidationError) {
+        return NextResponse.json(
+          {
+            error: error.message,
+            code: 'INVALID_TIME_SLOT',
+            slotIds: [error.slotId],
+            occurrenceDate: error.occurrenceDate,
+          },
+          { status: 400 },
+        );
+      }
+      throw error;
+    }
   } else {
     try {
       const resolved = resolveOneTimeTimeSlot({

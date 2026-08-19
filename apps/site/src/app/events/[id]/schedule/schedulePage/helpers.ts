@@ -6,6 +6,12 @@ import {
   toBracketDivisionKey as toDivisionKey,
 } from '@/lib/bracketViewCore';
 import { formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
+import {
+  RepeatingTimeSlotValidationError,
+  type ResolvedRepeatingTimeSlot,
+  resolveRepeatingTimeSlotOccurrence,
+} from '@/lib/repeatingTimeSlotAvailability';
+
 import { getFieldDisplayName } from '@/lib/fieldUtils';
 import type { BillDiscountSummary, Event, EventState, Field, Match, Sport, Team, TimeSlot } from '@/types';
 import { validateAndNormalizeBracketGraph, type BracketNode } from '@/server/matches/bracketGraph';
@@ -396,11 +402,7 @@ export const addDays = (value: Date, days: number): Date => {
   return copy;
 };
 
-export const formatWeeklyOccurrenceLabel = (occurrence: Date, startMinutes: number, endMinutes: number): string => {
-  const start = new Date(occurrence.getTime());
-  start.setHours(0, startMinutes, 0, 0);
-  const end = new Date(occurrence.getTime());
-  end.setHours(0, endMinutes, 0, 0);
+export const formatWeeklyOccurrenceLabel = (start: Date, end: Date): string => {
   const dayLabel = start.toLocaleDateString('en-US', {
     weekday: 'short',
     month: 'numeric',
@@ -472,7 +474,7 @@ export const buildWeeklyOccurrenceOptionsInRange = (
         .map((entry) => Number(entry))
         .filter((entry) => Number.isInteger(entry) && entry >= 0 && entry <= 6),
     )).sort((left, right) => left - right);
-    if (startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
+    if (startMinutes === null || endMinutes === null) {
       return;
     }
 
@@ -508,11 +510,14 @@ export const buildWeeklyOccurrenceOptionsInRange = (
       occurrenceStart.setHours(Math.floor(startMinutes / 60), startMinutes % 60, 0, 0);
       const occurrenceEnd = new Date(slotStartDate.getTime());
       occurrenceEnd.setHours(Math.floor(endMinutes / 60), endMinutes % 60, 0, 0);
+      if (occurrenceEnd.getTime() <= occurrenceStart.getTime()) {
+        return;
+      }
       options.push({
         id: `${slotId}:${toLocalIsoDate(slotStartDate)}`,
         slotId,
         occurrenceDate: toLocalIsoDate(slotStartDate),
-        label: formatWeeklyOccurrenceLabel(slotStartDate, startMinutes, endMinutes),
+        label: formatWeeklyOccurrenceLabel(occurrenceStart, occurrenceEnd),
         start: formatLocalDateTime(occurrenceStart),
         end: formatLocalDateTime(occurrenceEnd),
         startMinutes,
@@ -532,19 +537,24 @@ export const buildWeeklyOccurrenceOptionsInRange = (
         continue;
       }
 
-      const occurrenceStart = new Date(occurrence.getTime());
-      occurrenceStart.setHours(Math.floor(startMinutes / 60), startMinutes % 60, 0, 0);
-      const occurrenceEnd = new Date(occurrence.getTime());
-      occurrenceEnd.setHours(Math.floor(endMinutes / 60), endMinutes % 60, 0, 0);
+      let resolved: ResolvedRepeatingTimeSlot;
+      try {
+        resolved = resolveRepeatingTimeSlotOccurrence(slot, toLocalIsoDate(occurrence));
+      } catch (error) {
+        if (error instanceof RepeatingTimeSlotValidationError) {
+          continue;
+        }
+        throw error;
+      }
       options.push({
-        id: `${slotId}:${toLocalIsoDate(occurrence)}`,
+        id: `${slotId}:${resolved.occurrenceDate}`,
         slotId,
-        occurrenceDate: toLocalIsoDate(occurrence),
-        label: formatWeeklyOccurrenceLabel(occurrence, startMinutes, endMinutes),
-        start: formatLocalDateTime(occurrenceStart),
-        end: formatLocalDateTime(occurrenceEnd),
-        startMinutes,
-        endMinutes,
+        occurrenceDate: resolved.occurrenceDate,
+        label: formatWeeklyOccurrenceLabel(resolved.start, resolved.end),
+        start: formatLocalDateTime(resolved.start),
+        end: formatLocalDateTime(resolved.end),
+        startMinutes: resolved.startTimeMinutes,
+        endMinutes: resolved.endTimeMinutes,
         fieldIds,
         divisionIds,
       });

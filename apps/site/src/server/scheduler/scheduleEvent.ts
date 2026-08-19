@@ -23,6 +23,10 @@ import {
 } from './timeSlotAvailability';
 import { captureSchedulerState, restoreSchedulerState } from './schedulerState';
 import { ensureSplitPlayoffTimeSlotCoverage } from './timeSlotCoverage';
+import {
+  enumerateRepeatingTimeSlotOccurrences,
+  RepeatingTimeSlotValidationError,
+} from '@/lib/repeatingTimeSlotAvailability';
 
 export { ScheduleError } from './scheduleErrors';
 export type { ScheduleFailureFactor } from './scheduleErrors';
@@ -271,7 +275,7 @@ const resolveSchedulerTimeSlots = (
   try {
     return assertCanonicalSchedulerTimeSlots(event);
   } catch (error) {
-    if (error instanceof TimeSlotValidationError) {
+    if (error instanceof TimeSlotValidationError || error instanceof RepeatingTimeSlotValidationError) {
       throw new ScheduleError(error.message, 'RESOURCE');
     }
     throw error;
@@ -723,9 +727,9 @@ const describeScheduleFailure = (event: League, placeholderCount?: number): stri
   } else if (event.matchDurationMinutes) {
     matchMinutes = event.matchDurationMinutes;
   }
-
   const minutesPerMatch = matchMinutes + bufferMinutes;
-  const weeklySlotMinutesTotal = weeklySlotMinutes(event.timeSlots);
+
+  const weeklySlotMinutesTotal = weeklySlotMinutes(event);
   const weeklyHoursAvailable = weeklySlotMinutesTotal / 60;
   const weeklyMatchesCapacity = minutesPerMatch ? Math.floor(weeklySlotMinutesTotal / minutesPerMatch) : 0;
   const hasRecurringSlots = event.timeSlots.some((slot) => slot.repeating !== false);
@@ -758,43 +762,20 @@ const calculateSlotMinutes = (event: League): number => {
   if (start.getTime() >= end.getTime()) return 0;
 
   let totalMinutes = calculateOneTimeAvailabilityMinutes(event);
-
   const recurringSlots = event.timeSlots.filter((slot) => slot.repeating !== false);
-  if (!recurringSlots.length) {
-    return totalMinutes;
-  }
-
-  let weekIndex = 0;
-  while (start.getTime() + weekIndex * 7 * 24 * 60 * MINUTE_MS <= end.getTime()) {
-    const reference = new Date(start.getTime() + weekIndex * 7 * 24 * 60 * MINUTE_MS);
-    for (const slot of recurringSlots) {
-      const [slotStart, slotEnd] = slot.asDateRange(reference);
-      const slotDay = new Date(slotStart);
-      slotDay.setHours(0, 0, 0, 0);
-      const slotDayMs = slotDay.getTime();
-      const slotStartDate = hasValidDate(slot.startDate) ? slot.startDate : null;
-      const slotEndDate = hasValidDate(slot.endDate) ? slot.endDate : null;
-      if (slotStartDate) {
-        const slotStartDay = new Date(slotStartDate);
-        slotStartDay.setHours(0, 0, 0, 0);
-        if (slotDayMs < slotStartDay.getTime()) {
-          continue;
-        }
+  for (const slot of recurringSlots) {
+    const occurrences = enumerateRepeatingTimeSlotOccurrences({
+      slot,
+      windowStart: start,
+      windowEnd: end,
+    });
+    for (const occurrence of occurrences) {
+      const windowStart = new Date(Math.max(occurrence.start.getTime(), start.getTime()));
+      const windowEnd = new Date(Math.min(occurrence.end.getTime(), end.getTime()));
+      if (windowEnd.getTime() > windowStart.getTime()) {
+        totalMinutes += Math.floor((windowEnd.getTime() - windowStart.getTime()) / MINUTE_MS);
       }
-      if (slotEndDate) {
-        const slotEndDay = new Date(slotEndDate);
-        slotEndDay.setHours(0, 0, 0, 0);
-        if (slotDayMs > slotEndDay.getTime()) {
-          continue;
-        }
-      }
-      if (slotEnd.getTime() <= start.getTime() || slotStart.getTime() >= end.getTime()) continue;
-      const windowStart = slotStart.getTime() < start.getTime() ? start : slotStart;
-      const windowEnd = slotEnd.getTime() > end.getTime() ? end : slotEnd;
-      if (windowEnd.getTime() <= windowStart.getTime()) continue;
-      totalMinutes += Math.floor((windowEnd.getTime() - windowStart.getTime()) / MINUTE_MS);
     }
-    weekIndex += 1;
   }
   return totalMinutes;
 };
@@ -808,7 +789,7 @@ const prepareScheduleWindow = (
   if (!event.timeSlots.length) return;
   if (!hasExtendableRecurringSlots(event)) return;
   const expectedTeams = projectedTeamCount(event, includePlaceholderTeams);
-  const weeklyMinutes = weeklySlotMinutes(event.timeSlots.filter((slot) => isExtendableRecurringSlot(slot)));
+  const weeklyMinutes = weeklySlotMinutes(event, event.timeSlots.filter((slot) => isExtendableRecurringSlot(slot)));
   if (weeklyMinutes <= 0) return;
   const matchMinutes = estimatedMatchMinutes(event, expectedTeams);
   if (matchMinutes <= 0) return;
@@ -834,15 +815,27 @@ const projectedTeamCount = (event: Tournament | League, includePlaceholderTeams:
   return Math.max(teamCount, 2);
 };
 
-const weeklySlotMinutes = (slots: { repeating?: boolean; startTimeMinutes?: number; endTimeMinutes?: number }[]): number => {
+const weeklySlotMinutes = (
+  event: League | Tournament,
+  slots: TimeSlot[] = event.timeSlots,
+): number => {
+  const windowEnd = new Date(event.start.getTime() + 7 * 24 * 60 * MINUTE_MS);
   let total = 0;
   for (const slot of slots) {
-    if (slot.repeating === false) {
-      continue;
+    if (slot.repeating === false) continue;
+    const occurrences = enumerateRepeatingTimeSlotOccurrences({
+      slot,
+      windowStart: event.start,
+      windowEnd,
+    });
+    for (const occurrence of occurrences) {
+      if (
+        occurrence.start.getTime() >= event.start.getTime()
+        && occurrence.start.getTime() < windowEnd.getTime()
+      ) {
+        total += occurrence.durationMinutes;
+      }
     }
-    const start = slot.startTimeMinutes ?? 0;
-    const end = slot.endTimeMinutes ?? 0;
-    if (end > start) total += end - start;
   }
   return total;
 };

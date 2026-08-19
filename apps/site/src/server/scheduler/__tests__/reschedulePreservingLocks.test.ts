@@ -768,14 +768,14 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       playerIds: [],
     });
 
-    const eventStart = new Date(2026, 2, 2, 9, 0, 0);
-    const eventEnd = new Date(2026, 2, 4, 18, 0, 0);
+    const eventStart = new Date('2026-03-02T09:00:00.000Z');
+    const eventEnd = new Date('2026-03-04T18:00:00.000Z');
 
     const lockedMatch = createMatch({
       id: 'match_locked_multi_day',
       matchId: 1,
-      start: new Date(2026, 2, 3, 10, 0, 0),
-      end: new Date(2026, 2, 3, 11, 0, 0),
+      start: new Date('2026-03-03T10:00:00.000Z'),
+      end: new Date('2026-03-03T11:00:00.000Z'),
       locked: true,
       field,
       division,
@@ -786,8 +786,8 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     const unlockedMatch = createMatch({
       id: 'match_unlocked_multi_day',
       matchId: 2,
-      start: new Date(2026, 2, 2, 10, 0, 0),
-      end: new Date(2026, 2, 2, 11, 0, 0),
+      start: new Date('2026-03-02T10:00:00.000Z'),
+      end: new Date('2026-03-02T11:00:00.000Z'),
       field,
       division,
       team1: team3,
@@ -847,6 +847,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
           repeating: true,
           startTimeMinutes: 9 * 60,
           endTimeMinutes: 18 * 60,
+          timeZone: 'UTC',
           field: field.id,
           divisions: [division],
         }),
@@ -908,14 +909,14 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       playerIds: [],
     });
 
-    const eventStart = new Date(2026, 2, 2, 9, 0, 0);
-    const eventEnd = new Date(2026, 2, 2, 18, 0, 0);
+    const eventStart = new Date('2026-03-02T09:00:00.000Z');
+    const eventEnd = new Date('2026-03-02T18:00:00.000Z');
 
     const lockedMatch = createMatch({
       id: 'match_locked_multi_field',
       matchId: 1,
-      start: new Date(2026, 2, 2, 10, 0, 0),
-      end: new Date(2026, 2, 2, 11, 0, 0),
+      start: new Date('2026-03-02T10:00:00.000Z'),
+      end: new Date('2026-03-02T11:00:00.000Z'),
       locked: true,
       field: fieldTwo,
       division,
@@ -926,8 +927,8 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     const unlockedMatch = createMatch({
       id: 'match_unlocked_multi_field',
       matchId: 2,
-      start: new Date(2026, 2, 2, 11, 5, 0),
-      end: new Date(2026, 2, 2, 12, 5, 0),
+      start: new Date('2026-03-02T11:05:00.000Z'),
+      end: new Date('2026-03-02T12:05:00.000Z'),
       field: fieldOne,
       division,
       team1: team3,
@@ -989,6 +990,7 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
           repeating: true,
           startTimeMinutes: 9 * 60,
           endTimeMinutes: 18 * 60,
+          timeZone: 'UTC',
           fieldIds: [fieldOne.id, fieldTwo.id],
           divisions: [division],
         }),

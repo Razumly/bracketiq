@@ -1619,7 +1619,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_league_creation_with_invalid_configured_slot_when_submitted_then_creation_is_blocked() = runTest(testDispatcher) {
+    fun given_league_creation_with_overnight_configured_slot_when_submitted_then_creation_succeeds() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         harness.component.setLoadingHandler(harness.loadingHandler)
         advance()
@@ -1675,13 +1675,13 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        assertEquals(0, harness.eventRepository.createEditorCalls.size)
-        assertEquals(0, harness.onEventCreatedCount)
-        assertEquals(0, harness.fieldRepository.createdFields.size)
-        assertEquals(0, harness.fieldRepository.createdTimeSlots.size)
-        assertEquals(
-            "Schedule slot 2 must end after it starts.",
-            harness.component.errorState.value?.message,
+        assertEquals(1, harness.eventRepository.createEditorCalls.size)
+        assertEquals(1, harness.onEventCreatedCount)
+        val payloadSlots = harness.eventRepository.createEditorCalls.single().timeSlots.orEmpty()
+        assertTrue(
+            payloadSlots.any { slot ->
+                slot.startTimeMinutes == 700 && slot.endTimeMinutes == 650
+            },
         )
     }
 

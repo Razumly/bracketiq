@@ -25,6 +25,7 @@ import type { WeeklySlotConflict } from '@/lib/leagueService';
 import { formatDisplayDate, formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
 import { getFacilityScopedFieldDisplayName, getFieldDisplayName } from '@/lib/fieldUtils';
 import { applySportResourceLabels, GENERIC_RESOURCE_LABELS, type SportResourceLabels } from '@/lib/sportResourceLabels';
+import { repeatingTimeSlotHasOvernightWindow } from '@/lib/repeatingTimeSlotAvailability';
 
 const DROPDOWN_PROPS = { withinPortal: true, zIndex: 1800 };
 const MAX_STANDARD_NUMBER = 99_999;
@@ -1275,6 +1276,8 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
               slotEndDate &&
               slotEndDate.getTime() <= slotStartDate.getTime(),
             );
+            const overnightWindow = isRepeating
+              && repeatingTimeSlotHasOvernightWindow(slot.startTimeMinutes, slot.endTimeMinutes);
             const divisionsReadOnly = readOnly && !allowDivisionEditsWhenReadOnly;
             const resourcesReadOnly = readOnly && !allowResourceEditsWhenReadOnly;
             const resourceError = isRentalSlotMismatchError(slot.error) ? slot.error : null;
@@ -1519,6 +1522,11 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
                               error={endMissing && !slotTimingReadOnly ? 'Select an end time' : undefined}
                             />
                           </div>
+                          {overnightWindow ? (
+                            <Text size="xs" c="orange" mt={4}>
+                              Overnight slot ends on the next day.
+                            </Text>
+                          ) : null}
                         </>
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:items-end">

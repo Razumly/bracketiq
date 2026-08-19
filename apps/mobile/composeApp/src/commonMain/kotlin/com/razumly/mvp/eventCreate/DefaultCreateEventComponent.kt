@@ -46,6 +46,8 @@ import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.dataTypes.canonicalizedOneTime
 import com.razumly.mvp.core.data.dataTypes.validateOneTimeTimeSlots
+import com.razumly.mvp.core.data.dataTypes.validateRepeatingTimeSlotOccurrences
+import com.razumly.mvp.core.data.dataTypes.RepeatingTimeSlotValidationException
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
@@ -1856,8 +1858,13 @@ class DefaultCreateEventComponent(
             if (startMinutes == null || endMinutes == null) {
                 return "$label needs a start and end time."
             }
-            if (endMinutes <= startMinutes) {
-                return "$label must end after it starts."
+            if (startMinutes !in 0 until (24 * 60) || endMinutes !in 0..(24 * 60)) {
+                return "$label has an invalid start or end time."
+            }
+            try {
+                slot.validateRepeatingTimeSlotOccurrences()
+            } catch (error: RepeatingTimeSlotValidationException) {
+                return error.message ?: "$label cannot be resolved."
             }
         }
         try {
@@ -1982,9 +1989,6 @@ class DefaultCreateEventComponent(
             }
             if (endMinutes == null) {
                 invalidConfiguredScheduleSlot(index, "select an end time.")
-            }
-            if (endMinutes <= startMinutes) {
-                invalidConfiguredScheduleSlot(index, "end time must be after its start time.")
             }
             val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
             val repeatingEndDate = if (event.eventType == EventType.WEEKLY_EVENT) {

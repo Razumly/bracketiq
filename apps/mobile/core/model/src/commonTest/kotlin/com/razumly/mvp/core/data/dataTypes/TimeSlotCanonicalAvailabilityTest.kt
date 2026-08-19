@@ -3,6 +3,7 @@ package com.razumly.mvp.core.data.dataTypes
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -41,6 +42,19 @@ class TimeSlotCanonicalAvailabilityTest {
         assertEquals(Instant.parse("2026-08-17T14:00:00Z"), resolved.end)
         assertEquals(listOf("resource-1"), resolved.resourceIds)
         assertEquals(listOf("division-1"), resolved.divisionIds)
+    }
+
+    @Test
+    fun identifies_repeating_overnight_windows_for_inline_warning() {
+        assertTrue(
+            slot(startMinutes = 23 * 60, endMinutes = 60).copy(repeating = true).hasOvernightWindow(),
+        )
+        assertFalse(
+            slot(startMinutes = 9 * 60, endMinutes = 10 * 60).copy(repeating = true).hasOvernightWindow(),
+        )
+        assertFalse(
+            slot(startMinutes = 23 * 60, endMinutes = 60).hasOvernightWindow(),
+        )
     }
 
     @Test

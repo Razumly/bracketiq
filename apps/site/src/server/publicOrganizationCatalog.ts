@@ -10,6 +10,12 @@ import { getEventParticipantIdsForEvent } from '@/server/events/eventRegistratio
 import { getEventOfficialIdsForEvent } from '@/server/officials/eventOfficials';
 import { TEAM_REGISTRATION_STARTED_TTL_MS } from '@/server/teams/teamOpenRegistration';
 import { getFieldDisplayName, getFieldResolvedLocation } from '@/lib/fieldUtils';
+import {
+  RepeatingTimeSlotValidationError,
+  type ResolvedRepeatingTimeSlot,
+  resolveRepeatingTimeSlotOccurrence,
+} from '@/lib/repeatingTimeSlotAvailability';
+
 import { normalizeExternalHttpUrl } from '@/lib/externalUrl';
 import {
   buildPublicEventPath,
@@ -676,7 +682,7 @@ const buildWeeklyOccurrenceCards = (
     const startMinutes = typeof slot.startTimeMinutes === 'number' ? slot.startTimeMinutes : null;
     const endMinutes = typeof slot.endTimeMinutes === 'number' ? slot.endTimeMinutes : null;
     const weekdays = normalizeSlotWeekdays(slot);
-    if (!weekdays.length || startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
+    if (!weekdays.length || startMinutes === null || endMinutes === null) {
       return;
     }
 
@@ -706,21 +712,26 @@ const buildWeeklyOccurrenceCards = (
         continue;
       }
 
-      const occurrenceStart = new Date(occurrence.getTime());
-      occurrenceStart.setHours(Math.floor(startMinutes / 60), startMinutes % 60, 0, 0);
-      const occurrenceEnd = new Date(occurrence.getTime());
-      occurrenceEnd.setHours(Math.floor(endMinutes / 60), endMinutes % 60, 0, 0);
       const occurrenceDate = toLocalIsoDate(occurrence);
+      let resolved: ResolvedRepeatingTimeSlot;
+      try {
+        resolved = resolveRepeatingTimeSlotOccurrence(slot, occurrenceDate);
+      } catch (error) {
+        if (error instanceof RepeatingTimeSlotValidationError) {
+          continue;
+        }
+        throw error;
+      }
       occurrences.push({
         ...parentCard,
-        id: `${parentCard.id}:${slotId}:${occurrenceDate}`,
-        start: occurrenceStart.toISOString(),
-        end: occurrenceEnd.toISOString(),
+        id: `${parentCard.id}:${slotId}:${resolved.occurrenceDate}`,
+        start: resolved.start.toISOString(),
+        end: resolved.end.toISOString(),
         detailsUrl: formatEventOccurrenceDetailsUrl(
           organization.slug,
           String(parentRow.id),
           slotId,
-          occurrenceDate,
+          resolved.occurrenceDate,
         ),
       });
     }

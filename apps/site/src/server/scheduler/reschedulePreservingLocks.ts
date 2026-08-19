@@ -3,6 +3,11 @@ import {
   finalizeOpenEndedSchedule,
   prepareSchedulePlacementWindow,
 } from './scheduleEvent';
+import { assertCanonicalSchedulerTimeSlots } from './timeSlotAvailability';
+import {
+  enumerateRepeatingTimeSlotOccurrences,
+} from '@/lib/repeatingTimeSlotAvailability';
+import { resolveOneTimeTimeSlot } from '@/lib/timeSlotAvailability';
 import { getDateTimePartsInTimeZone, normalizeTimeZone } from '@/lib/dateUtils';
 import {
   Division,
@@ -11,6 +16,7 @@ import {
   MINUTE_MS,
   PlayingField,
   Team,
+  TimeSlot,
   Tournament,
   UserData,
 } from './types';
@@ -158,28 +164,6 @@ const durationForReschedule = (match: Match): number => {
   return MIN_SCHEDULE_DURATION_MS;
 };
 
-
-const toValidDayIndex = (value: unknown): number | null => {
-  const numeric = Number(value);
-  if (!Number.isInteger(numeric) || numeric < 0 || numeric > 6) {
-    return null;
-  }
-  return numeric;
-};
-
-const normalizeSlotDayIndexes = (slot: { daysOfWeek?: unknown; dayOfWeek?: unknown }): number[] => {
-  const rawDays = Array.isArray(slot.daysOfWeek) && slot.daysOfWeek.length
-    ? slot.daysOfWeek
-    : [slot.dayOfWeek];
-  return Array.from(
-    new Set(
-      rawDays
-        .map((value) => toValidDayIndex(value))
-        .filter((value): value is number => value !== null),
-    ),
-  );
-};
-
 const normalizeSlotFieldIds = (slot: {
   scheduledFieldIds?: unknown;
   fieldIds?: unknown;
@@ -191,43 +175,13 @@ const normalizeSlotFieldIds = (slot: {
     : Array.isArray(slot.fieldIds) && slot.fieldIds.length
       ? slot.fieldIds
       : [slot.field ?? slot.scheduledFieldId];
-  return Array.from(
-    new Set(
-      rawFieldIds
-        .map((value) => (typeof value === 'string' ? value.trim() : ''))
-        .filter((value) => value.length > 0),
-    ),
-  );
+  return Array.from(new Set(
+    rawFieldIds
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .filter((value) => value.length > 0),
+  ));
 };
-const slotPredicateTimeZone = (slot: {
-  startDate?: Date;
-  startTimeMinutes?: number;
-  timeZone?: string | null;
-}): string => {
-  const configuredTimeZone = normalizeTimeZone(slot.timeZone, 'UTC');
-  if (configuredTimeZone !== 'UTC' || typeof slot.startTimeMinutes !== 'number') {
-    return configuredTimeZone;
-  }
-  let localTimeZone: string;
-  try {
-    localTimeZone = normalizeTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone, 'UTC');
-  } catch {
-    return configuredTimeZone;
-  }
-  if (localTimeZone === 'UTC' || !slot.startDate) {
-    return configuredTimeZone;
-  }
-  const localParts = getDateTimePartsInTimeZone(slot.startDate, localTimeZone);
-  const utcParts = getDateTimePartsInTimeZone(slot.startDate, configuredTimeZone);
-  if (!localParts || !utcParts) {
-    return configuredTimeZone;
-  }
-  const localStartMinutes = localParts.hour * 60 + localParts.minute;
-  const utcStartMinutes = utcParts.hour * 60 + utcParts.minute;
-  return localStartMinutes === slot.startTimeMinutes && utcStartMinutes !== slot.startTimeMinutes
-    ? localTimeZone
-    : configuredTimeZone;
-};
+
 const slotAllowsField = (
   slot: {
     scheduledFieldIds?: unknown;
@@ -238,115 +192,41 @@ const slotAllowsField = (
   fieldId: string,
 ): boolean => {
   const allowedFieldIds = normalizeSlotFieldIds(slot);
-  if (!allowedFieldIds.length) {
-    return true;
-  }
-  return allowedFieldIds.includes(fieldId);
+  return !allowedFieldIds.length || allowedFieldIds.includes(fieldId);
 };
 
-const slotAllowsDivision = (slot: { divisions?: Division[] }, divisionId: string): boolean => {
-  if (!Array.isArray(slot.divisions) || !slot.divisions.length) {
-    return true;
-  }
-  return slot.divisions.some((division) => division.id === divisionId);
-};
-
-const slotAllowsDate = (
-  slot: {
-    startDate: Date;
-    endDate: Date | null;
-    startTimeMinutes: number;
-    timeZone?: string | null;
-  },
-  matchStart: Date,
-): boolean => {
-  const timeZone = slotPredicateTimeZone(slot);
-  const matchParts = getDateTimePartsInTimeZone(matchStart, timeZone);
-  const slotStartParts = getDateTimePartsInTimeZone(slot.startDate, timeZone);
-  if (!matchParts || !slotStartParts) {
-    return false;
-  }
-  const matchDayMs = Date.UTC(matchParts.year, matchParts.month - 1, matchParts.day);
-  const slotStartMs = Date.UTC(slotStartParts.year, slotStartParts.month - 1, slotStartParts.day);
-  if (matchDayMs < slotStartMs) return false;
-  if (!slot.endDate) return true;
-  const slotEndParts = getDateTimePartsInTimeZone(slot.endDate, timeZone);
-  if (!slotEndParts) {
-    return false;
-  }
-  const slotEndMs = Date.UTC(slotEndParts.year, slotEndParts.month - 1, slotEndParts.day);
-  return matchDayMs <= slotEndMs;
-};
-
-const slotAllowsTime = (
-  slot: {
-    dayOfWeek?: number;
-    daysOfWeek?: number[];
-    startTimeMinutes: number;
-    endTimeMinutes: number;
-    timeZone?: string | null;
-  },
-  matchStart: Date,
-  matchEnd: Date,
-): boolean => {
-  const timeZone = slotPredicateTimeZone(slot);
-  const startParts = getDateTimePartsInTimeZone(matchStart, timeZone);
-  const endParts = getDateTimePartsInTimeZone(matchEnd, timeZone);
-  if (!startParts || !endParts) {
-    return false;
-  }
-  const allowedDays = normalizeSlotDayIndexes(slot);
-  const dayOfWeek = (new Date(Date.UTC(
-    startParts.year,
-    startParts.month - 1,
-    startParts.day,
-  )).getUTCDay() + 6) % 7;
-  if (allowedDays.length && !allowedDays.includes(dayOfWeek)) {
-    return false;
-  }
-  if (
-    startParts.year !== endParts.year
-    || startParts.month !== endParts.month
-    || startParts.day !== endParts.day
-  ) {
-    return false;
-  }
-  const startMinutes = startParts.hour * 60 + startParts.minute;
-  const endMinutes = endParts.hour * 60 + endParts.minute;
-  return startMinutes >= slot.startTimeMinutes && endMinutes <= slot.endTimeMinutes;
-};
+const slotAllowsDivision = (slot: { divisions?: Division[] }, divisionId: string): boolean => (
+  !Array.isArray(slot.divisions)
+  || !slot.divisions.length
+  || slot.divisions.some((division) => division.id === divisionId)
+);
 
 const slotAllowsDateTime = (
-  slot: {
-    repeating?: boolean;
-    startDate: Date;
-    endDate: Date | null;
-    dayOfWeek: number;
-    startTimeMinutes: number;
-    endTimeMinutes: number;
-    timeZone?: string | null;
-  },
+  slot: TimeSlot,
   matchStart: Date,
   matchEnd: Date,
 ): boolean => {
-  if (slot.repeating === false) {
-    if (!(slot.startDate instanceof Date) || Number.isNaN(slot.startDate.getTime())) {
-      return false;
-    }
-    if (!(slot.endDate instanceof Date) || Number.isNaN(slot.endDate.getTime())) {
-      return false;
-    }
-    const slotTimeZone = normalizeTimeZone(slot.timeZone, 'UTC');
-    const slotStart = dateWithMinutesInTimeZone(slot.startDate, slot.startTimeMinutes, slotTimeZone);
-    const slotEndBase = slot.endTimeMinutes > slot.startTimeMinutes ? slot.startDate : slot.endDate;
-    const slotEnd = dateWithMinutesInTimeZone(slotEndBase, slot.endTimeMinutes, slotTimeZone);
-    if (!slotStart || !slotEnd || slotEnd.getTime() <= slotStart.getTime()) {
-      return false;
-    }
-    return matchStart.getTime() >= slotStart.getTime()
-      && matchEnd.getTime() <= slotEnd.getTime();
+  if (matchEnd.getTime() <= matchStart.getTime()) {
+    return false;
   }
-  return slotAllowsDate(slot, matchStart) && slotAllowsTime(slot, matchStart, matchEnd);
+  try {
+    if (slot.repeating === false) {
+      const resolved = resolveOneTimeTimeSlot(slot, slot.timeZone);
+      return matchStart.getTime() >= resolved.start.getTime()
+        && matchEnd.getTime() <= resolved.end.getTime();
+    }
+    const occurrences = enumerateRepeatingTimeSlotOccurrences({
+      slot,
+      windowStart: matchStart,
+      windowEnd: matchEnd,
+    });
+    return occurrences.some((occurrence) => (
+      matchStart.getTime() >= occurrence.start.getTime()
+      && matchEnd.getTime() <= occurrence.end.getTime()
+    ));
+  } catch {
+    return false;
+  }
 };
 
 
