@@ -522,6 +522,9 @@ export interface Match {
   $id: string;
   matchId?: number;
   eventId?: string;
+  phase?: string | null;
+  sourceDivisionId?: string | null;
+  phaseDivisionId?: string | null;
   fieldId?: string | null;
   locked?: boolean;
   status?: MatchLifecycleStatus | string | null;

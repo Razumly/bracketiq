@@ -57,7 +57,8 @@ import {
   collectConnectedBracketMatchIds as collectConnectedMatchIds,
   getBracketDivisionId as getDivisionId,
   getBracketDivisionLabel as getDivisionLabel,
-  getBracketMatchDivisionId as getMatchDivisionId,
+  getBracketMatchDivisionId as getBracketPhaseDivisionId,
+  getBracketMatchSourceDivisionId as getMatchSourceDivisionId,
   getBracketMatchDivisionLabel as getMatchDivisionLabel,
   getBracketRootMatches,
   pickPreferredBracketRootMatch as pickPreferredRootMatch,
@@ -1052,7 +1053,7 @@ function EventScheduleContent() {
     const labels = new Map<string, string>(divisionLabelsByKey);
 
     activeMatches.forEach((match) => {
-      const divisionId = getMatchDivisionId(match);
+      const divisionId = getMatchSourceDivisionId(match);
       const divisionKey = toDivisionKey(divisionId);
       if (!divisionId || !divisionKey) {
         return;
@@ -1471,7 +1472,7 @@ function EventScheduleContent() {
 
   const scheduleMatches = useMemo(() => {
     if (tournamentPoolPlayEnabled && selectedScheduleDivision !== 'all' && selectedSchedulePool !== 'all') {
-      return activeMatches.filter((match) => toDivisionKey(getMatchDivisionId(match)) === selectedSchedulePool);
+      return activeMatches.filter((match) => toDivisionKey(getMatchSourceDivisionId(match)) === selectedSchedulePool);
     }
 
     if (selectedScheduleDivision === 'all') {
@@ -1481,13 +1482,13 @@ function EventScheduleContent() {
     if (tournamentPoolPlayEnabled) {
       const poolDivisionKeysForBracket = new Set(schedulePoolOptions.map((option) => option.value));
       return activeMatches.filter((match) => {
-        const matchDivisionKey = toDivisionKey(getMatchDivisionId(match));
+        const matchDivisionKey = toDivisionKey(getMatchSourceDivisionId(match));
         return matchDivisionKey === selectedScheduleDivision
           || Boolean(matchDivisionKey && poolDivisionKeysForBracket.has(matchDivisionKey));
       });
     }
 
-    return activeMatches.filter((match) => toDivisionKey(getMatchDivisionId(match)) === selectedScheduleDivision);
+    return activeMatches.filter((match) => toDivisionKey(getMatchSourceDivisionId(match)) === selectedScheduleDivision);
   }, [
     activeMatches,
     schedulePoolOptions,
@@ -3706,7 +3707,7 @@ function EventScheduleContent() {
 
     const rootsForDivision = selectedBracketDivision
       ? playoffRootMatches.filter(
-          (match) => toDivisionKey(getMatchDivisionId(match)) === selectedBracketDivision,
+          (match) => toDivisionKey(getBracketPhaseDivisionId(match)) === selectedBracketDivision,
         )
       : playoffRootMatches;
 
@@ -3820,7 +3821,7 @@ function EventScheduleContent() {
       if (playoffMatchIds.has(match.$id)) {
         return;
       }
-      if (selectedDivisionKey && toDivisionKey(getMatchDivisionId(match)) !== selectedDivisionKey) {
+      if (selectedDivisionKey && toDivisionKey(getMatchSourceDivisionId(match)) !== selectedDivisionKey) {
         return;
       }
 

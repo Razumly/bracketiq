@@ -3,6 +3,8 @@ export type BracketMatchLike = {
   $id?: string | null;
   matchId?: number | null;
   division?: unknown;
+  sourceDivisionId?: string | null;
+  phaseDivisionId?: string | null;
   team1?: { division?: unknown } | null;
   team2?: { division?: unknown } | null;
   previousLeftId?: string | null;
@@ -80,8 +82,25 @@ const resolveLinkedMatchId = (
   normalizeToken(idValue) ?? getBracketMatchId(relationValue)
 );
 
+const getSourceDivisionId = (value: unknown): string | null => {
+  if (!value || typeof value !== 'object') {
+    return getBracketDivisionId(value);
+  }
+
+  const division = value as { sourceDivisionId?: unknown };
+  return normalizeToken(division.sourceDivisionId) ?? getBracketDivisionId(value);
+};
+
+export const getBracketMatchSourceDivisionId = <T extends BracketMatchLike>(match: T): string | null => (
+  normalizeToken(match.sourceDivisionId)
+  ?? getSourceDivisionId(match.division)
+  ?? getSourceDivisionId(match.team1?.division)
+  ?? getSourceDivisionId(match.team2?.division)
+);
+
 export const getBracketMatchDivisionId = <T extends BracketMatchLike>(match: T): string | null => (
-  getBracketDivisionId(match.division)
+  normalizeToken(match.phaseDivisionId)
+  ?? getBracketDivisionId(match.division)
   ?? getBracketDivisionId(match.team1?.division)
   ?? getBracketDivisionId(match.team2?.division)
 );
