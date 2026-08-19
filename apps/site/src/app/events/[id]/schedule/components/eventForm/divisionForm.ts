@@ -20,6 +20,7 @@ import {
 } from '@/lib/divisionTypes';
 import { normalizePriceCents } from '@/lib/priceUtils';
 import { normalizeDivisionPhaseSettingsMap } from '@/lib/divisionPhaseSettings';
+import { evaluatePlayoffPlacementCapacities } from '@/lib/divisionCapacity';
 
 import {
     buildTournamentConfig,
@@ -258,39 +259,26 @@ export const buildPlayoffDivisionCapacityWarnings = ({
         return [];
     }
 
-    const assignmentCounts = new Map<string, number>();
     const playoffDivisions = Array.isArray(playoffDivisionDetails) ? playoffDivisionDetails : [];
-
-    (divisionDetails || []).forEach((division) => {
-        const playoffTeamCount = Number.isFinite(division.playoffTeamCount)
-            ? Math.max(0, Math.trunc(division.playoffTeamCount as number))
-            : 0;
-        const mapping = Array.isArray(division.playoffPlacementDivisionIds)
-            ? division.playoffPlacementDivisionIds
-            : [];
-        for (let index = 0; index < playoffTeamCount; index += 1) {
-            const mappedDivisionId = normalizeDivisionKeys([mapping[index]])[0];
-            if (!mappedDivisionId) {
-                continue;
-            }
-            assignmentCounts.set(mappedDivisionId, (assignmentCounts.get(mappedDivisionId) ?? 0) + 1);
-        }
-    });
-
-    return playoffDivisions
-        .map((division) => {
-            const normalizedId = normalizeDivisionKeys([division.id])[0];
-            if (!normalizedId) {
-                return null;
-            }
-            const assigned = assignmentCounts.get(normalizedId) ?? 0;
-            const capacity = normalizePlayoffDivisionParticipantCount(division.maxParticipants) ?? 0;
-            if (assigned > capacity) {
-                return `${division.name} has ${assigned} mapped teams but only ${capacity} slots.`;
-            }
-            return null;
-        })
-        .filter((message): message is string => Boolean(message));
+    return evaluatePlayoffPlacementCapacities(
+        (divisionDetails || []).map((division) => ({
+            placementCount: division.playoffTeamCount,
+            playoffDivisionIds: Array.isArray(division.playoffPlacementDivisionIds)
+                ? division.playoffPlacementDivisionIds
+                : [],
+        })),
+        playoffDivisions.map((division) => ({
+            playoffDivisionId: division.id,
+            capacity: normalizePlayoffDivisionParticipantCount(division.maxParticipants) ?? 0,
+            name: division.name,
+        })),
+        (value) => normalizeDivisionKeys([value])[0] ?? null,
+    )
+        .filter((result) => !result.matchesCapacity)
+        .map((result) => {
+            const slotLabel = result.capacity === 1 ? 'slot' : 'slots';
+            return `${result.name ?? 'Playoff division'} has ${result.mappedPositionCount} mapped teams for ${result.capacity ?? 0} ${slotLabel}.`;
+        });
 };
 
 export const normalizePlayoffDivisionParticipantCount = (value: unknown): number | null => {

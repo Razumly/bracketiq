@@ -1,4 +1,5 @@
 import { extractDivisionTokenFromId } from '@/lib/divisionTypes';
+import { evaluatePlayoffPlacementCapacities } from '@/lib/divisionCapacity';
 
 import { Brackets } from './Brackets';
 import { deriveStandingsMatchResult } from '@/lib/standingsMatchScoring';
@@ -561,56 +562,40 @@ const getPlayoffDivisionReferenceCapacity = (
 
 export const validatePlayoffDivisionReferenceCapacities = (league: StandingsAdvancementEvent): string[] => {
   const errors: string[] = [];
-  if (!league.includePlayoffs) {
-    return errors;
-  }
-  if (!usesSplitAdvancementDivisions(league)) {
+  if (!league.includePlayoffs || !usesSplitAdvancementDivisions(league)) {
     return errors;
   }
 
-  const referenceCounts = new Map<string, number>();
-  for (const division of league.divisions) {
-    const playoffTeamCount = getDivisionPlayoffTeamCount(league, division);
-    if (playoffTeamCount <= 0) {
-      continue;
-    }
-    const mapping = Array.isArray(division.playoffPlacementDivisionIds)
-      ? division.playoffPlacementDivisionIds
-      : [];
-
-    for (let index = 0; index < playoffTeamCount; index += 1) {
-      const referencedDivisionId = normalizeToken(mapping[index]);
+  const capacityResults = evaluatePlayoffPlacementCapacities(
+    league.divisions.map((division) => ({
+      placementCount: getDivisionPlayoffTeamCount(league, division),
+      playoffDivisionIds: Array.isArray(division.playoffPlacementDivisionIds)
+        ? division.playoffPlacementDivisionIds
+        : [],
+    })),
+    getPlayoffDivisions(league).map((division) => ({
+      playoffDivisionId: normalizeToken(division.id) ?? '',
+      capacity: getPlayoffDivisionReferenceCapacity(league, division),
+      name: division.name,
+    })),
+    (value) => {
+      const referencedDivisionId = normalizeToken(value);
       if (!referencedDivisionId) {
-        continue;
+        return null;
       }
-      const resolvedDivisionId = normalizeToken(
+      return normalizeToken(
         getPlayoffDivisionById(league, referencedDivisionId)?.id,
       ) ?? referencedDivisionId;
-      referenceCounts.set(
-        resolvedDivisionId,
-        (referenceCounts.get(resolvedDivisionId) ?? 0) + 1,
-      );
-    }
-  }
+    },
+  );
 
-  for (const playoffDivision of getPlayoffDivisions(league)) {
-    const normalizedPlayoffDivisionId = normalizeToken(playoffDivision.id);
-    if (!normalizedPlayoffDivisionId) {
+  for (const result of capacityResults) {
+    if (result.capacity === null || result.capacity <= 0) {
+      errors.push(`Playoff division "${result.name ?? result.playoffDivisionId}" must define a team count before assignments can be validated.`);
       continue;
     }
-    const assignedCount = referenceCounts.get(normalizedPlayoffDivisionId) ?? 0;
-    if (assignedCount <= 0) {
-      continue;
-    }
-
-    const capacity = getPlayoffDivisionReferenceCapacity(league, playoffDivision);
-    if (capacity <= 0) {
-      errors.push(`Playoff division "${playoffDivision.name}" must define a team count before assignments can be validated.`);
-      continue;
-    }
-
-    if (assignedCount > capacity) {
-      errors.push(`Playoff division "${playoffDivision.name}" has ${assignedCount} mapped positions but only ${capacity} team slots.`);
+    if (!result.matchesCapacity) {
+      errors.push(`Playoff division "${result.name ?? result.playoffDivisionId}" has ${result.mappedPositionCount} mapped positions but ${result.capacity} team slots.`);
     }
   }
 

@@ -325,7 +325,7 @@ describe('finalizeMatch (league)', () => {
       'Mixed Age Playoff',
       [],
       null,
-      8,
+      4,
       null,
       'PLAYOFF',
     );

@@ -858,6 +858,195 @@ describe('upsertEventFromPayload', () => {
     });
   });
 
+  it('rejects split playoff mappings that do not fill each playoff division', async () => {
+    const client = createMockClient();
+    const sourceDivisionId = divisionId('open');
+    const goldDivisionId = divisionId('gold');
+    const silverDivisionId = divisionId('silver');
+    const payload = {
+      ...baseEventPayload(),
+      eventType: 'LEAGUE',
+      includePlayoffs: true,
+      playoffTeamCount: 4,
+      singleDivision: false,
+      splitLeaguePlayoffDivisions: true,
+      divisions: [sourceDivisionId],
+      divisionDetails: [
+        {
+          id: sourceDivisionId,
+          key: 'open',
+          name: 'Open',
+          divisionTypeId: 'skill_open_age_18plus',
+          divisionTypeName: 'Open 18+',
+          ratingType: 'SKILL',
+          gender: 'C',
+          maxParticipants: 8,
+          playoffTeamCount: 4,
+          playoffPlacementDivisionIds: [
+            goldDivisionId,
+            silverDivisionId,
+            goldDivisionId,
+            silverDivisionId,
+          ],
+        },
+      ],
+      playoffDivisionDetails: [
+        {
+          id: goldDivisionId,
+          key: 'gold',
+          kind: 'PLAYOFF',
+          name: 'Gold',
+          maxParticipants: 4,
+        },
+        {
+          id: silverDivisionId,
+          key: 'silver',
+          kind: 'PLAYOFF',
+          name: 'Silver',
+          maxParticipants: 4,
+        },
+      ],
+    };
+
+    await expect(upsertEventFromPayload(payload, client as any)).rejects.toThrow(
+      'Playoff division "Gold" has 2 mapped positions but 4 team slots.',
+    );
+    expect(client.events.upsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects split playoff mappings when every placement mapping is omitted', async () => {
+    const client = createMockClient();
+    const sourceDivisionId = divisionId('open');
+    const goldDivisionId = divisionId('gold');
+    const payload = {
+      ...baseEventPayload(),
+      eventType: 'LEAGUE',
+      includePlayoffs: true,
+      playoffTeamCount: 4,
+      singleDivision: false,
+      splitLeaguePlayoffDivisions: true,
+      divisions: [sourceDivisionId],
+      divisionDetails: [
+        {
+          id: sourceDivisionId,
+          key: 'open',
+          name: 'Open',
+          divisionTypeId: 'skill_open_age_18plus',
+          divisionTypeName: 'Open 18+',
+          ratingType: 'SKILL',
+          gender: 'C',
+          maxParticipants: 8,
+          playoffTeamCount: 4,
+        },
+      ],
+      playoffDivisionDetails: [
+        {
+          id: goldDivisionId,
+          key: 'gold',
+          kind: 'PLAYOFF',
+          name: 'Gold',
+          maxParticipants: 4,
+        },
+      ],
+    };
+
+    await expect(upsertEventFromPayload(payload, client as any)).rejects.toThrow(
+      'Playoff division "Gold" has 0 mapped positions but 4 team slots.',
+    );
+    expect(client.events.upsert).not.toHaveBeenCalled();
+  });
+
+  it('uses persisted split playoff values when an update omits them', async () => {
+    const client = createMockClient();
+    const sourceDivisionId = divisionId('open');
+    const goldDivisionId = divisionId('gold');
+    const placementMapping = [
+      goldDivisionId,
+      goldDivisionId,
+      goldDivisionId,
+      goldDivisionId,
+    ];
+    client.events.findUnique.mockResolvedValueOnce({
+      fieldIds: ['field_1'],
+      timeSlotIds: [],
+      eventType: 'LEAGUE',
+      end: new Date('2026-03-05T09:00:00.000Z'),
+      noFixedEndDateTime: false,
+      hostId: 'host_1',
+      organizationId: null,
+      parentEvent: null,
+      officialPositions: [],
+      officialSchedulingMode: 'SCHEDULE',
+      sportIds: ['sport_1'],
+    });
+    client.divisions.findMany.mockResolvedValue([
+      {
+        id: sourceDivisionId,
+        key: 'open',
+        name: 'Open',
+        kind: 'LEAGUE',
+        role: 'ENTRY',
+        maxParticipants: 8,
+        playoffTeamCount: 4,
+        playoffPlacementDivisionIds: placementMapping,
+      },
+      {
+        id: goldDivisionId,
+        key: 'gold',
+        name: 'Gold',
+        kind: 'PLAYOFF',
+        role: 'PHASE',
+        maxParticipants: 4,
+        playoffTeamCount: null,
+        playoffPlacementDivisionIds: [],
+      },
+    ]);
+    const payload = {
+      ...baseEventPayload(),
+      includePlayoffs: true,
+      singleDivision: false,
+      splitLeaguePlayoffDivisions: true,
+      divisions: [sourceDivisionId],
+      divisionDetails: [
+        {
+          id: sourceDivisionId,
+          key: 'open',
+          name: 'Open',
+          divisionTypeId: 'skill_open_age_18plus',
+          divisionTypeName: 'Open 18+',
+          ratingType: 'SKILL',
+          gender: 'C',
+          maxParticipants: 8,
+        },
+      ],
+      playoffDivisionDetails: [
+        {
+          id: goldDivisionId,
+          key: 'gold',
+          kind: 'PLAYOFF',
+          name: 'Gold',
+        },
+      ],
+    };
+
+    await expect(upsertEventFromPayload(payload, client as any)).resolves.toBe('event_1');
+    expect(client.events.upsert).toHaveBeenCalledTimes(1);
+    expect(client.divisions.findMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          role: { in: ['ENTRY', 'PHASE'] },
+        }),
+      }),
+    );
+    expect(client.divisions.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: sourceDivisionId },
+      update: expect.objectContaining({
+        playoffPlacementDivisionIds: placementMapping,
+      }),
+    }));
+  });
+
   it('preserves tournament pool set config on bracket and generated pool divisions', async () => {
     const client = createMockClient();
     const bracketDivisionId = divisionId('m_skill_open_age_18plus');

@@ -13,6 +13,25 @@ export type DivisionCapacityBreakdownRow = DivisionCapacitySnapshot & {
   kind: string | null;
 };
 
+export type PlayoffPlacementSource = {
+  placementCount: number | null | undefined;
+  playoffDivisionIds: readonly unknown[];
+};
+
+export type PlayoffDivisionCapacityTarget = {
+  playoffDivisionId: string;
+  capacity: number | null | undefined;
+  name?: string | null;
+};
+
+export type PlayoffDivisionCapacityResult = {
+  playoffDivisionId: string;
+  mappedPositionCount: number;
+  capacity: number | null;
+  name: string | null;
+  matchesCapacity: boolean;
+};
+
 type DivisionCapacityEvent = Pick<Event, 'singleDivision' | 'divisionDetails' | 'maxParticipants'>
   & Partial<Pick<Event, 'playoffDivisionDetails' | 'eventType' | 'includePlayoffs' | 'includePlayoffsOrPools'>>;
 
@@ -39,6 +58,42 @@ const normalizeCapacity = (value: unknown): number | null => {
     return null;
   }
   return Math.max(0, Math.trunc(numeric));
+};
+
+export const evaluatePlayoffPlacementCapacities = (
+  sources: readonly PlayoffPlacementSource[],
+  targets: readonly PlayoffDivisionCapacityTarget[],
+  resolveReferenceId: (value: unknown) => string | null = normalizeDivisionToken,
+): PlayoffDivisionCapacityResult[] => {
+  const mappingCounts = new Map<string, number>();
+  for (const source of sources) {
+    const placementCount = normalizeCapacity(source.placementCount) ?? 0;
+    for (let index = 0; index < placementCount; index += 1) {
+      const resolvedId = normalizeDivisionToken(resolveReferenceId(source.playoffDivisionIds[index]));
+      if (!resolvedId) {
+        continue;
+      }
+      mappingCounts.set(resolvedId, (mappingCounts.get(resolvedId) ?? 0) + 1);
+    }
+  }
+
+  const results: PlayoffDivisionCapacityResult[] = [];
+  for (const target of targets) {
+    const playoffDivisionId = normalizeDivisionToken(target.playoffDivisionId);
+    if (!playoffDivisionId) {
+      continue;
+    }
+    const mappedPositionCount = mappingCounts.get(playoffDivisionId) ?? 0;
+    const capacity = normalizeCapacity(target.capacity);
+    results.push({
+      playoffDivisionId,
+      mappedPositionCount,
+      name: target.name ?? null,
+      capacity,
+      matchesCapacity: capacity !== null && mappedPositionCount === capacity,
+    });
+  }
+  return results;
 };
 
 const normalizeIdList = (values: unknown): string[] => {

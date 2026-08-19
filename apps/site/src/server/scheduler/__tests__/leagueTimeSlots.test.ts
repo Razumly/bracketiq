@@ -1668,7 +1668,16 @@ describe('league scheduling (time slots)', () => {
   });
 
   it('places split playoff divisions without a phase-wide placement barrier', () => {
-    const mixedAge = new Division('mixed_age', 'Mixed Age', [], null, 4, 2, 'LEAGUE');
+    const mixedAge = new Division(
+      'mixed_age',
+      'Mixed Age',
+      [],
+      null,
+      4,
+      4,
+      'LEAGUE',
+      ['mixed_age_playoff', 'mixed_age_playoff', 'mixed_age_playoff', 'mixed_age_playoff'],
+    );
     const mixedAgePlayoff = new Division('mixed_age_playoff', 'Mixed Age Playoff', [], null, 4, null, 'PLAYOFF');
     const fieldRegular = buildFieldById('field_mixed_age_regular', mixedAge);
     const fieldPlayoff = buildFieldById('field_mixed_age_playoff', mixedAgePlayoff);
@@ -1746,9 +1755,18 @@ describe('league scheduling (time slots)', () => {
       [],
       null,
       8,
-      2,
+      8,
       'LEAGUE',
-      ['mixed_age_playoff_mapped_slots', 'mixed_age_playoff_mapped_slots'],
+      [
+        'mixed_age_playoff_mapped_slots',
+        'mixed_age_playoff_mapped_slots',
+        'mixed_age_playoff_mapped_slots',
+        'mixed_age_playoff_mapped_slots',
+        'mixed_age_playoff_mapped_slots',
+        'mixed_age_playoff_mapped_slots',
+        'mixed_age_playoff_mapped_slots',
+        'mixed_age_playoff_mapped_slots',
+      ],
     );
     const mixedAgePlayoff = new Division('mixed_age_playoff_mapped_slots', 'Mixed Age Playoff', [], null, 8, null, 'PLAYOFF');
     const fieldRegular = buildFieldById('field_mixed_age_regular_mapped', mixedAge);
@@ -1800,6 +1818,147 @@ describe('league scheduling (time slots)', () => {
 
     expect(playoffMatches.length).toBeGreaterThan(0);
     expect(playoffMatches.every((match) => match.field?.id === fieldRegular.id)).toBe(true);
+  });
+
+  it('ignores persisted playoff seeds when validating split league team assignments', () => {
+    const open = new Division(
+      'open_with_persisted_playoff_seeds',
+      'Open',
+      [],
+      null,
+      8,
+      8,
+      'LEAGUE',
+      [
+        'gold_with_persisted_seeds',
+        'silver_with_persisted_seeds',
+        'gold_with_persisted_seeds',
+        'silver_with_persisted_seeds',
+        'gold_with_persisted_seeds',
+        'silver_with_persisted_seeds',
+        'gold_with_persisted_seeds',
+        'silver_with_persisted_seeds',
+      ],
+    );
+    const gold = new Division(
+      'gold_with_persisted_seeds',
+      'Gold',
+      [],
+      null,
+      4,
+      null,
+      'PLAYOFF',
+    );
+    const silver = new Division(
+      'silver_with_persisted_seeds',
+      'Silver',
+      [],
+      null,
+      4,
+      null,
+      'PLAYOFF',
+    );
+    const registeredTeams = buildTeamsForDivision('registered', 8, open);
+    open.teamIds = Object.keys(registeredTeams);
+    const persistedPlayoffSeeds: Record<string, Team> = {};
+    for (const division of [gold, silver]) {
+      for (let seed = 1; seed <= 4; seed += 1) {
+        const safeDivisionId = division.id
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-');
+        const id = `playoff-${safeDivisionId}-${seed}`;
+        persistedPlayoffSeeds[id] = new Team({
+          id,
+          captainId: '',
+          kind: 'PLACEHOLDER',
+          division: open,
+          name: `Seed ${seed}`,
+          matches: [],
+        });
+        division.teamIds.push(id);
+      }
+    }
+    const teams = {
+      ...registeredTeams,
+      ...persistedPlayoffSeeds,
+    };
+    const regularField = buildFieldById('field_open_with_persisted_seeds', open);
+    const goldField = buildFieldById('field_gold_with_persisted_seeds', gold);
+    const silverField = buildFieldById('field_silver_with_persisted_seeds', silver);
+    const league = new League({
+      id: 'league_with_persisted_playoff_seeds',
+      name: 'League With Persisted Playoff Seeds',
+      start: new Date(2026, 0, 5, 8, 0, 0),
+      end: new Date(2026, 2, 30, 22, 0, 0),
+      noFixedEndDateTime: false,
+      maxParticipants: 8,
+      teamSignup: true,
+      eventType: 'LEAGUE',
+      singleDivision: false,
+      teams,
+      registeredTeamIds: [],
+      divisions: [open],
+      playoffDivisions: [gold, silver],
+      splitLeaguePlayoffDivisions: true,
+      officials: [],
+      fields: {
+        [regularField.id]: regularField,
+        [goldField.id]: goldField,
+        [silverField.id]: silverField,
+      },
+      timeSlots: [
+        new TimeSlot({
+          id: 'slot_open_with_persisted_seeds',
+          dayOfWeek: 0,
+          startDate: new Date(2026, 0, 5),
+          repeating: true,
+          startTimeMinutes: 8 * 60,
+          endTimeMinutes: 20 * 60,
+          field: regularField.id,
+          divisions: [open],
+        }),
+        new TimeSlot({
+          id: 'slot_gold_with_persisted_seeds',
+          dayOfWeek: 1,
+          startDate: new Date(2026, 0, 5),
+          repeating: true,
+          startTimeMinutes: 8 * 60,
+          endTimeMinutes: 20 * 60,
+          field: goldField.id,
+          divisions: [gold],
+        }),
+        new TimeSlot({
+          id: 'slot_silver_with_persisted_seeds',
+          dayOfWeek: 1,
+          startDate: new Date(2026, 0, 5),
+          repeating: true,
+          startTimeMinutes: 8 * 60,
+          endTimeMinutes: 20 * 60,
+          field: silverField.id,
+          divisions: [silver],
+        }),
+      ],
+      doTeamsOfficiate: false,
+      gamesPerOpponent: 1,
+      includePlayoffs: true,
+      playoffTeamCount: 8,
+      doubleElimination: false,
+      usesSets: false,
+      matchDurationMinutes: 60,
+      restTimeMinutes: 0,
+      leagueScoringConfig: { pointsForWin: 3, pointsForDraw: 1, pointsForLoss: 0 },
+    });
+
+    const scheduled = scheduleEvent(
+      { event: league, includePlaceholderTeams: true },
+      context,
+    );
+    const goldMatches = scheduled.matches.filter((match) => match.division.id === gold.id);
+    const silverMatches = scheduled.matches.filter((match) => match.division.id === silver.id);
+
+    expect(scheduled.matches).toHaveLength(34);
+    expect(goldMatches).toHaveLength(3);
+    expect(silverMatches).toHaveLength(3);
   });
 
   it('fails fast when split playoffs are enabled without playoff divisions', () => {
@@ -1854,13 +2013,31 @@ describe('league scheduling (time slots)', () => {
   });
 
   it('schedules split playoff divisions in parallel when they share the same playoff window', () => {
-    const mixedAge = new Division('mixed_age_parallel', 'Mixed Age', [], null, 4, 2, 'LEAGUE');
+    const mixedAge = new Division(
+      'mixed_age_parallel',
+      'Mixed Age',
+      [],
+      null,
+      8,
+      8,
+      'LEAGUE',
+      [
+        'mixed_age_playoff_a',
+        'mixed_age_playoff_a',
+        'mixed_age_playoff_a',
+        'mixed_age_playoff_a',
+        'mixed_age_playoff_b',
+        'mixed_age_playoff_b',
+        'mixed_age_playoff_b',
+        'mixed_age_playoff_b',
+      ],
+    );
     const playoffA = new Division('mixed_age_playoff_a', 'Mixed Age Playoff A', [], null, 4, null, 'PLAYOFF');
     const playoffB = new Division('mixed_age_playoff_b', 'Mixed Age Playoff B', [], null, 4, null, 'PLAYOFF');
     const fieldRegular = buildFieldById('field_mixed_age_regular_parallel', mixedAge);
     const fieldPlayoffA = buildFieldById('field_mixed_age_playoff_a_parallel', playoffA);
     const fieldPlayoffB = buildFieldById('field_mixed_age_playoff_b_parallel', playoffB);
-    const teams = buildTeams(4, mixedAge);
+    const teams = buildTeams(8, mixedAge);
 
     const league = new League({
       id: 'league_split_playoff_parallel_start',
@@ -1868,7 +2045,7 @@ describe('league scheduling (time slots)', () => {
       start: new Date(2026, 0, 5, 8, 0, 0),
       end: new Date(2026, 2, 30, 22, 0, 0),
       noFixedEndDateTime: false,
-      maxParticipants: 4,
+      maxParticipants: 8,
       teamSignup: true,
       eventType: 'LEAGUE',
       singleDivision: false,

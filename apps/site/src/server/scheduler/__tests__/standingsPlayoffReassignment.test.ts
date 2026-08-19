@@ -364,9 +364,9 @@ describe('standings playoff reassignment', () => {
       [],
       null,
       4,
-      2,
+      4,
       'LEAGUE',
-      ['playoff_2', 'playoff_2'],
+      ['playoff_2', 'playoff_2', 'playoff_2', 'playoff_2'],
     );
     const west = new Division(
       'west',
@@ -374,9 +374,9 @@ describe('standings playoff reassignment', () => {
       [],
       null,
       4,
-      2,
+      4,
       'LEAGUE',
-      ['playoff_2', 'playoff_2'],
+      ['playoff_2', 'playoff_2', 'playoff_2', 'playoff_2'],
     );
     west.standingsConfirmedAt = new Date('2026-01-15T00:00:00.000Z');
     west.standingsConfirmedBy = 'host_1';
@@ -446,7 +446,7 @@ describe('standings playoff reassignment', () => {
 
     const reassignment = applyLeagueDivisionPlayoffReassignment(scheduledLeague, east.id, context);
     const assignedTeamIds = reassignment.teamIdsByPlayoffDivision[playoffTwo.id] ?? [];
-    expect(assignedTeamIds.length).toBe(4);
+    expect(assignedTeamIds.length).toBe(8);
 
     const assignedCounts = new Map<string, number>();
     const reassignedMatches = getPlayoffMatches(scheduledLeague, playoffTwo.id);
@@ -623,7 +623,65 @@ describe('standings playoff reassignment', () => {
     });
 
     expect(validatePlayoffDivisionReferenceCapacities(tournament)).toEqual([
-      'Playoff division "Open" has 6 mapped positions but only 4 team slots.',
+      'Playoff division "Open" has 6 mapped positions but 4 team slots.',
+    ]);
+
+    bracketOpen.playoffTeamCount = 8;
+    expect(validatePlayoffDivisionReferenceCapacities(tournament)).toEqual([
+      'Playoff division "Open" has 6 mapped positions but 8 team slots.',
+    ]);
+  });
+
+  it('rejects split playoff capacity when every placement mapping is empty', () => {
+    const open = new Division(
+      'open_without_playoff_mappings',
+      'Open',
+      [],
+      null,
+      4,
+      4,
+      'LEAGUE',
+      [],
+    );
+    const gold = new Division(
+      'gold_without_playoff_mappings',
+      'Gold',
+      [],
+      null,
+      4,
+      null,
+      'PLAYOFF',
+    );
+    const league = new League({
+      id: 'league_without_playoff_mappings',
+      name: 'League Without Playoff Mappings',
+      start: new Date('2026-01-05T08:00:00.000Z'),
+      end: new Date('2026-03-30T22:00:00.000Z'),
+      noFixedEndDateTime: false,
+      maxParticipants: 4,
+      teamSignup: true,
+      eventType: 'LEAGUE',
+      singleDivision: false,
+      teams: {},
+      divisions: [open],
+      playoffDivisions: [gold],
+      splitLeaguePlayoffDivisions: true,
+      officials: [],
+      fields: {},
+      timeSlots: [],
+      doTeamsOfficiate: false,
+      gamesPerOpponent: 1,
+      includePlayoffs: true,
+      playoffTeamCount: 4,
+      doubleElimination: false,
+      usesSets: false,
+      matchDurationMinutes: 60,
+      restTimeMinutes: 0,
+      leagueScoringConfig: { pointsForWin: 3, pointsForDraw: 1, pointsForLoss: 0 },
+    });
+
+    expect(validatePlayoffDivisionReferenceCapacities(league)).toEqual([
+      'Playoff division "Gold" has 0 mapped positions but 4 team slots.',
     ]);
   });
 

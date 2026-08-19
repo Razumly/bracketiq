@@ -4,6 +4,7 @@ import {
   type StaffingDiagnostic,
 } from './officialStaffing';
 import { ScheduleError } from './scheduleErrors';
+import { validatePlayoffDivisionReferenceCapacities } from './standings';
 import { TimeSlotValidationError, type ResolvedOneTimeTimeSlot } from '@/lib/timeSlotAvailability';
 import {
   Division,
@@ -124,6 +125,17 @@ const normalizeLeagueRosterTeamIds = (
   const source = Array.isArray(league.registeredTeamIds) && league.registeredTeamIds.length
     ? league.registeredTeamIds
     : Object.keys(league.teams);
+  const playoffDivisionIds = new Set(
+    (league.playoffDivisions ?? [])
+      .map((division) => String(division.id ?? '').trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const playoffParticipantTeamIds = new Set(
+    (league.playoffDivisions ?? [])
+      .flatMap((division) => division.teamIds)
+      .map((teamId) => normalizeTeamId(teamId))
+      .filter((teamId): teamId is string => Boolean(teamId)),
+  );
   return Array.from(
     new Set(
       source
@@ -131,7 +143,20 @@ const normalizeLeagueRosterTeamIds = (
         .filter((teamId): teamId is string => Boolean(teamId))
         .filter((teamId) => Boolean(league.teams[teamId])),
     ),
-  ).filter((teamId) => includePlaceholderTeams || !isPlaceholderSchedulerTeam(league.teams[teamId]));
+  ).filter((teamId) => {
+    const team = league.teams[teamId];
+    if (!isPlaceholderSchedulerTeam(team)) {
+      return true;
+    }
+    if (!includePlaceholderTeams) {
+      return false;
+    }
+    if (playoffParticipantTeamIds.has(teamId)) {
+      return false;
+    }
+    const teamDivisionId = String(team?.division?.id ?? '').trim().toLowerCase();
+    return !playoffDivisionIds.has(teamDivisionId);
+  });
 };
 
 const applyRosterToLeagueTeams = (
@@ -537,6 +562,10 @@ const buildLeagueSchedule = (
   openEndedSchedule: boolean,
   includePlaceholderTeams: boolean,
 ): ScheduleResult => {
+  const playoffMappingErrors = validatePlayoffDivisionReferenceCapacities(league);
+  if (playoffMappingErrors.length > 0) {
+    throw new ScheduleError(playoffMappingErrors.join(' '), 'PLAYING_TEAM');
+  }
   const rosterTeamIds = normalizeLeagueRosterTeamIds(league, includePlaceholderTeams);
   const splitDivisionMode = !league.singleDivision && league.divisions.length > 0;
 

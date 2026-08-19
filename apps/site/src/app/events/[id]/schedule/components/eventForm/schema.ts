@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import type { LeagueSlotForm } from '@/app/discover/components/LeagueFields';
 import { parseDateTimeInTimeZone, parseLocalDateTime } from '@/lib/dateUtils';
+import { evaluatePlayoffPlacementCapacities } from '@/lib/divisionCapacity';
 import {
     hasWeeklyRepeatingTimeSlot,
     WEEKLY_REPEATING_TIME_SLOT_REQUIRED_MESSAGE,
@@ -615,7 +616,6 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                             division,
                         ]),
                     );
-                    const mappingReferences = new Map<string, number>();
 
                     values.divisionDetails.forEach((detail, index) => {
                         if (!(typeof detail.playoffTeamCount === 'number' && detail.playoffTeamCount >= 2)) {
@@ -648,16 +648,33 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                                 });
                                 continue;
                             }
-                            mappingReferences.set(mappedDivisionId, (mappingReferences.get(mappedDivisionId) ?? 0) + 1);
                         }
                     });
+
+                    const capacityByDivisionId = new Map(
+                        evaluatePlayoffPlacementCapacities(
+                            values.divisionDetails.map((detail) => ({
+                                placementCount: detail.playoffTeamCount,
+                                playoffDivisionIds: Array.isArray(detail.playoffPlacementDivisionIds)
+                                    ? detail.playoffPlacementDivisionIds
+                                    : [],
+                            })),
+                            values.playoffDivisionDetails.map((division) => ({
+                                playoffDivisionId: normalizeDivisionKeys([division.id])[0] ?? '',
+                                capacity: normalizePlayoffDivisionParticipantCount(division.maxParticipants),
+                                name: division.name,
+                            })),
+                            (value) => normalizeDivisionKeys([value])[0] ?? null,
+                        ).map((result) => [result.playoffDivisionId, result]),
+                    );
 
                     values.playoffDivisionDetails.forEach((division, index) => {
                         const normalizedId = normalizeDivisionKeys([division.id])[0];
                         if (!normalizedId) {
                             return;
                         }
-                        const assignedCount = mappingReferences.get(normalizedId) ?? 0;
+                        const capacityResult = capacityByDivisionId.get(normalizedId);
+                        const assignedCount = capacityResult?.mappedPositionCount ?? 0;
                         const capacity = normalizePlayoffDivisionParticipantCount(division.maxParticipants);
                         if (typeof capacity !== 'number' || capacity < 2) {
                             ctx.addIssue({
@@ -669,10 +686,10 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                             });
                             return;
                         }
-                        if (assignedCount > capacity) {
+                        if (!capacityResult?.matchesCapacity) {
                             ctx.addIssue({
                                 code: "custom",
-                                message: `Playoff division "${division.name}" has ${assignedCount} mapped positions but only ${capacity} slots.`,
+                                message: `Playoff division "${division.name}" has ${assignedCount} mapped positions but ${capacity} team slots.`,
                                 path: ['playoffDivisionDetails', index, 'maxParticipants'],
                             });
                         }

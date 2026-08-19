@@ -34,6 +34,7 @@ import {
   type DivisionGender,
   type DivisionRatingType,
 } from "@/lib/divisionTypes";
+import { evaluatePlayoffPlacementCapacities } from "@/lib/divisionCapacity";
 import {
   BlockingEvent,
   Division,
@@ -1750,6 +1751,107 @@ const normalizeDivisionDetailsPayload = (
     unique.push(detail);
   }
   return unique;
+};
+
+type PersistedSplitLeagueDivisionDetail = {
+  id: string;
+  key: string | null;
+  maxParticipants: number | null;
+  playoffTeamCount: number | null;
+  playoffPlacementDivisionIds: string[];
+};
+
+const assertSplitLeaguePlayoffMappingCounts = ({
+  divisionDetails,
+  playoffDivisionDetails,
+  persistedDivisionDetails,
+  defaultPlayoffTeamCount,
+  defaultMaxParticipants,
+}: {
+  divisionDetails: DivisionDetailPayload[];
+  playoffDivisionDetails: DivisionDetailPayload[];
+  persistedDivisionDetails: PersistedSplitLeagueDivisionDetail[];
+  defaultPlayoffTeamCount: number | null;
+  defaultMaxParticipants: number | null;
+}): void => {
+  if (divisionDetails.length === 0 || playoffDivisionDetails.length === 0) {
+    return;
+  }
+
+  const persistedByIdentifier = new Map<
+    string,
+    PersistedSplitLeagueDivisionDetail
+  >();
+  for (const detail of persistedDivisionDetails) {
+    const aliases = [
+      normalizeDivisionKey(detail.id),
+      normalizeDivisionKey(detail.key),
+      extractDivisionTokenFromId(detail.id),
+    ];
+    for (const alias of aliases) {
+      if (alias) {
+        persistedByIdentifier.set(alias, detail);
+      }
+    }
+  }
+
+  const findPersistedDetail = (
+    detail: DivisionDetailPayload,
+  ): PersistedSplitLeagueDivisionDetail | undefined => {
+    const aliases = [
+      normalizeDivisionKey(detail.id),
+      normalizeDivisionKey(detail.key),
+      extractDivisionTokenFromId(detail.id),
+    ];
+    for (const alias of aliases) {
+      const persisted = alias ? persistedByIdentifier.get(alias) : undefined;
+      if (persisted) {
+        return persisted;
+      }
+    }
+    return undefined;
+  };
+
+  const capacityResults = evaluatePlayoffPlacementCapacities(
+    divisionDetails.map((detail) => {
+      const persisted = findPersistedDetail(detail);
+      return {
+        placementCount: resolveDivisionValue(
+          detail.playoffTeamCount,
+          persisted?.playoffTeamCount,
+          defaultPlayoffTeamCount ?? undefined,
+        ),
+        playoffDivisionIds:
+          resolveDivisionValue(
+            detail.playoffPlacementDivisionIds,
+            persisted?.playoffPlacementDivisionIds,
+            [],
+          ) ?? [],
+      };
+    }),
+    playoffDivisionDetails.map((detail) => {
+      const persisted = findPersistedDetail(detail);
+      return {
+        playoffDivisionId: detail.id,
+        capacity: resolveDivisionValue(
+          detail.maxParticipants,
+          persisted?.maxParticipants,
+          defaultMaxParticipants ?? undefined,
+        ),
+        name: detail.name,
+      };
+    }),
+    normalizeDivisionKey,
+  );
+
+  for (const result of capacityResults) {
+    if (result.capacity === null || result.matchesCapacity) {
+      continue;
+    }
+    throw new Error(
+      `Playoff division "${result.name ?? result.playoffDivisionId}" has ${result.mappedPositionCount} mapped positions but ${result.capacity} team slots.`,
+    );
+  }
 };
 
 const requireExplicitLeaguePlayoffTeamCount = (
@@ -5250,11 +5352,11 @@ export const syncEventDivisions = async (
     });
   }
 
-  const existingRows = (
+  const persistedRows = (
     await client.divisions.findMany({
       where: {
         eventId: params.eventId,
-        role: "ENTRY",
+        role: { in: ["ENTRY", "PHASE"] },
         status: "ACTIVE",
       },
       select: {
@@ -5309,11 +5411,25 @@ export const syncEventDivisions = async (
         fieldIds: true,
       },
     })
-  ).filter((row: any) => String(row.role ?? "").toUpperCase() !== "PHASE");
+  );
+  const existingRows = persistedRows.filter(
+    (row: any) => String(row.role ?? "").toUpperCase() !== "PHASE",
+  );
+  const existingLookupRows = persistedRows.filter(
+    (row: any) =>
+      String(row.role ?? "").toUpperCase() !== "PHASE" ||
+      normalizeDivisionKind(row.kind, "LEAGUE") === "PLAYOFF",
+  );
 
-  const existingById = new Map<string, (typeof existingRows)[number]>();
-  const existingByKey = new Map<string, (typeof existingRows)[number]>();
-  for (const row of existingRows) {
+  const existingById = new Map<
+    string,
+    (typeof existingLookupRows)[number]
+  >();
+  const existingByKey = new Map<
+    string,
+    (typeof existingLookupRows)[number]
+  >();
+  for (const row of existingLookupRows) {
     const normalizedId = normalizeDivisionKey(row.id);
     if (normalizedId) {
       existingById.set(normalizedId, row);
@@ -5413,13 +5529,10 @@ export const syncEventDivisions = async (
   }
 
   const hasMultipleRegularDivisions = divisionIds.length > 1;
+  const usesPerDivisionPlayoffTeamCount =
+    hasMultipleRegularDivisions || normalizedPlayoffDetails.length > 0;
   if (params.includePlayoffs && !tournamentPoolPlayEnabled) {
-    if (!hasMultipleRegularDivisions) {
-      requireExplicitLeaguePlayoffTeamCount(
-        params.defaultPlayoffTeamCount,
-        "Playoff team count must be at least 2 when playoffs are enabled.",
-      );
-    } else {
+    if (usesPerDivisionPlayoffTeamCount) {
       for (const rawDivisionId of divisionIds) {
         const normalizedDivisionId =
           normalizeDivisionKey(rawDivisionId) ?? rawDivisionId;
@@ -5449,6 +5562,11 @@ export const syncEventDivisions = async (
           `Playoff team count must be at least 2 for division "${divisionLabel}" when playoffs are enabled.`,
         );
       }
+    } else {
+      requireExplicitLeaguePlayoffTeamCount(
+        params.defaultPlayoffTeamCount,
+        "Playoff team count must be at least 2 when playoffs are enabled.",
+      );
     }
   }
 
@@ -7168,6 +7286,47 @@ export const upsertEventFromPayload = async (
     !isManualRegistrationPayment
       ? normalizeInstallmentAmountList(payload.installmentAmounts)
       : [];
+
+  if (
+    nextEventType === "LEAGUE" &&
+    includePlayoffsOrPools &&
+    splitLeaguePlayoffDivisions
+  ) {
+    const needsPersistedDivisionDetails =
+      Boolean(existingEvent) &&
+      (normalizedDivisionDetails.some(
+        (detail) =>
+          detail.playoffTeamCount === undefined ||
+          detail.playoffPlacementDivisionIds === undefined,
+      ) ||
+        normalizedPlayoffDivisionDetails.some(
+          (detail) => detail.maxParticipants === undefined,
+        ));
+    const persistedDivisionDetails = needsPersistedDivisionDetails
+      ? ((await client.divisions.findMany({
+          where: {
+            eventId: id,
+            role: { in: ["ENTRY", "PHASE"] },
+            status: "ACTIVE",
+          },
+          select: {
+            id: true,
+            key: true,
+            maxParticipants: true,
+            playoffTeamCount: true,
+            playoffPlacementDivisionIds: true,
+          },
+        })) as PersistedSplitLeagueDivisionDetail[])
+      : [];
+
+    assertSplitLeaguePlayoffMappingCounts({
+      divisionDetails: normalizedDivisionDetails,
+      playoffDivisionDetails: normalizedPlayoffDivisionDetails,
+      persistedDivisionDetails,
+      defaultPlayoffTeamCount: defaultDivisionPlayoffTeamCount,
+      defaultMaxParticipants: defaultDivisionMaxParticipants,
+    });
+  }
 
   await upsertEventWithSchemaContract(
     client,

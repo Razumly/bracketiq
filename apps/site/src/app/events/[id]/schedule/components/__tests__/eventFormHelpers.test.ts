@@ -1622,7 +1622,10 @@ describe('event form division helpers', () => {
         }),
       ],
       playoffDivisionDetails: playoffDivisions,
-    })).toEqual(['Gold has 2 mapped teams but only 1 slots.']);
+    })).toEqual([
+      'Gold has 2 mapped teams for 1 slot.',
+      'Silver has 0 mapped teams for 4 slots.',
+    ]);
     expect(buildPlayoffDivisionCapacityWarnings({
       eventType: 'TOURNAMENT',
       includePlayoffs: true,
@@ -1630,6 +1633,62 @@ describe('event form division helpers', () => {
       divisionDetails: [],
       playoffDivisionDetails: playoffDivisions,
     })).toEqual([]);
+  });
+
+  it('rejects split playoff mappings that do not fill each playoff division', () => {
+    const schema = buildEventFormSchema({
+      allowMissingEventImage: true,
+      allowMissingEventDivisions: true,
+    });
+    const result = schema.safeParse(makeAffiliateEventFormValues({
+      isAffiliateEvent: false,
+      affiliateUrl: '',
+      eventType: 'LEAGUE',
+      singleDivision: false,
+      splitLeaguePlayoffDivisions: true,
+      divisions: ['open'],
+      divisionDetails: [
+        makeDivisionDetail({
+          id: 'open',
+          playoffTeamCount: 4,
+          playoffPlacementDivisionIds: ['gold', 'silver', 'gold', 'silver'],
+        }),
+      ],
+      playoffDivisionDetails: [
+        {
+          id: 'gold',
+          key: 'gold',
+          kind: 'PLAYOFF',
+          name: 'Gold',
+          maxParticipants: 4,
+          playoffConfig: {},
+        },
+        {
+          id: 'silver',
+          key: 'silver',
+          kind: 'PLAYOFF',
+          name: 'Silver',
+          maxParticipants: 4,
+          playoffConfig: {},
+        },
+      ],
+      leagueData: {
+        gamesPerOpponent: 1,
+        includePlayoffs: true,
+      },
+    }));
+
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        message: 'Playoff division "Gold" has 2 mapped positions but 4 team slots.',
+        path: ['playoffDivisionDetails', 0, 'maxParticipants'],
+      }),
+      expect.objectContaining({
+        message: 'Playoff division "Silver" has 2 mapped positions but 4 team slots.',
+        path: ['playoffDivisionDetails', 1, 'maxParticipants'],
+      }),
+    ]));
   });
 
   it('derives schedule participant count from single or split division capacity', () => {
