@@ -176,8 +176,8 @@ const buildTournamentPoolFixture = () => {
   const pool: any = {
     id: 'pool_1',
     name: 'Pool A',
-    playoffTeamCount: 1,
-    playoffPlacementDivisionIds: ['bracket_1'],
+    playoffTeamCount: 3,
+    playoffPlacementDivisionIds: ['bracket_1', 'bracket_1', 'bracket_1'],
     standingsOverrides: null,
     standingsConfirmedAt: null,
     standingsConfirmedBy: null,
@@ -185,8 +185,8 @@ const buildTournamentPoolFixture = () => {
   const otherPool: any = {
     id: 'pool_2',
     name: 'Pool B',
-    playoffTeamCount: 1,
-    playoffPlacementDivisionIds: ['bracket_1'],
+    playoffTeamCount: 3,
+    playoffPlacementDivisionIds: ['bracket_1', 'bracket_1', 'bracket_1'],
     standingsOverrides: null,
     standingsConfirmedAt: null,
     standingsConfirmedBy: null,
@@ -194,8 +194,8 @@ const buildTournamentPoolFixture = () => {
   const bracket: any = {
     id: 'bracket_1',
     name: 'Open Bracket',
-    maxParticipants: 4,
-    playoffTeamCount: 2,
+    maxParticipants: 6,
+    playoffTeamCount: 6,
   };
   const team1: any = {
     id: 'team_1',
@@ -271,7 +271,7 @@ const buildTournamentPoolFixture = () => {
     id: 'event_1',
     eventType: 'TOURNAMENT',
     includePlayoffs: true,
-    playoffTeamCount: 2,
+    playoffTeamCount: 6,
     splitLeaguePlayoffDivisions: true,
     divisions: [pool, otherPool],
     playoffDivisions: [bracket],

@@ -19,6 +19,8 @@ import {
     DIVISION_NUMBER_FIELD_CLASS,
     DIVISION_PRICE_FIELD_CLASS,
 } from '../divisionLayout';
+import { MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
+import { BRACKET_TEAM_COUNT_ERROR } from '../divisionMessages';
 
 type DivisionEditorCoreControlsProps = {
     gender: string;
@@ -143,12 +145,12 @@ export const DivisionEditorCoreControls = ({
         >
             <NumberInput
                 label={teamSignup ? 'Division Max Teams' : 'Division Max Participants'}
-                min={0}
+                min={eventType === 'TOURNAMENT' ? MIN_BRACKET_TEAM_COUNT : 0}
                 max={maxStandardNumber}
                 value={maxParticipants ?? ''}
                 w="100%"
                 styles={DIVISION_ALIGNED_INPUT_STYLES}
-                clampBehavior="strict"
+                clampBehavior={eventType === 'TOURNAMENT' ? 'none' : 'strict'}
                 disabled={divisionsImmutable || !divisionEditorReady}
                 onChange={(value) => {
                     if (divisionsImmutable || !divisionEditorReady) {
@@ -156,6 +158,12 @@ export const DivisionEditorCoreControls = ({
                     }
                     onMaxParticipantsChange(value);
                 }}
+                error={
+                    eventType === 'TOURNAMENT'
+                    && !(typeof maxParticipants === 'number' && maxParticipants >= MIN_BRACKET_TEAM_COUNT)
+                        ? BRACKET_TEAM_COUNT_ERROR
+                        : undefined
+                }
             />
             {divisionMaxParticipantsWarning ? (
                 <Text size="xs" c="orange.7" mt={4}>

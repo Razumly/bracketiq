@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.resolveEventResourceLabels
+import com.razumly.mvp.core.data.dataTypes.withDefaultPlayoffTeamCounts
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventEditorCanonicalState
 import com.razumly.mvp.core.data.repositories.EventEditorMutation
@@ -96,11 +97,13 @@ internal class EventEditActionHandler(
         seedSession: EventEditorSession? = null,
     ) {
         val rawSelected = seedSession?.canonicalState?.event ?: seedEvent ?: selectedEvent()
-        val selected = if (rawSelected.eventType == EventType.WEEKLY_EVENT) {
-            rawSelected.copy(noFixedEndDateTime = false)
-        } else {
-            rawSelected
-        }
+        val selected = (
+            if (rawSelected.eventType == EventType.WEEKLY_EVENT) {
+                rawSelected.copy(noFixedEndDateTime = false)
+            } else {
+                rawSelected
+            }
+        ).withDefaultPlayoffTeamCounts()
         val unsupportedFeatures = mobileEventEditUnsupportedFeatures(selected)
         if (enabled && unsupportedFeatures.isNotEmpty()) {
             setError(mobileEventEditUnsupportedMessage(unsupportedFeatures))
@@ -158,7 +161,7 @@ internal class EventEditActionHandler(
         editDraftCoordinator.updateEditedEvent { previous ->
             sportsCatalogCoordinator.syncOfficialStaffingForSportTransition(
                 previous = previous,
-                updated = previous.update(),
+                updated = previous.update().withDefaultPlayoffTeamCounts(),
             )
         }
     }

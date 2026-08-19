@@ -4,6 +4,7 @@ import {
     buildDivisionToken,
     getDivisionTypeById,
     inferDivisionDetails,
+    minimumParticipantCountForEventType,
 } from '@/lib/divisionTypes';
 import {
     getSystemTimeZone,
@@ -290,7 +291,13 @@ export const applyImmutableEventDefaults = ({
                 ageDivisionTypeId,
                 ageDivisionTypeName,
                 price: Math.max(0, next.price || 0),
-                maxParticipants: Math.max(2, Math.trunc(next.maxParticipants || 2)),
+                maxParticipants: Math.max(
+                    minimumParticipantCountForEventType(next.eventType),
+                    Math.trunc(
+                        next.maxParticipants
+                        || (minimumParticipantCountForEventType(next.eventType)),
+                    ),
+                ),
                 playoffTeamCount: Number.isFinite((defaults as any).playoffTeamCount)
                     ? Math.trunc((defaults as any).playoffTeamCount)
                     : undefined,

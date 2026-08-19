@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { MIN_BRACKET_TEAM_COUNT } from "@/lib/divisionTypes";
 import { Brackets } from "./Brackets";
 import { OfficialStaffingPlanner } from "./officialStaffing";
 import { ScheduleError } from "./scheduleErrors";
@@ -350,10 +351,19 @@ export class EventBuilder {
       }
       return league.playoffDivisions.some(
         (division) =>
-          this.resolvePlayoffParticipantCount(division, participantCount) >= 2,
+          this.resolvePlayoffParticipantCount(division, participantCount) >=
+          MIN_BRACKET_TEAM_COUNT,
       );
     }
-    return participantCount > 1;
+    const configuredCount =
+      typeof this.event.playoffTeamCount === "number" &&
+      Number.isFinite(this.event.playoffTeamCount)
+        ? Math.trunc(this.event.playoffTeamCount)
+        : MIN_BRACKET_TEAM_COUNT;
+    return (
+      participantCount >= MIN_BRACKET_TEAM_COUNT &&
+      configuredCount >= MIN_BRACKET_TEAM_COUNT
+    );
   }
 
   private eventHasAdvancementBracket(participantCount: number): boolean {
@@ -371,7 +381,8 @@ export class EventBuilder {
     }
     return playoffDivisions.some(
       (division) =>
-        this.resolvePlayoffParticipantCount(division, participantCount) >= 2,
+        this.resolvePlayoffParticipantCount(division, participantCount) >=
+        MIN_BRACKET_TEAM_COUNT,
     );
   }
 
@@ -954,7 +965,7 @@ export class EventBuilder {
   }
 
   private schedulePlayoffs(participants: Team[], durationMs: number): Match[] {
-    if (participants.length < 2) return [];
+    if (participants.length < MIN_BRACKET_TEAM_COUNT) return [];
     if (!this.isLeague && !this.isTournamentPoolPlay) {
       const bracketBuilder = new Brackets(
         this.event as Tournament,
@@ -983,7 +994,7 @@ export class EventBuilder {
           playoffDivision,
           participants.length,
         );
-        if (playoffCount < 2) {
+        if (playoffCount < MIN_BRACKET_TEAM_COUNT) {
           continue;
         }
         // Ensure each playoff division begins from the shared playoff start anchor.
@@ -1017,14 +1028,14 @@ export class EventBuilder {
         this.phasePlayoffDivisionFor(this.defaultDivision()) ??
         this.defaultDivision();
       const playoffCount = Math.min(
-        league.playoffTeamCount || participants.length,
+        league.playoffTeamCount ?? MIN_BRACKET_TEAM_COUNT,
         participants.length,
       );
-      if (playoffCount < 2) return [];
+      if (playoffCount < MIN_BRACKET_TEAM_COUNT) return [];
       seeded.push(
         ...this.buildLeaguePlayoffPlaceholders(playoffCount, playoffDivision),
       );
-      if (seeded.length < 2) {
+      if (seeded.length < MIN_BRACKET_TEAM_COUNT) {
         return [];
       }
       const playoffStart =
@@ -1054,7 +1065,7 @@ export class EventBuilder {
         playoffDivision,
         teams.length,
       );
-      if (divisionPlayoffCount < 2) {
+      if (divisionPlayoffCount < MIN_BRACKET_TEAM_COUNT) {
         continue;
       }
       this.schedule.currentTime = new Date(playoffStart);
@@ -1240,7 +1251,7 @@ export class EventBuilder {
     playoffStart: Date,
     config: PlayoffDivisionConfig,
   ): Match[] {
-    if (seeded.length < 2) {
+    if (seeded.length < MIN_BRACKET_TEAM_COUNT) {
       return [];
     }
     const teamLookup = Object.fromEntries(
@@ -1396,7 +1407,7 @@ export class EventBuilder {
     division: Division,
     fallbackTeamCount: number,
   ): number {
-    if (fallbackTeamCount < 2) {
+    if (fallbackTeamCount < MIN_BRACKET_TEAM_COUNT) {
       return 0;
     }
     const explicitDivisionCount = (() => {
@@ -1404,13 +1415,13 @@ export class EventBuilder {
         typeof division.playoffTeamCount === "number" &&
         Number.isFinite(division.playoffTeamCount)
       ) {
-        return Math.max(0, Math.trunc(division.playoffTeamCount));
+        return Math.max(MIN_BRACKET_TEAM_COUNT, Math.trunc(division.playoffTeamCount));
       }
       if (
         typeof division.maxParticipants === "number" &&
         Number.isFinite(division.maxParticipants)
       ) {
-        return Math.max(0, Math.trunc(division.maxParticipants));
+        return Math.max(MIN_BRACKET_TEAM_COUNT, Math.trunc(division.maxParticipants));
       }
       return null;
     })();
@@ -1418,11 +1429,10 @@ export class EventBuilder {
     const leagueCount =
       typeof eventPlayoffTeamCount === "number" &&
       Number.isFinite(eventPlayoffTeamCount)
-        ? Math.max(0, Math.trunc(eventPlayoffTeamCount))
-        : 0;
+        ? Math.max(MIN_BRACKET_TEAM_COUNT, Math.trunc(eventPlayoffTeamCount))
+        : MIN_BRACKET_TEAM_COUNT;
     const configured = explicitDivisionCount ?? leagueCount;
-    const fallback = configured > 0 ? configured : fallbackTeamCount;
-    return Math.min(fallback, fallbackTeamCount);
+    return Math.min(configured, fallbackTeamCount);
   }
 
 

@@ -4,6 +4,7 @@ import {
     normalizeTimeZone,
 } from '@/lib/dateUtils';
 import { resolveEventResourceLabels } from '@/lib/sportResourceLabels';
+import { normalizeBracketTeamCount } from '@/lib/divisionTypes';
 
 import {
     buildDefaultLeagueData,
@@ -208,13 +209,21 @@ export const buildEventFormDefaultValues = ({
         defaultDivisionDetails,
         sportsById,
     });
+    const normalizedDefaultDivisionDetails = defaultLeagueData.includePlayoffs
+        ? defaultDivisionDetails.map((detail) => ({
+            ...detail,
+            playoffTeamCount: normalizeBracketTeamCount(
+                detail.playoffTeamCount ?? defaultLeagueData.playoffTeamCount,
+            ),
+        }))
+        : defaultDivisionDetails;
     const defaultTournamentData = buildDefaultTournamentData(activeEditingEvent);
     const defaultPlayoffData = buildDefaultPlayoffData(activeEditingEvent);
 
     return {
         ...base,
         divisions: defaultDivisionKeys,
-        divisionDetails: defaultDivisionDetails,
+        divisionDetails: normalizedDefaultDivisionDetails,
         divisionFieldIds: defaultDivisionFieldIds,
         selectedFieldIds: defaultSelectedFieldIds,
         leagueSlots: normalizeSlotState(defaultSlots, base.eventType, base.parentEvent),

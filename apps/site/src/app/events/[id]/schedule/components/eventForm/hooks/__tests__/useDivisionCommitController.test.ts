@@ -153,7 +153,7 @@ const useDivisionCommitHarness = ({
         key: 'playoff_new',
         kind: 'PLAYOFF',
         name: 'Playoff Division',
-        maxParticipants: 2,
+        maxParticipants: 3,
         playoffConfig: buildTournamentConfig(configTemplate),
     }), []);
     const controller = useDivisionCommitController({

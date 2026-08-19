@@ -3,6 +3,8 @@
 package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.isBracketTeamCountEnabled
+import com.razumly.mvp.core.data.dataTypes.normalizeBracketTeamCount
 import com.razumly.mvp.core.data.dataTypes.DEFAULT_EVENT_SEED_COLOR_ARGB
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
@@ -30,6 +32,7 @@ import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentLinks
 import com.razumly.mvp.core.data.dataTypes.normalizeRegistrationPaymentMode
 import com.razumly.mvp.core.data.dataTypes.syncEventTypeTagsForEventType
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
+import com.razumly.mvp.core.data.util.normalizeDivisionDetail
 import com.razumly.mvp.core.data.util.normalizeDivisionDetails
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
@@ -206,6 +209,9 @@ data class EventApiDto(
             resolvedNoFixedEndDateTime -> parsedStart
             else -> null
         } ?: return null
+        val rawDivisionDetailsById = divisionDetails.orEmpty().associateBy { detail ->
+            detail.normalizeDivisionDetail(resolvedId).id.normalizeDivisionIdentifier()
+        }
         val normalizedResponseDetails = (divisionDetails ?: emptyList()).normalizeDivisionDetails(resolvedId)
         val normalizedRegularDetails = normalizedResponseDetails.filterNot(DivisionDetail::isPlayoffDivisionKind)
         val normalizedPlayoffDetails = (
@@ -257,9 +263,24 @@ data class EventApiDto(
             .distinct()
         val resolvedFieldCount = resolvedFieldIds.size.takeIf { count -> count > 0 }
         val resolvedPriceCents = (price ?: 0).coerceAtLeast(0)
-        val resolvedMaxParticipants = (maxParticipants ?: 0).coerceAtLeast(0)
+        val resolvedMaxParticipants = if (resolvedEventType == EventType.TOURNAMENT) {
+            normalizeBracketTeamCount(maxParticipants)
+        } else {
+            (maxParticipants ?: 0).coerceAtLeast(0)
+        }
+        val detailPlayoffTeamCount = mergedDetails
+            .firstOrNull { detail ->
+                detail.isPlayoffDivisionKind() && detail.playoffTeamCount != null
+            }
+            ?.playoffTeamCount
+            ?: mergedDetails.firstOrNull { detail -> detail.playoffTeamCount != null }?.playoffTeamCount
         val resolvedIncludePlayoffsOrPools = includePlayoffsOrPools ?: includePlayoffs ?: false
-        val resolvedEventPlayoffTeamCount = playoffTeamCount
+        val resolvedEventPlayoffTeamCount = when {
+            !resolvedIncludePlayoffsOrPools -> playoffTeamCount
+            isBracketTeamCountEnabled(resolvedEventType, resolvedIncludePlayoffsOrPools) ->
+                normalizeBracketTeamCount(playoffTeamCount ?: detailPlayoffTeamCount)
+            else -> playoffTeamCount
+        }
         val resolvedEventInstallmentAmounts = (installmentAmounts ?: emptyList())
             .map { amount -> amount.coerceAtLeast(0) }
         val resolvedEventInstallmentDueDates = (installmentDueDates ?: emptyList())
@@ -278,14 +299,35 @@ data class EventApiDto(
         val resolvedRegistrationPaymentMode = normalizeRegistrationPaymentMode(registrationPaymentMode)
         val manualPaymentsEnabled = isManualRegistrationPaymentMode(resolvedRegistrationPaymentMode)
         val mergedDetailsWithCapacity = mergedDetails.map { detail ->
+            val isGeneratedTournamentPool = resolvedEventType == EventType.TOURNAMENT &&
+                resolvedIncludePlayoffsOrPools &&
+                !detail.isPlayoffDivisionKind() &&
+                detail.poolCount == null &&
+                detail.playoffPlacementDivisionIds.isNotEmpty()
+            val rawDetail = rawDivisionDetailsById[detail.id.normalizeDivisionIdentifier()]
             detail.copy(
                 price = detail.price?.coerceAtLeast(0),
-                maxParticipants = detail.maxParticipants?.coerceAtLeast(2),
+                maxParticipants = when {
+                    detail.isPlayoffDivisionKind() ->
+                        normalizeBracketTeamCount(detail.maxParticipants)
+                    isGeneratedTournamentPool -> rawDetail?.maxParticipants
+                    resolvedEventType == EventType.TOURNAMENT && !isGeneratedTournamentPool ->
+                        normalizeBracketTeamCount(
+                            detail.maxParticipants ?: resolvedMaxParticipants,
+                        )
+                    else -> detail.maxParticipants?.coerceAtLeast(2)
+                },
                 playoffTeamCount = when {
                     !resolvedIncludePlayoffsOrPools -> null
-                    resolvedEventType == EventType.LEAGUE && splitLeaguePlayoffDivisions == true ->
-                        detail.playoffTeamCount
-                    singleDivision != false -> resolvedEventPlayoffTeamCount
+                    isGeneratedTournamentPool -> rawDetail?.playoffTeamCount
+                    isBracketTeamCountEnabled(resolvedEventType, resolvedIncludePlayoffsOrPools) ->
+                        normalizeBracketTeamCount(
+                            detail.playoffTeamCount ?: if (singleDivision != false) {
+                                resolvedEventPlayoffTeamCount
+                            } else {
+                                null
+                            },
+                        )
                     else -> detail.playoffTeamCount
                 },
                 allowPaymentPlans = if (singleDivision != false) {

@@ -139,6 +139,40 @@ class EventEditPayloadBuilderTest {
     }
 
     @Test
+    fun given_three_team_tournament_when_edit_payload_is_built_then_field_stays_scheduler_eligible() {
+        val divisionId = "event-1__division__open"
+        val event = leagueEvent(
+            eventType = EventType.TOURNAMENT,
+            divisions = listOf(divisionId),
+            fieldIds = listOf("field-1"),
+        ).copy(
+            maxParticipants = 3,
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = divisionId,
+                    kind = "LEAGUE",
+                    maxParticipants = 3,
+                ),
+            ),
+        )
+
+        val result = EventEditPayloadBuilder.prepareForUpdate(
+            EventEditPayloadInput(
+                editedEvent = event,
+                editableFields = listOf(field(id = "field-1", divisions = emptyList())),
+                editableLeagueTimeSlots = emptyList(),
+                selectedRentalFields = emptyList(),
+                leagueScoringConfig = LeagueScoringConfigDTO(),
+                originalEventStart = event.start,
+            ),
+        )
+
+        assertEquals(3, result.prepared.event.maxParticipants)
+        assertEquals(3, result.prepared.event.divisionDetails.single().maxParticipants)
+        assertEquals(listOf(divisionId), assertNotNull(result.prepared.fields).single().divisions)
+    }
+
+    @Test
     fun buildLeagueSlotDrafts_derives_non_repeating_day_and_minutes_from_datetimes() {
         val event = leagueEvent(
             divisions = listOf("open"),

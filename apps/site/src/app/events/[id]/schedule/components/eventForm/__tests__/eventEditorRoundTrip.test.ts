@@ -4,6 +4,8 @@ import {
 import type { Event, UserData } from '@/types';
 import type { EventFormValues } from '../formTypes';
 import { buildEventDraft } from '../buildEventDraft';
+import { buildDefaultLeagueData } from '../configDefaults';
+import { buildEventFormDefaultValues } from '../defaultValues';
 import {
   editorDraftToLegacyEvent,
   editorSnapshotToFormValues,
@@ -51,7 +53,7 @@ describe('event editor draft round trips', () => {
     expect(persistedProjection).not.toHaveProperty('officialSchedulingMode');
   });
 
-  it('does not derive an event playoff count from the first multi-division league', () => {
+  it('preserves an explicit event playoff count for a multi-division league', () => {
     const fixture = eventEditorFixtures.find(({ name }) => name === 'multi-division league')!.event;
     const event = {
       ...fixture,
@@ -65,10 +67,129 @@ describe('event editor draft round trips', () => {
 
     const draft = legacyEventToEditorDraft(event);
 
-    expect(draft.competition.playoffTeamCount).toBeNull();
+    expect(draft.competition.playoffTeamCount).toBe(8);
     expect(draft.competition.divisionDetails.map((detail) => detail.playoffTeamCount)).toEqual([8, 4]);
-    expect(editorDraftToLegacyEvent(draft).playoffTeamCount).toBeNull();
+    expect(editorDraftToLegacyEvent(draft).playoffTeamCount).toBe(8);
   });
+
+  it('defaults a missing multi-division event count without changing division counts', () => {
+    const fixture = eventEditorFixtures.find(({ name }) => name === 'multi-division league')!.event;
+    const event = {
+      ...fixture,
+      includePlayoffs: true,
+      playoffTeamCount: undefined,
+      divisionDetails: fixture.divisionDetails.map((detail, index) => ({
+        ...detail,
+        playoffTeamCount: index === 0 ? 8 : 4,
+      })),
+    } as unknown as Event;
+
+    const draft = legacyEventToEditorDraft(event);
+
+    expect(draft.competition.playoffTeamCount).toBe(3);
+    expect(draft.competition.divisionDetails.map((detail) => detail.playoffTeamCount)).toEqual([8, 4]);
+  });
+  it('preserves an enabled explicit legacy playoff count for validation', () => {
+    const fixture = eventEditorFixtures.find(({ name }) => name === 'multi-division league')!.event;
+    const event = {
+      ...fixture,
+      includePlayoffs: true,
+      playoffTeamCount: 2,
+      leagueConfig: {
+        ...fixture.leagueConfig,
+        includePlayoffs: true,
+        playoffTeamCount: 2,
+      },
+    } as unknown as Event;
+
+    const config = buildDefaultLeagueData({
+      base: {
+        eventType: 'LEAGUE',
+        sportIds: [],
+      },
+      activeEditingEvent: event,
+      defaultDivisionDetails: [],
+      sportsById: new Map(),
+    });
+
+    expect(config.playoffTeamCount).toBe(2);
+
+    const draft = legacyEventToEditorDraft({
+      ...event,
+      divisionDetails: fixture.divisionDetails.map((detail) => ({
+        ...detail,
+        playoffTeamCount: undefined,
+      })),
+    } as unknown as Event);
+    expect(draft.competition.playoffTeamCount).toBe(2);
+  });
+
+  it('preserves persisted tournament capacities below three on load', () => {
+    const fixture = eventEditorFixtures.find(
+      ({ name }) => name === 'tournament with pools and playoffs',
+    )!.event;
+    const event = {
+      ...fixture,
+      maxParticipants: 2,
+      divisionDetails: fixture.divisionDetails.map((detail) => ({
+        ...detail,
+        maxParticipants: 2,
+      })),
+      playoffDivisionDetails: fixture.playoffDivisionDetails.map((detail) => ({
+        ...detail,
+        maxParticipants: 2,
+      })),
+    } as unknown as Event;
+
+    const values = buildEventFormDefaultValues({
+      activeEditingEvent: event,
+      applyImmutableDefaults: (state) => state,
+      hasImmutableFields: false,
+      immutableFields: [],
+      isCreateMode: false,
+      resolvedOrganizationFields: [],
+      resolvedOrganizationId: '',
+      sportsById: new Map(),
+    });
+
+    expect(values.maxParticipants).toBe(2);
+    expect(values.divisionDetails.map((detail) => detail.maxParticipants)).toEqual(
+      expect.arrayContaining([2]),
+    );
+  });
+
+  it('defaults missing enabled division bracket counts and preserves explicit counts on load', () => {
+    const fixture = eventEditorFixtures.find(({ name }) => name === 'multi-division league')!.event;
+    const event = {
+      ...fixture,
+      includePlayoffs: true,
+      playoffTeamCount: undefined,
+      leagueConfig: {
+        ...fixture.leagueConfig,
+        includePlayoffs: true,
+        playoffTeamCount: undefined,
+      },
+      divisionDetails: fixture.divisionDetails.map((detail, index) => ({
+        ...detail,
+        playoffTeamCount: index === 0 ? undefined : 5,
+      })),
+    } as unknown as Event;
+
+    const values = buildEventFormDefaultValues({
+      activeEditingEvent: event,
+      applyImmutableDefaults: (state) => state,
+      hasImmutableFields: false,
+      immutableFields: [],
+      isCreateMode: false,
+      resolvedOrganizationFields: [],
+      resolvedOrganizationId: '',
+      sportsById: new Map(),
+    });
+
+    expect(values.leagueData.playoffTeamCount).toBe(3);
+    expect(values.divisionDetails.map((detail) => detail.playoffTeamCount)).toEqual([3, 5]);
+  });
+
 
   it('projects hydrated division metadata before strict command parsing', () => {
     const sourceEvent = eventEditorFixtures.find(({ name }) => name === 'tournament with pools and playoffs')!.event;
@@ -147,7 +268,16 @@ describe('event editor draft round trips', () => {
       ...editorSnapshotToFormValues(
         emptyEditorSnapshot(legacyEventToEditorDraft(sourceEvent), 'EDIT'),
       ),
-      leagueData: { includePlayoffs: true } as EventFormValues['leagueData'],
+      leagueData: {
+        includePlayoffs: true,
+        playoffTeamCount: undefined,
+      } as EventFormValues['leagueData'],
+      divisionDetails: editorSnapshotToFormValues(
+        emptyEditorSnapshot(legacyEventToEditorDraft(sourceEvent), 'EDIT'),
+      ).divisionDetails.map((detail) => ({
+        ...detail,
+        playoffTeamCount: undefined,
+      })),
     };
     const builtDraft = buildEventDraft({
       activeEditingEvent: sourceEvent,
@@ -176,10 +306,15 @@ describe('event editor draft round trips', () => {
       sportsById: new Map(),
     });
 
+    expect(builtDraft.playoffTeamCount).toBe(3);
+    expect(builtDraft.divisionDetails?.map((detail) => detail.playoffTeamCount))
+      .toEqual(expect.arrayContaining([3]));
+
     expect(builtDraft.playoffDivisionDetails?.[0]).toMatchObject({
       skillDivisionTypeId: 'skill_open',
       ageDivisionTypeId: 'age_open',
       fieldIds: ['field_fixture'],
+      playoffTeamCount: 3,
     });
 
     const parsed = createEventEditorCommandSchema.parse({
@@ -194,6 +329,7 @@ describe('event editor draft round trips', () => {
       ageDivisionTypeId: 'age_open',
       fieldIds: ['field_fixture'],
     });
+    expect(parsed.draft.competition.playoffTeamCount).toBe(3);
   });
   it('carries normalized captured staff invitations into non-affiliate commands only', () => {
     const sourceEvent = eventEditorFixtures[0].event;

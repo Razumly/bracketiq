@@ -471,7 +471,7 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
-    fun create_command_maps_division_playoff_count_to_required_competition_field() {
+    fun given_three_team_division_playoff_when_create_command_is_built_then_count_maps_to_competition_fields() {
         val snapshot = editorProtocolSnapshot()
         val session = EventEditorSessionMapper.fromCreateBootstrap(
             editorProtocolBootstrap(
@@ -487,7 +487,7 @@ class EventEditorSessionMapperTest {
                 event = session.canonicalState.event.copy(
                     playoffTeamCount = null,
                     divisionDetails = session.canonicalState.event.divisionDetails.map { detail ->
-                        detail.copy(playoffTeamCount = 8)
+                        detail.copy(playoffTeamCount = 3)
                     },
                 ),
             ),
@@ -495,12 +495,12 @@ class EventEditorSessionMapperTest {
 
         val command = EventEditorSessionMapper.toCreateCommand(session, mutation).command
 
-        assertEquals(8, command.draft.competition.playoffTeamCount)
-        assertEquals(8.0, command.draft.competition.divisionDetails.single().playoffTeamCount)
+        assertEquals(3, command.draft.competition.playoffTeamCount)
+        assertEquals(3.0, command.draft.competition.divisionDetails.single().playoffTeamCount)
     }
 
     @Test
-    fun multi_division_league_keeps_playoff_counts_on_divisions_only() {
+    fun given_multi_division_league_counts_when_mapped_then_event_and_division_counts_are_preserved() {
         val snapshot = editorProtocolSnapshot()
         val firstDivision = snapshot.draft.competition.divisionDetails.single().copy(
             playoffTeamCount = 8.0,
@@ -525,7 +525,7 @@ class EventEditorSessionMapperTest {
             ),
         )
 
-        assertNull(session.canonicalState.event.playoffTeamCount)
+        assertEquals(8, session.canonicalState.event.playoffTeamCount)
 
         val command = EventEditorSessionMapper.toCreateCommand(
             session = session,
@@ -538,10 +538,73 @@ class EventEditorSessionMapperTest {
             ),
         ).command
 
-        assertNull(command.draft.competition.playoffTeamCount)
+        assertEquals(8, command.draft.competition.playoffTeamCount)
         assertEquals(
             listOf(8.0, 4.0),
             command.draft.competition.divisionDetails.map { detail -> detail.playoffTeamCount },
+        )
+    }
+
+    @Test
+    fun given_league_bootstrap_without_playoff_counts_when_mapped_then_counts_default_to_three() {
+        val snapshot = editorProtocolSnapshot()
+        val session = EventEditorSessionMapper.fromCreateBootstrap(
+            editorProtocolBootstrap(
+                snapshot = snapshot.copy(
+                    draft = snapshot.draft.copy(
+                        competition = snapshot.draft.competition.copy(
+                            playoffTeamCount = null,
+                            divisionDetails = snapshot.draft.competition.divisionDetails.map { detail ->
+                                detail.copy(playoffTeamCount = null)
+                            },
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(3, session.canonicalState.event.playoffTeamCount)
+        assertEquals(
+            listOf(3, 3),
+            session.canonicalState.event.divisionDetails.map { detail -> detail.playoffTeamCount },
+        )
+    }
+
+    @Test
+    fun given_tournament_bootstrap_counts_below_three_when_mapped_then_counts_are_preserved() {
+        val snapshot = editorProtocolSnapshot()
+        val session = EventEditorSessionMapper.fromCreateBootstrap(
+            editorProtocolBootstrap(
+                snapshot = snapshot.copy(
+                    draft = snapshot.draft.copy(
+                        basics = snapshot.draft.basics.copy(eventType = "TOURNAMENT"),
+                        participation = snapshot.draft.participation.copy(
+                            singleDivision = true,
+                            maxParticipants = 2,
+                        ),
+                        competition = snapshot.draft.competition.copy(
+                            playoffTeamCount = 2,
+                            divisionDetails = snapshot.draft.competition.divisionDetails.map { detail ->
+                                detail.copy(
+                                    maxParticipants = 2.0,
+                                    playoffTeamCount = 2.0,
+                                )
+                            },
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(2, session.canonicalState.event.maxParticipants)
+        assertEquals(2, session.canonicalState.event.playoffTeamCount)
+        assertEquals(
+            listOf(2, 3),
+            session.canonicalState.event.divisionDetails.map { detail -> detail.maxParticipants },
+        )
+        assertEquals(
+            listOf(2, 3),
+            session.canonicalState.event.divisionDetails.map { detail -> detail.playoffTeamCount },
         )
     }
 

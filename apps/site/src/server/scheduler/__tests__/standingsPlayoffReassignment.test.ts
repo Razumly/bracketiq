@@ -431,7 +431,7 @@ describe('standings playoff reassignment', () => {
       doTeamsOfficiate: false,
       gamesPerOpponent: 1,
       includePlayoffs: true,
-      playoffTeamCount: 2,
+      playoffTeamCount: 3,
       doubleElimination: true,
       usesSets: false,
       matchDurationMinutes: 60,

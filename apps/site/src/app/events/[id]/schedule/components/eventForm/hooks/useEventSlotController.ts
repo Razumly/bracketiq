@@ -4,6 +4,7 @@ import type { UseFormClearErrors, UseFormGetValues } from 'react-hook-form';
 
 import type { LeagueSlotForm } from '@/app/discover/components/LeagueFields';
 import { eventService } from '@/lib/eventService';
+import { MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
 import type { SportResourceLabels } from '@/lib/sportResourceLabels';
 import type { Event, Field, LeagueConfig, TimeSlot, TournamentConfig } from '@/types';
 
@@ -511,7 +512,8 @@ export const useEventSlotController = ({
                 setLeagueData({
                     gamesPerOpponent: source?.gamesPerOpponent ?? 1,
                     includePlayoffs: includePlayoffsOrPools,
-                    playoffTeamCount: source?.playoffTeamCount ?? undefined,
+                    playoffTeamCount: source?.playoffTeamCount
+                        ?? (includePlayoffsOrPools ? MIN_BRACKET_TEAM_COUNT : undefined),
                     usesSets: source?.usesSets ?? false,
                     restTimeMinutes: 0,
                     setDurationMinutes: undefined,

@@ -3,6 +3,7 @@ import { WEEKLY_REPEATING_TIME_SLOT_REQUIRED_MESSAGE } from '@/lib/eventScheduli
 
 import {
   buildSlotDivisionLookup,
+  buildDefaultDivisionDetailsForSport,
   buildCompositeDivisionTypeId,
   buildDivisionTypeOptionsForEvent,
   buildDivisionTypeSelectOptions,
@@ -1266,8 +1267,8 @@ describe('event form slot helpers', () => {
       leagueData: { gamesPerOpponent: 1, includePlayoffs: true },
       divisionDetails: [makeDivisionDetail({
         id: 'open',
-        maxParticipants: 4,
-        playoffTeamCount: 2,
+        maxParticipants: 6,
+        playoffTeamCount: 6,
         poolCount: 2,
         gamesPerOpponent: 1,
         restTimeMinutes: 0,
@@ -1635,6 +1636,95 @@ describe('event form division helpers', () => {
     })).toEqual([]);
   });
 
+  it('rejects a tournament bracket with fewer than three teams', () => {
+    const schema = buildEventFormSchema({
+      allowMissingEventImage: true,
+      allowMissingEventDivisions: true,
+    });
+    const result = schema.safeParse(makeAffiliateEventFormValues({
+      isAffiliateEvent: false,
+      affiliateUrl: '',
+      eventType: 'TOURNAMENT',
+      singleDivision: true,
+      maxParticipants: 2,
+      divisions: ['open'],
+      divisionDetails: [
+        makeDivisionDetail({
+          id: 'open',
+          maxParticipants: 2,
+        }),
+      ],
+    }));
+
+    expect(result.error?.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        message: 'At least 3 teams need to be in the bracket.',
+        path: ['maxParticipants'],
+      }),
+    ]));
+  });
+
+  it('rejects an event-level tournament capacity below three in multi-division mode', () => {
+    const schema = buildEventFormSchema({
+      allowMissingEventImage: true,
+      allowMissingEventDivisions: true,
+    });
+    const result = schema.safeParse(makeAffiliateEventFormValues({
+      isAffiliateEvent: false,
+      affiliateUrl: '',
+      eventType: 'TOURNAMENT',
+      singleDivision: false,
+      maxParticipants: 2,
+      divisions: ['open'],
+      divisionDetails: [
+        makeDivisionDetail({
+          id: 'open',
+          maxParticipants: 3,
+        }),
+      ],
+    }));
+
+    expect(result.error?.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        message: 'At least 3 teams need to be in the bracket.',
+        path: ['maxParticipants'],
+      }),
+    ]));
+  });
+
+  it('rejects an event-level league playoff count below three in multi-division mode', () => {
+    const schema = buildEventFormSchema({
+      allowMissingEventImage: true,
+      allowMissingEventDivisions: true,
+    });
+    const result = schema.safeParse(makeAffiliateEventFormValues({
+      isAffiliateEvent: false,
+      affiliateUrl: '',
+      eventType: 'LEAGUE',
+      singleDivision: false,
+      leagueData: {
+        gamesPerOpponent: 1,
+        includePlayoffs: true,
+        playoffTeamCount: 2,
+      },
+      divisions: ['open'],
+      divisionDetails: [
+        makeDivisionDetail({
+          id: 'open',
+          maxParticipants: 3,
+          playoffTeamCount: 3,
+        }),
+      ],
+    }));
+
+    expect(result.error?.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        message: 'At least 3 teams need to be in the bracket.',
+        path: ['leagueData', 'playoffTeamCount'],
+      }),
+    ]));
+  });
+
   it('rejects split playoff mappings that do not fill each playoff division', () => {
     const schema = buildEventFormSchema({
       allowMissingEventImage: true,
@@ -1715,6 +1805,13 @@ describe('event form division helpers', () => {
       maxParticipants: 12,
       divisionDetails: [makeDivisionDetail({ id: 'division_1', maxParticipants: 0 })],
     })).toBe(12);
+  });
+
+  it('defaults new division brackets to three teams', () => {
+    expect(buildDefaultDivisionDetailsForSport('event_1')[0]).toEqual(expect.objectContaining({
+      maxParticipants: 10,
+      playoffTeamCount: 3,
+    }));
   });
 
   it('derives single-division pool defaults from persisted division values before editor values', () => {

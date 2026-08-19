@@ -5,8 +5,22 @@ import {
   getSkillDivisionTypeOptionsForSport,
   getSportAgeCutoffRule,
   inferDivisionDetails,
+  MIN_BRACKET_TEAM_COUNT,
+  minimumParticipantCountForEventType,
+  normalizeBracketTeamCount,
   normalizeDivisionTypeIds,
 } from '@/lib/divisionTypes';
+
+describe('divisionTypes bracket team policy', () => {
+  it('defaults a missing count and preserves an explicit count for validation', () => {
+    expect(MIN_BRACKET_TEAM_COUNT).toBe(3);
+    expect(normalizeBracketTeamCount(undefined)).toBe(MIN_BRACKET_TEAM_COUNT);
+    expect(normalizeBracketTeamCount(2)).toBe(2);
+    expect(normalizeBracketTeamCount(8)).toBe(8);
+    expect(minimumParticipantCountForEventType('TOURNAMENT')).toBe(MIN_BRACKET_TEAM_COUNT);
+    expect(minimumParticipantCountForEventType('LEAGUE')).toBe(2);
+  });
+});
 
 describe('divisionTypes age alignment', () => {
   it('adds adult age options for sports that use U-based age groups', () => {

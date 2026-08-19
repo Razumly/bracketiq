@@ -1,4 +1,8 @@
-import { buildEventDivisionId, extractDivisionTokenFromId } from '@/lib/divisionTypes';
+import {
+  buildEventDivisionId,
+  extractDivisionTokenFromId,
+  MIN_BRACKET_TEAM_COUNT,
+} from '@/lib/divisionTypes';
 
 type PrismaLike = any;
 
@@ -56,6 +60,21 @@ export const isTournamentPoolPlayEnabled = (event: {
     || event.includePlayoffs === true
   )
 );
+export const isGeneratedTournamentPoolRecord = (candidate: {
+  eventType?: unknown;
+  isPoolPlayEnabled: boolean;
+  kind?: unknown;
+  poolCount?: unknown;
+  playoffPlacementDivisionIds?: unknown;
+}): boolean => (
+  String(candidate.eventType ?? '').trim().toUpperCase() === 'TOURNAMENT'
+  && candidate.isPoolPlayEnabled
+  && String(candidate.kind ?? '').trim().toUpperCase() !== 'PLAYOFF'
+  && candidate.poolCount == null
+  && Array.isArray(candidate.playoffPlacementDivisionIds)
+  && candidate.playoffPlacementDivisionIds.length > 0
+);
+
 
 export const normalizeTournamentPoolToken = (value: unknown): string | null => {
   if (typeof value !== 'string') {
@@ -143,10 +162,10 @@ export const poolReferencesBracket = (
   });
 };
 
-export const generatedPoolsForBracket = (
-  pools: TournamentPoolSourceRow[],
+export const generatedPoolsForBracket = <T extends TournamentPoolSourceRow>(
+  pools: T[],
   bracketDivisionId: string,
-): TournamentPoolSourceRow[] => (
+): T[] => (
   pools
     .filter((pool) => String(pool.kind ?? 'LEAGUE').toUpperCase() !== 'PLAYOFF')
     .filter((pool) => poolReferencesBracket(pool, bracketDivisionId))
@@ -169,8 +188,10 @@ export const deriveTournamentPoolTeamCount = (params: {
   const maxParticipants = numericInput(params.maxParticipants);
   const poolCount = tournamentPoolCountFromValue(params.poolCount);
   const label = params.divisionName || 'Tournament division';
-  if (maxParticipants == null || maxParticipants < 1) {
-    throw new TournamentPoolValidationError(`${label} must have a max teams value when pool play is enabled.`);
+  if (maxParticipants == null || maxParticipants < MIN_BRACKET_TEAM_COUNT) {
+    throw new TournamentPoolValidationError(
+      `${label} must have a max teams value of at least ${MIN_BRACKET_TEAM_COUNT} when pool play is enabled.`,
+    );
   }
   if (poolCount == null) {
     throw new TournamentPoolValidationError(`${label} must have a pool count of at least 1 when pool play is enabled.`);
@@ -186,11 +207,14 @@ export const deriveTournamentPoolAdvancingCount = (params: {
   poolCount: unknown;
   divisionName?: string | null;
 }): number => {
-  const bracketTeamsCount = numericInput(params.bracketTeamsCount);
+  const bracketTeamsCount =
+    numericInput(params.bracketTeamsCount) ?? MIN_BRACKET_TEAM_COUNT;
   const poolCount = tournamentPoolCountFromValue(params.poolCount);
   const label = params.divisionName || 'Tournament division';
-  if (bracketTeamsCount == null || bracketTeamsCount < 2) {
-    throw new TournamentPoolValidationError(`${label} must have a bracket teams count of at least 2 when pool play is enabled.`);
+  if (bracketTeamsCount < MIN_BRACKET_TEAM_COUNT) {
+    throw new TournamentPoolValidationError(
+      `${label} must have a bracket teams count of at least ${MIN_BRACKET_TEAM_COUNT} when pool play is enabled.`,
+    );
   }
   if (poolCount == null) {
     throw new TournamentPoolValidationError(`${label} must have a pool count of at least 1 when pool play is enabled.`);

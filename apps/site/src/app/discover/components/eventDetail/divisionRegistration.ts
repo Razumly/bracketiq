@@ -407,7 +407,7 @@ export const buildDivisionOptionsForEvent = (event: Event | null): EventDivision
                 ? Math.max(2, Math.trunc(row.maxParticipants))
                 : undefined,
             playoffTeamCount: typeof row?.playoffTeamCount === 'number'
-                ? Math.max(2, Math.trunc(row.playoffTeamCount))
+                ? Math.trunc(row.playoffTeamCount)
                 : undefined,
             allowPaymentPlans: typeof row?.allowPaymentPlans === 'boolean'
                 ? row.allowPaymentPlans

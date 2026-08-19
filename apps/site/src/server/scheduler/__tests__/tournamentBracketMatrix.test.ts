@@ -342,6 +342,29 @@ describe('tournament bracket matrix', () => {
     }
   });
 
+  it('builds a three-team bracket with one bye and two matches', () => {
+    const scheduled = scheduleTournament(3, false);
+    const final = scheduled.matches.find((match) => match.getDependencies().length === 1);
+    const openingMatch = scheduled.matches.find((match) => match.getDependencies().length === 0);
+
+    expect(scheduled.matches).toHaveLength(2);
+    expect(final).toBeDefined();
+    expect(openingMatch).toBeDefined();
+    expect(final?.team1?.id).toBe('team_1');
+    expect(final?.team1Seed).toBe(1);
+    expect([openingMatch?.team1?.id, openingMatch?.team2?.id].sort()).toEqual([
+      'team_2',
+      'team_3',
+    ]);
+    expect(final?.getDependencies()).toEqual([openingMatch]);
+  });
+
+  it('does not build a bracket with fewer than three teams', () => {
+    const scheduled = scheduleTournament(2, false);
+
+    expect(scheduled.matches).toHaveLength(0);
+  });
+
   it('places every double-elimination Match after all incoming dependencies and rest', () => {
     const scheduled = scheduleTournament(8, true, 30);
     const dependentMatches = scheduled.matches.filter(

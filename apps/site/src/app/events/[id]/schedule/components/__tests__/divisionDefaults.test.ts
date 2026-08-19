@@ -8,7 +8,7 @@ type DivisionRow = {
 };
 
 describe('applyEventDefaultsToDivisionDetails', () => {
-    it('applies price, max participants, and playoff team count defaults when playoffs are enabled', () => {
+    it('applies event defaults and preserves explicit playoff team counts', () => {
         const current: DivisionRow[] = [
             { id: 'div_1', price: 25, maxParticipants: 10, playoffTeamCount: 6 },
             { id: 'div_2', price: 40, maxParticipants: 12, playoffTeamCount: 8 },
@@ -24,8 +24,8 @@ describe('applyEventDefaultsToDivisionDetails', () => {
 
         expect(result.changed).toBe(true);
         expect(result.details).toEqual([
-            { id: 'div_1', price: 15, maxParticipants: 14, playoffTeamCount: 4 },
-            { id: 'div_2', price: 15, maxParticipants: 14, playoffTeamCount: 4 },
+            { id: 'div_1', price: 15, maxParticipants: 14, playoffTeamCount: 6 },
+            { id: 'div_2', price: 15, maxParticipants: 14, playoffTeamCount: 8 },
         ]);
     });
 
@@ -69,7 +69,7 @@ describe('applyEventDefaultsToDivisionDetails', () => {
         ]);
     });
 
-    it('does not invent playoff counts when the event default is empty', () => {
+    it('defaults missing enabled playoff counts to three', () => {
         const current: DivisionRow[] = [
             { id: 'div_1', price: 5, maxParticipants: 6 },
             { id: 'div_2', price: 6, maxParticipants: 7 },
@@ -84,8 +84,8 @@ describe('applyEventDefaultsToDivisionDetails', () => {
         });
 
         expect(result.details).toEqual([
-            { id: 'div_1', price: 11, maxParticipants: 9 },
-            { id: 'div_2', price: 11, maxParticipants: 9 },
+            { id: 'div_1', price: 11, maxParticipants: 9, playoffTeamCount: 3 },
+            { id: 'div_2', price: 11, maxParticipants: 9, playoffTeamCount: 3 },
         ]);
     });
 });

@@ -420,12 +420,15 @@ it("round-trips configured playoff phase rules without treating them as standing
           fieldIds: [],
         },
         {
-          id: "division_playoff",
+          id: "division_league__phase__playoff",
           eventId: "event_rules",
           status: "ACTIVE",
           kind: "PLAYOFF",
-          key: "playoff",
-          name: "Playoff",
+          role: "PHASE",
+          phase: "PLAYOFF",
+          sourceDivisionId: "division_league",
+          key: "championship",
+          name: "Championship",
           standingsOverrides: {
             doubleElimination: true,
             winnerSetCount: 3,
@@ -483,6 +486,7 @@ it("round-trips configured playoff phase rules without treating them as standing
   );
   expect(snapshot.draft.competition.playoffDivisionDetails[0]).toEqual(
     expect.objectContaining({
+      name: "Championship",
       standingsOverrides: null,
       playoffConfig: expect.objectContaining({
         doubleElimination: true,
@@ -501,5 +505,192 @@ it("round-trips configured playoff phase rules without treating them as standing
   });
   expect(command.draft.competition.playoffDivisionDetails).toEqual(
     snapshot.draft.competition.playoffDivisionDetails,
+  );
+});
+
+it("collapses generated tournament pools into one editable bracket division", async () => {
+  const bracketDivisionId = "event_pool__division__open";
+  const poolDivisionIds = ["a", "b"].map(
+    (suffix) => `event_pool__division__open_pool_${suffix}`,
+  );
+  const client = {
+    ...buildClient([], []),
+    divisions: {
+      findMany: jest.fn().mockResolvedValue([
+        ...poolDivisionIds.map((id, index) => ({
+          id,
+          eventId: "event_pool",
+          status: "ACTIVE",
+          kind: "LEAGUE",
+          key: `open_pool_${String.fromCharCode(97 + index)}`,
+          name: `Pool ${String.fromCharCode(65 + index)}`,
+          maxParticipants: 8,
+          playoffTeamCount: 4,
+          price: 16000,
+          allowPaymentPlans: true,
+          installmentCount: 2,
+          installmentDueDates: [],
+          installmentDueRelativeDays: [0, 14],
+          installmentAmounts: [8000, 8000],
+          teamIds: [`team_${index + 1}`],
+          playoffPlacementDivisionIds: [
+            bracketDivisionId,
+            bracketDivisionId,
+          ],
+          fieldIds: [],
+        })),
+        {
+          id: bracketDivisionId,
+          eventId: "event_pool",
+          status: "ACTIVE",
+          kind: "PLAYOFF",
+          key: "open",
+          name: "Open",
+          maxParticipants: 8,
+          playoffTeamCount: 8,
+          poolCount: 2,
+          price: null,
+          allowPaymentPlans: false,
+          installmentCount: null,
+          installmentDueDates: [],
+          installmentDueRelativeDays: [],
+          installmentAmounts: [],
+          teamIds: [],
+          fieldIds: [],
+        },
+      ]),
+    },
+  } as any;
+
+  const snapshot = await buildEventEditorSnapshot(
+    {
+      id: "event_pool",
+      $id: "event_pool",
+      name: "Pool tournament",
+      description: "",
+      eventType: "TOURNAMENT",
+      includePlayoffs: true,
+      includePlayoffsOrPools: true,
+      teamSignup: true,
+      singleDivision: false,
+      maxParticipants: 16,
+      playoffTeamCount: 8,
+      sportIds: [],
+      start: "2026-09-10T18:00:00.000Z",
+      end: "2026-09-10T20:00:00.000Z",
+      noFixedEndDateTime: false,
+      timeZone: "UTC",
+      location: "",
+      address: "",
+      coordinates: [0, 0],
+      organizationId: null,
+      hostId: "host_pool",
+      state: "UNPUBLISHED",
+      fieldIds: [],
+      timeSlotIds: [],
+      divisions: poolDivisionIds,
+      divisionDetails: [],
+      playoffDivisionDetails: [],
+    },
+    { client, mode: "EDIT", actor: { userId: "host_pool" } },
+  );
+
+  expect(snapshot.draft.competition.divisionIds).toEqual([bracketDivisionId]);
+  expect(snapshot.draft.competition.divisionDetails).toEqual([
+    expect.objectContaining({
+      id: bracketDivisionId,
+      maxParticipants: 16,
+      playoffTeamCount: 8,
+      poolCount: 2,
+      poolTeamCount: 8,
+      price: 16000,
+      allowPaymentPlans: true,
+      installmentCount: 2,
+      installmentDueRelativeDays: [0, 14],
+      installmentAmounts: [8000, 8000],
+      teamIds: ["team_1", "team_2"],
+    }),
+  ]);
+  expect(snapshot.draft.competition.playoffDivisionDetails).toEqual([
+    expect.objectContaining({
+      id: bracketDivisionId,
+      maxParticipants: 8,
+      playoffTeamCount: 8,
+    }),
+  ]);
+});
+
+it("preserves a saved two-team tournament so the editor can reject it", async () => {
+  const divisionId = "event_legacy__division__open";
+  const playoffDivisionId = "event_legacy__division__playoff";
+  const snapshot = await buildEventEditorSnapshot(
+    {
+      id: "event_legacy",
+      $id: "event_legacy",
+      name: "Legacy tournament",
+      description: "",
+      eventType: "TOURNAMENT",
+      includePlayoffs: true,
+      teamSignup: true,
+      singleDivision: true,
+      maxParticipants: 2,
+      playoffTeamCount: 2,
+      sportIds: [],
+      start: "2026-09-10T18:00:00.000Z",
+      end: "2026-09-10T20:00:00.000Z",
+      noFixedEndDateTime: false,
+      timeZone: "UTC",
+      location: "",
+      address: "",
+      coordinates: [0, 0],
+      organizationId: null,
+      hostId: "host_legacy",
+      state: "UNPUBLISHED",
+      fieldIds: [],
+      timeSlotIds: [],
+      divisions: [divisionId],
+      divisionDetails: [
+        {
+          id: divisionId,
+          kind: "LEAGUE",
+          key: "open",
+          name: "Open",
+          maxParticipants: 2,
+          playoffTeamCount: 2,
+          fieldIds: [],
+        },
+      ],
+      playoffDivisionDetails: [
+        {
+          id: playoffDivisionId,
+          kind: "PLAYOFF",
+          key: "playoff",
+          name: "Playoff",
+          maxParticipants: 2,
+          playoffTeamCount: 2,
+          fieldIds: [],
+        },
+      ],
+    },
+    {
+      client: buildClient([], []) as any,
+      mode: "EDIT",
+      actor: { userId: "host_legacy" },
+    },
+  );
+
+  expect(snapshot.draft.participation.maxParticipants).toBe(2);
+  expect(snapshot.draft.competition.playoffTeamCount).toBe(2);
+  expect(snapshot.draft.competition.divisionDetails[0]).toEqual(
+    expect.objectContaining({
+      maxParticipants: 2,
+      playoffTeamCount: 2,
+    }),
+  );
+  expect(snapshot.draft.competition.playoffDivisionDetails[0]).toEqual(
+    expect.objectContaining({
+      maxParticipants: 2,
+      playoffTeamCount: 2,
+    }),
   );
 });

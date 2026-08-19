@@ -351,8 +351,8 @@ const writeDataFor = (
     : (entry.playoffTeamCount ?? null);
   return {
     id: plan.id,
-    key: phaseKeyFor(entry, plan.phase),
-    name: `${entry.name ?? entry.id} — ${phaseLabel(plan.phase)}`,
+    key: plan.clone ? phaseKeyFor(entry, plan.phase) : (entry.key ?? entry.id),
+    name: plan.clone ? `${entry.name ?? entry.id} — ${phaseLabel(plan.phase)}` : (entry.name ?? entry.id),
     kind: isBracket ? 'PLAYOFF' : 'LEAGUE',
     sortOrder: plan.sortOrder,
     eventId,

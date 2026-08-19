@@ -206,6 +206,7 @@ export const EventDetailsPanel = ({
         || showRegistrationQuestions
         || showCapacityWarning ? <EventDetailsLocationControls
             control={control}
+            eventType={eventData.eventType}
             coordinates={eventData.coordinates}
             defaultCoordinates={defaultCoordinates}
             coordinatesSelected={coordinatesSelected}

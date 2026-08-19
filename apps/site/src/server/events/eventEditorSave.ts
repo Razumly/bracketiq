@@ -1,6 +1,10 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createId } from "@/lib/id";
+import {
+  isBracketTeamCountEnabled,
+  MIN_BRACKET_TEAM_COUNT,
+} from "@/lib/divisionTypes";
 import { acquireEventLock } from "@/server/repositories/locks";
 import { upsertEventFromPayload } from "@/server/repositories/events";
 import { hasOrgPermission, canManageEvent } from "@/server/accessControl";
@@ -15,6 +19,7 @@ import {
   reconcileEventStaffDesiredState,
   type EventStaffPutInput,
 } from "./eventStaffReconciliation";
+import { isGeneratedTournamentPoolRecord } from "./tournamentPools";
 import {
   buildEventEditorSnapshot,
   loadCreateEventEditorSnapshot,
@@ -95,6 +100,68 @@ export class EditorInputError extends Error {
     this.name = "EditorInputError";
   }
 }
+const assertMinimumBracketTeamCounts = (draft: EventEditorDraft): void => {
+  const eventType = draft.basics.eventType.trim().toUpperCase();
+  const participationCount = draft.participation?.maxParticipants;
+  if (
+    eventType === "TOURNAMENT" &&
+    (typeof participationCount !== "number" ||
+      participationCount < MIN_BRACKET_TEAM_COUNT)
+  ) {
+    throw new EditorInputError(
+      `Tournament team count must be at least ${MIN_BRACKET_TEAM_COUNT}.`,
+    );
+  }
+
+  const isBracketCountValidationEnabled = isBracketTeamCountEnabled(
+    eventType,
+    draft.competition.includePlayoffs,
+  );
+  const eventPlayoffCount = draft.competition.playoffTeamCount;
+  if (
+    isBracketCountValidationEnabled &&
+    typeof eventPlayoffCount === "number" &&
+    eventPlayoffCount < MIN_BRACKET_TEAM_COUNT
+  ) {
+    throw new EditorInputError(
+      `Playoff team count must be at least ${MIN_BRACKET_TEAM_COUNT} when playoffs are enabled.`,
+    );
+  }
+
+  for (const detail of [
+    ...draft.competition.divisionDetails,
+    ...draft.competition.playoffDivisionDetails,
+  ]) {
+    const isGeneratedTournamentPool = isGeneratedTournamentPoolRecord({
+      eventType,
+      isPoolPlayEnabled: isBracketCountValidationEnabled,
+      kind: detail.kind,
+      poolCount: detail.poolCount,
+      playoffPlacementDivisionIds: detail.playoffPlacementDivisionIds,
+    });
+    if (isGeneratedTournamentPool) continue;
+    const divisionLabel = detail.name?.trim() || detail.id;
+    if (
+      eventType === "TOURNAMENT" &&
+      typeof detail.maxParticipants === "number" &&
+      detail.maxParticipants < MIN_BRACKET_TEAM_COUNT
+    ) {
+      throw new EditorInputError(
+        `Tournament team count must be at least ${MIN_BRACKET_TEAM_COUNT} for division "${divisionLabel}".`,
+      );
+    }
+    if (
+      isBracketCountValidationEnabled &&
+      typeof detail.playoffTeamCount === "number" &&
+      detail.playoffTeamCount < MIN_BRACKET_TEAM_COUNT
+    ) {
+      throw new EditorInputError(
+        `Playoff team count must be at least ${MIN_BRACKET_TEAM_COUNT} for division "${divisionLabel}" when playoffs are enabled.`,
+      );
+    }
+  }
+};
+
 
 export class EditorScheduleIntentError extends Error {
   constructor(message: string) {
@@ -302,6 +369,7 @@ const saveWithinTransaction = async (
   questionIdMap: Record<string, string>;
   emailCandidates: unknown[];
 }> => {
+  assertMinimumBracketTeamCounts(draft);
   if (existingSnapshot) {
     await assertPaymentCapability(draft, existingSnapshot);
   }

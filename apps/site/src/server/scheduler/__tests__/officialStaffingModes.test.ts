@@ -498,7 +498,7 @@ describe('official staffing modes', () => {
   it('SCHEDULE keeps assignable single-position officials when another slot has no candidates', () => {
     const division = buildDivision();
     const field = buildField('field_1', 1, division);
-    const teams = Object.values(buildTeams(2, division));
+    const teams = Object.values(buildTeams(3, division));
     const official1 = new UserData({ id: 'official_1', divisions: [division] });
     const official2 = new UserData({ id: 'official_2', divisions: [division] });
     const tournament = new Tournament({
@@ -506,7 +506,7 @@ describe('official staffing modes', () => {
       name: 'Planner Single Position Candidates',
       start: new Date(2026, 0, 3, 9, 0, 0),
       end: new Date(2026, 0, 3, 10, 0, 0),
-      maxParticipants: 2,
+      maxParticipants: 3,
       teamSignup: true,
       eventType: 'TOURNAMENT',
       teams: Object.fromEntries(teams.map((team) => [team.id, team])),
@@ -557,7 +557,7 @@ describe('official staffing modes', () => {
   it('assigns officials from position-specific pools per slot', () => {
     const division = buildDivision();
     const field = buildField('field_1', 1, division);
-    const teams = Object.values(buildTeams(2, division));
+    const teams = Object.values(buildTeams(3, division));
     const official1 = new UserData({ id: 'official_1', divisions: [division] });
     const official2 = new UserData({ id: 'official_2', divisions: [division] });
     const tournament = new Tournament({
@@ -565,7 +565,7 @@ describe('official staffing modes', () => {
       name: 'Planner Position Pools',
       start: new Date(2026, 0, 3, 9, 0, 0),
       end: new Date(2026, 0, 3, 10, 0, 0),
-      maxParticipants: 2,
+      maxParticipants: 3,
       teamSignup: true,
       eventType: 'TOURNAMENT',
       teams: Object.fromEntries(teams.map((team) => [team.id, team])),
@@ -614,14 +614,14 @@ describe('official staffing modes', () => {
   it('legacy OFF maps to full coverage and still refuses one user for two positions in one match', () => {
     const division = buildDivision();
     const field = buildField('field_1', 1, division);
-    const teams = Object.values(buildTeams(2, division));
+    const teams = Object.values(buildTeams(3, division));
     const official = new UserData({ id: 'official_1', divisions: [division] });
     const tournament = new Tournament({
       id: 'planner_off_unique_user',
       name: 'Planner OFF Uniqueness',
       start: new Date(2026, 0, 3, 9, 0, 0),
       end: new Date(2026, 0, 3, 10, 0, 0),
-      maxParticipants: 2,
+      maxParticipants: 3,
       teamSignup: true,
       eventType: 'TOURNAMENT',
       teams: Object.fromEntries(teams.map((team) => [team.id, team])),
@@ -660,7 +660,7 @@ describe('official staffing modes', () => {
   it('does not assign a participant to officiate their own match when an unrelated official is eligible', () => {
     const division = buildDivision();
     const field = buildField('field_1', 1, division);
-    const teams = Object.values(buildTeams(2, division));
+    const teams = Object.values(buildTeams(3, division));
     const participantOfficial = new UserData({
       id: 'official_a_participant',
       divisions: [division],
@@ -676,7 +676,7 @@ describe('official staffing modes', () => {
       name: 'Planner Own Match Guard',
       start: new Date(2026, 0, 3, 9, 0, 0),
       end: new Date(2026, 0, 3, 10, 0, 0),
-      maxParticipants: 2,
+      maxParticipants: 3,
       teamSignup: true,
       eventType: 'TOURNAMENT',
       teams: Object.fromEntries(teams.map((team) => [team.id, team])),

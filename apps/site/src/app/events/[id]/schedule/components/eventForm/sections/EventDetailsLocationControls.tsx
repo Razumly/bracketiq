@@ -8,6 +8,7 @@ import {
 } from '@mantine/core';
 
 import LocationSelector, { type LocationSelectionMeta } from '@/components/location/LocationSelector';
+import { minimumParticipantCountForEventType } from '@/lib/divisionTypes';
 import type { Event } from '@/types';
 
 import type { EventFormValues } from '../formTypes';
@@ -15,6 +16,7 @@ import { AnimatedSection } from '../components/AnimatedSection';
 
 type EventDetailsLocationControlsProps = {
     control: Control<EventFormValues>;
+    eventType: EventFormValues['eventType'];
     coordinates?: [number, number];
     defaultCoordinates?: [number, number];
     coordinatesSelected: boolean;
@@ -45,6 +47,7 @@ type EventDetailsLocationControlsProps = {
 
 export const EventDetailsLocationControls = ({
     control,
+    eventType,
     coordinates,
     defaultCoordinates,
     coordinatesSelected,
@@ -158,7 +161,8 @@ export const EventDetailsLocationControls = ({
                             render={({ field, fieldState }) => (
                                 <NumberInput
                                     label="Max Participants"
-                                    min={2}
+                                    min={minimumParticipantCountForEventType(eventType)}
+                                    aria-valuemin={minimumParticipantCountForEventType(eventType)}
                                     max={maxStandardNumber}
                                     value={field.value ?? ''}
                                     w="100%"

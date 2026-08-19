@@ -9,6 +9,7 @@ import {
 } from '@mantine/core';
 
 import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
+import { minimumParticipantCountForEventType } from '@/lib/divisionTypes';
 import type { Event, TournamentConfig } from '@/types';
 import { formatBillAmount, formatPrice } from '@/types';
 
@@ -105,9 +106,20 @@ export const DivisionSummaryList = ({
                         const effectiveDivisionPrice = singleDivision && !useDivisionPriceForSingleDivision
                             ? Math.max(0, eventPrice || 0)
                             : Math.max(0, detail.price || 0);
+                        const minimumDivisionParticipants = minimumParticipantCountForEventType(eventType);
                         const effectiveDivisionCapacity = singleDivision && !useDivisionCapacityForSingleDivision
-                            ? Math.max(2, Math.trunc(eventMaxParticipants || 2))
-                            : Math.max(2, Math.trunc(detail.maxParticipants || eventMaxParticipants || 2));
+                            ? Math.max(
+                                minimumDivisionParticipants,
+                                Math.trunc(eventMaxParticipants || minimumDivisionParticipants),
+                            )
+                            : Math.max(
+                                minimumDivisionParticipants,
+                                Math.trunc(
+                                    detail.maxParticipants
+                                    || eventMaxParticipants
+                                    || minimumDivisionParticipants,
+                                ),
+                            );
                         const effectiveDivisionPlayoffTeamCount = eventType === 'TOURNAMENT'
                             ? (typeof detail.playoffTeamCount === 'number'
                                 ? Math.trunc(detail.playoffTeamCount)

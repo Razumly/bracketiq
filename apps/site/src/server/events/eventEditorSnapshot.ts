@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import type { Event } from "@/types";
+import { normalizeBracketTeamCount } from "@/lib/divisionTypes";
 import {
   EVENT_EDITOR_CONTRACT_VERSION,
   parseEventEditorSnapshot,
@@ -19,6 +20,10 @@ import {
   matchDemandFromPersistedGraph,
   type MatchDemand,
 } from "@/server/scheduler/matchGraph";
+import {
+  generatedPoolsForBracket,
+  isTournamentPoolPlayEnabled,
+} from "./tournamentPools";
 
 export type EditorActor = {
   userId: string;
@@ -593,6 +598,8 @@ const EDITOR_DIVISION_KEYS = [
   "price",
   "maxParticipants",
   "playoffTeamCount",
+  "poolCount",
+  "poolTeamCount",
   "playoffPlacementDivisionIds",
   "standingsOverrides",
   "phaseSettings",
@@ -642,11 +649,14 @@ const isGeneratedPhaseDivision = (row: Record<string, unknown>): boolean => {
   const sourceDivisionId =
     typeof row.sourceDivisionId === "string" ? row.sourceDivisionId.trim() : "";
   const id = typeof row.id === "string" ? row.id.trim().toLowerCase() : "";
+  const key = typeof row.key === "string" ? row.key.trim().toLowerCase() : "";
+  const generatedKeySuffix = `__phase__${phase}`;
   return (
     role === "PHASE" &&
     Boolean(sourceDivisionId) &&
     Boolean(phase) &&
-    id === `${sourceDivisionId.toLowerCase()}__phase__${phase}`
+    id === `${sourceDivisionId.toLowerCase()}__phase__${phase}` &&
+    (!key || key.endsWith(generatedKeySuffix))
   );
 };
 
@@ -764,6 +774,8 @@ const divisionDetailFor = (row: Record<string, unknown>, index: number) => ({
     typeof row.maxParticipants === "number" ? row.maxParticipants : null,
   playoffTeamCount:
     typeof row.playoffTeamCount === "number" ? row.playoffTeamCount : null,
+  poolCount: typeof row.poolCount === "number" ? row.poolCount : null,
+  poolTeamCount: typeof row.poolTeamCount === "number" ? row.poolTeamCount : null,
   phaseSettings:
     row.phaseSettings && typeof row.phaseSettings === "object"
       ? row.phaseSettings
@@ -815,6 +827,128 @@ const divisionDetailFor = (row: Record<string, unknown>, index: number) => ({
   fieldIds: Array.isArray(row.fieldIds) ? row.fieldIds : [],
   teamIds: Array.isArray(row.teamIds) ? row.teamIds : [],
 });
+
+type EditorDivisionDetail = ReturnType<typeof divisionDetailFor>;
+
+const collapseTournamentPoolDivisions = (
+  event: Record<string, unknown>,
+  divisions: EditorDivisionDetail[],
+): EditorDivisionDetail[] => {
+  if (!isTournamentPoolPlayEnabled(event)) return divisions;
+
+  const poolDivisions = divisions.filter(
+    (division) => division.kind !== "PLAYOFF",
+  );
+  const bracketDivisions = divisions.filter(
+    (division) => division.kind === "PLAYOFF",
+  );
+  const consumedPoolIds = new Set<string>();
+  const canonicalDivisions = bracketDivisions.flatMap((bracket) => {
+    const pools = generatedPoolsForBracket(poolDivisions, bracket.id);
+    if (pools.length === 0) return [];
+    pools.forEach((pool) => consumedPoolIds.add(pool.id));
+    const sourcePool = pools[0]!;
+    const poolFieldIds = Array.from(
+      new Set(pools.flatMap((pool) => pool.fieldIds)),
+    );
+    const poolTeamIds = Array.from(
+      new Set(pools.flatMap((pool) => pool.teamIds)),
+    );
+
+    const poolMaxParticipants = pools.reduce(
+      (total, pool) =>
+        total +
+        (typeof pool.maxParticipants === "number" ? pool.maxParticipants : 0),
+      0,
+    );
+    const poolPlayoffTeamCount = pools.reduce(
+      (total, pool) =>
+        total +
+        (typeof pool.playoffTeamCount === "number"
+          ? pool.playoffTeamCount
+          : 0),
+      0,
+    );
+    const firstPoolTeamCount =
+      typeof pools[0]?.maxParticipants === "number"
+        ? pools[0].maxParticipants
+        : null;
+    const uniformPoolTeamCount =
+      firstPoolTeamCount !== null &&
+      pools.every((pool) => pool.maxParticipants === firstPoolTeamCount)
+        ? firstPoolTeamCount
+        : null;
+
+    return [
+      {
+        ...sourcePool,
+        id: bracket.id,
+        key: bracket.key,
+        name: bracket.name,
+        kind: "LEAGUE" as const,
+        maxParticipants:
+          poolMaxParticipants > 0
+            ? poolMaxParticipants
+            : bracket.maxParticipants,
+        playoffTeamCount:
+          typeof bracket.playoffTeamCount === "number"
+            ? bracket.playoffTeamCount
+            : poolPlayoffTeamCount,
+        poolCount:
+          typeof bracket.poolCount === "number"
+            ? bracket.poolCount
+            : pools.length,
+        poolTeamCount:
+          typeof bracket.poolTeamCount === "number"
+            ? bracket.poolTeamCount
+            : uniformPoolTeamCount,
+        phaseSettings: bracket.phaseSettings,
+        playoffPlacementDivisionIds: [],
+        playoffConfig: bracket.playoffConfig,
+        fieldIds: poolFieldIds,
+        teamIds: poolTeamIds,
+      },
+    ];
+  });
+  if (canonicalDivisions.length === 0) return divisions;
+
+  return [
+    ...poolDivisions.filter(
+      (division) => !consumedPoolIds.has(division.id),
+    ),
+    ...canonicalDivisions,
+    ...bracketDivisions,
+  ];
+};
+const normalizeTournamentEditorDivisions = (
+  event: Record<string, unknown>,
+  divisions: EditorDivisionDetail[],
+): EditorDivisionDetail[] => {
+  const collapsed = collapseTournamentPoolDivisions(event, divisions);
+  if (String(event.eventType ?? "").toUpperCase() !== "TOURNAMENT") {
+    return collapsed;
+  }
+
+  const bracketDivisions = divisions.filter(
+    (division) => division.kind === "PLAYOFF",
+  );
+  const generatedPoolIds = new Set(
+    bracketDivisions.flatMap((bracket) =>
+      generatedPoolsForBracket(divisions, bracket.id).map((pool) => pool.id),
+    ),
+  );
+  return collapsed.map((division) =>
+    generatedPoolIds.has(division.id)
+      ? division
+      : {
+          ...division,
+          maxParticipants: normalizeBracketTeamCount(division.maxParticipants),
+          playoffTeamCount: normalizeBracketTeamCount(
+            division.playoffTeamCount,
+          ),
+        },
+  );
+};
 const loadCatalogs = async (
   client: EditorSnapshotClient,
   event: Record<string, unknown>,
@@ -1319,9 +1453,13 @@ export const buildEventEditorSnapshot = async (
   );
   const divisions =
     loadedDivisions.length > 0 ? loadedDivisions : inlineDivisions;
-  const divisionDetails = divisions
+  const loadedDivisionDetails = divisions
     .map(divisionDetailFor)
     .filter((division) => division.id.length > 0);
+  const divisionDetails = normalizeTournamentEditorDivisions(
+    event,
+    loadedDivisionDetails,
+  );
   const rentalSlots = resources.timeSlots.filter(
     (slot) =>
       slot &&

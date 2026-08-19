@@ -1151,6 +1151,45 @@ describe('upsertEventFromPayload', () => {
     });
   });
 
+  it('accepts a saved tournament with generated two-team pool entries', async () => {
+    const client = createMockClient();
+    const bracketDivisionId = divisionId('open');
+    const poolDivisionIds = ['open_pool_a', 'open_pool_b', 'open_pool_c'].map(divisionId);
+    const payload = {
+      ...baseEventPayload(),
+      eventType: 'TOURNAMENT',
+      includePlayoffs: true,
+      singleDivision: false,
+      maxParticipants: 6,
+      divisions: poolDivisionIds,
+      divisionDetails: poolDivisionIds.map((poolDivisionId, index) => ({
+        id: poolDivisionId,
+        key: `open_pool_${String.fromCharCode(97 + index)}`,
+        kind: 'LEAGUE',
+        name: `Open Pool ${String.fromCharCode(65 + index)}`,
+        maxParticipants: 2,
+        playoffTeamCount: 2,
+        playoffPlacementDivisionIds: [bracketDivisionId, bracketDivisionId],
+      })),
+      playoffDivisionDetails: [
+        {
+          id: bracketDivisionId,
+          key: 'open',
+          kind: 'PLAYOFF',
+          name: 'Open',
+          maxParticipants: 6,
+          playoffTeamCount: 6,
+          poolCount: 3,
+        },
+      ],
+    };
+
+    await expect(upsertEventFromPayload(payload, client as any)).resolves.toBeDefined();
+    expect(client.divisions.upsert.mock.calls.map(([args]) => args.where.id)).toEqual(
+      expect.arrayContaining([...poolDivisionIds, bracketDivisionId]),
+    );
+  });
+
   it('preserves saved tournament pool standings overrides during ordinary event upserts', async () => {
     const client = createMockClient();
     const bracketDivisionId = divisionId('open');
@@ -1181,7 +1220,7 @@ describe('upsertEventFromPayload', () => {
           kind: 'PLAYOFF',
           name: 'Open',
           maxParticipants: 4,
-          playoffTeamCount: 2,
+          playoffTeamCount: 3,
           poolCount: 1,
         },
       ],
@@ -1242,7 +1281,7 @@ describe('upsertEventFromPayload', () => {
       ...baseEventPayload(),
       eventType: 'LEAGUE',
       includePlayoffs: true,
-      playoffTeamCount: 2,
+      playoffTeamCount: 3,
       singleDivision: false,
       splitLeaguePlayoffDivisions: false,
       divisions: [openDivisionId],
@@ -1255,7 +1294,7 @@ describe('upsertEventFromPayload', () => {
           divisionTypeName: 'Open',
           ratingType: 'SKILL',
           gender: 'C',
-          playoffTeamCount: 2,
+          playoffTeamCount: 3,
           playoffPlacementDivisionIds: staleMapping,
         },
       ],
@@ -1889,7 +1928,7 @@ describe('upsertEventFromPayload', () => {
     );
   });
 
-  it('requires an explicit event playoff team count when playoffs are enabled', async () => {
+  it('defaults a missing event playoff team count to three when playoffs are enabled', async () => {
     const client = createMockClient();
     const openDivisionId = divisionId('open');
 
@@ -1911,13 +1950,154 @@ describe('upsertEventFromPayload', () => {
       ],
     };
 
-    await expect(upsertEventFromPayload(payload, client as any)).rejects.toThrow(
-      'Playoff team count must be at least 2 when playoffs are enabled.',
+    await upsertEventFromPayload(payload, client as any);
+
+    const eventUpsert = client.events.upsert.mock.calls[0][0];
+    expect(eventUpsert.create.playoffTeamCount).toBe(3);
+    expect(eventUpsert.update.playoffTeamCount).toBe(3);
+    expect(client.divisions.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: openDivisionId },
+        create: expect.objectContaining({ playoffTeamCount: 3 }),
+        update: expect.objectContaining({ playoffTeamCount: 3 }),
+      }),
     );
-    expect(client.divisions.upsert).not.toHaveBeenCalled();
   });
 
-  it('requires explicit playoff team counts for each division in split leagues', async () => {
+  it('normalizes a two-team event playoff from installed clients', async () => {
+    const client = createMockClient();
+    const openDivisionId = divisionId('open');
+
+    const payload = {
+      ...baseEventPayload(),
+      includePlayoffs: true,
+      singleDivision: true,
+      playoffTeamCount: 2,
+      divisions: ['OPEN'],
+      divisionDetails: [
+        {
+          id: openDivisionId,
+          key: 'open',
+          name: 'Open',
+          divisionTypeId: 'open',
+          divisionTypeName: 'Open',
+          ratingType: 'SKILL',
+          gender: 'C',
+        },
+      ],
+    };
+
+    await upsertEventFromPayload(payload, client as any);
+
+    expect(client.events.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ playoffTeamCount: 3 }),
+        update: expect.objectContaining({ playoffTeamCount: 3 }),
+      }),
+    );
+    expect(client.divisions.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: openDivisionId },
+        create: expect.objectContaining({ playoffTeamCount: 3 }),
+        update: expect.objectContaining({ playoffTeamCount: 3 }),
+      }),
+    );
+  });
+
+  it('defaults a missing tournament event capacity to three', async () => {
+    const client = createMockClient();
+    const payload = {
+      ...baseEventPayload(),
+      eventType: 'TOURNAMENT',
+      includePlayoffs: false,
+      singleDivision: true,
+      maxParticipants: undefined,
+      divisions: ['OPEN'],
+      divisionDetails: [
+        {
+          id: divisionId('open'),
+          key: 'open',
+          name: 'Open',
+          maxParticipants: 3,
+        },
+      ],
+    };
+
+    await upsertEventFromPayload(payload, client as any);
+
+    expect(client.events.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ maxParticipants: 3 }),
+        update: expect.objectContaining({ maxParticipants: 3 }),
+      }),
+    );
+  });
+
+  it('normalizes tournament event capacity below three', async () => {
+    const client = createMockClient();
+    const payload = {
+      ...baseEventPayload(),
+      eventType: 'TOURNAMENT',
+      includePlayoffs: true,
+      singleDivision: true,
+      playoffTeamCount: 3,
+      maxParticipants: 2,
+      divisions: ['OPEN'],
+      divisionDetails: [
+        {
+          id: divisionId('open'),
+          key: 'open',
+          name: 'Open',
+          maxParticipants: 3,
+          playoffTeamCount: 3,
+        },
+      ],
+    };
+
+    await upsertEventFromPayload(payload, client as any);
+
+    expect(client.events.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ maxParticipants: 3 }),
+        update: expect.objectContaining({ maxParticipants: 3 }),
+      }),
+    );
+  });
+
+  it('normalizes tournament division capacity below three', async () => {
+    const client = createMockClient();
+    const openDivisionId = divisionId('open');
+    const payload = {
+      ...baseEventPayload(),
+      eventType: 'TOURNAMENT',
+      includePlayoffs: false,
+      singleDivision: true,
+      playoffTeamCount: 3,
+      maxParticipants: 8,
+      divisions: ['OPEN'],
+      divisionDetails: [
+        {
+          id: openDivisionId,
+          key: 'open',
+          name: 'Open',
+          maxParticipants: 2,
+          playoffTeamCount: 3,
+        },
+      ],
+    };
+
+    await upsertEventFromPayload(payload, client as any);
+
+    expect(client.divisions.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: openDivisionId },
+        create: expect.objectContaining({ maxParticipants: 3 }),
+        update: expect.objectContaining({ maxParticipants: 3 }),
+      }),
+    );
+  });
+
+  it('defaults missing split-league playoff team counts to three', async () => {
     const client = createMockClient();
     const openDivisionId = divisionId('open');
     const advancedDivisionId = divisionId('advanced');
@@ -1951,13 +2131,16 @@ describe('upsertEventFromPayload', () => {
       ],
     };
 
-    await expect(upsertEventFromPayload(payload, client as any)).rejects.toThrow(
-      'Playoff team count must be at least 2 for division "Advanced" when playoffs are enabled.',
-    );
-    expect(client.divisions.upsert).not.toHaveBeenCalled();
+    await upsertEventFromPayload(payload, client as any);
+
+    const divisionUpserts = client.divisions.upsert.mock.calls
+      .map(([args]) => args)
+      .filter((args) => [openDivisionId, advancedDivisionId].includes(args.where.id));
+    expect(divisionUpserts.map((args) => args.create.playoffTeamCount)).toEqual([4, 3]);
+    expect(divisionUpserts.map((args) => args.update.playoffTeamCount)).toEqual([4, 3]);
   });
 
-  it('persists multi-division playoff counts without an event-level count', async () => {
+  it('defaults the missing multi-division event playoff count to three', async () => {
     const client = createMockClient();
     const openDivisionId = divisionId('open');
     const advancedDivisionId = divisionId('advanced');
@@ -1995,8 +2178,8 @@ describe('upsertEventFromPayload', () => {
     await upsertEventFromPayload(payload, client as any);
 
     const eventUpsert = client.events.upsert.mock.calls[0][0];
-    expect(eventUpsert.create.playoffTeamCount).toBeNull();
-    expect(eventUpsert.update.playoffTeamCount).toBeNull();
+    expect(eventUpsert.create.playoffTeamCount).toBe(3);
+    expect(eventUpsert.update.playoffTeamCount).toBe(3);
 
     const divisionUpserts = client.divisions.upsert.mock.calls
       .map(([args]) => args)

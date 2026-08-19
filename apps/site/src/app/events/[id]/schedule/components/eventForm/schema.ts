@@ -26,6 +26,7 @@ import {
     normalizeSlotDivisionKeysWithLookup,
 } from './divisionForm';
 import { hasAffiliateUrl, isTournamentPoolPlayFormEnabled, supportsScheduleSlotsForEvent } from './eventRules';
+import { MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
 import { BRACKET_TEAM_COUNT_ERROR } from './divisionMessages';
 import { coordinatesAreSet } from './locationHelpers';
 import { isEventLocalField } from './resourceGroups';
@@ -592,6 +593,27 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
             }
         }
 
+        if (!isAffiliateEvent && values.eventType === 'TOURNAMENT') {
+            if (!(typeof values.maxParticipants === 'number' && values.maxParticipants >= MIN_BRACKET_TEAM_COUNT)) {
+                ctx.addIssue({
+                    code: "custom",
+                    message: BRACKET_TEAM_COUNT_ERROR,
+                    path: ['maxParticipants'],
+                });
+            }
+            if (!values.singleDivision) {
+                values.divisionDetails.forEach((detail, index) => {
+                    if (!(typeof detail.maxParticipants === 'number' && detail.maxParticipants >= MIN_BRACKET_TEAM_COUNT)) {
+                        ctx.addIssue({
+                            code: "custom",
+                            message: BRACKET_TEAM_COUNT_ERROR,
+                            path: ['divisionDetails', index, 'maxParticipants'],
+                        });
+                    }
+                });
+            }
+        }
+
         if (!isAffiliateEvent && supportsScheduleSlotsForEvent(values.eventType, values.parentEvent)) {
             const slotDivisionLookup = buildSlotDivisionLookup(
                 values.divisionDetails,
@@ -600,6 +622,18 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                     : [],
             );
             const selectedDivisionKeys = slotDivisionLookup.keys;
+            if (
+                (values.eventType === 'LEAGUE' || values.eventType === 'TOURNAMENT') &&
+                values.leagueData.includePlayoffs &&
+                !(typeof values.leagueData.playoffTeamCount === 'number' &&
+                    values.leagueData.playoffTeamCount >= MIN_BRACKET_TEAM_COUNT)
+            ) {
+                ctx.addIssue({
+                    code: "custom",
+                    message: BRACKET_TEAM_COUNT_ERROR,
+                    path: ['leagueData', 'playoffTeamCount'],
+                });
+            }
             if (values.eventType === 'LEAGUE' && values.leagueData.includePlayoffs) {
                 if (values.splitLeaguePlayoffDivisions) {
                     if (!values.playoffDivisionDetails.length) {
@@ -618,7 +652,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                     );
 
                     values.divisionDetails.forEach((detail, index) => {
-                        if (!(typeof detail.playoffTeamCount === 'number' && detail.playoffTeamCount >= 2)) {
+                        if (!(typeof detail.playoffTeamCount === 'number' && detail.playoffTeamCount >= MIN_BRACKET_TEAM_COUNT)) {
                             ctx.addIssue({
                                 code: "custom",
                                 message: BRACKET_TEAM_COUNT_ERROR,
@@ -676,12 +710,12 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                         const capacityResult = capacityByDivisionId.get(normalizedId);
                         const assignedCount = capacityResult?.mappedPositionCount ?? 0;
                         const capacity = normalizePlayoffDivisionParticipantCount(division.maxParticipants);
-                        if (typeof capacity !== 'number' || capacity < 2) {
+                        if (typeof capacity !== 'number' || capacity < MIN_BRACKET_TEAM_COUNT) {
                             ctx.addIssue({
                                 code: "custom",
                                 message: values.teamSignup
-                                    ? 'Playoff division teams count must be at least 2.'
-                                    : 'Playoff division participants count must be at least 2.',
+                                    ? `Playoff division teams count must be at least ${MIN_BRACKET_TEAM_COUNT}.`
+                                    : `Playoff division participants count must be at least ${MIN_BRACKET_TEAM_COUNT}.`,
                                 path: ['playoffDivisionDetails', index, 'maxParticipants'],
                             });
                             return;
@@ -694,17 +728,9 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                             });
                         }
                     });
-                } else if (values.singleDivision) {
-                    if (!(typeof values.leagueData.playoffTeamCount === 'number' && values.leagueData.playoffTeamCount >= 2)) {
-                        ctx.addIssue({
-                            code: "custom",
-                            message: BRACKET_TEAM_COUNT_ERROR,
-                            path: ['leagueData', 'playoffTeamCount'],
-                        });
-                    }
-                } else {
+                } else if (!values.singleDivision) {
                     values.divisionDetails.forEach((detail, index) => {
-                        if (!(typeof detail.playoffTeamCount === 'number' && detail.playoffTeamCount >= 2)) {
+                        if (!(typeof detail.playoffTeamCount === 'number' && detail.playoffTeamCount >= MIN_BRACKET_TEAM_COUNT)) {
                             ctx.addIssue({
                                 code: "custom",
                                 message: BRACKET_TEAM_COUNT_ERROR,
@@ -718,8 +744,8 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
             if (isTournamentPoolPlayFormEnabled(values.eventType, values.leagueData.includePlayoffs)) {
                 values.divisionDetails.forEach((detail, index) => {
                     const maxTeams = values.singleDivision
-                        ? Math.max(2, Math.trunc(values.maxParticipants || detail.maxParticipants || 0))
-                        : Math.max(2, Math.trunc(detail.maxParticipants || 0));
+                        ? Math.max(MIN_BRACKET_TEAM_COUNT, Math.trunc(values.maxParticipants || detail.maxParticipants || 0))
+                        : Math.max(MIN_BRACKET_TEAM_COUNT, Math.trunc(detail.maxParticipants || 0));
                     const poolCount = Number.isFinite(detail.poolCount)
                         ? Math.max(1, Math.trunc(detail.poolCount as number))
                         : null;
@@ -734,7 +760,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                         });
                         return;
                     }
-                    if (bracketTeams === null || bracketTeams < 2) {
+                    if (bracketTeams === null || bracketTeams < MIN_BRACKET_TEAM_COUNT) {
                         ctx.addIssue({
                             code: "custom",
                             message: BRACKET_TEAM_COUNT_ERROR,

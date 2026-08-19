@@ -23,6 +23,8 @@ import {
     DIVISION_NAME_FIELD_CLASS,
     DIVISION_NUMBER_FIELD_CLASS,
 } from '../divisionLayout';
+import { MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
+import { BRACKET_TEAM_COUNT_ERROR } from '../divisionMessages';
 import { DivisionPhaseConfigurationControls } from './DivisionPhaseRulesEditor';
 
 type DivisionEditorPlayoffDivisionControlsProps = {
@@ -82,11 +84,17 @@ export const DivisionEditorPlayoffDivisionControls = ({
             <NumberInput
                 label={teamSignup ? 'Teams Count' : 'Participants Count'}
                 value={maxParticipants ?? ''}
+                min={MIN_BRACKET_TEAM_COUNT}
                 max={maxStandardNumber}
                 clampBehavior="none"
                 disabled={disabled}
                 className={DIVISION_NUMBER_FIELD_CLASS}
                 onChange={onMaxParticipantsChange}
+                error={
+                    typeof maxParticipants === 'number' && maxParticipants >= MIN_BRACKET_TEAM_COUNT
+                        ? undefined
+                        : BRACKET_TEAM_COUNT_ERROR
+                }
             />
             <div className={DIVISION_FULL_WIDTH_CLASS}>
                 <TournamentFields

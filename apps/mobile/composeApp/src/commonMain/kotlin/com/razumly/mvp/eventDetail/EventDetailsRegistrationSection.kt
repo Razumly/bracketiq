@@ -60,10 +60,10 @@ import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderUsesUsername
 import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentProvider
 import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
-import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.StandardTextField
+import com.razumly.mvp.core.data.dataTypes.withSimplePlayoffsOrPoolPlay
 import com.razumly.mvp.eventDetail.composables.CancellationRefundOptions
 import com.razumly.mvp.eventDetail.composables.NumberInputField
 import com.razumly.mvp.eventDetail.composables.RegistrationOptions
@@ -240,29 +240,7 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
                         label = "Include Playoffs",
                         onCheckedChange = { checked ->
                             actions.onEditEvent {
-                                val nextDivisionDetails = mergeDivisionDetailsForDivisions(
-                                    divisions = divisions,
-                                    existingDetails = divisionDetails,
-                                    eventId = id,
-                                ).map { detail ->
-                                    when {
-                                        !checked -> detail.copy(playoffTeamCount = null)
-                                        singleDivision -> detail.copy(
-                                            playoffTeamCount = playoffTeamCount ?: detail.playoffTeamCount,
-                                        )
-                                        else -> detail
-                                    }
-                                }
-                                copy(
-                                    includePlayoffs = checked,
-                                    playoffTeamCount = when {
-                                        !checked -> null
-                                        singleDivision -> playoffTeamCount
-                                            ?: nextDivisionDetails.firstOrNull()?.playoffTeamCount
-                                        else -> playoffTeamCount
-                                    },
-                                    divisionDetails = nextDivisionDetails,
-                                )
+                                withSimplePlayoffsOrPoolPlay(checked)
                             }
                         },
                     )
@@ -272,26 +250,16 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
                         label = "Include Pool Play",
                         onCheckedChange = { checked ->
                             actions.onEditEvent {
-                                val nextDivisionDetails = mergeDivisionDetailsForDivisions(
-                                    divisions = divisions,
-                                    existingDetails = divisionDetails,
-                                    eventId = id,
-                                ).map { detail ->
-                                    if (checked) {
-                                        detail.withDerivedTournamentPoolTeamCount(enabled = true)
-                                    } else {
-                                        detail.copy(
-                                            playoffTeamCount = null,
-                                            poolCount = null,
-                                            poolTeamCount = null,
-                                        )
-                                    }
+                                val normalized = withSimplePlayoffsOrPoolPlay(checked)
+                                if (!checked) {
+                                    normalized
+                                } else {
+                                    normalized.copy(
+                                        divisionDetails = normalized.divisionDetails.map { detail ->
+                                            detail.withDerivedTournamentPoolTeamCount(enabled = true)
+                                        },
+                                    )
                                 }
-                                copy(
-                                    includePlayoffs = checked,
-                                    playoffTeamCount = if (checked) playoffTeamCount else null,
-                                    divisionDetails = nextDivisionDetails,
-                                )
                             }
                         },
                     )

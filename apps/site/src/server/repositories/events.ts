@@ -21,6 +21,8 @@ import {
 } from "@/lib/manualRegistrationPayments";
 import {
   buildDivisionToken,
+  MIN_BRACKET_TEAM_COUNT,
+  normalizeBracketTeamCount,
   buildEventDivisionId,
   cleanDivisionDisplayName,
   deriveDivisionTypeDisplayName,
@@ -88,6 +90,7 @@ import {
   buildGeneratedTournamentPools,
   generatedPoolsForBracket,
   isTournamentPoolPlayEnabled,
+  isGeneratedTournamentPoolRecord,
 } from "@/server/events/tournamentPools";
 import {
   collectPhaseDivisions,
@@ -120,6 +123,9 @@ import {
 } from "@/server/eventSports";
 
 type PrismaLike = PrismaClient | any;
+
+const normalizeLegacyBracketTeamCount = (value: unknown): number =>
+  Math.max(MIN_BRACKET_TEAM_COUNT, normalizeBracketTeamCount(value));
 
 
 export type EventFieldScheduleConflict = {
@@ -1854,18 +1860,17 @@ const assertSplitLeaguePlayoffMappingCounts = ({
   }
 };
 
-const requireExplicitLeaguePlayoffTeamCount = (
+const resolveLeaguePlayoffTeamCount = (
   value: number | null | undefined,
   message: string,
 ): number => {
+  if (value === null || value === undefined) {
+    return MIN_BRACKET_TEAM_COUNT;
+  }
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new LeaguePlayoffTeamCountValidationError(message);
   }
-  const normalized = Math.trunc(value);
-  if (normalized < 2) {
-    throw new LeaguePlayoffTeamCountValidationError(message);
-  }
-  return normalized;
+  return normalizeLegacyBracketTeamCount(value);
 };
 
 type DivisionRatingWindow = {
@@ -2501,11 +2506,15 @@ const isGeneratedPhaseDivisionRow = (row: any): boolean => {
       ? row.sourceDivisionId.trim()
       : "";
   const id = typeof row?.id === "string" ? row.id.trim().toLowerCase() : "";
+  const key =
+    typeof row?.key === "string" ? row.key.trim().toLowerCase() : "";
+  const generatedKeySuffix = `__phase__${phase}`;
   return (
     role === "PHASE" &&
     Boolean(sourceDivisionId) &&
     Boolean(phase) &&
-    id === `${sourceDivisionId.toLowerCase()}__phase__${phase}`
+    id === `${sourceDivisionId.toLowerCase()}__phase__${phase}` &&
+    (!key || key.endsWith(generatedKeySuffix))
   );
 };
 
@@ -4486,6 +4495,11 @@ export const loadEventWithRelations = async (
       ? event.doTeamsOfficiate
       : legacyOfficialSchedulingMode === "TEAM_STAFFING";
 
+  const schedulerPlayoffTeamCount =
+    Boolean(event.includePlayoffs) &&
+    (event.eventType === "LEAGUE" || event.eventType === "TOURNAMENT")
+      ? normalizeBracketTeamCount(event.playoffTeamCount)
+      : (event.playoffTeamCount ?? 0);
   const baseParams = {
     id: event.id,
     start: eventStart,
@@ -4500,7 +4514,10 @@ export const loadEventWithRelations = async (
     freeAgentIds: participantIds.freeAgentIds.length
       ? participantIds.freeAgentIds
       : ensureStringArray((event as any).freeAgentIds),
-    maxParticipants: event.maxParticipants ?? 0,
+    maxParticipants:
+      event.eventType === "TOURNAMENT"
+        ? normalizeBracketTeamCount(event.maxParticipants)
+        : (event.maxParticipants ?? 0),
     teamSignup: Boolean(event.teamSignup),
     coordinates,
     organizationId: event.organizationId ?? null,
@@ -4592,7 +4609,7 @@ export const loadEventWithRelations = async (
     setDurationMinutes: event.setDurationMinutes ?? 0,
     gamesPerOpponent: event.gamesPerOpponent ?? 1,
     includePlayoffs: Boolean(event.includePlayoffs),
-    playoffTeamCount: event.playoffTeamCount ?? 0,
+    playoffTeamCount: schedulerPlayoffTeamCount,
     setsPerMatch: event.setsPerMatch ?? 0,
     pointsToVictory: ensureNumberArray(event.pointsToVictory),
     timeSlots,
@@ -4608,7 +4625,7 @@ export const loadEventWithRelations = async (
           ...baseParams,
           gamesPerOpponent: event.gamesPerOpponent ?? 1,
           includePlayoffs: Boolean(event.includePlayoffs),
-          playoffTeamCount: event.playoffTeamCount ?? 0,
+          playoffTeamCount: schedulerPlayoffTeamCount,
           setsPerMatch: event.setsPerMatch ?? 0,
           pointsToVictory: ensureNumberArray(event.pointsToVictory),
         })
@@ -5450,6 +5467,12 @@ export const syncEventDivisions = async (
     eventType: normalizedEventType,
     includePlayoffs: params.includePlayoffs,
   });
+  const normalizedDefaultPlayoffTeamCount = params.includePlayoffs
+    ? resolveLeaguePlayoffTeamCount(
+        params.defaultPlayoffTeamCount,
+        `Playoff team count must be at least ${MIN_BRACKET_TEAM_COUNT} when playoffs are enabled.`,
+      )
+    : params.defaultPlayoffTeamCount;
   const clearSingleDivisionTeamAssignments =
     Boolean(params.singleDivision) && !tournamentPoolPlayEnabled;
   let effectiveDivisionIds = divisionIds;
@@ -5481,8 +5504,12 @@ export const syncEventDivisions = async (
           id: bracketDetail.id,
           key: bracketDetail.key,
           name: bracketDetail.name,
-          maxParticipants: bracketDetail.maxParticipants,
-          playoffTeamCount: bracketDetail.playoffTeamCount,
+          maxParticipants: normalizeLegacyBracketTeamCount(
+            bracketDetail.maxParticipants,
+          ),
+          playoffTeamCount: normalizeLegacyBracketTeamCount(
+            bracketDetail.playoffTeamCount,
+          ),
           poolCount: bracketDetail.poolCount,
         },
         existingPools,
@@ -5557,15 +5584,17 @@ export const syncEventDivisions = async (
           extractDivisionTokenFromId(normalizedDivisionId) ??
           normalizedDivisionId;
 
-        requireExplicitLeaguePlayoffTeamCount(
-          detail?.playoffTeamCount ?? existing?.playoffTeamCount,
-          `Playoff team count must be at least 2 for division "${divisionLabel}" when playoffs are enabled.`,
+        resolveLeaguePlayoffTeamCount(
+          detail?.playoffTeamCount ??
+            existing?.playoffTeamCount ??
+            normalizedDefaultPlayoffTeamCount,
+          `Playoff team count must be at least ${MIN_BRACKET_TEAM_COUNT} for division "${divisionLabel}" when playoffs are enabled.`,
         );
       }
     } else {
-      requireExplicitLeaguePlayoffTeamCount(
-        params.defaultPlayoffTeamCount,
-        "Playoff team count must be at least 2 when playoffs are enabled.",
+      resolveLeaguePlayoffTeamCount(
+        normalizedDefaultPlayoffTeamCount,
+        `Playoff team count must be at least ${MIN_BRACKET_TEAM_COUNT} when playoffs are enabled.`,
       );
     }
   }
@@ -5760,22 +5789,41 @@ export const syncEventDivisions = async (
               existing?.price,
               params.defaultPrice ?? undefined,
             ) ?? null);
-      const maxParticipants =
+      const rawMaxParticipants =
         resolveDivisionValue(
           detail?.maxParticipants,
           existing?.maxParticipants,
           params.defaultMaxParticipants ?? undefined,
         ) ?? null;
-      const playoffTeamCount =
+      const isGeneratedTournamentPool = isGeneratedTournamentPoolRecord({
+        eventType: normalizedEventType,
+        isPoolPlayEnabled: tournamentPoolPlayEnabled,
+        kind,
+        poolCount: detail?.poolCount,
+        playoffPlacementDivisionIds: [
+          ...ensureStringArray(detail?.playoffPlacementDivisionIds),
+          ...ensureStringArray(existing?.playoffPlacementDivisionIds),
+        ],
+      });
+      const maxParticipants =
+        normalizedEventType === "TOURNAMENT" &&
+        !isGeneratedTournamentPool
+          ? normalizeLegacyBracketTeamCount(rawMaxParticipants)
+          : rawMaxParticipants;
+      const rawPlayoffTeamCount =
         kind === "PLAYOFF" && !isTournamentBracketDivision
           ? null
           : (resolveDivisionValue(
               detail?.playoffTeamCount,
               existing?.playoffTeamCount,
-              params.singleDivision
-                ? (params.defaultPlayoffTeamCount ?? undefined)
+              params.includePlayoffs
+                ? (normalizedDefaultPlayoffTeamCount ?? undefined)
                 : undefined,
             ) ?? null);
+      const playoffTeamCount =
+        params.includePlayoffs && !isGeneratedTournamentPool
+          ? normalizeLegacyBracketTeamCount(rawPlayoffTeamCount)
+          : rawPlayoffTeamCount;
       const allowPaymentPlans =
         kind === "PLAYOFF" && !isTournamentBracketDivision
           ? false
@@ -6537,6 +6585,19 @@ export const upsertEventFromPayload = async (
       : payload.includePlayoffs,
     false,
   );
+  const normalizedEventPlayoffTeamCount = (() => {
+    const parsed = coerceNullableNumber(payload.playoffTeamCount);
+    if (
+      !includePlayoffsOrPools ||
+      (nextEventType !== "LEAGUE" && nextEventType !== "TOURNAMENT")
+    ) {
+      return parsed ?? null;
+    }
+    return resolveLeaguePlayoffTeamCount(
+      parsed,
+      `Playoff team count must be at least ${MIN_BRACKET_TEAM_COUNT} when playoffs are enabled.`,
+    );
+  })();
   const isTournamentPoolPlay = isTournamentPoolPlayEnabled({
     eventType: payloadEventType,
     includePlayoffs: includePlayoffsOrPools,
@@ -7072,6 +7133,7 @@ export const upsertEventFromPayload = async (
     const existingMatchRulesOverride = (existingEvent as any)
       ?.matchRulesOverride;
     if (
+
       existingMatchRulesOverride &&
       typeof existingMatchRulesOverride === "object" &&
       !Array.isArray(existingMatchRulesOverride)
@@ -7080,6 +7142,13 @@ export const upsertEventFromPayload = async (
     }
     return existingMatchRulesOverride === null ? null : undefined;
   })();
+  const rawEventMaxParticipants =
+    coerceNullableNumber(payload.maxParticipants) ??
+    (nextEventType === "TOURNAMENT" ? MIN_BRACKET_TEAM_COUNT : null);
+  const normalizedEventMaxParticipants =
+    nextEventType === "TOURNAMENT"
+      ? normalizeLegacyBracketTeamCount(rawEventMaxParticipants)
+      : rawEventMaxParticipants;
   const payloadIncludesAutoCreatePointMatchIncidents =
     Object.prototype.hasOwnProperty.call(
       payload,
@@ -7123,7 +7192,7 @@ export const upsertEventFromPayload = async (
     address: payload.address ?? null,
     rating: payload.rating ?? null,
     teamSizeLimit: payload.teamSizeLimit ?? 0,
-    maxParticipants: payload.maxParticipants ?? null,
+    maxParticipants: normalizedEventMaxParticipants,
     minAge: payload.minAge ?? null,
     maxAge: payload.maxAge ?? null,
     hostId: normalizedHostId,
@@ -7166,7 +7235,7 @@ export const upsertEventFromPayload = async (
     coordinates: payloadCoordinates,
     gamesPerOpponent: payload.gamesPerOpponent ?? null,
     includePlayoffs: includePlayoffsOrPools,
-    playoffTeamCount: payload.playoffTeamCount ?? null,
+    playoffTeamCount: normalizedEventPlayoffTeamCount,
     usesSets: payload.usesSets ?? false,
     matchDurationMinutes: payload.matchDurationMinutes ?? null,
     setDurationMinutes: payload.setDurationMinutes ?? null,
@@ -7223,20 +7292,11 @@ export const upsertEventFromPayload = async (
     }
     return normalizedEventPrice;
   })();
-  const defaultDivisionMaxParticipants = (() => {
-    const parsed = coerceNullableNumber(payload.maxParticipants);
-    if (typeof parsed === "number") {
-      return Math.max(0, Math.trunc(parsed));
-    }
-    return parsed ?? null;
-  })();
-  const defaultDivisionPlayoffTeamCount = (() => {
-    const parsed = coerceNullableNumber(payload.playoffTeamCount);
-    if (typeof parsed === "number") {
-      return Math.max(0, Math.trunc(parsed));
-    }
-    return parsed ?? null;
-  })();
+  const defaultDivisionMaxParticipants =
+    typeof normalizedEventMaxParticipants === "number"
+      ? Math.max(0, Math.trunc(normalizedEventMaxParticipants))
+      : normalizedEventMaxParticipants;
+  const defaultDivisionPlayoffTeamCount = normalizedEventPlayoffTeamCount;
   const defaultDivisionAllowPaymentPlans = (() => {
     if (
       !canPersistEventPricing ||

@@ -1,4 +1,8 @@
-import { buildDivisionName } from '@/lib/divisionTypes';
+import {
+    buildDivisionName,
+    MIN_BRACKET_TEAM_COUNT,
+    minimumParticipantCountForEventType,
+} from '@/lib/divisionTypes';
 import { normalizePriceCents } from '@/lib/priceUtils';
 import type { LeagueConfig, TournamentConfig } from '@/types';
 import { normalizeDivisionPhaseSettingsMap } from '@/lib/divisionPhaseSettings';
@@ -54,11 +58,13 @@ type BuildResetDivisionEditorStateOptions = {
 export const buildInitialDivisionEditorState = ({
     eventPrice,
     eventMaxParticipants,
+    eventType,
     leagueData,
     sportUsesPointsPerSetWin,
 }: {
     eventPrice: number;
     eventMaxParticipants: number | null;
+    eventType: EventFormValues['eventType'];
     leagueData: LeagueConfig;
     sportUsesPointsPerSetWin: boolean;
 }): DivisionEditorState => ({
@@ -69,8 +75,13 @@ export const buildInitialDivisionEditorState = ({
     ageDivisionTypeId: '',
     name: '',
     price: Math.max(0, eventPrice || 0),
-    maxParticipants: Math.max(2, Math.trunc(eventMaxParticipants || 2)),
-    playoffTeamCount: null,
+    maxParticipants: Math.max(
+        minimumParticipantCountForEventType(eventType),
+        Math.trunc(eventMaxParticipants || (minimumParticipantCountForEventType(eventType))),
+    ),
+    playoffTeamCount: leagueData.includePlayoffs
+        ? leagueData.playoffTeamCount ?? MIN_BRACKET_TEAM_COUNT
+        : null,
     poolCount: null,
     phaseSettings: {},
     playoffPlacementDivisionIds: [],
@@ -110,8 +121,16 @@ export const buildResetDivisionEditorState = ({
         ageDivisionTypeId: defaultDivisionTypeSelections.ageDivisionTypeId,
         name: '',
         price: Math.max(0, eventData.price || 0),
-        maxParticipants: Math.max(2, Math.trunc(eventData.maxParticipants || 2)),
-        playoffTeamCount: null,
+        maxParticipants: Math.max(
+            minimumParticipantCountForEventType(eventData.eventType),
+            Math.trunc(
+                eventData.maxParticipants
+                || (minimumParticipantCountForEventType(eventData.eventType)),
+            ),
+        ),
+        playoffTeamCount: leagueData.includePlayoffs
+            ? leagueData.playoffTeamCount ?? MIN_BRACKET_TEAM_COUNT
+            : null,
         poolCount: null,
         phaseSettings: {},
         playoffPlacementDivisionIds: [],
@@ -186,11 +205,20 @@ export const buildLeagueDivisionEditorState = ({
             || (detail.ratingType === 'AGE' ? detail.divisionTypeId : fallbackSelections.ageDivisionTypeId),
         name: detail.name,
         price: Math.max(0, detail.price || 0),
-        maxParticipants: Math.max(2, Math.trunc(detail.maxParticipants || eventData.maxParticipants || 2)),
+        maxParticipants: Math.max(
+            minimumParticipantCountForEventType(eventData.eventType),
+            Math.trunc(
+                detail.maxParticipants
+                || eventData.maxParticipants
+                || (minimumParticipantCountForEventType(eventData.eventType)),
+            ),
+        ),
         playoffTeamCount: typeof detail.playoffTeamCount === 'number'
             && Number.isFinite(detail.playoffTeamCount)
             ? Math.trunc(detail.playoffTeamCount)
-            : null,
+            : (leagueData.includePlayoffs
+                ? leagueData.playoffTeamCount ?? MIN_BRACKET_TEAM_COUNT
+                : null),
         poolCount: typeof detail.poolCount === 'number'
             ? Math.max(1, Math.trunc(detail.poolCount))
             : null,

@@ -2,11 +2,13 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MIN_BRACKET_TEAM_COUNT
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.minimumParticipantCount
 import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderInputLabel
 import com.razumly.mvp.core.data.dataTypes.manualPaymentProviderUsesUsername
 import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentUrl
@@ -70,9 +72,12 @@ private fun splitLeaguePlayoffPlacementErrors(
         playoffDivisions = playoffDivisions,
     ).mapNotNull { result ->
         val label = result.name ?: result.playoffDivisionId
+        val capacity = result.capacity
         when {
-            result.capacity == null ->
+            capacity == null ->
                 "Playoff division \"$label\" must define a team count before assignments can be validated."
+            capacity < MIN_BRACKET_TEAM_COUNT ->
+                "Playoff division \"$label\" team count must be at least $MIN_BRACKET_TEAM_COUNT."
 
             !result.sourceMappingsValid ->
                 "Playoff division \"$label\" has ${result.mappedPositionCount} assigned positions " +
@@ -256,11 +261,18 @@ internal fun computeEventValidationResult(
         divisionDetailsForSettings.isNotEmpty() &&
             divisionDetailsForSettings.all { detail -> (detail.price ?: 0) > 0 }
     }
+    val minimumParticipantCount = editEvent.eventType.minimumParticipantCount()
+    val eventCapacityValid =
+        editEvent.eventType != EventType.TOURNAMENT ||
+            editEvent.maxParticipants >= minimumParticipantCount
     val isMaxParticipantsValid = if (editEvent.singleDivision) {
-        editEvent.maxParticipants >= 2
+        eventCapacityValid && editEvent.maxParticipants >= minimumParticipantCount
     } else {
-        divisionDetailsForSettings.isNotEmpty() &&
-            divisionDetailsForSettings.all { detail -> (detail.maxParticipants ?: 0) >= 2 }
+        eventCapacityValid &&
+            divisionDetailsForSettings.isNotEmpty() &&
+            divisionDetailsForSettings.all { detail ->
+                (detail.maxParticipants ?: 0) >= minimumParticipantCount
+            }
     }
     val isTeamSizeValid = !editEvent.teamSignup || editEvent.teamSizeLimit >= 1
     val ageRangeErrors = eventAgeRangeErrors(editEvent)
@@ -450,27 +462,33 @@ internal fun computeEventValidationResult(
         } else {
             editEvent.playoffTeamCount ?: singleLeaguePlayoffDetail?.playoffTeamCount
         }
+        val eventLeaguePlayoffCountValid =
+            !editEvent.includePlayoffs ||
+                (editEvent.playoffTeamCount ?: MIN_BRACKET_TEAM_COUNT) >= MIN_BRACKET_TEAM_COUNT
         val baseLeaguePlayoffConfigValid = if (!editEvent.includePlayoffs) {
             true
         } else if (editEvent.singleDivision) {
-            singleLeaguePlayoffCount?.let { count -> count >= 2 } == true &&
+            singleLeaguePlayoffCount?.let { count -> count >= MIN_BRACKET_TEAM_COUNT } == true &&
                 (singleLeaguePlayoffDetail?.let(::isPlayoffConfigValid) ?: true)
         } else {
             leaguePlayoffDetails.isNotEmpty() &&
                 leaguePlayoffDetails.all { detail ->
-                    detail.playoffTeamCount?.let { count -> count >= 2 } == true &&
+                    detail.playoffTeamCount?.let { count -> count >= MIN_BRACKET_TEAM_COUNT } == true &&
                         isPlayoffConfigValid(detail)
                 }
         }
         val splitPlayoffCountsValid = if (validatesSplitPlayoffPlacements) {
             canonicalSplitPlayoffSources?.all { detail ->
-                detail.playoffTeamCount?.let { count -> count >= 2 } == true
+                detail.playoffTeamCount?.let { count -> count >= MIN_BRACKET_TEAM_COUNT } == true
             } == true
         } else {
             true
         }
         val leaguePlayoffConfigValid =
-            baseLeaguePlayoffConfigValid && splitPlayoffSourcesValid && splitPlayoffCountsValid
+            eventLeaguePlayoffCountValid &&
+                baseLeaguePlayoffConfigValid &&
+                splitPlayoffSourcesValid &&
+                splitPlayoffCountsValid
         playoffPlacementValidationErrors = when {
             !splitPlayoffSourcesValid -> listOf(
                 "One or more league divisions are not saved correctly. " +
@@ -525,10 +543,15 @@ internal fun computeEventValidationResult(
         playoffPlacementValidationErrors = emptyList()
         isLeagueGamesValid = true
         val details = tournamentValidationDetails(editEvent, divisionDetailsForSettings)
+        val eventTournamentPlayoffCountValid =
+            !editEvent.includePlayoffs ||
+                (editEvent.playoffTeamCount ?: MIN_BRACKET_TEAM_COUNT) >= MIN_BRACKET_TEAM_COUNT
         isLeaguePlayoffTeamsValid = if (!editEvent.includePlayoffs) {
             true
         } else {
-            details.isNotEmpty() && details.all(::isTournamentPoolDivisionValid)
+            eventTournamentPlayoffCountValid &&
+                details.isNotEmpty() &&
+                details.all(::isTournamentPoolDivisionValid)
         }
         isLeaguePointsValid = true
         val tournamentConfigs = if (editEvent.singleDivision) {
@@ -617,10 +640,18 @@ internal fun computeEventValidationResult(
         if (!isMaxParticipantsValid) {
             add(
                 when {
-                    editEvent.singleDivision && editEvent.teamSignup -> "Max teams must be at least 2."
-                    editEvent.singleDivision -> "Max participants must be at least 2."
-                    editEvent.teamSignup -> "Each division must have max teams of at least 2."
-                    else -> "Each division must have max participants of at least 2."
+                    !eventCapacityValid && editEvent.teamSignup ->
+                        "Max teams must be at least $minimumParticipantCount."
+                    !eventCapacityValid ->
+                        "Max participants must be at least $minimumParticipantCount."
+                    editEvent.singleDivision && editEvent.teamSignup ->
+                        "Max teams must be at least $minimumParticipantCount."
+                    editEvent.singleDivision ->
+                        "Max participants must be at least $minimumParticipantCount."
+                    editEvent.teamSignup ->
+                        "Each division must have max teams of at least $minimumParticipantCount."
+                    else ->
+                        "Each division must have max participants of at least $minimumParticipantCount."
                 },
             )
         }
@@ -689,9 +720,9 @@ internal fun computeEventValidationResult(
                     if (editEvent.eventType == EventType.TOURNAMENT) {
                         "Each tournament division needs pool count, bracket team count, and even pool sizing when pool play is enabled."
                     } else if (editEvent.singleDivision && !editEvent.splitLeaguePlayoffDivisions) {
-                        "Playoff team count must be at least 2 when playoffs are enabled."
+                        "Playoff team count must be at least $MIN_BRACKET_TEAM_COUNT when playoffs are enabled."
                     } else {
-                        "Each division must have a playoff team count of at least 2 when playoffs are enabled."
+                        "Each division must have a playoff team count of at least $MIN_BRACKET_TEAM_COUNT when playoffs are enabled."
                     },
                 )
             }

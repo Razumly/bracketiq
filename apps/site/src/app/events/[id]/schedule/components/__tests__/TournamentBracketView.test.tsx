@@ -326,20 +326,20 @@ const buildSplitLeaguePlayoffBracket = (): TournamentBracket => {
   return {
     tournament: {
       includePlayoffs: true,
-      playoffTeamCount: 2,
+      playoffTeamCount: 3,
       divisions: ['league_a', 'league_b'],
       divisionDetails: [
         {
           id: 'league_a',
           name: 'League A',
-          playoffTeamCount: 2,
-          playoffPlacementDivisionIds: ['playoff_top', 'playoff_bottom'],
+          playoffTeamCount: 3,
+          playoffPlacementDivisionIds: ['playoff_top', 'playoff_bottom', 'playoff_top'],
         },
         {
           id: 'league_b',
           name: 'League B',
-          playoffTeamCount: 2,
-          playoffPlacementDivisionIds: ['playoff_top', 'playoff_bottom'],
+          playoffTeamCount: 3,
+          playoffPlacementDivisionIds: ['playoff_top', 'playoff_bottom', 'playoff_bottom'],
         },
       ],
       playoffDivisionDetails: [

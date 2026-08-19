@@ -248,7 +248,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_api_dto_merges_tournament_playoff_division_details_for_registration_pricing() {
+    fun given_generated_pool_when_hydrated_then_explicit_capacities_are_preserved() {
         val bracketId = "event-12__division__c_skill_open_age_18plus"
         val poolId = "${bracketId}_pool_a"
         val dto = EventApiDto(
@@ -271,7 +271,8 @@ class EventDtosTest {
                     divisionTypeName = "Open",
                     ratingType = "SKILL",
                     gender = "C",
-                    maxParticipants = 4,
+                    maxParticipants = 1,
+                    playoffTeamCount = 1,
                     playoffPlacementDivisionIds = listOf(bracketId),
                 ),
             ),
@@ -286,18 +287,24 @@ class EventDtosTest {
                     ratingType = "SKILL",
                     gender = "C",
                     price = 4500,
-                    maxParticipants = 16,
+                    maxParticipants = 2,
+                    playoffTeamCount = 2,
                 ),
             ),
         )
 
         val event = dto.toEventOrNull()
         val bracketDetail = event?.divisionDetails?.firstOrNull { detail -> detail.id == bracketId }
+        val poolDetail = event?.divisionDetails?.firstOrNull { detail -> detail.id == poolId }
 
         assertEquals(listOf(poolId), event?.divisions)
         assertEquals("PLAYOFF", bracketDetail?.kind)
         assertEquals(4500, bracketDetail?.price)
         assertEquals(4500, event?.resolvedDivisionPriceCents(bracketId))
+        assertEquals(1, poolDetail?.maxParticipants)
+        assertEquals(1, poolDetail?.playoffTeamCount)
+        assertEquals(2, bracketDetail?.maxParticipants)
+        assertEquals(2, bracketDetail?.playoffTeamCount)
     }
 
 
@@ -342,7 +349,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun given_split_league_playoff_payload_when_hydrated_then_mapping_and_capacity_are_preserved() {
+    fun given_split_league_playoff_payload_when_hydrated_then_explicit_capacity_is_preserved() {
         val sourceDivisionId = "event-19__division__open"
         val playoffDivisionId = "event-19__division__playoff_gold"
         val dto = EventApiDto(
@@ -600,7 +607,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_api_dto_preserves_missing_multi_division_playoff_count_until_explicitly_set() {
+    fun given_multi_division_league_without_division_playoff_count_when_hydrated_then_count_defaults_to_three() {
         val dto = EventApiDto(
             id = "event-16",
             name = "API League",
@@ -631,7 +638,47 @@ class EventDtosTest {
         val event = dto.toEventOrNull()
 
         assertEquals(10, event?.playoffTeamCount)
-        assertEquals(null, event?.divisionDetails?.firstOrNull()?.playoffTeamCount)
+        assertEquals(3, event?.divisionDetails?.firstOrNull()?.playoffTeamCount)
+    }
+
+    @Test
+    fun given_league_without_event_playoff_count_when_hydrated_then_count_defaults_to_three() {
+        val dto = EventApiDto(
+            id = "event-17",
+            name = "API League",
+            hostId = "host-17",
+            eventType = EventType.LEAGUE.name,
+            includePlayoffs = true,
+            singleDivision = true,
+            maxParticipants = 12,
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T01:00:00Z",
+        )
+
+        val event = dto.toEventOrNull()
+
+        assertEquals(3, event?.playoffTeamCount)
+    }
+
+    @Test
+    fun given_single_tournament_counts_below_three_when_hydrated_then_counts_are_preserved() {
+        val dto = EventApiDto(
+            id = "event-18",
+            name = "Legacy Tournament",
+            hostId = "host-18",
+            eventType = EventType.TOURNAMENT.name,
+            includePlayoffs = true,
+            singleDivision = true,
+            playoffTeamCount = 2,
+            maxParticipants = 2,
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T01:00:00Z",
+        )
+
+        val event = dto.toEventOrNull()
+
+        assertEquals(2, event?.playoffTeamCount)
+        assertEquals(2, event?.maxParticipants)
     }
 
     @Test

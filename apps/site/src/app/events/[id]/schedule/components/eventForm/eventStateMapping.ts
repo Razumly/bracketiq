@@ -1,5 +1,12 @@
 import { createLeagueScoringConfig } from '@/types/defaults';
-import { getDivisionTypeById, buildDivisionName, buildDivisionToken, inferDivisionDetails } from '@/lib/divisionTypes';
+import {
+    buildDivisionName,
+    buildDivisionToken,
+    getDivisionTypeById,
+    inferDivisionDetails,
+    isBracketTeamCountEnabled,
+    normalizeBracketTeamCount,
+} from '@/lib/divisionTypes';
 import { getSystemTimeZone, normalizeTimeZone } from '@/lib/dateUtils';
 import { normalizePriceCents } from '@/lib/priceUtils';
 import {
@@ -110,6 +117,7 @@ export const mapEventToFormState = (event: Event): EventFormState => {
     const defaultEventPrice = defaultEventAllowPaymentPlans && defaultEventInstallmentAmounts.length
         ? sumInstallmentAmounts(defaultEventInstallmentAmounts)
         : normalizePriceCents(event.price);
+    const normalizedEventType = event.eventType === 'AFFILIATE' ? 'EVENT' : event.eventType;
 
     const normalizedDivisionIds = Array.isArray(event.divisions)
         ? Array.from(
@@ -179,9 +187,13 @@ export const mapEventToFormState = (event: Event): EventFormState => {
                 ageDivisionTypeId,
                 ageDivisionTypeName,
                 price: defaultEventPrice,
-                maxParticipants: Number.isFinite(event.maxParticipants) ? event.maxParticipants : 10,
+                maxParticipants: normalizedEventType === 'TOURNAMENT'
+                    ? normalizeBracketTeamCount(event.maxParticipants)
+                    : Number.isFinite(event.maxParticipants)
+                        ? Math.trunc(event.maxParticipants)
+                        : 10,
                 playoffTeamCount: Number.isFinite(event.playoffTeamCount)
-                    ? Math.trunc(event.playoffTeamCount as number)
+                    ? normalizeBracketTeamCount(event.playoffTeamCount)
                     : undefined,
                 playoffPlacementDivisionIds: [],
                 allowPaymentPlans: defaultEventAllowPaymentPlans,
@@ -212,6 +224,12 @@ export const mapEventToFormState = (event: Event): EventFormState => {
         });
         return ordered;
     })();
+    const isPlayoffCountEnabled = isBracketTeamCountEnabled(
+        event.eventType,
+        (event as Event & { includePlayoffsOrPools?: boolean }).includePlayoffsOrPools
+            ?? event.leagueConfig?.includePlayoffs
+            ?? event.includePlayoffs,
+    );
     const normalizedDivisionDetailsWithCapacity: DivisionDetailForm[] = normalizedDivisionDetails.map((detail): DivisionDetailForm => ({
         ...detail,
         kind: detail.kind === 'PLAYOFF' ? 'PLAYOFF' : 'LEAGUE',
@@ -220,15 +238,17 @@ export const mapEventToFormState = (event: Event): EventFormState => {
             : Number.isFinite(detail.price)
                 ? Math.max(0, detail.price)
                 : defaultEventPrice,
-        maxParticipants: Number.isFinite(detail.maxParticipants)
-            ? Math.max(2, Math.trunc(detail.maxParticipants))
-            : Number.isFinite(event.maxParticipants)
-                ? Math.max(2, Math.trunc(event.maxParticipants))
-                : 10,
-        playoffTeamCount: Number.isFinite(detail.playoffTeamCount)
-            ? Math.trunc(detail.playoffTeamCount as number)
-            : Number.isFinite(event.playoffTeamCount)
-                ? Math.trunc(event.playoffTeamCount as number)
+        maxParticipants: normalizedEventType === 'TOURNAMENT'
+            ? normalizeBracketTeamCount(detail.maxParticipants ?? event.maxParticipants)
+            : Number.isFinite(detail.maxParticipants)
+                ? Math.trunc(detail.maxParticipants)
+                : Number.isFinite(event.maxParticipants)
+                    ? Math.trunc(event.maxParticipants)
+                    : 10,
+        playoffTeamCount: isPlayoffCountEnabled
+            ? normalizeBracketTeamCount(detail.playoffTeamCount ?? event.playoffTeamCount)
+            : Number.isFinite(detail.playoffTeamCount)
+                ? Math.trunc(detail.playoffTeamCount as number)
                 : undefined,
         poolCount: Number.isFinite(detail.poolCount)
             ? Math.max(1, Math.trunc(detail.poolCount as number))
@@ -316,17 +336,17 @@ export const mapEventToFormState = (event: Event): EventFormState => {
                 const poolCount = Number.isFinite(division.poolCount)
                     ? Math.max(1, Math.trunc(division.poolCount as number))
                     : derivedPoolSettings?.poolCount;
-                const rawMaxParticipants = Number.isFinite(division.maxParticipants)
-                    ? Math.max(2, Math.trunc(division.maxParticipants as number))
-                    : Number.isFinite(event.maxParticipants)
-                        ? Math.max(2, Math.trunc(event.maxParticipants as number))
-                        : undefined;
+                const rawMaxParticipants = normalizeBracketTeamCount(
+                    Number.isFinite(division.maxParticipants)
+                        ? division.maxParticipants
+                        : event.maxParticipants,
+                );
                 const maxParticipantsFromPools = typeof poolCount === 'number'
                     && typeof derivedPoolSettings?.poolTeamCount === 'number'
                     ? poolCount * derivedPoolSettings.poolTeamCount
                     : undefined;
                 const maxParticipants = typeof maxParticipantsFromPools === 'number'
-                    ? Math.max(rawMaxParticipants ?? 2, maxParticipantsFromPools)
+                    ? Math.max(rawMaxParticipants, maxParticipantsFromPools)
                     : rawMaxParticipants;
                 const poolTeamCount = derivePoolTeamCount(maxParticipants, poolCount)
                     ?? (Number.isFinite(division.poolTeamCount)
@@ -385,7 +405,6 @@ export const mapEventToFormState = (event: Event): EventFormState => {
         || (!hasExplicitStaffingPriority && legacyOfficialSchedulingMode === 'TEAM_STAFFING');
 
     const existingAffiliateUrl = event.affiliateUrl ?? '';
-    const normalizedEventType = event.eventType === 'AFFILIATE' ? 'EVENT' : event.eventType;
 
     return {
     $id: event.$id,
@@ -429,7 +448,11 @@ export const mapEventToFormState = (event: Event): EventFormState => {
     installmentDueDates: Array.isArray(event.installmentDueDates) ? event.installmentDueDates as string[] : [],
     installmentDueRelativeDays: normalizeInstallmentRelativeDays((event as any).installmentDueRelativeDays),
     allowTeamSplitDefault: Boolean(event.allowTeamSplitDefault),
-    maxParticipants: Number.isFinite(event.maxParticipants) ? event.maxParticipants : null,
+    maxParticipants: normalizedEventType === 'TOURNAMENT'
+        ? normalizeBracketTeamCount(event.maxParticipants)
+        : Number.isFinite(event.maxParticipants)
+            ? Math.trunc(event.maxParticipants)
+            : null,
     teamSizeLimit: Number.isFinite(event.teamSizeLimit) ? event.teamSizeLimit : null,
     teamSignup: Boolean(event.teamSignup),
     singleDivision: Boolean(event.singleDivision),

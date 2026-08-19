@@ -39,6 +39,7 @@ import com.razumly.mvp.core.data.dataTypes.syncEventTypeTagsForEventType
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.usesTeamOfficialScheduling
 import com.razumly.mvp.core.data.dataTypes.withDoTeamsOfficiate
+import com.razumly.mvp.core.data.dataTypes.withDefaultPlayoffTeamCounts
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
@@ -359,11 +360,12 @@ class DefaultCreateEventComponent(
 
     private fun applyEditorSession(session: EventEditorSession) {
         val canonical = session.canonicalState
+        val normalizedEvent = canonical.event.withDefaultPlayoffTeamCounts()
         _editorSession.value = session
-        _newEventState.value = canonical.event
-        _currentEventType.value = canonical.event.eventType
+        _newEventState.value = normalizedEvent
+        _currentEventType.value = normalizedEvent.eventType
         defaultEvent.value = defaultEvent.value.copy(
-            event = canonical.event,
+            event = normalizedEvent,
         )
         _localFields.value = canonical.fields
         _leagueSlots.value = canonical.timeSlots
@@ -540,7 +542,7 @@ class DefaultCreateEventComponent(
             val normalized = syncOfficialStaffingForSportTransition(
                 previous = previous,
                 updated = updated,
-            )
+            ).withDefaultPlayoffTeamCounts()
             val sportChanged = previous.sportIds.firstOrNull() != normalized.sportIds.firstOrNull()
 
             _newEventState.value = normalized
@@ -567,7 +569,7 @@ class DefaultCreateEventComponent(
             val normalized = syncOfficialStaffingForSportTransition(
                 previous = previous,
                 updated = updated,
-            )
+            ).withDefaultPlayoffTeamCounts()
             val sportChanged = previous.sportIds.firstOrNull() != normalized.sportIds.firstOrNull()
 
             _newEventState.value = normalized
@@ -623,7 +625,7 @@ class DefaultCreateEventComponent(
             val normalized = syncOfficialStaffingForSportTransition(
                 previous = previous,
                 updated = updated,
-            )
+            ).withDefaultPlayoffTeamCounts()
 
             _newEventState.value = normalized
             syncLeagueSlotDefaultStartDates(previousEvent = previous, updatedEvent = normalized)

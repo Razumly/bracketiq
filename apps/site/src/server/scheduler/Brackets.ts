@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
 import { OfficialStaffingPlanner } from './officialStaffing';
 import { ScheduleError } from './scheduleErrors';
 import { Schedule } from './Schedule';
@@ -181,8 +182,11 @@ export class Brackets {
 
   private createBracketStructure(): Match {
     const totalTeams = this.seededEntrants.length;
-    if (totalTeams < 2) {
-      throw new ScheduleError('Not enough teams to build a bracket', 'PLAYING_TEAM');
+    if (totalTeams < MIN_BRACKET_TEAM_COUNT) {
+      throw new ScheduleError(
+        `At least ${MIN_BRACKET_TEAM_COUNT} teams are required to build a bracket`,
+        'PLAYING_TEAM',
+      );
     }
 
     const bracketSize = this.nextPowerOfTwo(totalTeams);

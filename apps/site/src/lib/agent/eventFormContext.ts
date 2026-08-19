@@ -810,7 +810,7 @@ export const eventFormAgentContext: EventFormAgentContext = {
           label: 'Playoff Division Name / Teams Count / Participants Count / Add Playoff Division',
           inputType: 'repeatable text, number, and buttons',
           visibleWhen: 'Visible only when League playoffs and split league/playoff divisions are enabled.',
-          requiredWhen: 'At least one playoff division is required when split playoffs are enabled. Each playoff division needs name and capacity >= 2.',
+          requiredWhen: 'At least one playoff division is required when split playoffs are enabled. Each playoff division needs a name and a capacity of at least 3.',
           defaultOrPreset: 'When enabling split playoffs, the form creates one playoff division if none exist.',
           createsOrUpdates: ['playoffDivisionDetails'],
           description: 'Defines the playoff bracket containers that league placements feed into. Capacity limits how many mapped placements can enter that playoff division.',

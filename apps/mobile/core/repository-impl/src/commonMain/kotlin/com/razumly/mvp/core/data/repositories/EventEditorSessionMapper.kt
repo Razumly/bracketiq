@@ -3,6 +3,9 @@ package com.razumly.mvp.core.data.repositories
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionPhaseSettingsMVP
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MIN_BRACKET_TEAM_COUNT
+import com.razumly.mvp.core.data.dataTypes.isBracketTeamCountEnabled
+import com.razumly.mvp.core.data.dataTypes.normalizeBracketTeamCount
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventTag
@@ -330,15 +333,56 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
     )
     val officialMode = resolvedStaffingPriority.toLegacyOfficialSchedulingMode()
     val effectiveDoTeamsOfficiate = staff.doTeamsOfficiate ?: false
-    val regularDetails = competition.divisionDetails.map(EventEditorDivisionDetailDto::toDomain)
-    val playoffDetails = competition.playoffDivisionDetails.map(EventEditorDivisionDetailDto::toDomain)
-    val allDetails = regularDetails + playoffDetails
-    val isMultiDivisionLeague = eventType == EventType.LEAGUE && regularDetails.size > 1
-    val eventPlayoffTeamCount = if (isMultiDivisionLeague) {
-        null
+    val isBracketCountEnabled = isBracketTeamCountEnabled(
+        eventType,
+        competition.includePlayoffs,
+    )
+    val eventPlayoffTeamCount = if (isBracketCountEnabled) {
+        normalizeBracketTeamCount(competition.playoffTeamCount)
     } else {
-        competition.playoffTeamCount ?: regularDetails.firstOrNull()?.playoffTeamCount
+        competition.playoffTeamCount
     }
+    val eventMaxParticipants = if (eventType == EventType.TOURNAMENT) {
+        normalizeBracketTeamCount(participation.maxParticipants)
+    } else {
+        participation.maxParticipants ?: 0
+    }
+    val regularDetails = competition.divisionDetails
+        .map(EventEditorDivisionDetailDto::toDomain)
+        .map { detail ->
+            val normalizedPlayoffCount = when {
+                !isBracketCountEnabled -> detail.playoffTeamCount
+                participation.singleDivision -> eventPlayoffTeamCount
+                else -> normalizeBracketTeamCount(detail.playoffTeamCount)
+            }
+            detail.copy(
+                maxParticipants = if (eventType == EventType.TOURNAMENT) {
+                    normalizeBracketTeamCount(
+                        detail.maxParticipants ?: eventMaxParticipants,
+                    )
+                } else {
+                    detail.maxParticipants
+                },
+                playoffTeamCount = normalizedPlayoffCount,
+            )
+        }
+    val playoffDetails = competition.playoffDivisionDetails
+        .map(EventEditorDivisionDetailDto::toDomain)
+        .map { detail ->
+            detail.copy(
+                maxParticipants = if (eventType == EventType.TOURNAMENT) {
+                    normalizeBracketTeamCount(detail.maxParticipants)
+                } else {
+                    detail.maxParticipants
+                },
+                playoffTeamCount = if (isBracketCountEnabled) {
+                    normalizeBracketTeamCount(detail.playoffTeamCount)
+                } else {
+                    detail.playoffTeamCount
+                },
+            )
+        }
+    val allDetails = regularDetails + playoffDetails
     return Event(
         id = eventId,
         name = basics.name,
@@ -370,7 +414,7 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
         registrationPaymentMode = payment.mode,
         manualPaymentLinks = payment.manualPaymentLinks.map(EventEditorManualPaymentLinkDto::toDomain),
         manualPaymentInstructions = payment.manualPaymentInstructions,
-        maxParticipants = participation.maxParticipants ?: 0,
+        maxParticipants = eventMaxParticipants,
         minAge = participation.minAge,
         maxAge = participation.maxAge,
         teamSizeLimit = participation.teamSizeLimit ?: 2,
@@ -594,41 +638,82 @@ private fun Event.toCompetitionDto(
 ): EventEditorCompetitionDto {
     val existingById = (existing.divisionDetails + existing.playoffDivisionDetails).associateBy { it.id }
     val currentRegularDetails = divisionDetails.filterNot { it.kind?.equals("PLAYOFF", ignoreCase = true) == true }
-    val baselineRegularDetails = baseline.divisionDetails.filterNot { it.kind?.equals("PLAYOFF", ignoreCase = true) == true }
-    val isMultiDivisionLeague = eventType == EventType.LEAGUE && currentRegularDetails.size > 1
-    val currentRegularDetailsForDto = if (
-        includePlayoffs &&
-        !isMultiDivisionLeague &&
-        currentRegularDetails.size == 1 &&
-        playoffTeamCount != null
-    ) {
-        currentRegularDetails.map { detail ->
-            detail.copy(playoffTeamCount = detail.playoffTeamCount ?: playoffTeamCount)
-        }
-    } else {
-        currentRegularDetails
+    val baselineRegularDetails = baseline.divisionDetails.filterNot {
+        it.kind?.equals("PLAYOFF", ignoreCase = true) == true
     }
-    val currentPlayoffTeamCount = if (includePlayoffs) {
-        if (isMultiDivisionLeague) {
-            null
-        } else {
-            playoffTeamCount ?: currentRegularDetailsForDto.firstOrNull()?.playoffTeamCount
-        }
+    val baselinePlayoffDetails = baseline.divisionDetails.filter {
+        it.kind?.equals("PLAYOFF", ignoreCase = true) == true
+    }
+    val isCurrentBracketCountEnabled = isBracketTeamCountEnabled(eventType, includePlayoffs)
+    val currentPlayoffTeamCount = if (isCurrentBracketCountEnabled) {
+        playoffTeamCount ?: MIN_BRACKET_TEAM_COUNT
     } else {
         playoffTeamCount
     }
-    val baselineIsMultiDivisionLeague =
-        baseline.eventType == EventType.LEAGUE && baselineRegularDetails.size > 1
-    val baselinePlayoffTeamCount = if (baseline.includePlayoffs) {
-        if (baselineIsMultiDivisionLeague) {
-            null
+    val currentRegularDetailsForDto = currentRegularDetails.map { detail ->
+        if (isCurrentBracketCountEnabled && detail.playoffTeamCount == null) {
+            detail.copy(
+                playoffTeamCount = if (singleDivision) {
+                    currentPlayoffTeamCount
+                } else {
+                    MIN_BRACKET_TEAM_COUNT
+                },
+            )
         } else {
-            baseline.playoffTeamCount ?: baselineRegularDetails.firstOrNull()?.playoffTeamCount
+            detail
         }
+    }
+    val currentPlayoffDetailsForDto = playoffDivisionDetails.map { detail ->
+        if (isCurrentBracketCountEnabled && detail.playoffTeamCount == null) {
+            detail.copy(playoffTeamCount = MIN_BRACKET_TEAM_COUNT)
+        } else {
+            detail
+        }
+    }
+    val isBaselineBracketCountEnabled = isBracketTeamCountEnabled(
+        baseline.eventType,
+        baseline.includePlayoffs,
+    )
+    val baselinePlayoffTeamCount = if (isBaselineBracketCountEnabled) {
+        baseline.playoffTeamCount ?: MIN_BRACKET_TEAM_COUNT
     } else {
         baseline.playoffTeamCount
     }
-    val regularDetailsChanged = currentRegularDetailsForDto != baselineRegularDetails
+    val baselineRegularDetailsForDto = baselineRegularDetails.map { detail ->
+        if (isBaselineBracketCountEnabled && detail.playoffTeamCount == null) {
+            detail.copy(
+                playoffTeamCount = if (baseline.singleDivision) {
+                    baselinePlayoffTeamCount
+                } else {
+                    MIN_BRACKET_TEAM_COUNT
+                },
+            )
+        } else {
+            detail
+        }
+    }
+    val baselinePlayoffDetailsForDto = baselinePlayoffDetails.map { detail ->
+        if (isBaselineBracketCountEnabled && detail.playoffTeamCount == null) {
+            detail.copy(playoffTeamCount = MIN_BRACKET_TEAM_COUNT)
+        } else {
+            detail
+        }
+    }
+    val isRegularBracketCountSerializationRequired =
+        isCurrentBracketCountEnabled && currentRegularDetailsForDto.any { detail ->
+            existingById[detail.id]?.playoffTeamCount != detail.playoffTeamCount?.toDouble()
+        }
+    val isPlayoffBracketCountSerializationRequired =
+        isCurrentBracketCountEnabled && currentPlayoffDetailsForDto.any { detail ->
+            existingById[detail.id]?.playoffTeamCount != detail.playoffTeamCount?.toDouble()
+        }
+    val regularDetailsChanged =
+        currentRegularDetailsForDto != baselineRegularDetailsForDto ||
+            isRegularBracketCountSerializationRequired
+    val normalizedPlayoffDetailsChanged =
+        playoffDivisionDetailsChanged ||
+            currentPlayoffDetailsForDto != baselinePlayoffDetailsForDto ||
+            isPlayoffBracketCountSerializationRequired
     val currentDivisionIdsChanged = divisions != baseline.divisions
     val currentWinnerSetCountChanged = winnerSetCount != baseline.winnerSetCount
     val currentLoserSetCountChanged = loserSetCount != baseline.loserSetCount
@@ -654,8 +739,8 @@ private fun Event.toCompetitionDto(
         } else {
             existing.divisionDetails
         },
-        playoffDivisionDetails = if (playoffDivisionDetailsChanged) {
-            playoffDivisionDetails.map { detail -> detail.toDto(existingById[detail.id]) }
+        playoffDivisionDetails = if (normalizedPlayoffDetailsChanged) {
+            currentPlayoffDetailsForDto.map { detail -> detail.toDto(existingById[detail.id]) }
         } else {
             existing.playoffDivisionDetails
         },

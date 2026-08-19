@@ -17,6 +17,7 @@ import {
     inferDivisionDetails,
     normalizeDivisionGender,
     normalizeDivisionRatingType,
+    MIN_BRACKET_TEAM_COUNT,
 } from '@/lib/divisionTypes';
 import { normalizePriceCents } from '@/lib/priceUtils';
 import { normalizeDivisionPhaseSettingsMap } from '@/lib/divisionPhaseSettings';
@@ -559,7 +560,7 @@ export const normalizeDivisionDetailEntry = (
             : normalizePriceCents(rawDivisionPriceCents * 100),
         maxParticipants: Math.max(2, Math.trunc(rawDivisionMaxParticipants)),
         playoffTeamCount: Number.isFinite(rawDivisionPlayoffTeamCount)
-            ? Math.max(2, Math.trunc(rawDivisionPlayoffTeamCount as number))
+            ? Math.trunc(rawDivisionPlayoffTeamCount as number)
             : undefined,
         poolCount: Number.isFinite(rawPoolCount)
             ? Math.max(1, Math.trunc(rawPoolCount as number))
@@ -916,7 +917,7 @@ export const buildDefaultDivisionDetailsForSport = (
         ageDivisionTypeName: fallbackAge.name,
         price: 0,
         maxParticipants: 10,
-        playoffTeamCount: 10,
+        playoffTeamCount: MIN_BRACKET_TEAM_COUNT,
         playoffPlacementDivisionIds: [],
         allowPaymentPlans: false,
         installmentCount: 0,

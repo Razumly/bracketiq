@@ -933,7 +933,8 @@ describe("LeagueFields", () => {
     expect(onAutoResolveSlotConflict).toHaveBeenCalledWith(0);
   });
 
-  it("requires playoff team count when playoffs are enabled", () => {
+  it("defaults a missing enabled playoff team count to three", () => {
+    const onLeagueDataChange = jest.fn();
     renderWithMantine(
       <LeagueFields
         leagueData={{
@@ -944,7 +945,7 @@ describe("LeagueFields", () => {
           matchDurationMinutes: 60,
           restTimeMinutes: 0,
         }}
-        onLeagueDataChange={noop}
+        onLeagueDataChange={onLeagueDataChange}
         slots={[baseSlot]}
         onAddSlot={noop}
         onUpdateSlot={noop}
@@ -954,10 +955,11 @@ describe("LeagueFields", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Playoff Team Count")).toHaveValue("");
+    expect(screen.getByLabelText("Playoff Team Count")).toHaveValue("3");
+    expect(onLeagueDataChange).toHaveBeenCalledWith({ playoffTeamCount: 3 });
     expect(
-      screen.getByText("At least 2 teams need to be in the bracket."),
-    ).toBeInTheDocument();
+      screen.queryByText("At least 3 teams need to be in the bracket."),
+    ).not.toBeInTheDocument();
   });
 
   it("does not show a standalone match duration for timed sports", () => {
@@ -1050,7 +1052,7 @@ describe("LeagueFields", () => {
     });
   });
 
-  it("defaults playoff team count from participants each time playoffs are enabled", () => {
+  it("defaults an absent playoff team count to three and preserves an explicit count", () => {
     const onLeagueDataChange = jest.fn();
     const participantCount = 12;
 
@@ -1078,7 +1080,7 @@ describe("LeagueFields", () => {
     fireEvent.click(screen.getByLabelText(/Include Playoffs/i));
     expect(onLeagueDataChange).toHaveBeenLastCalledWith({
       includePlayoffs: true,
-      playoffTeamCount: participantCount,
+      playoffTeamCount: 3,
     });
 
     firstRender.unmount();
@@ -1138,7 +1140,7 @@ describe("LeagueFields", () => {
     fireEvent.click(screen.getByLabelText(/Include Playoffs/i));
     expect(onLeagueDataChange).toHaveBeenLastCalledWith({
       includePlayoffs: true,
-      playoffTeamCount: participantCount,
+      playoffTeamCount: 6,
     });
   });
 

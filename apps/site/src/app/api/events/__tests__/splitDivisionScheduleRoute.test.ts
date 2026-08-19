@@ -490,7 +490,7 @@ describe('event schedule route - split divisions regression', () => {
       gamesPerOpponent: 1,
       includePlayoffs: true,
       splitLeaguePlayoffDivisions: true,
-      playoffTeamCount: 2,
+      playoffTeamCount: 3,
       doTeamsOfficiate: false,
       usesSets: false,
       matchDurationMinutes: 60,

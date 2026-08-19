@@ -1198,7 +1198,7 @@ describe('EventForm dirty state', () => {
     confirmSpy.mockRestore();
   });
 
-  it('keeps bracket teams empty and shows the field error until at least two teams are entered', async () => {
+  it('defaults bracket teams to three and rejects smaller counts', async () => {
     const formRef = React.createRef<EventFormHandle>();
     renderForm(jest.fn(), formRef, {
       eventType: 'LEAGUE',
@@ -1225,22 +1225,22 @@ describe('EventForm dirty state', () => {
     }
 
     const bracketTeams = screen.getByLabelText('Playoff Team Count') as HTMLInputElement;
-    expect(bracketTeams).toHaveValue('');
+    expect(bracketTeams).toHaveValue('3');
+    expect(bracketTeams).toHaveAttribute('aria-valuemin', '3');
+    expect(getLegacyDraft(formRef).playoffTeamCount).toBe(3);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await waitFor(() => {
-      expect(screen.getByText('At least 2 teams need to be in the bracket.')).toBeInTheDocument();
-    });
-
-    fireEvent.change(bracketTeams, { target: { value: '1' } });
+    fireEvent.change(bracketTeams, { target: { value: '2' } });
     fireEvent.blur(bracketTeams);
     expect(getLegacyDraft(formRef).includePlayoffs).toBe(true);
     const invalidBracketTeams = await screen.findByLabelText('Playoff Team Count') as HTMLInputElement;
-    expect(invalidBracketTeams).toHaveValue('1');
-    expect(getLegacyDraft(formRef).playoffTeamCount).toBe(1);
-    expect(screen.getByText('At least 2 teams need to be in the bracket.')).toBeInTheDocument();
+    expect(invalidBracketTeams).toHaveValue('2');
+    await waitFor(() => expect(getLegacyDraft(formRef).playoffTeamCount).toBe(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() => {
+      expect(screen.getByText('At least 3 teams need to be in the bracket.')).toBeInTheDocument();
+    });
 
-    fireEvent.change(invalidBracketTeams, { target: { value: '2' } });
+    fireEvent.change(invalidBracketTeams, { target: { value: '3' } });
     fireEvent.blur(invalidBracketTeams);
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     expect(await screen.findByRole('heading', { name: 'Schedule & Location' })).toBeInTheDocument();
@@ -3512,8 +3512,8 @@ describe('EventForm dirty state', () => {
     expect(screen.getByText('New Division')).toBeInTheDocument();
     expect(screen.queryByText('League Divisions')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Division Type')).toHaveValue('LEAGUE');
-    expect(screen.getByLabelText('Division Playoff Team Count')).toHaveValue('');
-    expect(screen.queryByLabelText('Placement #1')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Division Playoff Team Count')).toHaveValue('4');
+    expect(screen.getByLabelText('Placement #1')).toBeInTheDocument();
     expect(document.querySelector('.responsive-card-grid')).not.toBeNull();
     expect(screen.getByText('Division Type: League')).toBeInTheDocument();
     expect(screen.getAllByText('Division Type: Playoff')).toHaveLength(2);
@@ -3562,7 +3562,7 @@ describe('EventForm dirty state', () => {
     });
   });
 
-  it('warns for playoff division counts below two without coercing the input to two', async () => {
+  it('warns for playoff division counts below three without coercing the input', async () => {
     const onDirtyStateChange = jest.fn();
     const formRef = React.createRef<EventFormHandle>();
 
@@ -3597,7 +3597,7 @@ describe('EventForm dirty state', () => {
     await userEvent.click(screen.getByText('Add Division'));
 
     await waitFor(() => {
-      expect(screen.getByText('Playoff division teams count must be at least 2.')).toBeInTheDocument();
+      expect(screen.getByText('Playoff division teams count must be at least 3.')).toBeInTheDocument();
       expect((teamsCountInput as HTMLInputElement).value).toBe('1');
       expect(getLegacyDraft(formRef)?.playoffDivisionDetails).toEqual([]);
     });
@@ -3610,7 +3610,7 @@ describe('EventForm dirty state', () => {
     await userEvent.click(screen.getByText('Add Division'));
 
     await waitFor(() => {
-      expect(screen.getByText('Playoff division teams count must be at least 2.')).toBeInTheDocument();
+      expect(screen.getByText('Playoff division teams count must be at least 3.')).toBeInTheDocument();
       expect((teamsCountInput as HTMLInputElement).value).toBe('');
       expect(getLegacyDraft(formRef)?.playoffDivisionDetails).toEqual([]);
     });

@@ -84,12 +84,14 @@ type DraftProps = {
     eventData: EventFormValues;
     hasStripeAccount?: boolean;
     isCreateMode?: boolean;
+    leagueData?: LeagueConfig;
 };
 
 const useDraftHarness = ({
     eventData,
     hasStripeAccount = true,
     isCreateMode = false,
+    leagueData = LEAGUE_DATA,
 }: DraftProps) => useDivisionEditorDraft({
     createNextPlayoffDivision: (
         existing: PlayoffDivisionDetailForm[],
@@ -99,7 +101,7 @@ const useDraftHarness = ({
         key: `playoff_${existing.length + 1}`,
         kind: 'PLAYOFF',
         name: `Playoff Division ${existing.length + 1}`,
-        maxParticipants: 2,
+        maxParticipants: 3,
         playoffConfig: buildTournamentConfig(configTemplate),
     }),
     currentSportRequiresSets: true,
@@ -108,7 +110,7 @@ const useDraftHarness = ({
     firstDivisionDetailForDefaults: eventData.divisionDetails[0],
     hasStripeAccount,
     isCreateMode,
-    leagueData: LEAGUE_DATA,
+    leagueData,
     playoffData: PLAYOFF_DATA,
     splitDivisionEditorEnabled: true,
 });
@@ -136,7 +138,7 @@ describe('useDivisionEditorDraft', () => {
             ageDivisionTypeId: 'adult',
             price: 3_000,
             maxParticipants: 8,
-            playoffTeamCount: null,
+            playoffTeamCount: 4,
         }));
         expect(result.current.divisionEditor.playoffConfig).toEqual(expect.objectContaining({
             doubleElimination: false,
@@ -166,14 +168,27 @@ describe('useDivisionEditorDraft', () => {
         }));
     });
 
-    it('keeps an unset persisted bracket count empty while editing', () => {
+    it('preserves an explicit event bracket count while editing an unset division', () => {
         const detail = buildDivisionDetail({ playoffTeamCount: undefined });
         const eventData = buildEventData({ divisionDetails: [detail] });
         const { result } = renderHook(() => useDraftHarness({ eventData }));
 
         act(() => result.current.handleEditDivisionDetail(detail.id));
 
-        expect(result.current.divisionEditor.playoffTeamCount).toBeNull();
+        expect(result.current.divisionEditor.playoffTeamCount).toBe(4);
+    });
+
+    it('defaults an unset bracket count to three while editing', () => {
+        const detail = buildDivisionDetail({ playoffTeamCount: undefined });
+        const eventData = buildEventData({ divisionDetails: [detail] });
+        const { result } = renderHook(() => useDraftHarness({
+            eventData,
+            leagueData: { ...LEAGUE_DATA, playoffTeamCount: undefined },
+        }));
+
+        act(() => result.current.handleEditDivisionDetail(detail.id));
+
+        expect(result.current.divisionEditor.playoffTeamCount).toBe(3);
     });
 
     it('normalizes installment commands and clears paid settings when Stripe becomes unavailable', async () => {

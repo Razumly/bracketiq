@@ -63,7 +63,18 @@ class CreateEventSelectionRulesTest {
         assertFalse(updated.singleDivision)
         assertTrue(updated.noFixedEndDateTime)
         assertFalse(updated.allowPaymentPlans == true)
+        assertEquals(3, updated.maxParticipants)
         assertEquals(end, updated.end)
+    }
+
+    @Test
+    fun given_explicit_tournament_capacity_when_selection_rules_apply_then_value_is_preserved_for_validation() {
+        val updated = Event(
+            eventType = EventType.TOURNAMENT,
+            maxParticipants = 2,
+        ).applyCreateSelectionRules()
+
+        assertEquals(2, updated.maxParticipants)
     }
 
     @Test

@@ -184,7 +184,7 @@ We persist raw string IDs for associations (for example `teamIds`, `friendIds`, 
 - Use date-only calendar inputs for all date-of-birth fields (signup/profile/children). Do not capture time for DOB values.
 - Use 12-hour AM/PM time presentation for user-facing time pickers and labels.
 - Keep one scoring-format control path per form section; do not expose duplicate controls for the same setting.
-- When playoffs are enabled, `playoffTeamCount` must be unset by default and validated as required until explicitly chosen.
+- When playoffs are enabled, default an absent `playoffTeamCount` to `3`. Current editors must preserve explicit values and reject values below `3`. The legacy HTTP upsert can normalize a finite value below `3` to `3` for installed-client compatibility.
 - Field-to-division mapping is mandatory for league/tournament scheduling. Apply fallback in this order: field divisions from payload, then event divisions, then persisted field divisions, then `OPEN`.
 - Weekly scheduling must support multi-day selection at the form boundary (`daysOfWeek`) while remaining backward compatible with legacy `dayOfWeek`.
 - Any event create/edit scheduling change must include regression tests for validation, payload mapping, and scheduler behavior.

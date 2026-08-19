@@ -926,6 +926,24 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun given_explicit_capacity_when_tournament_is_selected_then_invalid_inputs_are_preserved_for_validation() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.updateEventField { copy(maxParticipants = 2) }
+        advance()
+        harness.component.onTypeSelected(EventType.TOURNAMENT)
+        advance()
+
+        assertEquals(2, harness.component.newEventState.value.maxParticipants)
+
+        harness.component.updateEventField { copy(maxParticipants = 1) }
+        advance()
+
+        assertEquals(1, harness.component.newEventState.value.maxParticipants)
+    }
+
+    @Test
     fun selecting_weekly_event_keeps_existing_team_signup_choice() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()

@@ -3,6 +3,7 @@ import { NumberInput } from '@mantine/core';
 
 import { AnimatedLayoutSection } from '../components/AnimatedSection';
 import { DIVISION_NUMBER_FIELD_CLASS } from '../divisionLayout';
+import { MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
 import { BRACKET_TEAM_COUNT_ERROR } from '../divisionMessages';
 import { parseOptionalWholeNumber } from '../divisionNumbers';
 
@@ -35,7 +36,8 @@ export const SingleDivisionPoolControls = ({
         <AnimatedLayoutSection in={visible} className={DIVISION_NUMBER_FIELD_CLASS}>
             <NumberInput
                 label="Bracket Teams"
-                min={2}
+                min={MIN_BRACKET_TEAM_COUNT}
+                aria-valuemin={MIN_BRACKET_TEAM_COUNT}
                 max={maxStandardNumber}
                 value={defaults.bracketTeams ?? ''}
                 w="100%"
@@ -51,7 +53,7 @@ export const SingleDivisionPoolControls = ({
                     });
                 }}
                 error={playoffTeamCountError || (
-                    typeof defaults.bracketTeams === 'number' && defaults.bracketTeams >= 2
+                    typeof defaults.bracketTeams === 'number' && defaults.bracketTeams >= MIN_BRACKET_TEAM_COUNT
                         ? undefined
                         : BRACKET_TEAM_COUNT_ERROR
                 )}

@@ -80,6 +80,50 @@ describe('syncEventDivisionPhases', () => {
     expect(client.eventDivisionPhaseParticipants.upsert).toHaveBeenCalledTimes(2);
   });
 
+  it('preserves an explicit playoff division name through repeated phase syncs', async () => {
+    const client = createClient();
+    const entry = {
+      id: 'event__division__open',
+      key: 'open',
+      name: 'Open',
+      kind: 'LEAGUE' as const,
+      teamIds: ['team_1'],
+      playoffTeamCount: 3,
+      playoffPlacementDivisionIds: [
+        'event__division__open_playoff',
+        'event__division__open_playoff',
+        'event__division__open_playoff',
+      ],
+    };
+    const playoff = {
+      id: 'event__division__open_playoff',
+      key: 'open_playoff',
+      name: 'Open Playoff',
+      kind: 'PLAYOFF' as const,
+      maxParticipants: 3,
+    };
+    const sync = (playoffEntry: typeof playoff) => syncEventDivisionPhases({
+      client,
+      eventId: 'event_1',
+      eventType: 'LEAGUE',
+      includePlayoffs: true,
+      entries: [entry, playoffEntry],
+    });
+
+    await sync(playoff);
+    const firstPlayoffWrite = client.divisions.upsert.mock.calls
+      .map(([args]) => args)
+      .find((args: any) => args.where.id === playoff.id)?.create;
+    expect(firstPlayoffWrite?.name).toBe(playoff.name);
+
+    client.divisions.upsert.mockClear();
+    await sync({ ...playoff, ...firstPlayoffWrite });
+    const secondPlayoffWrite = client.divisions.upsert.mock.calls
+      .map(([args]) => args)
+      .find((args: any) => args.where.id === playoff.id)?.create;
+    expect(secondPlayoffWrite?.name).toBe(playoff.name);
+  });
+
   it('creates pool-owned phase rows and one shared bracket phase for tournaments', async () => {
     const client = createClient();
     const entries = [

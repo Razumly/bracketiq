@@ -1,4 +1,5 @@
 import { calculateTimedMatchDurationMinutes } from '@/lib/divisionPhaseSettings';
+import { normalizeBracketTeamCount } from '@/lib/divisionTypes';
 import { GENERIC_RESOURCE_LABELS, getSportResourceLabels } from '@/lib/sportResourceLabels';
 import type { Event, EventOfficial, EventOfficialPosition, Field, TimeSlot } from '@/types';
 import {
@@ -100,6 +101,7 @@ const paymentMode = (event: Record<string, unknown>): 'FREE' | 'ONLINE' | 'MANUA
 const draftFromRecord = (
   event: Record<string, unknown>,
   questions: unknown = event.registrationQuestions,
+  isPersistedBracketCountNormalizationEnabled = false,
 ): EventEditorDraft => {
   const start = asIsoDateTime(event.start, new Date(0).toISOString());
   const explicitScheduleEndConstraint = nullableString(event.scheduleEndConstraint);
@@ -134,9 +136,19 @@ const draftFromRecord = (
   const regularDivisionDetails = rawDivisionDetails.filter(
     (detail) => stringValue(detail.kind).trim().toUpperCase() !== 'PLAYOFF',
   );
-  const isMultiDivisionLeague =
-    stringValue(event.eventType).trim().toUpperCase() === 'LEAGUE' &&
-    regularDivisionDetails.length > 1;
+  const includePlayoffs = booleanValue(event.includePlayoffs);
+  const normalizedEventType = stringValue(event.eventType, 'EVENT').trim().toUpperCase();
+  const rawEventPlayoffTeamCount = numberOrNull(event.playoffTeamCount);
+  const normalizedEventPlayoffTeamCount =
+    isPersistedBracketCountNormalizationEnabled &&
+    includePlayoffs &&
+    (normalizedEventType === 'LEAGUE' || normalizedEventType === 'TOURNAMENT')
+      ? normalizeBracketTeamCount(rawEventPlayoffTeamCount)
+      : rawEventPlayoffTeamCount;
+  const normalizedEventMaxParticipants =
+    isPersistedBracketCountNormalizationEnabled && normalizedEventType === 'TOURNAMENT'
+      ? normalizeBracketTeamCount(numberOrNull(event.maxParticipants))
+      : numberOrNull(event.maxParticipants);
   const rawTimeSlotIds = stringArray(
     Array.isArray(event.timeSlotIds) && event.timeSlotIds.length > 0
       ? event.timeSlotIds
@@ -184,7 +196,7 @@ const draftFromRecord = (
     basics: {
       name: stringValue(event.name),
       description: stringValue(event.description),
-      eventType: stringValue(event.eventType, 'EVENT'),
+      eventType: normalizedEventType,
       sportIds: stringArray(event.sportIds),
       start,
       timeZone: stringValue(event.timeZone, 'UTC'),
@@ -206,7 +218,7 @@ const draftFromRecord = (
       singleDivision: booleanValue(event.singleDivision),
       registrationByDivisionType: booleanValue(event.registrationByDivisionType),
       teamSizeLimit: numberOrNull(event.teamSizeLimit),
-      maxParticipants: numberOrNull(event.maxParticipants),
+      maxParticipants: normalizedEventMaxParticipants,
       minAge: numberOrNull(event.minAge),
       maxAge: numberOrNull(event.maxAge),
       cancellationRefundHours: numberOrNull(event.cancellationRefundHours),
@@ -243,13 +255,9 @@ const draftFromRecord = (
       winnerSetCount: numberOrNull(event.winnerSetCount),
       loserSetCount: numberOrNull(event.loserSetCount),
       doubleElimination: booleanValue(event.doubleElimination),
-      includePlayoffs: booleanValue(event.includePlayoffs),
+      includePlayoffs,
       splitLeaguePlayoffDivisions: booleanValue(event.splitLeaguePlayoffDivisions),
-      playoffTeamCount: isMultiDivisionLeague
-        ? null
-        : numberOrNull(event.playoffTeamCount)
-          ?? (regularDivisionDetails[0]?.playoffTeamCount as number | undefined)
-          ?? null,
+      playoffTeamCount: normalizedEventPlayoffTeamCount,
       pointsToVictory: Array.isArray(event.pointsToVictory) ? event.pointsToVictory.map(Number).filter(Number.isFinite) : [],
       winnerBracketPointsToVictory: Array.isArray(event.winnerBracketPointsToVictory) ? event.winnerBracketPointsToVictory.map(Number).filter(Number.isFinite) : [],
       loserBracketPointsToVictory: Array.isArray(event.loserBracketPointsToVictory) ? event.loserBracketPointsToVictory.map(Number).filter(Number.isFinite) : [],
@@ -304,7 +312,7 @@ const draftFromRecord = (
 };
 
 export const legacyEventToEditorDraft = (event: Event, questions?: unknown): EventEditorDraft => (
-  draftFromRecord(event as unknown as Record<string, unknown>, questions)
+  draftFromRecord(event as unknown as Record<string, unknown>, questions, true)
 );
 
 export const eventFormValuesToEditorDraft = (values: EventFormValues, questions?: unknown): EventEditorDraft => (

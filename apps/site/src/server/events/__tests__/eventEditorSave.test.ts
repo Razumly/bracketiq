@@ -377,6 +377,28 @@ describe("saveEventEditor", () => {
     expect(tx.registrationQuestions.create).not.toHaveBeenCalled();
     expect(reconcileEventStaffDesiredState).not.toHaveBeenCalled();
   });
+  it("rejects a tournament team count below three as editor input", async () => {
+    txFor();
+    (buildEventEditorSnapshot as jest.Mock).mockResolvedValue({
+      ...snapshot(),
+      draft: { basics: { eventType: "TOURNAMENT" } },
+    });
+    const command = commandFor([]);
+    command.draft.basics.eventType = "TOURNAMENT";
+    command.draft.participation = { maxParticipants: 2 };
+    command.draft.competition.includePlayoffs = false;
+
+    await expect(
+      saveEventEditor({ userId: "host_1" }, command, "event_1"),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        name: "EditorInputError",
+        message: "Tournament team count must be at least 3.",
+      }),
+    );
+    expect(upsertEventFromPayload).not.toHaveBeenCalled();
+  });
+
   it("maps invalid staff assignments to an actionable editor input error", async () => {
     const tx = txFor();
     (upsertEventFromPayload as jest.Mock).mockResolvedValue("event_1");

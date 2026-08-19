@@ -57,6 +57,7 @@ import com.materialkolor.scheme.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventTag
+import com.razumly.mvp.core.data.dataTypes.MIN_BRACKET_TEAM_COUNT
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
@@ -84,9 +85,11 @@ import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.dataTypes.withLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.withTournamentConfig
+import com.razumly.mvp.core.data.dataTypes.withSimplePlayoffsOrPoolPlay
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.skillsForSport
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.minimumParticipantCount
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeName
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
@@ -124,7 +127,6 @@ import com.razumly.mvp.eventCreate.withSimpleDoubleElimination
 import com.razumly.mvp.eventCreate.withSimpleManualRegistrationPayments
 import com.razumly.mvp.eventCreate.withSimplePaidRegistration
 import com.razumly.mvp.eventCreate.withSimplePaymentPlans
-import com.razumly.mvp.eventCreate.withSimplePlayoffsOrPoolPlay
 import com.razumly.mvp.eventCreate.withSimpleSingleDivision
 import com.razumly.mvp.eventCreate.withSimpleTeamRegistration
 import com.razumly.mvp.eventMap.MapComponent
@@ -190,9 +192,10 @@ internal fun activeInclusivePriceCents(
 
 internal fun Event.resolveDivisionPlayoffTeamCount(divisionPlayoffTeamCount: Int?): Int? = when {
     !includePlayoffs -> null
-    eventType == EventType.LEAGUE && splitLeaguePlayoffDivisions -> divisionPlayoffTeamCount
-    singleDivision -> playoffTeamCount ?: divisionPlayoffTeamCount
-    else -> divisionPlayoffTeamCount
+    eventType == EventType.LEAGUE && splitLeaguePlayoffDivisions ->
+        divisionPlayoffTeamCount ?: playoffTeamCount ?: MIN_BRACKET_TEAM_COUNT
+    singleDivision -> playoffTeamCount ?: divisionPlayoffTeamCount ?: MIN_BRACKET_TEAM_COUNT
+    else -> divisionPlayoffTeamCount ?: playoffTeamCount ?: MIN_BRACKET_TEAM_COUNT
 }
 
 @Composable
@@ -462,9 +465,9 @@ fun EventDetails(
                 detail.price?.coerceAtLeast(0)
             }
             val effectiveMaxParticipants = if (editEvent.singleDivision) {
-                editEvent.maxParticipants.takeIf { value -> value >= 2 }
+                editEvent.maxParticipants
             } else {
-                detail.maxParticipants?.coerceAtLeast(2)
+                detail.maxParticipants
             }
             val detailInstallmentAmounts = detail.installmentAmounts.map { amount ->
                 amount.coerceAtLeast(0)
@@ -567,6 +570,7 @@ fun EventDetails(
         editEvent.priceCents,
         editEvent.maxParticipants,
         editEvent.playoffTeamCount,
+        editEvent.eventType,
         editEvent.allowPaymentPlans,
         editEvent.installmentCount,
         editEvent.installmentDueDates,
@@ -580,7 +584,10 @@ fun EventDetails(
         defaultDivisionEditorState(
             defaultPriceCents = editEvent.priceCents,
             defaultMaxParticipants = editEvent.maxParticipants,
-            defaultPlayoffTeamCount = editEvent.playoffTeamCount,
+            minimumMaxParticipants = editEvent.eventType.minimumParticipantCount(),
+            defaultPlayoffTeamCount = editEvent.resolveDivisionPlayoffTeamCount(
+                divisionDetailsForSettings.firstNotNullOfOrNull { detail -> detail.playoffTeamCount },
+            ),
             defaultPoolCount = defaultPoolCount,
             defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true,
             defaultInstallmentCount = editEvent.installmentCount,
@@ -1162,17 +1169,20 @@ fun EventDetails(
         } else {
             divisionEditor.priceCents.coerceAtLeast(0)
         }
+        val minimumMaxParticipants = editEvent.eventType.minimumParticipantCount()
         val normalizedMaxParticipants = if (editEvent.singleDivision) {
-            editEvent.maxParticipants.takeIf { value -> value >= 2 }
+            editEvent.maxParticipants
         } else {
-            val maxParticipants = divisionEditor.maxParticipants
-            if (maxParticipants == null || maxParticipants < 2) {
-                divisionEditor = divisionEditor.copy(
-                    error = "Division max teams must be at least 2.",
-                )
-                return
-            }
-            maxParticipants
+            divisionEditor.maxParticipants
+        }
+        if (
+            normalizedMaxParticipants == null ||
+            normalizedMaxParticipants < minimumMaxParticipants
+        ) {
+            divisionEditor = divisionEditor.copy(
+                error = "Division max teams must be at least $minimumMaxParticipants.",
+            )
+            return
         }
         val divisionPlayoffTeamCount = divisionEditor.playoffTeamCount
         val tournamentPoolPlayEnabled = editEvent.isTournamentPoolPlayEnabled()
@@ -1181,17 +1191,17 @@ fun EventDetails(
             editEvent.eventType == EventType.LEAGUE &&
             editEvent.includePlayoffs &&
             (!editEvent.singleDivision || editEvent.splitLeaguePlayoffDivisions) &&
-            (divisionPlayoffTeamCount == null || divisionPlayoffTeamCount < 2)
+            (divisionPlayoffTeamCount == null || divisionPlayoffTeamCount < MIN_BRACKET_TEAM_COUNT)
         ) {
             divisionEditor = divisionEditor.copy(
-                error = "Playoff team count is required for each division when playoffs are enabled.",
+                error = "Playoff team count must be at least $MIN_BRACKET_TEAM_COUNT for each division.",
             )
             return
         }
         if (tournamentPoolPlayEnabled) {
             if (normalizedMaxParticipants == null) {
                 divisionEditor = divisionEditor.copy(
-                    error = "Division max teams must be at least 2.",
+                    error = "Division max teams must be at least $MIN_BRACKET_TEAM_COUNT.",
                 )
                 return
             }
@@ -1201,9 +1211,9 @@ fun EventDetails(
                 )
                 return
             }
-            if (divisionPlayoffTeamCount == null || divisionPlayoffTeamCount < 2) {
+            if (divisionPlayoffTeamCount == null || divisionPlayoffTeamCount < MIN_BRACKET_TEAM_COUNT) {
                 divisionEditor = divisionEditor.copy(
-                    error = "Bracket team count is required when pool play is enabled.",
+                    error = "Bracket team count must be at least $MIN_BRACKET_TEAM_COUNT when pool play is enabled.",
                 )
                 return
             }
@@ -1461,7 +1471,9 @@ fun EventDetails(
             name = detail.name,
             priceCents = (detail.price ?: editEvent.priceCents).coerceAtLeast(0),
             maxParticipants = detail.maxParticipants
-                ?: editEvent.maxParticipants.takeIf { value -> value >= 2 },
+                ?: editEvent.maxParticipants.takeIf { value ->
+                    value >= editEvent.eventType.minimumParticipantCount()
+                },
             playoffTeamCount = editEvent.resolveDivisionPlayoffTeamCount(detail.playoffTeamCount),
             poolCount = detail.poolCount,
             allowPaymentPlans = detail.allowPaymentPlans == true,

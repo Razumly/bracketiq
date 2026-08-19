@@ -1,3 +1,4 @@
+import { MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
 import { EventBuilder } from './EventBuilder';
 import {
   collectUnresolvedStaffingDiagnostics,
@@ -866,18 +867,17 @@ const resolveDivisionPlayoffTeamCount = (
   division: Division | undefined,
   teamCount: number,
 ): number => {
-  if (teamCount < 2) {
+  if (teamCount < MIN_BRACKET_TEAM_COUNT) {
     return 0;
   }
   const configuredDivisionCount = typeof division?.playoffTeamCount === 'number' && Number.isFinite(division.playoffTeamCount)
-    ? Math.max(0, Math.trunc(division.playoffTeamCount))
+    ? Math.max(MIN_BRACKET_TEAM_COUNT, Math.trunc(division.playoffTeamCount))
     : null;
   const configuredEventCount = typeof event.playoffTeamCount === 'number' && Number.isFinite(event.playoffTeamCount)
-    ? Math.max(0, Math.trunc(event.playoffTeamCount))
-    : 0;
+    ? Math.max(MIN_BRACKET_TEAM_COUNT, Math.trunc(event.playoffTeamCount))
+    : MIN_BRACKET_TEAM_COUNT;
   const configured = configuredDivisionCount ?? configuredEventCount;
-  const fallback = configured > 0 ? configured : teamCount;
-  return Math.min(fallback, teamCount);
+  return Math.min(configured, teamCount);
 };
 
 const resolveSplitPlayoffDivisionCapacity = (
@@ -886,10 +886,10 @@ const resolveSplitPlayoffDivisionCapacity = (
 ): number => {
   const explicitCapacity = (() => {
     if (typeof playoffDivision.maxParticipants === 'number' && Number.isFinite(playoffDivision.maxParticipants)) {
-      return Math.max(0, Math.trunc(playoffDivision.maxParticipants));
+      return Math.max(MIN_BRACKET_TEAM_COUNT, Math.trunc(playoffDivision.maxParticipants));
     }
     if (typeof playoffDivision.playoffTeamCount === 'number' && Number.isFinite(playoffDivision.playoffTeamCount)) {
-      return Math.max(0, Math.trunc(playoffDivision.playoffTeamCount));
+      return Math.max(MIN_BRACKET_TEAM_COUNT, Math.trunc(playoffDivision.playoffTeamCount));
     }
     return null;
   })();
@@ -897,8 +897,8 @@ const resolveSplitPlayoffDivisionCapacity = (
     return explicitCapacity;
   }
   const fallbackLeagueCount = typeof event.playoffTeamCount === 'number' && Number.isFinite(event.playoffTeamCount)
-    ? Math.max(0, Math.trunc(event.playoffTeamCount))
-    : 0;
+    ? Math.max(MIN_BRACKET_TEAM_COUNT, Math.trunc(event.playoffTeamCount))
+    : MIN_BRACKET_TEAM_COUNT;
   return fallbackLeagueCount;
 };
 
@@ -1080,7 +1080,7 @@ const estimateLeagueMatches = (event: League, teamCount: number): number => {
       if (splitPlayoffsEnabled) {
         return event.playoffDivisions.reduce((total, playoffDivision) => {
           const playoffCount = resolveSplitPlayoffDivisionCapacity(event, playoffDivision);
-          if (playoffCount < 2) {
+          if (playoffCount < MIN_BRACKET_TEAM_COUNT) {
             return total;
           }
           return total + tournamentMatchCount(
@@ -1090,7 +1090,9 @@ const estimateLeagueMatches = (event: League, teamCount: number): number => {
         }, 0);
       }
       const playoffCount = resolveDivisionPlayoffTeamCount(event, undefined, teamCount);
-      return playoffCount >= 2 ? tournamentMatchCount(playoffCount, Boolean(event.doubleElimination)) : 0;
+      return playoffCount >= MIN_BRACKET_TEAM_COUNT
+        ? tournamentMatchCount(playoffCount, Boolean(event.doubleElimination))
+        : 0;
     })();
     return regularMatches + playoffMatches;
   }
@@ -1112,14 +1114,14 @@ const estimateLeagueMatches = (event: League, teamCount: number): number => {
       divisionLookup.get(divisionId),
       divisionTeamCount,
     );
-    if (playoffCount >= 2) {
+    if (playoffCount >= MIN_BRACKET_TEAM_COUNT) {
       playoffMatches += tournamentMatchCount(playoffCount, Boolean(event.doubleElimination));
     }
   }
   if (event.includePlayoffs && splitPlayoffsEnabled) {
     for (const playoffDivision of event.playoffDivisions) {
       const playoffCount = resolveSplitPlayoffDivisionCapacity(event, playoffDivision);
-      if (playoffCount < 2) {
+      if (playoffCount < MIN_BRACKET_TEAM_COUNT) {
         continue;
       }
       playoffMatches += tournamentMatchCount(
@@ -1150,7 +1152,7 @@ const estimateTournamentMatches = (event: Tournament, teamCount: number): number
 };
 
 const tournamentMatchCount = (teamCount: number, doubleElimination: boolean): number => {
-  if (teamCount < 2) return 0;
+  if (teamCount < MIN_BRACKET_TEAM_COUNT) return 0;
   if (doubleElimination) return Math.max(2 * teamCount - 1, 0);
   return Math.max(teamCount - 1, 0);
 };

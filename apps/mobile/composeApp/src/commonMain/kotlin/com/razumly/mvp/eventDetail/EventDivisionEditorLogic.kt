@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionPhaseSettingsMVP
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameterOption
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MIN_BRACKET_TEAM_COUNT
 import com.razumly.mvp.core.data.dataTypes.LeagueConfig
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.toDropdownOptions
@@ -115,6 +116,7 @@ internal fun defaultDivisionEditorState(
     defaultPriceCents: Int,
     defaultMaxParticipants: Int,
     defaultPlayoffTeamCount: Int?,
+    minimumMaxParticipants: Int = 2,
     defaultPoolCount: Int? = null,
     defaultAllowPaymentPlans: Boolean,
     defaultInstallmentCount: Int?,
@@ -125,8 +127,8 @@ internal fun defaultDivisionEditorState(
     defaultPlayoffConfig: TournamentConfig = TournamentConfig(),
     defaultPhaseSettings: Map<String, DivisionPhaseSettingsMVP> = emptyMap(),
 ): DivisionEditorState {
-    val fallbackMax = defaultMaxParticipants.takeIf { value -> value >= 2 }
-    val fallbackPlayoff = defaultPlayoffTeamCount?.coerceAtLeast(2)
+    val fallbackMax = defaultMaxParticipants.takeIf { value -> value >= minimumMaxParticipants }
+    val fallbackPlayoff = defaultPlayoffTeamCount
     val fallbackPoolCount = defaultPoolCount?.takeIf { value -> value >= 1 }
     val normalizedInstallmentAmounts = defaultInstallmentAmounts.map { amount ->
         amount.coerceAtLeast(0)
@@ -197,6 +199,46 @@ internal fun applySingleDivisionDefaultsToDetails(
             } else {
                 null
             },
+        )
+    }
+}
+
+internal fun applySingleDivisionBracketTeamCountInput(
+    value: String,
+    divisionEditor: DivisionEditorState,
+    divisionEditorDefaults: DivisionEditorState,
+    poolCount: Int?,
+    actions: EventDetailsDivisionEditorFormActions,
+) {
+    if (value.isNotEmpty() && !value.all(Char::isDigit)) return
+
+    val parsedTeamCount = value.toIntOrNull()
+    actions.onDivisionEditorDefaultsChange(
+        divisionEditorDefaults.copy(
+            playoffTeamCount = parsedTeamCount?.takeIf { count ->
+                count >= MIN_BRACKET_TEAM_COUNT
+            },
+        ),
+    )
+    if (divisionEditor.editingId.isNullOrBlank()) {
+        actions.onDivisionEditorChange(
+            divisionEditor.copy(
+                playoffTeamCount = parsedTeamCount,
+                error = null,
+            ),
+        )
+    }
+    actions.onEditEvent {
+        val nextDetails = applySingleDivisionDefaultsToDetails(
+            details = divisionDetails,
+            defaultPriceCents = priceCents,
+            defaultMaxParticipants = maxParticipants,
+            defaultPlayoffTeamCount = parsedTeamCount,
+            defaultPoolCount = poolCount,
+        )
+        copy(
+            playoffTeamCount = parsedTeamCount,
+            divisionDetails = nextDetails,
         )
     }
 }

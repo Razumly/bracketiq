@@ -1,3 +1,5 @@
+import { normalizeBracketTeamCount } from '@/lib/divisionTypes';
+
 type DivisionDefaultsTarget = {
     price: number;
     maxParticipants: number;
@@ -54,16 +56,13 @@ export const applyEventDefaultsToDivisionDetails = <T extends DivisionDefaultsTa
 ): ApplyEventDivisionDefaultsResult<T> => {
     const normalizedPrice = normalizePrice(params.defaultPrice);
     const normalizedMaxParticipants = normalizeCapacity(params.defaultMaxParticipants);
-    const shouldUpdatePlayoff = (params.includePlayoffs || Boolean(params.includeTournamentPoolPlay))
-        && Number.isFinite(params.defaultPlayoffTeamCount);
-    const normalizedPlayoffTeamCount = shouldUpdatePlayoff
-        ? Math.trunc(params.defaultPlayoffTeamCount as number)
-        : undefined;
-    const shouldUpdatePool = Boolean(params.includeTournamentPoolPlay);
-    const normalizedPoolCount = shouldUpdatePool
+    const isPlayoffUpdateRequired = params.includePlayoffs || Boolean(params.includeTournamentPoolPlay);
+    const normalizedPlayoffTeamCount = normalizeBracketTeamCount(params.defaultPlayoffTeamCount);
+    const isPoolUpdateRequired = Boolean(params.includeTournamentPoolPlay);
+    const normalizedPoolCount = isPoolUpdateRequired
         ? normalizePoolCount(params.defaultPoolCount)
         : undefined;
-    const normalizedPoolTeamCount = shouldUpdatePool
+    const normalizedPoolTeamCount = isPoolUpdateRequired
         ? derivePoolTeamCount(normalizedMaxParticipants, normalizedPoolCount)
         : undefined;
 
@@ -71,20 +70,20 @@ export const applyEventDefaultsToDivisionDetails = <T extends DivisionDefaultsTa
     const nextDetails = params.details.map((detail) => {
         const nextPrice = normalizedPrice;
         const nextMaxParticipants = normalizedMaxParticipants;
-        const nextPlayoffTeamCount = shouldUpdatePlayoff
-            ? normalizedPlayoffTeamCount
+        const nextPlayoffTeamCount = isPlayoffUpdateRequired
+            ? detail.playoffTeamCount ?? normalizedPlayoffTeamCount
             : detail.playoffTeamCount;
-        const nextPoolCount = shouldUpdatePool
+        const nextPoolCount = isPoolUpdateRequired
             ? normalizedPoolCount
             : detail.poolCount;
-        const nextPoolTeamCount = shouldUpdatePool
+        const nextPoolTeamCount = isPoolUpdateRequired
             ? normalizedPoolTeamCount
             : detail.poolTeamCount;
         const detailChanged = detail.price !== nextPrice
             || detail.maxParticipants !== nextMaxParticipants
-            || (shouldUpdatePlayoff && detail.playoffTeamCount !== nextPlayoffTeamCount)
-            || (shouldUpdatePool && detail.poolCount !== nextPoolCount)
-            || (shouldUpdatePool && detail.poolTeamCount !== nextPoolTeamCount);
+            || (isPlayoffUpdateRequired && detail.playoffTeamCount !== nextPlayoffTeamCount)
+            || (isPoolUpdateRequired && detail.poolCount !== nextPoolCount)
+            || (isPoolUpdateRequired && detail.poolTeamCount !== nextPoolTeamCount);
         if (!detailChanged) {
             return detail;
         }
@@ -93,9 +92,11 @@ export const applyEventDefaultsToDivisionDetails = <T extends DivisionDefaultsTa
             ...detail,
             price: nextPrice,
             maxParticipants: nextMaxParticipants,
-            playoffTeamCount: nextPlayoffTeamCount,
-            poolCount: nextPoolCount,
-            poolTeamCount: nextPoolTeamCount,
+            ...(isPlayoffUpdateRequired ? { playoffTeamCount: nextPlayoffTeamCount } : {}),
+            ...(isPoolUpdateRequired ? {
+                poolCount: nextPoolCount,
+                poolTeamCount: nextPoolTeamCount,
+            } : {}),
         };
     });
 

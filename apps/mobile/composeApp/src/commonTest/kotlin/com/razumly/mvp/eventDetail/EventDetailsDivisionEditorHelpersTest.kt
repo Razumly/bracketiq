@@ -192,7 +192,7 @@ class EventDetailsDivisionEditorHelpersTest {
     }
 
     @Test
-    fun default_division_editor_state_keeps_missing_default_max_empty() {
+    fun given_an_invalid_playoff_count_when_editor_state_is_built_then_the_value_is_preserved() {
         val state = defaultDivisionEditorState(
             defaultPriceCents = -1,
             defaultMaxParticipants = 0,
@@ -205,7 +205,7 @@ class EventDetailsDivisionEditorHelpersTest {
 
         assertEquals(0, state.priceCents)
         assertEquals(null, state.maxParticipants)
-        assertEquals(2, state.playoffTeamCount)
+        assertEquals(1, state.playoffTeamCount)
         assertEquals("", state.gender)
         assertEquals("", state.skillDivisionTypeId)
         assertEquals("", state.ageDivisionTypeId)

@@ -5,10 +5,26 @@ import {
   assignRegisteredTeamToTournamentPool,
   buildGeneratedTournamentPools,
   getTournamentPoolIdsForBracket,
+  isGeneratedTournamentPoolRecord,
   removeRegisteredTeamFromTournamentPools,
 } from '@/server/events/tournamentPools';
 
 describe('tournamentPools', () => {
+  it('classifies only generated tournament pool rows', () => {
+    const generatedPool = {
+      eventType: 'TOURNAMENT',
+      isPoolPlayEnabled: true,
+      kind: 'LEAGUE',
+      poolCount: null,
+      playoffPlacementDivisionIds: ['event_1__division__open'],
+    };
+
+    expect(isGeneratedTournamentPoolRecord(generatedPool)).toBe(true);
+    expect(isGeneratedTournamentPoolRecord({ ...generatedPool, poolCount: 2 })).toBe(false);
+    expect(isGeneratedTournamentPoolRecord({ ...generatedPool, kind: 'PLAYOFF' })).toBe(false);
+    expect(isGeneratedTournamentPoolRecord({ ...generatedPool, isPoolPlayEnabled: false })).toBe(false);
+  });
+
   it('generates alphabetic pools with even team and advancement counts', () => {
     const pools = buildGeneratedTournamentPools({
       eventId: 'event_1',
@@ -58,6 +74,40 @@ describe('tournamentPools', () => {
         poolCount: 3,
       },
     })).toThrow(TournamentPoolValidationError);
+  });
+
+  it('rejects legacy two-team tournament brackets', () => {
+    expect(() => buildGeneratedTournamentPools({
+      eventId: 'event_1',
+      bracket: {
+        id: 'event_1__division__open',
+        key: 'open',
+        name: 'Open',
+        maxParticipants: 3,
+        playoffTeamCount: 2,
+        poolCount: 1,
+      },
+    })).toThrow(TournamentPoolValidationError);
+  });
+
+  it('defaults a missing tournament bracket count to three', () => {
+    const pools = buildGeneratedTournamentPools({
+      eventId: 'event_1',
+      bracket: {
+        id: 'event_1__division__open',
+        key: 'open',
+        name: 'Open',
+        maxParticipants: 3,
+        poolCount: 1,
+      },
+    });
+
+    expect(pools).toEqual([
+      expect.objectContaining({
+        maxParticipants: 3,
+        playoffTeamCount: 3,
+      }),
+    ]);
   });
 
   it('assigns a registered team to the least-filled generated pool', async () => {

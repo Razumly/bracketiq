@@ -2,6 +2,7 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MIN_BRACKET_TEAM_COUNT
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionDetails
@@ -70,7 +71,7 @@ internal fun derivePoolTeamCount(
     maxTeams: Int?,
     poolCount: Int?,
 ): Int? {
-    val normalizedMaxTeams = maxTeams?.takeIf { it >= 2 } ?: return null
+    val normalizedMaxTeams = maxTeams?.takeIf { it >= MIN_BRACKET_TEAM_COUNT } ?: return null
     val normalizedPoolCount = poolCount?.takeIf { it >= 1 } ?: return null
     return if (normalizedMaxTeams % normalizedPoolCount == 0) {
         normalizedMaxTeams / normalizedPoolCount
@@ -98,9 +99,9 @@ internal fun isTournamentPoolDivisionValid(detail: DivisionDetail): Boolean {
     val maxTeams = detail.maxParticipants ?: return false
     val poolCount = detail.poolCount ?: return false
     val bracketTeamCount = detail.playoffTeamCount ?: return false
-    return maxTeams >= 2 &&
+    return maxTeams >= MIN_BRACKET_TEAM_COUNT &&
         poolCount >= 1 &&
-        bracketTeamCount >= 2 &&
+        bracketTeamCount >= MIN_BRACKET_TEAM_COUNT &&
         maxTeams % poolCount == 0 &&
         bracketTeamCount % poolCount == 0
 }

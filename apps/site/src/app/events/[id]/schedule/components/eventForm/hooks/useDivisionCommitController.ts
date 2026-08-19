@@ -8,6 +8,8 @@ import {
     buildDivisionName,
     buildDivisionToken,
     getDivisionTypeById,
+    MIN_BRACKET_TEAM_COUNT,
+    minimumParticipantCountForEventType,
 } from '@/lib/divisionTypes';
 import type {
     LeagueConfig,
@@ -124,12 +126,12 @@ export const useDivisionCommitController = ({
                 setDivisionEditor((previous) => ({ ...previous, error: 'Playoff division name is required.' }));
                 return;
             }
-            if (typeof normalizedMaxParticipants !== 'number' || normalizedMaxParticipants < 2) {
+            if (typeof normalizedMaxParticipants !== 'number' || normalizedMaxParticipants < MIN_BRACKET_TEAM_COUNT) {
                 setDivisionEditor((previous) => ({
                     ...previous,
                     error: eventData.teamSignup
-                        ? 'Playoff division teams count must be at least 2.'
-                        : 'Playoff division participants count must be at least 2.',
+                        ? `Playoff division teams count must be at least ${MIN_BRACKET_TEAM_COUNT}.`
+                        : `Playoff division participants count must be at least ${MIN_BRACKET_TEAM_COUNT}.`,
                 }));
                 return;
             }
@@ -190,11 +192,12 @@ export const useDivisionCommitController = ({
         const rawDivisionMaxParticipants = usesEventLevelDivisionDefaults
             ? eventData.maxParticipants
             : divisionEditor.maxParticipants;
+        const minimumDivisionParticipants = minimumParticipantCountForEventType(eventData.eventType);
         const isDivisionMaxParticipantsMissing = (!eventData.singleDivision || isAffiliateEvent)
             && typeof rawDivisionMaxParticipants !== 'number';
         const normalizedDivisionMaxParticipants = typeof rawDivisionMaxParticipants === 'number'
             ? Math.max(0, Math.trunc(rawDivisionMaxParticipants))
-            : Math.max(2, Math.trunc(eventData.maxParticipants || 2));
+            : Math.max(minimumDivisionParticipants, Math.trunc(eventData.maxParticipants || minimumDivisionParticipants));
         const rawDivisionPlayoffTeamCount = (() => {
             if (
                 (eventData.eventType !== 'LEAGUE' && eventData.eventType !== 'TOURNAMENT')
@@ -275,12 +278,17 @@ export const useDivisionCommitController = ({
             }));
             return;
         }
-        if ((!eventData.singleDivision || isAffiliateEvent) && normalizedDivisionMaxParticipants < 2) {
+        if (
+            (!eventData.singleDivision || isAffiliateEvent)
+            && normalizedDivisionMaxParticipants < minimumDivisionParticipants
+        ) {
             setDivisionEditor((previous) => ({
                 ...previous,
-                error: eventData.teamSignup
-                    ? 'Division max teams must be at least 2.'
-                    : 'Division max participants must be at least 2.',
+                error: eventData.eventType === 'TOURNAMENT'
+                    ? BRACKET_TEAM_COUNT_ERROR
+                    : eventData.teamSignup
+                        ? `Division max teams must be at least ${minimumDivisionParticipants}.`
+                        : `Division max participants must be at least ${minimumDivisionParticipants}.`,
             }));
             return;
         }
@@ -297,7 +305,7 @@ export const useDivisionCommitController = ({
             eventData.eventType === 'LEAGUE'
             && leagueData.includePlayoffs
             && !eventData.singleDivision
-            && !(typeof normalizedDivisionPlayoffTeamCount === 'number' && normalizedDivisionPlayoffTeamCount >= 2)
+            && !(typeof normalizedDivisionPlayoffTeamCount === 'number' && normalizedDivisionPlayoffTeamCount >= MIN_BRACKET_TEAM_COUNT)
         ) {
             setDivisionEditor((previous) => ({ ...previous, error: BRACKET_TEAM_COUNT_ERROR }));
             return;
@@ -307,7 +315,7 @@ export const useDivisionCommitController = ({
                 setDivisionEditor((previous) => ({ ...previous, error: 'Pool count is required.' }));
                 return;
             }
-            if (!(typeof normalizedDivisionPlayoffTeamCount === 'number' && normalizedDivisionPlayoffTeamCount >= 2)) {
+            if (!(typeof normalizedDivisionPlayoffTeamCount === 'number' && normalizedDivisionPlayoffTeamCount >= MIN_BRACKET_TEAM_COUNT)) {
                 setDivisionEditor((previous) => ({ ...previous, error: BRACKET_TEAM_COUNT_ERROR }));
                 return;
             }

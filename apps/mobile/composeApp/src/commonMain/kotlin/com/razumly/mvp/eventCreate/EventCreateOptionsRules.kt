@@ -1,10 +1,12 @@
 package com.razumly.mvp.eventCreate
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MIN_BRACKET_TEAM_COUNT
 import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_MANUAL
 import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_ONLINE
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.minimumParticipantCount
 import com.razumly.mvp.core.data.dataTypes.withDoTeamsOfficiate
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 
@@ -129,16 +131,29 @@ fun Event.withSimpleSingleDivision(enabled: Boolean): Event {
         existingDetails = divisionDetails,
         eventId = id,
     )
+    val minimumMaxParticipants = eventType.minimumParticipantCount()
+    val resolvedEventPlayoffTeamCount = if (includePlayoffs) {
+        playoffTeamCount
+            ?: mergedDetails.firstNotNullOfOrNull { detail -> detail.playoffTeamCount }
+            ?: MIN_BRACKET_TEAM_COUNT
+    } else {
+        null
+    }
     return copy(
         singleDivision = enabled,
+        playoffTeamCount = if (enabled && includePlayoffs) {
+            resolvedEventPlayoffTeamCount
+        } else {
+            playoffTeamCount
+        },
         allowTeamSplitDefault = if (enabled) false else allowTeamSplitDefault,
         divisionDetails = mergedDetails.map { detail ->
             if (enabled) {
                 detail.copy(
                     price = priceCents.coerceAtLeast(0),
-                    maxParticipants = maxParticipants.takeIf { it >= 2 },
+                    maxParticipants = maxParticipants.takeIf { it >= minimumMaxParticipants },
                     playoffTeamCount = if (includePlayoffs) {
-                        playoffTeamCount ?: detail.playoffTeamCount
+                        resolvedEventPlayoffTeamCount
                     } else {
                         null
                     },
@@ -146,7 +161,9 @@ fun Event.withSimpleSingleDivision(enabled: Boolean): Event {
             } else {
                 detail.copy(
                     playoffTeamCount = if (includePlayoffs) {
-                        detail.playoffTeamCount ?: playoffTeamCount
+                        detail.playoffTeamCount
+                            ?: playoffTeamCount
+                            ?: MIN_BRACKET_TEAM_COUNT
                     } else {
                         null
                     },
@@ -156,35 +173,6 @@ fun Event.withSimpleSingleDivision(enabled: Boolean): Event {
     )
 }
 
-fun Event.withSimplePlayoffsOrPoolPlay(enabled: Boolean): Event {
-    if (eventType != EventType.LEAGUE && eventType != EventType.TOURNAMENT) return this
-    val mergedDetails = mergeDivisionDetailsForDivisions(
-        divisions = divisions,
-        existingDetails = divisionDetails,
-        eventId = id,
-    )
-    return copy(
-        includePlayoffs = enabled,
-        playoffTeamCount = if (enabled) playoffTeamCount else null,
-        divisionDetails = mergedDetails.map { detail ->
-            if (enabled) {
-                detail.copy(
-                    playoffTeamCount = if (singleDivision) {
-                        playoffTeamCount ?: detail.playoffTeamCount
-                    } else {
-                        detail.playoffTeamCount
-                    },
-                )
-            } else {
-                detail.copy(
-                    playoffTeamCount = null,
-                    poolCount = null,
-                    poolTeamCount = null,
-                )
-            }
-        },
-    )
-}
 
 fun Event.withSimpleDoubleElimination(enabled: Boolean): Event {
     val nextEnabled = eventType == EventType.TOURNAMENT && enabled

@@ -1,10 +1,35 @@
 import { calculateAgeOnDate } from '@/lib/age';
 import { formatDisplayDate } from '@/lib/dateUtils';
+import type { Event } from '@/types';
 
 export type DivisionGender = 'M' | 'F' | 'C';
 export type DivisionRatingType = 'AGE' | 'SKILL';
 
 export type DivisionAgeRuleKind = 'UNDER_OR_EQUAL' | 'MINIMUM' | 'EXACT';
+
+export const MIN_BRACKET_TEAM_COUNT = 3;
+export const normalizeBracketTeamCount = (value: unknown): number => {
+  if (value === null || value === undefined) {
+    return MIN_BRACKET_TEAM_COUNT;
+  }
+  const numeric = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numeric)
+    ? Math.trunc(numeric)
+    : MIN_BRACKET_TEAM_COUNT;
+};
+
+export const isBracketTeamCountEnabled = (
+  eventType: unknown,
+  includePlayoffs: unknown,
+): boolean => {
+  const normalizedEventType = String(eventType ?? '').trim().toUpperCase();
+  return Boolean(includePlayoffs) &&
+    (normalizedEventType === 'LEAGUE' || normalizedEventType === 'TOURNAMENT');
+};
+export const minimumParticipantCountForEventType = (
+  eventType: Event['eventType'],
+): number => eventType === 'TOURNAMENT' ? MIN_BRACKET_TEAM_COUNT : 2;
+
 
 export type DivisionAgeBracket = {
   kind: DivisionAgeRuleKind;

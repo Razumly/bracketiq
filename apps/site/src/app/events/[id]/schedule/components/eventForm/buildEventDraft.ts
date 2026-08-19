@@ -1,6 +1,14 @@
 import type { LeagueSlotForm } from '@/app/discover/components/LeagueFields';
 import { getSystemTimeZone, formatLocalDateTime, normalizeTimeZone, parseLocalDateTime } from '@/lib/dateUtils';
-import { buildDivisionName, buildDivisionToken, getDivisionTypeById, inferDivisionDetails } from '@/lib/divisionTypes';
+import {
+    buildDivisionName,
+    buildDivisionToken,
+    getDivisionTypeById,
+    isBracketTeamCountEnabled,
+    MIN_BRACKET_TEAM_COUNT,
+    minimumParticipantCountForEventType,
+    inferDivisionDetails,
+} from '@/lib/divisionTypes';
 import { normalizeEntityId, sanitizeOrganizationEventAssignments } from '@/lib/organizationEventAccess';
 import { getFieldOrganizationId } from '../externalRentalField';
 import { resolveOrganizationEventFieldIds } from '../eventFieldSelection';
@@ -179,6 +187,11 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
         const maxAge = normalizeNumber(source.maxAge);
         const sportInput = resolveSportInput(resolvedSport ?? sportId);
         const divisionReferenceDate = parseDateValue(source.start ?? null);
+        const minimumDivisionParticipants = minimumParticipantCountForEventType(source.eventType);
+        const isPlayoffCountEnabled = isBracketTeamCountEnabled(
+            source.eventType,
+            source.leagueData.includePlayoffs,
+        );
         const normalizedDivisionDetails = (() => {
             const fromDetails = Array.isArray(source.divisionDetails)
                 ? source.divisionDetails
@@ -240,10 +253,13 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
                     ageDivisionTypeId,
                     ageDivisionTypeName,
                     price: eventPriceCents,
-                    maxParticipants: Math.max(2, Math.trunc(source.maxParticipants || 2)),
+                    maxParticipants: Math.max(
+                        minimumDivisionParticipants,
+                        Math.trunc(source.maxParticipants || minimumDivisionParticipants),
+                    ),
                     playoffTeamCount: Number.isFinite(source.leagueData?.playoffTeamCount)
                         ? Math.trunc(source.leagueData.playoffTeamCount as number)
-                        : undefined,
+                        : (isPlayoffCountEnabled ? MIN_BRACKET_TEAM_COUNT : undefined),
                     playoffPlacementDivisionIds: [],
                     allowPaymentPlans: eventAllowPaymentPlans,
                     installmentCount: eventAllowPaymentPlans
@@ -306,8 +322,14 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
         const normalizedTournamentPoolBracketDetails: PlayoffDivisionDetailForm[] = tournamentPoolPlayEnabled
             ? normalizedDivisionDetails.map((detail) => {
                 const maxParticipants = singleDivisionEnabled
-                    ? Math.max(2, Math.trunc(source.maxParticipants || detail.maxParticipants || 2))
-                    : Math.max(2, Math.trunc(detail.maxParticipants || source.maxParticipants || 2));
+                    ? Math.max(
+                        minimumDivisionParticipants,
+                        Math.trunc(source.maxParticipants || detail.maxParticipants || minimumDivisionParticipants),
+                    )
+                    : Math.max(
+                        minimumDivisionParticipants,
+                        Math.trunc(detail.maxParticipants || source.maxParticipants || minimumDivisionParticipants),
+                    );
                 const poolCount = Number.isFinite(detail.poolCount)
                     ? Math.max(1, Math.trunc(detail.poolCount as number))
                     : undefined;
@@ -317,7 +339,7 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
                     maxParticipants,
                     playoffTeamCount: Number.isFinite(detail.playoffTeamCount)
                         ? Math.trunc(detail.playoffTeamCount as number)
-                        : undefined,
+                        : MIN_BRACKET_TEAM_COUNT,
                     poolCount,
                     poolTeamCount: derivePoolTeamCount(maxParticipants, poolCount),
                     playoffPlacementDivisionIds: [],
@@ -361,8 +383,14 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
                 )
                 : 0,
             maxParticipants: useEventLevelDivisionDefaults
-                ? Math.max(2, Math.trunc(source.maxParticipants || 2))
-                : Math.max(2, Math.trunc(detail.maxParticipants || source.maxParticipants || 2)),
+                ? Math.max(
+                    minimumDivisionParticipants,
+                    Math.trunc(source.maxParticipants || minimumDivisionParticipants),
+                )
+                : Math.max(
+                    minimumDivisionParticipants,
+                    Math.trunc(detail.maxParticipants || source.maxParticipants || minimumDivisionParticipants),
+                ),
             playoffTeamCount: (() => {
                 if (source.eventType !== 'LEAGUE' || !source.leagueData.includePlayoffs) {
                     return undefined;
@@ -370,11 +398,11 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
                 if (singleDivisionEnabled && !splitLeaguePlayoffDivisions) {
                     return Number.isFinite(source.leagueData.playoffTeamCount)
                         ? Math.trunc(source.leagueData.playoffTeamCount as number)
-                        : undefined;
+                        : MIN_BRACKET_TEAM_COUNT;
                 }
                 return Number.isFinite(detail.playoffTeamCount)
                     ? Math.trunc(detail.playoffTeamCount as number)
-                    : undefined;
+                    : MIN_BRACKET_TEAM_COUNT;
             })(),
             playoffPlacementDivisionIds: (() => {
                 if (source.eventType === 'TOURNAMENT' && source.leagueData.includePlayoffs) {
@@ -385,7 +413,7 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
                 }
                 const playoffTeamCount = Number.isFinite(detail.playoffTeamCount)
                     ? Math.max(0, Math.trunc(detail.playoffTeamCount as number))
-                    : 0;
+                    : MIN_BRACKET_TEAM_COUNT;
                 const mapping = normalizePlacementDivisionIds(detail.playoffPlacementDivisionIds);
                 if (playoffTeamCount <= 0) {
                     return mapping;
@@ -581,7 +609,9 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
             installmentAmounts: eventAllowPaymentPlans ? installmentAmountsCents : [],
             installmentDueDates: eventAllowPaymentPlans ? source.installmentDueDates : [],
             allowTeamSplitDefault: isAffiliateEvent ? false : source.allowTeamSplitDefault,
-            maxParticipants: source.maxParticipants ?? undefined,
+            maxParticipants: typeof source.maxParticipants === 'number' && Number.isFinite(source.maxParticipants)
+                ? Math.trunc(source.maxParticipants)
+                : minimumDivisionParticipants,
             teamSizeLimit: source.teamSizeLimit ?? undefined,
             teamSignup: isAffiliateEvent ? false : source.teamSignup,
             singleDivision: source.singleDivision,
@@ -591,10 +621,12 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
             divisionDetails: normalizedDivisionDetailsForPayload.map((detail) => ({
                 ...detail,
                 price: normalizePriceCents(detail.price),
-                maxParticipants: Math.max(2, Math.trunc(detail.maxParticipants || 2)),
+                maxParticipants: Number.isFinite(detail.maxParticipants)
+                    ? Math.trunc(detail.maxParticipants as number)
+                    : minimumDivisionParticipants,
                 playoffTeamCount: Number.isFinite(detail.playoffTeamCount)
                     ? Math.trunc(detail.playoffTeamCount as number)
-                    : undefined,
+                    : (isPlayoffCountEnabled ? MIN_BRACKET_TEAM_COUNT : undefined),
                 allowPaymentPlans: Boolean(detail.allowPaymentPlans),
                 installmentCount: detail.allowPaymentPlans
                     ? (detail.installmentCount || detail.installmentAmounts.length || 0)
@@ -627,7 +659,7 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
                 maxParticipants: normalizePlayoffDivisionParticipantCount(division.maxParticipants) ?? undefined,
                 playoffTeamCount: Number.isFinite(division.playoffTeamCount)
                     ? Math.trunc(division.playoffTeamCount as number)
-                    : undefined,
+                    : (tournamentPoolPlayEnabled ? MIN_BRACKET_TEAM_COUNT : undefined),
                 poolCount: Number.isFinite(division.poolCount)
                     ? Math.max(1, Math.trunc(division.poolCount as number))
                     : undefined,
@@ -858,7 +890,7 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
             draft.playoffTeamCount = source.leagueData.includePlayoffs
                 ? (Number.isFinite(source.leagueData.playoffTeamCount)
                     ? Math.trunc(source.leagueData.playoffTeamCount as number)
-                    : undefined)
+                    : MIN_BRACKET_TEAM_COUNT)
                 : undefined;
 
             if (sportRequiresSets) {
@@ -899,7 +931,11 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
             );
             draft.includePlayoffs = Boolean(source.leagueData.includePlayoffs);
             (draft as any).includePlayoffsOrPools = Boolean(source.leagueData.includePlayoffs);
-            draft.playoffTeamCount = undefined;
+            draft.playoffTeamCount = source.leagueData.includePlayoffs
+                ? (Number.isFinite(source.leagueData.playoffTeamCount)
+                    ? Math.trunc(source.leagueData.playoffTeamCount as number)
+                    : MIN_BRACKET_TEAM_COUNT)
+                : undefined;
             draft.doubleElimination = normalizedTournamentConfig.doubleElimination;
             draft.winnerSetCount = normalizedTournamentConfig.winnerSetCount;
             draft.loserSetCount = normalizedTournamentConfig.loserSetCount;

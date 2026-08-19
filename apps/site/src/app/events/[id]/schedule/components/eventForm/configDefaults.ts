@@ -1,4 +1,5 @@
 import type { Event, LeagueConfig, Sport, TournamentConfig } from '@/types';
+import { normalizeBracketTeamCount } from '@/lib/divisionTypes';
 
 import type { DivisionDetailForm } from './divisionForm';
 
@@ -314,16 +315,21 @@ export const buildDefaultLeagueData = ({
         const source = divisionLeagueDetail
             ? buildDivisionLeagueConfig(divisionLeagueDetail, eventLeagueFallback, requiresSets)
             : eventLeagueFallback;
+        const includePlayoffs = Boolean(
+            (source as { includePlayoffsOrPools?: unknown })?.includePlayoffsOrPools
+            ?? source?.includePlayoffs
+            ?? (activeEditingEvent as { includePlayoffsOrPools?: unknown })?.includePlayoffsOrPools
+            ?? activeEditingEvent.includePlayoffs,
+        );
         return normalizeLeagueConfigForSetMode({
             ...source,
             gamesPerOpponent: source?.gamesPerOpponent ?? 1,
-            includePlayoffs: Boolean(
-                (source as { includePlayoffsOrPools?: unknown })?.includePlayoffsOrPools
-                ?? source?.includePlayoffs
-                ?? (activeEditingEvent as { includePlayoffsOrPools?: unknown })?.includePlayoffsOrPools
-                ?? activeEditingEvent.includePlayoffs,
-            ),
-            playoffTeamCount: source?.playoffTeamCount ?? activeEditingEvent.playoffTeamCount,
+            includePlayoffs,
+            playoffTeamCount: includePlayoffs
+                ? normalizeBracketTeamCount(
+                    source?.playoffTeamCount ?? activeEditingEvent.playoffTeamCount,
+                )
+                : source?.playoffTeamCount ?? activeEditingEvent.playoffTeamCount,
         }, requiresSets);
     }
     return normalizeLeagueConfigForSetMode({

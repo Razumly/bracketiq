@@ -18,6 +18,7 @@ import {
 } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import type { Field, LeagueConfig, Sport, TimeSlot } from '@/types';
+import { MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
 import { BRACKET_TEAM_COUNT_ERROR } from '@/app/events/[id]/schedule/components/eventForm/divisionMessages';
 import { parseOptionalWholeNumber } from '@/app/events/[id]/schedule/components/eventForm/divisionNumbers';
 import type { WeeklySlotConflict } from '@/lib/leagueService';
@@ -752,7 +753,22 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
 
   const setsPerMatch = leagueData.setsPerMatch ?? 1;
   const pointsToVictory = leagueData.pointsToVictory ?? [];
-  const playoffDefaultTeamCount = Math.max(2, Number.isFinite(participantCount) ? Number(participantCount) : 2);
+  const playoffDefaultTeamCount = typeof leagueData.playoffTeamCount === 'number'
+    && Number.isFinite(leagueData.playoffTeamCount)
+    ? leagueData.playoffTeamCount
+    : MIN_BRACKET_TEAM_COUNT;
+  useEffect(() => {
+    if (
+      leagueData.includePlayoffs
+      && (leagueData.playoffTeamCount === null || leagueData.playoffTeamCount === undefined)
+    ) {
+      onLeagueDataChange({ playoffTeamCount: MIN_BRACKET_TEAM_COUNT });
+    }
+  }, [
+    leagueData.includePlayoffs,
+    leagueData.playoffTeamCount,
+    onLeagueDataChange,
+  ]);
   const normalizedLockedDivisionKeys = useMemo(
     () => normalizeDivisionKeys(lockedDivisionKeys),
     [lockedDivisionKeys],
@@ -1046,9 +1062,10 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
                 <NumberInput
                   className="mt-4"
                   label="Playoff Team Count"
-                  min={2}
+                  min={MIN_BRACKET_TEAM_COUNT}
+                  aria-valuemin={MIN_BRACKET_TEAM_COUNT}
                   max={MAX_STANDARD_NUMBER}
-                  value={typeof leagueData.playoffTeamCount === 'number' ? leagueData.playoffTeamCount : ''}
+                  value={playoffDefaultTeamCount}
                   onChange={(value) => {
                     onLeagueDataChange({
                       playoffTeamCount: parseOptionalWholeNumber(value),
@@ -1058,7 +1075,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
                   maw={220}
                   error={
                     leagueData.includePlayoffs &&
-                    !(typeof leagueData.playoffTeamCount === 'number' && leagueData.playoffTeamCount >= 2)
+                    playoffDefaultTeamCount < MIN_BRACKET_TEAM_COUNT
                       ? BRACKET_TEAM_COUNT_ERROR
                       : undefined
                   }

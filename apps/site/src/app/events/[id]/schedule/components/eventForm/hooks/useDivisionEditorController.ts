@@ -5,7 +5,11 @@ import {
     useRef,
 } from 'react';
 
-import { buildEventDivisionId } from '@/lib/divisionTypes';
+import {
+    buildEventDivisionId,
+    MIN_BRACKET_TEAM_COUNT,
+    minimumParticipantCountForEventType,
+} from '@/lib/divisionTypes';
 import type { LeagueConfig, TournamentConfig } from '@/types';
 
 import { applyEventDefaultsToDivisionDetails } from '../../divisionDefaults';
@@ -83,7 +87,7 @@ export const useDivisionEditorController = ({
                     key,
                     kind: 'PLAYOFF',
                     name: `Playoff Division ${index}`,
-                    maxParticipants: 2,
+                    maxParticipants: MIN_BRACKET_TEAM_COUNT,
                     playoffConfig: buildTournamentConfig(configTemplate),
                 };
             }
@@ -95,7 +99,7 @@ export const useDivisionEditorController = ({
             key: fallbackKey,
             kind: 'PLAYOFF',
             name: 'Playoff Division',
-            maxParticipants: 2,
+            maxParticipants: MIN_BRACKET_TEAM_COUNT,
             playoffConfig: buildTournamentConfig(configTemplate),
         };
     }, [eventData.$id]);
@@ -206,7 +210,10 @@ export const useDivisionEditorController = ({
         const nextPoolCount = Object.prototype.hasOwnProperty.call(updates, 'poolCount')
             ? updates.poolCount
             : singleDivisionPoolPlayDefaults.poolCount;
-        const normalizedMaxParticipants = Math.max(2, Math.trunc(eventData.maxParticipants || 2));
+        const normalizedMaxParticipants = Math.max(
+            MIN_BRACKET_TEAM_COUNT,
+            Math.trunc(eventData.maxParticipants || MIN_BRACKET_TEAM_COUNT),
+        );
         const normalizedPlayoffTeamCount = typeof nextPlayoffTeamCount === 'number'
             ? Math.trunc(nextPlayoffTeamCount)
             : undefined;
@@ -254,7 +261,9 @@ export const useDivisionEditorController = ({
         const { details: nextDetails, changed } = applyEventDefaultsToDivisionDetails({
             details: currentDetails,
             defaultPrice: Number(eventData.price) || 0,
-            defaultMaxParticipants: Number(eventData.maxParticipants) || 2,
+            defaultMaxParticipants: Number(eventData.maxParticipants) || (
+                minimumParticipantCountForEventType(eventData.eventType)
+            ),
             includePlayoffs: eventData.eventType === 'LEAGUE' && leagueData.includePlayoffs,
             defaultPlayoffTeamCount: typeof leagueData.playoffTeamCount === 'number'
                 ? leagueData.playoffTeamCount

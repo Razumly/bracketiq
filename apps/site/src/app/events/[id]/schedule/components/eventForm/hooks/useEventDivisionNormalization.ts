@@ -4,6 +4,7 @@ import {
     type SetStateAction,
 } from 'react';
 
+import { isBracketTeamCountEnabled, MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
 import type {
     LeagueConfig,
     Sport,
@@ -166,6 +167,52 @@ export const useEventDivisionNormalization = ({
         eventData.eventType,
         eventData.playoffDivisionDetails,
         eventData.splitLeaguePlayoffDivisions,
+        setValue,
+    ]);
+
+    useEffect(() => {
+        const isPlayoffCountEnabled = isBracketTeamCountEnabled(
+            eventData.eventType,
+            leagueData.includePlayoffs,
+        );
+        if (!isPlayoffCountEnabled) {
+            return;
+        }
+
+        if (leagueData.playoffTeamCount === null || leagueData.playoffTeamCount === undefined) {
+            setLeagueData((previous) => (
+                previous.playoffTeamCount === null || previous.playoffTeamCount === undefined
+                    ? { ...previous, playoffTeamCount: MIN_BRACKET_TEAM_COUNT }
+                    : previous
+            ), { shouldDirty: false });
+        }
+
+        const currentDetails = Array.isArray(eventData.divisionDetails)
+            ? eventData.divisionDetails
+            : [];
+        let hasDetailChanges = false;
+        const nextDetails = currentDetails.map((detail) => {
+            if (detail.playoffTeamCount !== null && detail.playoffTeamCount !== undefined) {
+                return detail;
+            }
+            hasDetailChanges = true;
+            return {
+                ...detail,
+                playoffTeamCount: MIN_BRACKET_TEAM_COUNT,
+            };
+        });
+        if (hasDetailChanges) {
+            setValue('divisionDetails', nextDetails, {
+                shouldDirty: false,
+                shouldValidate: true,
+            });
+        }
+    }, [
+        eventData.divisionDetails,
+        eventData.eventType,
+        leagueData.includePlayoffs,
+        leagueData.playoffTeamCount,
+        setLeagueData,
         setValue,
     ]);
 

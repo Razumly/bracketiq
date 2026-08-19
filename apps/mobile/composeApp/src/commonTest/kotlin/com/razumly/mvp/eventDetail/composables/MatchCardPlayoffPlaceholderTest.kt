@@ -567,15 +567,15 @@ class MatchCardPlayoffPlaceholderTest {
             id = "pool_a",
             key = "pool_a",
             name = "Open Pool A",
-            playoffTeamCount = 2,
-            playoffPlacementDivisionIds = listOf(bracketDivision.id, bracketDivision.id),
+            playoffTeamCount = 3,
+            playoffPlacementDivisionIds = listOf(bracketDivision.id, bracketDivision.id, bracketDivision.id),
         )
         val poolB = DivisionDetail(
             id = "pool_b",
             key = "pool_b",
             name = "Open Pool B",
-            playoffTeamCount = 2,
-            playoffPlacementDivisionIds = listOf(bracketDivision.id, bracketDivision.id),
+            playoffTeamCount = 3,
+            playoffPlacementDivisionIds = listOf(bracketDivision.id, bracketDivision.id, bracketDivision.id),
         )
         val match1 = matchWithRelations(
             id = "match_1",
@@ -669,15 +669,15 @@ class MatchCardPlayoffPlaceholderTest {
             id = "${bracketDivisionId}_pool_a",
             key = "c_skill_skill_open_age_18plus_pool_a",
             name = "Open 18+",
-            playoffTeamCount = 2,
-            playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId),
+            playoffTeamCount = 3,
+            playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId, bracketDivisionId),
         )
         val poolB = DivisionDetail(
             id = "${bracketDivisionId}_pool_b",
             key = "c_skill_skill_open_age_18plus_pool_b",
             name = "Open 18+",
-            playoffTeamCount = 2,
-            playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId),
+            playoffTeamCount = 3,
+            playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId, bracketDivisionId),
         )
         val match = matchWithRelations(
             id = "match_1",
@@ -719,8 +719,8 @@ class MatchCardPlayoffPlaceholderTest {
             gender = "C",
             skillDivisionTypeName = "Open",
             ageDivisionTypeName = "18+",
-            playoffTeamCount = 2,
-            playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId),
+            playoffTeamCount = 3,
+            playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId, bracketDivisionId),
         )
         val poolB = DivisionDetail(
             id = "${bracketDivisionId}_pool_b",
@@ -729,8 +729,8 @@ class MatchCardPlayoffPlaceholderTest {
             gender = "C",
             skillDivisionTypeName = "Open",
             ageDivisionTypeName = "18+",
-            playoffTeamCount = 2,
-            playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId),
+            playoffTeamCount = 3,
+            playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId, bracketDivisionId),
         )
         val bracketDivision = DivisionDetail(
             id = bracketDivisionId,
@@ -951,8 +951,8 @@ private fun tournamentPoolDetail(
     id = id,
     key = id,
     name = name,
-    playoffTeamCount = 2,
-    playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId),
+    playoffTeamCount = 3,
+    playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId, bracketDivisionId),
 )
 
 private fun tournamentPoolDetailWithoutMappings(

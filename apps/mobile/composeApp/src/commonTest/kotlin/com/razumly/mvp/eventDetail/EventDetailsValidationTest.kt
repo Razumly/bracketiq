@@ -3,11 +3,13 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.MIN_BRACKET_TEAM_COUNT
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_MANUAL
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.withDefaultPlayoffTeamCounts
 import com.razumly.mvp.core.data.util.buildEventDivisionId
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -252,6 +254,86 @@ class EventDetailsValidationTest {
     }
 
     @Test
+    fun given_tournament_when_max_teams_is_two_then_validation_fails() {
+        val detail = singleDivisionTournamentPoolDetail(poolCount = null).copy(
+            maxParticipants = 2,
+            playoffTeamCount = null,
+        )
+        val result = validateEvent(
+            singleDivisionTournamentEvent(detail).copy(
+                includePlayoffs = false,
+                maxParticipants = 2,
+            ),
+            divisionDetailsForSettings = listOf(detail),
+        )
+
+        assertFalse(result.isMaxParticipantsValid)
+        assertFalse(result.isValid)
+        assertTrue("Max teams must be at least 3." in result.validationErrors)
+    }
+
+    @Test
+    fun given_multi_division_tournament_when_event_max_teams_is_two_then_validation_fails() {
+        val open = singleDivisionTournamentPoolDetail(poolCount = null).copy(
+            id = "event-multi__division__open",
+            maxParticipants = 3,
+            playoffTeamCount = null,
+        )
+        val advanced = open.copy(id = "event-multi__division__advanced")
+        val event = singleDivisionTournamentEvent(open).copy(
+            includePlayoffs = false,
+            singleDivision = false,
+            divisions = listOf(open.id, advanced.id),
+            divisionDetails = listOf(open, advanced),
+            maxParticipants = 2,
+        )
+
+        val result = validateEvent(
+            event,
+            divisionDetailsForSettings = listOf(open, advanced),
+        )
+
+        assertFalse(result.isMaxParticipantsValid)
+        assertFalse(result.isValid)
+        assertTrue("Max teams must be at least 3." in result.validationErrors)
+    }
+
+    @Test
+    fun given_multi_division_league_when_event_playoff_count_is_two_then_validation_fails() {
+        val open = splitLeagueDivision(
+            id = "event-multi__division__open",
+            name = "Open",
+            skillDivisionTypeId = "open",
+            playoffDivisionId = null,
+        )
+        val advanced = open.copy(
+            id = "event-multi__division__advanced",
+            name = "Advanced",
+            skillDivisionTypeId = "advanced",
+        )
+        val event = baseLeagueEvent(maxParticipants = 8).copy(
+            includePlayoffs = true,
+            singleDivision = false,
+            playoffTeamCount = 2,
+            divisions = listOf(open.id, advanced.id),
+            divisionDetails = listOf(open, advanced),
+        )
+
+        val result = validateEvent(
+            event,
+            divisionDetailsForSettings = listOf(open, advanced),
+        )
+
+        assertFalse(result.isLeaguePlayoffTeamsValid)
+        assertFalse(result.isValid)
+        assertTrue(
+            result.validationErrors.any { error ->
+                error.contains("playoff team count", ignoreCase = true)
+            },
+        )
+    }
+
+    @Test
     fun individual_registration_does_not_require_a_team_size() {
         val result = validateEvent(
             baseLeagueEvent(maxParticipants = 2).copy(
@@ -336,6 +418,32 @@ class EventDetailsValidationTest {
     }
 
     @Test
+    fun given_league_playoffs_when_team_count_is_two_then_validation_fails() {
+        val detail = splitLeagueDivision(
+            id = "event-1__division__open",
+            name = "Open",
+            skillDivisionTypeId = "open",
+            playoffDivisionId = null,
+        )
+        val event = baseLeagueEvent(maxParticipants = 8).copy(
+            id = "event-1",
+            includePlayoffs = true,
+            playoffTeamCount = 2,
+            divisions = listOf(detail.id),
+            divisionDetails = listOf(detail),
+        )
+
+        val result = validateEvent(
+            event,
+            divisionDetailsForSettings = listOf(detail),
+        )
+
+        assertFalse(result.isLeaguePlayoffTeamsValid)
+        assertFalse(result.isValid)
+        assertTrue("Playoff team count must be at least 3 when playoffs are enabled." in result.validationErrors)
+    }
+
+    @Test
     fun given_split_league_playoffs_when_mapping_does_not_fill_target_then_validation_fails() {
         val playoffDivisionId = "event-1__division__playoff_gold"
         val openDivision = splitLeagueDivision(
@@ -373,8 +481,55 @@ class EventDetailsValidationTest {
         assertFalse(result.isLeaguePlayoffTeamsValid)
         assertFalse(result.isValid)
         assertTrue(
-            "Playoff division \"Gold\" has 2 assigned positions and 4 team slots. " +
+            "Playoff division \"Gold\" has 3 assigned positions and 4 team slots. " +
                 "Assign every playoff position to an existing playoff division." in result.validationErrors,
+        )
+    }
+
+    @Test
+    fun given_split_league_playoffs_when_target_count_is_below_three_then_validation_fails() {
+        val goldDivisionId = "event-1__division__playoff_gold"
+        val silverDivisionId = "event-1__division__playoff_silver"
+        val sourceDivision = splitLeagueDivision(
+            id = "event-1__division__open",
+            name = "Open",
+            skillDivisionTypeId = "open",
+            playoffDivisionId = null,
+        ).copy(
+            playoffPlacementDivisionIds = listOf(goldDivisionId, goldDivisionId, silverDivisionId),
+        )
+        val playoffDivisions = listOf(
+            DivisionDetail(
+                id = goldDivisionId,
+                kind = "PLAYOFF",
+                name = "Gold",
+                maxParticipants = 2,
+            ),
+            DivisionDetail(
+                id = silverDivisionId,
+                kind = "PLAYOFF",
+                name = "Silver",
+                maxParticipants = 1,
+            ),
+        )
+        val event = baseLeagueEvent(maxParticipants = 8).copy(
+            id = "event-1",
+            includePlayoffs = true,
+            splitLeaguePlayoffDivisions = true,
+            singleDivision = true,
+            divisions = listOf(sourceDivision.id),
+            divisionDetails = listOf(sourceDivision) + playoffDivisions,
+        )
+
+        val result = validateEvent(
+            event,
+            divisionDetailsForSettings = listOf(sourceDivision),
+        )
+
+        assertFalse(result.isLeaguePlayoffTeamsValid)
+        assertFalse(result.isValid)
+        assertTrue(
+            "Playoff division \"Gold\" team count must be at least 3." in result.validationErrors,
         )
     }
 
@@ -419,14 +574,14 @@ class EventDetailsValidationTest {
 
         assertFalse(result.isLeaguePlayoffTeamsValid)
         assertTrue(
-            "Each division must have a playoff team count of at least 2 when playoffs are enabled." in
+            "Each division must have a playoff team count of at least 3 when playoffs are enabled." in
                 result.validationErrors,
         )
         assertFalse(result.validationErrors.any { error -> error.contains("mapped positions") })
     }
 
     @Test
-    fun given_split_single_division_league_when_editor_resolves_count_then_source_count_owns_value() {
+    fun given_split_single_division_league_when_editor_resolves_count_then_explicit_or_default_value_is_used() {
         val event = baseLeagueEvent(maxParticipants = 8).copy(
             includePlayoffs = true,
             splitLeaguePlayoffDivisions = true,
@@ -435,10 +590,57 @@ class EventDetailsValidationTest {
         )
 
         assertEquals(2, event.resolveDivisionPlayoffTeamCount(2))
-        assertEquals(null, event.resolveDivisionPlayoffTeamCount(null))
+        assertEquals(4, event.resolveDivisionPlayoffTeamCount(null))
         assertEquals(
             4,
             event.copy(splitLeaguePlayoffDivisions = false).resolveDivisionPlayoffTeamCount(2),
+        )
+        assertEquals(
+            MIN_BRACKET_TEAM_COUNT,
+            event.copy(playoffTeamCount = null).resolveDivisionPlayoffTeamCount(null),
+        )
+    }
+
+    @Test
+    fun given_enabled_missing_counts_when_the_draft_is_normalized_then_three_is_used_and_explicit_values_remain() {
+        val openDivision = splitLeagueDivision(
+            id = "event-1__division__open",
+            name = "Open",
+            skillDivisionTypeId = "open",
+            playoffDivisionId = "event-1__division__playoff_gold",
+        ).copy(playoffTeamCount = null)
+        val recDivision = splitLeagueDivision(
+            id = "event-1__division__rec",
+            name = "Rec",
+            skillDivisionTypeId = "rec",
+            playoffDivisionId = "event-1__division__playoff_gold",
+        ).copy(playoffTeamCount = 5)
+        val playoffDivision = DivisionDetail(
+            id = "event-1__division__playoff_gold",
+            kind = "PLAYOFF",
+            name = "Gold",
+            maxParticipants = null,
+        )
+
+        val normalized = baseLeagueEvent(maxParticipants = 8).copy(
+            includePlayoffs = true,
+            splitLeaguePlayoffDivisions = true,
+            singleDivision = false,
+            playoffTeamCount = null,
+            divisions = listOf(openDivision.id, recDivision.id),
+            divisionDetails = listOf(openDivision, recDivision, playoffDivision),
+        ).withDefaultPlayoffTeamCounts()
+
+        assertEquals(MIN_BRACKET_TEAM_COUNT, normalized.playoffTeamCount)
+        assertEquals(
+            listOf(MIN_BRACKET_TEAM_COUNT, 5),
+            normalized.divisionDetails
+                .filterNot { detail -> detail.kind == "PLAYOFF" }
+                .map { detail -> detail.playoffTeamCount },
+        )
+        assertEquals(
+            MIN_BRACKET_TEAM_COUNT,
+            normalized.divisionDetails.first { detail -> detail.kind == "PLAYOFF" }.maxParticipants,
         )
     }
 
@@ -461,7 +663,7 @@ class EventDetailsValidationTest {
             id = playoffDivisionId,
             kind = "PLAYOFF",
             name = "Gold",
-            maxParticipants = 4,
+            maxParticipants = 6,
         )
         val event = baseLeagueEvent(maxParticipants = 0).copy(
             id = "event-1",
@@ -525,8 +727,8 @@ class EventDetailsValidationTest {
                 kind = "LEAGUE",
                 name = "Pool",
                 maxParticipants = 4,
-                playoffTeamCount = 2,
-                playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId),
+                playoffTeamCount = 3,
+                playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId, bracketDivisionId),
                 usesSets = true,
                 setsPerMatch = 3,
                 pointsToVictory = listOf(21, 21, 21),
@@ -538,7 +740,7 @@ class EventDetailsValidationTest {
             kind = "PLAYOFF",
             name = "Mens Open 18+",
             maxParticipants = 16,
-            playoffTeamCount = 8,
+            playoffTeamCount = 12,
             poolCount = 4,
             usesSets = true,
             setsPerMatch = 3,
@@ -653,8 +855,8 @@ class EventDetailsValidationTest {
         skillDivisionTypeId = skillDivisionTypeId,
         ageDivisionTypeId = "adult",
         maxParticipants = 8,
-        playoffTeamCount = 2,
-        playoffPlacementDivisionIds = List(2) { playoffDivisionId.orEmpty() }
+        playoffTeamCount = 3,
+        playoffPlacementDivisionIds = List(3) { playoffDivisionId.orEmpty() }
             .filter(String::isNotBlank),
     )
 

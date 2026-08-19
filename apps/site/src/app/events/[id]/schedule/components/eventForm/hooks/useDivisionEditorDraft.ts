@@ -5,6 +5,7 @@ import {
     useState,
 } from 'react';
 
+import { MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
 import type { LeagueConfig, TournamentConfig } from '@/types';
 
 import {
@@ -87,6 +88,7 @@ export const useDivisionEditorDraft = ({
         buildInitialDivisionEditorState({
             eventPrice: eventData.price,
             eventMaxParticipants: eventData.maxParticipants,
+            eventType: eventData.eventType,
             leagueData,
             sportUsesPointsPerSetWin: Boolean(eventData.sportConfig?.usePointsPerSetWin),
         })
@@ -271,12 +273,17 @@ export const useDivisionEditorDraft = ({
         && divisionEditor.skillDivisionTypeId
         && divisionEditor.ageDivisionTypeId,
     );
+    const minimumDivisionParticipants = (
+        eventData.eventType === 'TOURNAMENT' || divisionEditor.divisionKind === 'PLAYOFF'
+    )
+        ? MIN_BRACKET_TEAM_COUNT
+        : 2;
     const divisionMaxParticipantsWarning = !eventData.singleDivision
         && typeof divisionEditor.maxParticipants === 'number'
-        && divisionEditor.maxParticipants < 2
+        && divisionEditor.maxParticipants < minimumDivisionParticipants
         ? (eventData.teamSignup
-            ? 'Warning: make division max teams at least 2.'
-            : 'Warning: make division max participants at least 2.')
+            ? `Warning: make division max teams at least ${minimumDivisionParticipants}.`
+            : `Warning: make division max participants at least ${minimumDivisionParticipants}.`)
         : null;
 
     return {

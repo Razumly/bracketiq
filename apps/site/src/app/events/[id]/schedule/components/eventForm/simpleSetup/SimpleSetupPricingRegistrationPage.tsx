@@ -112,6 +112,7 @@ export const SimpleSetupPricingRegistrationPage = ({
 
             <EventDetailsLocationControls
                 control={control}
+                eventType={eventData.eventType}
                 coordinates={eventData.coordinates}
                 coordinatesSelected
                 onSelectedAddressChange={() => undefined}

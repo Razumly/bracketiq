@@ -9,6 +9,10 @@ import type { Event } from '@/types';
 
 import { AnimatedLayoutSection } from '../components/AnimatedSection';
 import { DIVISION_NUMBER_FIELD_CLASS } from '../divisionLayout';
+import {
+    MIN_BRACKET_TEAM_COUNT,
+    minimumParticipantCountForEventType,
+} from '@/lib/divisionTypes';
 import { BRACKET_TEAM_COUNT_ERROR } from '../divisionMessages';
 import { parseOptionalWholeNumber } from '../divisionNumbers';
 import type { EventFormValues } from '../formTypes';
@@ -43,7 +47,7 @@ export const SingleDivisionCapacityControls = ({
     onPlayoffTeamCountChange,
 }: SingleDivisionCapacityControlsProps) => {
     const resolvedPlayoffTeamCountError = playoffTeamCountError || (
-        typeof playoffTeamCount === 'number' && playoffTeamCount >= 2
+        typeof playoffTeamCount === 'number' && playoffTeamCount >= MIN_BRACKET_TEAM_COUNT
             ? undefined
             : BRACKET_TEAM_COUNT_ERROR
     );
@@ -56,12 +60,13 @@ export const SingleDivisionCapacityControls = ({
                 render={({ field, fieldState }) => (
                     <NumberInput
                         label={teamSignup ? 'Max Teams' : 'Max Participants'}
-                        min={2}
+                        min={minimumParticipantCountForEventType(eventType)}
+                        aria-valuemin={minimumParticipantCountForEventType(eventType)}
                         max={maxStandardNumber}
                         value={field.value ?? ''}
                         w="100%"
                         styles={numberInputStyles}
-                        clampBehavior="blur"
+                        clampBehavior={eventType === 'TOURNAMENT' ? 'none' : 'blur'}
                         disabled={maxParticipantsDisabled}
                         onChange={(value) => {
                             if (maxParticipantsDisabled) return;
@@ -81,7 +86,8 @@ export const SingleDivisionCapacityControls = ({
         >
             <NumberInput
                 label={singleDivision ? 'Playoff Team Count' : 'Default Playoff Team Count'}
-                min={2}
+                min={MIN_BRACKET_TEAM_COUNT}
+                aria-valuemin={MIN_BRACKET_TEAM_COUNT}
                 max={maxStandardNumber}
                 w="100%"
                 styles={numberInputStyles}

@@ -7,6 +7,7 @@ import {
     formatLocalDateTime,
     parseLocalDateTime,
 } from '@/lib/dateUtils';
+import { MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
 import type {
     Event,
     LeagueConfig,
@@ -138,24 +139,23 @@ export const useEventFormConfigurationActions = ({
     ]);
 
     const handleIncludePlayoffsToggle = useCallback((checked: boolean) => {
-        if (!checked) {
-            setLeagueData((previous) => ({
-                ...previous,
-                includePlayoffs: false,
-                playoffTeamCount: undefined,
-            }));
-            setValue('splitLeaguePlayoffDivisions', false, { shouldDirty: true, shouldValidate: true });
-            return;
-        }
-
         setLeagueData((previous) => ({
             ...previous,
-            includePlayoffs: true,
-            playoffTeamCount: typeof previous.playoffTeamCount === 'number'
-                ? Math.trunc(previous.playoffTeamCount)
+            includePlayoffs: checked,
+            playoffTeamCount: checked
+                ? previous.playoffTeamCount ?? MIN_BRACKET_TEAM_COUNT
                 : undefined,
         }));
-    }, [setLeagueData, setValue]);
+        if (checked) {
+            const currentDetails = getValues('divisionDetails');
+            setValue('divisionDetails', currentDetails.map((detail) => ({
+                ...detail,
+                playoffTeamCount: detail.playoffTeamCount ?? MIN_BRACKET_TEAM_COUNT,
+            })), { shouldDirty: true, shouldValidate: true });
+        } else {
+            setValue('splitLeaguePlayoffDivisions', false, { shouldDirty: true, shouldValidate: true });
+        }
+    }, [getValues, setLeagueData, setValue]);
 
     const handleEventTypeChange = useCallback((
         nextType: Event['eventType'],
@@ -238,21 +238,25 @@ export const useEventFormConfigurationActions = ({
         setLeagueData((previous) => ({
             ...previous,
             includePlayoffs: checked,
-            playoffTeamCount: checked ? previous.playoffTeamCount : undefined,
+            playoffTeamCount: checked
+                ? previous.playoffTeamCount ?? MIN_BRACKET_TEAM_COUNT
+                : undefined,
         }));
-        if (checked) {
-            return;
-        }
-        const currentDetails = Array.isArray(eventData.divisionDetails)
-            ? eventData.divisionDetails
-            : [];
-        setValue('divisionDetails', currentDetails.map((detail) => ({
-            ...detail,
-            playoffTeamCount: undefined,
-            poolCount: undefined,
-            poolTeamCount: undefined,
-        })), { shouldDirty: true, shouldValidate: true });
-    }, [eventData.divisionDetails, setLeagueData, setValue]);
+        const currentDetails = getValues('divisionDetails');
+        setValue('divisionDetails', currentDetails.map((detail) => (
+            checked
+                ? {
+                    ...detail,
+                    playoffTeamCount: detail.playoffTeamCount ?? MIN_BRACKET_TEAM_COUNT,
+                }
+                : {
+                    ...detail,
+                    playoffTeamCount: undefined,
+                    poolCount: undefined,
+                    poolTeamCount: undefined,
+                }
+        )), { shouldDirty: true, shouldValidate: true });
+    }, [getValues, setLeagueData, setValue]);
 
     const handleStartChange = useCallback((value: Date) => {
         setValue('start', formatLocalDateTime(value), { shouldDirty: true, shouldValidate: true });

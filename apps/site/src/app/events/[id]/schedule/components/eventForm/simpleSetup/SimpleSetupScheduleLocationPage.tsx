@@ -160,6 +160,7 @@ export const SimpleSetupScheduleLocationPage = ({
 
       <EventDetailsLocationControls
         control={control}
+        eventType={eventData.eventType}
         coordinates={eventData.coordinates}
         defaultCoordinates={defaultCoordinates}
         coordinatesSelected={coordinatesAreSet(eventData.coordinates)}

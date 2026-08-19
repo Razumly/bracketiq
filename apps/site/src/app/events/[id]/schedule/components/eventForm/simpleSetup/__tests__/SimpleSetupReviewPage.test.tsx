@@ -202,7 +202,7 @@ const buildModel = (name = 'Summer League') => buildSimpleSetupReviewModel({
     validationErrorIndex: {
         ordered: [{
             path: 'divisionDetails.0.playoffTeamCount',
-            message: 'At least 2 teams need to be in the bracket.',
+            message: 'At least 3 teams need to be in the bracket.',
             simplePageId: 'divisions',
             advancedSectionId: 'section-division-settings',
             focusFieldName: 'divisionDetails.0.playoffTeamCount',
@@ -210,7 +210,7 @@ const buildModel = (name = 'Summer League') => buildSimpleSetupReviewModel({
         bySimplePage: {
             divisions: [{
                 path: 'divisionDetails.0.playoffTeamCount',
-                message: 'At least 2 teams need to be in the bracket.',
+                message: 'At least 3 teams need to be in the bracket.',
                 simplePageId: 'divisions',
                 advancedSectionId: 'section-division-settings',
                 focusFieldName: 'divisionDetails.0.playoffTeamCount',
@@ -243,7 +243,7 @@ describe('buildSimpleSetupReviewModel', () => {
         expect(JSON.stringify(model)).toContain('Participant waiver');
         expect(JSON.stringify(model)).toContain('What is your team color?');
         expect(model.sections.find((section) => section.id === 'divisions')?.warnings)
-            .toContain('At least 2 teams need to be in the bracket.');
+            .toContain('At least 3 teams need to be in the bracket.');
     });
 
     it('reflects the current form values every time the model is rebuilt', () => {

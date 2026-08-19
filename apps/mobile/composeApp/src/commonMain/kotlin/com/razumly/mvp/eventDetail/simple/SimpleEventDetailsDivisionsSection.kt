@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MIN_BRACKET_TEAM_COUNT
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabels
 import com.razumly.mvp.core.presentation.util.teamSizeFormat
@@ -229,8 +230,8 @@ internal fun SimpleEventDetailsDivisionEditorActionsContent(
                         }
                     },
                     isError = state.showValidationErrors &&
-                        (state.divisionEditor.playoffTeamCount ?: 0) < 2,
-                    errorMessage = "Required and must be at least 2.",
+                        (state.divisionEditor.playoffTeamCount ?: 0) < MIN_BRACKET_TEAM_COUNT,
+                    errorMessage = "Required and must be at least $MIN_BRACKET_TEAM_COUNT.",
                 )
             }
 

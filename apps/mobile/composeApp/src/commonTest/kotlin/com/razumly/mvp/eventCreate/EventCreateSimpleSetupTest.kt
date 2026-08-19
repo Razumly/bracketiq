@@ -1,6 +1,8 @@
 package com.razumly.mvp.eventCreate
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MIN_BRACKET_TEAM_COUNT
+import com.razumly.mvp.core.data.dataTypes.withSimplePlayoffsOrPoolPlay
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionPhaseSettingsMVP
 import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
@@ -325,6 +327,65 @@ class EventCreateSimpleSetupTest {
         assertNull(updated.cancellationRefundHours)
         assertFalse(updated.allowPaymentPlans == true)
         assertTrue(updated.installmentAmounts.isEmpty())
+    }
+
+    @Test
+    fun given_no_count_when_playoffs_are_enabled_then_the_count_defaults_to_three() {
+        val updated = Event(
+            eventType = EventType.LEAGUE,
+            singleDivision = true,
+            divisions = listOf("open"),
+            divisionDetails = listOf(DivisionDetail(id = "open")),
+        ).withSimplePlayoffsOrPoolPlay(true)
+
+        assertEquals(MIN_BRACKET_TEAM_COUNT, updated.playoffTeamCount)
+        assertEquals(MIN_BRACKET_TEAM_COUNT, updated.divisionDetails.single().playoffTeamCount)
+    }
+
+    @Test
+    fun given_missing_enabled_playoff_counts_when_division_mode_changes_then_counts_default_to_three() {
+        val singleDivisionEvent = Event(
+            eventType = EventType.LEAGUE,
+            singleDivision = false,
+            includePlayoffs = true,
+            divisions = listOf("open"),
+            divisionDetails = listOf(DivisionDetail(id = "open")),
+        ).withSimpleSingleDivision(true)
+
+        assertEquals(MIN_BRACKET_TEAM_COUNT, singleDivisionEvent.playoffTeamCount)
+        assertEquals(
+            MIN_BRACKET_TEAM_COUNT,
+            singleDivisionEvent.divisionDetails.single().playoffTeamCount,
+        )
+
+        val multiDivisionEvent = singleDivisionEvent.copy(
+            playoffTeamCount = null,
+            divisionDetails = singleDivisionEvent.divisionDetails.map { detail ->
+                detail.copy(playoffTeamCount = null)
+            },
+        ).withSimpleSingleDivision(false)
+
+        assertEquals(
+            MIN_BRACKET_TEAM_COUNT,
+            multiDivisionEvent.divisionDetails.single().playoffTeamCount,
+        )
+    }
+
+    @Test
+    fun given_a_later_explicit_count_when_single_division_is_enabled_then_the_count_is_preserved() {
+        val updated = Event(
+            eventType = EventType.LEAGUE,
+            singleDivision = false,
+            includePlayoffs = true,
+            divisions = listOf("open", "advanced"),
+            divisionDetails = listOf(
+                DivisionDetail(id = "open"),
+                DivisionDetail(id = "advanced", playoffTeamCount = 5),
+            ),
+        ).withSimpleSingleDivision(true)
+
+        assertEquals(5, updated.playoffTeamCount)
+        assertTrue(updated.divisionDetails.all { detail -> detail.playoffTeamCount == 5 })
     }
 
     @Test

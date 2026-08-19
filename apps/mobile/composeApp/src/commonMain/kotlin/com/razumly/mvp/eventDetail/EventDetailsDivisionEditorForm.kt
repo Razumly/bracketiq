@@ -21,11 +21,13 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionCompetitionPhase
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MIN_BRACKET_TEAM_COUNT
 import com.razumly.mvp.core.data.dataTypes.DivisionPhaseSettingsMVP
 import com.razumly.mvp.core.data.dataTypes.LeagueConfig
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.minimumParticipantCount
 import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
@@ -185,6 +187,7 @@ private fun DivisionModeToggle(
 ) {
     val editEvent = state.editEvent
     val divisionEditor = state.divisionEditor
+    val minimumMaxParticipants = editEvent.eventType.minimumParticipantCount()
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -197,9 +200,15 @@ private fun DivisionModeToggle(
                 label = "Single Division",
                 enabled = true,
                 onCheckedChange = { checked ->
-                    val explicitPlayoffCount =
+                    val explicitPlayoffCount = if (editEvent.includePlayoffs) {
                         editEvent.playoffTeamCount
-                            ?: state.divisionDetails.firstOrNull()?.playoffTeamCount
+                            ?: state.divisionDetails.firstNotNullOfOrNull { detail ->
+                                detail.playoffTeamCount
+                            }
+                            ?: MIN_BRACKET_TEAM_COUNT
+                    } else {
+                        null
+                    }
                     val explicitPoolCount =
                         state.divisionDetails.firstOrNull()?.poolCount
                             ?: divisionEditor.poolCount
@@ -233,7 +242,7 @@ private fun DivisionModeToggle(
                             val nextPlayoffCount = if (!includePlayoffs) {
                                 null
                             } else if (checked) {
-                                explicitPlayoffCount ?: existing.playoffTeamCount
+                                explicitPlayoffCount
                             } else {
                                 existing.playoffTeamCount ?: playoffTeamCount
                             }
@@ -241,7 +250,7 @@ private fun DivisionModeToggle(
                                 existing.copy(
                                     price = editEvent.priceCents.coerceAtLeast(0),
                                     maxParticipants = editEvent.maxParticipants
-                                        .takeIf { value -> value >= 2 },
+                                        .takeIf { value -> value >= minimumMaxParticipants },
                                     playoffTeamCount = nextPlayoffCount,
                                     poolCount = explicitPoolCount,
                                     poolTeamCount = derivePoolTeamCount(
@@ -462,6 +471,7 @@ private fun DivisionSingleDivisionDefaults(
     val divisionEditor = state.divisionEditor
     val divisionEditorDefaults = state.divisionEditorDefaults
     val manualPaymentsEnabled = editEvent.usesManualRegistrationPayments()
+    val minimumMaxParticipants = editEvent.eventType.minimumParticipantCount()
 
     AnimatedVisibility(editEvent.singleDivision) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -522,7 +532,7 @@ private fun DivisionSingleDivisionDefaults(
                     if (value.isEmpty() || value.all { it.isDigit() }) {
                         val parsedMaxParticipants = value.toIntOrNull() ?: 0
                         val nextDefaultMaxParticipants = parsedMaxParticipants
-                            .takeIf { parsed -> parsed >= 2 }
+                            .takeIf { parsed -> parsed >= minimumMaxParticipants }
                         actions.onDivisionEditorDefaultsChange(
                             divisionEditorDefaults.copy(
                                 maxParticipants = nextDefaultMaxParticipants,
@@ -555,7 +565,8 @@ private fun DivisionSingleDivisionDefaults(
                         }
                     }
                 },
-                isMaxParticipantsError = editEvent.maxParticipants < 2,
+                minimumMaxParticipants = minimumMaxParticipants,
+                isMaxParticipantsError = editEvent.maxParticipants < minimumMaxParticipants,
             )
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
@@ -573,40 +584,17 @@ private fun DivisionSingleDivisionDefaults(
                         value = editEvent.playoffTeamCount?.toString().orEmpty(),
                         label = "Event Playoff Team Count *",
                         onValueChange = { value ->
-                            if (value.isNotEmpty() && !value.all { it.isDigit() }) {
-                                return@NumberInputField
-                            }
-                            val parsedPlayoffCount = value.toIntOrNull()
-                            actions.onDivisionEditorDefaultsChange(
-                                divisionEditorDefaults.copy(
-                                    playoffTeamCount = parsedPlayoffCount?.takeIf { count -> count >= 2 },
-                                ),
+                            applySingleDivisionBracketTeamCountInput(
+                                value = value,
+                                divisionEditor = divisionEditor,
+                                divisionEditorDefaults = divisionEditorDefaults,
+                                poolCount = null,
+                                actions = actions,
                             )
-                            if (divisionEditor.editingId.isNullOrBlank()) {
-                                actions.onDivisionEditorChange(
-                                    divisionEditor.copy(
-                                        playoffTeamCount = parsedPlayoffCount,
-                                        error = null,
-                                    ),
-                                )
-                            }
-                            actions.onEditEvent {
-                                val nextDetails = applySingleDivisionDefaultsToDetails(
-                                    details = divisionDetails,
-                                    defaultPriceCents = priceCents,
-                                    defaultMaxParticipants = maxParticipants,
-                                    defaultPlayoffTeamCount = parsedPlayoffCount,
-                                    defaultPoolCount = null,
-                                )
-                                copy(
-                                    playoffTeamCount = parsedPlayoffCount,
-                                    divisionDetails = nextDetails,
-                                )
-                            }
                         },
                         isError = state.showValidationErrors &&
-                            (editEvent.playoffTeamCount ?: 0) < 2,
-                        errorMessage = "Required and must be at least 2.",
+                            (editEvent.playoffTeamCount ?: 0) < MIN_BRACKET_TEAM_COUNT,
+                        errorMessage = "Required and must be at least $MIN_BRACKET_TEAM_COUNT.",
                     )
                 }
                 if (singleDivisionTournamentPoolPlayEnabled) {
@@ -615,40 +603,17 @@ private fun DivisionSingleDivisionDefaults(
                         value = editEvent.playoffTeamCount?.toString().orEmpty(),
                         label = "Bracket Teams *",
                         onValueChange = { value ->
-                            if (value.isNotEmpty() && !value.all { it.isDigit() }) {
-                                return@NumberInputField
-                            }
-                            val parsedBracketTeams = value.toIntOrNull()
-                            actions.onDivisionEditorDefaultsChange(
-                                divisionEditorDefaults.copy(
-                                    playoffTeamCount = parsedBracketTeams?.takeIf { count -> count >= 2 },
-                                ),
+                            applySingleDivisionBracketTeamCountInput(
+                                value = value,
+                                divisionEditor = divisionEditor,
+                                divisionEditorDefaults = divisionEditorDefaults,
+                                poolCount = singleDivisionPoolCount,
+                                actions = actions,
                             )
-                            if (divisionEditor.editingId.isNullOrBlank()) {
-                                actions.onDivisionEditorChange(
-                                    divisionEditor.copy(
-                                        playoffTeamCount = parsedBracketTeams,
-                                        error = null,
-                                    ),
-                                )
-                            }
-                            actions.onEditEvent {
-                                val nextDetails = applySingleDivisionDefaultsToDetails(
-                                    details = divisionDetails,
-                                    defaultPriceCents = priceCents,
-                                    defaultMaxParticipants = maxParticipants,
-                                    defaultPlayoffTeamCount = parsedBracketTeams,
-                                    defaultPoolCount = singleDivisionPoolCount,
-                                )
-                                copy(
-                                    playoffTeamCount = parsedBracketTeams,
-                                    divisionDetails = nextDetails,
-                                )
-                            }
                         },
                         isError = state.showValidationErrors && run {
                             val playoffTeamCount = editEvent.playoffTeamCount
-                            (playoffTeamCount ?: 0) < 2 ||
+                            (playoffTeamCount ?: 0) < MIN_BRACKET_TEAM_COUNT ||
                                 (
                                     singleDivisionPoolCount != null &&
                                         singleDivisionPoolCount > 0 &&
@@ -656,7 +621,7 @@ private fun DivisionSingleDivisionDefaults(
                                         playoffTeamCount % singleDivisionPoolCount != 0
                                     )
                         },
-                        errorMessage = "Must be at least 2 and divide evenly by pools.",
+                        errorMessage = "Must be at least $MIN_BRACKET_TEAM_COUNT and divide evenly by pools.",
                     )
                     NumberInputField(
                         modifier = Modifier.fillMaxWidth(0.48f),
@@ -731,6 +696,7 @@ private fun DivisionInfoFields(
         val editEvent = state.editEvent
         val divisionEditor = state.divisionEditor
         val manualPaymentsEnabled = editEvent.usesManualRegistrationPayments()
+        val minimumMaxParticipants = editEvent.eventType.minimumParticipantCount()
 
         Text(
         text = "Division Info",
@@ -853,8 +819,10 @@ private fun DivisionInfoFields(
                         )
                     }
                 },
+                minimumMaxParticipants = minimumMaxParticipants,
                 isMaxParticipantsError = divisionEditor.maxParticipants.let { maxParticipants ->
-                    state.showValidationErrors && (maxParticipants == null || maxParticipants < 2)
+                    state.showValidationErrors &&
+                        (maxParticipants == null || maxParticipants < minimumMaxParticipants)
                 },
             )
             }
@@ -881,6 +849,7 @@ private fun DivisionPriceAndMaxTeamsFields(
     onPriceChange: (Int) -> Unit,
     onMaxParticipantsChange: (String) -> Unit,
     isMaxParticipantsError: Boolean,
+    minimumMaxParticipants: Int,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -895,7 +864,7 @@ private fun DivisionPriceAndMaxTeamsFields(
             enabled = enabled,
             onValueChange = onMaxParticipantsChange,
             isError = isMaxParticipantsError,
-            errorMessage = "Required and must be at least 2.",
+            errorMessage = "Required and must be at least $minimumMaxParticipants.",
         )
         if (manualPaymentsEnabled) {
             MoneyInputField(
@@ -938,7 +907,7 @@ private fun DivisionTournamentPoolFields(
 
     val tournamentPoolPlayEnabled = editEvent.isTournamentPoolPlayEnabled()
     val divisionMaxTeams = if (editEvent.singleDivision) {
-        editEvent.maxParticipants.takeIf { value -> value >= 2 } ?: 0
+        editEvent.maxParticipants.takeIf { value -> value >= MIN_BRACKET_TEAM_COUNT } ?: 0
     } else {
         divisionEditor.maxParticipants ?: 0
     }
@@ -975,14 +944,14 @@ private fun DivisionTournamentPoolFields(
                     }
                 },
                 isError = state.showValidationErrors && tournamentPoolPlayEnabled &&
-                    ((divisionBracketTeamCount ?: 0) < 2 ||
+                    ((divisionBracketTeamCount ?: 0) < MIN_BRACKET_TEAM_COUNT ||
                         (
                             divisionPoolCount != null &&
                                 divisionPoolCount > 0 &&
                                 divisionBracketTeamCount != null &&
                                 divisionBracketTeamCount % divisionPoolCount != 0
                             )),
-                errorMessage = "Must be at least 2 and divide evenly by pools.",
+                errorMessage = "Must be at least $MIN_BRACKET_TEAM_COUNT and divide evenly by pools.",
             )
         }
         NumberInputField(

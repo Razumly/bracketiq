@@ -38,6 +38,7 @@ import {
   stripApiCompatibilityFields,
 } from '@/lib/apiMappers';
 import { formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
+import { MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
 import { buildLeaguePlayoffPlaceholderAssignmentsForMatches } from '@/lib/bracketEntrantPlaceholders';
 import { createClientId } from '@/lib/clientId';
 import { hasResolvedMatchParticipants } from '@/lib/matchParticipants';
@@ -3316,8 +3317,8 @@ function EventScheduleContent() {
           : 1,
         includePlayoffs: Boolean(source.includePlayoffs),
         playoffTeamCount: Number.isFinite(Number(source.playoffTeamCount))
-          ? Math.max(2, Math.trunc(Number(source.playoffTeamCount)))
-          : undefined,
+          ? Math.trunc(Number(source.playoffTeamCount))
+          : (source.includePlayoffs ? MIN_BRACKET_TEAM_COUNT : undefined),
         usesSets,
         matchDurationMinutes,
         restTimeMinutes,

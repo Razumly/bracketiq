@@ -228,7 +228,55 @@ describe('useEventFormConfigurationActions', () => {
         });
     });
 
-    it('enables league playoffs without filling a bracket team count', async () => {
+    it('defaults absent tournament pool bracket counts to three', async () => {
+        const { result } = renderHook(() => useConfigurationActionsHarness(buildEventData({
+            eventType: 'TOURNAMENT',
+            divisionDetails: [
+                { id: 'division_1', playoffTeamCount: undefined },
+                { id: 'division_2', playoffTeamCount: 4 },
+            ] as EventFormValues['divisionDetails'],
+            leagueData: buildLeagueData({ includePlayoffs: false, playoffTeamCount: undefined }),
+        }), jest.fn()));
+
+        act(() => result.current.actions.handleIncludePoolPlayChange(true));
+
+        await waitFor(() => {
+            expect(result.current.eventData.leagueData).toEqual(expect.objectContaining({
+                includePlayoffs: true,
+                playoffTeamCount: 3,
+            }));
+            expect(result.current.eventData.divisionDetails).toEqual([
+                expect.objectContaining({ playoffTeamCount: 3 }),
+                expect.objectContaining({ playoffTeamCount: 4 }),
+            ]);
+        });
+    });
+
+    it('defaults absent league division bracket counts to three', async () => {
+        const { result } = renderHook(() => useConfigurationActionsHarness(buildEventData({
+            eventType: 'LEAGUE',
+            divisionDetails: [
+                { id: 'division_1', playoffTeamCount: undefined },
+                { id: 'division_2', playoffTeamCount: 4 },
+            ] as EventFormValues['divisionDetails'],
+            leagueData: buildLeagueData({ includePlayoffs: false, playoffTeamCount: undefined }),
+        }), jest.fn()));
+
+        act(() => result.current.actions.handleIncludePlayoffsToggle(true));
+
+        await waitFor(() => {
+            expect(result.current.eventData.leagueData).toEqual(expect.objectContaining({
+                includePlayoffs: true,
+                playoffTeamCount: 3,
+            }));
+            expect(result.current.eventData.divisionDetails).toEqual([
+                expect.objectContaining({ playoffTeamCount: 3 }),
+                expect.objectContaining({ playoffTeamCount: 4 }),
+            ]);
+        });
+    });
+
+    it('defaults league playoff team count to three when playoffs are enabled', async () => {
         const { result } = renderHook(() => useConfigurationActionsHarness(buildEventData({
             eventType: 'LEAGUE',
             leagueData: buildLeagueData({ includePlayoffs: false, playoffTeamCount: undefined }),
@@ -239,6 +287,6 @@ describe('useEventFormConfigurationActions', () => {
         await waitFor(() => {
             expect(result.current.eventData.leagueData.includePlayoffs).toBe(true);
         });
-        expect(result.current.eventData.leagueData.playoffTeamCount).toBeUndefined();
+        expect(result.current.eventData.leagueData.playoffTeamCount).toBe(3);
     });
 });

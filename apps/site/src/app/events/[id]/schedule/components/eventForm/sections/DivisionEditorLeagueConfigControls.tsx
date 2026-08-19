@@ -19,6 +19,7 @@ import {
     DIVISION_FULL_WIDTH_CLASS,
     DIVISION_NUMBER_FIELD_CLASS,
 } from '../divisionLayout';
+import { MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
 import { BRACKET_TEAM_COUNT_ERROR } from '../divisionMessages';
 import { parseOptionalWholeNumber } from '../divisionNumbers';
 import { DivisionPhaseConfigurationControls } from './DivisionPhaseRulesEditor';
@@ -108,7 +109,8 @@ export const DivisionEditorLeagueConfigControls = ({
         <AnimatedLayoutSection in={playoffTeamCountVisible} className={DIVISION_NUMBER_FIELD_CLASS}>
             <NumberInput
                 label="Division Playoff Team Count"
-                min={2}
+                min={MIN_BRACKET_TEAM_COUNT}
+                aria-valuemin={MIN_BRACKET_TEAM_COUNT}
                 max={maxStandardNumber}
                 w="100%"
                 styles={numberInputStyles}
@@ -122,7 +124,7 @@ export const DivisionEditorLeagueConfigControls = ({
                     onPlayoffTeamCountChange(parseOptionalWholeNumber(value) ?? null);
                 }}
                 error={playoffTeamCountError || (
-                    typeof playoffTeamCount === 'number' && playoffTeamCount >= 2
+                    typeof playoffTeamCount === 'number' && playoffTeamCount >= MIN_BRACKET_TEAM_COUNT
                         ? undefined
                         : BRACKET_TEAM_COUNT_ERROR
                 )}
