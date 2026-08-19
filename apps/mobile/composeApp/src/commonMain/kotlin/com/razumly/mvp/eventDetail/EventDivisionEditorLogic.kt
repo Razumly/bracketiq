@@ -612,6 +612,46 @@ internal fun duplicateDivisionIdentityNames(details: List<DivisionDetail>): List
     return duplicateNames.toList()
 }
 
+internal fun duplicateDivisionNames(
+    details: List<DivisionDetail>,
+    excludeGeneratedTournamentPools: Boolean,
+): List<String> {
+    val seenIds = mutableSetOf<String>()
+    val firstNameByKey = linkedMapOf<String, String>()
+    val duplicateNamesByKey = linkedMapOf<String, String>()
+
+    details.forEach { detail ->
+        val sourceDivisionId = detail.sourceDivisionId
+            ?.normalizeDivisionIdentifier()
+            .orEmpty()
+        val divisionId = detail.id.normalizeDivisionIdentifier()
+        val isGeneratedPhase = sourceDivisionId.isNotBlank() &&
+            divisionId.startsWith("${sourceDivisionId}__phase__")
+        if (isGeneratedPhase ||
+            (excludeGeneratedTournamentPools && detail.isGeneratedTournamentPoolDivision())
+        ) {
+            return@forEach
+        }
+        if (divisionId.isNotBlank() && !seenIds.add(divisionId)) {
+            return@forEach
+        }
+
+        val displayName = detail.name.trim().replace(DIVISION_NAME_WHITESPACE_PATTERN, " ")
+        val nameKey = displayName.normalizeDivisionNameKey()
+        if (nameKey.isBlank()) {
+            return@forEach
+        }
+        val firstName = firstNameByKey[nameKey]
+        if (firstName == null) {
+            firstNameByKey[nameKey] = displayName
+        } else {
+            duplicateNamesByKey[nameKey] = firstName
+        }
+    }
+
+    return duplicateNamesByKey.values.toList()
+}
+
 internal fun String.normalizeDivisionNameKey(): String {
     return trim()
         .lowercase()
@@ -630,16 +670,20 @@ internal fun buildDivisionToken(
     )
 }
 
-internal fun buildDivisionName(
+internal fun applyDivisionEditorTypeSelection(
+    previous: DivisionEditorState,
     gender: String,
+    skillDivisionTypeId: String,
     skillDivisionTypeName: String,
+    ageDivisionTypeId: String,
     ageDivisionTypeName: String,
-): String {
-    val normalizedSkillDivisionTypeName = skillDivisionTypeName.trim()
-    val normalizedAgeDivisionTypeName = ageDivisionTypeName.trim()
-    return when (gender.trim().uppercase()) {
-        "M" -> "Men's $normalizedSkillDivisionTypeName $normalizedAgeDivisionTypeName"
-        "F" -> "Women's $normalizedSkillDivisionTypeName $normalizedAgeDivisionTypeName"
-        else -> "Coed $normalizedSkillDivisionTypeName $normalizedAgeDivisionTypeName"
-    }
+): DivisionEditorState {
+    return previous.copy(
+        gender = gender,
+        skillDivisionTypeId = skillDivisionTypeId,
+        skillDivisionTypeName = skillDivisionTypeName,
+        ageDivisionTypeId = ageDivisionTypeId,
+        ageDivisionTypeName = ageDivisionTypeName,
+        error = null,
+    )
 }

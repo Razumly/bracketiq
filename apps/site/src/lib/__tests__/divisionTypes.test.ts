@@ -145,9 +145,10 @@ describe('divisionTypes age alignment', () => {
     expect(inferred.defaultName).toBe('CoEd BB 18+');
   });
 
-  it('normalizes legacy composite separators to spaces', () => {
-    expect(cleanDivisionDisplayName('Open / 18+', 'fallback')).toBe('Open 18+');
-    expect(cleanDivisionDisplayName('Open • 18+', 'fallback')).toBe('Open 18+');
+  it('preserves organizer-owned division display labels', () => {
+    expect(cleanDivisionDisplayName('Open /  18+', 'fallback')).toBe('Open /  18+');
+    expect(cleanDivisionDisplayName('Open • 18+', 'fallback')).toBe('Open • 18+');
+    expect(cleanDivisionDisplayName('  ', 'fallback')).toBe('fallback');
   });
 
   it('normalizes explicit and legacy division type ids into persisted age and skill ids', () => {

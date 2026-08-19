@@ -12,6 +12,7 @@ import {
   loadEventScheduleState,
 } from "../eventEditorSnapshot";
 import { parseSaveEventEditorCommand } from "@/contracts/eventEditor";
+import { syncEventDivisions } from "@/server/repositories/events";
 
 const buildClient = (
   fields: unknown[],
@@ -140,9 +141,7 @@ it("keeps create revisions stable when defaults are omitted", async () => {
       new Date(initial.draft.basics.start).getTime(),
   ).toBe(60 * 60 * 1000);
   expect(reloaded.editorRevision).toBe(initial.editorRevision);
-  expect(reloaded.scheduleState.revision).toBe(
-    initial.scheduleState.revision,
-  );
+  expect(reloaded.scheduleState.revision).toBe(initial.scheduleState.revision);
 });
 it("keeps competition create defaults on the generated-end schedule policy", async () => {
   const snapshot = await loadCreateEventEditorSnapshot(
@@ -374,7 +373,6 @@ it("hydrates template source values and resources in create snapshots", async ()
     snapshot.scheduleState.revision,
   );
 
-
   client.eventTemplates.findUnique.mockResolvedValue({
     ...templateSource,
     description: "Template description changed at the source",
@@ -533,10 +531,7 @@ it("collapses generated tournament pools into one editable bracket division", as
           installmentDueRelativeDays: [0, 14],
           installmentAmounts: [8000, 8000],
           teamIds: [`team_${index + 1}`],
-          playoffPlacementDivisionIds: [
-            bracketDivisionId,
-            bracketDivisionId,
-          ],
+          playoffPlacementDivisionIds: [bracketDivisionId, bracketDivisionId],
           fieldIds: [],
         })),
         {
@@ -618,6 +613,154 @@ it("collapses generated tournament pools into one editable bracket division", as
       playoffTeamCount: 8,
     }),
   ]);
+});
+
+it("round-trips two collapsed tournament brackets through division sync", async () => {
+  const eventId = "event_pool_roundtrip";
+  const bracketNames = ["Open 18+", "Advanced 18+"];
+  const bracketKeys = ["open", "advanced"];
+  const bracketDivisionIds = bracketKeys.map(
+    (key) => `${eventId}__division__${key}`,
+  );
+  const poolDivisionIds = bracketKeys.map(
+    (key) => `${eventId}__division__${key}_pool_a`,
+  );
+  const poolRows = poolDivisionIds.map((id, index) => ({
+    id,
+    eventId,
+    status: "ACTIVE",
+    kind: "LEAGUE",
+    role: "ENTRY",
+    isSystemGenerated: true,
+    key: `${bracketKeys[index]}_pool_a`,
+    name: "Pool A",
+    maxParticipants: 4,
+    playoffTeamCount: 2,
+    playoffPlacementDivisionIds: [
+      bracketDivisionIds[index],
+      bracketDivisionIds[index],
+    ],
+    teamIds: [],
+    fieldIds: [],
+  }));
+  const bracketRows = bracketDivisionIds.map((id, index) => ({
+    id,
+    eventId,
+    status: "ACTIVE",
+    kind: "PLAYOFF",
+    role: "PHASE",
+    phase: "BRACKET",
+    isSystemGenerated: false,
+    key: bracketKeys[index],
+    name: bracketNames[index],
+    maxParticipants: 4,
+    playoffTeamCount: 2,
+    poolCount: 1,
+    playoffPlacementDivisionIds: [],
+    teamIds: [],
+    fieldIds: [],
+  }));
+  const persistedRows = [...poolRows, ...bracketRows];
+  const snapshotClient = {
+    ...buildClient([], []),
+    divisions: {
+      findMany: jest.fn().mockResolvedValue(persistedRows),
+    },
+  } as any;
+  const snapshot = await buildEventEditorSnapshot(
+    {
+      id: eventId,
+      $id: eventId,
+      name: "Two bracket pool tournament",
+      description: "",
+      eventType: "TOURNAMENT",
+      includePlayoffs: true,
+      includePlayoffsOrPools: true,
+      teamSignup: true,
+      singleDivision: false,
+      maxParticipants: 8,
+      playoffTeamCount: 4,
+      sportIds: [],
+      start: "2026-09-10T18:00:00.000Z",
+      end: "2026-09-10T20:00:00.000Z",
+      noFixedEndDateTime: false,
+      timeZone: "UTC",
+      location: "",
+      address: "",
+      coordinates: [0, 0],
+      organizationId: null,
+      hostId: "host_pool",
+      state: "UNPUBLISHED",
+      fieldIds: [],
+      timeSlotIds: [],
+      divisions: poolDivisionIds,
+      divisionDetails: [],
+      playoffDivisionDetails: [],
+    },
+    { client: snapshotClient, mode: "EDIT", actor: { userId: "host_pool" } },
+  );
+  expect(snapshot.draft.competition.divisionIds).toEqual(bracketDivisionIds);
+  expect(
+    snapshot.draft.competition.divisionDetails.map((detail) => detail.name),
+  ).toEqual(bracketNames);
+
+  const divisionUpsert = jest.fn().mockResolvedValue(undefined);
+  const syncClient = {
+    divisions: {
+      findMany: jest
+        .fn()
+        .mockResolvedValueOnce(persistedRows)
+        .mockResolvedValueOnce(bracketRows),
+      deleteMany: jest.fn().mockResolvedValue(undefined),
+      upsert: divisionUpsert,
+    },
+    eventDivisionPhaseSources: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue(undefined),
+      upsert: jest.fn().mockResolvedValue(undefined),
+    },
+    eventDivisionPhaseParticipants: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue(undefined),
+      upsert: jest.fn().mockResolvedValue(undefined),
+    },
+  };
+  await syncEventDivisions(
+    {
+      eventId,
+      divisionIds: snapshot.draft.competition.divisionIds,
+      fieldIds: [],
+      includePlayoffs: snapshot.draft.competition.includePlayoffs,
+      singleDivision: false,
+      divisionDetails: snapshot.draft.competition.divisionDetails,
+      playoffDivisionDetails: snapshot.draft.competition.playoffDivisionDetails,
+      defaultMaxParticipants: snapshot.draft.participation.maxParticipants,
+      defaultPlayoffTeamCount: snapshot.draft.competition.playoffTeamCount,
+      eventType: snapshot.draft.basics.eventType,
+    },
+    syncClient as any,
+  );
+
+  bracketRows.forEach((bracket) => {
+    expect(divisionUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: bracket.id },
+        create: expect.objectContaining({
+          name: bracket.name,
+          role: "PHASE",
+          isSystemGenerated: false,
+        }),
+      }),
+    );
+  });
+  poolDivisionIds.forEach((poolDivisionId) => {
+    expect(divisionUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: poolDivisionId },
+        create: expect.objectContaining({ isSystemGenerated: true }),
+      }),
+    );
+  });
 });
 
 it("preserves a saved two-team tournament so the editor can reject it", async () => {

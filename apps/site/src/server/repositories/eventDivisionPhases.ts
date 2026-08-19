@@ -1,10 +1,10 @@
-import type { DivisionCompetitionPhase } from '@/types';
+import type { DivisionCompetitionPhase } from "@/types";
 
 type PhaseEntry = {
   id: string;
   key?: string | null;
   name?: string | null;
-  kind?: 'LEAGUE' | 'PLAYOFF' | string | null;
+  kind?: "LEAGUE" | "PLAYOFF" | string | null;
   sortOrder?: number | null;
   sourceDivisionId?: string | null;
   fieldIds?: string[] | null;
@@ -64,11 +64,11 @@ type PhasePlan = {
 };
 
 type PhaseDivisionRow = {
-
   id: string;
   role?: unknown;
   phase?: unknown;
   sourceDivisionId?: string | null;
+  isSystemGenerated?: boolean | null;
   teamIds?: unknown;
 };
 export type PhaseDivisionCandidate = {
@@ -78,31 +78,33 @@ export type PhaseDivisionCandidate = {
   teamIds?: readonly string[] | null;
 };
 
-export const collectScheduledDivisions = <T extends PhaseDivisionCandidate>(
-  scheduled: {
-    divisions?: readonly T[] | null;
-    playoffDivisions?: readonly T[] | null;
-  },
-): T[] => Array.from(
-  new Map(
-    [
-      ...(scheduled.divisions ?? []),
-      ...(scheduled.playoffDivisions ?? []),
-    ]
-      .filter((division) => String(division.id ?? "").trim().length > 0)
-      .map((division) => [division.id, division] as const),
-  ).values(),
-);
+export const collectScheduledDivisions = <
+  T extends PhaseDivisionCandidate,
+>(scheduled: {
+  divisions?: readonly T[] | null;
+  playoffDivisions?: readonly T[] | null;
+}): T[] =>
+  Array.from(
+    new Map(
+      [...(scheduled.divisions ?? []), ...(scheduled.playoffDivisions ?? [])]
+        .filter((division) => String(division.id ?? "").trim().length > 0)
+        .map((division) => [division.id, division] as const),
+    ).values(),
+  );
 
-export const collectPhaseDivisions = <T extends PhaseDivisionCandidate>(
-  scheduled: {
-    divisions?: readonly T[] | null;
-    playoffDivisions?: readonly T[] | null;
-  },
-): T[] => collectScheduledDivisions(scheduled).filter((division) => (
-  String(division.role ?? '').trim().toUpperCase() === 'PHASE'
-  && String(division.phase ?? '').trim().length > 0
-));
+export const collectPhaseDivisions = <
+  T extends PhaseDivisionCandidate,
+>(scheduled: {
+  divisions?: readonly T[] | null;
+  playoffDivisions?: readonly T[] | null;
+}): T[] =>
+  collectScheduledDivisions(scheduled).filter(
+    (division) =>
+      String(division.role ?? "")
+        .trim()
+        .toUpperCase() === "PHASE" &&
+      String(division.phase ?? "").trim().length > 0,
+  );
 type PhaseTeamCandidate = {
   id?: string | null;
   division?: {
@@ -119,29 +121,29 @@ export const collectPhaseTeamIdsByDivision = <
     playoffDivisions?: readonly T[] | null;
   },
   teams: Readonly<Record<string, U>>,
-): Record<string, string[]> => Object.fromEntries(
-  collectPhaseDivisions(scheduled).map((division) => {
-    const declaredTeamIds = Array.isArray(division.teamIds)
-      ? Array.from(
-          new Set(
-            division.teamIds
-              .map((teamId) => String(teamId ?? '').trim())
-              .filter(Boolean),
-          ),
-        )
-      : [];
-    if (declaredTeamIds.length) {
-      return [division.id, declaredTeamIds];
-    }
-    return [
-      division.id,
-      Object.entries(teams)
-        .filter(([, team]) => team.division?.id === division.id)
-        .map(([teamId, team]) => team.id ?? teamId),
-    ];
-  }),
-);
-
+): Record<string, string[]> =>
+  Object.fromEntries(
+    collectPhaseDivisions(scheduled).map((division) => {
+      const declaredTeamIds = Array.isArray(division.teamIds)
+        ? Array.from(
+            new Set(
+              division.teamIds
+                .map((teamId) => String(teamId ?? "").trim())
+                .filter(Boolean),
+            ),
+          )
+        : [];
+      if (declaredTeamIds.length) {
+        return [division.id, declaredTeamIds];
+      }
+      return [
+        division.id,
+        Object.entries(teams)
+          .filter(([, team]) => team.division?.id === division.id)
+          .map(([teamId, team]) => team.id ?? teamId),
+      ];
+    }),
+  );
 
 type PhaseSourceRow = {
   entryDivisionId?: string | null;
@@ -172,17 +174,17 @@ export type PhasePersistenceClient = {
   };
 };
 
-const asStringArray = (value: unknown): string[] => (
+const asStringArray = (value: unknown): string[] =>
   Array.isArray(value)
-    ? Array.from(new Set(value.map((entry) => String(entry ?? '').trim()).filter(Boolean)))
-    : []
-);
+    ? Array.from(
+        new Set(
+          value.map((entry) => String(entry ?? "").trim()).filter(Boolean),
+        ),
+      )
+    : [];
 
-const asPositionalStringArray = (value: unknown): string[] => (
-  Array.isArray(value)
-    ? value.map((entry) => String(entry ?? '').trim())
-    : []
-);
+const asPositionalStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.map((entry) => String(entry ?? "").trim()) : [];
 
 export const persistPhaseParticipantAssignments = async (params: {
   client: PhasePersistenceClient;
@@ -195,30 +197,36 @@ export const persistPhaseParticipantAssignments = async (params: {
   }
 
   const assignments = Object.entries(params.teamIdsByPhaseDivision)
-    .map(([phaseDivisionId, teamIds]) => [
-      String(phaseDivisionId ?? '').trim(),
-      asStringArray(teamIds),
-    ] as const)
+    .map(
+      ([phaseDivisionId, teamIds]) =>
+        [String(phaseDivisionId ?? "").trim(), asStringArray(teamIds)] as const,
+    )
     .filter(([phaseDivisionId]) => phaseDivisionId.length > 0);
   if (!assignments.length) {
     return;
   }
 
-  const phaseDivisionIds = assignments.map(([phaseDivisionId]) => phaseDivisionId);
+  const phaseDivisionIds = assignments.map(
+    ([phaseDivisionId]) => phaseDivisionId,
+  );
   const sourceRows = params.client.eventDivisionPhaseSources?.findMany
     ? await params.client.eventDivisionPhaseSources.findMany({
-      where: {
-        eventId: params.eventId,
-        phaseDivisionId: { in: phaseDivisionIds },
-      },
-      select: { phaseDivisionId: true, entryDivisionId: true },
-    })
+        where: {
+          eventId: params.eventId,
+          phaseDivisionId: { in: phaseDivisionIds },
+        },
+        select: { phaseDivisionId: true, entryDivisionId: true },
+      })
     : [];
   const sourceEntryDivisionIdByPhase = new Map<string, string>();
   for (const row of sourceRows) {
-    const phaseDivisionId = String(row.phaseDivisionId ?? '').trim();
-    const entryDivisionId = String(row.entryDivisionId ?? '').trim();
-    if (phaseDivisionId && entryDivisionId && !sourceEntryDivisionIdByPhase.has(phaseDivisionId)) {
+    const phaseDivisionId = String(row.phaseDivisionId ?? "").trim();
+    const entryDivisionId = String(row.entryDivisionId ?? "").trim();
+    if (
+      phaseDivisionId &&
+      entryDivisionId &&
+      !sourceEntryDivisionIdByPhase.has(phaseDivisionId)
+    ) {
       sourceEntryDivisionIdByPhase.set(phaseDivisionId, entryDivisionId);
     }
   }
@@ -240,81 +248,88 @@ export const persistPhaseParticipantAssignments = async (params: {
           eventId: params.eventId,
           phaseDivisionId,
           eventTeamId,
-          sourceEntryDivisionId: sourceEntryDivisionIdByPhase.get(phaseDivisionId) ?? null,
+          sourceEntryDivisionId:
+            sourceEntryDivisionIdByPhase.get(phaseDivisionId) ?? null,
         },
         update: {
           eventId: params.eventId,
           phaseDivisionId,
           eventTeamId,
-          sourceEntryDivisionId: sourceEntryDivisionIdByPhase.get(phaseDivisionId) ?? null,
+          sourceEntryDivisionId:
+            sourceEntryDivisionIdByPhase.get(phaseDivisionId) ?? null,
         },
       });
     }
   }
 };
 
-const asNumberArray = (value: unknown): number[] => (
+const asNumberArray = (value: unknown): number[] =>
   Array.isArray(value)
     ? value
-      .map((entry) => (typeof entry === 'number' ? entry : Number(entry)))
-      .filter((entry) => Number.isFinite(entry))
-      .map((entry) => Math.trunc(entry))
-    : []
-);
+        .map((entry) => (typeof entry === "number" ? entry : Number(entry)))
+        .filter((entry) => Number.isFinite(entry))
+        .map((entry) => Math.trunc(entry))
+    : [];
 
 const asDate = (value: string | Date | null | undefined): Date | null => {
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (value instanceof Date)
+    return Number.isNaN(value.getTime()) ? null : value;
   if (!value) return null;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-const phaseLabel = (phase: DivisionCompetitionPhase): string => ({
-  LEAGUE: 'League',
-  POOL: 'Pool',
-  BRACKET: 'Bracket',
-  PLAYOFF: 'Playoff',
-}[phase]);
+const phaseIdFor = (entryId: string, phase: DivisionCompetitionPhase): string =>
+  `${entryId}__phase__${phase.toLowerCase()}`;
 
-const phaseIdFor = (entryId: string, phase: DivisionCompetitionPhase): string => (
-  `${entryId}__phase__${phase.toLowerCase()}`
-);
+const phaseKeyFor = (
+  entry: PhaseEntry,
+  phase: DivisionCompetitionPhase,
+): string => `${entry.key ?? entry.id}__phase__${phase.toLowerCase()}`;
 
-const phaseKeyFor = (entry: PhaseEntry, phase: DivisionCompetitionPhase): string => (
-  `${entry.key ?? entry.id}__phase__${phase.toLowerCase()}`
-);
+const phaseLabel = (phase: DivisionCompetitionPhase): string => {
+  if (phase === "POOL") return "Pool";
+  if (phase === "BRACKET") return "Bracket";
+  if (phase === "PLAYOFF") return "Playoff";
+  return "League";
+};
 
 const generatedPlayoffStandingsOverridesFor = (
   entry: PhaseEntry,
   preserveFallback: boolean,
 ): Record<string, unknown> | null => {
-  const hasPlayoffFields = [
-    entry.playoffDoubleElimination,
-    entry.playoffWinnerSetCount,
-    entry.playoffLoserSetCount,
-    entry.playoffPrize,
-    entry.playoffFieldCount,
-    entry.playoffRestTimeMinutes,
-    entry.playoffMatchDurationMinutes,
-    entry.playoffSetDurationMinutes,
-  ].some((value) => value !== null && value !== undefined)
-    || asNumberArray(entry.playoffWinnerBracketPointsToVictory).length > 0
-    || asNumberArray(entry.playoffLoserBracketPointsToVictory).length > 0;
+  const hasPlayoffFields =
+    [
+      entry.playoffDoubleElimination,
+      entry.playoffWinnerSetCount,
+      entry.playoffLoserSetCount,
+      entry.playoffPrize,
+      entry.playoffFieldCount,
+      entry.playoffRestTimeMinutes,
+      entry.playoffMatchDurationMinutes,
+      entry.playoffSetDurationMinutes,
+    ].some((value) => value !== null && value !== undefined) ||
+    asNumberArray(entry.playoffWinnerBracketPointsToVictory).length > 0 ||
+    asNumberArray(entry.playoffLoserBracketPointsToVictory).length > 0;
   if (!hasPlayoffFields) {
     if (!preserveFallback) return null;
-    return entry.standingsOverrides
-      && typeof entry.standingsOverrides === 'object'
-      && !Array.isArray(entry.standingsOverrides)
-      ? entry.standingsOverrides as Record<string, unknown>
+    return entry.standingsOverrides &&
+      typeof entry.standingsOverrides === "object" &&
+      !Array.isArray(entry.standingsOverrides)
+      ? (entry.standingsOverrides as Record<string, unknown>)
       : null;
   }
   return {
     doubleElimination: entry.playoffDoubleElimination ?? false,
     winnerSetCount: entry.playoffWinnerSetCount ?? 1,
     loserSetCount: entry.playoffLoserSetCount ?? 1,
-    winnerBracketPointsToVictory: asNumberArray(entry.playoffWinnerBracketPointsToVictory),
-    loserBracketPointsToVictory: asNumberArray(entry.playoffLoserBracketPointsToVictory),
-    prize: entry.playoffPrize ?? '',
+    winnerBracketPointsToVictory: asNumberArray(
+      entry.playoffWinnerBracketPointsToVictory,
+    ),
+    loserBracketPointsToVictory: asNumberArray(
+      entry.playoffLoserBracketPointsToVictory,
+    ),
+    prize: entry.playoffPrize ?? "",
     fieldCount: entry.playoffFieldCount ?? 1,
     restTimeMinutes: entry.playoffRestTimeMinutes ?? 0,
     matchDurationMinutes: entry.playoffMatchDurationMinutes ?? null,
@@ -326,15 +341,14 @@ const phaseStandingsOverridesFor = (
   entry: PhaseEntry,
   isBracket: boolean,
   preserveFallback: boolean,
-): Record<string, unknown> | null => (
-  isBracket ? generatedPlayoffStandingsOverridesFor(entry, preserveFallback) : (
-    entry.standingsOverrides
-      && typeof entry.standingsOverrides === 'object'
-      && !Array.isArray(entry.standingsOverrides)
-      ? entry.standingsOverrides as Record<string, unknown>
-      : null
-  )
-);
+): Record<string, unknown> | null =>
+  isBracket
+    ? generatedPlayoffStandingsOverridesFor(entry, preserveFallback)
+    : entry.standingsOverrides &&
+        typeof entry.standingsOverrides === "object" &&
+        !Array.isArray(entry.standingsOverrides)
+      ? (entry.standingsOverrides as Record<string, unknown>)
+      : null;
 
 const writeDataFor = (
   plan: PhasePlan,
@@ -342,7 +356,7 @@ const writeDataFor = (
   organizationId: string | null | undefined,
 ): Record<string, unknown> => {
   const entry = plan.template;
-  const isBracket = plan.phase === 'BRACKET' || plan.phase === 'PLAYOFF';
+  const isBracket = plan.phase === "BRACKET" || plan.phase === "PLAYOFF";
   const maxParticipants = isBracket
     ? (entry.playoffTeamCount ?? entry.maxParticipants ?? null)
     : (entry.maxParticipants ?? null);
@@ -352,22 +366,30 @@ const writeDataFor = (
   return {
     id: plan.id,
     key: plan.clone ? phaseKeyFor(entry, plan.phase) : (entry.key ?? entry.id),
-    name: plan.clone ? `${entry.name ?? entry.id} — ${phaseLabel(plan.phase)}` : (entry.name ?? entry.id),
-    kind: isBracket ? 'PLAYOFF' : 'LEAGUE',
+    name: plan.clone
+      ? `${entry.name ?? entry.id} ${phaseLabel(plan.phase)}`
+      : (entry.name ?? entry.id),
+    kind: isBracket ? "PLAYOFF" : "LEAGUE",
     sortOrder: plan.sortOrder,
     eventId,
-    scope: 'EVENT',
-    role: 'PHASE',
+    scope: "EVENT",
+    role: "PHASE",
     phase: plan.phase,
-    status: 'ACTIVE',
+    status: "ACTIVE",
     sourceDivisionId: plan.sourceEntryIds[0] ?? entry.id,
     organizationId: organizationId ?? null,
     sportId: entry.sportId ?? null,
     price: isBracket ? null : (entry.price ?? null),
     maxParticipants,
     playoffTeamCount,
-    playoffPlacementDivisionIds: asPositionalStringArray(entry.playoffPlacementDivisionIds),
-    standingsOverrides: phaseStandingsOverridesFor(entry, isBracket, !plan.clone),
+    playoffPlacementDivisionIds: asPositionalStringArray(
+      entry.playoffPlacementDivisionIds,
+    ),
+    standingsOverrides: phaseStandingsOverridesFor(
+      entry,
+      isBracket,
+      !plan.clone,
+    ),
     phaseSettings: entry.phaseSettings ?? {},
     gamesPerOpponent: entry.gamesPerOpponent ?? null,
     restTimeMinutes: entry.restTimeMinutes ?? null,
@@ -379,8 +401,12 @@ const writeDataFor = (
     playoffDoubleElimination: entry.playoffDoubleElimination ?? null,
     playoffWinnerSetCount: entry.playoffWinnerSetCount ?? null,
     playoffLoserSetCount: entry.playoffLoserSetCount ?? null,
-    playoffWinnerBracketPointsToVictory: asNumberArray(entry.playoffWinnerBracketPointsToVictory),
-    playoffLoserBracketPointsToVictory: asNumberArray(entry.playoffLoserBracketPointsToVictory),
+    playoffWinnerBracketPointsToVictory: asNumberArray(
+      entry.playoffWinnerBracketPointsToVictory,
+    ),
+    playoffLoserBracketPointsToVictory: asNumberArray(
+      entry.playoffLoserBracketPointsToVictory,
+    ),
     playoffPrize: entry.playoffPrize ?? null,
     playoffFieldCount: entry.playoffFieldCount ?? null,
     playoffRestTimeMinutes: entry.playoffRestTimeMinutes ?? null,
@@ -392,9 +418,15 @@ const writeDataFor = (
     installmentCount: isBracket ? null : (entry.installmentCount ?? null),
     installmentDueDates: isBracket
       ? []
-      : (entry.installmentDueDates ?? []).map((value) => asDate(value)).filter((value): value is Date => Boolean(value)),
-    installmentDueRelativeDays: isBracket ? [] : asNumberArray(entry.installmentDueRelativeDays),
-    installmentAmounts: isBracket ? [] : asNumberArray(entry.installmentAmounts),
+      : (entry.installmentDueDates ?? [])
+          .map((value) => asDate(value))
+          .filter((value): value is Date => Boolean(value)),
+    installmentDueRelativeDays: isBracket
+      ? []
+      : asNumberArray(entry.installmentDueRelativeDays),
+    installmentAmounts: isBracket
+      ? []
+      : asNumberArray(entry.installmentAmounts),
     divisionTypeId: entry.divisionTypeId ?? null,
     skillDivisionTypeId: entry.skillDivisionTypeId ?? null,
     ageDivisionTypeId: entry.ageDivisionTypeId ?? null,
@@ -437,11 +469,11 @@ export const syncEventDivisionPhases = async (params: {
   const client = params.client;
   const sources = client.eventDivisionPhaseSources;
   const participants = client.eventDivisionPhaseParticipants;
-  const eventType = String(params.eventType ?? '').toUpperCase();
-  if (!['LEAGUE', 'TOURNAMENT'].includes(eventType)) {
+  const eventType = String(params.eventType ?? "").toUpperCase();
+  if (!["LEAGUE", "TOURNAMENT"].includes(eventType)) {
     if (client.divisions?.deleteMany) {
       await client.divisions.deleteMany({
-        where: { eventId: params.eventId, role: 'PHASE' },
+        where: { eventId: params.eventId, role: "PHASE" },
       });
     }
     if (sources?.deleteMany) {
@@ -456,113 +488,151 @@ export const syncEventDivisionPhases = async (params: {
     return;
   }
 
-  const entries = params.entries.filter((entry) => entry.kind !== 'PLAYOFF');
-  const playoffEntries = params.entries.filter((entry) => entry.kind === 'PLAYOFF');
+  const entries = params.entries.filter((entry) => entry.kind !== "PLAYOFF");
+  const playoffEntries = params.entries.filter(
+    (entry) => entry.kind === "PLAYOFF",
+  );
   const sourceFieldIds = Array.from(
     new Set(entries.flatMap((entry) => asStringArray(entry.fieldIds))),
   );
-  const phaseFieldIdsFor = (entry: PhaseEntry): string[] => Array.from(
-    new Set([...asStringArray(entry.fieldIds), ...sourceFieldIds]),
-  );
+  const phaseFieldIdsFor = (entry: PhaseEntry): string[] =>
+    Array.from(new Set([...asStringArray(entry.fieldIds), ...sourceFieldIds]));
   const plans: PhasePlan[] = [];
-  const addClone = (entry: PhaseEntry, phase: DivisionCompetitionPhase, sortOrder: number) => {
+  const addClone = (
+    entry: PhaseEntry,
+    phase: DivisionCompetitionPhase,
+    sortOrder: number,
+  ) => {
     if (!plans.some((plan) => plan.id === phaseIdFor(entry.id, phase))) {
       plans.push(planClone(entry, phase, sortOrder));
     }
   };
 
-  if (eventType === 'LEAGUE') {
-    entries.forEach((entry, index) => addClone(entry, 'LEAGUE', index));
+  if (eventType === "LEAGUE") {
+    entries.forEach((entry, index) => addClone(entry, "LEAGUE", index));
     if (params.includePlayoffs) {
       if (playoffEntries.length) {
-        const allParticipantIds = entries.flatMap((entry) => asStringArray(entry.teamIds));
-        playoffEntries.forEach((entry, index) => plans.push({
-          id: entry.id,
-          phase: 'PLAYOFF',
-          sortOrder: entries.length + index,
-          template: entry,
-          sourceEntryIds: entry.sourceDivisionId ? [entry.sourceDivisionId] : entries.map((source) => source.id),
-          participantTeamIds: allParticipantIds,
-          fieldIds: phaseFieldIdsFor(entry),
-          clone: false,
-        }));
+        const allParticipantIds = entries.flatMap((entry) =>
+          asStringArray(entry.teamIds),
+        );
+        playoffEntries.forEach((entry, index) =>
+          plans.push({
+            id: entry.id,
+            phase: "PLAYOFF",
+            sortOrder: entries.length + index,
+            template: entry,
+            sourceEntryIds: entry.sourceDivisionId
+              ? [entry.sourceDivisionId]
+              : entries.map((source) => source.id),
+            participantTeamIds: allParticipantIds,
+            fieldIds: phaseFieldIdsFor(entry),
+            clone: false,
+          }),
+        );
       } else {
-        entries.forEach((entry, index) => addClone(entry, 'PLAYOFF', entries.length + index));
+        entries.forEach((entry, index) =>
+          addClone(entry, "PLAYOFF", entries.length + index),
+        );
       }
     }
   } else if (params.tournamentPoolPlayEnabled) {
-    entries.forEach((entry, index) => addClone(entry, 'POOL', index));
+    entries.forEach((entry, index) => addClone(entry, "POOL", index));
     if (playoffEntries.length) {
-      const allParticipantIds = entries.flatMap((entry) => asStringArray(entry.teamIds));
-      playoffEntries.forEach((entry, index) => plans.push({
+      const allParticipantIds = entries.flatMap((entry) =>
+        asStringArray(entry.teamIds),
+      );
+      playoffEntries.forEach((entry, index) =>
+        plans.push({
+          id: entry.id,
+          phase: "BRACKET",
+          sortOrder: entries.length + index,
+          template: entry,
+          sourceEntryIds: entries.map((source) => source.id),
+          fieldIds: phaseFieldIdsFor(entry),
+          participantTeamIds: allParticipantIds,
+          clone: false,
+        }),
+      );
+    } else {
+      entries.forEach((entry, index) =>
+        addClone(entry, "BRACKET", entries.length + index),
+      );
+    }
+  } else {
+    entries.forEach((entry, index) => addClone(entry, "BRACKET", index));
+    const allParticipantIds = entries.flatMap((entry) =>
+      asStringArray(entry.teamIds),
+    );
+    playoffEntries.forEach((entry, index) =>
+      plans.push({
         id: entry.id,
-        phase: 'BRACKET',
+        phase: "BRACKET",
         sortOrder: entries.length + index,
         template: entry,
         sourceEntryIds: entries.map((source) => source.id),
-        fieldIds: phaseFieldIdsFor(entry),
         participantTeamIds: allParticipantIds,
+        fieldIds: phaseFieldIdsFor(entry),
         clone: false,
-      }));
-    } else {
-      entries.forEach((entry, index) => addClone(entry, 'BRACKET', entries.length + index));
-    }
-  } else {
-    entries.forEach((entry, index) => addClone(entry, 'BRACKET', index));
-    const allParticipantIds = entries.flatMap((entry) => asStringArray(entry.teamIds));
-    playoffEntries.forEach((entry, index) => plans.push({
-      id: entry.id,
-      phase: 'BRACKET',
-      sortOrder: entries.length + index,
-      template: entry,
-      sourceEntryIds: entries.map((source) => source.id),
-      participantTeamIds: allParticipantIds,
-      fieldIds: phaseFieldIdsFor(entry),
-      clone: false,
-    }));
+      }),
+    );
   }
   const planIds = new Set(plans.map((plan) => plan.id));
   const existingPhaseRows = client.divisions.findMany
     ? await client.divisions.findMany({
-      where: { eventId: params.eventId, role: 'PHASE' },
-      select: { id: true, phase: true, teamIds: true },
-    })
+        where: { eventId: params.eventId, role: "PHASE" },
+        select: {
+          id: true,
+          phase: true,
+          teamIds: true,
+          isSystemGenerated: true,
+        },
+      })
     : [];
-  const existingPhaseRowsById = new Map(existingPhaseRows.map((row) => [row.id, row]));
+  const existingPhaseRowsById = new Map(
+    existingPhaseRows.map((row) => [row.id, row]),
+  );
   const existingPhaseParticipantRows = participants.findMany
     ? await participants.findMany({
-      where: { eventId: params.eventId },
-      select: { phaseDivisionId: true, eventTeamId: true },
-    })
+        where: { eventId: params.eventId },
+        select: { phaseDivisionId: true, eventTeamId: true },
+      })
     : [];
   const existingParticipantIdsByPhase = new Map<string, string[]>();
   for (const row of existingPhaseParticipantRows) {
-    const phaseId = String(row.phaseDivisionId ?? '').trim();
-    const eventTeamId = String(row.eventTeamId ?? '').trim();
+    const phaseId = String(row.phaseDivisionId ?? "").trim();
+    const eventTeamId = String(row.eventTeamId ?? "").trim();
     if (!phaseId || !eventTeamId) continue;
     const teamIds = existingParticipantIdsByPhase.get(phaseId) ?? [];
     if (!teamIds.includes(eventTeamId)) teamIds.push(eventTeamId);
     existingParticipantIdsByPhase.set(phaseId, teamIds);
   }
-  const staleIds = existingPhaseRows.map((row) => row.id).filter((id) => !planIds.has(id));
+  const staleIds = existingPhaseRows
+    .map((row) => row.id)
+    .filter((id) => !planIds.has(id));
   if (staleIds.length && client.divisions.deleteMany) {
     await client.divisions.deleteMany({ where: { id: { in: staleIds } } });
   }
-  if (sources.deleteMany) await sources.deleteMany({ where: { eventId: params.eventId } });
-  if (participants.deleteMany) await participants.deleteMany({ where: { eventId: params.eventId } });
+  if (sources.deleteMany)
+    await sources.deleteMany({ where: { eventId: params.eventId } });
+  if (participants.deleteMany)
+    await participants.deleteMany({ where: { eventId: params.eventId } });
 
   for (const plan of plans) {
-    const participantTeamIds =
-      existingParticipantIdsByPhase.has(plan.id)
-        ? existingParticipantIdsByPhase.get(plan.id) ?? []
-        : existingPhaseRowsById.has(plan.id)
-          ? asStringArray(existingPhaseRowsById.get(plan.id)?.teamIds)
-          : plan.participantTeamIds;
+    const participantTeamIds = existingParticipantIdsByPhase.has(plan.id)
+      ? (existingParticipantIdsByPhase.get(plan.id) ?? [])
+      : existingPhaseRowsById.has(plan.id)
+        ? asStringArray(existingPhaseRowsById.get(plan.id)?.teamIds)
+        : plan.participantTeamIds;
     const data = {
       ...writeDataFor(plan, params.eventId, params.organizationId),
-      ...(plan.phase === 'POOL' ? { teamIds: participantTeamIds } : {}),
+      isSystemGenerated:
+        plan.clone ||
+        existingPhaseRowsById.get(plan.id)?.isSystemGenerated === true,
+      ...(plan.phase === "POOL" ? { teamIds: participantTeamIds } : {}),
     };
-    const update: Record<string, unknown> = { ...(data as Record<string, unknown>) };
+    const update: Record<string, unknown> = {
+      ...(data as Record<string, unknown>),
+    };
     delete update.id;
     await client.divisions.upsert({
       where: { id: plan.id },

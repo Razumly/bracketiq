@@ -347,6 +347,68 @@ describe('event form payment helpers', () => {
     }));
   });
 
+  it('rejects duplicate names across regular and playoff divisions', () => {
+    const schema = buildEventFormSchema({
+      allowMissingEventImage: true,
+      allowMissingEventDivisions: true,
+    });
+    const result = schema.safeParse(makeAffiliateEventFormValues({
+      divisionDetails: [
+        makeDivisionDetail({
+          id: 'open',
+          name: 'Open',
+        }),
+      ],
+      playoffDivisionDetails: [
+        {
+          id: 'gold',
+          key: 'gold',
+          kind: 'PLAYOFF',
+          name: '  open  ',
+          maxParticipants: 4,
+          playoffConfig: {},
+        },
+      ],
+    }));
+
+    expect(result.error?.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        message: 'Division name must be unique within this event. Choose a different name.',
+        path: ['playoffDivisionDetails', 0, 'name'],
+      }),
+    ]));
+  });
+
+  it('allows a generated phase to copy its source division name', () => {
+    const schema = buildEventFormSchema({
+      allowMissingEventImage: true,
+      allowMissingEventDivisions: true,
+    });
+    const result = schema.safeParse(makeAffiliateEventFormValues({
+      divisionDetails: [
+        makeDivisionDetail({
+          id: 'open',
+          name: 'Open',
+        }),
+      ],
+      playoffDivisionDetails: [
+        {
+          id: 'open__phase__playoff',
+          sourceDivisionId: 'open',
+          key: 'open__phase__playoff',
+          kind: 'PLAYOFF',
+          name: 'Open',
+          maxParticipants: 4,
+          playoffConfig: {},
+        },
+      ],
+    }));
+
+    expect(result.error?.issues ?? []).not.toContainEqual(expect.objectContaining({
+      message: 'Division name must be unique within this event. Choose a different name.',
+    }));
+  });
+
   it('validates manual payment destinations with provider-specific rules', () => {
     const schema = buildEventFormSchema({
       allowMissingEventImage: true,

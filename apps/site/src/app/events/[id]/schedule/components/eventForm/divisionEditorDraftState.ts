@@ -1,5 +1,4 @@
 import {
-    buildDivisionName,
     MIN_BRACKET_TEAM_COUNT,
     minimumParticipantCountForEventType,
 } from '@/lib/divisionTypes';
@@ -414,26 +413,8 @@ export const clearDivisionEditorPaidSettings = (state: DivisionEditorState): Div
 export const updateDivisionEditorSelectionState = (
     state: DivisionEditorState,
     updates: Partial<Pick<DivisionEditorState, 'gender' | 'skillDivisionTypeId' | 'ageDivisionTypeId'>>,
-    sportInput: string,
-): DivisionEditorState => {
-    const next = { ...state, ...updates, error: null };
-    if (Object.prototype.hasOwnProperty.call(updates, 'skillDivisionTypeId') && !updates.skillDivisionTypeId) {
-        next.skillDivisionTypeId = '';
-    }
-    if (Object.prototype.hasOwnProperty.call(updates, 'ageDivisionTypeId') && !updates.ageDivisionTypeId) {
-        next.ageDivisionTypeId = '';
-    }
-    if (!next.gender || !next.skillDivisionTypeId || !next.ageDivisionTypeId) {
-        next.name = '';
-        next.nameTouched = false;
-        return next;
-    }
-    next.name = buildDivisionName({
-        gender: next.gender as 'M' | 'F' | 'C',
-        sportInput,
-        skillDivisionTypeId: next.skillDivisionTypeId,
-        ageDivisionTypeId: next.ageDivisionTypeId,
-    });
-    next.nameTouched = false;
-    return next;
-};
+): DivisionEditorState => ({
+    ...state,
+    ...updates,
+    error: null,
+});

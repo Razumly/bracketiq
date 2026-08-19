@@ -418,6 +418,73 @@ class EventDetailsValidationTest {
     }
 
     @Test
+    fun given_divisions_with_different_identities_and_the_same_name_then_validation_fails() {
+        val first = DivisionDetail(
+            id = "event-1__division__open",
+            name = "Open",
+            gender = "C",
+            skillDivisionTypeId = "open",
+            ageDivisionTypeId = "adult",
+            maxParticipants = 8,
+            playoffPlacementDivisionIds = listOf("event-1__division__playoff"),
+        )
+        val second = DivisionDetail(
+            id = "event-1__division__advanced",
+            name = "  open  ",
+            gender = "C",
+            skillDivisionTypeId = "advanced",
+            kind = "PLAYOFF",
+            ageDivisionTypeId = "adult",
+            maxParticipants = 8,
+        )
+
+        val result = validateEvent(
+            baseLeagueEvent(maxParticipants = 0).copy(
+                id = "event-1",
+                singleDivision = false,
+                divisions = listOf(first.id, second.id),
+                divisionDetails = listOf(first, second),
+            ),
+            divisionDetailsForSettings = listOf(first, second),
+        )
+
+        assertFalse(result.isDivisionNameValid)
+        assertFalse(result.isValid)
+        assertTrue(
+            "Division name must be unique within this event. Choose a different name." in result.validationErrors,
+        )
+    }
+
+    @Test
+    fun given_a_generated_phase_with_its_source_name_then_name_validation_succeeds() {
+        val source = DivisionDetail(
+            id = "event-1__division__open",
+            name = "Open",
+            gender = "C",
+            skillDivisionTypeId = "open",
+            ageDivisionTypeId = "adult",
+            maxParticipants = 8,
+        )
+        val generatedPhase = source.copy(
+            id = "${source.id}__phase__playoff",
+            sourceDivisionId = source.id,
+            kind = "PLAYOFF",
+        )
+
+        val result = validateEvent(
+            baseLeagueEvent(maxParticipants = 0).copy(
+                id = "event-1",
+                singleDivision = false,
+                divisions = listOf(source.id),
+                divisionDetails = listOf(source, generatedPhase),
+            ),
+            divisionDetailsForSettings = listOf(source),
+        )
+
+        assertTrue(result.isDivisionNameValid)
+    }
+
+    @Test
     fun given_league_playoffs_when_team_count_is_two_then_validation_fails() {
         val detail = splitLeagueDivision(
             id = "event-1__division__open",

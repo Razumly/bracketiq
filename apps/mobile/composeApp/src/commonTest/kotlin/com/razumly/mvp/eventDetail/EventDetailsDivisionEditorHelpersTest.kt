@@ -238,10 +238,25 @@ class EventDetailsDivisionEditorHelpersTest {
     }
 
     @Test
-    fun build_division_name_uses_gender_prefix() {
-        assertEquals("Men's Open U18", buildDivisionName("M", "Open", "U18"))
-        assertEquals("Women's Open U18", buildDivisionName("F", "Open", "U18"))
-        assertEquals("Coed Open U18", buildDivisionName("C", "Open", "U18"))
+    fun division_type_selection_preserves_organizer_owned_name() {
+        val updated = applyDivisionEditorTypeSelection(
+            previous = DivisionEditorState(
+                name = "Elite /  18+",
+                nameTouched = true,
+                error = "Old error",
+            ),
+            gender = "F",
+            skillDivisionTypeId = "advanced",
+            skillDivisionTypeName = "Advanced",
+            ageDivisionTypeId = "u18",
+            ageDivisionTypeName = "U18",
+        )
+
+        assertEquals("Elite /  18+", updated.name)
+        assertTrue(updated.nameTouched)
+        assertEquals("F", updated.gender)
+        assertEquals("advanced", updated.skillDivisionTypeId)
+        assertNull(updated.error)
     }
 
     @Test
@@ -479,18 +494,16 @@ class EventDetailsDivisionEditorHelpersTest {
     }
 
     @Test
-    fun normalize_division_detail_replaces_event_scoped_id_name_with_display_name() {
-        val eventId = "abfb6091-87ed-4aec-9ce9-90c38eec21cf"
-        val divisionId = buildEventDivisionId(eventId, "m_skill_open_age_18plus")
+    fun normalize_division_detail_preserves_name_that_normalizes_to_identifier() {
         val detail = DivisionDetail(
-            id = divisionId,
-            key = "m_skill_open_age_18plus",
-            name = divisionId,
+            id = "division_open",
+            key = "open",
+            name = "DIVISION  OPEN",
         )
 
-        val normalized = detail.normalizeDivisionDetail(eventId)
+        val normalized = detail.normalizeDivisionDetail()
 
-        assertEquals("Mens Open 18+", normalized.name)
+        assertEquals("DIVISION  OPEN", normalized.name)
     }
 
     @Test

@@ -71,6 +71,8 @@ import com.razumly.mvp.eventCreate.CreateEventComponent.Child
 import com.razumly.mvp.eventCreate.CreateEventComponent.Config
 import com.razumly.mvp.eventDetail.assignedUserIdsForRole
 import com.razumly.mvp.eventDetail.conflictListLabel
+import com.razumly.mvp.eventDetail.duplicateDivisionNames
+import com.razumly.mvp.eventDetail.isTournamentPoolPlayEnabled
 import com.razumly.mvp.eventDetail.EventImageCoordinator
 import com.razumly.mvp.eventDetail.EventImageFailure
 import com.razumly.mvp.eventDetail.EventImageUploadOutcome
@@ -1686,6 +1688,19 @@ class DefaultCreateEventComponent(
             useManualTimeSlots = submission.useManualTimeSlots,
             availableRentalResources = submission.availableRentalResources,
         )?.let { return it }
+
+        val submittedDivisionDetails = (
+            submission.event.divisionDetails +
+                submission.session.canonicalState.playoffDivisionDetails
+            ).distinctBy { detail -> detail.id }
+        if (
+            duplicateDivisionNames(
+                details = submittedDivisionDetails,
+                excludeGeneratedTournamentPools = submission.event.isTournamentPoolPlayEnabled(),
+            ).isNotEmpty()
+        ) {
+            return "Division name must be unique within this event. Choose a different name."
+        }
 
         val hasRentalBackedEventSlots = submission.event.eventType == EventType.EVENT &&
             submission.leagueSlots.any { slot -> slot.isRentalBacked() }

@@ -45,12 +45,12 @@ describe('resolveDivisionDisplayName', () => {
     })).toBe('CoEd Open 18+');
   });
 
-  it('uses simple pool labels for generated tournament pool rows', () => {
+  it('preserves generated tournament pool names', () => {
     const bracketId = 'evt_1__division__c_skill_open_age_18plus';
     const pool = {
       id: `${bracketId}_pool_a`,
       key: 'c_skill_open_age_18plus_pool_a',
-      name: 'Open 18+ Pool A',
+      name: 'Pool A',
       playoffPlacementDivisionIds: [bracketId],
     };
     const index = buildDivisionDisplayNameIndex([pool]);
@@ -67,16 +67,16 @@ describe('resolveDivisionDisplayName', () => {
     })).toBe('Pool A');
   });
 
-  it('cleans legacy metadata names before falling back to inferred labels', () => {
+  it('preserves organizer-owned metadata-like names', () => {
     expect(resolveDivisionDisplayName({
       division: {
         id: 'evt_1__division__c_skill_bb_age_18plus',
         key: 'c_skill_bb_age_18plus',
-        name: 'CoEd Skill BB AGE 18plus',
+        name: 'CoEd  Skill BB / AGE 18plus',
       } as any,
       divisionDetails: [],
       sportInput: 'volleyball',
-    })).toBe('CoEd BB 18+');
+    })).toBe('CoEd  Skill BB / AGE 18plus');
   });
 });
 

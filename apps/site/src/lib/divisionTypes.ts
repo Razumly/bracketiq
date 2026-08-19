@@ -26,6 +26,79 @@ export const isBracketTeamCountEnabled = (
   return Boolean(includePlayoffs) &&
     (normalizedEventType === 'LEAGUE' || normalizedEventType === 'TOURNAMENT');
 };
+
+export type DivisionNameCandidate = {
+  id?: unknown;
+  sourceDivisionId?: unknown;
+  name?: unknown;
+};
+
+export const isGeneratedPhaseDivisionNameCandidate = (
+  candidate: DivisionNameCandidate,
+  sourceDivisionIds: readonly unknown[] = [],
+): boolean => {
+  const id = String(candidate.id ?? '').trim().toLowerCase();
+  const sourceDivisionId = String(candidate.sourceDivisionId ?? '').trim().toLowerCase();
+  const knownSourceDivisionIds = new Set(
+    sourceDivisionIds
+      .map((value) => String(value ?? '').trim().toLowerCase())
+      .filter(Boolean),
+  );
+  return Boolean(
+    id
+    && sourceDivisionId
+    && knownSourceDivisionIds.has(sourceDivisionId)
+    && id.startsWith(`${sourceDivisionId}__phase__`),
+  );
+};
+
+export const normalizeDivisionNameKey = (value: unknown): string => String(value ?? '')
+  .trim()
+  .toLowerCase()
+  .replace(/\s+/g, ' ');
+
+export const findDuplicateDivisionNames = (
+  candidates: readonly DivisionNameCandidate[],
+): string[] => {
+  const seenIds = new Set<string>();
+  const firstNameByKey = new Map<string, string>();
+  const duplicateNameByKey = new Map<string, string>();
+
+  candidates.forEach((candidate) => {
+    const id = String(candidate.id ?? '').trim().toLowerCase();
+    if (id && seenIds.has(id)) {
+      return;
+    }
+    if (id) {
+      seenIds.add(id);
+    }
+
+    const displayName = String(candidate.name ?? '').trim().replace(/\s+/g, ' ');
+    const nameKey = normalizeDivisionNameKey(displayName);
+    if (!nameKey) {
+      return;
+    }
+    const firstName = firstNameByKey.get(nameKey);
+    if (firstName) {
+      duplicateNameByKey.set(nameKey, firstName);
+      return;
+    }
+    firstNameByKey.set(nameKey, displayName);
+  });
+
+  return Array.from(duplicateNameByKey.values());
+};
+
+export class EventDivisionNameValidationError extends Error {
+  readonly duplicateNames: string[];
+
+  constructor(duplicateNames: string[]) {
+    super('Division name must be unique within this event. Choose a different name.');
+    this.name = 'EventDivisionNameValidationError';
+    this.duplicateNames = duplicateNames;
+  }
+}
+
 export const minimumParticipantCountForEventType = (
   eventType: Event['eventType'],
 ): number => eventType === 'TOURNAMENT' ? MIN_BRACKET_TEAM_COUNT : 2;
@@ -641,19 +714,6 @@ const sanitizeTokenPart = (value: string): string => value
   .replace(/[^a-z0-9]+/g, '_')
   .replace(/^_+|_+$/g, '');
 
-export const looksLikeLegacyDivisionMetadataLabel = (value: unknown): boolean => {
-  if (typeof value !== 'string') {
-    return false;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return false;
-  const hasWordSkill = /\bskill\b/.test(normalized);
-  const hasWordAge = /\bage\b/.test(normalized);
-  const startsWithRatingPrefix = /^(?:(?:coed|co-ed|mens|men's|womens|women's)\s+)?(?:skill|age)\b/.test(normalized);
-  const hasTokenPattern = normalized.includes('skill_') && normalized.includes('_age_');
-  return (hasWordSkill && hasWordAge) || startsWithRatingPrefix || hasTokenPattern;
-};
-
 export const cleanDivisionDisplayName = (
   value: unknown,
   fallback: string,
@@ -661,14 +721,7 @@ export const cleanDivisionDisplayName = (
   if (typeof value !== 'string') {
     return fallback;
   }
-  const trimmed = value.trim();
-  if (!trimmed || looksLikeLegacyDivisionMetadataLabel(trimmed)) {
-    return fallback;
-  }
-  return trimmed
-    .replace(/\s*(?:•|â€¢|\/)\s*/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return value.trim() || fallback;
 };
 
 export const normalizeDivisionIdToken = (value: unknown): string | null => {

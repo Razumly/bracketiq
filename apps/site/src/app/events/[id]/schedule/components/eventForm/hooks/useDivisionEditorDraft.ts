@@ -30,7 +30,6 @@ import {
     type DivisionEditorKind,
     type DivisionEditorState,
     type PlayoffDivisionDetailForm,
-    resolveSportInput,
 } from '../divisionForm';
 import { leagueConfigEqual } from '../formEquality';
 import type { EventFormValues } from '../formTypes';
@@ -211,9 +210,8 @@ export const useDivisionEditorDraft = ({
     const updateDivisionEditorSelection = useCallback((
         updates: Partial<Pick<DivisionEditorState, 'gender' | 'skillDivisionTypeId' | 'ageDivisionTypeId'>>,
     ) => {
-        const sportInput = resolveSportInput(eventData.sportConfig ?? eventData.sportIds[0]);
-        setDivisionEditor((previous) => updateDivisionEditorSelectionState(previous, updates, sportInput));
-    }, [eventData.sportConfig, eventData.sportIds]);
+        setDivisionEditor((previous) => updateDivisionEditorSelectionState(previous, updates));
+    }, []);
 
     const handleEditDivisionDetail = useCallback((divisionId: string) => {
         const detail = (eventData.divisionDetails || []).find((entry) => entry.id === divisionId);

@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventCreate
 
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.Facility
@@ -2253,6 +2254,125 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(
             "Add at least one division before creating this event.",
             harness.component.errorState.value?.message,
+        )
+    }
+
+    @Test
+    fun given_duplicate_division_names_when_submitted_then_creation_is_blocked() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        advance()
+        harness.component.selectFieldCount(1)
+        advance()
+        harness.component.setUseManualTimeSlots(true)
+        advance()
+
+        val first = DivisionDetail(
+            id = "division_open",
+            name = "Open",
+            gender = "C",
+            skillDivisionTypeId = "open",
+            ageDivisionTypeId = "adult",
+            maxParticipants = 8,
+            playoffPlacementDivisionIds = listOf("division_playoff"),
+        )
+        val second = DivisionDetail(
+            id = "division_advanced",
+            name = "  open  ",
+            gender = "C",
+            skillDivisionTypeId = "advanced",
+            ageDivisionTypeId = "adult",
+            maxParticipants = 8,
+        )
+        val divisionIds = listOf(first.id, second.id)
+        harness.component.updateEventField {
+            copy(
+                name = "Duplicate Division Names",
+                organizationId = "org-open",
+                divisions = divisionIds,
+                divisionDetails = listOf(first, second),
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_086_400_000),
+            )
+        }
+        harness.component.updateLocalFieldDivisions(0, divisionIds)
+        harness.component.updateLeagueTimeSlot(0) {
+            copy(
+                dayOfWeek = 2,
+                daysOfWeek = listOf(2),
+                divisions = divisionIds,
+                startTimeMinutes = 600,
+                endTimeMinutes = 660,
+                scheduledFieldId = harness.component.localFields.value.first().id,
+            )
+        }
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        assertTrue(harness.eventRepository.createEditorCalls.isEmpty())
+        assertEquals(
+            "Division name must be unique within this event. Choose a different name.",
+            harness.component.errorState.value?.message,
+        )
+        assertEquals(
+            listOf("Open", "  open  "),
+            harness.component.newEventState.value.divisionDetails.map(DivisionDetail::name),
+        )
+    }
+
+    @Test
+    fun given_custom_division_name_when_submitted_then_name_is_preserved() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        advance()
+        harness.component.selectFieldCount(1)
+        advance()
+        harness.component.setUseManualTimeSlots(true)
+        advance()
+
+        val division = DivisionDetail(
+            id = "division_elite",
+            name = "Elite /  18+",
+            gender = "C",
+            skillDivisionTypeId = "open",
+            ageDivisionTypeId = "adult",
+            maxParticipants = 8,
+        )
+        harness.component.updateEventField {
+            copy(
+                name = "Custom Division Name",
+                organizationId = "org-open",
+                divisions = listOf(division.id),
+                divisionDetails = listOf(division),
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_086_400_000),
+            )
+        }
+        harness.component.updateLocalFieldDivisions(0, listOf(division.id))
+        harness.component.updateLeagueTimeSlot(0) {
+            copy(
+                dayOfWeek = 2,
+                daysOfWeek = listOf(2),
+                divisions = listOf(division.id),
+                startTimeMinutes = 600,
+                endTimeMinutes = 660,
+                scheduledFieldId = harness.component.localFields.value.first().id,
+            )
+        }
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        assertEquals(
+            "Elite /  18+",
+            harness.eventRepository.createEditorCalls.single().event.divisionDetails.single().name,
         )
     }
 

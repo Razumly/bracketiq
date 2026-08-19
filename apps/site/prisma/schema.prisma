@@ -822,6 +822,7 @@ model Divisions {
   organizationId                      String?
   scope                               DivisionScopeEnum  @default(EVENT)
   role                                DivisionRoleEnum   @default(ENTRY)
+  isSystemGenerated                   Boolean            @default(false)
   phase                               DivisionPhaseEnum?
   status                              DivisionStatusEnum @default(ACTIVE)
   sourceDivisionId                    String?

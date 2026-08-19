@@ -26,7 +26,12 @@ import {
     normalizeSlotDivisionKeysWithLookup,
 } from './divisionForm';
 import { hasAffiliateUrl, isTournamentPoolPlayFormEnabled, supportsScheduleSlotsForEvent } from './eventRules';
-import { MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
+import {
+    findDuplicateDivisionNames,
+    isGeneratedPhaseDivisionNameCandidate,
+    MIN_BRACKET_TEAM_COUNT,
+    normalizeDivisionNameKey,
+} from '@/lib/divisionTypes';
 import { BRACKET_TEAM_COUNT_ERROR } from './divisionMessages';
 import { coordinatesAreSet } from './locationHelpers';
 import { isEventLocalField } from './resourceGroups';
@@ -264,6 +269,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
         playoffDivisionDetails: z.array(
             z.object({
                 id: z.string().trim().min(1),
+                sourceDivisionId: z.string().trim().min(1).optional(),
                 key: z.string().trim().min(1),
                 kind: z.literal('PLAYOFF').default('PLAYOFF'),
                 name: z.string().trim().min(1),
@@ -353,6 +359,44 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
         joinAsParticipant: z.boolean(),
     })
     .superRefine((values, ctx) => {
+        const sourceDivisionIds = values.divisionDetails.map((detail) => detail.id);
+        const namedDivisionCandidates = [
+            ...values.divisionDetails.map((detail, index) => ({
+                detail,
+                path: ['divisionDetails', index, 'name'] as const,
+            })),
+            ...values.playoffDivisionDetails.map((detail, index) => ({
+                detail,
+                path: ['playoffDivisionDetails', index, 'name'] as const,
+            })),
+        ].filter(
+            ({ detail }) => !isGeneratedPhaseDivisionNameCandidate(detail, sourceDivisionIds),
+        );
+        const duplicateNameKeys = new Set(
+            findDuplicateDivisionNames(namedDivisionCandidates.map(({ detail }) => detail))
+                .map(normalizeDivisionNameKey),
+        );
+        const seenDivisionIds = new Set<string>();
+        const seenDivisionNameKeys = new Set<string>();
+        namedDivisionCandidates.forEach(({ detail, path }) => {
+            const id = detail.id.trim().toLowerCase();
+            if (id && seenDivisionIds.has(id)) {
+                return;
+            }
+            if (id) {
+                seenDivisionIds.add(id);
+            }
+            const nameKey = normalizeDivisionNameKey(detail.name);
+            if (duplicateNameKeys.has(nameKey) && seenDivisionNameKeys.has(nameKey)) {
+                ctx.addIssue({
+                    code: 'custom',
+                    message: 'Division name must be unique within this event. Choose a different name.',
+                    path: [...path],
+                });
+            }
+            seenDivisionNameKeys.add(nameKey);
+        });
+
         const sportConfig = values.sportConfig && typeof values.sportConfig === 'object'
             ? values.sportConfig as Record<string, unknown>
             : null;

@@ -21,6 +21,8 @@ import {
 } from "@/lib/manualRegistrationPayments";
 import {
   buildDivisionToken,
+  EventDivisionNameValidationError,
+  findDuplicateDivisionNames,
   MIN_BRACKET_TEAM_COUNT,
   normalizeBracketTeamCount,
   buildEventDivisionId,
@@ -126,7 +128,6 @@ type PrismaLike = PrismaClient | any;
 
 const normalizeLegacyBracketTeamCount = (value: unknown): number =>
   Math.max(MIN_BRACKET_TEAM_COUNT, normalizeBracketTeamCount(value));
-
 
 export type EventFieldScheduleConflict = {
   fieldId: string;
@@ -1365,19 +1366,21 @@ const buildDivisionDisplayName = (
   sportId?: string | null,
 ): string => {
   if (!key.length) return "Open";
-  const inferred = inferDivisionDetails({
-    identifier: key,
-    sportInput: sportId ?? undefined,
-  });
-  if (inferred.defaultName && inferred.defaultName.trim().length > 0) {
-    return inferred.defaultName;
-  }
-  return key
+  const literalName = key
     .replace(/[_-]+/g, " ")
     .split(" ")
     .filter((chunk) => chunk.length > 0)
     .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
     .join(" ");
+  const normalizedKey = key.trim().toLowerCase().replace(/-/g, "_");
+  if (!/(?:^|_)skill_|(?:^|_)age_/.test(normalizedKey)) {
+    return literalName || "Open";
+  }
+  const inferred = inferDivisionDetails({
+    identifier: key,
+    sportInput: sportId ?? undefined,
+  });
+  return inferred.defaultName?.trim() || literalName || "Open";
 };
 
 const buildDivisionId = (eventId: string, key: string): string =>
@@ -2494,28 +2497,51 @@ const buildDivisions = (
 
   return { divisions: result, map, fieldIdsByDivision };
 };
-const isGeneratedPhaseDivisionRow = (row: any): boolean => {
-  const role = String(row?.role ?? "")
-    .trim()
-    .toUpperCase();
-  const phase = String(row?.phase ?? "")
-    .trim()
-    .toLowerCase();
-  const sourceDivisionId =
-    typeof row?.sourceDivisionId === "string"
-      ? row.sourceDivisionId.trim()
-      : "";
-  const id = typeof row?.id === "string" ? row.id.trim().toLowerCase() : "";
-  const key =
-    typeof row?.key === "string" ? row.key.trim().toLowerCase() : "";
-  const generatedKeySuffix = `__phase__${phase}`;
-  return (
-    role === "PHASE" &&
-    Boolean(sourceDivisionId) &&
-    Boolean(phase) &&
-    id === `${sourceDivisionId.toLowerCase()}__phase__${phase}` &&
-    (!key || key.endsWith(generatedKeySuffix))
-  );
+
+const collectSystemGeneratedDivisionIds = (
+  rows: readonly any[],
+): Set<string> => {
+  const systemGeneratedIds = new Set<string>();
+  rows.forEach((row) => {
+    if (row?.isSystemGenerated !== true) {
+      return;
+    }
+    const id = normalizeDivisionKey(row?.id);
+    if (id) {
+      systemGeneratedIds.add(id);
+    }
+  });
+  return systemGeneratedIds;
+};
+
+const assertUniqueSubmittedEventDivisionNames = (
+  payload: any,
+  systemGeneratedDivisionIds: ReadonlySet<string> = new Set(),
+  systemGeneratedEntryIds: ReadonlySet<string> = new Set(),
+): void => {
+  const candidates = [
+    ...(Array.isArray(payload?.divisionDetails) ? payload.divisionDetails : []),
+    ...(Array.isArray(payload?.playoffDivisionDetails)
+      ? payload.playoffDivisionDetails
+      : []),
+  ].filter((candidate) => {
+    const id = normalizeDivisionKey(candidate?.id);
+    if (!id || !systemGeneratedDivisionIds.has(id)) {
+      return true;
+    }
+    if (systemGeneratedEntryIds.has(id)) {
+      return false;
+    }
+    const role = String(candidate?.role ?? "")
+      .trim()
+      .toUpperCase();
+    const kind = normalizeDivisionKind(candidate?.kind, "LEAGUE");
+    return role !== "PHASE" && kind !== "PLAYOFF";
+  });
+  const duplicateNames = findDuplicateDivisionNames(candidates);
+  if (duplicateNames.length > 0) {
+    throw new EventDivisionNameValidationError(duplicateNames);
+  }
 };
 
 const serializeDivisionDetailsForTemplate = (
@@ -3597,10 +3623,13 @@ const buildMatches = (
         hasBracketLinks,
       });
     const officialPositionsForMatch =
-      division.phaseSettings?.[competitionPhase]?.officialPositions
-      ?? event.officialPositions;
+      division.phaseSettings?.[competitionPhase]?.officialPositions ??
+      event.officialPositions;
     const positionCountsForMatch = new Map(
-      officialPositionsForMatch.map((position) => [position.id, position.count]),
+      officialPositionsForMatch.map((position) => [
+        position.id,
+        position.count,
+      ]),
     );
     let officialAssignments: MatchOfficialAssignment[] = [];
     try {
@@ -4011,10 +4040,7 @@ export const loadEventWithRelations = async (
     const phaseDivisionId = normalizeDivisionKey(row.id);
     if (!phaseDivisionId) continue;
     const sourceDivisionIds = [
-      ...(
-        phaseSourceDivisionIdsByPhase.get(phaseDivisionId) ??
-        []
-      ),
+      ...(phaseSourceDivisionIdsByPhase.get(phaseDivisionId) ?? []),
       normalizeDivisionKey(row.sourceDivisionId),
     ].filter((id): id is string => Boolean(id));
     const inheritedFieldIds = sourceDivisionIds.flatMap(
@@ -4317,7 +4343,10 @@ export const loadEventWithRelations = async (
   );
   const timeSlots = buildTimeSlots(timeSlotRows, divisionMap, allDivisions);
   const phaseDivisionsBySource = new Map<string, Division[]>();
-  const addPhaseSource = (phaseDivisionId: string, sourceDivisionId: string) => {
+  const addPhaseSource = (
+    phaseDivisionId: string,
+    sourceDivisionId: string,
+  ) => {
     const normalizedPhaseId = normalizeDivisionKey(phaseDivisionId);
     const normalizedSourceId = normalizeDivisionKey(sourceDivisionId);
     if (!normalizedPhaseId || !normalizedSourceId) {
@@ -4336,13 +4365,17 @@ export const loadEventWithRelations = async (
       phaseDivisions.push(phaseDivision);
     }
     phaseDivisionsBySource.set(normalizedSourceId, phaseDivisions);
-    const sourceIds = phaseSourceDivisionIdsByPhase.get(normalizedPhaseId) ?? [];
+    const sourceIds =
+      phaseSourceDivisionIdsByPhase.get(normalizedPhaseId) ?? [];
     if (!sourceIds.includes(normalizedSourceId)) {
       sourceIds.push(normalizedSourceId);
       phaseSourceDivisionIdsByPhase.set(normalizedPhaseId, sourceIds);
     }
   };
-  for (const [phaseDivisionId, sourceDivisionIds] of phaseSourceDivisionIdsByPhase.entries()) {
+  for (const [
+    phaseDivisionId,
+    sourceDivisionIds,
+  ] of phaseSourceDivisionIdsByPhase.entries()) {
     for (const sourceDivisionId of sourceDivisionIds) {
       addPhaseSource(phaseDivisionId, sourceDivisionId);
     }
@@ -4365,7 +4398,10 @@ export const loadEventWithRelations = async (
     }
   }
   const relatedPhaseDivisionsByPhaseId = new Map<string, Division[]>();
-  for (const [phaseDivisionId, sourceDivisionIds] of phaseSourceDivisionIdsByPhase.entries()) {
+  for (const [
+    phaseDivisionId,
+    sourceDivisionIds,
+  ] of phaseSourceDivisionIdsByPhase.entries()) {
     const phaseDivision = divisionMap.get(phaseDivisionId);
     if (!phaseDivision) {
       throw new Error(
@@ -4380,8 +4416,12 @@ export const loadEventWithRelations = async (
     const isFinalPhase = phase === "PLAYOFF" || phase === "BRACKET";
     if (isRegularPhase || isFinalPhase) {
       for (const sourceDivisionId of sourceDivisionIds) {
-        for (const relatedPhaseDivision of phaseDivisionsBySource.get(sourceDivisionId) ?? []) {
-          const relatedPhase = String(relatedPhaseDivision.phase ?? "").toUpperCase();
+        for (const relatedPhaseDivision of phaseDivisionsBySource.get(
+          sourceDivisionId,
+        ) ?? []) {
+          const relatedPhase = String(
+            relatedPhaseDivision.phase ?? "",
+          ).toUpperCase();
           const isRelatedRegularPhase =
             relatedPhase === "LEAGUE" || relatedPhase === "POOL";
           const isRelatedFinalPhase =
@@ -4406,9 +4446,10 @@ export const loadEventWithRelations = async (
     );
     for (const division of timeSlot.divisions) {
       const divisionId = normalizeDivisionKey(division.id) ?? division.id;
-      const sourcePhaseDivisions = relatedPhaseDivisionsByPhaseId.get(divisionId)
-        ?? phaseDivisionsBySource.get(divisionId)
-        ?? [];
+      const sourcePhaseDivisions =
+        relatedPhaseDivisionsByPhaseId.get(divisionId) ??
+        phaseDivisionsBySource.get(divisionId) ??
+        [];
       for (const phaseDivision of sourcePhaseDivisions) {
         expandedDivisions.set(phaseDivision.id, phaseDivision);
       }
@@ -4658,7 +4699,7 @@ export const loadEventWithRelations = async (
   const explicitPlayoffRows = hydratedDivisionRows.filter(
     (row: any) =>
       normalizeDivisionKind(row?.kind, "LEAGUE") === "PLAYOFF" &&
-      !isGeneratedPhaseDivisionRow(row),
+      row?.isSystemGenerated !== true,
   );
   (constructed as any).divisionDetails =
     serializeDivisionDetailsForTemplate(entryDivisionRows);
@@ -4724,8 +4765,8 @@ export const saveMatches = async (
         hasBracketLinks: isBracketMatch,
       });
     const officialPositionsForMatch =
-      match.division?.phaseSettings?.[matchPhase]?.officialPositions
-      ?? persistedOfficialPositions;
+      match.division?.phaseSettings?.[matchPhase]?.officialPositions ??
+      persistedOfficialPositions;
     const legacyOfficialAssignments =
       !rawOfficialAssignments.length && officialPositionsForMatch
         ? buildLegacyOfficialAssignment({
@@ -4946,8 +4987,7 @@ export const persistScheduledRosterTeams = async (
   });
   const now = new Date();
   // Prisma and test clients share the phase persistence delegates.
-  const phasePersistenceClient =
-    client as unknown as PhasePersistenceClient;
+  const phasePersistenceClient = client as unknown as PhasePersistenceClient;
   const shouldRemoveOmittedPlaceholderTeams =
     params.removeOmittedPlaceholderTeams !== false;
 
@@ -4960,15 +5000,16 @@ export const persistScheduledRosterTeams = async (
     .map((division) => division.id)
     .filter((divisionId) => scheduledDivisionIds.includes(divisionId));
   const sourceDivisionIdByPhase = new Map<string, string>();
-  const phaseSourceRows = typeof (client as any).eventDivisionPhaseSources?.findMany === "function"
-    ? await (client as any).eventDivisionPhaseSources.findMany({
-      where: {
-        eventId: params.eventId,
-        phaseDivisionId: { in: phaseDivisionIds },
-      },
-      select: { phaseDivisionId: true, entryDivisionId: true },
-    })
-    : [];
+  const phaseSourceRows =
+    typeof (client as any).eventDivisionPhaseSources?.findMany === "function"
+      ? await (client as any).eventDivisionPhaseSources.findMany({
+          where: {
+            eventId: params.eventId,
+            phaseDivisionId: { in: phaseDivisionIds },
+          },
+          select: { phaseDivisionId: true, entryDivisionId: true },
+        })
+      : [];
   for (const row of phaseSourceRows as any[]) {
     const phaseDivisionId = normalizeDivisionKey(row.phaseDivisionId);
     const entryDivisionId = normalizeDivisionKey(row.entryDivisionId);
@@ -4976,7 +5017,10 @@ export const persistScheduledRosterTeams = async (
       sourceDivisionIdByPhase.set(phaseDivisionId, entryDivisionId);
     }
   }
-  if (phaseDivisionIds.length && typeof client.divisions?.findMany === "function") {
+  if (
+    phaseDivisionIds.length &&
+    typeof client.divisions?.findMany === "function"
+  ) {
     const phaseRows = await client.divisions.findMany({
       where: {
         eventId: params.eventId,
@@ -4989,7 +5033,11 @@ export const persistScheduledRosterTeams = async (
     for (const row of phaseRows as any[]) {
       const phaseDivisionId = normalizeDivisionKey(row.id);
       const entryDivisionId = normalizeDivisionKey(row.sourceDivisionId);
-      if (phaseDivisionId && entryDivisionId && !sourceDivisionIdByPhase.has(phaseDivisionId)) {
+      if (
+        phaseDivisionId &&
+        entryDivisionId &&
+        !sourceDivisionIdByPhase.has(phaseDivisionId)
+      ) {
         sourceDivisionIdByPhase.set(phaseDivisionId, entryDivisionId);
       }
     }
@@ -5001,7 +5049,7 @@ export const persistScheduledRosterTeams = async (
       if (!normalizedDivisionId) continue;
       const isPhaseDivision = phaseDivisionIds.includes(division.id);
       const ownerDivisionId = isPhaseDivision
-        ? sourceDivisionIdByPhase.get(normalizedDivisionId) ?? division.id
+        ? (sourceDivisionIdByPhase.get(normalizedDivisionId) ?? division.id)
         : division.id;
       if (!ids.includes(ownerDivisionId)) ids.push(ownerDivisionId);
     }
@@ -5030,7 +5078,7 @@ export const persistScheduledRosterTeams = async (
     addDivisionAliases(
       divisionId,
       phaseDivisionIds.includes(division.id)
-        ? sourceDivisionIdByPhase.get(divisionId) ?? divisionId
+        ? (sourceDivisionIdByPhase.get(divisionId) ?? divisionId)
         : divisionId,
     );
   }
@@ -5327,108 +5375,87 @@ export const syncEventDivisions = async (
 ) => {
   const usesRelativeInstallmentDueDates =
     String(params.eventType ?? "").toUpperCase() === "WEEKLY_EVENT";
-  const normalizedDivisionIds = normalizeDivisionIdentifierList(
+  const submittedDivisionIds = normalizeDivisionIdentifierList(
     params.divisionIds,
     params.eventId,
   );
-  const divisionIds = normalizedDivisionIds.length
-    ? normalizedDivisionIds
-    : [buildDivisionId(params.eventId, DEFAULT_DIVISION_KEY)];
   const divisionFieldMap = params.divisionFieldMap ?? {};
   const allowedFieldIds = new Set(
     params.fieldIds.map((fieldId) => String(fieldId)),
   );
 
-  const normalizedLeagueDetails = normalizeDivisionDetailsPayload(
+  const submittedLeagueDetails = normalizeDivisionDetailsPayload(
     params.divisionDetails ?? [],
     params.eventId,
     params.sportId,
     "LEAGUE",
   );
-  const normalizedPlayoffDetails = normalizeDivisionDetailsPayload(
+  const submittedPlayoffDetails = normalizeDivisionDetailsPayload(
     params.playoffDivisionDetails ?? [],
     params.eventId,
     params.sportId,
     "PLAYOFF",
   );
-  const allNormalizedDetails = [
-    ...normalizedLeagueDetails,
-    ...normalizedPlayoffDetails,
-  ];
-  const detailLookup = new Map<string, DivisionDetailPayload>();
-  for (const detail of allNormalizedDetails) {
-    const aliases = new Set<string>([
-      detail.id,
-      detail.key,
-      extractDivisionTokenFromId(detail.id) ?? "",
-    ]);
-    aliases.forEach((alias) => {
-      const normalized = normalizeDivisionKey(alias);
-      if (!normalized) return;
-      detailLookup.set(normalized, detail);
-    });
-  }
 
-  const persistedRows = (
-    await client.divisions.findMany({
-      where: {
-        eventId: params.eventId,
-        role: { in: ["ENTRY", "PHASE"] },
-        status: "ACTIVE",
-      },
-      select: {
-        id: true,
-        sourceDivisionId: true,
-        key: true,
-        name: true,
-        sportId: true,
-        price: true,
-        maxParticipants: true,
-        playoffTeamCount: true,
-        allowPaymentPlans: true,
-        installmentCount: true,
-        installmentDueDates: true,
-        installmentDueRelativeDays: true,
-        installmentAmounts: true,
-        divisionTypeId: true,
-        skillDivisionTypeId: true,
-        ageDivisionTypeId: true,
-        ratingType: true,
-        gender: true,
-        ageCutoffDate: true,
-        ageCutoffLabel: true,
-        ageCutoffSource: true,
-        kind: true,
-        sortOrder: true,
-        role: true,
-        phase: true,
-        playoffPlacementDivisionIds: true,
-        standingsOverrides: true,
-        phaseSettings: true,
-        gamesPerOpponent: true,
-        restTimeMinutes: true,
-        usesSets: true,
-        matchDurationMinutes: true,
-        setDurationMinutes: true,
-        setsPerMatch: true,
-        pointsToVictory: true,
-        playoffDoubleElimination: true,
-        playoffWinnerSetCount: true,
-        playoffLoserSetCount: true,
-        playoffWinnerBracketPointsToVictory: true,
-        playoffLoserBracketPointsToVictory: true,
-        playoffPrize: true,
-        playoffFieldCount: true,
-        playoffRestTimeMinutes: true,
-        playoffMatchDurationMinutes: true,
-        playoffSetDurationMinutes: true,
-        standingsConfirmedAt: true,
-        standingsConfirmedBy: true,
-        teamIds: true,
-        fieldIds: true,
-      },
-    })
-  );
+  const persistedRows = await client.divisions.findMany({
+    where: {
+      eventId: params.eventId,
+      role: { in: ["ENTRY", "PHASE"] },
+      status: "ACTIVE",
+    },
+    select: {
+      id: true,
+      sourceDivisionId: true,
+      key: true,
+      name: true,
+      sportId: true,
+      price: true,
+      maxParticipants: true,
+      playoffTeamCount: true,
+      allowPaymentPlans: true,
+      installmentCount: true,
+      installmentDueDates: true,
+      installmentDueRelativeDays: true,
+      installmentAmounts: true,
+      divisionTypeId: true,
+      skillDivisionTypeId: true,
+      ageDivisionTypeId: true,
+      ratingType: true,
+      gender: true,
+      ageCutoffDate: true,
+      ageCutoffLabel: true,
+      ageCutoffSource: true,
+      kind: true,
+      sortOrder: true,
+      role: true,
+      phase: true,
+      playoffPlacementDivisionIds: true,
+      isSystemGenerated: true,
+      standingsOverrides: true,
+      phaseSettings: true,
+      gamesPerOpponent: true,
+      restTimeMinutes: true,
+      usesSets: true,
+      matchDurationMinutes: true,
+      setDurationMinutes: true,
+      setsPerMatch: true,
+      pointsToVictory: true,
+      playoffDoubleElimination: true,
+      playoffWinnerSetCount: true,
+      playoffLoserSetCount: true,
+      playoffWinnerBracketPointsToVictory: true,
+      playoffLoserBracketPointsToVictory: true,
+      playoffPrize: true,
+      playoffFieldCount: true,
+      playoffRestTimeMinutes: true,
+      playoffMatchDurationMinutes: true,
+      playoffSetDurationMinutes: true,
+      standingsConfirmedAt: true,
+      standingsConfirmedBy: true,
+      teamIds: true,
+      fieldIds: true,
+    },
+  });
   const existingRows = persistedRows.filter(
     (row: any) => String(row.role ?? "").toUpperCase() !== "PHASE",
   );
@@ -5438,14 +5465,8 @@ export const syncEventDivisions = async (
       normalizeDivisionKind(row.kind, "LEAGUE") === "PLAYOFF",
   );
 
-  const existingById = new Map<
-    string,
-    (typeof existingLookupRows)[number]
-  >();
-  const existingByKey = new Map<
-    string,
-    (typeof existingLookupRows)[number]
-  >();
+  const existingById = new Map<string, (typeof existingLookupRows)[number]>();
+  const existingByKey = new Map<string, (typeof existingLookupRows)[number]>();
   for (const row of existingLookupRows) {
     const normalizedId = normalizeDivisionKey(row.id);
     if (normalizedId) {
@@ -5467,6 +5488,72 @@ export const syncEventDivisions = async (
     eventType: normalizedEventType,
     includePlayoffs: params.includePlayoffs,
   });
+  const submittedLeagueDetailIds = new Set(
+    submittedLeagueDetails
+      .map((detail) => normalizeDivisionKey(detail.id))
+      .filter((id): id is string => Boolean(id)),
+  );
+  const ignoredSystemGeneratedDivisionIds = new Set(
+    persistedRows
+      .filter((row: any) => {
+        if (row.isSystemGenerated !== true) {
+          return false;
+        }
+        const role = String(row.role ?? "")
+          .trim()
+          .toUpperCase();
+        return role === "PHASE" || !tournamentPoolPlayEnabled;
+      })
+      .map((row: any) => normalizeDivisionKey(row.id))
+      .filter((id: string | null): id is string => Boolean(id)),
+  );
+  const isIgnoredSystemGeneratedDivision = (id: unknown): boolean => {
+    const normalizedId = normalizeDivisionKey(id);
+    return Boolean(
+      normalizedId && ignoredSystemGeneratedDivisionIds.has(normalizedId),
+    );
+  };
+  const normalizedLeagueDetails = submittedLeagueDetails.filter(
+    (detail) => !isIgnoredSystemGeneratedDivision(detail.id),
+  );
+  const normalizedPlayoffDetails = submittedPlayoffDetails.filter((detail) => {
+    const id = normalizeDivisionKey(detail.id);
+    const regularTournamentProjection =
+      normalizedEventType === "TOURNAMENT" &&
+      !tournamentPoolPlayEnabled &&
+      Boolean(id && submittedLeagueDetailIds.has(id));
+    return (
+      !regularTournamentProjection &&
+      !isIgnoredSystemGeneratedDivision(detail.id)
+    );
+  });
+  const activeSubmittedDivisionIds = submittedDivisionIds.filter(
+    (id) => !isIgnoredSystemGeneratedDivision(id),
+  );
+  const divisionIds = activeSubmittedDivisionIds.length
+    ? activeSubmittedDivisionIds
+    : [buildDivisionId(params.eventId, DEFAULT_DIVISION_KEY)];
+  const detailLookup = new Map<string, DivisionDetailPayload>();
+  for (const detail of [
+    ...normalizedLeagueDetails,
+    ...normalizedPlayoffDetails,
+  ]) {
+    const aliases = new Set<string>([
+      detail.id,
+      detail.key,
+      extractDivisionTokenFromId(detail.id) ?? "",
+    ]);
+    aliases.forEach((alias) => {
+      const normalized = normalizeDivisionKey(alias);
+      if (!normalized) return;
+      detailLookup.set(normalized, detail);
+    });
+  }
+  const trustedInternalDivisionIds = collectSystemGeneratedDivisionIds(
+    persistedRows.filter(
+      (row: any) => !isIgnoredSystemGeneratedDivision(row.id),
+    ),
+  );
   const normalizedDefaultPlayoffTeamCount = params.includePlayoffs
     ? resolveLeaguePlayoffTeamCount(
         params.defaultPlayoffTeamCount,
@@ -5539,6 +5626,10 @@ export const syncEventDivisions = async (
           teamIds: pool.teamIds,
         };
         generatedPoolEntryIds.push(entryDetail.id);
+        const generatedPoolId = normalizeDivisionKey(entryDetail.id);
+        if (generatedPoolId) {
+          trustedInternalDivisionIds.add(generatedPoolId);
+        }
         const aliases = new Set<string>([
           entryDetail.id,
           entryDetail.key,
@@ -5689,11 +5780,14 @@ export const syncEventDivisions = async (
         normalizedTypeIds;
       const key =
         detail?.key ??
-        buildDivisionToken({
-          gender,
-          ratingType,
-          divisionTypeId,
-        });
+        existing?.key ??
+        (detail || existing
+          ? buildDivisionToken({
+              gender,
+              ratingType,
+              divisionTypeId,
+            })
+          : fallbackIdentifier);
       const divisionTypeName = deriveDivisionTypeDisplayName({
         sportInput: params.sportId ?? undefined,
         gender,
@@ -5702,33 +5796,32 @@ export const syncEventDivisions = async (
       });
 
       const mappedFieldIds = (() => {
-              const fieldMapAliases = Array.from(
-                new Set(
-                  [
-                    normalizedDivisionId,
-                    persistedId,
-                    key,
-                    detail?.id,
-                    detail?.key,
-                    extractDivisionTokenFromId(normalizedDivisionId),
-                    extractDivisionTokenFromId(persistedId),
-                  ]
-                    .map((alias) => normalizeDivisionKey(alias))
-                    .filter((alias): alias is string => Boolean(alias)),
-                ),
-              );
-              return Array.from(
-                new Set([
-                  ...fieldMapAliases.flatMap((alias) =>
-                    ensureStringArray(divisionFieldMap[alias]),
-                  ),
-                  ...ensureStringArray(detail?.fieldIds),
-                ]),
-              ).filter(
-                (fieldId) =>
-                  !allowedFieldIds.size || allowedFieldIds.has(fieldId),
-              );
-            })();
+        const fieldMapAliases = Array.from(
+          new Set(
+            [
+              normalizedDivisionId,
+              persistedId,
+              key,
+              detail?.id,
+              detail?.key,
+              extractDivisionTokenFromId(normalizedDivisionId),
+              extractDivisionTokenFromId(persistedId),
+            ]
+              .map((alias) => normalizeDivisionKey(alias))
+              .filter((alias): alias is string => Boolean(alias)),
+          ),
+        );
+        return Array.from(
+          new Set([
+            ...fieldMapAliases.flatMap((alias) =>
+              ensureStringArray(divisionFieldMap[alias]),
+            ),
+            ...ensureStringArray(detail?.fieldIds),
+          ]),
+        ).filter(
+          (fieldId) => !allowedFieldIds.size || allowedFieldIds.has(fieldId),
+        );
+      })();
       const mappedTeamIds =
         kind === "PLAYOFF" || params.singleDivision
           ? []
@@ -5744,11 +5837,15 @@ export const syncEventDivisions = async (
         kind === "PLAYOFF" && !isTournamentBracketDivision
           ? { minRating: null, maxRating: null }
           : divisionRatingWindow(key, params.sportId ?? null);
+      const fallbackName =
+        detail || existing
+          ? divisionTypeName ||
+            inferred.defaultName ||
+            buildDivisionDisplayName(key, params.sportId ?? null)
+          : buildDivisionDisplayName(key, params.sportId ?? null);
       const name = cleanDivisionDisplayName(
         detail?.name ?? existing?.name,
-        divisionTypeName ||
-          inferred.defaultName ||
-          buildDivisionDisplayName(key, params.sportId ?? null),
+        fallbackName,
       );
       const ageEligibility =
         kind === "PLAYOFF" && !isTournamentBracketDivision
@@ -5806,8 +5903,7 @@ export const syncEventDivisions = async (
         ],
       });
       const maxParticipants =
-        normalizedEventType === "TOURNAMENT" &&
-        !isGeneratedTournamentPool
+        normalizedEventType === "TOURNAMENT" && !isGeneratedTournamentPool
           ? normalizeLegacyBracketTeamCount(rawMaxParticipants)
           : rawMaxParticipants;
       const rawPlayoffTeamCount =
@@ -5953,6 +6049,9 @@ export const syncEventDivisions = async (
         id: persistedId,
         sourceDivisionId:
           detail?.sourceDivisionId ?? existing?.sourceDivisionId ?? null,
+        isSystemGenerated: Boolean(
+          persistedId && trustedInternalDivisionIds.has(persistedId),
+        ),
         key,
         name,
         kind,
@@ -5995,6 +6094,16 @@ export const syncEventDivisions = async (
         teamIds: mappedTeamIds,
       };
     });
+
+  const duplicateDivisionNames = findDuplicateDivisionNames(
+    finalEntries.filter((entry) => {
+      const id = normalizeDivisionKey(entry.id);
+      return !id || !trustedInternalDivisionIds.has(id);
+    }),
+  );
+  if (duplicateDivisionNames.length > 0) {
+    throw new EventDivisionNameValidationError(duplicateDivisionNames);
+  }
 
   if (!params.singleDivision || tournamentPoolPlayEnabled) {
     const teamDivisionMap = new Map<string, string>();
@@ -6065,6 +6174,7 @@ export const syncEventDivisions = async (
         scope: "EVENT",
         status: "ACTIVE",
         role: entry.kind === "PLAYOFF" ? "PHASE" : "ENTRY",
+        isSystemGenerated: entry.isSystemGenerated,
         phase:
           entry.kind === "PLAYOFF"
             ? tournamentPoolPlayEnabled
@@ -6136,6 +6246,7 @@ export const syncEventDivisions = async (
         sortOrder: entry.sortOrder,
         eventId: params.eventId,
         role: entry.kind === "PLAYOFF" ? "PHASE" : "ENTRY",
+        isSystemGenerated: entry.isSystemGenerated,
         phase:
           entry.kind === "PLAYOFF"
             ? tournamentPoolPlayEnabled
@@ -6238,6 +6349,7 @@ export const upsertEventFromPayload = async (
       fieldIds: true,
       timeSlotIds: true,
       eventType: true,
+      includePlayoffs: true,
       end: true,
       scheduleEndConstraint: true,
       generatedScheduleEnd: true,
@@ -6246,10 +6358,6 @@ export const upsertEventFromPayload = async (
       assistantHostIds: true,
       organizationId: true,
       parentEvent: true,
-      affiliateUrl: true,
-      registrationPaymentMode: true as any,
-      manualPaymentLinks: true as any,
-      manualPaymentInstructions: true as any,
       location: true,
       officialPositions: true as any,
       officialSchedulingMode: true as any,
@@ -6262,6 +6370,49 @@ export const upsertEventFromPayload = async (
       timeZone: true,
     },
   });
+  const divisionNameEventType = payload.eventType ?? existingEvent?.eventType;
+  const divisionNamePoolPlayEnabled = isTournamentPoolPlayEnabled({
+    eventType: divisionNameEventType,
+    includePlayoffsOrPools:
+      payload.includePlayoffsOrPools ??
+      payload.includePlayoffs ??
+      existingEvent?.includePlayoffs,
+  });
+  const persistedInternalDivisionRows = existingEvent
+    ? await client.divisions.findMany({
+        where: {
+          eventId: id,
+          role: { in: ["ENTRY", "PHASE"] },
+          status: "ACTIVE",
+        },
+        select: {
+          id: true,
+          key: true,
+          kind: true,
+          role: true,
+          phase: true,
+          sourceDivisionId: true,
+          isSystemGenerated: true,
+          playoffPlacementDivisionIds: true,
+        },
+      })
+    : [];
+  const systemGeneratedDivisionIds = collectSystemGeneratedDivisionIds(
+    persistedInternalDivisionRows,
+  );
+  const systemGeneratedEntryIds = collectSystemGeneratedDivisionIds(
+    persistedInternalDivisionRows.filter(
+      (row: any) =>
+        String(row.role ?? "")
+          .trim()
+          .toUpperCase() === "ENTRY",
+    ),
+  );
+  assertUniqueSubmittedEventDivisionNames(
+    payload,
+    systemGeneratedDivisionIds,
+    systemGeneratedEntryIds,
+  );
   const resolvedOrganizationId =
     normalizeEntityId(payload.organizationId) ??
     normalizeEntityId(existingEvent?.organizationId);
@@ -7055,10 +7206,8 @@ export const upsertEventFromPayload = async (
     !isManualRegistrationPayment
       ? ensureNumberArray(payload.installmentAmounts)
       : [];
-  const hasLegacyOfficialSchedulingModeInput = Object.prototype.hasOwnProperty.call(
-    payload,
-    "officialSchedulingMode",
-  );
+  const hasLegacyOfficialSchedulingModeInput =
+    Object.prototype.hasOwnProperty.call(payload, "officialSchedulingMode");
   const legacyOfficialSchedulingMode = normalizeOfficialSchedulingMode(
     payload.officialSchedulingMode,
     normalizeOfficialSchedulingMode(
@@ -7133,7 +7282,6 @@ export const upsertEventFromPayload = async (
     const existingMatchRulesOverride = (existingEvent as any)
       ?.matchRulesOverride;
     if (
-
       existingMatchRulesOverride &&
       typeof existingMatchRulesOverride === "object" &&
       !Array.isArray(existingMatchRulesOverride)

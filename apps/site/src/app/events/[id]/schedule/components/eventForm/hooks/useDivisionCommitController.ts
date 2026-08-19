@@ -8,8 +8,10 @@ import {
     buildDivisionName,
     buildDivisionToken,
     getDivisionTypeById,
+    isGeneratedPhaseDivisionNameCandidate,
     MIN_BRACKET_TEAM_COUNT,
     minimumParticipantCountForEventType,
+    normalizeDivisionNameKey,
 } from '@/lib/divisionTypes';
 import type {
     LeagueConfig,
@@ -30,7 +32,6 @@ import {
     applyDivisionAgeCutoff,
     buildCompositeDivisionTypeId,
     buildUniqueDivisionIdForToken,
-    normalizeDivisionNameKey,
     normalizeDivisionTokenPart,
     normalizePlacementDivisionIds,
     normalizePlayoffDivisionParticipantCount,
@@ -139,15 +140,24 @@ export const useDivisionCommitController = ({
             const currentPlayoffDivisions = Array.isArray(eventData.playoffDivisionDetails)
                 ? [...eventData.playoffDivisionDetails]
                 : [];
+            const sourceDivisionIds = Array.isArray(eventData.divisionDetails)
+                ? eventData.divisionDetails.map((detail) => detail.id)
+                : [];
+            const divisionNameCandidates = [
+                ...currentPlayoffDivisions,
+                ...(Array.isArray(eventData.divisionDetails) ? eventData.divisionDetails : []),
+            ].filter(
+                (detail) => !isGeneratedPhaseDivisionNameCandidate(detail, sourceDivisionIds),
+            );
             const normalizedName = normalizeDivisionNameKey(name);
-            const duplicateByName = currentPlayoffDivisions.find((detail) => (
+            const duplicateByName = divisionNameCandidates.find((detail) => (
                 detail.id !== divisionEditor.editingId
                 && normalizeDivisionNameKey(detail.name) === normalizedName
             ));
             if (duplicateByName) {
                 setDivisionEditor((previous) => ({
                     ...previous,
-                    error: 'Division name must be unique within this event.',
+                    error: 'Division name must be unique within this event. Choose a different name.',
                 }));
                 return;
             }
@@ -378,15 +388,22 @@ export const useDivisionCommitController = ({
         const existingDetail = divisionEditor.editingId
             ? currentDetails.find((detail) => detail.id === divisionEditor.editingId)
             : null;
+        const sourceDivisionIds = currentDetails.map((detail) => detail.id);
+        const divisionNameCandidates = [
+            ...currentDetails,
+            ...(Array.isArray(eventData.playoffDivisionDetails) ? eventData.playoffDivisionDetails : []),
+        ].filter(
+            (detail) => !isGeneratedPhaseDivisionNameCandidate(detail, sourceDivisionIds),
+        );
         const normalizedName = normalizeDivisionNameKey(name);
-        const duplicateByName = currentDetails.find((detail) => (
+        const duplicateByName = divisionNameCandidates.find((detail) => (
             detail.id !== divisionEditor.editingId
             && normalizeDivisionNameKey(detail.name) === normalizedName
         ));
         if (duplicateByName) {
             setDivisionEditor((previous) => ({
                 ...previous,
-                error: 'Division name must be unique within this event.',
+                error: 'Division name must be unique within this event. Choose a different name.',
             }));
             return;
         }

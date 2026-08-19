@@ -87,7 +87,7 @@ describe('TeamCard division label', () => {
     expect(screen.queryByText(/division_5f2f1c9d/i)).not.toBeInTheDocument();
   });
 
-  it('ignores legacy skill/age metadata labels and falls back to clean type name', () => {
+  it('preserves an organizer-owned metadata-like division name', () => {
     const team = createTeam({
       division: {
         id: 'event_456__division__c_skill_open_age_u14',
@@ -97,23 +97,20 @@ describe('TeamCard division label', () => {
 
     renderWithMantine(<TeamCard team={team} />);
 
-    expect(screen.getByText('CoEd Open U14')).toBeInTheDocument();
-    expect(screen.queryByText(/skill:/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/age:/i)).not.toBeInTheDocument();
+    expect(screen.getByText('C - Skill: Open - Age: U14')).toBeInTheDocument();
   });
 
-  it('falls back to inferred label from division object id when name is legacy metadata', () => {
+  it('preserves organizer punctuation and internal spacing', () => {
     const team = createTeam({
       division: {
         id: 'event_456__division__c_skill_open_age_u14',
-        name: 'C - Skill: Open - Age: U14',
+        name: 'Open /  U14',
       },
     });
 
     renderWithMantine(<TeamCard team={team} />);
 
-    expect(screen.getByText(/Open/i)).toBeInTheDocument();
-    expect(screen.queryByText(/Skill/i)).not.toBeInTheDocument();
+    expect(screen.getByText('Open / U14')).toHaveTextContent('Open /  U14', { normalizeWhitespace: false });
     expect(screen.queryByText('Division')).not.toBeInTheDocument();
   });
 

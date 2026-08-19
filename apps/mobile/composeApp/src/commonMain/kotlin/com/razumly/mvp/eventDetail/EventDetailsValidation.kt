@@ -216,6 +216,7 @@ internal data class EventValidationResult(
     val isLeagueSlotsValid: Boolean,
     val isSkillLevelValid: Boolean,
     val isDivisionIdentityValid: Boolean,
+    val isDivisionNameValid: Boolean,
     val isSportValid: Boolean,
     val isFixedEndDateRangeValid: Boolean,
     val isPaymentPlansValid: Boolean,
@@ -290,8 +291,13 @@ internal fun computeEventValidationResult(
     }
     val isLocationValid = editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
     val isSkillLevelValid = editEvent.eventType == EventType.LEAGUE || editEvent.divisions.isNotEmpty()
-    val duplicateDivisionNames = duplicateDivisionIdentityNames(divisionDetailsForSettings)
-    val isDivisionIdentityValid = duplicateDivisionNames.isEmpty()
+    val duplicateDivisionIdentityNames = duplicateDivisionIdentityNames(divisionDetailsForSettings)
+    val isDivisionIdentityValid = duplicateDivisionIdentityNames.isEmpty()
+    val duplicateDivisionNames = duplicateDivisionNames(
+        details = editEvent.divisionDetails + divisionDetailsForSettings,
+        excludeGeneratedTournamentPools = editEvent.isTournamentPoolPlayEnabled(),
+    )
+    val isDivisionNameValid = duplicateDivisionNames.isEmpty()
     val isSportValid = !isNewEvent || editEvent.sportIds.isNotEmpty()
     val requiresFixedEndValidation = requiresFixedEndRangeValidation(
         event = editEvent,
@@ -602,6 +608,7 @@ internal fun computeEventValidationResult(
         isLocationValid &&
         isSkillLevelValid &&
         isDivisionIdentityValid &&
+        isDivisionNameValid &&
         isFieldCountValid &&
         isLeagueGamesValid &&
         isLeagueDurationValid &&
@@ -678,6 +685,9 @@ internal fun computeEventValidationResult(
         }
         if (!isDivisionIdentityValid) {
             add("Each division must have a unique gender, skill division, and age division.")
+        }
+        if (!isDivisionNameValid) {
+            add("Division name must be unique within this event. Choose a different name.")
         }
         if (!isLocationValid) {
             add("Select a location.")
@@ -775,6 +785,7 @@ internal fun computeEventValidationResult(
         isLeagueSlotsValid = isLeagueSlotsValid,
         isSkillLevelValid = isSkillLevelValid,
         isDivisionIdentityValid = isDivisionIdentityValid,
+        isDivisionNameValid = isDivisionNameValid,
         isSportValid = isSportValid,
         isFixedEndDateRangeValid = isFixedEndDateRangeValid,
         isPaymentPlansValid = isPaymentPlansValid,

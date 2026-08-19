@@ -116,6 +116,7 @@ import { eventEditorFixtures } from "@/test/eventEditor/fixtures";
 import { prisma } from "@/lib/prisma";
 import type { CreateEventEditorCommand } from "@/contracts/eventEditor";
 import type * as EditorContractAdapters from "@/app/events/[id]/schedule/components/eventForm/editorContractAdapters";
+import { EventDivisionNameValidationError } from "@/lib/divisionTypes";
 import { acquireEventLock } from "@/server/repositories/locks";
 import { upsertEventFromPayload } from "@/server/repositories/events";
 import {
@@ -376,6 +377,23 @@ describe("saveEventEditor", () => {
     expect((prisma as any).$transaction).toHaveBeenCalledTimes(1);
     expect(tx.registrationQuestions.create).not.toHaveBeenCalled();
     expect(reconcileEventStaffDesiredState).not.toHaveBeenCalled();
+  });
+
+  it("maps duplicate division names to an actionable editor input error", async () => {
+    txFor();
+    (upsertEventFromPayload as jest.Mock).mockRejectedValue(
+      new EventDivisionNameValidationError(["Open"]),
+    );
+
+    await expect(
+      saveEventEditor({ userId: "host_1" }, commandFor([]), "event_1"),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        name: "EditorInputError",
+        message:
+          "Division name must be unique within this event. Choose a different name.",
+      }),
+    );
   });
   it("rejects a tournament team count below three as editor input", async () => {
     txFor();

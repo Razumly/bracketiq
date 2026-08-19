@@ -2,7 +2,6 @@ import type { Division, Event } from '@/types';
 import {
   extractDivisionTokenFromId,
   inferDivisionDetails,
-  looksLikeLegacyDivisionMetadataLabel,
 } from '@/lib/divisionTypes';
 
 const normalizeDivisionKey = (value: unknown): string | null => {
@@ -245,9 +244,7 @@ const labelForDivision = (params: {
     sportInput: params.sportInput,
     fallbackName: labelFromDetail || undefined,
   });
-  return labelFromDetail && !looksLikeLegacyDivisionMetadataLabel(labelFromDetail)
-    ? labelFromDetail
-    : inferred.defaultName || startCase(fallbackIdentifier);
+  return labelFromDetail || inferred.defaultName || startCase(fallbackIdentifier);
 };
 
 const dedupeLabels = (labels: string[]): string[] => {

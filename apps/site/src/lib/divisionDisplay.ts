@@ -3,7 +3,6 @@ import {
   cleanDivisionDisplayName,
   extractDivisionTokenFromId,
   inferDivisionDetails,
-  looksLikeLegacyDivisionMetadataLabel,
 } from '@/lib/divisionTypes';
 
 const tournamentPoolSuffixRegex = /(?:^|[\s_-]+)pool[\s_-]*([a-z0-9]+)$/i;
@@ -38,11 +37,6 @@ export const resolveTournamentPoolDisplayName = (value: unknown): string | null 
   return `Pool ${suffix.toUpperCase()}`;
 };
 
-const toDisplayDivisionLabel = (value: string | null): string | null => {
-  if (!value) return null;
-  return looksLikeLegacyDivisionMetadataLabel(value) ? null : value;
-};
-
 const rowHasPoolPlacement = (row: Record<string, unknown>): boolean => (
   Array.isArray(row.playoffPlacementDivisionIds)
   && row.playoffPlacementDivisionIds.some((entry) => typeof entry === 'string' && entry.trim().length > 0)
@@ -69,7 +63,7 @@ export const buildDivisionDisplayNameIndex = (divisionDetails: unknown): Map<str
 
     const row = entry as Record<string, unknown>;
     const rawName = resolveLabel(row.name);
-    const name = resolvePoolDisplayNameForRow(row) ?? toDisplayDivisionLabel(rawName);
+    const name = rawName ?? resolvePoolDisplayNameForRow(row);
     if (!name) {
       return;
     }
@@ -99,13 +93,13 @@ export const resolveDivisionDisplayName = (params: {
 
   if (division && typeof division === 'object') {
     const row = division as Division & Record<string, unknown>;
+    const explicitName = resolveLabel(row.name);
+    if (explicitName) {
+      return explicitName;
+    }
     const poolName = resolvePoolDisplayNameForRow(row);
     if (poolName) {
       return poolName;
-    }
-    const explicitName = toDisplayDivisionLabel(resolveLabel(row.name));
-    if (explicitName) {
-      return explicitName;
     }
   }
 

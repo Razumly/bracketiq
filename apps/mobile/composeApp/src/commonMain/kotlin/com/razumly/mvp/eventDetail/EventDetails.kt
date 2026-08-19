@@ -879,31 +879,13 @@ fun EventDetails(
             existingDetails = divisionDetailsForSettings,
             fallbackOptions = ageDivisionTypeSelectOptions,
         )
-        val hasRequiredFields = nextGender.isNotBlank() &&
-            nextSkillDivisionTypeId.isNotBlank() &&
-            nextAgeDivisionTypeId.isNotBlank()
-        val autoName = if (hasRequiredFields) {
-            buildDivisionName(
-                gender = nextGender,
-                skillDivisionTypeName = resolvedSkillDivisionTypeName,
-                ageDivisionTypeName = resolvedAgeDivisionTypeName,
-            )
-        } else {
-            ""
-        }
-        divisionEditor = previous.copy(
+        divisionEditor = applyDivisionEditorTypeSelection(
+            previous = previous,
             gender = nextGender,
             skillDivisionTypeId = nextSkillDivisionTypeId,
             skillDivisionTypeName = resolvedSkillDivisionTypeName,
             ageDivisionTypeId = nextAgeDivisionTypeId,
             ageDivisionTypeName = resolvedAgeDivisionTypeName,
-            name = when {
-                !hasRequiredFields -> ""
-                previous.nameTouched -> previous.name
-                else -> autoName
-            },
-            nameTouched = hasRequiredFields && previous.nameTouched,
-            error = null,
         )
     }
     fun syncDivisionInstallmentCount(count: Int) {
@@ -1108,13 +1090,7 @@ fun EventDetails(
             skillDivisionTypeName = resolvedSkillDivisionTypeName,
             ageDivisionTypeName = resolvedAgeDivisionTypeName,
         )
-        val resolvedDivisionName = divisionEditor.name.trim().ifBlank {
-            buildDivisionName(
-                gender = normalizedGender,
-                skillDivisionTypeName = resolvedSkillDivisionTypeName,
-                ageDivisionTypeName = resolvedAgeDivisionTypeName,
-            )
-        }
+        val resolvedDivisionName = divisionEditor.name.trim()
         if (
             normalizedGender.isBlank() ||
             normalizedSkillDivisionTypeId.isBlank() ||
@@ -1148,14 +1124,24 @@ fun EventDetails(
             )
             return
         }
-        val normalizedDivisionName = resolvedDivisionName.normalizeDivisionNameKey()
-        val duplicateByName = divisionDetailsForSettings.firstOrNull { existing ->
-            val isCurrent = existingDetail != null && divisionRecordMatchesSelection(existing, existingDetail.id)
-            !isCurrent && existing.name.normalizeDivisionNameKey() == normalizedDivisionName
-        }
-        if (duplicateByName != null) {
+        val existingDivisionNameCandidates = (
+            editEvent.divisionDetails + divisionDetailsForSettings
+            )
+            .distinctBy { detail -> detail.id.normalizeDivisionIdentifier() }
+            .filterNot { detail ->
+                existingDetail != null && divisionRecordMatchesSelection(detail, existingDetail.id)
+            }
+        val candidateDivision = (existingDetail ?: DivisionDetail(id = "pending-division")).copy(
+            name = resolvedDivisionName,
+        )
+        if (
+            duplicateDivisionNames(
+                details = existingDivisionNameCandidates + candidateDivision,
+                excludeGeneratedTournamentPools = editEvent.isTournamentPoolPlayEnabled(),
+            ).isNotEmpty()
+        ) {
             divisionEditor = divisionEditor.copy(
-                error = "Division name must be unique within this event.",
+                error = "Division name must be unique within this event. Choose a different name.",
             )
             return
         }

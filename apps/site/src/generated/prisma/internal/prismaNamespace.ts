@@ -9261,6 +9261,7 @@ export const DivisionsScalarFieldEnum = {
   organizationId: 'organizationId',
   scope: 'scope',
   role: 'role',
+  isSystemGenerated: 'isSystemGenerated',
   phase: 'phase',
   status: 'status',
   sourceDivisionId: 'sourceDivisionId',

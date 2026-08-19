@@ -2,6 +2,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createId } from "@/lib/id";
 import {
+  EventDivisionNameValidationError,
   isBracketTeamCountEnabled,
   MIN_BRACKET_TEAM_COUNT,
 } from "@/lib/divisionTypes";
@@ -427,22 +428,29 @@ const saveWithinTransaction = async (
   eventPayload.registrationPaymentMode =
     draft.registration.payment.mode === "MANUAL" ? "MANUAL" : "ONLINE";
   eventPayload.price = draft.registration.payment.priceCents;
-  await upsertEventFromPayload(
-    {
-      ...eventPayload,
-      id: eventId,
-      fieldIds: draft.resources.fieldIds,
-      timeSlotIds: draft.resources.timeSlotIds,
-      fields: draft.resources.fields,
-      timeSlots: draft.resources.timeSlots,
-      divisionDetails: draft.competition.divisionDetails,
-      playoffDivisionDetails: draft.competition.playoffDivisionDetails,
-      divisionFieldIds: draft.competition.divisionFieldIds,
-      tags: draft.basics.tags,
-    },
-    tx,
-    { preserveOperationalState: true, preserveStaffState: true },
-  );
+  try {
+    await upsertEventFromPayload(
+      {
+        ...eventPayload,
+        id: eventId,
+        fieldIds: draft.resources.fieldIds,
+        timeSlotIds: draft.resources.timeSlotIds,
+        fields: draft.resources.fields,
+        timeSlots: draft.resources.timeSlots,
+        divisionDetails: draft.competition.divisionDetails,
+        playoffDivisionDetails: draft.competition.playoffDivisionDetails,
+        divisionFieldIds: draft.competition.divisionFieldIds,
+        tags: draft.basics.tags,
+      },
+      tx,
+      { preserveOperationalState: true, preserveStaffState: true },
+    );
+  } catch (error) {
+    if (error instanceof EventDivisionNameValidationError) {
+      throw new EditorInputError(error.message);
+    }
+    throw error;
+  }
 
   const questionIdMap = await reconcileQuestions(
     tx,

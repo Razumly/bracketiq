@@ -14,6 +14,7 @@ import {
     buildTournamentConfig,
     normalizeLeagueConfigForSetMode,
 } from '../../configDefaults';
+import { updateDivisionEditorSelectionState } from '../../divisionEditorDraftState';
 import type {
     DivisionDetailForm,
     DivisionEditorState,
@@ -57,6 +58,22 @@ const buildEditor = (overrides: Partial<DivisionEditorState> = {}): DivisionEdit
     nameTouched: true,
     error: null,
     ...overrides,
+});
+
+describe('division editor selection state', () => {
+    it('does not change an organizer-owned name when metadata changes', () => {
+        const original = buildEditor({
+            name: 'Elite /  18+',
+            nameTouched: true,
+        });
+
+        const updated = updateDivisionEditorSelectionState(original, {
+            skillDivisionTypeId: 'advanced',
+        });
+
+        expect(updated.name).toBe('Elite /  18+');
+        expect(updated.nameTouched).toBe(true);
+    });
 });
 
 const buildEventData = (overrides: Partial<EventFormValues> = {}): EventFormValues => ({
@@ -360,5 +377,50 @@ describe('useDivisionCommitController', () => {
             name: '',
             error: null,
         }));
+    });
+
+    it('asks for a different playoff name when a regular division already uses it', () => {
+        const eventData = buildEventData({
+            eventType: 'LEAGUE',
+            divisionDetails: [buildExistingDivision({ name: 'Open' })],
+            playoffDivisionDetails: [],
+        });
+        const editor = buildEditor({
+            divisionKind: 'PLAYOFF',
+            name: '  open  ',
+            maxParticipants: 4,
+        });
+        const { result } = renderHook(() => useDivisionCommitHarness({ editor, eventData }));
+
+        act(() => result.current.handleSaveDivisionDetail());
+
+        expect(result.current.divisionEditor.error).toBe(
+            'Division name must be unique within this event. Choose a different name.',
+        );
+        expect(result.current.formValues.playoffDivisionDetails).toEqual([]);
+        expect(result.current.divisionEditor.name).toBe('  open  ');
+    });
+
+    it('asks for a different regular name when a playoff division already uses it', () => {
+        const eventData = buildEventData({
+            playoffDivisionDetails: [{
+                id: 'playoff_existing',
+                key: 'playoff_existing',
+                kind: 'PLAYOFF',
+                name: 'Open 18+',
+                maxParticipants: 4,
+                playoffConfig: buildTournamentConfig(),
+            }],
+        });
+        const editor = buildEditor({ name: ' open 18+ ' });
+        const { result } = renderHook(() => useDivisionCommitHarness({ editor, eventData }));
+
+        act(() => result.current.handleSaveDivisionDetail());
+
+        expect(result.current.divisionEditor.error).toBe(
+            'Division name must be unique within this event. Choose a different name.',
+        );
+        expect(result.current.formValues.divisionDetails).toEqual([]);
+        expect(result.current.divisionEditor.name).toBe(' open 18+ ');
     });
 });

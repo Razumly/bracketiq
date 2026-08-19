@@ -67,18 +67,6 @@ export default function TeamCard({
     const trimmed = value.trim();
     return trimmed.length ? trimmed : null;
   };
-  const looksLikeLegacyDivisionMetadataLabel = (value: string): boolean => {
-    const normalized = value.trim().toLowerCase();
-    if (!normalized) return false;
-    const hasWordSkill = /\bskill\b/.test(normalized);
-    const hasWordAge = /\bage\b/.test(normalized);
-    const hasTokenPattern = normalized.includes('skill_') && normalized.includes('_age_');
-    return (hasWordSkill && hasWordAge) || hasTokenPattern;
-  };
-  const toDisplayDivisionLabel = (value: string | null): string | null => {
-    if (!value) return null;
-    return looksLikeLegacyDivisionMetadataLabel(value) ? null : value;
-  };
   const looksLikeDivisionId = (value: string): boolean => {
     const normalized = value.trim().toLowerCase();
     if (!normalized) return false;
@@ -91,8 +79,8 @@ export default function TeamCard({
     ? team.division
     : null;
 
-  const divisionLabelFromObjectName = toDisplayDivisionLabel(resolveLabel(divisionObject?.name));
-  const divisionLabelFromObjectSkillLevel = toDisplayDivisionLabel(resolveLabel(divisionObject?.skillLevel));
+  const divisionLabelFromObjectName = resolveLabel(divisionObject?.name);
+  const divisionLabelFromObjectSkillLevel = resolveLabel(divisionObject?.skillLevel);
   const divisionLabelFromObjectId = (() => {
     const divisionId = resolveLabel(divisionObject?.id);
     if (!divisionId) return null;
@@ -100,7 +88,7 @@ export default function TeamCard({
       identifier: divisionId,
       sportInput: team.sport,
     });
-    return toDisplayDivisionLabel(resolveLabel(inferred.divisionTypeName) ?? inferred.defaultName);
+    return resolveLabel(inferred.divisionTypeName) ?? inferred.defaultName;
   })();
 
   const divisionLabelFromString = (() => {
@@ -108,7 +96,7 @@ export default function TeamCard({
     if (!rawDivision) return null;
 
     if (!looksLikeDivisionId(rawDivision)) {
-      return toDisplayDivisionLabel(rawDivision);
+      return rawDivision;
     }
 
     const divisionToken = extractDivisionTokenFromId(rawDivision);
@@ -117,10 +105,10 @@ export default function TeamCard({
       return null;
     }
 
-    return toDisplayDivisionLabel(inferDivisionDetails({
+    return inferDivisionDetails({
       identifier: rawDivision,
       sportInput: team.sport,
-    }).defaultName);
+    }).defaultName;
   })();
 
   const divisionLabel = divisionLabelFromObjectName

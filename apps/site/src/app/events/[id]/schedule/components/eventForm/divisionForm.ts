@@ -18,6 +18,7 @@ import {
     normalizeDivisionGender,
     normalizeDivisionRatingType,
     MIN_BRACKET_TEAM_COUNT,
+    normalizeDivisionNameKey,
 } from '@/lib/divisionTypes';
 import { normalizePriceCents } from '@/lib/priceUtils';
 import { normalizeDivisionPhaseSettingsMap } from '@/lib/divisionPhaseSettings';
@@ -135,11 +136,6 @@ export const normalizePlacementDivisionIds = (values: unknown): string[] => {
     }
     return values.map((value) => normalizeDivisionKeys([value])[0] ?? '');
 };
-
-export const normalizeDivisionNameKey = (value: unknown): string => String(value ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ');
 
 export const buildUniqueDivisionIdForToken = (params: {
     eventId: string;

@@ -26,7 +26,23 @@ class DivisionFormatterDisplayLabelTest {
     }
 
     @Test
-    fun to_division_display_label_ignores_legacy_skill_age_metadata_names() {
+    fun to_division_display_label_preserves_name_that_normalizes_to_identifier() {
+        val label = "division_open".toDivisionDisplayLabel(
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "division_open",
+                    key = "open",
+                    name = "DIVISION  OPEN",
+                    divisionTypeName = "Open",
+                ),
+            ),
+        )
+
+        assertEquals("DIVISION  OPEN", label)
+    }
+
+    @Test
+    fun to_division_display_label_preserves_explicit_metadata_like_name() {
         val divisionId = buildEventDivisionId("event-1", "c_skill_open_age_u14")
         val label = divisionId.toDivisionDisplayLabel(
             divisionDetails = listOf(
@@ -39,28 +55,28 @@ class DivisionFormatterDisplayLabelTest {
             ),
         )
 
-        assertEquals("CoEd Open U14", label)
+        assertEquals("C - Skill: Open - Age: U14", label)
     }
 
     @Test
-    fun to_division_display_label_falls_back_to_inferred_name_when_type_name_is_blank() {
+    fun to_division_display_label_preserves_explicit_name_when_type_name_is_blank() {
         val divisionId = buildEventDivisionId("event-1", "c_skill_open_age_u14")
         val label = divisionId.toDivisionDisplayLabel(
             divisionDetails = listOf(
                 DivisionDetail(
                     id = divisionId,
                     key = "c_skill_open_age_u14",
-                    name = "C - Skill: Open - Age: U14",
+                    name = "Open /  U14",
                     divisionTypeName = "",
                 ),
             ),
         )
 
-        assertEquals("CoEd Open U14", label)
+        assertEquals("Open /  U14", label)
     }
 
     @Test
-    fun to_division_display_label_uses_simple_pool_label_for_tournament_pool_details() {
+    fun to_division_display_label_preserves_generated_pool_name() {
         val bracketId = buildEventDivisionId("event-1", "c_skill_open_age_18plus")
         val poolId = "${bracketId}_pool_a"
         val label = poolId.toDivisionDisplayLabel(
@@ -68,7 +84,7 @@ class DivisionFormatterDisplayLabelTest {
                 DivisionDetail(
                     id = poolId,
                     key = "c_skill_open_age_18plus_pool_a",
-                    name = "Open 18+ Pool A",
+                    name = "Pool A",
                     playoffPlacementDivisionIds = listOf(bracketId),
                 ),
             ),

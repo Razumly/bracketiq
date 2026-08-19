@@ -17,12 +17,6 @@ private val decimalTokenRegex = Regex("^(\\d+)_(\\d+)$")
 private val plusTokenRegex = Regex("^(\\d+)plus$")
 private val trailingUTokenRegex = Regex("^(\\d+)u$")
 private val leadingUTokenRegex = Regex("^u(\\d+)$")
-private val wordSkillRegex = Regex("\\bskill\\b")
-private val wordAgeRegex = Regex("\\bage\\b")
-private val ratingPrefixRegex = Regex(
-    pattern = "^(?:(?:coed|co-ed|mens|men's|womens|women's)\\s+)?(?:skill|age)\\b",
-    option = RegexOption.IGNORE_CASE,
-)
 private const val DIVISION_MARKER = "__division__"
 
 const val DEFAULT_DIVISION = "open"
@@ -65,23 +59,8 @@ data class ParsedDivisionTypeSelection(
 
 private fun String.cleanDivisionText(): String = trim().replace(whitespaceRegex, " ")
 
-private fun String.looksLikeLegacyDivisionMetadataLabel(): Boolean {
-    val normalized = cleanDivisionText().lowercase()
-    if (normalized.isEmpty()) return false
-    val includesSkillAgeWords =
-        wordSkillRegex.containsMatchIn(normalized) && wordAgeRegex.containsMatchIn(normalized)
-    val includesSkillAgeTokenPattern = normalized.contains("skill_") && normalized.contains("_age_")
-    return includesSkillAgeWords || ratingPrefixRegex.containsMatchIn(normalized) || includesSkillAgeTokenPattern
-}
-
 private fun String?.cleanDivisionDisplayName(fallback: String): String {
-    val trimmed = this?.trim().orEmpty()
-    return trimmed
-        .takeIf { value -> value.isNotEmpty() && !value.looksLikeLegacyDivisionMetadataLabel() }
-        ?.replace(Regex("\\s*(?:•|â€¢|/)\\s*"), " ")
-        ?.replace(whitespaceRegex, " ")
-        ?.trim()
-        ?: fallback
+    return this?.trim()?.takeIf(String::isNotEmpty) ?: fallback
 }
 
 fun String.toTournamentPoolDisplayLabel(): String? {
@@ -444,20 +423,8 @@ fun String.toDivisionDisplayLabel(
     if (normalized.isEmpty()) return ""
     if (divisionDetails.isNotEmpty()) {
         val detail = divisionDetails.findDivisionDetailByIdentifier(normalized)
-        val poolLabel = detail
-            ?.takeIf { poolDetail ->
-                poolDetail.playoffPlacementDivisionIds.any { placementId -> placementId.isNotBlank() }
-            }
-            ?.let { poolDetail ->
-                poolDetail.name.toTournamentPoolDisplayLabel()
-                    ?: poolDetail.key.toTournamentPoolDisplayLabel()
-                    ?: poolDetail.id.toTournamentPoolDisplayLabel()
-            }
-        if (!poolLabel.isNullOrBlank()) {
-            return poolLabel
-        }
         val explicit = detail?.name?.trim()
-        if (!explicit.isNullOrEmpty() && !explicit.looksLikeLegacyDivisionMetadataLabel()) {
+        if (!explicit.isNullOrEmpty()) {
             return explicit
         }
     }
@@ -631,7 +598,9 @@ fun DivisionDetail.normalizeDivisionDetail(eventId: String? = null): DivisionDet
     return copy(
         id = normalizedId,
         key = normalizedKey,
-        name = name.cleanDivisionDisplayName(normalizedCombinedDivisionTypeName.ifBlank { inferred.defaultName }),
+        name = name.cleanDivisionDisplayName(
+            normalizedCombinedDivisionTypeName.ifBlank { inferred.defaultName },
+        ),
         divisionTypeId = if (normalizedDivisionTypeId.isBlank()) {
             normalizedCombinedDivisionTypeId
         } else {
