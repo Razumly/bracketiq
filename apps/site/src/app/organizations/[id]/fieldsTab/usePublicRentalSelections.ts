@@ -18,6 +18,10 @@ import {
 import { createId } from "@/lib/id";
 import { fieldService } from "@/lib/fieldService";
 import { getFacilityScopedFieldDisplayName } from "@/lib/fieldUtils";
+import {
+  enumerateRepeatingTimeSlotOccurrences,
+  RepeatingTimeSlotValidationError,
+} from "@/lib/repeatingTimeSlotAvailability";
 import { buildFieldCalendarEvents } from "../fieldCalendar";
 import { normalizeDaysOfWeek, normalizeFieldIds } from "./facilityFormUtils";
 import type {
@@ -253,54 +257,23 @@ const rentalSlotCoversDraftDay = (
     );
   }
 
-  const dayOfWeek = mondayDayOf(params.selectionStart);
-  const startTimeMinutes =
-    params.selectionStart.getHours() * 60 + params.selectionStart.getMinutes();
-  const endTimeMinutes =
-    params.selectionEnd.getHours() * 60 + params.selectionEnd.getMinutes();
-  const slotDays = normalizeDaysOfWeek(slot.daysOfWeek, slot.dayOfWeek);
-  if (!slotDays.includes(dayOfWeek)) {
-    return false;
+  try {
+    const occurrences = enumerateRepeatingTimeSlotOccurrences({
+      slot,
+      windowStart: params.selectionStart,
+      windowEnd: params.selectionEnd,
+    });
+    return occurrences.some(
+      (occurrence) =>
+        params.selectionStart.getTime() >= occurrence.start.getTime() &&
+        params.selectionEnd.getTime() <= occurrence.end.getTime(),
+    );
+  } catch (error) {
+    if (error instanceof RepeatingTimeSlotValidationError) {
+      return false;
+    }
+    throw error;
   }
-  const slotStartMinutes =
-    typeof slot.startTimeMinutes === "number" ? slot.startTimeMinutes : null;
-  const slotEndMinutes =
-    typeof slot.endTimeMinutes === "number" ? slot.endTimeMinutes : null;
-  if (
-    slotStartMinutes === null ||
-    slotEndMinutes === null ||
-    slotEndMinutes <= slotStartMinutes
-  ) {
-    return false;
-  }
-  if (startTimeMinutes < slotStartMinutes || endTimeMinutes > slotEndMinutes) {
-    return false;
-  }
-
-  const slotStartBoundary = parseLocalDateTime(slot.startDate ?? null);
-  const slotEndBoundary = parseLocalDateTime(slot.endDate ?? null);
-
-  const normalizeDay = (date: Date) =>
-    new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
-  if (
-    slotStartBoundary &&
-    normalizeDay(params.selectionStart) < normalizeDay(slotStartBoundary)
-  ) {
-    return false;
-  }
-  if (
-    slotEndBoundary &&
-    normalizeDay(params.selectionStart) > normalizeDay(slotEndBoundary)
-  ) {
-    return false;
-  }
-  if (
-    slotEndBoundary &&
-    normalizeDay(params.selectionEnd) > normalizeDay(slotEndBoundary)
-  ) {
-    return false;
-  }
-  return true;
 };
 
 export function usePublicRentalSelections({

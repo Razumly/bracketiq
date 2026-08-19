@@ -2,9 +2,9 @@ import { addMinutes } from 'date-fns';
 import type { Field, Match, Event as EventRecord, TimeSlot } from '@/types';
 import { getFacilityScopedFieldDisplayName } from '@/lib/fieldUtils';
 import {
+  enumerateRepeatingTimeSlotOccurrences,
   RepeatingTimeSlotValidationError,
   type ResolvedRepeatingTimeSlot,
-  resolveRepeatingTimeSlotOccurrence,
 } from '@/lib/repeatingTimeSlotAvailability';
 
 
@@ -19,9 +19,6 @@ const parseToDate = (value?: string | Date | null): Date | null => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-const toLocalCalendarDate = (value: Date): string => (
-  `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
-);
 
 const ensureEndDate = (start: Date, rawEnd?: string | Date | null, fallbackMinutes: number = ONE_HOUR_IN_MINUTES): Date => {
   const parsed = parseToDate(rawEnd);
@@ -113,21 +110,6 @@ export type FacilityCalendarFeed = {
   range: CalendarRange;
 };
 
-const normalizeToMondayIndex = (date: Date): number => {
-  return (date.getDay() + 6) % 7;
-};
-
-const alignDateToSlot = (seed: Date, slotDay: number): Date => {
-  const aligned = new Date(seed.getTime());
-  aligned.setHours(0, 0, 0, 0);
-  const seedIndex = normalizeToMondayIndex(aligned);
-  let diff = slotDay - seedIndex;
-  if (diff < 0) {
-    diff += 7;
-  }
-  aligned.setDate(aligned.getDate() + diff);
-  return aligned;
-};
 
 const addDays = (date: Date, days: number): Date => {
   const next = new Date(date.getTime());
@@ -832,69 +814,38 @@ export const buildFieldCalendarEvents = (fields: Field[], range: CalendarRange =
             return;
           }
 
-          const slotDays = Array.from(
-            new Set(
-              (
-                Array.isArray(slot.daysOfWeek) && slot.daysOfWeek.length
-                  ? slot.daysOfWeek
-                  : typeof slot.dayOfWeek === 'number'
-                    ? [slot.dayOfWeek]
-                    : []
-              )
-                .map((value) => Number(value))
-                .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6),
-            ),
-          );
-          if (!slotDays.length || slot.repeating === false) {
+          if (slot.repeating === false) {
             return;
           }
 
-          const normalizedBase = new Date(baseStart.getTime());
-          normalizedBase.setHours(0, 0, 0, 0);
-
-          const slotEndBoundaryRaw = parseToDate(slot.endDate ?? null);
-          const slotEndBoundary = slotEndBoundaryRaw ? new Date(slotEndBoundaryRaw.getTime()) : null;
-          if (slotEndBoundary) {
-            slotEndBoundary.setHours(23, 59, 59, 999);
-          }
-
-          let weekCursor = new Date(rangeStart.getTime());
-          weekCursor.setDate(weekCursor.getDate() - normalizeToMondayIndex(weekCursor));
-          weekCursor.setHours(0, 0, 0, 0);
-
-          while (weekCursor <= rangeEnd) {
-            slotDays.forEach((slotDay) => {
-              const occurrence = addDays(weekCursor, slotDay);
-              if (occurrence < normalizedBase || occurrence < rangeStart || occurrence > rangeEnd) {
-                return;
-              }
-              if (slotEndBoundary && occurrence > slotEndBoundary) {
-                return;
-              }
-              let resolved: ResolvedRepeatingTimeSlot;
-              try {
-                resolved = resolveRepeatingTimeSlotOccurrence(slot, toLocalCalendarDate(occurrence));
-              } catch (error) {
-                if (error instanceof RepeatingTimeSlotValidationError) {
-                  return;
-                }
-                throw error;
-              }
-              const effectiveStart = resolved.start;
-              const effectiveEnd = resolved.end;
-              generated.push({
-                id: `field-booked-weekly-${field.$id}-${evt.$id}-${slot.$id}-${effectiveStart.getTime()}`,
-                title: 'Booked',
-                start: effectiveStart,
-                end: effectiveEnd,
-                resourceId: field.$id,
-                resource: evt,
-                metaType: 'booked',
-                fieldName: baseTitle,
-              });
+          let resolvedOccurrences: ResolvedRepeatingTimeSlot[];
+          try {
+            resolvedOccurrences = enumerateRepeatingTimeSlotOccurrences({
+              slot,
+              windowStart: rangeStart,
+              windowEnd: rangeEnd,
             });
-            weekCursor = addDays(weekCursor, 7);
+          } catch (error) {
+            if (error instanceof RepeatingTimeSlotValidationError) {
+              return;
+            }
+            throw error;
           }
+
+          resolvedOccurrences.forEach((resolved) => {
+            const effectiveStart = resolved.start;
+            const effectiveEnd = resolved.end;
+            generated.push({
+              id: `field-booked-weekly-${field.$id}-${evt.$id}-${slot.$id}-${effectiveStart.getTime()}`,
+              title: 'Booked',
+              start: effectiveStart,
+              end: effectiveEnd,
+              resourceId: field.$id,
+              resource: evt,
+              metaType: 'booked',
+              fieldName: baseTitle,
+            });
+          });
         });
 
         return generated;
@@ -936,63 +887,38 @@ export const buildFieldCalendarEvents = (fields: Field[], range: CalendarRange =
         return;
       }
 
-      if (
-        slot.repeating &&
-        typeof slot.dayOfWeek === 'number' &&
-        typeof slot.startTimeMinutes === 'number' &&
-        typeof slot.endTimeMinutes === 'number'
-      ) {
+      if (slot.repeating) {
         const rangeStart = range ? new Date(range.start.getTime()) : new Date(baseStart.getTime());
-        const rangeEnd = range ? new Date(range.end.getTime()) : new Date(baseStart.getTime());
+        const rangeEnd = range ? new Date(range.end.getTime()) : addDays(rangeStart, 28);
         rangeStart.setHours(0, 0, 0, 0);
         rangeEnd.setHours(23, 59, 59, 999);
 
-        const normalizedBase = new Date(baseStart.getTime());
-        normalizedBase.setHours(0, 0, 0, 0);
-
-        if (rangeEnd < normalizedBase) {
-          return;
-        }
-
-        if (rangeStart < normalizedBase) {
-          rangeStart.setTime(normalizedBase.getTime());
-        }
-
-        const slotEndBoundaryRaw = parseToDate(slot.endDate ?? null);
-        const slotEndBoundary = slotEndBoundaryRaw ? new Date(slotEndBoundaryRaw.getTime()) : null;
-        if (slotEndBoundary) {
-          slotEndBoundary.setHours(23, 59, 59, 999);
-          if (slotEndBoundary < rangeStart) {
+        let resolvedOccurrences: ResolvedRepeatingTimeSlot[];
+        try {
+          resolvedOccurrences = enumerateRepeatingTimeSlotOccurrences({
+            slot,
+            windowStart: rangeStart,
+            windowEnd: rangeEnd,
+          });
+        } catch (error) {
+          if (error instanceof RepeatingTimeSlotValidationError) {
             return;
           }
+          throw error;
         }
 
-        let occurrence = alignDateToSlot(rangeStart, slot.dayOfWeek);
-        if (occurrence < normalizedBase) {
-          const weeksToCatchUp = Math.ceil((normalizedBase.getTime() - occurrence.getTime()) / (7 * 24 * 60 * 60 * 1000));
-          occurrence = addDays(occurrence, weeksToCatchUp * 7);
-        }
-
-        const duration = Math.max(1, slot.endTimeMinutes - slot.startTimeMinutes);
-
-        while (occurrence <= rangeEnd && (!slotEndBoundary || occurrence <= slotEndBoundary)) {
-          const effectiveStart = new Date(occurrence.getTime());
-          effectiveStart.setMinutes(slot.startTimeMinutes);
-          const effectiveEnd = addMinutes(effectiveStart, duration);
-
+        resolvedOccurrences.forEach((resolved) => {
           rentalEntries.push({
-            id: `field-rental-${field.$id}-${slot.$id}-${effectiveStart.getTime()}`,
+            id: `field-rental-${field.$id}-${slot.$id}-${resolved.start.getTime()}`,
             title: 'Rental Slot',
-            start: effectiveStart,
-            end: effectiveEnd,
+            start: resolved.start,
+            end: resolved.end,
             resourceId: field.$id,
             resource: slot,
             metaType: 'rental',
             fieldName: baseTitle,
           });
-
-          occurrence = addDays(occurrence, 7);
-        }
+        });
 
         return;
       }

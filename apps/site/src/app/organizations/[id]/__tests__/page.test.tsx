@@ -104,6 +104,38 @@ describe('buildFieldCalendarEvents', () => {
     expect(matchEntry?.end.toISOString()).toBe(expectedEnd.toISOString());
   });
 
+  it('resolves overnight repeating rental entries with the shared slot interval', () => {
+    const entries = buildFieldCalendarEvents(
+      [{
+        ...baseField,
+        rentalSlots: [{
+          $id: 'rental_overnight',
+          dayOfWeek: 0,
+          daysOfWeek: [0],
+          startDate: '2026-03-02T00:00:00.000Z',
+          endDate: '2026-03-09T00:00:00.000Z',
+          startTimeMinutes: 22 * 60,
+          endTimeMinutes: 2 * 60,
+          timeZone: 'UTC',
+          repeating: true,
+          scheduledFieldId: 'field_1',
+          scheduledFieldIds: ['field_1'],
+        }],
+        events: [],
+        matches: [],
+      } as unknown as Field],
+      {
+        start: new Date('2026-03-02T00:00:00.000Z'),
+        end: new Date('2026-03-03T00:00:00.000Z'),
+      },
+    );
+
+    const rentalEntry = entries.find((entry) => entry.metaType === 'rental');
+    expect(rentalEntry).toBeDefined();
+    expect(rentalEntry?.start.toISOString()).toBe('2026-03-02T22:00:00.000Z');
+    expect(rentalEntry?.end.toISOString()).toBe('2026-03-03T02:00:00.000Z');
+  });
+
   it('summarizes rentable inventory, utilization, revenue per court-hour, and conflicts by facility', () => {
     const range = {
       start: new Date('2026-03-10T00:00:00.000Z'),

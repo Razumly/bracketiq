@@ -100,6 +100,58 @@ describe('CreateRentalSlotModal multi-field creation', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('submits an open-ended overnight repeating rental slot', async () => {
+    const field = {
+      $id: 'field_overnight',
+      name: 'Overnight Court',
+      location: '',
+      lat: 0,
+      long: 0,
+      rentalSlotIds: ['slot_overnight'],
+      rentalSlots: [],
+    } as any;
+    const slot = {
+      $id: 'slot_overnight',
+      dayOfWeek: 0,
+      daysOfWeek: [0],
+      startDate: '2030-06-10T00:00:00',
+      endDate: null,
+      startTimeMinutes: 23 * 60,
+      endTimeMinutes: 60,
+      timeZone: 'UTC',
+      repeating: true,
+    } as any;
+    const onSubmitOverride = jest.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <MantineProvider>
+        <CreateRentalSlotModal
+          opened
+          onClose={() => undefined}
+          field={field}
+          slot={slot}
+          onSubmitOverride={onSubmitOverride}
+          organizationId={null}
+          organizationHasStripeAccount={false}
+        />
+      </MantineProvider>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Save Rental Slot' }));
+
+    await waitFor(() => {
+      expect(onSubmitOverride).toHaveBeenCalledWith(expect.objectContaining({
+        payload: expect.objectContaining({
+          startTimeMinutes: 23 * 60,
+          endTimeMinutes: 60,
+          endDate: null,
+          repeating: true,
+        }),
+      }));
+    });
+  });
+
   it('renders selected fields with colors from the provided field reference list', async () => {
     const selectedFields = [
       {

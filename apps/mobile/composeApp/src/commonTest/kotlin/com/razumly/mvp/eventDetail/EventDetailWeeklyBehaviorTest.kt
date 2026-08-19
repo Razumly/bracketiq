@@ -127,6 +127,37 @@ class EventDetailWeeklyBehaviorTest {
     }
 
     @Test
+    fun weekly_schedule_options_use_slot_time_zone_for_occurrence_date_bounds() {
+        val event = Event(
+            id = "weekly-named-zone-event",
+            eventType = EventType.WEEKLY_EVENT,
+            start = Instant.parse("2026-04-13T00:30:00Z"),
+            end = Instant.parse("2026-04-20T00:30:00Z"),
+            timeZone = "UTC",
+            divisions = listOf("open"),
+        )
+        val slot = TimeSlot(
+            id = "slot-named-zone",
+            dayOfWeek = 6,
+            daysOfWeek = listOf(6),
+            divisions = listOf("open"),
+            startTimeMinutes = 18 * 60,
+            endTimeMinutes = 19 * 60,
+            startDate = Instant.parse("2026-04-12T07:00:00Z"),
+            timeZone = "America/Los_Angeles",
+            repeating = true,
+            endDate = Instant.parse("2026-04-19T07:00:00Z"),
+            scheduledFieldId = "field-1",
+            scheduledFieldIds = listOf("field-1"),
+            price = null,
+        )
+
+        val options = buildWeeklyScheduleOptions(event, listOf(slot))
+
+        assertEquals("2026-04-12", options.first().occurrenceDate)
+    }
+
+    @Test
     fun weekly_session_options_buildThreeWeeksFromTheSlotStart() {
         val event = Event(
             id = "weekly-session-event",

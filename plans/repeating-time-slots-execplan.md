@@ -19,6 +19,10 @@ A human can verify the result by running the focused site and mobile tests. The 
 - [x] (2026-08-18) Update mobile editing, validation, Room mapping, and presentation for the same contract.
 - [x] (2026-08-18) Add focused site and mobile regression tests.
 - [x] (2026-08-18) Run focused checks, smoke scenarios, and issue completion gates.
+- [x] (2026-08-18) Reopen review defects and add regressions for canonical persistence, external conflict gating, mobile bounds, and rental modal submission.
+- [x] (2026-08-18) Preserve overnight repeating slots in canonical persistence and external conflict checks.
+- [x] (2026-08-18) Preserve configured local date bounds in mobile conflict windows and weekly projections.
+- [x] (2026-08-18) Preserve an open-ended repeating rental end date during modal submission.
 
 ## Surprises & Discoveries
 
@@ -28,7 +32,9 @@ A human can verify the result by running the focused site and mobile tests. The 
   Evidence: `apps/site/src/app/discover/components/eventDetail/weeklySessions.ts` and `apps/site/src/server/events/weeklyOccurrences.ts` do not resolve local wall-clock values through the slot time zone.
 - Observation: `kotlinx-datetime` provides `LocalDateTime.toInstant(timeZone)` but its default behavior does not prove a strict gap/fold policy.
   Evidence: the installed 0.8.0 source was inspected before implementation; the implementation must compare round-tripped local components and inspect offsets before accepting a value.
-
+- Observation: `CreateRentalSlotModal` filled a missing repeating end date while slot props changed because the default non-repeating effect ran before the repeating state update.
+  Evidence: the new modal regression observed a synthetic same-day `endDate` in the update payload for an overnight slot with no configured end date.
+ 
 ## Decision Log
 
 - Decision: Keep one-time slots same-day and change only repeating slots to allow an end time on the next local date.
@@ -39,7 +45,10 @@ A human can verify the result by running the focused site and mobile tests. The 
   Date/Author: 2026-08-18 / Codex.
 - Decision: Use a canonical occurrence shape containing local date, local start and end components, resolved start and end instants, time-zone name, and duration.
   Rationale: Scheduler, diagnostics, UI presentation, and mobile acceptance need the same interval boundaries. Recomputing each path caused the current drift.
+- Decision: Preserve a null repeating end date and compare only explicit repeating date bounds.
+  Rationale: An overnight end clock uses the next local date for occurrence resolution. A synthetic same-day bound changes the availability contract.
   Date/Author: 2026-08-18 / Codex.
+ 
 
 ## Outcomes & Retrospective
 
@@ -47,8 +56,9 @@ A human can verify the result by running the focused site and mobile tests. The 
 - Overnight slots end on the next local date. Site and mobile forms show the next-weekday warning.
 - Site scheduler, diagnostics, weekly sessions, field calendars, and API validation use the resolver.
 - Mobile validation, editor payloads, Room mapping, and weekly presentation use the same local-time contract.
-- Site verification passed: 14 suites and 144 tests. Site TypeScript validation passed.
-- Mobile verification passed: the complete `:composeApp:testDebugUnitTest` suite.
+- Site verification passed: focused schedule and rental checks passed with 10 suites and 165 tests. Site TypeScript validation passed. Changed site files passed ESLint.
+- Mobile verification passed: the three targeted repeating-schedule suites passed with 34 tests. The prior complete `:composeApp:testDebugUnitTest` suite also passed.
+- Defect remediation verification passed: canonical persistence, external conflict gating, mobile final-date overlap, named-zone weekly projections, and open-ended rental submission have regression coverage.
 - No known acceptance gap remains.
 
 ## Context and Orientation

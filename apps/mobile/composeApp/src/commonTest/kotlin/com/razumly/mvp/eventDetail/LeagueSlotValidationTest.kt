@@ -225,6 +225,44 @@ class LeagueSlotValidationTest {
         )
     }
 
+    @Test
+    fun given_repeating_slot_on_its_final_date_when_mixed_slot_overlaps_then_reports_conflict() {
+        val finalDate = Instant.parse("2026-08-17T00:00:00Z")
+        val repeatingSlot = buildSlot(
+            id = "slot-final-day",
+            repeating = true,
+            dayOfWeek = 0,
+            daysOfWeek = listOf(0),
+            startTimeMinutes = 22 * 60,
+            endTimeMinutes = 2 * 60,
+            startDate = finalDate,
+            endDate = finalDate,
+        )
+        val oneTimeSlot = buildSlot(
+            id = "slot-once-final-day",
+            repeating = false,
+            startTimeMinutes = 23 * 60,
+            endTimeMinutes = 23 * 60 + 30,
+            startDate = Instant.parse("2026-08-17T23:00:00Z"),
+            endDate = Instant.parse("2026-08-17T23:30:00Z"),
+        )
+
+        val errors = computeLeagueSlotErrors(
+            slots = listOf(repeatingSlot, oneTimeSlot),
+            singleDivision = false,
+            selectedDivisionIds = emptyList(),
+        )
+
+        assertEquals(
+            "Overlaps with another timeslot for one or more selected resources.",
+            errors[0],
+        )
+        assertEquals(
+            "Overlaps with another timeslot for one or more selected resources.",
+            errors[1],
+        )
+    }
+
 
     private fun buildSlot(
         id: String,

@@ -408,8 +408,9 @@ export const slotCanCheckExternalConflicts = (
 
     const hasTimeRange = (
         typeof slot.startTimeMinutes === 'number' &&
+        Number.isFinite(slot.startTimeMinutes) &&
         typeof slot.endTimeMinutes === 'number' &&
-        slot.endTimeMinutes > slot.startTimeMinutes
+        Number.isFinite(slot.endTimeMinutes)
     );
     if (!hasTimeRange || normalizeWeekdays(slot).length === 0) {
         return false;

@@ -318,14 +318,14 @@ export default function CreateRentalSlotModal({
   }, [organizationHasStripeAccount]);
 
   useEffect(() => {
-    if (!repeating && startDate && !endDate) {
+    if (!repeating && startDate && !endDate && !slot?.repeating && !initialRange) {
       setEndDate(new Date(startDate.getTime()));
       return;
     }
     if (startDate && endDate && endDate < startDate) {
       setEndDate(new Date(startDate.getTime()));
     }
-  }, [startDate, endDate, repeating]);
+  }, [startDate, endDate, initialRange, repeating, slot]);
 
   const handleClose = () => {
     if (submitting || deleting) {
@@ -418,20 +418,19 @@ export default function CreateRentalSlotModal({
       endDateTime.setHours(0, 0, 0, 0);
     }
 
-    if (
-      repeating &&
-      !endDateValue &&
-      endMinutes !== null &&
-      startMinutes !== null &&
-      endMinutes <= startMinutes
-    ) {
-      setError('When the slot repeats weekly without an end date, the end time must be after the start time.');
-      return;
+    if (repeating && endDateValue) {
+      const startDay = new Date(startDateValue.getTime());
+      const endDay = new Date(endDateValue.getTime());
+      startDay.setHours(0, 0, 0, 0);
+      endDay.setHours(0, 0, 0, 0);
+      if (endDay.getTime() < startDay.getTime()) {
+        setError('End date must be on or after the start date.');
+        return;
+      }
     }
 
     const compare = endDateTime.getTime() - startDateTime.getTime();
-    const isInvalidRange = repeating ? compare <= 0 : compare < 0;
-    if (isInvalidRange) {
+    if (!repeating && compare < 0) {
       setError('End date/time must be after the start date/time.');
       return;
     }

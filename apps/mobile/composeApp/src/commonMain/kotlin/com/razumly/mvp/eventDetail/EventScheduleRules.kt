@@ -12,7 +12,12 @@ import com.razumly.mvp.core.data.dataTypes.validateRepeatingTimeSlotOccurrences
 
 import com.razumly.mvp.core.data.dataTypes.resolveOneTimeInterval
 
-import kotlin.time.Duration.Companion.days
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.plus
+import kotlinx.datetime.toLocalDateTime
+
 import kotlin.time.Instant
 
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -126,8 +131,18 @@ private fun TimeSlot.resolveConflictWindow(): ConflictInterval? {
             }
         }.getOrNull()
     }
-    val resolvedEnd = endDate ?: (startDate + 370.days)
-    return ConflictInterval(startDate, resolvedEnd).takeIf { window ->
+
+    val zone = runCatching {
+        TimeZone.of(timeZone.trim().takeIf(String::isNotBlank) ?: "UTC")
+    }.getOrNull() ?: return null
+    val startLocalDate = startDate.toLocalDateTime(zone).date
+    val configuredEndDate = endDate?.toLocalDateTime(zone)?.date
+    val inclusiveEndDate = configuredEndDate ?: startLocalDate.plus(DatePeriod(days = 370))
+    val windowStart = startDate
+    val windowEnd = inclusiveEndDate
+        .plus(DatePeriod(days = 1))
+        .atStartOfDayIn(zone)
+    return ConflictInterval(windowStart, windowEnd).takeIf { window ->
         window.end > window.start
     }
 }

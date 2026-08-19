@@ -41,7 +41,6 @@ internal fun buildWeeklySessionOptions(
     }
 
     val timeZone = event.resolvedTimeZone()
-    val today = Clock.System.now().toLocalDateTime(timeZone).date
     val fallbackDivisionIds = event.divisions
         .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
         .filter(String::isNotBlank)
@@ -51,6 +50,7 @@ internal fun buildWeeklySessionOptions(
 
     timeSlots.forEach { slot ->
         val slotTimeZone = slot.resolvedTimeZone(timeZone)
+        val today = Clock.System.now().toLocalDateTime(slotTimeZone).date
         val normalizedDays = slot.normalizedDaysOfWeek()
         if (normalizedDays.isEmpty()) {
             return@forEach
@@ -59,7 +59,7 @@ internal fun buildWeeklySessionOptions(
         val slotStartDate = slot.startDate.toLocalDateTime(slotTimeZone).date
         val rawSlotEndDate = slot.endDate?.toLocalDateTime(slotTimeZone)?.date
         val slotEndDate = rawSlotEndDate?.takeIf { endDate ->
-            endDate > slotStartDate
+            endDate >= slotStartDate
         }
         val anchorDate = if (today > slotStartDate) today else slotStartDate
         val anchorWeekStart = startOfWeekMonday(anchorDate)
@@ -126,7 +126,6 @@ internal fun buildWeeklyScheduleOptions(
     }
 
     val timeZone = event.resolvedTimeZone()
-    val eventStartDate = event.start.toLocalDateTime(timeZone).date
     val fallbackScheduleWindowDays = 365
     val fallbackDivisionIds = event.divisions
         .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
@@ -136,6 +135,7 @@ internal fun buildWeeklyScheduleOptions(
 
     timeSlots.forEach { slot ->
         val slotTimeZone = slot.resolvedTimeZone(timeZone)
+        val eventStartDate = event.start.toLocalDateTime(slotTimeZone).date
         val normalizedDays = slot.normalizedDaysOfWeek()
         if (normalizedDays.isEmpty()) {
             return@forEach

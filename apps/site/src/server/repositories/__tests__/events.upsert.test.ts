@@ -544,7 +544,39 @@ describe("upsertEventFromPayload", () => {
     expect(eventUpsertArg.update.noFixedEndDateTime).toBe(false);
   });
 
-  it("rejects fixed endDateTime values that are not after startDateTime", async () => {
+  it('persists an overnight repeating slot instead of dropping it before persistence', async () => {
+    const client = createMockClient();
+    const payload = {
+      ...baseEventPayload(),
+      eventType: 'LEAGUE',
+      end: '2026-03-05T09:00:00.000Z',
+      divisions: ['OPEN'],
+      timeSlots: [{
+        id: 'slot_overnight',
+        dayOfWeek: 0,
+        daysOfWeek: [0],
+        divisions: ['OPEN'],
+        startTimeMinutes: 22 * 60,
+        endTimeMinutes: 2 * 60,
+        repeating: true,
+        scheduledFieldId: 'field_1',
+        startDate: '2026-01-05',
+        endDate: '2026-03-05',
+        timeZone: 'America/New_York',
+      }],
+    };
+
+    await expect(upsertEventFromPayload(payload, client as any)).resolves.toBe('event_1');
+    expect(client.timeSlots.upsert).toHaveBeenCalledTimes(1);
+    expect(client.timeSlots.upsert.mock.calls[0][0].create).toEqual(expect.objectContaining({
+      startTimeMinutes: 22 * 60,
+      endTimeMinutes: 2 * 60,
+      repeating: true,
+    }));
+    expect(client.events.upsert.mock.calls[0][0].create.timeSlotIds).toEqual(['slot_overnight']);
+  });
+
+  it('rejects fixed endDateTime values that are not after startDateTime', async () => {
     const client = createMockClient();
     const payload = {
       ...baseEventPayload(),
