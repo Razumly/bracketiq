@@ -84,6 +84,8 @@ import com.razumly.mvp.eventDetail.data.BracketLane
 import com.razumly.mvp.eventDetail.data.BracketNode
 import com.razumly.mvp.eventDetail.data.filterValidNextMatchCandidates
 import com.razumly.mvp.eventDetail.data.validateAndNormalizeBracketGraph
+import com.razumly.mvp.eventDetail.staff.STAFF_NAME_LOAD_ERROR
+import com.razumly.mvp.eventDetail.staff.staffFullName
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
@@ -1548,7 +1550,7 @@ private fun buildEventOfficialSelectionOptions(
 ): List<EventOfficialSelectionOption> {
     return eventOfficials
         .map { official ->
-            val userName = usersById[official.userId]?.fullName ?: official.userId
+            val userName = usersById[official.userId]?.let(::staffFullName) ?: STAFF_NAME_LOAD_ERROR
             val eligibleForSlot = official.positionIds.contains(slot.positionId)
             EventOfficialSelectionOption(
                 eventOfficialId = official.id,

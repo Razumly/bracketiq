@@ -178,17 +178,12 @@ type TeamStaffAssignmentRow = {
 const toDisplayName = (user: {
   firstName?: string | null;
   lastName?: string | null;
-  userName?: string | null;
-  id: string;
 }): string => {
-  const fullName = `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim();
-  if (fullName) {
-    return fullName;
-  }
-  if (user.userName?.trim()) {
-    return user.userName.trim();
-  }
-  return user.id;
+  const firstName = typeof user.firstName === 'string' ? user.firstName.trim() : '';
+  const lastName = typeof user.lastName === 'string' ? user.lastName.trim() : '';
+  return firstName.length > 0 && lastName.length > 0
+    ? `${firstName} ${lastName}`
+    : 'Name unavailable';
 };
 
 const normalizeStatus = (value: string | null | undefined): string | undefined => {
@@ -1288,7 +1283,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const buildPersonFields = (userId: string) => {
     const user = usersById.get(userId);
-    const fullName = user ? toDisplayName(user) : userId;
+    const fullName = user ? toDisplayName(user) : 'Name unavailable';
     return {
       userId,
       firstName: user?.firstName ?? '',

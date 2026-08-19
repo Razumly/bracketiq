@@ -79,6 +79,7 @@ export const EventFormStaffSection = ({
         hostCardVisibleCount,
         newStaffInvite,
         nonOrgStaffError,
+        staffNameError,
         nonOrgStaffResults,
         nonOrgStaffSearch,
         nonOrgStaffSearchLoading,
@@ -121,6 +122,7 @@ export const EventFormStaffSection = ({
                 nonOrgStaffResults={nonOrgStaffResults}
                 nonOrgStaffSearchLoading={nonOrgStaffSearchLoading}
                 nonOrgStaffError={nonOrgStaffError}
+                staffNameError={staffNameError}
                 newStaffInvite={newStaffInvite}
                 assignedOfficialUserIds={assignedUserIdSetByRole.OFFICIAL}
                 assistantHostIds={assistantHostValue}

@@ -143,12 +143,9 @@ const entityId = (value: unknown): string | null => {
 
 const userDisplayName = (user?: (Partial<UserData> & { id?: string; name?: string }) | null): string | null => {
   if (!user) return null;
-  const fullName = typeof user.fullName === 'string' ? user.fullName.trim() : '';
-  const firstLast = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
-  const displayName = typeof user.displayName === 'string' ? user.displayName.trim() : '';
-  const userName = typeof user.userName === 'string' ? user.userName.trim() : '';
-  const name = typeof user.name === 'string' ? user.name.trim() : '';
-  return fullName || firstLast || displayName || userName || name || null;
+  const firstName = typeof user.firstName === 'string' ? user.firstName.trim() : '';
+  const lastName = typeof user.lastName === 'string' ? user.lastName.trim() : '';
+  return firstName.length > 0 && lastName.length > 0 ? `${firstName} ${lastName}` : null;
 };
 
 const MATCH_TIME_PICKER_PROPS = {
@@ -1364,7 +1361,7 @@ export default function ScoreUpdateModal({
   };
   const officialNameLabel = (assignment: { userId?: string | null; eventOfficialId?: string | null }) => {
     const userId = assignment.userId || (assignment.eventOfficialId ? eventOfficialUserIdsById.get(assignment.eventOfficialId) : null);
-    return userId ? userDisplayName(officialUsersById.get(userId)) ?? 'TBD' : 'TBD';
+    return userId ? userDisplayName(officialUsersById.get(userId)) ?? 'Staff name unavailable' : 'TBD';
   };
   const officialAssignments = match.officialAssignments ?? match.officialIds ?? [];
   const hasTeamOfficial = Boolean(teamOfficialId || teamOfficial);

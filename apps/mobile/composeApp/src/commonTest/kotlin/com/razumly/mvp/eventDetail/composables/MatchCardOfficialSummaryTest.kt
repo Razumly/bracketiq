@@ -5,6 +5,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.eventDetail.staff.STAFF_NAME_LOAD_ERROR
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -53,7 +54,7 @@ class MatchCardOfficialSummaryTest {
     }
 
     @Test
-    fun resolve_official_summary_falls_back_to_position_labels_when_user_not_found() {
+    fun resolve_official_summary_reports_missing_user_name_instead_of_position_label() {
         val match = MatchMVP(
             matchId = 1,
             eventId = "event_1",
@@ -79,7 +80,40 @@ class MatchCardOfficialSummaryTest {
             showEventOfficialNames = true,
         )
 
-        assertEquals("Officials: R1", summary)
+        assertEquals(STAFF_NAME_LOAD_ERROR, summary)
+    }
+
+    @Test
+    fun resolve_official_summary_does_not_use_username_when_full_name_is_missing() {
+        val match = MatchMVP(
+            matchId = 1,
+            eventId = "event_1",
+            officialIds = listOf(
+                MatchOfficialAssignment(
+                    positionId = "r1",
+                    slotIndex = 0,
+                    holderType = OfficialAssignmentHolderType.OFFICIAL,
+                    userId = "official_1",
+                    eventOfficialId = "event_official_1",
+                ),
+            ),
+            id = "match_1",
+        )
+
+        val summary = resolveEventOfficialSummary(
+            match = match,
+            positions = listOf(EventOfficialPosition(id = "r1", name = "R1")),
+            usersById = mapOf(
+                "official_1" to user(
+                    id = "official_1",
+                    firstName = "Jordan",
+                    lastName = "",
+                ).copy(userName = "jordan_official"),
+            ),
+            showEventOfficialNames = true,
+        )
+
+        assertEquals(STAFF_NAME_LOAD_ERROR, summary)
     }
 
     @Test

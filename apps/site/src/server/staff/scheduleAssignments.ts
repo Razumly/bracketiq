@@ -421,13 +421,17 @@ const assertParentOccurrenceAvailable = async ({
   }
 };
 
-const displayName = (user: any, fallback: string): string => {
+const STAFF_NAME_UNAVAILABLE_LABEL = 'Staff name unavailable';
+
+const displayName = (
+  user: { firstName?: unknown; lastName?: unknown } | null | undefined,
+  fallback: string,
+): string => {
   const firstName = typeof user?.firstName === 'string' ? user.firstName.trim() : '';
   const lastName = typeof user?.lastName === 'string' ? user.lastName.trim() : '';
-  const fullName = typeof user?.fullName === 'string' ? user.fullName.trim() : '';
-  const username = typeof user?.userName === 'string' ? user.userName.trim() : '';
-  const name = [firstName, lastName].filter(Boolean).join(' ').trim() || fullName || username;
-  return name || fallback;
+  return firstName.length > 0 && lastName.length > 0
+    ? `${firstName} ${lastName}`
+    : fallback;
 };
 
 export const mapStaffScheduleAssignment = (
@@ -450,7 +454,7 @@ export const mapStaffScheduleAssignment = (
     staffMemberId: row.staffMemberId ?? null,
     organizationRoleId: row.organizationRoleId ?? null,
     userId: row.userId ?? null,
-    userName: row.userId ? displayName(user, `Staff ${row.userId}`) : openLabel,
+    userName: row.userId ? displayName(user, STAFF_NAME_UNAVAILABLE_LABEL) : openLabel,
     isOpen: !row.userId,
     isChildAssignment: Boolean(row.parentAssignmentId),
     assignmentKind: row.assignmentKind,

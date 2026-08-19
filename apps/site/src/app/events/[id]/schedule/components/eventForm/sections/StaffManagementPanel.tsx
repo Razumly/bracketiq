@@ -33,6 +33,7 @@ type StaffManagementPanelProps = {
     isOrganizationHostedEvent: boolean;
     officialStaffingCoverageError?: string | null;
     sportDefaultPositionCount: number;
+    staffNameError?: string | null;
     maxMediumTextLength: number;
     maxShortTextLength: number;
     comboboxProps?: ComponentProps<typeof StaffOfficialPositionEditor>['comboboxProps'];
@@ -110,6 +111,7 @@ export const StaffManagementPanel = ({
     nonOrgStaffSearchLoading,
     nonOrgStaffError,
     newStaffInvite,
+    staffNameError,
     assignedOfficialUserIds,
     assistantHostIds,
     assignedOfficialCards,
@@ -152,6 +154,7 @@ export const StaffManagementPanel = ({
     showTeamOperations = true,
 }: StaffManagementPanelProps) => (
     <>
+        {staffNameError ? <Text c="red" size="sm">{staffNameError}</Text> : null}
         {showDedicatedOfficials ? <TeamOfficiatingControls
             control={control}
             doTeamsOfficiate={Boolean(eventData.doTeamsOfficiate)}

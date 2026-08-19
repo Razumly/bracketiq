@@ -108,9 +108,11 @@ export async function GET(
   const rolesById = new Map(roles.map((role) => [role.id, role]));
   const staffMembers = staffRows.map((staffMember) => {
     const user = usersById.get(staffMember.userId);
-    const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim()
-      || user?.userName
-      || staffMember.userId;
+    const firstName = typeof user?.firstName === 'string' ? user.firstName.trim() : '';
+    const lastName = typeof user?.lastName === 'string' ? user.lastName.trim() : '';
+    const fullName = firstName.length > 0 && lastName.length > 0
+      ? `${firstName} ${lastName}`
+      : 'Staff name unavailable';
     return {
       staffMemberId: staffMember.id,
       userId: staffMember.userId,

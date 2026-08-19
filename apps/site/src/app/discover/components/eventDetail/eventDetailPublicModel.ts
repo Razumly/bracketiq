@@ -9,7 +9,6 @@ import {
     formatAffiliateEventPriceRange,
     formatEventDivisionPriceRange,
     getEventDateTime,
-    getUserFullName,
     getUserHandle,
 } from '@/types';
 import {
@@ -32,6 +31,18 @@ import {
     uniqueNonEmptyStrings,
 } from './eventDetailPresentation';
 import { parseDateValue } from './weeklySessions';
+
+const STAFF_NAME_UNAVAILABLE_LABEL = 'Staff name unavailable';
+
+const getStaffFullName = (user?: Partial<UserData> | null): string | null => {
+    if (user?.isIdentityHidden) {
+        return null;
+    }
+    const firstName = typeof user?.firstName === 'string' ? user.firstName.trim() : '';
+    const lastName = typeof user?.lastName === 'string' ? user.lastName.trim() : '';
+    const fullName = `${firstName} ${lastName}`.trim();
+    return firstName.length > 0 && lastName.length > 0 && fullName.length > 0 ? fullName : null;
+};
 
 type BuildEventDetailPublicModelArgs = {
     event: Event;
@@ -77,7 +88,6 @@ export function buildEventDetailPublicModel({
     const eventScheduleDisplayText = isEvergreenProgram
         ? (event.dateDisplayText?.trim() || event.scheduleText?.trim() || 'No fixed start date')
         : `${date} at ${time}`;
-    const isTeamSignup = Boolean(event.teamSignup);
     const startDateValue = parseDateValue(event.start ?? null);
     const endDateValue = parseDateValue(event.end ?? null);
     const sharesSingleDayWindow = Boolean(
@@ -86,6 +96,7 @@ export function buildEventDetailPublicModel({
         && startDateValue.toDateString() === endDateValue.toDateString(),
     );
     const sportLabel = getSportLabel(event);
+    const isTeamSignup = Boolean(event.teamSignup);
     const organization = typeof event.organization === 'object' && event.organization
         ? event.organization
         : null;
@@ -97,13 +108,12 @@ export function buildEventDetailPublicModel({
             return organizationName;
         }
         if (hostUser) {
-            return getUserFullName(hostUser);
+            return getStaffFullName(hostUser) ?? STAFF_NAME_UNAVAILABLE_LABEL;
         }
         if (organizationName) {
             return organizationName;
         }
-        const normalizedHostId = typeof event.hostId === 'string' ? event.hostId.trim() : '';
-        return normalizedHostId || 'Hosted by organizer';
+        return 'Hosted by organizer';
     })();
     const hostedByHandle = !isOrganizationEvent && hostUser ? getUserHandle(hostUser) : null;
     const hostedByHref = getOrganizationHostedByHref({
@@ -165,15 +175,23 @@ export function buildEventDetailPublicModel({
     const assistantHostNames = (() => {
         const hydratedIds = new Set((event.assistantHosts ?? []).map((entry) => entry.$id));
         return uniqueNonEmptyStrings([
-            ...(event.assistantHosts ?? []).map((entry) => getUserFullName(entry)),
-            ...((event.assistantHostIds ?? []).filter((entry) => !hydratedIds.has(entry))),
+            ...(event.assistantHosts ?? []).map(
+                (entry) => getStaffFullName(entry) ?? STAFF_NAME_UNAVAILABLE_LABEL,
+            ),
+            ...((event.assistantHostIds ?? [])
+                .filter((entry) => !hydratedIds.has(entry))
+                .map(() => STAFF_NAME_UNAVAILABLE_LABEL)),
         ]);
     })();
     const officialNames = (() => {
         const hydratedIds = new Set((event.officials ?? []).map((entry) => entry.$id));
         return uniqueNonEmptyStrings([
-            ...(event.officials ?? []).map((entry) => getUserFullName(entry)),
-            ...((event.officialIds ?? []).filter((entry) => !hydratedIds.has(entry))),
+            ...(event.officials ?? []).map(
+                (entry) => getStaffFullName(entry) ?? STAFF_NAME_UNAVAILABLE_LABEL,
+            ),
+            ...((event.officialIds ?? [])
+                .filter((entry) => !hydratedIds.has(entry))
+                .map(() => STAFF_NAME_UNAVAILABLE_LABEL)),
         ]);
     })();
     const normalizedViewerId = typeof user?.$id === 'string' ? user.$id.trim() : '';

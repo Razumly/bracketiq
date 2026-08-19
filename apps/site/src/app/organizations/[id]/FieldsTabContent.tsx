@@ -2178,9 +2178,9 @@ export default function FieldsTabContent({
           if (!field) {
             return;
           }
-	          const assignedStaffName = draft.mode !== 'rental' && draft.staff?.userId
-	            ? staffMemberByUserId.get(draft.staff.userId)?.fullName ?? draft.staff.userName ?? null
-	            : null;
+          const assignedStaffName = draft.mode !== 'rental' && draft.staff?.userId
+            ? staffMemberByUserId.get(draft.staff.userId)?.fullName ?? 'Staff name unavailable'
+            : null;
 	          occurrences.forEach((occurrence) => {
 	            const coveredRanges = draft.staff?.parentDraftId
 	              ? []
@@ -3635,7 +3635,7 @@ export default function FieldsTabContent({
         ...editingStaffAssignment,
         userId: nextUserId,
         userName: nextUserId
-          ? selectedStaffMember?.fullName ?? editingStaffAssignment.userName
+          ? selectedStaffMember?.fullName ?? 'Staff name unavailable'
           : '',
         isOpen: !nextUserId,
         rateOverrideType: overrideAmountCents ? 'HOURLY' : null,

@@ -461,7 +461,7 @@ const mapOrganizationTeamStaffRow = (row: Record<string, any>): OrganizationTeam
   userId: String(row?.userId ?? ''),
   firstName: typeof row?.firstName === 'string' ? row.firstName : undefined,
   lastName: typeof row?.lastName === 'string' ? row.lastName : undefined,
-  fullName: typeof row?.fullName === 'string' && row.fullName.trim() ? row.fullName.trim() : String(row?.userId ?? 'Unknown User'),
+  fullName: typeof row?.fullName === 'string' && row.fullName.trim() ? row.fullName.trim() : 'Staff name unavailable',
   userName: typeof row?.userName === 'string' ? row.userName : undefined,
   profileImageId: typeof row?.profileImageId === 'string' ? row.profileImageId : null,
   role: row?.role === 'HEAD_COACH'
@@ -476,7 +476,7 @@ const mapOrganizationTeamMemberRow = (row: Record<string, any>): OrganizationTea
   userId: String(row?.userId ?? ''),
   firstName: typeof row?.firstName === 'string' ? row.firstName : undefined,
   lastName: typeof row?.lastName === 'string' ? row.lastName : undefined,
-  fullName: typeof row?.fullName === 'string' && row.fullName.trim() ? row.fullName.trim() : String(row?.userId ?? 'Unknown User'),
+  fullName: typeof row?.fullName === 'string' && row.fullName.trim() ? row.fullName.trim() : 'Staff name unavailable',
   userName: typeof row?.userName === 'string' ? row.userName : undefined,
   profileImageId: typeof row?.profileImageId === 'string' ? row.profileImageId : null,
   status: typeof row?.status === 'string' ? row.status : undefined,
@@ -995,17 +995,16 @@ function OrganizationDetailContent() {
     return null;
   }, [org?.owner, org?.ownerId, user]);
   const currentOfficials = useMemo(() => org?.officials ?? [], [org?.officials]);
-  const userDisplayName = useCallback((candidate: Partial<UserData> | undefined, fallbackId: string): string => {
+  const STAFF_NAME_UNAVAILABLE_LABEL = 'Staff name unavailable';
+  const userDisplayName = useCallback((candidate: Partial<UserData> | undefined): string => {
+    if (candidate?.isIdentityHidden) {
+      return STAFF_NAME_UNAVAILABLE_LABEL;
+    }
     const firstName = typeof candidate?.firstName === 'string' ? candidate.firstName.trim() : '';
     const lastName = typeof candidate?.lastName === 'string' ? candidate.lastName.trim() : '';
-    const fullName = `${firstName} ${lastName}`.trim();
-    if (fullName.length > 0) {
-      return fullName;
-    }
-    if (typeof candidate?.userName === 'string' && candidate.userName.trim().length > 0) {
-      return candidate.userName.trim();
-    }
-    return fallbackId;
+    return firstName.length > 0 && lastName.length > 0
+      ? `${firstName} ${lastName}`
+      : STAFF_NAME_UNAVAILABLE_LABEL;
   }, []);
   const staffRosterEntries = useMemo<RoleRosterEntry[]>(() => {
     const entries: RoleRosterEntry[] = [];
@@ -1017,7 +1016,7 @@ function OrganizationDetailContent() {
       entries.push({
         id: ownerHost.$id,
         userId: ownerHost.$id,
-        fullName: userDisplayName(ownerHost, ownerHost.$id),
+        fullName: userDisplayName(ownerHost),
         userName: ownerHost.userName || null,
         email: org?.staffEmailsByUserId?.[ownerHost.$id] ?? null,
         user: ownerHost,
@@ -1034,7 +1033,7 @@ function OrganizationDetailContent() {
       entries.push({
         id: org.ownerId,
         userId: org.ownerId,
-        fullName: org.ownerId,
+        fullName: STAFF_NAME_UNAVAILABLE_LABEL,
         userName: null,
         email: org?.staffEmailsByUserId?.[org.ownerId] ?? null,
         user: null,
@@ -1059,7 +1058,7 @@ function OrganizationDetailContent() {
         id: staffMember.$id,
         staffMemberId: staffMember.$id,
         userId: staffMember.userId,
-        fullName: userDisplayName(userEntry, staffMember.userId),
+        fullName: userDisplayName(userEntry),
         userName: userEntry?.userName || null,
         email: org?.staffEmailsByUserId?.[staffMember.userId] ?? staffMember.invite?.email ?? null,
         user: userEntry ?? null,
@@ -1079,7 +1078,7 @@ function OrganizationDetailContent() {
       entries.push({
         id: invite.$id,
         userId: invite.userId,
-        fullName: [invite.firstName, invite.lastName].filter(Boolean).join(' ').trim() || invite.email || invite.userId,
+        fullName: `${String(invite.firstName ?? '').trim()} ${String(invite.lastName ?? '').trim()}`.trim() || STAFF_NAME_UNAVAILABLE_LABEL,
         userName: null,
         email: invite.email ?? null,
         user: null,
@@ -1095,6 +1094,12 @@ function OrganizationDetailContent() {
 
     return entries;
   }, [org?.ownerId, org?.staffEmailsByUserId, org?.staffInvites, org?.staffMembers, org?.staffRoles, ownerHost, userDisplayName]);
+  const staffRosterNameError = useMemo(
+    () => staffRosterEntries.some((entry) => (
+      Boolean(entry.userId) && entry.fullName === STAFF_NAME_UNAVAILABLE_LABEL
+    )) ? 'Staff names could not be loaded. Refresh and try again.' : null,
+    [staffRosterEntries],
+  );
   const eventHostOptions = useMemo(() => {
     const ids = new Set<string>();
     if (typeof org?.ownerId === 'string' && org.ownerId.length > 0) {
@@ -1104,24 +1109,24 @@ function OrganizationDetailContent() {
 
     const labelById = new Map<string, string>();
     if (org?.owner?.$id) {
-      labelById.set(org.owner.$id, `${userDisplayName(org.owner, org.owner.$id)} (Owner)`);
+      labelById.set(org.owner.$id, `${userDisplayName(org.owner)} (Owner)`);
     } else if (org?.ownerId) {
-      labelById.set(org.ownerId, `${org.ownerId} (Owner)`);
+      labelById.set(org.ownerId, `${STAFF_NAME_UNAVAILABLE_LABEL} (Owner)`);
     }
 
     currentHosts.forEach((host) => {
       if (!host?.$id) return;
-      labelById.set(host.$id, userDisplayName(host, host.$id));
+      labelById.set(host.$id, userDisplayName(host));
     });
 
     if (user?.$id && !labelById.has(user.$id)) {
-      labelById.set(user.$id, userDisplayName(user, user.$id));
+      labelById.set(user.$id, userDisplayName(user));
     }
 
     return Array.from(ids)
       .map((hostId) => ({
         value: hostId,
-        label: labelById.get(hostId) ?? hostId,
+        label: labelById.get(hostId) ?? STAFF_NAME_UNAVAILABLE_LABEL,
       }))
       .sort((left, right) => left.label.localeCompare(right.label));
   }, [currentHostIds, currentHosts, org?.owner, org?.ownerId, user, userDisplayName]);
@@ -4180,29 +4185,31 @@ function OrganizationDetailContent() {
                 )}
               </Paper>
             )}
-
             {canManageStaffSurface && activeTab === 'staff' && (
-              <RoleRosterManager
-                rosterEntries={staffRosterEntries}
-                searchValue={staffSearch}
-                onSearchChange={(value) => { void handleSearchStaff(value); }}
-                searchResults={staffResults}
-                searchLoading={staffSearchLoading}
-                searchError={staffError}
-                onAddExisting={(candidate, roleId, types) => { void handleInviteExistingStaff(candidate, roleId, types); }}
-                inviteRows={staffInvites}
-                onInviteRowsChange={(rows) => setStaffInvites(rows)}
-                inviteError={staffInviteError}
-                inviting={invitingStaff}
-                staffRoles={org.staffRoles ?? []}
-                onSendInvites={() => { void handleInviteStaffEmails(); }}
-                onRemoveFromRoster={(entryUserId) => { void handleRemoveStaffMember(entryUserId); }}
-                onRoleChange={(entryUserId, roleId) => handleUpdateStaffRole(entryUserId, roleId)}
-                onCreateRole={(name, permissions) => handleCreateStaffRole(name, permissions)}
-                onUpdateRole={(roleId, data) => handleUpdateStaffRoleDefinition(roleId, data)}
-                organizationId={org.$id}
-                canManageCompensation={canManageStaffCompensation}
-              />
+              <>
+                {staffRosterNameError ? <Text c="red" size="sm" mb="sm">{staffRosterNameError}</Text> : null}
+                <RoleRosterManager
+                  rosterEntries={staffRosterEntries}
+                  searchValue={staffSearch}
+                  onSearchChange={(value) => { void handleSearchStaff(value); }}
+                  searchResults={staffResults}
+                  searchLoading={staffSearchLoading}
+                  searchError={staffError}
+                  onAddExisting={(candidate, roleId, types) => { void handleInviteExistingStaff(candidate, roleId, types); }}
+                  inviteRows={staffInvites}
+                  onInviteRowsChange={(rows) => setStaffInvites(rows)}
+                  inviteError={staffInviteError}
+                  inviting={invitingStaff}
+                  staffRoles={org.staffRoles ?? []}
+                  onSendInvites={() => { void handleInviteStaffEmails(); }}
+                  onRemoveFromRoster={(entryUserId) => { void handleRemoveStaffMember(entryUserId); }}
+                  onRoleChange={(entryUserId, roleId) => handleUpdateStaffRole(entryUserId, roleId)}
+                  onCreateRole={(name, permissions) => handleCreateStaffRole(name, permissions)}
+                  onUpdateRole={(roleId, data) => handleUpdateStaffRoleDefinition(roleId, data)}
+                  organizationId={org.$id}
+                  canManageCompensation={canManageStaffCompensation}
+                />
+              </>
             )}
 
             {(isOwner || canManageDiscounts) && activeTab === 'discounts' && org && (

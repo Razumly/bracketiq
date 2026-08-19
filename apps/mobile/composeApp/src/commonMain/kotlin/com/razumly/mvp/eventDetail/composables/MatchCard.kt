@@ -68,6 +68,8 @@ import com.razumly.mvp.eventDetail.isPlayoffDivisionKind
 import com.razumly.mvp.eventDetail.isGeneratedTournamentPoolDivision
 import com.razumly.mvp.eventDetail.resolveEventMatchRules
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
+import com.razumly.mvp.eventDetail.staff.STAFF_NAME_LOAD_ERROR
+import com.razumly.mvp.eventDetail.staff.staffFullName
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -988,19 +990,21 @@ internal fun buildManageOfficialRows(
         val key = positionId to slotIndex
         handledKeys += key
         val assignment = assignmentsByKey[key]
+        val assignmentUserId = assignment?.userId?.trim()?.takeIf(String::isNotBlank)
         val officialLabel: String = when {
-            assignment == null -> "TBD"
+            assignment == null || assignmentUserId == null -> "TBD"
             else -> {
-                val resolvedUserLabel = assignment.userId
-                    ?.let { userId -> usersById[userId] }
-                    ?.let(::resolveUserLabel)
+                val resolvedUserLabel = usersById[assignmentUserId]
+                    ?.let(::staffFullName)
                     ?.takeIf(String::isNotBlank)
-                val currentUserFallback = if (assignment.userId == normalizedCurrentUserId) {
+                val currentUserFallback = if (assignmentUserId == normalizedCurrentUserId) {
                     normalizedCurrentUserLabel ?: ""
                 } else {
                     ""
                 }
-                resolvedUserLabel ?: currentUserFallback.ifBlank { "TBD" }
+                resolvedUserLabel
+                    ?: currentUserFallback.takeIf(String::isNotBlank)
+                    ?: STAFF_NAME_LOAD_ERROR
             }
         }
         rows += ManageOfficialRow(
@@ -1013,29 +1017,35 @@ internal fun buildManageOfficialRows(
         val key = assignment.positionId to assignment.slotIndex
         if (handledKeys.contains(key)) return@forEach
         val positionLabel = assignmentLabelsByKey[key] ?: "Official"
-        val resolvedUserLabel = assignment.userId
+        val assignmentUserId = assignment.userId?.trim()?.takeIf(String::isNotBlank)
+        val resolvedUserLabel = assignmentUserId
             ?.let { userId -> usersById[userId] }
-            ?.let(::resolveUserLabel)
+            ?.let(::staffFullName)
             ?.takeIf(String::isNotBlank)
-        val currentUserFallback = if (assignment.userId == normalizedCurrentUserId) {
+        val currentUserFallback = if (assignmentUserId == normalizedCurrentUserId) {
             normalizedCurrentUserLabel ?: ""
         } else {
             ""
         }
-        val officialLabel: String = resolvedUserLabel ?: currentUserFallback.ifBlank { "TBD" }
+        val officialLabel: String = if (assignmentUserId == null) {
+            "TBD"
+        } else {
+            resolvedUserLabel
+                ?: currentUserFallback.takeIf(String::isNotBlank)
+                ?: STAFF_NAME_LOAD_ERROR
+        }
         rows += ManageOfficialRow(positionLabel = positionLabel, officialLabel = officialLabel)
     }
 
     if (normalizedAssignments.isEmpty() && legacyOfficialId != null) {
         val legacyOfficialLabel = usersById[legacyOfficialId]
-            ?.let(::resolveUserLabel)
+            ?.let(::staffFullName)
             ?.takeIf(String::isNotBlank)
             ?: if (legacyOfficialId == normalizedCurrentUserId) {
                 normalizedCurrentUserLabel ?: ""
             } else {
                 ""
-            }
-            .ifBlank { "TBD" }
+            }.ifBlank { STAFF_NAME_LOAD_ERROR }
         if (rows.isNotEmpty()) {
             rows[0] = rows[0].copy(officialLabel = legacyOfficialLabel)
         } else {
@@ -1090,20 +1100,27 @@ internal fun resolveEventOfficialSummary(
     } else {
         labeledAssignments
     }
-    val assignmentDisplayNames = visibleAssignments.map { (assignment, label) ->
-        val currentUserFallbackLabel = if (assignment.userId == normalizedCurrentUserId) {
+    val assignmentDisplayNames = visibleAssignments.map { (assignment, _) ->
+        val userId = assignment.userId?.trim()?.takeIf(String::isNotBlank)
+        val resolvedUserLabel = userId
+            ?.let { assignedUserId -> usersById[assignedUserId] }
+            ?.let(::resolveUserLabel)
+            ?.takeIf(String::isNotBlank)
+        val currentUserFallbackLabel = if (userId == normalizedCurrentUserId) {
             normalizedCurrentUserLabel
         } else {
             null
         }
-        assignment.userId
-            ?.let { userId -> usersById[userId] }
-            ?.let(::resolveUserLabel)
-            ?.takeIf(String::isNotBlank)
-            ?: currentUserFallbackLabel
-            ?: label
-            ?: "Official"
+        when {
+            userId == null -> "TBD"
+            resolvedUserLabel != null -> resolvedUserLabel
+            currentUserFallbackLabel?.isNotBlank() == true -> currentUserFallbackLabel
+            else -> STAFF_NAME_LOAD_ERROR
+        }
     }.distinct()
+    if (assignmentDisplayNames.any { label -> label == STAFF_NAME_LOAD_ERROR }) {
+        return STAFF_NAME_LOAD_ERROR
+    }
     if (assignmentDisplayNames.isNotEmpty()) {
         return "Officials: ${assignmentDisplayNames.joinToString(", ")}"
     }
@@ -1111,11 +1128,17 @@ internal fun resolveEventOfficialSummary(
     val legacyOfficialId = match.officialId?.trim()?.takeIf(String::isNotBlank)
     if (!showOnlyCurrentOfficial || legacyOfficialId == normalizedCurrentUserId) {
         val officialUser = legacyOfficialId?.let { usersById[it] }
-        if (officialUser != null) {
-            return "Official: ${resolveUserLabel(officialUser)}"
+        val officialLabel = officialUser?.let(::resolveUserLabel)?.takeIf(String::isNotBlank)
+            ?: if (legacyOfficialId == normalizedCurrentUserId) {
+                normalizedCurrentUserLabel
+            } else {
+                null
+            }
+        if (officialLabel != null) {
+            return "Official: $officialLabel"
         }
-        if (legacyOfficialId != null && legacyOfficialId == normalizedCurrentUserId && normalizedCurrentUserLabel != null) {
-            return "Official: $normalizedCurrentUserLabel"
+        if (legacyOfficialId != null) {
+            return STAFF_NAME_LOAD_ERROR
         }
     }
 
@@ -1133,14 +1156,7 @@ internal fun resolveTeamOfficialSummary(
     return officialTeamSummary?.let { "Official: $it" }
 }
 
-private fun resolveUserLabel(user: UserData): String {
-    val fullName = user.fullName.trim()
-    if (fullName.isNotEmpty()) {
-        return fullName
-    }
-    val userName = user.userName.trim()
-    return userName.ifBlank { "TBD" }
-}
+private fun resolveUserLabel(user: UserData): String? = staffFullName(user)
 
 internal enum class BracketTeamSlot { TEAM1, TEAM2 }
 

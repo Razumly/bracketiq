@@ -36,6 +36,9 @@ import {
     buildStaffInviteByUserId,
     buildUserDataById,
     filterOrganizationStaffRosterEntries,
+    getStaffFullName,
+    STAFF_NAME_LOAD_ERROR,
+    STAFF_NAME_UNAVAILABLE_LABEL,
     type StaffRosterStatus,
 } from '../staffInvites';
 import { stringArraysEqual } from '../shared';
@@ -276,7 +279,13 @@ export const useStaffRosterController = ({
                 setNonOrgStaffError(null);
                 const results = await userService.searchUsers(query);
                 if (!cancelled) {
-                    setNonOrgStaffResults(results.filter((candidate) => Boolean(candidate?.$id)));
+                    const validResults = results.filter(
+                        (candidate) => Boolean(candidate?.$id) && Boolean(getStaffFullName(candidate)),
+                    );
+                    if (validResults.length !== results.length) {
+                        setNonOrgStaffError(STAFF_NAME_LOAD_ERROR);
+                    }
+                    setNonOrgStaffResults(validResults);
                 }
             } catch (error) {
                 console.error('Failed to search staff:', error);
@@ -363,6 +372,16 @@ export const useStaffRosterController = ({
         }),
         [assistantHostUsersById, assistantHostValue, currentEventStaffInviteByUserId, eventData.hostId, eventData.pendingStaffInvites, organizationUsersById],
     );
+    const staffNameError = useMemo(() => {
+        const missingAssignedName = [...assignedOfficialCards, ...assignedHostCards].some((card) => (
+            card.source === 'assigned' && card.displayName === STAFF_NAME_UNAVAILABLE_LABEL
+        ));
+        const missingRosterName = organizationStaffRosterEntries.some((entry) => (
+            Boolean(entry.userId) && entry.fullName === STAFF_NAME_UNAVAILABLE_LABEL
+        ));
+        return missingAssignedName || missingRosterName ? STAFF_NAME_LOAD_ERROR : null;
+    }, [assignedHostCards, assignedOfficialCards, organizationStaffRosterEntries]);
+
 
     useEffect(() => {
         setOrganizationStaffVisibleCount(5);
@@ -399,6 +418,7 @@ export const useStaffRosterController = ({
         handleRemoveAssistantHost,
         hostCardVisibleCount,
         nonOrgStaffError,
+        staffNameError,
         nonOrgStaffResults,
         nonOrgStaffSearch,
         nonOrgStaffSearchLoading,

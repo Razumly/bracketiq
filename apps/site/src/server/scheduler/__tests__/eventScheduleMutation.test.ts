@@ -70,6 +70,8 @@ const buildDivision = (
     {},
     "PHASE",
     phase,
+    null,
+    true,
   );
 
 const buildLeague = (

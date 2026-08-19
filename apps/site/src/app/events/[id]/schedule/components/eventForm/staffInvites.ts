@@ -302,7 +302,7 @@ export const buildOrganizationStaffRosterEntries = (
         entries.push({
             id: organization.ownerId,
             userId: organization.ownerId,
-            fullName: toUserLabel(organization.owner, organization.ownerId),
+            fullName: toUserLabel(organization.owner),
             userName: organization.owner?.userName ?? null,
             email: organization.staffEmailsByUserId?.[organization.ownerId] ?? getUserEmail(organization.owner),
             user: organization.owner ?? null,
@@ -320,7 +320,7 @@ export const buildOrganizationStaffRosterEntries = (
         entries.push({
             id: staffMember.$id,
             userId: staffMember.userId,
-            fullName: toUserLabel(staffMember.user, staffMember.userId),
+            fullName: toUserLabel(staffMember.user),
             userName: staffMember.user?.userName ?? null,
             email: organization?.staffEmailsByUserId?.[staffMember.userId] ?? getUserEmail(staffMember.user),
             user: staffMember.user ?? null,
@@ -338,7 +338,7 @@ export const buildOrganizationStaffRosterEntries = (
         entries.push({
             id: invite.$id,
             userId: invite.userId,
-            fullName: [invite.firstName, invite.lastName].filter(Boolean).join(' ').trim() || invite.email || invite.userId,
+            fullName: getStaffFullName(invite) ?? STAFF_NAME_UNAVAILABLE_LABEL,
             userName: null,
             email: invite.email ?? null,
             user: null,
@@ -416,7 +416,7 @@ export const buildAssignedOfficialCards = ({
             userId: officialId,
             user: official,
             email: getUserEmail(official),
-            displayName: toUserLabel(official ?? undefined, officialId),
+            displayName: toUserLabel(official),
             status: inviteStatus && inviteStatus !== 'active' ? inviteStatus : null,
             source: 'assigned',
         };
@@ -431,7 +431,7 @@ export const buildAssignedOfficialCards = ({
             userId: null,
             user: null,
             email: invite.email,
-            displayName: [invite.firstName, invite.lastName].filter(Boolean).join(' ').trim() || invite.email,
+            displayName: getStaffFullName(invite) ?? STAFF_NAME_UNAVAILABLE_LABEL,
             status: 'email_invite',
             source: 'draft',
         });
@@ -466,7 +466,7 @@ export const buildAssignedHostCards = ({
             userId: primaryHostId,
             user: (hostUser as UserData | null) ?? null,
             email: getUserEmail(hostUser),
-            displayName: toUserLabel(hostUser ?? undefined, primaryHostId),
+            displayName: toUserLabel(hostUser),
             status: null,
             source: 'assigned',
         });
@@ -481,7 +481,7 @@ export const buildAssignedHostCards = ({
             userId: assistantHostId,
             user: (assistantHost as UserData | null) ?? null,
             email: getUserEmail(assistantHost),
-            displayName: toUserLabel(assistantHost ?? undefined, assistantHostId),
+            displayName: toUserLabel(assistantHost),
             status: inviteStatus && inviteStatus !== 'active' ? inviteStatus : null,
             source: 'assigned',
         });
@@ -496,7 +496,7 @@ export const buildAssignedHostCards = ({
             userId: null,
             user: null,
             email: invite.email,
-            displayName: [invite.firstName, invite.lastName].filter(Boolean).join(' ').trim() || invite.email,
+            displayName: getStaffFullName(invite) ?? STAFF_NAME_UNAVAILABLE_LABEL,
             status: 'email_invite',
             source: 'draft',
         });
@@ -691,18 +691,23 @@ export const getUserEmail = (candidate?: Partial<UserData> | null): string | nul
     return email.length > 0 ? email : null;
 };
 
-export const toUserLabel = (user: Partial<UserData> | undefined, fallbackId: string): string => {
+export const STAFF_NAME_UNAVAILABLE_LABEL = 'Staff name unavailable';
+
+export const STAFF_NAME_LOAD_ERROR = 'Staff names could not be loaded. Refresh and try again.';
+
+export const getStaffFullName = (user?: Partial<UserData> | null): string | null => {
+    if (user?.isIdentityHidden) {
+        return null;
+    }
     const firstName = typeof user?.firstName === 'string' ? user.firstName.trim() : '';
     const lastName = typeof user?.lastName === 'string' ? user.lastName.trim() : '';
     const fullName = `${firstName} ${lastName}`.trim();
-    if (fullName.length > 0) {
-        return fullName;
-    }
-    if (typeof user?.userName === 'string' && user.userName.trim().length > 0) {
-        return user.userName.trim();
-    }
-    return fallbackId;
+    return firstName.length > 0 && lastName.length > 0 && fullName.length > 0 ? fullName : null;
 };
+
+export const toUserLabel = (user?: Partial<UserData> | null): string => (
+    getStaffFullName(user) ?? STAFF_NAME_UNAVAILABLE_LABEL
+);
 
 export const userMatchesSearch = (candidate: Partial<UserData> | undefined, query: string): boolean => {
     const normalizedQuery = query.trim().toLowerCase();

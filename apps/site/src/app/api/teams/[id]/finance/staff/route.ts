@@ -36,18 +36,13 @@ const mutationErrorResponse = (error: unknown) => {
 };
 
 const displayName = (
-  user: { firstName?: string | null; lastName?: string | null; userName?: string | null } | null | undefined,
-  fallback: string,
+  user: { firstName?: string | null; lastName?: string | null } | null | undefined,
 ): string => {
-  const fullName = [user?.firstName, user?.lastName]
-    .map((part) => (typeof part === 'string' ? part.trim() : ''))
-    .filter(Boolean)
-    .join(' ');
-  if (fullName) {
-    return fullName;
-  }
-  const userName = typeof user?.userName === 'string' ? user.userName.trim() : '';
-  return userName || fallback;
+  const firstName = typeof user?.firstName === 'string' ? user.firstName.trim() : '';
+  const lastName = typeof user?.lastName === 'string' ? user.lastName.trim() : '';
+  return firstName.length > 0 && lastName.length > 0
+    ? `${firstName} ${lastName}`
+    : 'Staff name unavailable';
 };
 
 export async function GET(
@@ -120,7 +115,6 @@ export async function GET(
       roleName: staffMember.roleId ? rolesById.get(staffMember.roleId)?.name ?? null : null,
       displayName: displayName(
         staffMember.userId ? usersById.get(staffMember.userId) : null,
-        `Staff ${staffMember.id}`,
       ),
       types: staffMember.types,
     })),

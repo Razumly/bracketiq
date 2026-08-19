@@ -83,6 +83,7 @@ internal data class EventDetailsStaffState(
     val draftInviteOfficial: Boolean,
     val draftInviteAssistantHost: Boolean,
     val staffEditorError: String?,
+    val staffNameError: String?,
     val assignedStaffExpanded: Boolean,
     val officialStaffCards: List<StaffAssignmentCardModel>,
     val hostStaffCards: List<StaffAssignmentCardModel>,
@@ -148,6 +149,13 @@ internal fun LazyListScope.eventDetailsStaffSection(
         animationDelay = 300,
         showContainer = showContainer,
         viewContent = {
+            state.staffNameError?.let { errorText ->
+                Text(
+                    text = errorText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             DetailKeyValueList(
                 rows = buildList {
                     add(
@@ -195,6 +203,13 @@ internal fun LazyListScope.eventDetailsStaffSection(
             )
         },
         editContent = {
+            state.staffNameError?.let { errorText ->
+                Text(
+                    text = errorText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             var teamOfficiatingExpanded by rememberSaveable(state.editEvent.id) { mutableStateOf(true) }
             var teamOperationsExpanded by rememberSaveable(state.editEvent.id) { mutableStateOf(true) }
             var staffingPriorityExpanded by rememberSaveable(state.editEvent.id) { mutableStateOf(true) }

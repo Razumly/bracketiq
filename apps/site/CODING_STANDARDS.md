@@ -14,6 +14,10 @@ Do not add tests that only:
 
 A UI test should perform the relevant interaction and assert the resulting state, output, or side effect. A static page, metadata, or route-presence check belongs in browser or deployment smoke validation when it is an externally important contract. Do not preserve a unit test only to satisfy a coverage number.
 
+## Failure and fallback standard
+
+Show an explicit failure when required data is missing or cannot load. Do not show an entity ID, username, or other implementation value in place of a required display name. Use a fallback only when the product contract defines that fallback. For example, a missing price may display as free when the event contract defines that behavior. Otherwise, stop the affected flow and show the error.
+
 ## External provider boundary
 
 Do not mock or hand-build third-party provider interfaces in Jest or Playwright tests. This includes provider SDKs, HTTP endpoints and responses, OAuth/token exchanges, hosted widgets, maps, payment flows, and webhook payloads. Examples include Stripe, Google or Apple OAuth and Maps, QuickBooks, BoldSign, Gmail, ScrapingDog, Firecrawl, and OpenAI-compatible model APIs.

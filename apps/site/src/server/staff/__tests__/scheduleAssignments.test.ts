@@ -5,6 +5,7 @@ jest.mock('@/lib/prisma', () => ({ prisma: {} }));
 import {
   createStaffScheduleAssignment,
   deleteStaffScheduleAssignment,
+  mapStaffScheduleAssignment,
   updateStaffScheduleAssignment,
 } from '@/server/staff/scheduleAssignments';
 
@@ -87,6 +88,28 @@ const createClient = () => {
     tx,
   };
 };
+
+describe('mapStaffScheduleAssignment', () => {
+  it('shows an explicit name error instead of a staff ID', () => {
+    const assignment = mapStaffScheduleAssignment(
+      {
+        id: 'assignment_1',
+        organizationId: 'org_1',
+        userId: 'user_42',
+        assignmentKind: 'OFFICIAL_SHIFT',
+        timeSlotId: 'timeslot_1',
+      },
+      {
+        usersById: new Map([
+          ['user_42', { id: 'user_42', userName: 'staff_handle' }],
+        ]),
+      },
+    );
+
+    expect(assignment.userName).toBe('Staff name unavailable');
+    expect(assignment.userName).not.toContain('user_42');
+  });
+});
 
 describe('createStaffScheduleAssignment', () => {
   it('creates an open parent coverage assignment without a staff member', async () => {

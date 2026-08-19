@@ -107,7 +107,7 @@ internal data class ParsedDivisionToken(
 
 internal val DIVISION_TOKEN_PATTERN = Regex("^([mfc])_(age|skill)_(.+)$")
 internal val COMBINED_DIVISION_TOKEN_PATTERN = Regex("^([mfc])_skill_(.+)_age_(.+)$")
-internal val DIVISION_NAME_WHITESPACE_PATTERN = Regex("\\s+")
+internal val DIVISION_NAME_WHITESPACE_PATTERN = Regex("[\\s\\u00A0]+")
 private val DIVISION_COMPONENT_PLUS_TOKEN_PATTERN = Regex("^(\\d+)plus$")
 private val DIVISION_COMPONENT_LEADING_U_TOKEN_PATTERN = Regex("^u(\\d+)$")
 private val DIVISION_COMPONENT_TRAILING_U_TOKEN_PATTERN = Regex("^(\\d+)u$")

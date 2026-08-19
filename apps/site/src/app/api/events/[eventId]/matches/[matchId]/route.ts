@@ -237,18 +237,12 @@ class AutoRescheduleWindowExceededError extends Error {
   }
 }
 
-const formatHostName = (profile?: { firstName: string | null; lastName: string | null; userName: string | null } | null): string => {
+const formatHostName = (profile?: { firstName: string | null; lastName: string | null } | null): string => {
   const firstName = profile?.firstName?.trim() ?? '';
   const lastName = profile?.lastName?.trim() ?? '';
-  const fullName = `${firstName} ${lastName}`.trim();
-  if (fullName.length > 0) {
-    return fullName;
-  }
-  const userName = profile?.userName?.trim() ?? '';
-  if (userName.length > 0) {
-    return userName;
-  }
-  return 'Host';
+  return firstName.length > 0 && lastName.length > 0
+    ? `${firstName} ${lastName}`
+    : 'Host name unavailable';
 };
 
 const normalizeIdToken = (value: unknown): string | null => {

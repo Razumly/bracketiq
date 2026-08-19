@@ -241,9 +241,12 @@ const hasUnsavedScheduleChanges = (pageContext: AgentPageContext | null): boolea
   pageContext?.page?.kind === 'event_schedule' && pageContext.page.hasUnsavedChanges === true
 );
 
-const formatUserName = (user: { firstName?: string | null; lastName?: string | null; userName?: string | null; id?: string }): string => {
-  const fullName = `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim();
-  return fullName || user.userName?.trim() || 'Unknown user';
+const formatUserName = (user: { firstName?: string | null; lastName?: string | null }): string => {
+  const firstName = typeof user.firstName === 'string' ? user.firstName.trim() : '';
+  const lastName = typeof user.lastName === 'string' ? user.lastName.trim() : '';
+  return firstName.length > 0 && lastName.length > 0
+    ? `${firstName} ${lastName}`
+    : 'Name unavailable';
 };
 
 const parseToolArgs = (args: unknown): Record<string, unknown> => {
@@ -885,7 +888,7 @@ const getEventScheduleContext = async (
     })),
     officials: eventOfficials.map((official) => ({
       userId: official.userId,
-      displayName: userNameById.get(official.userId) ?? official.userId,
+      displayName: userNameById.get(official.userId) ?? 'Staff name unavailable',
       positionIds: official.positionIds,
       fieldIds: official.fieldIds,
     })),
@@ -917,8 +920,7 @@ const getEventScheduleContext = async (
       team1Name: match.team1Id ? teamNameById.get(match.team1Id) ?? 'Unknown team' : null,
       team2Id: match.team2Id,
       team2Name: match.team2Id ? teamNameById.get(match.team2Id) ?? 'Unknown team' : null,
-      officialId: match.officialId,
-      officialName: match.officialId ? userNameById.get(match.officialId) ?? 'Unknown official' : null,
+      officialName: match.officialId ? userNameById.get(match.officialId) ?? 'Official name unavailable' : null,
       officialIds: match.officialIds,
       teamOfficialId: match.teamOfficialId,
       teamOfficialName: match.teamOfficialId ? teamNameById.get(match.teamOfficialId) ?? 'Unknown team' : null,

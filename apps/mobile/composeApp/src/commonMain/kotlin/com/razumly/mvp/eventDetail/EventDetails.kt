@@ -107,7 +107,6 @@ import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.getScreenHeight
-import com.razumly.mvp.core.presentation.util.toNameCase
 import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.util.LocalPopupHandler
@@ -117,10 +116,12 @@ import com.razumly.mvp.eventDetail.readonly.resolveReadOnlyFieldCount
 import com.razumly.mvp.eventDetail.shared.BackgroundImage
 import com.razumly.mvp.eventDetail.shared.DetailRowSpec
 import com.razumly.mvp.eventDetail.shared.localImageScheme
+import com.razumly.mvp.eventDetail.staff.STAFF_NAME_LOAD_ERROR
+import com.razumly.mvp.eventDetail.staff.STAFF_NAME_UNAVAILABLE_LABEL
 import com.razumly.mvp.eventDetail.staff.StaffAssignmentCardModel
 import com.razumly.mvp.eventDetail.staff.buildAssignedStaffCards
 import com.razumly.mvp.eventDetail.staff.buildDraftStaffCards
-import com.razumly.mvp.eventDetail.staff.userDisplayName
+import com.razumly.mvp.eventDetail.staff.staffFullName
 import com.razumly.mvp.eventCreate.hasPaidRegistration
 import com.razumly.mvp.eventCreate.withSimpleAutomaticRefunds
 import com.razumly.mvp.eventCreate.withSimpleDoubleElimination
@@ -1890,22 +1891,13 @@ fun EventDetails(
         }
         lastAutoLoadedOfficialDefaultsSportId = selectedSportId
     }
-    val hostDisplayName = remember(host, eventWithRelations.organization, isOrganizationEvent) {
+    val hostDisplayName = remember(host, event.hostId, eventWithRelations.organization, isOrganizationEvent) {
         val organizationName = eventWithRelations.organization?.name.orEmpty()
-        val hostName = buildString {
-            val firstName = host?.firstName?.toNameCase().orEmpty()
-            val lastName = host?.lastName?.toNameCase().orEmpty()
-            if (firstName.isNotBlank()) {
-                append(firstName)
-            }
-            if (lastName.isNotBlank()) {
-                if (isNotEmpty()) append(" ")
-                append(lastName)
-            }
-        }.trim()
+        val hostName = host?.let(::staffFullName)
         when {
             isOrganizationEvent && organizationName.isNotBlank() -> organizationName
-            hostName.isNotBlank() -> hostName
+            hostName != null -> hostName
+            event.hostId.isNotBlank() -> STAFF_NAME_UNAVAILABLE_LABEL
             organizationName.isNotBlank() -> organizationName
             else -> "Hosted by organizer"
         }
@@ -1988,17 +1980,19 @@ fun EventDetails(
             .filterNot { userId -> userId == editEvent.hostId.trim() }
             .distinct()
     }
-    val resolvedHostDisplay = remember(editEvent.hostId, knownUsersById, hostDisplayName) {
-        knownUsersById[editEvent.hostId]?.let(::userDisplayName)
-            ?: hostDisplayName.takeIf(String::isNotBlank)
-            ?: "No host selected"
+    val resolvedHostDisplay = remember(editEvent.hostId, knownUsersById) {
+        when {
+            editEvent.hostId.isBlank() -> "No host selected"
+            else -> knownUsersById[editEvent.hostId]?.let(::staffFullName)
+                ?: STAFF_NAME_UNAVAILABLE_LABEL
+        }
     }
     val visibleUserSuggestions = remember(staffSearchQuery, userSuggestions) {
         val normalizedQuery = staffSearchQuery.trim()
         if (normalizedQuery.isBlank()) {
             emptyList()
         } else {
-            userSuggestions
+            userSuggestions.filter { user -> staffFullName(user) != null }
         }
     }
     val sortedPendingStaffInvites = remember(pendingStaffInvites) {
@@ -2085,6 +2079,27 @@ fun EventDetails(
                     drafts = sortedPendingStaffInvites,
                 ),
             )
+        }
+    }
+    val staffNameError = remember(
+        editEvent.hostId,
+        resolvedHostDisplay,
+        officialStaffCards,
+        hostStaffCards,
+        staffSearchQuery,
+        userSuggestions,
+    ) {
+        val missingAssignedName = (officialStaffCards + hostStaffCards).any { card ->
+            card.userId != null && card.title == STAFF_NAME_UNAVAILABLE_LABEL
+        }
+        val missingHostName = editEvent.hostId.isNotBlank() &&
+            resolvedHostDisplay == STAFF_NAME_UNAVAILABLE_LABEL
+        val missingSearchName = staffSearchQuery.isNotBlank() &&
+            userSuggestions.any { user -> staffFullName(user) == null }
+        if (missingAssignedName || missingHostName || missingSearchName) {
+            STAFF_NAME_LOAD_ERROR
+        } else {
+            null
         }
     }
     val freeAgentCount = remember(event.freeAgentIds) { event.freeAgentIds.size }
@@ -2729,6 +2744,7 @@ fun EventDetails(
                         draftInviteOfficial = draftInviteOfficial,
                         draftInviteAssistantHost = draftInviteAssistantHost,
                         staffEditorError = staffEditorError,
+                        staffNameError = staffNameError,
                         assignedStaffExpanded = assignedStaffExpanded,
                         officialStaffCards = officialStaffCards,
                         hostStaffCards = hostStaffCards,

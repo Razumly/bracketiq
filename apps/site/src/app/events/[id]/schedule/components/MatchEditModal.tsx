@@ -484,15 +484,16 @@ const normalizeAssignments = (value: unknown): MatchOfficialAssignment[] => {
 };
 
 const formatUserLabel = (user?: Partial<UserData> | null): string => {
-  if (!user) return 'Official';
-  const name = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
-  if (name) {
-    return name;
-  }
-  if (user.userName) {
-    return user.userName;
-  }
-  return 'Official';
+  const firstName = typeof user?.firstName === 'string' ? user.firstName.trim() : '';
+  const lastName = typeof user?.lastName === 'string' ? user.lastName.trim() : '';
+  return firstName.length > 0 && lastName.length > 0
+    ? `${firstName} ${lastName}`
+    : 'Name unavailable';
+};
+
+const formatStaffUserLabel = (user?: Partial<UserData> | null): string => {
+  const label = formatUserLabel(user);
+  return label === 'Name unavailable' ? 'Staff name unavailable' : label;
 };
 
 const findTeamById = (id: string | null, allTeams: Team[], fallback?: Match['team1']): Team | undefined => {
@@ -856,7 +857,7 @@ export default function MatchEditModal({
       }
       acc.push({
         value: officialId,
-        label: formatUserLabel(official),
+        label: formatStaffUserLabel(official),
       });
       return acc;
     }, []);
@@ -868,7 +869,7 @@ export default function MatchEditModal({
       }
     };
 
-    ensureOption(matchUserOfficialId, formatUserLabel(match?.official as UserData));
+    ensureOption(matchUserOfficialId, formatStaffUserLabel(match?.official as UserData));
 
     return options.sort((a, b) => a.label.localeCompare(b.label));
   }, [officials, matchUserOfficialId, match]);
@@ -1071,7 +1072,7 @@ export default function MatchEditModal({
         const user = officialUserById.get(eventOfficial.userId);
         addOption(
           encodeAssignmentValue('OFFICIAL', eventOfficial.id),
-          `Official: ${formatUserLabel(user ?? { userName: eventOfficial.userId })}`,
+          `Official: ${formatStaffUserLabel(user)}`,
         );
       });
       playerCandidates.forEach(({ user, teamName }, playerId) => {
@@ -1087,13 +1088,13 @@ export default function MatchEditModal({
           const user = officialUserById.get(assignedEventOfficial.userId);
           addOption(
             encodeAssignmentValue('OFFICIAL', assignedEventOfficial.id),
-            `Official: ${formatUserLabel(user ?? { userName: assignedEventOfficial.userId })}`,
+            `Official: ${formatStaffUserLabel(user)}`,
           );
         } else if (assignmentUserId) {
           const fallbackUser = officialUserById.get(assignmentUserId);
           addOption(
             encodeAssignmentValue('OFFICIAL', assignmentUserId),
-            `Official: ${formatUserLabel(fallbackUser ?? { userName: assignmentUserId })}`,
+            `Official: ${formatStaffUserLabel(fallbackUser)}`,
           );
         }
       }
@@ -1101,7 +1102,9 @@ export default function MatchEditModal({
         const assignmentUserId = normalizeOptionalId(assignment.userId);
         if (assignmentUserId && !optionsByValue.has(encodeAssignmentValue('PLAYER', assignmentUserId))) {
           const player = playerCandidates.get(assignmentUserId);
-          const label = player ? `Player: ${formatUserLabel(player.user)} (${player.teamName})` : `Player: ${assignmentUserId}`;
+          const label = player
+            ? `Player: ${formatUserLabel(player.user)} (${player.teamName})`
+            : 'Player: Name unavailable';
           addOption(encodeAssignmentValue('PLAYER', assignmentUserId), label);
         }
       }

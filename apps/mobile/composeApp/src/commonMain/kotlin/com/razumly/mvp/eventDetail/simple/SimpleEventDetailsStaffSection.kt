@@ -85,6 +85,13 @@ internal fun LazyListScope.simpleEventDetailsStaffSection(
         animationDelay = 300,
         showContainer = showContainer,
         viewContent = {
+            state.staffNameError?.let { errorText ->
+                Text(
+                    text = errorText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             DetailKeyValueList(
                 rows = buildList {
                     add(
@@ -132,6 +139,13 @@ internal fun LazyListScope.simpleEventDetailsStaffSection(
             )
         },
         editContent = {
+            state.staffNameError?.let { errorText ->
+                Text(
+                    text = errorText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             var teamOperationsExpanded by rememberSaveable(state.editEvent.id) { mutableStateOf(true) }
             var staffingPriorityExpanded by rememberSaveable(state.editEvent.id) { mutableStateOf(true) }
             var staffInvitesExpanded by rememberSaveable(state.editEvent.id) { mutableStateOf(true) }

@@ -197,4 +197,22 @@ describe('useStaffRosterController', () => {
         expect(result.current.nonOrgStaffSearchLoading).toBe(false);
         errorSpy.mockRestore();
     });
+
+    it('rejects staff search results without full names', async () => {
+        mockedSearchUsers.mockResolvedValue([{
+            $id: 'missing-name',
+            firstName: '',
+            lastName: '',
+            userName: 'missing_name',
+        } as UserData]);
+        const { result } = renderHook(() => useRosterHarness({ eventData: buildEventData({ hostId: '' }) }));
+
+        act(() => result.current.setNonOrgStaffSearch('missing'));
+
+        await waitFor(() => expect(result.current.nonOrgStaffError).toBe(
+            'Staff names could not be loaded. Refresh and try again.',
+        ));
+        expect(result.current.nonOrgStaffResults).toEqual([]);
+        expect(JSON.stringify(result.current.nonOrgStaffResults)).not.toContain('missing-name');
+    });
 });

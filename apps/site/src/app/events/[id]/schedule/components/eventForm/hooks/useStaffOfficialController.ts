@@ -61,6 +61,7 @@ export const useStaffOfficialController = (params: UseStaffOfficialControllerPar
         hostCardVisibleCount: roster.hostCardVisibleCount,
         newStaffInvite: invitations.newStaffInvite,
         nonOrgStaffError: roster.nonOrgStaffError,
+        staffNameError: roster.staffNameError,
         nonOrgStaffResults: roster.nonOrgStaffResults,
         nonOrgStaffSearch: roster.nonOrgStaffSearch,
         nonOrgStaffSearchLoading: roster.nonOrgStaffSearchLoading,

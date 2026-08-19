@@ -356,6 +356,11 @@ class EventDetailsDivisionEditorHelpersTest {
     }
 
     @Test
+    fun normalize_division_name_key_collapses_unicode_space() {
+        assertEquals("open elite", "Open\u00A0Elite".normalizeDivisionNameKey())
+    }
+
+    @Test
     fun duplicate_division_names_includes_organizer_owned_pool_shaped_rows() {
         val bracketId = "event-1__division__open"
         val first = DivisionDetail(

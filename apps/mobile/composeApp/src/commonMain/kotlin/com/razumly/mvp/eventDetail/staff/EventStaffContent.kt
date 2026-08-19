@@ -72,14 +72,25 @@ internal fun EditableStaffCardList(
     }
 }
 
-internal fun userDisplayName(user: UserData): String {
-    val fullName = user.fullName.trim()
-    return when {
-        fullName.isNotBlank() -> fullName
-        user.userName.trim().isNotBlank() -> user.userName.trim()
-        else -> user.id
+internal const val STAFF_NAME_UNAVAILABLE_LABEL = "Staff name unavailable"
+internal const val STAFF_NAME_LOAD_ERROR = "Staff names could not be loaded. Refresh and try again."
+
+internal fun staffFullName(user: UserData): String? {
+    if (user.isIdentityHidden) {
+        return null
     }
+    val firstName = user.firstName.trim()
+    val lastName = user.lastName.trim()
+    if (firstName.isBlank() || lastName.isBlank()) {
+        return null
+    }
+    return "$firstName $lastName"
+        .trim()
+        .takeIf(String::isNotBlank)
 }
+
+internal fun userDisplayName(user: UserData): String =
+    staffFullName(user) ?: STAFF_NAME_UNAVAILABLE_LABEL
 
 internal data class StaffAssignmentCardModel(
     val key: String,
@@ -116,7 +127,7 @@ internal fun buildAssignedStaffCards(
             }
             StaffAssignmentCardModel(
                 key = "${role.name}:$userId",
-                title = user?.let(::userDisplayName) ?: userId,
+                title = user?.let(::userDisplayName) ?: STAFF_NAME_UNAVAILABLE_LABEL,
                 email = invite?.email?.trim()?.takeIf(String::isNotBlank),
                 statusLabel = eventStaffStatusLabel(invite?.normalizedStatusOrNull()),
                 role = role,

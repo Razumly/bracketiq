@@ -113,6 +113,47 @@ describe('buildEventDetailPublicModel', () => {
         expect(model.officialPositionsSummary).toBe('Referee x2');
     });
 
+    it('never exposes staff IDs when staff names are unavailable', () => {
+        const event = buildEvent({
+            assistantHostIds: ['assistant-id'],
+            officialIds: ['official-id'],
+        });
+
+        const model = buildModel({
+            event,
+            hostUser: buildUser({
+                $id: event.hostId,
+                firstName: '',
+                lastName: '',
+                userName: 'host-handle',
+            }),
+        });
+
+        expect(model.hostedByLabel).toBe('Staff name unavailable');
+        expect(model.assistantHostNames).toEqual(['Staff name unavailable']);
+        expect(model.officialNames).toEqual(['Staff name unavailable']);
+        expect(JSON.stringify(model)).not.toContain('assistant-id');
+        expect(JSON.stringify(model)).not.toContain('official-id');
+    });
+
+    it('does not treat a privacy display label as a staff full name', () => {
+        const official = buildUser({
+            $id: 'official-display-label',
+            firstName: '',
+            lastName: '',
+            displayName: 'official-handle',
+        });
+        const event = buildEvent({
+            officialIds: [official.$id],
+            officials: [official],
+        });
+
+        const model = buildModel({ event });
+
+        expect(model.officialNames).toEqual(['Staff name unavailable']);
+        expect(JSON.stringify(model)).not.toContain('official-handle');
+    });
+
     it('prefers upcoming matches for the selected division and resolves team names', () => {
         const event = buildEvent({
             eventType: 'TOURNAMENT',

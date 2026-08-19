@@ -101,13 +101,6 @@ function MatchCard({
     const isCompactHorizontal = layout === 'horizontal' && hideTimeBadge;
     const resolvedTimeZone = normalizeTimeZone(timeZone);
 
-    const toTitleCase = (value: string) =>
-        value
-            .split(/\s+/)
-            .filter(Boolean)
-            .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-            .join(' ');
-
     const getTeamName = (teamData: any) => {
         if (teamData?.name) return teamData.name;
         if (teamData?.players?.length > 0) {
@@ -192,12 +185,13 @@ function MatchCard({
         return getBracketPlaceholder(previousMatch, slot);
     };
 
-    const getUserName = (userData: any) => {
-        if (!userData) return 'Official';
-        const name = [userData.firstName, userData.lastName].filter(Boolean).join(' ').trim();
-        if (name) return toTitleCase(name);
-        if (userData.userName) return toTitleCase(userData.userName);
-        return 'Official';
+    const getStaffName = (userData?: Partial<UserData> | null) => {
+        if (!userData || userData.isIdentityHidden) return 'Staff name unavailable';
+        const firstName = typeof userData.firstName === 'string' ? userData.firstName.trim() : '';
+        const lastName = typeof userData.lastName === 'string' ? userData.lastName.trim() : '';
+        return firstName.length > 0 && lastName.length > 0
+            ? `${firstName} ${lastName}`
+            : 'Staff name unavailable';
     };
 
     const getMatchResult = () => {
@@ -238,11 +232,11 @@ function MatchCard({
             return null;
         }
         if (match.official && typeof match.official === 'object' && match.official.$id === normalizedUserId) {
-            return getUserName(match.official);
+            return getStaffName(match.official);
         }
         const mappedOfficial = officialUsersById?.[normalizedUserId];
         if (mappedOfficial) {
-            return getUserName(mappedOfficial);
+            return getStaffName(mappedOfficial);
         }
         return null;
     };
@@ -257,15 +251,11 @@ function MatchCard({
                 return;
             }
             if (assignment.holderType === 'PLAYER') {
-                labels.add(`Player ${userId}`);
+                labels.add('Player name unavailable');
                 return;
             }
             const resolvedLabel = resolveOfficialLabel(userId);
-            if (resolvedLabel) {
-                labels.add(resolvedLabel);
-                return;
-            }
-            labels.add(`Official ${userId}`);
+            labels.add(resolvedLabel ?? 'Staff name unavailable');
         });
         return Array.from(labels);
     })();
@@ -488,13 +478,13 @@ function MatchCard({
                                         <span className="text-[10px] uppercase tracking-wide text-gray-500">Official Official:</span>
                                         <Image
                                             src={getUserAvatarUrl(match.official, 16)}
-                                            alt={getUserName(match.official)}
+                                            alt={getStaffName(match.official)}
                                             width={16}
                                             height={16}
                                             unoptimized
                                             className="w-4 h-4 rounded-full"
                                         />
-                                        <span className="truncate max-w-[120px]">{getUserName(match.official)}</span>
+                                        <span className="truncate max-w-[120px]">{getStaffName(match.official)}</span>
                                     </span>
                                 )}
                                 {match.teamOfficial && (
@@ -521,13 +511,13 @@ function MatchCard({
                         <span className="text-[10px] uppercase tracking-wide text-gray-500">Official Official:</span>
                         <Image
                             src={getUserAvatarUrl(match.official, 18)}
-                            alt={getUserName(match.official)}
+                            alt={getStaffName(match.official)}
                             width={16}
                             height={16}
                             unoptimized
                             className="w-4 h-4 rounded-full"
                         />
-                                <span className="font-medium truncate max-w-[120px]">{getUserName(match.official)}</span>
+                                <span className="font-medium truncate max-w-[120px]">{getStaffName(match.official)}</span>
                             </div>
                         )}
                 {match.teamOfficial && (
