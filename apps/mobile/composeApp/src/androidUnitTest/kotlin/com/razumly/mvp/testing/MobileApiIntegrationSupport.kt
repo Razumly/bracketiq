@@ -173,6 +173,7 @@ private fun EventEditorDraftDto.toEditorDraft(
         key = key,
         name = name,
         kind = kind ?: "LEAGUE",
+        isSystemGenerated = isSystemGenerated,
         divisionTypeId = divisionTypeId,
         skillDivisionTypeId = skillDivisionTypeId,
         ageDivisionTypeId = ageDivisionTypeId,

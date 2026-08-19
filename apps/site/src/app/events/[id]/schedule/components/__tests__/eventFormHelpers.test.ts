@@ -395,6 +395,7 @@ describe('event form payment helpers', () => {
         {
           id: 'open__phase__playoff',
           sourceDivisionId: 'open',
+          isSystemGenerated: true,
           key: 'open__phase__playoff',
           kind: 'PLAYOFF',
           name: 'Open',
@@ -1978,23 +1979,33 @@ describe('event form division helpers', () => {
     const settings = deriveTournamentPoolSettingsByBracketId([
       makeDivisionDetail({
         id: 'pool_a',
+        isSystemGenerated: true,
         maxParticipants: 4,
         playoffPlacementDivisionIds: ['bracket_1'],
       }),
       makeDivisionDetail({
         id: 'pool_b',
+        isSystemGenerated: true,
         maxParticipants: 4,
         playoffPlacementDivisionIds: ['bracket_1'],
       }),
       makeDivisionDetail({
         id: 'pool_c',
+        isSystemGenerated: true,
         maxParticipants: 3,
         playoffPlacementDivisionIds: ['bracket_2'],
       }),
       makeDivisionDetail({
         id: 'pool_d',
+        isSystemGenerated: true,
         maxParticipants: 5,
         playoffPlacementDivisionIds: ['bracket_2'],
+      }),
+      makeDivisionDetail({
+        id: 'organizer_pool',
+        isSystemGenerated: false,
+        maxParticipants: 20,
+        playoffPlacementDivisionIds: ['bracket_1'],
       }),
     ]);
 

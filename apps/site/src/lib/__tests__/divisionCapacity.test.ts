@@ -188,6 +188,7 @@ describe('divisionCapacity', () => {
           key: 'c_skill_open_age_18plus_pool_a',
           name: 'CoEd Open - 18+ Pool A',
           kind: 'LEAGUE',
+          isSystemGenerated: true,
           maxParticipants: 4,
           playoffPlacementDivisionIds: [bracketId, bracketId],
           teamIds: ['team_1', 'stale_team'],
@@ -197,6 +198,7 @@ describe('divisionCapacity', () => {
           key: 'c_skill_open_age_18plus_pool_b',
           name: 'CoEd Open - 18+ Pool B',
           kind: 'LEAGUE',
+          isSystemGenerated: true,
           maxParticipants: 4,
           playoffPlacementDivisionIds: [bracketId, bracketId],
           teamIds: ['team_2'],
@@ -235,5 +237,42 @@ describe('divisionCapacity', () => {
       divisionId: poolAId,
       eligibleTeamIds: ['team_1', 'team_2', 'team_3'],
     })).toEqual({ capacity: 8, filled: 3 });
+  });
+
+  it('keeps organizer-owned pool-shaped division capacity separate', () => {
+    const organizerDivisionId = 'event_1__division__beginner_pool_a';
+    const bracketId = 'event_1__division__open';
+    const breakdown = buildDivisionCapacityBreakdown({
+      event: {
+        eventType: 'TOURNAMENT',
+        includePlayoffsOrPools: true,
+        includePlayoffs: true,
+        singleDivision: false,
+        maxParticipants: 4,
+        divisionDetails: [
+          {
+            id: organizerDivisionId,
+            key: 'beginner_pool_a',
+            name: 'Beginner Pool',
+            kind: 'LEAGUE',
+            isSystemGenerated: false,
+            maxParticipants: 4,
+            playoffPlacementDivisionIds: [bracketId],
+            teamIds: ['team_1'],
+          } as any,
+        ],
+      },
+      excludePlayoffs: true,
+    });
+
+    expect(breakdown).toEqual([
+      expect.objectContaining({
+        divisionId: organizerDivisionId,
+        name: 'Beginner Pool',
+        kind: 'LEAGUE',
+        capacity: 4,
+        filled: 1,
+      }),
+    ]);
   });
 });

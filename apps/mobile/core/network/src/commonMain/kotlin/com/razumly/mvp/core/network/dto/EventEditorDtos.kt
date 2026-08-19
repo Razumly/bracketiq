@@ -312,6 +312,7 @@ data class EventEditorDivisionDetailDto(
     val key: String,
     val name: String,
     val kind: String,
+    val isSystemGenerated: Boolean? = null,
     val poolPlay: Boolean? = null,
     val divisionTypeId: String,
     val skillDivisionTypeId: String,

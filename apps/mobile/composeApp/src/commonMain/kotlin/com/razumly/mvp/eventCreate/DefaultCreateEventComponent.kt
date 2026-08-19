@@ -1694,10 +1694,7 @@ class DefaultCreateEventComponent(
                 submission.session.canonicalState.playoffDivisionDetails
             ).distinctBy { detail -> detail.id }
         if (
-            duplicateDivisionNames(
-                details = submittedDivisionDetails,
-                excludeGeneratedTournamentPools = submission.event.isTournamentPoolPlayEnabled(),
-            ).isNotEmpty()
+            duplicateDivisionNames(submittedDivisionDetails).isNotEmpty()
         ) {
             return "Division name must be unique within this event. Choose a different name."
         }

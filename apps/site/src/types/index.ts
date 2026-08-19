@@ -74,6 +74,7 @@ export interface Division {
   phase?: DivisionCompetitionPhase | null;
   status?: DivisionStatus;
   sourceDivisionId?: string;
+  isSystemGenerated?: boolean;
   sportId?: string;
   price?: number;
   maxParticipants?: number;

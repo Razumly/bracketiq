@@ -5,6 +5,7 @@ import {
   getSkillDivisionTypeOptionsForSport,
   getSportAgeCutoffRule,
   inferDivisionDetails,
+  isGeneratedPhaseDivisionNameCandidate,
   MIN_BRACKET_TEAM_COUNT,
   minimumParticipantCountForEventType,
   normalizeBracketTeamCount,
@@ -19,6 +20,26 @@ describe('divisionTypes bracket team policy', () => {
     expect(normalizeBracketTeamCount(8)).toBe(8);
     expect(minimumParticipantCountForEventType('TOURNAMENT')).toBe(MIN_BRACKET_TEAM_COUNT);
     expect(minimumParticipantCountForEventType('LEAGUE')).toBe(2);
+  });
+});
+
+describe('division provenance', () => {
+  it('classifies generated phase names only from explicit provenance', () => {
+    const phaseShapedDivision = {
+      id: 'event__division__open__phase__league',
+      sourceDivisionId: 'event__division__open',
+      name: 'Open',
+    };
+
+    expect(isGeneratedPhaseDivisionNameCandidate({
+      ...phaseShapedDivision,
+      isSystemGenerated: true,
+    })).toBe(true);
+    expect(isGeneratedPhaseDivisionNameCandidate({
+      ...phaseShapedDivision,
+      isSystemGenerated: false,
+    })).toBe(false);
+    expect(isGeneratedPhaseDivisionNameCandidate(phaseShapedDivision)).toBe(false);
   });
 });
 

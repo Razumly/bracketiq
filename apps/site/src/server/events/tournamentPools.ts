@@ -11,6 +11,7 @@ export type TournamentPoolSourceRow = {
   key?: string | null;
   name?: string | null;
   kind?: string | null;
+  isSystemGenerated?: boolean | null;
   maxParticipants?: number | null;
   playoffTeamCount?: number | null;
   playoffPlacementDivisionIds?: string[] | null;
@@ -31,6 +32,7 @@ export type GeneratedTournamentPool = {
   key: string;
   name: string;
   kind: 'LEAGUE';
+  isSystemGenerated: true;
   maxParticipants: number;
   playoffTeamCount: number;
   playoffPlacementDivisionIds: string[];
@@ -64,11 +66,13 @@ export const isGeneratedTournamentPoolRecord = (candidate: {
   eventType?: unknown;
   isPoolPlayEnabled: boolean;
   kind?: unknown;
+  isSystemGenerated?: unknown;
   poolCount?: unknown;
   playoffPlacementDivisionIds?: unknown;
 }): boolean => (
   String(candidate.eventType ?? '').trim().toUpperCase() === 'TOURNAMENT'
   && candidate.isPoolPlayEnabled
+  && candidate.isSystemGenerated === true
   && String(candidate.kind ?? '').trim().toUpperCase() !== 'PLAYOFF'
   && candidate.poolCount == null
   && Array.isArray(candidate.playoffPlacementDivisionIds)
@@ -167,6 +171,7 @@ export const generatedPoolsForBracket = <T extends TournamentPoolSourceRow>(
   bracketDivisionId: string,
 ): T[] => (
   pools
+    .filter((pool) => pool.isSystemGenerated === true)
     .filter((pool) => String(pool.kind ?? 'LEAGUE').toUpperCase() !== 'PLAYOFF')
     .filter((pool) => poolReferencesBracket(pool, bracketDivisionId))
     .sort((left, right) => String(left.name ?? left.id).localeCompare(String(right.name ?? right.id)))
@@ -268,6 +273,7 @@ export const buildGeneratedTournamentPools = (params: {
       key,
       name: `Pool ${letter}`,
       kind: 'LEAGUE',
+      isSystemGenerated: true,
       maxParticipants: poolTeamCount,
       playoffTeamCount: advancingPerPool,
       playoffPlacementDivisionIds: Array.from({ length: advancingPerPool }).map(() => bracketId),
@@ -298,6 +304,7 @@ export const assignRegisteredTeamToTournamentPool = async (params: {
           "key",
           "name",
           "kind",
+          "isSystemGenerated",
           "maxParticipants",
           "playoffTeamCount",
           "playoffPlacementDivisionIds",
@@ -305,6 +312,7 @@ export const assignRegisteredTeamToTournamentPool = async (params: {
         FROM "Divisions"
         WHERE "eventId" = ${params.eventId}
           AND "role" = 'PHASE'
+          AND "isSystemGenerated" = true
           AND "phase" = 'POOL'
           AND "status" = 'ACTIVE'
         FOR UPDATE
@@ -313,6 +321,7 @@ export const assignRegisteredTeamToTournamentPool = async (params: {
         where: {
           eventId: params.eventId,
           role: 'PHASE',
+          isSystemGenerated: true,
           phase: 'POOL',
           status: 'ACTIVE',
         },
@@ -321,6 +330,7 @@ export const assignRegisteredTeamToTournamentPool = async (params: {
           key: true,
           name: true,
           kind: true,
+          isSystemGenerated: true,
           maxParticipants: true,
           playoffTeamCount: true,
           playoffPlacementDivisionIds: true,
@@ -410,6 +420,7 @@ export const getTournamentPoolIdsForBracket = async (params: {
           "key",
           "name",
           "kind",
+          "isSystemGenerated",
           "maxParticipants",
           "playoffTeamCount",
           "playoffPlacementDivisionIds",
@@ -417,6 +428,7 @@ export const getTournamentPoolIdsForBracket = async (params: {
         FROM "Divisions"
         WHERE "eventId" = ${params.eventId}
           AND "role" = 'PHASE'
+          AND "isSystemGenerated" = true
           AND "phase" = 'POOL'
           AND "status" = 'ACTIVE'
         FOR UPDATE
@@ -425,6 +437,7 @@ export const getTournamentPoolIdsForBracket = async (params: {
         where: {
           eventId: params.eventId,
           role: 'PHASE',
+          isSystemGenerated: true,
           phase: 'POOL',
           status: 'ACTIVE',
         },
@@ -433,6 +446,7 @@ export const getTournamentPoolIdsForBracket = async (params: {
           key: true,
           name: true,
           kind: true,
+          isSystemGenerated: true,
           maxParticipants: true,
           playoffTeamCount: true,
           playoffPlacementDivisionIds: true,
@@ -459,6 +473,7 @@ export const removeRegisteredTeamFromTournamentPools = async (params: {
       eventId: params.eventId,
       role: 'PHASE',
       phase: 'POOL',
+      isSystemGenerated: true,
       status: 'ACTIVE',
     },
     select: {

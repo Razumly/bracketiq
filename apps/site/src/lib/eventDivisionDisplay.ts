@@ -100,12 +100,17 @@ const getFirstPlacementDivisionId = (division: Pick<Division, 'playoffPlacementD
     .find((entry) => entry.length > 0) ?? null;
 };
 
-const getTournamentPoolBracketId = (division: Division): string | null => (
-  getFirstPlacementDivisionId(division)
-  ?? inferBracketIdFromPoolId(division.id)
-  ?? inferBracketIdFromPoolId(division.key)
-  ?? inferBracketIdFromPoolId(division.name)
-);
+const getTournamentPoolBracketId = (division: Division): string | null => {
+  if (division.isSystemGenerated !== true) {
+    return null;
+  }
+  return (
+    getFirstPlacementDivisionId(division)
+    ?? inferBracketIdFromPoolId(division.id)
+    ?? inferBracketIdFromPoolId(division.key)
+    ?? inferBracketIdFromPoolId(division.name)
+  );
+};
 
 const hasTournamentPoolPlay = (event: Event, details: Division[]): boolean => {
   const eventType = typeof event.eventType === 'string' ? event.eventType.trim().toUpperCase() : '';
@@ -115,10 +120,18 @@ const hasTournamentPoolPlay = (event: Event, details: Division[]): boolean => {
   if (eventType !== 'TOURNAMENT' || !includePools) {
     return false;
   }
-  return details.some((detail) => !isPlayoffDivision(detail) && Boolean(getTournamentPoolBracketId(detail)))
+  const detailIndexes = indexDivisions(details);
+  return details.some((detail) => (
+    detail.isSystemGenerated === true
+    && !isPlayoffDivision(detail)
+    && Boolean(getTournamentPoolBracketId(detail))
+  ))
     || (Array.isArray(event.divisions) && event.divisions.some((entry) => {
       const divisionId = getDivisionIdFromEventEntry(entry);
-      return Boolean(inferBracketIdFromPoolId(divisionId));
+      if (!divisionId) return false;
+      const matchedDetail = getDivisionDetail(divisionId, detailIndexes);
+      return matchedDetail?.isSystemGenerated === true
+        && Boolean(getTournamentPoolBracketId(matchedDetail));
     }));
 };
 
@@ -171,7 +184,11 @@ const buildTournamentBracketDisplayRows = (
 
   const poolRows = new Map<string, Division>();
   details
-    .filter((detail) => !isPlayoffDivision(detail) && Boolean(getTournamentPoolBracketId(detail)))
+    .filter((detail) => (
+      detail.isSystemGenerated === true
+      && !isPlayoffDivision(detail)
+      && Boolean(getTournamentPoolBracketId(detail))
+    ))
     .forEach((detail) => {
       const id = normalizeDivisionKey(detail.id) ?? normalizeDivisionKey(detail.key);
       if (id) {
@@ -185,17 +202,14 @@ const buildTournamentBracketDisplayRows = (
       if (!divisionId || poolRows.has(divisionId)) {
         return;
       }
-      const bracketId = inferBracketIdFromPoolId(divisionId);
-      if (!bracketId) {
+      const matchedDetail = getDivisionDetail(divisionId, detailIndexes);
+      if (
+        matchedDetail?.isSystemGenerated !== true
+        || !getTournamentPoolBracketId(matchedDetail)
+      ) {
         return;
       }
-      const detail = getDivisionDetail(divisionId, detailIndexes) ?? {
-        id: divisionId,
-        key: divisionId,
-        name: stripTournamentPoolSuffix(divisionId) ?? divisionId,
-        playoffPlacementDivisionIds: [bracketId],
-      };
-      poolRows.set(divisionId, detail);
+      poolRows.set(divisionId, matchedDetail);
     });
   }
 

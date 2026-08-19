@@ -593,6 +593,7 @@ const EDITOR_DIVISION_KEYS = [
   "kind",
   "role",
   "phase",
+  "isSystemGenerated",
   "sortOrder",
   "sourceDivisionId",
   "price",
@@ -639,26 +640,6 @@ const EDITOR_DIVISION_KEYS = [
   "teamIds",
 ] as const;
 
-const isGeneratedPhaseDivision = (row: Record<string, unknown>): boolean => {
-  const role = String(row.role ?? "")
-    .trim()
-    .toUpperCase();
-  const phase = String(row.phase ?? "")
-    .trim()
-    .toLowerCase();
-  const sourceDivisionId =
-    typeof row.sourceDivisionId === "string" ? row.sourceDivisionId.trim() : "";
-  const id = typeof row.id === "string" ? row.id.trim().toLowerCase() : "";
-  const key = typeof row.key === "string" ? row.key.trim().toLowerCase() : "";
-  const generatedKeySuffix = `__phase__${phase}`;
-  return (
-    role === "PHASE" &&
-    Boolean(sourceDivisionId) &&
-    Boolean(phase) &&
-    id === `${sourceDivisionId.toLowerCase()}__phase__${phase}` &&
-    (!key || key.endsWith(generatedKeySuffix))
-  );
-};
 
 const loadEventDivisions = async (
   client: EditorSnapshotClient,
@@ -675,18 +656,12 @@ const loadEventDivisions = async (
         Boolean(row) && typeof row === "object",
     )
     .filter((row) => {
+      if (row.isSystemGenerated !== true) return true;
       const isPhase =
         String(row.role ?? "")
           .trim()
           .toUpperCase() === "PHASE" || Boolean(row.phase);
-      if (!isPhase) return true;
-      if (
-        String(row.kind ?? "")
-          .trim()
-          .toUpperCase() !== "PLAYOFF"
-      )
-        return false;
-      return !isGeneratedPhaseDivision(row);
+      return !isPhase;
     })
     .map((row) => projectReadRow(row, EDITOR_DIVISION_KEYS));
 };
@@ -757,6 +732,12 @@ const divisionDetailFor = (row: Record<string, unknown>, index: number) => ({
       : `division-${index + 1}`,
   name: typeof row.name === "string" ? row.name : `Division ${index + 1}`,
   kind: row.kind === "PLAYOFF" ? ("PLAYOFF" as const) : ("LEAGUE" as const),
+  isSystemGenerated:
+    row.isSystemGenerated === true
+      ? true
+      : row.isSystemGenerated === false
+        ? false
+        : undefined,
   poolPlay: Boolean(
     (row.phaseSettings as Record<string, unknown> | null)?.poolPlay,
   ),
@@ -839,12 +820,15 @@ const collapseTournamentPoolDivisions = (
   const poolDivisions = divisions.filter(
     (division) => division.kind !== "PLAYOFF",
   );
+  const generatedPoolDivisions = poolDivisions.filter(
+    (division) => division.isSystemGenerated === true,
+  );
   const bracketDivisions = divisions.filter(
     (division) => division.kind === "PLAYOFF",
   );
   const consumedPoolIds = new Set<string>();
   const canonicalDivisions = bracketDivisions.flatMap((bracket) => {
-    const pools = generatedPoolsForBracket(poolDivisions, bracket.id);
+    const pools = generatedPoolsForBracket(generatedPoolDivisions, bracket.id);
     if (pools.length === 0) return [];
     pools.forEach((pool) => consumedPoolIds.add(pool.id));
     const sourcePool = pools[0]!;
@@ -1456,9 +1440,15 @@ export const buildEventEditorSnapshot = async (
   const loadedDivisionDetails = divisions
     .map(divisionDetailFor)
     .filter((division) => division.id.length > 0);
-  const divisionDetails = normalizeTournamentEditorDivisions(
+  const internalDivisionDetails = normalizeTournamentEditorDivisions(
     event,
     loadedDivisionDetails,
+  );
+  const divisionDetails = internalDivisionDetails.map(
+    ({ isSystemGenerated, ...division }) => ({
+      ...division,
+      ...(isSystemGenerated === false ? { isSystemGenerated: false } : {}),
+    }),
   );
   const rentalSlots = resources.timeSlots.filter(
     (slot) =>

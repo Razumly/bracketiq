@@ -140,14 +140,11 @@ export const useDivisionCommitController = ({
             const currentPlayoffDivisions = Array.isArray(eventData.playoffDivisionDetails)
                 ? [...eventData.playoffDivisionDetails]
                 : [];
-            const sourceDivisionIds = Array.isArray(eventData.divisionDetails)
-                ? eventData.divisionDetails.map((detail) => detail.id)
-                : [];
             const divisionNameCandidates = [
                 ...currentPlayoffDivisions,
                 ...(Array.isArray(eventData.divisionDetails) ? eventData.divisionDetails : []),
             ].filter(
-                (detail) => !isGeneratedPhaseDivisionNameCandidate(detail, sourceDivisionIds),
+                (detail) => !isGeneratedPhaseDivisionNameCandidate(detail),
             );
             const normalizedName = normalizeDivisionNameKey(name);
             const duplicateByName = divisionNameCandidates.find((detail) => (
@@ -388,12 +385,11 @@ export const useDivisionCommitController = ({
         const existingDetail = divisionEditor.editingId
             ? currentDetails.find((detail) => detail.id === divisionEditor.editingId)
             : null;
-        const sourceDivisionIds = currentDetails.map((detail) => detail.id);
         const divisionNameCandidates = [
             ...currentDetails,
             ...(Array.isArray(eventData.playoffDivisionDetails) ? eventData.playoffDivisionDetails : []),
         ].filter(
-            (detail) => !isGeneratedPhaseDivisionNameCandidate(detail, sourceDivisionIds),
+            (detail) => !isGeneratedPhaseDivisionNameCandidate(detail),
         );
         const normalizedName = normalizeDivisionNameKey(name);
         const duplicateByName = divisionNameCandidates.find((detail) => (

@@ -468,6 +468,7 @@ class EventDetailsValidationTest {
         val generatedPhase = source.copy(
             id = "${source.id}__phase__playoff",
             sourceDivisionId = source.id,
+            isSystemGenerated = true,
             kind = "PLAYOFF",
         )
 
@@ -793,6 +794,7 @@ class EventDetailsValidationTest {
                 id = poolDivisionId,
                 kind = "LEAGUE",
                 name = "Pool",
+                isSystemGenerated = true,
                 maxParticipants = 4,
                 playoffTeamCount = 3,
                 playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId, bracketDivisionId),

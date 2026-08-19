@@ -43,7 +43,9 @@ internal fun DivisionDetail.tournamentBracketDivisionId(): String? =
         ?: id.inferredTournamentBracketDivisionIdFromPool()
 
 internal fun DivisionDetail.isGeneratedTournamentPoolDivision(): Boolean =
-    !isTournamentPlayoffDivision() && tournamentBracketDivisionId() != null
+    isSystemGenerated == true &&
+        !isTournamentPlayoffDivision() &&
+        tournamentBracketDivisionId() != null
 
 internal fun Event.inferredTournamentBracketDivisionIds(): Set<String> = buildSet {
     divisionDetails
@@ -53,14 +55,11 @@ internal fun Event.inferredTournamentBracketDivisionIds(): Set<String> = buildSe
         .forEach(::add)
 
     divisionDetails
+        .filter(DivisionDetail::isGeneratedTournamentPoolDivision)
         .mapNotNull { detail -> detail.tournamentBracketDivisionId() }
         .filter(String::isNotBlank)
         .forEach(::add)
 
-    divisions
-        .mapNotNull { divisionId -> divisionId.inferredTournamentBracketDivisionIdFromPool() }
-        .filter(String::isNotBlank)
-        .forEach(::add)
 }
 
 internal fun Event.isTournamentPoolPlayEnabled(): Boolean =
@@ -119,7 +118,11 @@ internal fun Event.divisionDetailsForEventSettings(): List<DivisionDetail> {
     val allDetails = divisionDetails.normalizeDivisionDetails(id)
     val explicitBracketDetails = allDetails.filter(DivisionDetail::isTournamentPlayoffDivision)
     if (explicitBracketDetails.isNotEmpty()) {
-        return explicitBracketDetails
+        val organizerDetails = allDetails.filter { detail ->
+            detail.isSystemGenerated != true && !detail.isTournamentPlayoffDivision()
+        }
+        return (explicitBracketDetails + organizerDetails)
+            .distinctBy { detail -> detail.normalizedTournamentDivisionId() }
     }
 
     val nonPoolDetails = mergedDetails.filterNot(DivisionDetail::isGeneratedTournamentPoolDivision)

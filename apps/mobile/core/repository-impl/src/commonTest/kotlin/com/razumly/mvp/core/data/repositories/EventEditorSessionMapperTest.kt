@@ -55,6 +55,7 @@ internal fun editorProtocolSnapshot(
         key = "division-key",
         name = "Open",
         kind = "LEAGUE",
+        isSystemGenerated = false,
         poolPlay = true,
         divisionTypeId = "division-type-1",
         skillDivisionTypeId = "skill-1",
@@ -304,6 +305,10 @@ class EventEditorSessionMapperTest {
         assertEquals("question-client-1", canonical.questions.single().clientId)
         assertEquals("official@example.test", canonical.pendingStaffInvites.single().email)
         assertEquals("playoff-division-1", canonical.playoffDivisionDetails.single().id)
+        assertEquals(
+            false,
+            canonical.event.divisionDetails.first { detail -> detail.id == "division-1" }.isSystemGenerated,
+        )
         assertEquals(listOf("field-1"), canonical.divisionFieldIds["division-1"])
         assertEquals("summer", canonical.event.tags.single().slug)
     }
@@ -333,6 +338,10 @@ class EventEditorSessionMapperTest {
         assertEquals(listOf("document-1"), decoded.draft.registration.requiredDocumentIds)
         assertEquals(listOf("field-immutable-1"), decoded.draft.resources.immutableFieldIds)
         assertEquals("Updated", decoded.draft.staff.pendingInvites.single().firstName)
+        assertEquals(
+            false,
+            decoded.draft.competition.divisionDetails.single().isSystemGenerated,
+        )
     }
 
     @Test
@@ -542,6 +551,62 @@ class EventEditorSessionMapperTest {
         assertEquals(
             listOf(8.0, 4.0),
             command.draft.competition.divisionDetails.map { detail -> detail.playoffTeamCount },
+        )
+    }
+
+    @Test
+    fun create_command_routes_playoff_rows_from_event_details() {
+        val session = EventEditorSessionMapper.fromCreateBootstrap(editorProtocolBootstrap())
+        val playoffDetail = session.canonicalState.event.divisionDetails
+            .first { detail -> detail.id == "division-1" }
+            .copy(
+                id = "custom-bracket",
+                key = "custom-bracket",
+                name = "Elite / 18+",
+                kind = "PLAYOFF",
+            )
+        val mutation = EventEditorMutation(
+            canonicalState = session.canonicalState.copy(
+                event = session.canonicalState.event.copy(
+                    divisions = listOf(playoffDetail.id),
+                    divisionDetails = listOf(playoffDetail),
+                ),
+                playoffDivisionDetails = emptyList(),
+            ),
+        )
+
+        val command = EventEditorSessionMapper.toCreateCommand(session, mutation).command
+
+        assertEquals(emptyList(), command.draft.competition.divisionDetails)
+        assertEquals(
+            "Elite / 18+",
+            command.draft.competition.playoffDivisionDetails.single().name,
+        )
+    }
+
+    @Test
+    fun save_command_routes_canonical_bracket_edits_to_playoff_details() {
+        val snapshot = editorProtocolSnapshot(mode = "EDIT")
+        val session = EventEditorSessionMapper.fromEditSnapshot(snapshot)
+        val baselinePlayoff = session.canonicalState.playoffDivisionDetails.single()
+        val editedBracket = baselinePlayoff.copy(
+            name = "Elite / 18+",
+            kind = "LEAGUE",
+        )
+        val mutation = EventEditorMutation(
+            canonicalState = session.canonicalState.copy(
+                event = session.canonicalState.event.copy(
+                    divisions = listOf(editedBracket.id),
+                    divisionDetails = listOf(editedBracket),
+                ),
+            ),
+        )
+
+        val command = EventEditorSessionMapper.toSaveCommand(session, mutation)
+
+        assertEquals(
+            "Elite / 18+",
+            command.draft.competition.playoffDivisionDetails.single().name,
         )
     }
 

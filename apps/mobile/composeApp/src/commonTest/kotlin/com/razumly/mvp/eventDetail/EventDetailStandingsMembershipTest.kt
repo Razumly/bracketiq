@@ -71,6 +71,54 @@ class EventDetailStandingsMembershipTest {
                         DivisionDetail(
                             id = poolId,
                             name = "Pool A",
+                            isSystemGenerated = true,
+                            playoffPlacementDivisionIds = listOf(bracketId),
+                        ),
+                    ),
+                ),
+                players = emptyList(),
+                matches = emptyList(),
+                teams = teams,
+            ),
+            selectedDivision = bracketId,
+            selectedStandingsPoolDivisionId = poolId,
+            tournamentPoolPlayEnabled = true,
+            showStandingsDrawColumn = false,
+            leagueDivisionStandings = null,
+        )
+
+        assertEquals(listOf("team_1", "team_2"), presentation.leagueStandings.map { it.teamId })
+    }
+
+    @Test
+    fun organizer_owned_pool_shaped_division_does_not_suppress_parent_tournament_teams() {
+        val bracketId = "bracket_open"
+        val poolId = "pool_open_a"
+        val teams = listOf(
+            team("team_1", "Team One", bracketId),
+            team("team_2", "Team Two", bracketId),
+        )
+        val presentation = buildEventDetailDivisionPresentation(
+            selectedEvent = EventWithFullRelations(
+                event = Event(
+                    id = "tournament_1",
+                    eventType = EventType.TOURNAMENT,
+                    includePlayoffs = true,
+                    singleDivision = false,
+                    divisions = listOf(poolId),
+                    divisionDetails = listOf(
+                        DivisionDetail(id = bracketId, kind = "PLAYOFF", name = "Open"),
+                        DivisionDetail(
+                            id = poolId,
+                            name = "Pool A",
+                            isSystemGenerated = true,
+                            playoffPlacementDivisionIds = listOf(bracketId),
+                        ),
+                        DivisionDetail(
+                            id = "organizer_pool",
+                            name = "Organizer Pool",
+                            isSystemGenerated = false,
+                            teamIds = listOf("organizer_team"),
                             playoffPlacementDivisionIds = listOf(bracketId),
                         ),
                     ),

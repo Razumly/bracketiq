@@ -230,6 +230,7 @@ internal fun createEventEditorSession(
         key = key,
         name = name,
         kind = kind ?: "LEAGUE",
+        isSystemGenerated = isSystemGenerated,
         divisionTypeId = divisionTypeId,
         skillDivisionTypeId = skillDivisionTypeId,
         ageDivisionTypeId = ageDivisionTypeId,

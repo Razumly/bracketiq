@@ -93,6 +93,7 @@ import {
   generatedPoolsForBracket,
   isTournamentPoolPlayEnabled,
   isGeneratedTournamentPoolRecord,
+  TournamentPoolValidationError,
 } from "@/server/events/tournamentPools";
 import {
   collectPhaseDivisions,
@@ -1472,6 +1473,7 @@ type DivisionDetailPayload = {
   name: string;
   kind: "LEAGUE" | "PLAYOFF";
   role?: "ENTRY" | "PHASE";
+  isSystemGenerated?: boolean;
   phase?: "LEAGUE" | "POOL" | "BRACKET" | "PLAYOFF" | null;
   divisionTypeId: string;
   skillDivisionTypeId: string;
@@ -2331,6 +2333,7 @@ const buildDivisions = (
     kind?: "LEAGUE" | "PLAYOFF" | null;
     role?: "ENTRY" | "PHASE" | string | null;
     phase?: "LEAGUE" | "POOL" | "BRACKET" | "PLAYOFF" | string | null;
+    isSystemGenerated?: boolean | null;
     sortOrder?: number | null;
     fieldIds?: string[] | null;
     sportId?: string | null;
@@ -2464,6 +2467,7 @@ const buildDivisions = (
       role,
       phase,
       matchedRow?.sourceDivisionId ?? null,
+      matchedRow?.isSystemGenerated === true,
     );
     result.push(division);
 
@@ -5605,6 +5609,11 @@ export const syncEventDivisions = async (
         const existingPool = existingById.get(
           normalizeDivisionKey(pool.id) ?? pool.id,
         );
+        if (existingPool && existingPool.isSystemGenerated !== true) {
+          throw new TournamentPoolValidationError(
+            `Generated tournament pool "${pool.id}" conflicts with organizer-owned division "${existingPool.id}".`,
+          );
+        }
         const entryDetail: DivisionDetailPayload = {
           ...bracketDetail,
           id: pool.id,
@@ -5613,6 +5622,7 @@ export const syncEventDivisions = async (
           role: "ENTRY",
           phase: null,
           kind: "LEAGUE",
+          isSystemGenerated: true,
           sourceDivisionId:
             existingPool?.sourceDivisionId ??
             bracketDetail.sourceDivisionId ??
@@ -5896,6 +5906,9 @@ export const syncEventDivisions = async (
         eventType: normalizedEventType,
         isPoolPlayEnabled: tournamentPoolPlayEnabled,
         kind,
+        isSystemGenerated: Boolean(
+          persistedId && trustedInternalDivisionIds.has(persistedId),
+        ),
         poolCount: detail?.poolCount,
         playoffPlacementDivisionIds: [
           ...ensureStringArray(detail?.playoffPlacementDivisionIds),

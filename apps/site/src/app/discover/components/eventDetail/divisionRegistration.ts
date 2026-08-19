@@ -116,9 +116,11 @@ const getFirstTournamentPoolPlacementId = (
 };
 
 const getTournamentPoolBracketId = (detail: EventDivisionDetail): string | null => (
-    getFirstTournamentPoolPlacementId(detail)
-    ?? inferTournamentBracketIdFromPoolId(detail.id)
-    ?? inferTournamentBracketIdFromPoolId(detail.key)
+    detail.isSystemGenerated === true
+        ? getFirstTournamentPoolPlacementId(detail)
+            ?? inferTournamentBracketIdFromPoolId(detail.id)
+            ?? inferTournamentBracketIdFromPoolId(detail.key)
+        : null
 );
 
 const hasTournamentPoolPlayRegistration = (event: Event, detailRows: EventDivisionDetail[]): boolean => {
@@ -129,11 +131,9 @@ const hasTournamentPoolPlayRegistration = (event: Event, detailRows: EventDivisi
     if (eventType !== 'TOURNAMENT' || !includePools) {
         return false;
     }
-    return detailRows.some((detail) => !isPlayoffDivisionDetail(detail) && Boolean(getTournamentPoolBracketId(detail)))
-        || (Array.isArray(event.divisions) && event.divisions.some((entry) => {
-            const divisionId = getDivisionIdFromEventEntry(entry);
-            return Boolean(inferTournamentBracketIdFromPoolId(divisionId));
-        }));
+    return detailRows.some(
+        (detail) => !isPlayoffDivisionDetail(detail) && Boolean(getTournamentPoolBracketId(detail)),
+    );
 };
 
 const dedupeDivisionDetails = (rows: EventDivisionDetail[]): EventDivisionDetail[] => {
@@ -152,7 +152,6 @@ const dedupeDivisionDetails = (rows: EventDivisionDetail[]): EventDivisionDetail
 };
 
 const buildTournamentBracketRegistrationRows = (
-    event: Event,
     detailRows: EventDivisionDetail[],
     playoffRows: EventDivisionDetail[],
 ): EventDivisionDetail[] => {
@@ -179,25 +178,6 @@ const buildTournamentBracketRegistrationRows = (
             }
         });
 
-    if (Array.isArray(event.divisions)) {
-        event.divisions.forEach((entry) => {
-            const divisionId = getDivisionIdFromEventEntry(entry);
-            if (!divisionId || poolRows.has(divisionId)) {
-                return;
-            }
-            const bracketId = inferTournamentBracketIdFromPoolId(divisionId);
-            if (!bracketId) {
-                return;
-            }
-            const detail = detailsByAlias.get(divisionId) ?? {
-                id: divisionId,
-                key: divisionId,
-                name: stripTournamentPoolSuffix(divisionId) ?? divisionId,
-                playoffPlacementDivisionIds: [bracketId],
-            };
-            poolRows.set(divisionId, detail);
-        });
-    }
 
     const bracketRows = new Map<string, EventDivisionDetail>();
     poolRows.forEach((pool) => {
@@ -299,7 +279,7 @@ export const buildDivisionOptionsForEvent = (event: Event | null): EventDivision
     const baseDetailRows = Array.isArray(event.divisionDetails) ? event.divisionDetails : [];
     const playoffRows = Array.isArray(event.playoffDivisionDetails) ? event.playoffDivisionDetails : [];
     const tournamentBracketRows = hasTournamentPoolPlayRegistration(event, baseDetailRows)
-        ? buildTournamentBracketRegistrationRows(event, baseDetailRows, playoffRows)
+        ? buildTournamentBracketRegistrationRows(baseDetailRows, playoffRows)
         : [];
     const useTournamentBracketRegistration = tournamentBracketRows.length > 0;
     const detailRows = useTournamentBracketRegistration

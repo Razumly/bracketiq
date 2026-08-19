@@ -11,6 +11,7 @@ const serializeDivision = (division: Division) => ({
   kind: division.kind,
   role: division.role,
   phase: division.phase,
+  isSystemGenerated: division.isSystemGenerated,
   phaseSettings: Object.fromEntries(
     Object.entries(division.phaseSettings ?? {}).map(([phase, settings]) => [
       phase,

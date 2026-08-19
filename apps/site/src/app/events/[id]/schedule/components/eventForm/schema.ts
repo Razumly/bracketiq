@@ -230,6 +230,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                 sourceDivisionId: z.string().trim().min(1).optional(),
                 key: z.string().trim().min(1),
                 kind: z.enum(['LEAGUE', 'PLAYOFF']).optional(),
+                isSystemGenerated: z.boolean().optional(),
                 name: z.string().trim().min(1),
                 divisionTypeId: z.string().trim().min(1),
                 divisionTypeName: z.string().trim().min(1),
@@ -272,6 +273,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                 sourceDivisionId: z.string().trim().min(1).optional(),
                 key: z.string().trim().min(1),
                 kind: z.literal('PLAYOFF').default('PLAYOFF'),
+                isSystemGenerated: z.boolean().optional(),
                 name: z.string().trim().min(1),
                 maxParticipants: z.number().int().nullable(),
                 playoffConfig: z.any(),
@@ -359,7 +361,6 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
         joinAsParticipant: z.boolean(),
     })
     .superRefine((values, ctx) => {
-        const sourceDivisionIds = values.divisionDetails.map((detail) => detail.id);
         const namedDivisionCandidates = [
             ...values.divisionDetails.map((detail, index) => ({
                 detail,
@@ -370,7 +371,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                 path: ['playoffDivisionDetails', index, 'name'] as const,
             })),
         ].filter(
-            ({ detail }) => !isGeneratedPhaseDivisionNameCandidate(detail, sourceDivisionIds),
+            ({ detail }) => !isGeneratedPhaseDivisionNameCandidate(detail),
         );
         const duplicateNameKeys = new Set(
             findDuplicateDivisionNames(namedDivisionCandidates.map(({ detail }) => detail))

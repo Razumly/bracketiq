@@ -356,6 +356,65 @@ class EventDetailsDivisionEditorHelpersTest {
     }
 
     @Test
+    fun duplicate_division_names_includes_organizer_owned_pool_shaped_rows() {
+        val bracketId = "event-1__division__open"
+        val first = DivisionDetail(
+            id = "${bracketId}_pool_beginner",
+            name = "Beginner Pool",
+            isSystemGenerated = false,
+            playoffPlacementDivisionIds = listOf(bracketId),
+        )
+        val second = DivisionDetail(
+            id = "event-1__division__beginner",
+            name = " beginner pool ",
+        )
+
+        assertEquals(
+            listOf("Beginner Pool"),
+            duplicateDivisionNames(listOf(first, second)),
+        )
+    }
+
+    @Test
+    fun duplicate_division_names_includes_organizer_owned_phase_shaped_rows() {
+        val sourceId = "event-1__division__open"
+        val organizerPhase = DivisionDetail(
+            id = "${sourceId}__phase__playoff",
+            sourceDivisionId = sourceId,
+            name = "Open",
+            isSystemGenerated = false,
+        )
+        val other = DivisionDetail(
+            id = "event-1__division__other",
+            name = " open ",
+        )
+
+        assertEquals(
+            listOf("Open"),
+            duplicateDivisionNames(listOf(organizerPhase, other)),
+        )
+    }
+
+    @Test
+    fun duplicate_division_names_excludes_server_generated_rows() {
+        val generated = DivisionDetail(
+            id = "event-1__division__open__phase__playoff",
+            sourceDivisionId = "event-1__division__open",
+            name = "Open",
+            isSystemGenerated = true,
+        )
+        val organizerOwned = DivisionDetail(
+            id = "event-1__division__other",
+            name = "Open",
+        )
+
+        assertEquals(
+            emptyList(),
+            duplicateDivisionNames(listOf(generated, organizerOwned)),
+        )
+    }
+
+    @Test
     fun default_division_editor_state_keeps_default_pool_count() {
         val state = defaultDivisionEditorState(
             defaultPriceCents = 0,

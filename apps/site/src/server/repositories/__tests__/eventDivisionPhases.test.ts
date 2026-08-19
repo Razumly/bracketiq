@@ -1,10 +1,19 @@
 /** @jest-environment node */
 
-import { syncEventDivisionPhases } from "@/server/repositories/eventDivisionPhases";
+import {
+  PhaseDivisionOwnershipError,
+  syncEventDivisionPhases,
+} from "@/server/repositories/eventDivisionPhases";
 
 const createClient = () => ({
   divisions: {
-    findMany: jest.fn().mockResolvedValue([{ id: "stale-phase" }]),
+    findMany: jest.fn().mockResolvedValue([
+      {
+        id: "stale-phase",
+        role: "PHASE",
+        isSystemGenerated: true,
+      },
+    ]),
     deleteMany: jest.fn().mockResolvedValue(undefined),
     upsert: jest.fn().mockResolvedValue(undefined),
   },
@@ -270,6 +279,75 @@ describe("syncEventDivisionPhases", () => {
       }),
     );
   });
+  it("preserves organizer-owned divisions during generated phase cleanup", async () => {
+    const client = createClient();
+    client.divisions.findMany.mockResolvedValue([
+      {
+        id: "organizer-pool",
+        role: "PHASE",
+        phase: "POOL",
+        isSystemGenerated: false,
+      },
+      {
+        id: "stale-generated-phase",
+        role: "PHASE",
+        phase: "POOL",
+        isSystemGenerated: true,
+      },
+    ]);
+
+    await syncEventDivisionPhases({
+      client,
+      eventId: "event_1",
+      eventType: "TOURNAMENT",
+      tournamentPoolPlayEnabled: true,
+      entries: [
+        {
+          id: "event_1__division__open",
+          key: "open",
+          name: "Open",
+          kind: "LEAGUE",
+        },
+      ],
+    });
+
+    expect(client.divisions.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["stale-generated-phase"] } },
+    });
+    expect(client.divisions.deleteMany).not.toHaveBeenCalledWith({
+      where: { id: { in: ["organizer-pool"] } },
+    });
+  });
+
+  it("rejects a generated phase id owned by an organizer division", async () => {
+    const client = createClient();
+    client.divisions.findMany.mockResolvedValue([
+      {
+        id: "event_1__division__open__phase__league",
+        role: "PHASE",
+        phase: "LEAGUE",
+        isSystemGenerated: false,
+      },
+    ]);
+
+    await expect(
+      syncEventDivisionPhases({
+        client,
+        eventId: "event_1",
+        eventType: "LEAGUE",
+        entries: [
+          {
+            id: "event_1__division__open",
+            key: "open",
+            name: "Open",
+            kind: "LEAGUE",
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(PhaseDivisionOwnershipError);
+    expect(client.divisions.upsert).not.toHaveBeenCalled();
+  });
+
   it("does not create competition phases for non-competition events", async () => {
     const client = createClient();
 

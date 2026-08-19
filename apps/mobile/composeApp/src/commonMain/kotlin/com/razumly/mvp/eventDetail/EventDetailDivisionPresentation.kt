@@ -37,7 +37,8 @@ private fun EventWithFullRelations.parentTournamentTeamIdsForUnassignedPool(
     if (parentDivisionId.isBlank()) return emptySet()
 
     val siblingHasExplicitMembership = event.divisionDetails.any { detail ->
-        detail.id.normalizeDivisionIdentifier() != normalizedPoolId &&
+        detail.isSystemGenerated == true &&
+            detail.id.normalizeDivisionIdentifier() != normalizedPoolId &&
             detail.teamIds.isNotEmpty() &&
             detail.tournamentBracketDivisionId()
                 ?.normalizeDivisionIdentifier() == parentDivisionId

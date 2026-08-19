@@ -111,6 +111,7 @@ private fun DivisionDetail.toDto(existing: EventEditorDivisionDetailDto? = null)
         key = key,
         name = name,
         kind = kind?.trim()?.uppercase().takeUnless { it.isNullOrBlank() } ?: existing?.kind ?: "LEAGUE",
+        isSystemGenerated = isSystemGenerated ?: existing?.isSystemGenerated,
         poolPlay = existing?.poolPlay,
         divisionTypeId = divisionTypeId,
         skillDivisionTypeId = skillDivisionTypeId,
@@ -155,6 +156,7 @@ private fun EventEditorDivisionDetailDto.toDomain(): DivisionDetail = DivisionDe
     id = id.normalizedId(),
     sourceDivisionId = sourceDivisionId.normalizedIdOrNull(),
     kind = kind.trim().uppercase(),
+    isSystemGenerated = isSystemGenerated,
     key = key,
     name = name,
     divisionTypeId = divisionTypeId,
@@ -641,6 +643,25 @@ private fun Event.toCompetitionDto(
     val baselineRegularDetails = baseline.divisionDetails.filterNot {
         it.kind?.equals("PLAYOFF", ignoreCase = true) == true
     }
+    val currentDetailsById = divisionDetails.associateBy { detail -> detail.id.normalizedId() }
+    val routedPlayoffDetails = linkedMapOf<String, DivisionDetail>()
+    playoffDivisionDetails.forEach { playoffDetail ->
+        val editedDetail = currentDetailsById[playoffDetail.id.normalizedId()]
+        val routedDetail = when {
+            editedDetail == null -> playoffDetail
+            editedDetail.kind?.equals("PLAYOFF", ignoreCase = true) == true -> editedDetail
+            else -> editedDetail.copy(
+                kind = "PLAYOFF",
+                isSystemGenerated = playoffDetail.isSystemGenerated,
+                playoffPlacementDivisionIds = playoffDetail.playoffPlacementDivisionIds,
+                teamIds = playoffDetail.teamIds,
+            )
+        }
+        routedPlayoffDetails[playoffDetail.id.normalizedId()] = routedDetail
+    }
+    divisionDetails
+        .filter { detail -> detail.kind?.equals("PLAYOFF", ignoreCase = true) == true }
+        .forEach { detail -> routedPlayoffDetails[detail.id.normalizedId()] = detail }
     val baselinePlayoffDetails = baseline.divisionDetails.filter {
         it.kind?.equals("PLAYOFF", ignoreCase = true) == true
     }
@@ -663,7 +684,7 @@ private fun Event.toCompetitionDto(
             detail
         }
     }
-    val currentPlayoffDetailsForDto = playoffDivisionDetails.map { detail ->
+    val currentPlayoffDetailsForDto = routedPlayoffDetails.values.map { detail ->
         if (isCurrentBracketCountEnabled && detail.playoffTeamCount == null) {
             detail.copy(playoffTeamCount = MIN_BRACKET_TEAM_COUNT)
         } else {

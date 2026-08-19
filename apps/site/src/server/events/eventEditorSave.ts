@@ -137,6 +137,7 @@ const assertMinimumBracketTeamCounts = (draft: EventEditorDraft): void => {
       eventType,
       isPoolPlayEnabled: isBracketCountValidationEnabled,
       kind: detail.kind,
+      isSystemGenerated: detail.isSystemGenerated,
       poolCount: detail.poolCount,
       playoffPlacementDivisionIds: detail.playoffPlacementDivisionIds,
     });

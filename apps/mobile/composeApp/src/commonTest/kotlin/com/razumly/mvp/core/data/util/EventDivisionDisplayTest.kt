@@ -22,12 +22,14 @@ class EventDivisionDisplayTest {
                     id = poolA,
                     key = "c_skill_open_age_18plus_pool_a",
                     name = "CoEd Open 18+ Pool A",
+                    isSystemGenerated = true,
                     playoffPlacementDivisionIds = listOf(bracketId),
                 ),
                 DivisionDetail(
                     id = poolB,
                     key = "c_skill_open_age_18plus_pool_b",
                     name = "CoEd Open 18+ Pool B",
+                    isSystemGenerated = true,
                     playoffPlacementDivisionIds = listOf(bracketId),
                 ),
                 DivisionDetail(
@@ -57,18 +59,42 @@ class EventDivisionDisplayTest {
                     id = poolA,
                     key = "c_skill_open_age_18plus_pool_a",
                     name = "Pool A",
+                    isSystemGenerated = true,
                     playoffPlacementDivisionIds = listOf(bracketId),
                 ),
                 DivisionDetail(
                     id = poolB,
                     key = "c_skill_open_age_18plus_pool_b",
                     name = "Pool B",
+                    isSystemGenerated = true,
                     playoffPlacementDivisionIds = listOf(bracketId),
                 ),
             ),
         )
 
         assertEquals(listOf("CoEd Open 18+"), event.divisionDisplayLabels())
+    }
+
+    @Test
+    fun divisionDisplayLabels_tournamentPoolShapedOrganizerDivisionStaysVisible() {
+        val organizerDivisionId = "event-1__division__beginner_pool_a"
+        val event = Event(
+            id = "event-1",
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            divisions = listOf(organizerDivisionId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = organizerDivisionId,
+                    key = "beginner_pool_a",
+                    name = "Beginner Pool",
+                    isSystemGenerated = false,
+                    playoffPlacementDivisionIds = listOf("event-1__division__open"),
+                ),
+            ),
+        )
+
+        assertEquals(listOf("Beginner Pool"), event.divisionDisplayLabels())
     }
 
     @Test

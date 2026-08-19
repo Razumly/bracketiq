@@ -427,8 +427,10 @@ fun String.toDivisionDisplayLabel(
         if (!explicit.isNullOrEmpty()) {
             return explicit
         }
+        if (detail?.isSystemGenerated == true) {
+            normalized.toTournamentPoolDisplayLabel()?.let { poolLabel -> return poolLabel }
+        }
     }
-    normalized.toTournamentPoolDisplayLabel()?.let { poolLabel -> return poolLabel }
     val inference = inferDivisionMetadata(normalized)
     return inference.defaultName
 }

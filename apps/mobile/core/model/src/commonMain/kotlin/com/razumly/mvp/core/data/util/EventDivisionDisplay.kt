@@ -37,15 +37,14 @@ private fun DivisionDetail.tournamentPoolBracketDivisionId(): String? =
         ?: name.inferredBracketDivisionIdFromPool()
 
 private fun DivisionDetail.isGeneratedTournamentPoolDivision(): Boolean =
-    !isPlayoffDivision() && tournamentPoolBracketDivisionId() != null
+    isSystemGenerated == true &&
+        !isPlayoffDivision() &&
+        tournamentPoolBracketDivisionId() != null
 
 private fun Event.hasTournamentPoolPlayDisplayDivisions(): Boolean =
     eventType == EventType.TOURNAMENT &&
         includePlayoffs &&
-        (
-            divisionDetails.any { detail -> detail.isGeneratedTournamentPoolDivision() } ||
-                divisions.any { division -> division.inferredBracketDivisionIdFromPool() != null }
-            )
+        divisionDetails.any { detail -> detail.isGeneratedTournamentPoolDivision() }
 
 private fun List<DivisionDetail>.findByDivisionId(divisionId: String): DivisionDetail? =
     firstOrNull { detail ->
@@ -58,7 +57,6 @@ private fun Event.tournamentBracketDisplayDetails(): List<DivisionDetail> {
         return explicitBracketDetails
     }
 
-    val detailsById = divisionDetails.associateBy { detail -> detail.normalizedDivisionId() }
     val poolDetails = mutableListOf<DivisionDetail>()
     val seenPoolIds = mutableSetOf<String>()
 
@@ -73,19 +71,6 @@ private fun Event.tournamentBracketDisplayDetails(): List<DivisionDetail> {
         .filter { detail -> detail.isGeneratedTournamentPoolDivision() }
         .forEach(::addPoolDetail)
 
-    divisions.forEach { divisionId ->
-        val normalizedId = divisionId.normalizeDivisionIdentifier()
-        if (normalizedId.isBlank() || normalizedId in seenPoolIds) return@forEach
-        val bracketDivisionId = normalizedId.inferredBracketDivisionIdFromPool() ?: return@forEach
-        addPoolDetail(
-            detailsById[normalizedId] ?: DivisionDetail(
-                id = normalizedId,
-                key = normalizedId,
-                name = normalizedId.toDivisionDisplayLabel(divisionDetails),
-                playoffPlacementDivisionIds = listOf(bracketDivisionId),
-            ),
-        )
-    }
 
     val bracketDetails = linkedMapOf<String, DivisionDetail>()
     poolDetails.forEach { pool ->

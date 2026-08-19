@@ -31,6 +31,7 @@ describe('event division registration options', () => {
                     id: poolA,
                     key: 'c_skill_open_age_18plus_pool_a',
                     name: 'CoEd Open 18+ Pool A',
+                    isSystemGenerated: true,
                     playoffPlacementDivisionIds: [bracketId],
                     maxParticipants: 4,
                 },
@@ -38,6 +39,7 @@ describe('event division registration options', () => {
                     id: poolB,
                     key: 'c_skill_open_age_18plus_pool_b',
                     name: 'CoEd Open 18+ Pool B',
+                    isSystemGenerated: true,
                     playoffPlacementDivisionIds: [bracketId],
                     maxParticipants: 4,
                 },
@@ -59,6 +61,37 @@ describe('event division registration options', () => {
                 name: 'CoEd Open 18+',
                 priceCents: 2500,
                 maxParticipants: 8,
+            }),
+        ]);
+    });
+
+    it('keeps organizer-owned pool-shaped divisions as registration options', () => {
+        const organizerDivisionId = 'event_pool__division__beginner_pool_a';
+        const event = buildEvent({
+            $id: 'event_pool',
+            eventType: 'TOURNAMENT',
+            includePlayoffs: true,
+            includePlayoffsOrPools: true,
+            price: 900,
+            divisions: [organizerDivisionId],
+            divisionDetails: [
+                {
+                    id: organizerDivisionId,
+                    key: 'beginner_pool_a',
+                    name: 'Beginner Pool',
+                    isSystemGenerated: false,
+                    maxParticipants: 4,
+                    playoffPlacementDivisionIds: ['event_pool__division__open'],
+                },
+            ],
+            playoffDivisionDetails: [],
+        });
+
+        expect(buildDivisionOptionsForEvent(event)).toEqual([
+            expect.objectContaining({
+                id: organizerDivisionId,
+                name: 'Beginner Pool',
+                maxParticipants: 4,
             }),
         ]);
     });

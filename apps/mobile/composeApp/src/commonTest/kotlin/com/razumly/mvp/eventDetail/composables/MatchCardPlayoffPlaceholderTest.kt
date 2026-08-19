@@ -567,6 +567,7 @@ class MatchCardPlayoffPlaceholderTest {
             id = "pool_a",
             key = "pool_a",
             name = "Open Pool A",
+            isSystemGenerated = true,
             playoffTeamCount = 3,
             playoffPlacementDivisionIds = listOf(bracketDivision.id, bracketDivision.id, bracketDivision.id),
         )
@@ -574,6 +575,7 @@ class MatchCardPlayoffPlaceholderTest {
             id = "pool_b",
             key = "pool_b",
             name = "Open Pool B",
+            isSystemGenerated = true,
             playoffTeamCount = 3,
             playoffPlacementDivisionIds = listOf(bracketDivision.id, bracketDivision.id, bracketDivision.id),
         )
@@ -623,6 +625,42 @@ class MatchCardPlayoffPlaceholderTest {
     }
 
     @Test
+    fun organizer_owned_mappings_do_not_create_tournament_placeholders() {
+        val bracketDivision = DivisionDetail(
+            id = "bracket_open",
+            kind = "PLAYOFF",
+            name = "Open Bracket",
+        )
+        val organizerDivision = DivisionDetail(
+            id = "pool_a",
+            name = "Organizer Pool",
+            isSystemGenerated = false,
+            playoffTeamCount = 2,
+            playoffPlacementDivisionIds = listOf(bracketDivision.id, bracketDivision.id),
+        )
+        val match = matchWithRelations(
+            id = "match_1",
+            division = bracketDivision.id,
+            team1Seed = 1,
+            team2Seed = 2,
+            previousLeftId = null,
+            previousRightId = null,
+        )
+
+        val assignments = buildPlayoffPlaceholderAssignmentsForEvent(
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            singleDivision = false,
+            eventDivisions = listOf(organizerDivision.id),
+            divisionDetails = listOf(organizerDivision, bracketDivision),
+            eventPlayoffTeamCount = null,
+            matches = mapOf(match.match.id to match),
+        )
+
+        assertEquals(emptyMap(), assignments)
+    }
+
+    @Test
     fun build_playoff_placeholder_assignments_for_tournament_infers_pool_play_from_mappings() {
         val bracketDivision = DivisionDetail(
             id = "bracket_open",
@@ -669,6 +707,7 @@ class MatchCardPlayoffPlaceholderTest {
             id = "${bracketDivisionId}_pool_a",
             key = "c_skill_skill_open_age_18plus_pool_a",
             name = "Open 18+",
+            isSystemGenerated = true,
             playoffTeamCount = 3,
             playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId, bracketDivisionId),
         )
@@ -676,6 +715,7 @@ class MatchCardPlayoffPlaceholderTest {
             id = "${bracketDivisionId}_pool_b",
             key = "c_skill_skill_open_age_18plus_pool_b",
             name = "Open 18+",
+            isSystemGenerated = true,
             playoffTeamCount = 3,
             playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId, bracketDivisionId),
         )
@@ -716,6 +756,7 @@ class MatchCardPlayoffPlaceholderTest {
             id = "${bracketDivisionId}_pool_a",
             key = "c_skill_skill_open_age_18plus_pool_a",
             name = "Pool A",
+            isSystemGenerated = true,
             gender = "C",
             skillDivisionTypeName = "Open",
             ageDivisionTypeName = "18+",
@@ -726,6 +767,7 @@ class MatchCardPlayoffPlaceholderTest {
             id = "${bracketDivisionId}_pool_b",
             key = "c_skill_skill_open_age_18plus_pool_b",
             name = "Pool B",
+            isSystemGenerated = true,
             gender = "C",
             skillDivisionTypeName = "Open",
             ageDivisionTypeName = "18+",
@@ -951,6 +993,7 @@ private fun tournamentPoolDetail(
     id = id,
     key = id,
     name = name,
+    isSystemGenerated = true,
     playoffTeamCount = 3,
     playoffPlacementDivisionIds = listOf(bracketDivisionId, bracketDivisionId, bracketDivisionId),
 )
@@ -963,6 +1006,7 @@ private fun tournamentPoolDetailWithoutMappings(
     id = id,
     key = id.substringAfter("__division__", id),
     name = name,
+    isSystemGenerated = true,
     divisionTypeName = divisionTypeName,
 )
 

@@ -1136,8 +1136,7 @@ fun EventDetails(
         )
         if (
             duplicateDivisionNames(
-                details = existingDivisionNameCandidates + candidateDivision,
-                excludeGeneratedTournamentPools = editEvent.isTournamentPoolPlayEnabled(),
+                existingDivisionNameCandidates + candidateDivision,
             ).isNotEmpty()
         ) {
             divisionEditor = divisionEditor.copy(

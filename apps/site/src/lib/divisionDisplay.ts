@@ -37,16 +37,12 @@ export const resolveTournamentPoolDisplayName = (value: unknown): string | null 
   return `Pool ${suffix.toUpperCase()}`;
 };
 
-const rowHasPoolPlacement = (row: Record<string, unknown>): boolean => (
-  Array.isArray(row.playoffPlacementDivisionIds)
-  && row.playoffPlacementDivisionIds.some((entry) => typeof entry === 'string' && entry.trim().length > 0)
-);
 
 const resolvePoolDisplayNameForRow = (row: Record<string, unknown>): string | null => {
   const poolName = resolveTournamentPoolDisplayName(row.name)
     ?? resolveTournamentPoolDisplayName(row.key)
     ?? resolveTournamentPoolDisplayName(row.id);
-  return rowHasPoolPlacement(row) ? poolName : null;
+  return row.isSystemGenerated === true ? poolName : null;
 };
 
 export const buildDivisionDisplayNameIndex = (divisionDetails: unknown): Map<string, string> => {
@@ -128,10 +124,6 @@ export const resolveDivisionDisplayName = (params: {
     return null;
   }
 
-  const poolLabel = resolveTournamentPoolDisplayName(identifier);
-  if (poolLabel) {
-    return poolLabel;
-  }
 
   const inferred = inferDivisionDetails({
     identifier,

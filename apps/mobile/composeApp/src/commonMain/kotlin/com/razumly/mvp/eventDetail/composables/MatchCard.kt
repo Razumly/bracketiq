@@ -65,6 +65,7 @@ import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.resolveCanonicalPlayoffPlacementSources
 import com.razumly.mvp.core.util.resolvedTimeZone
 import com.razumly.mvp.eventDetail.isPlayoffDivisionKind
+import com.razumly.mvp.eventDetail.isGeneratedTournamentPoolDivision
 import com.razumly.mvp.eventDetail.resolveEventMatchRules
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import kotlinx.datetime.LocalDate
@@ -1173,7 +1174,8 @@ internal fun buildPlayoffPlaceholderAssignmentsForEvent(
 
     val slots = buildLeaguePlayoffEntrantSlots(matches)
     val hasPlacementMappings = divisionDetails.any { detail ->
-        detail.playoffPlacementDivisionIds.isNotEmpty()
+        detail.playoffPlacementDivisionIds.isNotEmpty() &&
+            (eventType != EventType.TOURNAMENT || detail.isSystemGenerated == true)
     }
     if (eventType == EventType.LEAGUE && !includePlayoffs) {
         return emptyMap()
@@ -1468,7 +1470,10 @@ internal fun buildTournamentPoolPlayPlaceholderAssignments(
     if (orderedDetails.isEmpty()) {
         return emptyMap()
     }
-    val mappedDetails = orderedDetails.filter { detail -> detail.playoffPlacementDivisionIds.isNotEmpty() }
+    val generatedPoolDetails = orderedDetails.filter(DivisionDetail::isGeneratedTournamentPoolDivision)
+    val mappedDetails = generatedPoolDetails.filter { detail ->
+        detail.playoffPlacementDivisionIds.isNotEmpty()
+    }
 
     val slotsByPlayoffDivision = slots
         .mapNotNull { slot ->
@@ -1496,7 +1501,7 @@ internal fun buildTournamentPoolPlayPlaceholderAssignments(
         } else {
             buildInferredTournamentPoolSeedLabelsForPlayoffDivision(
                 playoffDivisionId = playoffDivisionId,
-                poolDivisionDetails = orderedDetails,
+                poolDivisionDetails = generatedPoolDetails,
                 allDivisionDetails = divisionDetails,
                 eventPlayoffTeamCount = eventPlayoffTeamCount,
                 slots = divisionSlots,

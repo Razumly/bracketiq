@@ -51,6 +51,7 @@ describe('resolveDivisionDisplayName', () => {
       id: `${bracketId}_pool_a`,
       key: 'c_skill_open_age_18plus_pool_a',
       name: 'Pool A',
+      isSystemGenerated: true,
       playoffPlacementDivisionIds: [bracketId],
     };
     const index = buildDivisionDisplayNameIndex([pool]);
@@ -65,6 +66,23 @@ describe('resolveDivisionDisplayName', () => {
       divisionNameIndex: index,
       sportInput: 'volleyball',
     })).toBe('Pool A');
+  });
+
+  it('does not assign generated pool labels to organizer-owned rows', () => {
+    const bracketId = 'evt_1__division__c_skill_open_age_18plus';
+    const organizerDivision = {
+      id: `${bracketId}_pool_a`,
+      key: 'c_skill_open_age_18plus_pool_a',
+      name: '',
+      isSystemGenerated: false,
+      playoffPlacementDivisionIds: [bracketId],
+    };
+
+    expect(resolveDivisionDisplayName({
+      division: organizerDivision as any,
+      divisionDetails: [organizerDivision],
+      sportInput: 'volleyball',
+    })).not.toBe('Pool A');
   });
 
   it('preserves organizer-owned metadata-like names', () => {

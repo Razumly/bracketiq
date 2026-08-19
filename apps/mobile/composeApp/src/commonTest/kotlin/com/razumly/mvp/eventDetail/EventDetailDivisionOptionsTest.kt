@@ -31,12 +31,14 @@ class EventDetailDivisionOptionsTest {
                     id = "${bracketId}_pool_a",
                     key = "c_skill_open_age_18plus_pool_a",
                     name = "CoEd Open 18+ Pool A",
+                    isSystemGenerated = true,
                     playoffPlacementDivisionIds = listOf(bracketId),
                 ),
                 DivisionDetail(
                     id = "${bracketId}_pool_b",
                     key = "c_skill_open_age_18plus_pool_b",
                     name = "CoEd Open 18+ Pool B",
+                    isSystemGenerated = true,
                     playoffPlacementDivisionIds = listOf(bracketId),
                 ),
             ),
@@ -62,6 +64,7 @@ class EventDetailDivisionOptionsTest {
                     id = "${bracketId}_pool_a",
                     key = "c_skill_open_age_18plus_pool_a",
                     name = "CoEd Open 18+ Pool A",
+                    isSystemGenerated = true,
                     playoffPlacementDivisionIds = listOf(bracketId),
                 ),
             ),
@@ -87,6 +90,7 @@ class EventDetailDivisionOptionsTest {
                     id = "${bracketId}_pool_a",
                     key = "c_skill_open_age_18plus_pool_a",
                     name = "Pool A",
+                    isSystemGenerated = true,
                     playoffPlacementDivisionIds = listOf(bracketId),
                 ),
             ),
@@ -96,6 +100,32 @@ class EventDetailDivisionOptionsTest {
 
         assertEquals(listOf(bracketId), options.map { option -> option.id })
         assertEquals("CoEd Open 18+", options.single().label)
+    }
+
+    @Test
+    fun buildRegistrationDivisionOptions_keepsOrganizerOwnedPoolShapedDivision() {
+        val bracketId = "event-1__division__open"
+        val organizerDivisionId = "${bracketId}_pool_beginner"
+        val event = Event(
+            id = "event-1",
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            singleDivision = false,
+            divisions = listOf(organizerDivisionId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = organizerDivisionId,
+                    name = "Beginner Pool",
+                    isSystemGenerated = false,
+                    playoffPlacementDivisionIds = listOf(bracketId),
+                ),
+            ),
+        )
+
+        val options = buildRegistrationDivisionOptions(event)
+
+        assertEquals(listOf(organizerDivisionId), options.map { option -> option.id })
+        assertEquals("Beginner Pool", options.single().label)
     }
 
     @Test
@@ -278,12 +308,14 @@ class EventDetailDivisionOptionsTest {
                     id = poolAId,
                     key = "open_pool_a",
                     name = "Open Pool A",
+                    isSystemGenerated = true,
                     playoffPlacementDivisionIds = listOf(bracketId),
                 ),
                 DivisionDetail(
                     id = poolBId,
                     key = "open_pool_b",
                     name = "Open Pool B",
+                    isSystemGenerated = true,
                     playoffPlacementDivisionIds = listOf(bracketId),
                 ),
             ),
@@ -518,12 +550,14 @@ class EventDetailDivisionOptionsTest {
                 id = poolAId,
                 key = "c_skill_open_age_18plus_pool_a",
                 name = "CoEd Open 18+ Pool A",
+                isSystemGenerated = true,
                 playoffPlacementDivisionIds = listOf(bracketId),
             ),
             DivisionDetail(
                 id = poolBId,
                 key = "c_skill_open_age_18plus_pool_b",
                 name = "CoEd Open 18+ Pool B",
+                isSystemGenerated = true,
                 playoffPlacementDivisionIds = listOf(bracketId),
             ),
         ),

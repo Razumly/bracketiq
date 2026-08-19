@@ -115,7 +115,9 @@ const isPlayoffDivision = (detail: Pick<Division, 'kind'>): boolean => (
 );
 
 const isGeneratedPoolDivision = (detail: Division): boolean => (
-  !isPlayoffDivision(detail) && getDivisionPlacementDivisionIds(detail).length > 0
+  detail.isSystemGenerated === true
+  && !isPlayoffDivision(detail)
+  && getDivisionPlacementDivisionIds(detail).length > 0
 );
 
 const stripGeneratedPoolSuffix = (value: string | null | undefined): string | null => {

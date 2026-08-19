@@ -71,10 +71,18 @@ type PhaseDivisionRow = {
   isSystemGenerated?: boolean | null;
   teamIds?: unknown;
 };
+
+export class PhaseDivisionOwnershipError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PhaseDivisionOwnershipError";
+  }
+}
 export type PhaseDivisionCandidate = {
   id: string;
   role?: unknown;
   phase?: unknown;
+  isSystemGenerated?: boolean | null;
   teamIds?: readonly string[] | null;
 };
 
@@ -473,7 +481,11 @@ export const syncEventDivisionPhases = async (params: {
   if (!["LEAGUE", "TOURNAMENT"].includes(eventType)) {
     if (client.divisions?.deleteMany) {
       await client.divisions.deleteMany({
-        where: { eventId: params.eventId, role: "PHASE" },
+        where: {
+          eventId: params.eventId,
+          role: "PHASE",
+          isSystemGenerated: true,
+        },
       });
     }
     if (sources?.deleteMany) {
@@ -579,10 +591,12 @@ export const syncEventDivisionPhases = async (params: {
   const planIds = new Set(plans.map((plan) => plan.id));
   const existingPhaseRows = client.divisions.findMany
     ? await client.divisions.findMany({
-        where: { eventId: params.eventId, role: "PHASE" },
+        where: { eventId: params.eventId },
         select: {
           id: true,
+          role: true,
           phase: true,
+          sourceDivisionId: true,
           teamIds: true,
           isSystemGenerated: true,
         },
@@ -607,6 +621,11 @@ export const syncEventDivisionPhases = async (params: {
     existingParticipantIdsByPhase.set(phaseId, teamIds);
   }
   const staleIds = existingPhaseRows
+    .filter(
+      (row) =>
+        row.isSystemGenerated === true &&
+        String(row.role ?? "").trim().toUpperCase() === "PHASE",
+    )
     .map((row) => row.id)
     .filter((id) => !planIds.has(id));
   if (staleIds.length && client.divisions.deleteMany) {
@@ -618,6 +637,12 @@ export const syncEventDivisionPhases = async (params: {
     await participants.deleteMany({ where: { eventId: params.eventId } });
 
   for (const plan of plans) {
+    const occupied = existingPhaseRowsById.get(plan.id);
+    if (plan.clone && occupied && occupied.isSystemGenerated !== true) {
+      throw new PhaseDivisionOwnershipError(
+        `Generated phase "${plan.id}" conflicts with organizer-owned division "${occupied.id}". Remove that division before schedule generation.`,
+      );
+    }
     const participantTeamIds = existingParticipantIdsByPhase.has(plan.id)
       ? (existingParticipantIdsByPhase.get(plan.id) ?? [])
       : existingPhaseRowsById.has(plan.id)

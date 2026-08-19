@@ -612,26 +612,16 @@ internal fun duplicateDivisionIdentityNames(details: List<DivisionDetail>): List
     return duplicateNames.toList()
 }
 
-internal fun duplicateDivisionNames(
-    details: List<DivisionDetail>,
-    excludeGeneratedTournamentPools: Boolean,
-): List<String> {
+internal fun duplicateDivisionNames(details: List<DivisionDetail>): List<String> {
     val seenIds = mutableSetOf<String>()
     val firstNameByKey = linkedMapOf<String, String>()
     val duplicateNamesByKey = linkedMapOf<String, String>()
 
     details.forEach { detail ->
-        val sourceDivisionId = detail.sourceDivisionId
-            ?.normalizeDivisionIdentifier()
-            .orEmpty()
-        val divisionId = detail.id.normalizeDivisionIdentifier()
-        val isGeneratedPhase = sourceDivisionId.isNotBlank() &&
-            divisionId.startsWith("${sourceDivisionId}__phase__")
-        if (isGeneratedPhase ||
-            (excludeGeneratedTournamentPools && detail.isGeneratedTournamentPoolDivision())
-        ) {
+        if (detail.isSystemGenerated == true) {
             return@forEach
         }
+        val divisionId = detail.id.normalizeDivisionIdentifier()
         if (divisionId.isNotBlank() && !seenIds.add(divisionId)) {
             return@forEach
         }

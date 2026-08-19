@@ -189,6 +189,7 @@ describe('scheduler API serialization', () => {
 
   it('preserves placeholder identity and bound PLAYER holders in canonical slots', () => {
     const division = new Division('open', 'Open');
+    division.isSystemGenerated = true;
     const placeholder = new Team({
       id: 'event_team_slot_1',
       captainId: '',
@@ -237,6 +238,12 @@ describe('scheduler API serialization', () => {
       expect.objectContaining({ id: placeholder.id, kind: 'PLACEHOLDER' }),
     ]);
     expect(serialized.teamIds).toEqual([placeholder.id]);
+    expect(serialized.divisionDetails).toEqual([
+      expect.objectContaining({
+        id: division.id,
+        isSystemGenerated: true,
+      }),
+    ]);
     expect(serialized.matches[0]?.officialIds).toEqual([
       expect.objectContaining({
         positionId: 'line_judge',

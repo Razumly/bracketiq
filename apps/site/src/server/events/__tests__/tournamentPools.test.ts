@@ -15,11 +15,20 @@ describe('tournamentPools', () => {
       eventType: 'TOURNAMENT',
       isPoolPlayEnabled: true,
       kind: 'LEAGUE',
+      isSystemGenerated: true,
       poolCount: null,
       playoffPlacementDivisionIds: ['event_1__division__open'],
     };
 
     expect(isGeneratedTournamentPoolRecord(generatedPool)).toBe(true);
+    expect(isGeneratedTournamentPoolRecord({
+      ...generatedPool,
+      isSystemGenerated: undefined,
+    })).toBe(false);
+    expect(isGeneratedTournamentPoolRecord({
+      ...generatedPool,
+      isSystemGenerated: false,
+    })).toBe(false);
     expect(isGeneratedTournamentPoolRecord({ ...generatedPool, poolCount: 2 })).toBe(false);
     expect(isGeneratedTournamentPoolRecord({ ...generatedPool, kind: 'PLAYOFF' })).toBe(false);
     expect(isGeneratedTournamentPoolRecord({ ...generatedPool, isPoolPlayEnabled: false })).toBe(false);
@@ -43,6 +52,7 @@ describe('tournamentPools', () => {
         key: 'open_pool_a',
         name: 'Pool A',
         kind: 'LEAGUE',
+        isSystemGenerated: true,
         maxParticipants: 4,
         playoffTeamCount: 2,
         playoffPlacementDivisionIds: ['event_1__division__open', 'event_1__division__open'],
@@ -124,6 +134,7 @@ describe('tournamentPools', () => {
               key: 'open_pool_a',
               name: 'Pool A',
               kind: 'LEAGUE',
+              isSystemGenerated: true,
               maxParticipants: 4,
               playoffPlacementDivisionIds: ['event_1__division__open'],
               teamIds: ['event_team_1', 'event_team_2'],
@@ -133,6 +144,7 @@ describe('tournamentPools', () => {
               key: 'open_pool_b',
               name: 'Pool B',
               kind: 'LEAGUE',
+              isSystemGenerated: true,
               maxParticipants: 4,
               playoffPlacementDivisionIds: ['event_1__division__open'],
               teamIds: ['event_team_4'],
@@ -168,6 +180,7 @@ describe('tournamentPools', () => {
               key: 'open_pool_a',
               name: 'Pool A',
               kind: 'LEAGUE',
+              isSystemGenerated: true,
               maxParticipants: 4,
               playoffPlacementDivisionIds: ['event_1__division__open'],
               teamIds: ['event_team_1'],
@@ -177,6 +190,7 @@ describe('tournamentPools', () => {
               key: 'open_pool_b',
               name: 'Pool B',
               kind: 'LEAGUE',
+              isSystemGenerated: true,
               maxParticipants: 4,
               playoffPlacementDivisionIds: ['event_1__division__open'],
               teamIds: [],
@@ -204,6 +218,7 @@ describe('tournamentPools', () => {
         key: 'open_pool_a',
         name: 'Pool A',
         kind: 'LEAGUE',
+        isSystemGenerated: true,
         playoffPlacementDivisionIds: ['event_1__division__open'],
         teamIds: [],
       },
@@ -212,6 +227,7 @@ describe('tournamentPools', () => {
         key: 'other_pool_a',
         name: 'Pool A',
         kind: 'LEAGUE',
+        isSystemGenerated: true,
         playoffPlacementDivisionIds: ['event_1__division__other'],
         teamIds: [],
       },
@@ -238,6 +254,7 @@ describe('tournamentPools', () => {
         eventId: 'event_1',
         role: 'PHASE',
         phase: 'POOL',
+        isSystemGenerated: true,
         status: 'ACTIVE',
       },
     }));

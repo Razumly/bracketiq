@@ -520,6 +520,7 @@ it("collapses generated tournament pools into one editable bracket division", as
           eventId: "event_pool",
           status: "ACTIVE",
           kind: "LEAGUE",
+          isSystemGenerated: true,
           key: `open_pool_${String.fromCharCode(97 + index)}`,
           name: `Pool ${String.fromCharCode(65 + index)}`,
           maxParticipants: 8,
@@ -613,6 +614,91 @@ it("collapses generated tournament pools into one editable bracket division", as
       playoffTeamCount: 8,
     }),
   ]);
+});
+
+it("keeps organizer-owned rows that have generated pool fields", async () => {
+  const bracketDivisionId = "event_pool__division__open";
+  const organizerDivisionId = "event_pool__division__beginner_pool";
+  const client = {
+    ...buildClient([], []),
+    divisions: {
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: organizerDivisionId,
+          eventId: "event_pool",
+          status: "ACTIVE",
+          kind: "LEAGUE",
+          role: "ENTRY",
+          isSystemGenerated: false,
+          key: "beginner_pool",
+          name: "Beginner Pool",
+          maxParticipants: 4,
+          playoffTeamCount: 2,
+          playoffPlacementDivisionIds: [bracketDivisionId],
+          fieldIds: [],
+          teamIds: [],
+        },
+        {
+          id: bracketDivisionId,
+          eventId: "event_pool",
+          status: "ACTIVE",
+          kind: "PLAYOFF",
+          role: "PHASE",
+          isSystemGenerated: false,
+          key: "open",
+          name: "Open",
+          maxParticipants: 8,
+          playoffTeamCount: 4,
+          poolCount: 2,
+          fieldIds: [],
+          teamIds: [],
+        },
+      ]),
+    },
+  } as any;
+
+  const snapshot = await buildEventEditorSnapshot(
+    {
+      id: "event_pool",
+      $id: "event_pool",
+      name: "Pool tournament",
+      description: "",
+      eventType: "TOURNAMENT",
+      includePlayoffs: true,
+      includePlayoffsOrPools: true,
+      teamSignup: true,
+      singleDivision: false,
+      maxParticipants: 8,
+      playoffTeamCount: 4,
+      sportIds: [],
+      start: "2026-09-10T18:00:00.000Z",
+      end: "2026-09-10T20:00:00.000Z",
+      noFixedEndDateTime: false,
+      timeZone: "UTC",
+      location: "",
+      address: "",
+      coordinates: [0, 0],
+      organizationId: null,
+      hostId: "host_pool",
+      state: "UNPUBLISHED",
+      fieldIds: [],
+      timeSlotIds: [],
+      divisions: [organizerDivisionId],
+      divisionDetails: [],
+      playoffDivisionDetails: [],
+    },
+    { client, mode: "EDIT", actor: { userId: "host_pool" } },
+  );
+
+  expect(snapshot.draft.competition.divisionDetails).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: organizerDivisionId,
+        name: "Beginner Pool",
+        isSystemGenerated: false,
+      }),
+    ]),
+  );
 });
 
 it("round-trips two collapsed tournament brackets through division sync", async () => {

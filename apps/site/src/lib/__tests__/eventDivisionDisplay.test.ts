@@ -16,12 +16,14 @@ describe('buildEventDivisionDisplayLabels', () => {
           id: poolA,
           key: 'c_skill_open_age_18plus_pool_a',
           name: 'CoEd Open 18+ Pool A',
+          isSystemGenerated: true,
           playoffPlacementDivisionIds: [bracketId],
         },
         {
           id: poolB,
           key: 'c_skill_open_age_18plus_pool_b',
           name: 'CoEd Open 18+ Pool B',
+          isSystemGenerated: true,
           playoffPlacementDivisionIds: [bracketId],
         },
       ] as any,
@@ -52,12 +54,14 @@ describe('buildEventDivisionDisplayLabels', () => {
           id: poolA,
           key: 'c_skill_open_age_18plus_pool_a',
           name: 'Pool A',
+          isSystemGenerated: true,
           playoffPlacementDivisionIds: [bracketId],
         },
         {
           id: poolB,
           key: 'c_skill_open_age_18plus_pool_b',
           name: 'Pool B',
+          isSystemGenerated: true,
           playoffPlacementDivisionIds: [bracketId],
         },
       ] as any,
@@ -65,6 +69,30 @@ describe('buildEventDivisionDisplayLabels', () => {
     });
 
     expect(buildEventDivisionDisplayLabels(event)).toEqual(['CoEd Open 18+']);
+  });
+
+  it('keeps organizer-owned rows that have generated pool fields', () => {
+    const bracketId = 'event_pool__division__open';
+    const organizerPool = {
+      id: `${bracketId}_pool_a`,
+      key: 'open_pool_a',
+      name: 'Beginner Pool',
+      isSystemGenerated: false,
+      playoffPlacementDivisionIds: [bracketId],
+    };
+    const event = buildEvent({
+      eventType: 'TOURNAMENT',
+      includePlayoffs: true,
+      includePlayoffsOrPools: true,
+      divisions: [bracketId, organizerPool.id],
+      divisionDetails: [organizerPool] as any,
+      playoffDivisionDetails: [],
+    });
+
+    expect(buildEventDivisionDisplayLabels(event)).toEqual([
+      'CoEd Open 18+',
+      'Beginner Pool',
+    ]);
   });
 
   it('shows league divisions instead of playoff divisions for league playoffs', () => {

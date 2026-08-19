@@ -134,20 +134,6 @@ private fun buildSyntheticTournamentBracketRegistrationDetails(event: Event): Li
         .filter { detail -> detail.isGeneratedTournamentPoolDivision() }
         .forEach(::addPoolDetail)
 
-    event.divisions.forEach { divisionId ->
-        val normalizedId = divisionId.normalizeDivisionIdentifier()
-        if (normalizedId.isBlank() || normalizedId in seenPoolIds) return@forEach
-        val bracketDivisionId = normalizedId.inferredTournamentBracketDivisionIdFromPool() ?: return@forEach
-        addPoolDetail(
-            detailsById[normalizedId] ?: DivisionDetail(
-                id = normalizedId,
-                key = normalizedId,
-                name = normalizedId.toDivisionDisplayLabel(event.divisionDetails),
-                playoffPlacementDivisionIds = listOf(bracketDivisionId),
-            ),
-        )
-    }
-
     val bracketDetails = linkedMapOf<String, DivisionDetail>()
     poolDetails.forEach { pool ->
         val bracketDivisionId = pool.tournamentBracketDivisionId() ?: return@forEach

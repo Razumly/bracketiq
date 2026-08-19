@@ -294,8 +294,7 @@ internal fun computeEventValidationResult(
     val duplicateDivisionIdentityNames = duplicateDivisionIdentityNames(divisionDetailsForSettings)
     val isDivisionIdentityValid = duplicateDivisionIdentityNames.isEmpty()
     val duplicateDivisionNames = duplicateDivisionNames(
-        details = editEvent.divisionDetails + divisionDetailsForSettings,
-        excludeGeneratedTournamentPools = editEvent.isTournamentPoolPlayEnabled(),
+        editEvent.divisionDetails + divisionDetailsForSettings,
     )
     val isDivisionNameValid = duplicateDivisionNames.isEmpty()
     val isSportValid = !isNewEvent || editEvent.sportIds.isNotEmpty()

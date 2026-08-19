@@ -156,6 +156,7 @@ export class Division implements Group {
   role: DivisionRole;
   phase: DivisionCompetitionPhase | null;
   sourceDivisionId: string | null;
+  isSystemGenerated: boolean;
   fieldIds: string[];
   teamIds: string[];
   price: number | null;
@@ -188,6 +189,7 @@ export class Division implements Group {
     role: DivisionRole = 'ENTRY',
     phase: DivisionCompetitionPhase | null = null,
     sourceDivisionId: string | null = null,
+    isSystemGenerated: boolean = false,
   ) {
     this.id = id;
     this.name = name ?? id;
@@ -196,6 +198,7 @@ export class Division implements Group {
     this.phase = phase;
     this.fieldIds = Array.isArray(fieldIds) ? fieldIds : [];
     this.sourceDivisionId = sourceDivisionId;
+    this.isSystemGenerated = isSystemGenerated;
     this.price = typeof price === 'number' && Number.isFinite(price) ? price : null;
     this.maxParticipants = typeof maxParticipants === 'number' && Number.isFinite(maxParticipants)
       ? Math.max(0, Math.trunc(maxParticipants))

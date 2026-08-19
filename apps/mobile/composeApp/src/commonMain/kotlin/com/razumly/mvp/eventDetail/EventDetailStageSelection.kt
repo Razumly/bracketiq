@@ -297,9 +297,6 @@ private fun DivisionDetail.referencesBracketDivision(bracketDivisionId: String?)
 private fun Event.tournamentPoolSourceDetails(): List<DivisionDetail> {
     if (!isTournamentPoolPlayEnabled()) return emptyList()
 
-    val detailsById = divisionDetails.associateBy { detail ->
-        detail.normalizedTournamentDivisionId()
-    }
     val sourceDetails = mutableListOf<DivisionDetail>()
     val seenIds = mutableSetOf<String>()
 
@@ -313,20 +310,6 @@ private fun Event.tournamentPoolSourceDetails(): List<DivisionDetail> {
     divisionDetails
         .filter { detail -> detail.isGeneratedTournamentPoolDivision() }
         .forEach(::addDetail)
-
-    divisions.forEach { divisionId ->
-        val normalizedId = divisionId.normalizeDivisionIdentifier()
-        if (normalizedId.isBlank() || normalizedId in seenIds) return@forEach
-        val bracketDivisionId = normalizedId.inferredTournamentBracketDivisionIdFromPool() ?: return@forEach
-        addDetail(
-            detailsById[normalizedId] ?: DivisionDetail(
-                id = normalizedId,
-                key = normalizedId,
-                name = normalizedId.toDivisionDisplayLabel(divisionDetails),
-                playoffPlacementDivisionIds = listOf(bracketDivisionId),
-            ),
-        )
-    }
 
     return sourceDetails
 }

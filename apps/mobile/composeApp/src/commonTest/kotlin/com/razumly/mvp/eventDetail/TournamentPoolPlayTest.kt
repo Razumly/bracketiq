@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.buildEventDivisionId
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class TournamentPoolPlayTest {
@@ -25,6 +26,7 @@ class TournamentPoolPlayTest {
                     id = poolDivisionId,
                     key = "c_skill_open_age_18plus_pool_a",
                     name = "CoEd Open 18+ Pool A",
+                    isSystemGenerated = true,
                 ),
             ),
         )
@@ -49,6 +51,7 @@ class TournamentPoolPlayTest {
                     id = poolDivisionId,
                     key = "c_skill_open_age_18plus_pool_a",
                     name = "Pool A",
+                    isSystemGenerated = true,
                     playoffPlacementDivisionIds = listOf(bracketDivisionId),
                 ),
             ),
@@ -56,6 +59,58 @@ class TournamentPoolPlayTest {
 
         assertTrue(event.isTournamentPoolPlayEnabled())
         assertEquals(setOf(bracketDivisionId), event.inferredTournamentBracketDivisionIds())
+    }
+
+    @Test
+    fun organizerOwnedPoolShapedDivision_isNotGeneratedPool() {
+        val bracketDivisionId = "event-1__division__open"
+        val organizerDetail = DivisionDetail(
+            id = "${bracketDivisionId}_pool_beginner",
+            key = "open_pool_beginner",
+            name = "Beginner Pool",
+            playoffPlacementDivisionIds = listOf(bracketDivisionId),
+        )
+        val event = Event(
+            id = "event-1",
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = false,
+            divisions = listOf(organizerDetail.id),
+            divisionDetails = listOf(organizerDetail),
+        )
+
+        assertFalse(organizerDetail.isGeneratedTournamentPoolDivision())
+        assertFalse(event.isTournamentPoolPlayEnabled())
+    }
+
+    @Test
+    fun divisionDetailsForEventSettings_keepsOrganizerOwnedPoolShapedDivision() {
+        val bracketDivisionId = "event-1__division__open"
+        val organizerDetail = DivisionDetail(
+            id = "${bracketDivisionId}_pool_beginner",
+            key = "open_pool_beginner",
+            name = "Beginner Pool",
+            isSystemGenerated = false,
+            playoffPlacementDivisionIds = listOf(bracketDivisionId),
+        )
+        val bracketDetail = DivisionDetail(
+            id = bracketDivisionId,
+            key = "open",
+            name = "Open",
+            kind = "PLAYOFF",
+            isSystemGenerated = false,
+        )
+        val event = Event(
+            id = "event-1",
+            eventType = EventType.TOURNAMENT,
+            includePlayoffs = true,
+            divisions = listOf(organizerDetail.id, bracketDetail.id),
+            divisionDetails = listOf(organizerDetail, bracketDetail),
+        )
+
+        assertEquals(
+            listOf("Open", "Beginner Pool"),
+            event.divisionDetailsForEventSettings().map(DivisionDetail::name),
+        )
     }
 
     @Test
@@ -87,6 +142,7 @@ class TournamentPoolPlayTest {
                     name = "Pool A",
                     maxParticipants = 8,
                     playoffTeamCount = 4,
+                    isSystemGenerated = true,
                     playoffPlacementDivisionIds = listOf(bracketDivisionId),
                 ),
                 DivisionDetail(

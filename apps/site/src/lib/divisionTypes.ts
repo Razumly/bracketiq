@@ -30,27 +30,13 @@ export const isBracketTeamCountEnabled = (
 export type DivisionNameCandidate = {
   id?: unknown;
   sourceDivisionId?: unknown;
+  isSystemGenerated?: unknown;
   name?: unknown;
 };
 
 export const isGeneratedPhaseDivisionNameCandidate = (
   candidate: DivisionNameCandidate,
-  sourceDivisionIds: readonly unknown[] = [],
-): boolean => {
-  const id = String(candidate.id ?? '').trim().toLowerCase();
-  const sourceDivisionId = String(candidate.sourceDivisionId ?? '').trim().toLowerCase();
-  const knownSourceDivisionIds = new Set(
-    sourceDivisionIds
-      .map((value) => String(value ?? '').trim().toLowerCase())
-      .filter(Boolean),
-  );
-  return Boolean(
-    id
-    && sourceDivisionId
-    && knownSourceDivisionIds.has(sourceDivisionId)
-    && id.startsWith(`${sourceDivisionId}__phase__`),
-  );
-};
+): boolean => candidate.isSystemGenerated === true;
 
 export const normalizeDivisionNameKey = (value: unknown): string => String(value ?? '')
   .trim()

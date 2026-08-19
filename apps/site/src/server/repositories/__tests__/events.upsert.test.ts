@@ -1740,7 +1740,7 @@ describe("upsertEventFromPayload", () => {
     });
   });
 
-  it("promotes legacy pool rows only when the server regenerates them", async () => {
+  it("rejects ambiguous legacy pool rows instead of claiming them", async () => {
     const client = createMockClient();
     const bracketTokens = [
       "m_skill_open_age_18plus",
@@ -1806,16 +1806,10 @@ describe("upsertEventFromPayload", () => {
 
     await expect(
       upsertEventFromPayload(payload, client as any),
-    ).resolves.toBeDefined();
-    poolDivisionIds.forEach((poolDivisionId) => {
-      expect(client.divisions.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: poolDivisionId },
-          create: expect.objectContaining({ isSystemGenerated: true }),
-          update: expect.objectContaining({ isSystemGenerated: true }),
-        }),
-      );
-    });
+    ).rejects.toThrow(
+      `Generated tournament pool "${poolDivisionIds[0]}" conflicts with organizer-owned division "${poolDivisionIds[0]}".`,
+    );
+    expect(client.divisions.upsert).not.toHaveBeenCalled();
   });
 
   it("does not trust a persisted organizer-owned pool-shaped row", async () => {
@@ -2035,6 +2029,7 @@ describe("upsertEventFromPayload", () => {
         key: "open_pool_a",
         name: "Pool A",
         kind: "LEAGUE",
+        isSystemGenerated: true,
         maxParticipants: 4,
         playoffTeamCount: 2,
         playoffPlacementDivisionIds: [bracketDivisionId, bracketDivisionId],
@@ -2107,6 +2102,7 @@ describe("upsertEventFromPayload", () => {
         name: "Open — Playoff",
         kind: "PLAYOFF",
         role: "PHASE",
+        isSystemGenerated: true,
         fieldIds: [],
         playoffPlacementDivisionIds: [],
       },

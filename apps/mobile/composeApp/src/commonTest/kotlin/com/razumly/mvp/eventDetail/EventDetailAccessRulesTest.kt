@@ -89,6 +89,7 @@ class EventDetailAccessRulesTest {
                 ),
                 DivisionDetail(
                     id = "${bracketId}_pool_a",
+                    isSystemGenerated = true,
                 ),
             ),
         )

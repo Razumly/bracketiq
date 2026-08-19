@@ -39,6 +39,7 @@ export const normalizeEventBracketCountsResponse = <T extends EventResponseRecor
         eventType,
         isPoolPlayEnabled: isBracketCountNormalizationEnabled,
         kind: detail.kind,
+        isSystemGenerated: detail.isSystemGenerated,
         poolCount: detail.poolCount,
         playoffPlacementDivisionIds: detail.playoffPlacementDivisionIds,
       });

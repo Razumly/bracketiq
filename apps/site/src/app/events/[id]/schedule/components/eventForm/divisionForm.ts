@@ -362,6 +362,7 @@ export const getSingleDivisionEditorNotice = (
 export type DivisionDetailForm = {
     id: string;
     sourceDivisionId?: string;
+    isSystemGenerated?: boolean;
     key: string;
     kind?: 'LEAGUE' | 'PLAYOFF';
     name: string;
@@ -540,6 +541,9 @@ export const normalizeDivisionDetailEntry = (
     const baseDetail: DivisionDetailForm = {
         id,
         sourceDivisionId: typeof row.sourceDivisionId === 'string' ? row.sourceDivisionId : undefined,
+        isSystemGenerated: typeof row.isSystemGenerated === 'boolean'
+            ? row.isSystemGenerated
+            : undefined,
         key,
         kind: typeof row.kind === 'string' && row.kind.toUpperCase() === 'PLAYOFF' ? 'PLAYOFF' : 'LEAGUE',
         name,
@@ -676,6 +680,9 @@ export const deriveTournamentPoolSettingsByBracketId = (
     }>();
 
     poolDivisionDetails.forEach((detail) => {
+        if (detail.isSystemGenerated !== true) {
+            return;
+        }
         const parentBracketIds = Array.from(
             new Set(normalizePlacementDivisionIds(detail.playoffPlacementDivisionIds).filter(Boolean)),
         );
