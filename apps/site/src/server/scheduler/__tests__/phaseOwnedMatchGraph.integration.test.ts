@@ -386,8 +386,8 @@ describe("phase-owned Match Graph persistence", () => {
         timeSlotIds: ["slot-weekend"],
         timeSlots: [{
           id: "slot-weekend",
-          dayOfWeek: 6,
-          daysOfWeek: [6, 0],
+          dayOfWeek: 5,
+          daysOfWeek: [5, 6],
           startTimeMinutes: 9 * 60,
           endTimeMinutes: 24 * 60,
           startDate: "2026-08-22T09:00:00.000Z",
@@ -453,6 +453,9 @@ describe("phase-owned Match Graph persistence", () => {
       { log: () => {}, error: () => {} },
     );
     expect(scheduled.matches).toHaveLength(70);
+    expect(new Set(scheduled.matches.map((match) => match.start.getUTCDay()))).toEqual(
+      new Set([0, 6]),
+    );
     expect(scheduled.matches.every((match) => (
       match.field?.id === "field-1"
       && match.start.getTime() < match.end.getTime()

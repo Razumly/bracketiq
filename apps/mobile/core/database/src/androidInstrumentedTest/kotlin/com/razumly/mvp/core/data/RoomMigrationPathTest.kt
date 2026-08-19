@@ -50,7 +50,7 @@ class RoomMigrationPathTest {
         }
     }
     @Test
-    fun v98MatchGraphMigration_preservesPlacementAndAddsPhaseOwnerColumn() {
+    fun given_v98_match_graph_rows_when_migrated_then_placement_and_phase_owner_are_preserved() {
         val databaseName = "room-match-graph-v98"
         migrationHelper.createDatabase(databaseName, 98).use { database ->
             database.execSQL(

@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.util.matchesDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.presentation.EventDetailInitialTab
 import com.razumly.mvp.core.presentation.guides.EventGuideTargets
@@ -76,18 +77,6 @@ internal fun selectedEventDetailTabGuideTarget(selectedTab: DetailTab): String =
     DetailTab.SCHEDULE -> EventGuideTargets.ScheduleContent
     DetailTab.LEAGUES -> EventGuideTargets.StandingsContent
     DetailTab.PARTICIPANTS -> EventGuideTargets.ParticipantsContent
-}
-private fun MatchWithRelations.matchesDivisionIdentifier(
-    normalizedDivisionId: String,
-): Boolean {
-    val normalizedPhaseDivisionId = match.phaseDivisionId?.normalizeDivisionIdentifier()
-    return if (!normalizedPhaseDivisionId.isNullOrBlank()) {
-        normalizedPhaseDivisionId == normalizedDivisionId
-    } else {
-        listOf(match.division, match.sourceDivisionId).any { divisionId ->
-            divisionId?.normalizeDivisionIdentifier() == normalizedDivisionId
-        }
-    }
 }
 
 internal fun filterScheduleMatchesForDivision(

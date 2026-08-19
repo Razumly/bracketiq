@@ -4453,7 +4453,7 @@ function EventScheduleContent() {
       draft: EventEditorDraft,
       mode: 'CREATE' | 'EDIT',
       createCompletionMode?: 'CREATE_ONLY' | 'CREATE_AND_BUILD_SCHEDULE',
-      preserveLocalMatchDraft = false,
+      hasDraftMatchChanges = false,
     ): Promise<{ event: Event; snapshot: EventEditorSnapshot }> => {
       const contractDraft = isRentalFlow
         ? {
@@ -4577,7 +4577,7 @@ function EventScheduleContent() {
         result.snapshot.draft,
         result.snapshot.eventId,
       ) as unknown as Event;
-      const canonicalMatches = preserveLocalMatchDraft
+      const canonicalMatches = hasDraftMatchChanges
         && result.scheduleOutcome.status === 'NOT_REQUESTED'
         ? activeMatches
         : scheduleMatches ?? (

@@ -751,21 +751,31 @@ export const clearRemovedEventOfficialMatchAssignments = async (
         )
       ) {
         const row = assignment as Record<string, unknown>;
-        return [
-          {
-            ...row,
-            positionId: normalizeEntityId(row.positionId),
-            slotIndex: Number(row.slotIndex),
-            holderType:
-              typeof row.holderType === "string"
-                ? row.holderType.trim().toUpperCase()
-                : row.holderType,
-            userId: normalizeEntityId(row.userId),
-            eventOfficialId: normalizeEntityId(row.eventOfficialId),
-            checkedIn: row.checkedIn === true,
-            hasConflict: row.hasConflict === true,
-          },
-        ];
+        const canonicalAssignment = {
+          ...row,
+          positionId: normalizeEntityId(row.positionId),
+          slotIndex: Number(row.slotIndex),
+          holderType:
+            typeof row.holderType === "string"
+              ? row.holderType.trim().toUpperCase()
+              : row.holderType,
+          userId: normalizeEntityId(row.userId),
+          eventOfficialId: normalizeEntityId(row.eventOfficialId),
+          checkedIn: row.checkedIn === true,
+          hasConflict: row.hasConflict === true,
+        };
+        if (
+          row.positionId !== canonicalAssignment.positionId ||
+          row.slotIndex !== canonicalAssignment.slotIndex ||
+          row.holderType !== canonicalAssignment.holderType ||
+          row.userId !== canonicalAssignment.userId ||
+          row.eventOfficialId !== canonicalAssignment.eventOfficialId ||
+          row.checkedIn !== canonicalAssignment.checkedIn ||
+          row.hasConflict !== canonicalAssignment.hasConflict
+        ) {
+          assignmentsChanged = true;
+        }
+        return [canonicalAssignment];
       }
       assignmentsChanged = true;
       if (!assignment || typeof assignment !== "object") {

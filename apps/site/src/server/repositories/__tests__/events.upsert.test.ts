@@ -6,6 +6,7 @@ jest.mock('@/lib/prisma', () => ({
 
 import { persistScheduledRosterTeams, upsertEventFromPayload } from '@/server/repositories/events';
 import { buildEventDivisionId } from '@/lib/divisionTypes';
+import { collectPhaseTeamIdsByDivision } from '@/server/repositories/eventDivisionPhases';
 import { WEEKLY_REPEATING_TIME_SLOT_REQUIRED_MESSAGE } from '@/lib/eventScheduling';
 // Test fixtures cover only fields used by roster persistence.
 type ScheduledRosterEvent =
@@ -2497,6 +2498,82 @@ describe('upsertEventFromPayload', () => {
     });
   });
 
+  it('canonicalizes retained event official assignments when no official is removed', async () => {
+    const client = createMockClient();
+    client.matches.findMany.mockImplementation((args: {
+      select?: { officialIds?: boolean };
+    }) => {
+      if (args?.select?.officialIds) {
+        return Promise.resolve([
+          {
+            id: 'match_retained_official',
+            fieldId: 'field_1',
+            officialId: 'kept_official',
+            officialCheckedIn: false,
+            officialIds: [
+              {
+                positionId: 'event_pos_r1',
+                slotIndex: 0,
+                holderType: 'OFFICIAL',
+                userId: 'kept_official',
+                eventOfficialId: 'event_official_kept',
+                checkedIn: false,
+              },
+            ],
+          },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+    const repositoryClient = client as unknown as Parameters<
+      typeof upsertEventFromPayload
+    >[1];
+
+    await upsertEventFromPayload(
+      {
+        ...baseEventPayload(),
+        divisions: ['OPEN'],
+        officialPositions: [
+          {
+            id: 'event_pos_r1',
+            name: 'R1',
+            count: 1,
+            order: 0,
+          },
+        ],
+        eventOfficials: [
+          {
+            id: 'event_official_kept',
+            userId: 'kept_official',
+            positionIds: ['event_pos_r1'],
+            fieldIds: ['field_1'],
+            isActive: true,
+          },
+        ],
+      },
+      repositoryClient,
+    );
+
+    expect(client.matches.update).toHaveBeenCalledWith({
+      where: { id: 'match_retained_official' },
+      data: {
+        officialIds: [
+          {
+            positionId: 'event_pos_r1',
+            slotIndex: 0,
+            holderType: 'OFFICIAL',
+            userId: 'kept_official',
+            eventOfficialId: 'event_official_kept',
+            checkedIn: false,
+            hasConflict: false,
+          },
+        ],
+        officialId: 'kept_official',
+        officialCheckedIn: false,
+      },
+    });
+  });
+
   it('persists match rules overrides and point-incident automation settings', async () => {
     const client = createMockClient();
     const payload = {
@@ -2644,6 +2721,35 @@ describe('upsertEventFromPayload', () => {
         }),
       }),
     );
+  });
+});
+
+describe('collectPhaseTeamIdsByDivision', () => {
+  it('keeps confirmed phase membership when teams retain their entry division', () => {
+    const entryDivisionId = 'entry-open';
+    const phaseDivisionId = 'phase-playoff';
+    const teamIdsByPhaseDivision = collectPhaseTeamIdsByDivision(
+      {
+        divisions: [
+          {
+            id: phaseDivisionId,
+            role: 'PHASE',
+            phase: 'PLAYOFF',
+            teamIds: ['advanced-team'],
+          },
+        ],
+      },
+      {
+        'advanced-team': {
+          id: 'advanced-team',
+          division: { id: entryDivisionId },
+        },
+      },
+    );
+
+    expect(teamIdsByPhaseDivision).toEqual({
+      [phaseDivisionId]: ['advanced-team'],
+    });
   });
 });
 

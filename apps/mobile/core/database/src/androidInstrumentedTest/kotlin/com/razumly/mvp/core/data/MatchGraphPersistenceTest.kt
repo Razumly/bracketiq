@@ -32,7 +32,7 @@ class MatchGraphPersistenceTest {
     }
 
     @Test
-    fun room_reopen_preserves_unplaced_graph_identity_and_phase_ownership() = runBlocking {
+    fun given_unplaced_graph_when_room_reopens_then_identity_and_phase_ownership_are_preserved() = runBlocking {
         val first = Room.databaseBuilder<MVPDatabaseService>(
             context,
             MVPDatabaseService::class.java,
@@ -67,6 +67,8 @@ class MatchGraphPersistenceTest {
                         sourceDivisionId = "phase-pool",
                         phaseDivisionId = "phase-bracket",
                         division = "phase-pool",
+                        previousLeftId = "event-graph:match:1",
+                        previousRightId = "event-graph:match:2",
                         fieldId = null,
                         start = null,
                         end = null,

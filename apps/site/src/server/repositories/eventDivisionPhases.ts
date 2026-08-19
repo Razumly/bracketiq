@@ -75,6 +75,7 @@ export type PhaseDivisionCandidate = {
   id: string;
   role?: unknown;
   phase?: unknown;
+  teamIds?: readonly string[] | null;
 };
 
 export const collectScheduledDivisions = <T extends PhaseDivisionCandidate>(
@@ -119,12 +120,26 @@ export const collectPhaseTeamIdsByDivision = <
   },
   teams: Readonly<Record<string, U>>,
 ): Record<string, string[]> => Object.fromEntries(
-  collectPhaseDivisions(scheduled).map((division) => [
-    division.id,
-    Object.entries(teams)
-      .filter(([, team]) => team.division?.id === division.id)
-      .map(([teamId, team]) => team.id ?? teamId),
-  ]),
+  collectPhaseDivisions(scheduled).map((division) => {
+    const declaredTeamIds = Array.isArray(division.teamIds)
+      ? Array.from(
+          new Set(
+            division.teamIds
+              .map((teamId) => String(teamId ?? '').trim())
+              .filter(Boolean),
+          ),
+        )
+      : [];
+    if (declaredTeamIds.length) {
+      return [division.id, declaredTeamIds];
+    }
+    return [
+      division.id,
+      Object.entries(teams)
+        .filter(([, team]) => team.division?.id === division.id)
+        .map(([teamId, team]) => team.id ?? teamId),
+    ];
+  }),
 );
 
 

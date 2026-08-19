@@ -97,14 +97,14 @@ const buildTeams = (
 
 const scheduleTournament = (
   teamCount: number,
-  doubleElimination: boolean,
+  isDoubleElimination: boolean,
   restTimeMinutes = 0,
 ) => {
   const division = buildDivision();
   const field = buildField(division);
   const teams = buildTeams(teamCount, division);
   const tournament = new Tournament({
-    id: `matrix_tournament_${doubleElimination ? 'double' : 'single'}_${teamCount}`,
+    id: `matrix_tournament_${isDoubleElimination ? 'double' : 'single'}_${teamCount}`,
     name: `Matrix Tournament ${teamCount}`,
     start: new Date(2026, 0, 5, 8, 0, 0),
     end: new Date(2026, 11, 31, 22, 0, 0),
@@ -116,7 +116,7 @@ const scheduleTournament = (
     fields: { [field.id]: field },
     timeSlots: buildTimeSlots([division]),
     doTeamsOfficiate: false,
-    doubleElimination,
+    doubleElimination: isDoubleElimination,
     winnerSetCount: 1,
     loserSetCount: 1,
     usesSets: false,
@@ -128,8 +128,8 @@ const scheduleTournament = (
 
 type PoolScenario = {
   label: string;
-  doubleElimination: boolean;
-  usesSets: boolean;
+  isDoubleElimination: boolean;
+  isSetBased: boolean;
   officiating: 'STAFF' | 'TEAM';
   teamsPerPool: number;
 };
@@ -137,15 +137,15 @@ type PoolScenario = {
 const poolScenarios: PoolScenario[] = [
   {
     label: 'timed pools and single-elimination bracket with staff officials',
-    doubleElimination: false,
-    usesSets: false,
+    isDoubleElimination: false,
+    isSetBased: false,
     officiating: 'STAFF',
     teamsPerPool: 2,
   },
   {
     label: 'set-based pools and double-elimination bracket with Team officials',
-    doubleElimination: true,
-    usesSets: true,
+    isDoubleElimination: true,
+    isSetBased: true,
     officiating: 'TEAM',
     teamsPerPool: 3,
   },
@@ -163,16 +163,16 @@ const buildPoolTournament = (scenario: PoolScenario) => {
     'PLAYOFF',
   );
   bracketDivision.playoffConfig = {
-    doubleElimination: scenario.doubleElimination,
-    winnerSetCount: scenario.usesSets ? 3 : 1,
+    doubleElimination: scenario.isDoubleElimination,
+    winnerSetCount: scenario.isSetBased ? 3 : 1,
     loserSetCount: 1,
-    winnerBracketPointsToVictory: scenario.usesSets ? [21, 21, 15] : [],
-    loserBracketPointsToVictory: scenario.usesSets ? [21] : [],
+    winnerBracketPointsToVictory: scenario.isSetBased ? [21, 21, 15] : [],
+    loserBracketPointsToVictory: scenario.isSetBased ? [21] : [],
     prize: 'Championship',
     fieldCount: 1,
     restTimeMinutes: 15,
-    matchDurationMinutes: scenario.usesSets ? null : 45,
-    setDurationMinutes: scenario.usesSets ? 15 : null,
+    matchDurationMinutes: scenario.isSetBased ? null : 45,
+    setDurationMinutes: scenario.isSetBased ? 15 : null,
   };
   const poolA = new Division(
     `${suffix}_pool_a`,
@@ -196,11 +196,11 @@ const buildPoolTournament = (scenario: PoolScenario) => {
   );
   const poolConfig = {
     gamesPerOpponent: 1,
-    usesSets: scenario.usesSets,
-    matchDurationMinutes: scenario.usesSets ? undefined : 45,
-    setDurationMinutes: scenario.usesSets ? 15 : undefined,
-    setsPerMatch: scenario.usesSets ? 3 : undefined,
-    pointsToVictory: scenario.usesSets ? [21, 21, 15] : undefined,
+    usesSets: scenario.isSetBased,
+    matchDurationMinutes: scenario.isSetBased ? undefined : 45,
+    setDurationMinutes: scenario.isSetBased ? 15 : undefined,
+    setsPerMatch: scenario.isSetBased ? 3 : undefined,
+    pointsToVictory: scenario.isSetBased ? [21, 21, 15] : undefined,
     restTimeMinutes: 15,
   };
   poolA.leagueConfig = { ...poolConfig };
@@ -268,14 +268,14 @@ const buildPoolTournament = (scenario: PoolScenario) => {
       fieldIds: [field.id],
       isActive: true,
     })),
-    doubleElimination: scenario.doubleElimination,
-    winnerSetCount: scenario.usesSets ? 3 : 1,
+    doubleElimination: scenario.isDoubleElimination,
+    winnerSetCount: scenario.isSetBased ? 3 : 1,
     loserSetCount: 1,
-    winnerBracketPointsToVictory: scenario.usesSets ? [21, 21, 15] : [],
-    loserBracketPointsToVictory: scenario.usesSets ? [21] : [],
-    usesSets: scenario.usesSets,
-    matchDurationMinutes: scenario.usesSets ? undefined : 45,
-    setDurationMinutes: scenario.usesSets ? 15 : undefined,
+    winnerBracketPointsToVictory: scenario.isSetBased ? [21, 21, 15] : [],
+    loserBracketPointsToVictory: scenario.isSetBased ? [21] : [],
+    usesSets: scenario.isSetBased,
+    matchDurationMinutes: scenario.isSetBased ? undefined : 45,
+    setDurationMinutes: scenario.isSetBased ? 15 : undefined,
     restTimeMinutes: 15,
   });
 
@@ -313,7 +313,7 @@ describe('tournament bracket matrix', () => {
     expect(poolMatches).toHaveLength(
       scenario.teamsPerPool * (scenario.teamsPerPool - 1),
     );
-    if (scenario.doubleElimination) {
+    if (scenario.isDoubleElimination) {
       expect(bracketMatches.length).toBeGreaterThan(3);
       expect(bracketMatches.some((match) => match.losersBracket)).toBe(true);
     } else {

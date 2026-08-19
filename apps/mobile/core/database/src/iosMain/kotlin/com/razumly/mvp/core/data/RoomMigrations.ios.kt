@@ -301,26 +301,12 @@ private val MIGRATION_97_98_CANONICAL_STAFFING_PRIORITY = migration(
 private val MIGRATION_98_99_MATCH_GRAPH_OWNERSHIP = migration(
     98,
     99,
-    listOf(
-        "ALTER TABLE `MatchMVP` ADD COLUMN `placementState` TEXT NOT NULL DEFAULT 'UNPLACED'",
-        "ALTER TABLE `MatchMVP` ADD COLUMN `phase` TEXT",
-        "ALTER TABLE `MatchMVP` ADD COLUMN `sourceDivisionId` TEXT",
-        "UPDATE `MatchMVP` SET `placementState` = CASE WHEN `fieldId` IS NOT NULL THEN 'PLACED' ELSE 'UNPLACED' END",
-    ),
+    MATCH_GRAPH_OWNERSHIP_MIGRATION_STATEMENTS,
 )
 private val MIGRATION_99_100_MATCH_GRAPH_PHASE_OWNER = migration(
     99,
     100,
-    listOf(
-        "ALTER TABLE `MatchMVP` ADD COLUMN `phaseDivisionId` TEXT",
-        """
-            UPDATE `MatchMVP`
-            SET `phaseDivisionId` = CASE
-                WHEN `sourceDivisionId` IS NOT NULL THEN `division`
-                ELSE NULL
-            END
-        """.trimIndent(),
-    ),
+    MATCH_GRAPH_PHASE_OWNER_MIGRATION_STATEMENTS,
 )
 
 internal val IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V100: Array<Migration> = arrayOf(

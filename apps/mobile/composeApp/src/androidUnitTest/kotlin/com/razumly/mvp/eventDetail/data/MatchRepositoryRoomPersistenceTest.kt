@@ -56,7 +56,7 @@ class MatchRepositoryRoomPersistenceTest {
     }
 
     @Test
-    fun room_reopen_preserves_placeholder_entrants_and_unbound_official_slots() = runTest {
+    fun given_placeholder_graph_and_unbound_slot_when_room_reopens_then_schedule_is_preserved() = runTest {
         val expected = roomBackedSchedule()
         val first = openDatabase()
         try {
@@ -91,7 +91,7 @@ class MatchRepositoryRoomPersistenceTest {
     }
 
     @Test
-    fun rejected_remote_refresh_keeps_room_backed_schedule_unchanged() = runTest {
+    fun given_room_backed_schedule_when_remote_refresh_is_rejected_then_local_schedule_is_unchanged() = runTest {
         val expected = roomBackedSchedule()
         val database = openDatabase()
         val engine = MockEngine { request ->

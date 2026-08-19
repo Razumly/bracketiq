@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
+import com.razumly.mvp.core.data.dataTypes.dtos.toMatch
 import com.razumly.mvp.core.util.jsonMVP
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
@@ -18,6 +19,22 @@ import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 class MatchDtosTest {
+    @Test
+    fun given_match_scores_when_dto_round_trips_then_both_scores_are_preserved() {
+        val original = MatchMVP(
+            id = "match-score-round-trip",
+            eventId = "event-1",
+            matchId = 1,
+            team1Points = listOf(21, 18, 15),
+            team2Points = listOf(17, 21, 11),
+        )
+
+        val restored = original.toMatchDTO().toMatch(original.id)
+
+        assertEquals(original.team1Points, restored.team1Points)
+        assertEquals(original.team2Points, restored.team2Points)
+    }
+
     @Test
     fun match_api_dto_maps_structured_official_assignments() {
         val dto = MatchApiDto(
@@ -96,7 +113,7 @@ class MatchDtosTest {
     }
 
     @Test
-    fun match_api_dto_preserves_entry_selection_and_phase_owner_for_graph_match() {
+    fun given_graph_match_dto_when_mapped_then_entry_selection_and_phase_owner_are_preserved() {
         val dto = MatchApiDto(
             id = "match-graph",
             matchId = 9,
@@ -141,7 +158,7 @@ class MatchDtosTest {
     }
     
     @Test
-    fun bulk_match_mappers_send_phase_owner_as_match_division() {
+    fun given_phase_owned_match_when_bulk_mapped_then_phase_owner_is_sent_as_division() {
         val match = MatchMVP(
             id = "match-phase",
             eventId = "event-phase",

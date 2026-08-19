@@ -4,8 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { upsertEventFromPayload } from "@/server/repositories/events";
 import { persistCreateOnlyMatchGraph } from "@/server/scheduler/eventScheduleMutation";
 
-const runDatabaseIntegration = process.env.RUN_DATABASE_INTEGRATION === "1";
-const describeDatabase = runDatabaseIntegration ? describe : describe.skip;
+const isDatabaseIntegrationEnabled = process.env.RUN_DATABASE_INTEGRATION === "1";
+const describeDatabase = isDatabaseIntegrationEnabled ? describe : describe.skip;
 
 type DatabaseClient = typeof prisma;
 

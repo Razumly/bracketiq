@@ -308,7 +308,7 @@ class RoomMigrationsIosTest {
     }
 
     @Test
-    fun v98MatchGraphMigration_preservesPlacementAndAddsPhaseOwnership() {
+    fun givenV98MatchRows_whenMigratedToV99_thenPreservesPlacementAndAddsPhaseOwnership() {
         BundledSQLiteDriver().open(":memory:").use { connection ->
             connection.execute(
                 """
@@ -352,7 +352,7 @@ class RoomMigrationsIosTest {
         }
     }
     @Test
-    fun v99MatchGraphMigration_backfillsPhaseOwnerWithoutChangingEntrySelection() {
+    fun givenV99MatchRows_whenMigratedToV100_thenBackfillsPhaseOwnerWithoutChangingEntrySelection() {
         BundledSQLiteDriver().open(":memory:").use { connection ->
             connection.execute(
                 """

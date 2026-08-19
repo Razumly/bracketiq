@@ -165,9 +165,9 @@ type Scenario = {
   teamCount: number;
   gamesPerOpponent: number;
   playoffTeamCount: number;
-  usesSets: boolean;
+  isSetBased: boolean;
   restTimeMinutes: number;
-  doubleElimination: boolean;
+  isDoubleElimination: boolean;
   officiating: 'STAFF' | 'TEAM';
 };
 
@@ -177,9 +177,9 @@ const scenarios: Scenario[] = [
     teamCount: 5,
     gamesPerOpponent: 1,
     playoffTeamCount: 4,
-    usesSets: false,
+    isSetBased: false,
     restTimeMinutes: 15,
-    doubleElimination: false,
+    isDoubleElimination: false,
     officiating: 'STAFF',
   },
   {
@@ -187,9 +187,9 @@ const scenarios: Scenario[] = [
     teamCount: 6,
     gamesPerOpponent: 2,
     playoffTeamCount: 4,
-    usesSets: true,
+    isSetBased: true,
     restTimeMinutes: 20,
-    doubleElimination: true,
+    isDoubleElimination: true,
     officiating: 'TEAM',
   },
 ];
@@ -213,7 +213,7 @@ describe('league schedule matrix', () => {
     const start = new Date('2026-01-05T08:00:00.000Z');
     const end = new Date('2026-02-28T22:00:00.000Z');
     const league = new League({
-      id: `league_${scenario.officiating.toLowerCase()}_${scenario.doubleElimination ? 'double' : 'single'}`,
+      id: `league_${scenario.officiating.toLowerCase()}_${scenario.isDoubleElimination ? 'double' : 'single'}`,
       name: `Matrix ${scenario.label}`,
       start,
       end,
@@ -244,12 +244,12 @@ describe('league schedule matrix', () => {
       gamesPerOpponent: scenario.gamesPerOpponent,
       includePlayoffs: true,
       playoffTeamCount: scenario.playoffTeamCount,
-      doubleElimination: scenario.doubleElimination,
-      usesSets: scenario.usesSets,
-      matchDurationMinutes: scenario.usesSets ? undefined : 60,
-      setDurationMinutes: scenario.usesSets ? 20 : undefined,
-      setsPerMatch: scenario.usesSets ? 3 : undefined,
-      pointsToVictory: scenario.usesSets ? [21, 21, 15] : undefined,
+      doubleElimination: scenario.isDoubleElimination,
+      usesSets: scenario.isSetBased,
+      matchDurationMinutes: scenario.isSetBased ? undefined : 60,
+      setDurationMinutes: scenario.isSetBased ? 20 : undefined,
+      setsPerMatch: scenario.isSetBased ? 3 : undefined,
+      pointsToVictory: scenario.isSetBased ? [21, 21, 15] : undefined,
       restTimeMinutes: scenario.restTimeMinutes,
       leagueScoringConfig: { pointsForWin: 3, pointsForDraw: 1, pointsForLoss: 0 },
     });
@@ -277,7 +277,7 @@ describe('league schedule matrix', () => {
     );
 
     expect(scheduled.matches.length - playoffMatches.length).toBe(expectedRegularMatches);
-    if (scenario.doubleElimination) {
+    if (scenario.isDoubleElimination) {
       expect(playoffMatches.length).toBeGreaterThan(expectedSingleEliminationMatches);
       expect(playoffMatches.some((match) => match.losersBracket)).toBe(true);
     } else {

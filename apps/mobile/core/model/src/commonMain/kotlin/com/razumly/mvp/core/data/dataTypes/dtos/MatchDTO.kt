@@ -85,6 +85,7 @@ fun MatchDTO.toMatch(id: String): MatchMVP {
         sourceDivisionId = sourceDivisionId,
         phaseDivisionId = phaseDivisionId,
         division = division?.trim()?.takeIf(String::isNotBlank),
+        team1Points = team1Points,
         team2Points = team2Points,
         side = side,
         losersBracket = losersBracket,

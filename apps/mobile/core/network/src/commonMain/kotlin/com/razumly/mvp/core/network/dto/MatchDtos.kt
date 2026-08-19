@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
+import com.razumly.mvp.core.data.util.persistenceDivisionId
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlinx.serialization.json.JsonArray
@@ -707,7 +708,7 @@ fun MatchMVP.toBulkMatchUpdateEntryDto(): BulkMatchUpdateEntryDto = BulkMatchUpd
     officialIds = officialIds,
     start = start?.toString(),
     end = end?.toString(),
-    division = phaseDivisionId ?: division,
+    division = persistenceDivisionId(),
     losersBracket = losersBracket,
     locked = locked,
     matchRulesSnapshot = matchRulesSnapshot,
@@ -749,7 +750,7 @@ fun MatchMVP.toBulkMatchCreateEntryDto(
     officialIds = officialIds,
     start = start?.toString(),
     end = end?.toString(),
-    division = phaseDivisionId ?: division,
+    division = persistenceDivisionId(),
     losersBracket = losersBracket,
     locked = locked,
     matchRulesSnapshot = matchRulesSnapshot,

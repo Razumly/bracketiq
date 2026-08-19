@@ -18,6 +18,7 @@ import com.razumly.mvp.core.auth.WatchMatchOperationSync
 import com.razumly.mvp.core.data.repositories.collectionIdChunks
 import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
+import com.razumly.mvp.core.data.util.persistenceDivisionId
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.BulkMatchCreateEntryDto
@@ -1038,7 +1039,7 @@ class MatchRepository(
                     matchId = sanitizedMatch.matchId,
                     start = sanitizedMatch.start?.toString(),
                     end = sanitizedMatch.end?.toString(),
-                    division = sanitizedMatch.phaseDivisionId ?: sanitizedMatch.division,
+                    division = sanitizedMatch.persistenceDivisionId(),
                     losersBracket = sanitizedMatch.losersBracket,
                     locked = sanitizedMatch.locked,
                     matchRulesSnapshot = sanitizedMatch.matchRulesSnapshot,
