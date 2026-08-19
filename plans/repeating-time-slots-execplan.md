@@ -10,19 +10,21 @@ A human can verify the result by running the focused site and mobile tests. The 
 
 ## Progress
 
-- [x] (2026-08-18) Read issue #27, repository rules, and the existing site and mobile time-slot paths.
-- [x] (2026-08-18) Create the isolated `issue/27-repeating-time-slots` worktree and claim issue #27.
-- [x] (2026-08-18) Define one strict local-date occurrence resolver for site scheduling and presentation.
-- [x] (2026-08-18) Allow overnight repeating intervals and report their next local weekday.
-- [x] (2026-08-18) Reject daylight-saving gaps and folds with a date-specific error.
-- [x] (2026-08-18) Route scheduler and diagnostics through the canonical resolved occurrence data.
-- [x] (2026-08-18) Update mobile editing, validation, Room mapping, and presentation for the same contract.
-- [x] (2026-08-18) Add focused site and mobile regression tests.
-- [x] (2026-08-18) Run focused checks, smoke scenarios, and issue completion gates.
-- [x] (2026-08-18) Reopen review defects and add regressions for canonical persistence, external conflict gating, mobile bounds, and rental modal submission.
-- [x] (2026-08-18) Preserve overnight repeating slots in canonical persistence and external conflict checks.
-- [x] (2026-08-18) Preserve configured local date bounds in mobile conflict windows and weekly projections.
-- [x] (2026-08-18) Preserve an open-ended repeating rental end date during modal submission.
+- [x] (2026-08-18 00:00Z) Read issue #27, repository rules, and the existing site and mobile time-slot paths.
+- [x] (2026-08-18 00:00Z) Create the isolated `issue/27-repeating-time-slots` worktree and claim issue #27.
+- [x] (2026-08-18 00:00Z) Define one strict local-date occurrence resolver for site scheduling and presentation.
+- [x] (2026-08-18 00:00Z) Allow overnight repeating intervals and report their next local weekday.
+- [x] (2026-08-18 00:00Z) Reject daylight-saving gaps and folds with a date-specific error.
+- [x] (2026-08-18 00:00Z) Route scheduler and diagnostics through the canonical resolved occurrence data.
+- [x] (2026-08-18 00:00Z) Update mobile editing, validation, Room mapping, and presentation for the same contract.
+- [x] (2026-08-18 00:00Z) Add focused site and mobile regression tests.
+- [x] (2026-08-18 00:00Z) Run focused checks, smoke scenarios, and issue completion gates.
+- [x] (2026-08-18 00:00Z) Reopen review defects and add regressions for canonical persistence, external conflict gating, mobile bounds, and rental modal submission.
+- [x] (2026-08-18 00:00Z) Preserve overnight repeating slots in canonical persistence and external conflict checks.
+- [x] (2026-08-18 00:00Z) Preserve configured local date bounds in mobile conflict windows and weekly projections.
+- [x] (2026-08-18 00:00Z) Preserve an open-ended repeating rental end date during modal submission.
+- [x] (2026-08-19 20:06Z) Remove unused overlap-only APIs and add mobile daylight-saving regressions.
+- [x] (2026-08-18 00:00Z) Run the final focused checks and record the issue evidence.
 
 ## Surprises & Discoveries
 
@@ -45,9 +47,13 @@ A human can verify the result by running the focused site and mobile tests. The 
   Date/Author: 2026-08-18 / Codex.
 - Decision: Use a canonical occurrence shape containing local date, local start and end components, resolved start and end instants, time-zone name, and duration.
   Rationale: Scheduler, diagnostics, UI presentation, and mobile acceptance need the same interval boundaries. Recomputing each path caused the current drift.
+  Date/Author: 2026-08-18 / Codex.
 - Decision: Preserve a null repeating end date and compare only explicit repeating date bounds.
   Rationale: An overnight end clock uses the next local date for occurrence resolution. A synthetic same-day bound changes the availability contract.
   Date/Author: 2026-08-18 / Codex.
+- Decision: Remove overlap-only helper APIs after moving conflict checks to resolved occurrence intervals.
+  Rationale: No production caller used the helpers. Keeping them would preserve a second interval model that ignores named time zones and daylight-saving transitions.
+  Date/Author: 2026-08-19 / Codex.
  
 
 ## Outcomes & Retrospective
@@ -56,8 +62,8 @@ A human can verify the result by running the focused site and mobile tests. The 
 - Overnight slots end on the next local date. Site and mobile forms show the next-weekday warning.
 - Site scheduler, diagnostics, weekly sessions, field calendars, and API validation use the resolver.
 - Mobile validation, editor payloads, Room mapping, and weekly presentation use the same local-time contract.
-- Site verification passed: focused schedule and rental checks passed with 10 suites and 165 tests. Site TypeScript validation passed. Changed site files passed ESLint.
-- Mobile verification passed: the three targeted repeating-schedule suites passed with 34 tests. The prior complete `:composeApp:testDebugUnitTest` suite also passed.
+- Site verification passed: 10 Jest suites and 117 tests passed. Site TypeScript validation passed. Changed-site ESLint completed with 0 errors and 7 exhaustive-deps warnings in the existing schedule page.
+- Mobile verification passed: the canonical model test, five targeted Compose classes, and the complete `:composeApp:testDebugUnitTest` task completed with `BUILD SUCCESSFUL`.
 - Defect remediation verification passed: canonical persistence, external conflict gating, mobile final-date overlap, named-zone weekly projections, and open-ended rental submission have regression coverage.
 - No known acceptance gap remains.
 
@@ -81,11 +87,37 @@ Finally, update mobile slot validation and Compose UI. Mobile will allow overnig
 
 ## Concrete Steps
 
-Run site commands from `/Users/elesesy/StudioProjects/bracketiq-issue-27/apps/site`. Run mobile commands from `/Users/elesesy/StudioProjects/bracketiq-issue-27/apps/mobile`.
+Run site commands from `/Users/elesesy/StudioProjects/bracketiq-issue-27/apps/site`.
 
-Run focused site checks from `apps/site` with `npm test -- --runInBand` and these paths: `src/lib/__tests__/repeatingTimeSlotAvailability.test.ts`, `src/app/events/[id]/schedule/components/eventForm/__tests__/slotValidation.test.ts`, `src/app/events/[id]/schedule/schedulePage/__tests__/helpers.weeklyOccurrences.test.ts`, `src/app/api/time-slots/__tests__/route.test.ts`, `src/app/api/time-slots/[id]/__tests__/route.test.ts`, and `src/server/scheduler/__tests__/leagueTimeSlots.test.ts`. Run site type checking with `npx tsc --noEmit`. Run mobile checks from `apps/mobile` with `./gradlew :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.core.data.dataTypes.TimeSlotCanonicalAvailabilityTest' --tests 'com.razumly.mvp.eventDetail.LeagueSlotValidationTest' --tests 'com.razumly.mvp.eventDetail.EventEditPayloadBuilderTest' --tests 'com.razumly.mvp.eventCreate.DefaultCreateEventComponentTest'`. Do not start a runtime unless an explicit current request authorizes that state change.
+Run the focused site tests.
 
-After each implementation milestone, update this plan's `Progress`, `Surprises & Discoveries`, and `Decision Log` sections when the design changes. At completion, add the focused test results and the acceptance outcome to `Outcomes & Retrospective`.
+    npx jest --runInBand --runTestsByPath src/lib/__tests__/repeatingTimeSlotAvailability.test.ts src/app/discover/components/eventDetail/__tests__/weeklySessions.test.ts src/app/api/time-slots/__tests__/route.test.ts 'src/app/organizations/[id]/__tests__/page.test.tsx' src/server/__tests__/publicOrganizationCatalog.test.ts 'src/app/events/[id]/schedule/components/eventForm/__tests__/slotValidation.test.ts' 'src/app/events/[id]/schedule/components/eventForm/__tests__/slotConflictHelpers.test.ts' 'src/app/events/[id]/schedule/schedulePage/__tests__/helpers.weeklyOccurrences.test.ts' 'src/app/api/time-slots/[id]/__tests__/route.test.ts' src/server/scheduler/__tests__/leagueTimeSlots.test.ts
+
+Observe a Jest summary with every selected suite passing.
+
+Run site type checking.
+
+    npx tsc --noEmit
+
+Observe no TypeScript diagnostics.
+
+Run the core mobile model check from `/Users/elesesy/StudioProjects/bracketiq-issue-27/apps/mobile`.
+
+    ./gradlew :core:model:testDebugUnitTest --tests 'com.razumly.mvp.core.data.dataTypes.TimeSlotCanonicalAvailabilityTest'
+
+Observe `BUILD SUCCESSFUL`.
+
+Run the Compose mobile checks.
+
+    ./gradlew :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventDetail.LeagueSlotValidationTest' --tests 'com.razumly.mvp.eventDetail.EventEditPayloadBuilderTest' --tests 'com.razumly.mvp.eventCreate.DefaultCreateEventComponentTest' --tests 'com.razumly.mvp.eventDetail.EventDetailWeeklyBehaviorTest' --tests 'com.razumly.mvp.eventDetail.EventDetailsValidationTest'
+
+Observe `BUILD SUCCESSFUL` and passing reports for every selected class.
+
+Do not start a runtime unless the current request authorizes that state change.
+
+Update this plan after each implementation milestone.
+
+Record focused test results and the acceptance outcome in `Outcomes & Retrospective`.
 
 ## Validation and Acceptance
 
@@ -103,12 +135,22 @@ The main artifacts are the strict occurrence resolver, its focused tests, the si
 
 ## Interfaces and Dependencies
 
-The canonical site resolver exposes a typed function with an input containing `localDate`, `startTimeMinutes`, `endTimeMinutes`, `timeZone`, and optional date-bound fields. Its output contains `occurrenceDate`, `endDate`, `start`, `end`, `durationMinutes`, `isOvernight`, `nextWeekday`, resource IDs, and division IDs. It throws `RepeatingTimeSlotValidationError` with a stable code for invalid local times.
+The site resolver is in `apps/site/src/lib/repeatingTimeSlotAvailability.ts`. It exposes:
 
-The mobile layer must keep `TimeSlot.startTimeMinutes`, `TimeSlot.endTimeMinutes`, `TimeSlot.startDate`, `TimeSlot.endDate`, `TimeSlot.daysOfWeek`, and `TimeSlot.timeZone` as the input contract. It must not import site TypeScript or Prisma types. The server remains the authority for accepted daylight-saving resolution; mobile validation must use the same reject-before-write behavior and display the server's dated error when the server rejects the input.
+    resolveRepeatingTimeSlotOccurrence(slot: RepeatingTimeSlotIntervalInput, occurrenceDate: string): ResolvedRepeatingTimeSlot
+
+The input contains the repeating slot fields, including `daysOfWeek`, `startDate`, `endDate`, `startTimeMinutes`, `endTimeMinutes`, and `timeZone`. The output contains `occurrenceDate`, `endDate`, `start`, `end`, `durationMinutes`, `isOvernight`, `nextWeekday`, resource IDs, and division IDs. The resolver throws `RepeatingTimeSlotValidationError` with a stable code for invalid local times.
+
+The mobile resolver is `TimeSlot.resolveRepeatingOccurrence(occurrenceDate: LocalDate)` in `apps/mobile/core/model/src/commonMain/kotlin/com/razumly/mvp/core/data/dataTypes/TimeSlot.kt`. It returns `ResolvedRepeatingTimeSlotInterval` with the same local dates, resolved instants, duration, time-zone name, resources, and divisions.
+
+Mobile input keeps `TimeSlot.startTimeMinutes`, `TimeSlot.endTimeMinutes`, `TimeSlot.startDate`, `TimeSlot.endDate`, `TimeSlot.daysOfWeek`, and `TimeSlot.timeZone`. Mobile does not import site TypeScript or Prisma types. The server remains the authority for accepted daylight-saving resolution. Mobile validation rejects invalid input before persistence and displays the server's dated error.
 
 ### Revision note
 
 Created on 2026-08-18 after repository and dependency inspection. This plan records the issue #27 scope and the strict rejection policy for daylight-saving gaps and folds before implementation.
 
 Updated on 2026-08-18 after implementation review. Replaced placeholder validation commands with concrete site and mobile commands, aligned the interface section with the resolver output, and recorded the completed verification scope. This change makes the living plan self-contained and accurate after implementation.
+
+Updated on 2026-08-19 after the standards review. Added timestamps, corrected the resolver signatures, documented expected command output, and recorded the removal of unused overlap-only APIs.
+
+Updated on 2026-08-18 after final verification. Recorded the passing site and mobile commands and the remaining lint warnings.

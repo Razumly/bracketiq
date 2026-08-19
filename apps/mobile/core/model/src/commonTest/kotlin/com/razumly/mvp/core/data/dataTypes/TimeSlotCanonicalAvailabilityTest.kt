@@ -1,11 +1,12 @@
 package com.razumly.mvp.core.data.dataTypes
 
+import kotlinx.datetime.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
-import kotlin.test.assertNull
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -55,6 +56,83 @@ class TimeSlotCanonicalAvailabilityTest {
         assertFalse(
             slot(startMinutes = 23 * 60, endMinutes = 60).hasOvernightWindow(),
         )
+    }
+
+    @Test
+    fun given_repeating_overnight_slot_when_resolved_then_matches_site_canonical_fixture() {
+        val resolved = slot(
+            startMinutes = 22 * 60,
+            endMinutes = 2 * 60,
+        ).copy(
+            dayOfWeek = 5,
+            daysOfWeek = listOf(5),
+            startDate = Instant.parse("2026-02-01T05:00:00Z"),
+            endDate = Instant.parse("2026-03-31T04:00:00Z"),
+            repeating = true,
+        ).resolveRepeatingOccurrence(LocalDate(2026, 2, 28))
+
+        assertEquals(LocalDate(2026, 2, 28), resolved.occurrenceDate)
+        assertEquals(LocalDate(2026, 3, 1), resolved.endDate)
+        assertEquals(Instant.parse("2026-03-01T03:00:00Z"), resolved.start)
+        assertEquals(Instant.parse("2026-03-01T07:00:00Z"), resolved.end)
+        assertEquals(240, resolved.durationMinutes)
+        assertEquals("Sunday", resolved.nextWeekday)
+    }
+
+    @Test
+    fun given_overnight_slot_crossing_dst_when_resolved_then_preserves_elapsed_duration() {
+        val resolved = slot(
+            startMinutes = 23 * 60,
+            endMinutes = 4 * 60,
+        ).copy(
+            dayOfWeek = 5,
+            daysOfWeek = listOf(5),
+            startDate = Instant.parse("2026-03-01T05:00:00Z"),
+            endDate = Instant.parse("2026-03-31T04:00:00Z"),
+            repeating = true,
+        ).resolveRepeatingOccurrence(LocalDate(2026, 3, 7))
+
+        assertEquals(Instant.parse("2026-03-08T04:00:00Z"), resolved.start)
+        assertEquals(Instant.parse("2026-03-08T08:00:00Z"), resolved.end)
+        assertEquals(240, resolved.durationMinutes)
+    }
+
+    @Test
+    fun given_repeating_slot_in_dst_gap_when_resolved_then_rejects_local_time() {
+        val error = assertFailsWith<RepeatingTimeSlotValidationException> {
+            slot(
+                startMinutes = 2 * 60 + 30,
+                endMinutes = 4 * 60,
+            ).copy(
+                dayOfWeek = 6,
+                daysOfWeek = listOf(6),
+                startDate = Instant.parse("2026-03-08T05:00:00Z"),
+                endDate = Instant.parse("2026-03-09T04:00:00Z"),
+                repeating = true,
+            ).resolveRepeatingOccurrence(LocalDate(2026, 3, 8))
+        }
+
+        assertTrue(error.message.orEmpty().contains("does not exist"))
+        assertTrue(error.message.orEmpty().contains("2026-03-08"))
+    }
+
+    @Test
+    fun given_repeating_slot_in_dst_fold_when_resolved_then_rejects_ambiguous_time() {
+        val error = assertFailsWith<RepeatingTimeSlotValidationException> {
+            slot(
+                startMinutes = 1 * 60 + 30,
+                endMinutes = 3 * 60,
+            ).copy(
+                dayOfWeek = 6,
+                daysOfWeek = listOf(6),
+                startDate = Instant.parse("2026-11-01T04:00:00Z"),
+                endDate = Instant.parse("2026-11-02T05:00:00Z"),
+                repeating = true,
+            ).resolveRepeatingOccurrence(LocalDate(2026, 11, 1))
+        }
+
+        assertTrue(error.message.orEmpty().contains("ambiguous"))
+        assertTrue(error.message.orEmpty().contains("2026-11-01"))
     }
 
     @Test

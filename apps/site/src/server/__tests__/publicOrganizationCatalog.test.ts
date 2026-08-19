@@ -43,24 +43,27 @@ const prismaMock = {
   },
 };
 
-jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
+jest.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 
 const buildDivisionStandingsResponseMock = jest.fn();
 const toLeagueEventMock = jest.fn();
 const buildPublicBracketWidgetViewMock = jest.fn();
 const loadEventWithRelationsMock = jest.fn();
 
-jest.mock('@/app/api/events/[eventId]/standings/shared', () => ({
-  buildDivisionStandingsResponse: (...args: unknown[]) => buildDivisionStandingsResponseMock(...args),
+jest.mock("@/app/api/events/[eventId]/standings/shared", () => ({
+  buildDivisionStandingsResponse: (...args: unknown[]) =>
+    buildDivisionStandingsResponseMock(...args),
   toLeagueEvent: (...args: unknown[]) => toLeagueEventMock(...args),
 }));
 
-jest.mock('@/server/publicWidgetBracket', () => ({
-  buildPublicBracketWidgetView: (...args: unknown[]) => buildPublicBracketWidgetViewMock(...args),
+jest.mock("@/server/publicWidgetBracket", () => ({
+  buildPublicBracketWidgetView: (...args: unknown[]) =>
+    buildPublicBracketWidgetViewMock(...args),
 }));
 
-jest.mock('@/server/repositories/events', () => ({
-  loadEventWithRelations: (...args: unknown[]) => loadEventWithRelationsMock(...args),
+jest.mock("@/server/repositories/events", () => ({
+  loadEventWithRelations: (...args: unknown[]) =>
+    loadEventWithRelationsMock(...args),
 }));
 
 import {
@@ -78,27 +81,27 @@ import {
   getPublicStandingsWidgetPage,
   getPublicOrganizationTeamForRegistration,
   listPublicOrganizationTeams,
-} from '@/server/publicOrganizationCatalog';
+} from "@/server/publicOrganizationCatalog";
 
 const publicOrganization = {
-  id: 'org_1',
-  slug: 'scsoccer',
-  name: 'SCSoccer',
+  id: "org_1",
+  slug: "scsoccer",
+  name: "SCSoccer",
   description: null,
   location: null,
   website: null,
-  logoUrl: '/logo.png',
+  logoUrl: "/logo.png",
   sports: [],
-  brandPrimaryColor: '#0f766e',
-  brandAccentColor: '#f59e0b',
-  publicHeadline: 'Play',
-  publicIntroText: 'Join',
+  brandPrimaryColor: "#0f766e",
+  brandAccentColor: "#f59e0b",
+  publicHeadline: "Play",
+  publicIntroText: "Join",
   publicPageEnabled: true,
   publicWidgetsEnabled: true,
   publicCompletionRedirectUrl: null,
 };
 
-describe('publicOrganizationCatalog', () => {
+describe("publicOrganizationCatalog", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prismaMock.organizations.findUnique.mockReset();
@@ -131,33 +134,33 @@ describe('publicOrganizationCatalog', () => {
     loadEventWithRelationsMock.mockReset();
   });
 
-  it('lists active organization divisions with safe registration URLs', async () => {
+  it("lists active organization divisions with safe registration URLs", async () => {
     prismaMock.divisions.findMany.mockResolvedValue([
       {
-        id: 'division_1',
-        organizationId: 'org_1',
+        id: "division_1",
+        organizationId: "org_1",
         eventId: null,
-        scope: 'ORGANIZATION',
-        status: 'ACTIVE',
-        name: 'Girls U14 Premier',
-        gender: 'F',
-        divisionTypeId: 'skill_premier_age_u14',
-        skillDivisionTypeId: 'premier',
-        ageDivisionTypeId: 'u14',
-        registrationUrl: 'https://club.example/register',
+        scope: "ORGANIZATION",
+        status: "ACTIVE",
+        name: "Girls U14 Premier",
+        gender: "F",
+        divisionTypeId: "skill_premier_age_u14",
+        skillDivisionTypeId: "premier",
+        ageDivisionTypeId: "u14",
+        registrationUrl: "https://club.example/register",
       },
       {
-        id: 'division_2',
-        organizationId: 'org_1',
+        id: "division_2",
+        organizationId: "org_1",
         eventId: null,
-        scope: 'ORGANIZATION',
-        status: 'ACTIVE',
-        name: 'Unsafe',
-        gender: 'C',
-        divisionTypeId: 'skill_open_age_18plus',
-        skillDivisionTypeId: 'open',
-        ageDivisionTypeId: '18plus',
-        registrationUrl: 'javascript:alert(1)',
+        scope: "ORGANIZATION",
+        status: "ACTIVE",
+        name: "Unsafe",
+        gender: "C",
+        divisionTypeId: "skill_open_age_18plus",
+        skillDivisionTypeId: "open",
+        ageDivisionTypeId: "18plus",
+        registrationUrl: "javascript:alert(1)",
       },
     ]);
 
@@ -165,189 +168,216 @@ describe('publicOrganizationCatalog', () => {
 
     expect(divisions).toEqual([
       expect.objectContaining({
-        id: 'division_1',
-        registrationUrl: 'https://club.example/register',
+        id: "division_1",
+        registrationUrl: "https://club.example/register",
       }),
       expect.objectContaining({
-        id: 'division_2',
+        id: "division_2",
         registrationUrl: null,
       }),
     ]);
-    expect(prismaMock.divisions.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        organizationId: 'org_1',
-        scope: 'ORGANIZATION',
-        status: 'ACTIVE',
+    expect(prismaMock.divisions.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: "org_1",
+          scope: "ORGANIZATION",
+          status: "ACTIVE",
+        }),
       }),
-    }));
+    );
   });
 
-  it('does not return page-disabled organizations for public pages', async () => {
+  it("does not return page-disabled organizations for public pages", async () => {
     prismaMock.organizations.findUnique.mockResolvedValue({
-      id: 'org_1',
-      name: 'SCSoccer',
-      publicSlug: 'scsoccer',
+      id: "org_1",
+      name: "SCSoccer",
+      publicSlug: "scsoccer",
       publicPageEnabled: false,
       publicWidgetsEnabled: true,
-      publicCompletionRedirectUrl: 'https://client.example.com/thanks',
+      publicCompletionRedirectUrl: "https://client.example.com/thanks",
     });
 
-    await expect(getPublicOrganizationBySlug('scsoccer', { surface: 'page' })).resolves.toBeNull();
-    await expect(getPublicOrganizationBySlug('scsoccer', { surface: 'widget' })).resolves.toEqual(expect.objectContaining({
-      slug: 'scsoccer',
-      publicWidgetsEnabled: true,
-      publicCompletionRedirectUrl: 'https://client.example.com/thanks',
-    }));
+    await expect(
+      getPublicOrganizationBySlug("scsoccer", { surface: "page" }),
+    ).resolves.toBeNull();
+    await expect(
+      getPublicOrganizationBySlug("scsoccer", { surface: "widget" }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        slug: "scsoccer",
+        publicWidgetsEnabled: true,
+        publicCompletionRedirectUrl: "https://client.example.com/thanks",
+      }),
+    );
   });
 
-  it('returns the regular organization profile path for a disabled public slug', async () => {
+  it("returns the regular organization profile path for a disabled public slug", async () => {
     prismaMock.organizations.findUnique.mockResolvedValue({
-      id: 'org_disabled',
+      id: "org_disabled",
       publicPageEnabled: false,
     });
 
-    await expect(getDisabledPublicOrganizationRedirectPath('scsoccer'))
-      .resolves.toBe('/organizations/org_disabled');
+    await expect(
+      getDisabledPublicOrganizationRedirectPath("scsoccer"),
+    ).resolves.toBe("/organizations/org_disabled");
   });
 
-  it('does not redirect enabled or unknown public slugs', async () => {
+  it("does not redirect enabled or unknown public slugs", async () => {
     prismaMock.organizations.findUnique.mockResolvedValueOnce({
-      id: 'org_enabled',
+      id: "org_enabled",
       publicPageEnabled: true,
     });
-    await expect(getDisabledPublicOrganizationRedirectPath('scsoccer')).resolves.toBeNull();
+    await expect(
+      getDisabledPublicOrganizationRedirectPath("scsoccer"),
+    ).resolves.toBeNull();
 
     prismaMock.organizations.findUnique.mockResolvedValueOnce(null);
-    await expect(getDisabledPublicOrganizationRedirectPath('missing')).resolves.toBeNull();
+    await expect(
+      getDisabledPublicOrganizationRedirectPath("missing"),
+    ).resolves.toBeNull();
   });
 
-  it('redirects legacy underscore URLs to the canonical hyphen URL', async () => {
+  it("redirects legacy underscore URLs to the canonical hyphen URL", async () => {
     prismaMock.organizations.findUnique.mockResolvedValue({
-      id: 'org_enabled',
-      publicSlug: 'river-city-sports',
+      id: "org_enabled",
+      publicSlug: "river-city-sports",
       publicPageEnabled: true,
     });
 
-    await expect(getPublicOrganizationRedirectPath('River_City_Sports'))
-      .resolves.toBe('/o/river-city-sports');
-    await expect(getPublicOrganizationRedirectPath('River_City_Sports', {
-      suffix: '/events/event_1?slotId=slot_1',
-    })).resolves.toBe('/o/river-city-sports/events/event_1?slotId=slot_1');
+    await expect(
+      getPublicOrganizationRedirectPath("River_City_Sports"),
+    ).resolves.toBe("/o/river-city-sports");
+    await expect(
+      getPublicOrganizationRedirectPath("River_City_Sports", {
+        suffix: "/events/event_1?slotId=slot_1",
+      }),
+    ).resolves.toBe("/o/river-city-sports/events/event_1?slotId=slot_1");
   });
 
-  it('redirects disabled canonical and legacy URLs to the regular profile', async () => {
+  it("redirects disabled canonical and legacy URLs to the regular profile", async () => {
     prismaMock.organizations.findUnique.mockResolvedValue({
-      id: 'org_disabled',
-      publicSlug: 'river-city-sports',
+      id: "org_disabled",
+      publicSlug: "river-city-sports",
       publicPageEnabled: false,
     });
 
-    await expect(getPublicOrganizationRedirectPath('river-city-sports'))
-      .resolves.toBe('/organizations/org_disabled');
-    await expect(getPublicOrganizationRedirectPath('river_city_sports'))
-      .resolves.toBe('/organizations/org_disabled');
+    await expect(
+      getPublicOrganizationRedirectPath("river-city-sports"),
+    ).resolves.toBe("/organizations/org_disabled");
+    await expect(
+      getPublicOrganizationRedirectPath("river_city_sports"),
+    ).resolves.toBe("/organizations/org_disabled");
   });
 
-  it('publishes organization ownership status without exposing the owner', async () => {
+  it("publishes organization ownership status without exposing the owner", async () => {
     prismaMock.organizations.findUnique.mockResolvedValue({
-      id: 'org_1',
-      name: 'SCSoccer',
-      ownerId: 'internal_admin_1',
-      publicSlug: 'scsoccer',
+      id: "org_1",
+      name: "SCSoccer",
+      ownerId: "internal_admin_1",
+      publicSlug: "scsoccer",
       publicPageEnabled: true,
       publicWidgetsEnabled: true,
-      originType: 'AFFILIATE_IMPORTED',
-      ownershipStatus: 'UNCLAIMED',
-      claimVerificationLevel: 'NONE',
+      originType: "AFFILIATE_IMPORTED",
+      ownershipStatus: "UNCLAIMED",
+      claimVerificationLevel: "NONE",
     });
 
-    const organization = await getPublicOrganizationBySlug('scsoccer', { surface: 'page' });
+    const organization = await getPublicOrganizationBySlug("scsoccer", {
+      surface: "page",
+    });
 
-    expect(organization).toEqual(expect.objectContaining({
-      originType: 'AFFILIATE_IMPORTED',
-      ownershipStatus: 'UNCLAIMED',
-      claimable: true,
-      claimUrl: '/organizations/org_1/claim',
-      ownershipAction: 'CLAIM',
-    }));
-    expect(organization).not.toHaveProperty('ownerId');
+    expect(organization).toEqual(
+      expect.objectContaining({
+        originType: "AFFILIATE_IMPORTED",
+        ownershipStatus: "UNCLAIMED",
+        claimable: true,
+        claimUrl: "/organizations/org_1/claim",
+        ownershipAction: "CLAIM",
+      }),
+    );
+    expect(organization).not.toHaveProperty("ownerId");
   });
 
-  it('lists only public event cards for an organization', async () => {
+  it("lists only public event cards for an organization", async () => {
     prismaMock.events.findMany.mockResolvedValue([
       {
-        id: 'event_1',
-        name: 'Spring League',
-        description: 'League play',
-        start: new Date('2026-05-01T17:00:00.000Z'),
+        id: "event_1",
+        name: "Spring League",
+        description: "League play",
+        start: new Date("2026-05-01T17:00:00.000Z"),
         end: null,
-        location: 'Main Field',
-        eventType: 'LEAGUE',
-        sportIds: ['soccer'],
-          price: 2500,
-          imageId: 'file_1',
-          divisions: ['open'],
+        location: "Main Field",
+        eventType: "LEAGUE",
+        sportIds: ["soccer"],
+        price: 2500,
+        imageId: "file_1",
+        divisions: ["open"],
       },
     ]);
-    prismaMock.sports.findMany.mockResolvedValue([{ id: 'soccer', name: 'Soccer' }]);
-    prismaMock.divisions.findMany.mockResolvedValue([{ eventId: 'event_1', id: 'open', key: 'open', name: 'Open' }]);
+    prismaMock.sports.findMany.mockResolvedValue([
+      { id: "soccer", name: "Soccer" },
+    ]);
+    prismaMock.divisions.findMany.mockResolvedValue([
+      { eventId: "event_1", id: "open", key: "open", name: "Open" },
+    ]);
 
     const events = await listPublicOrganizationEvents(publicOrganization);
 
-    expect(prismaMock.events.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        organizationId: 'org_1',
-        NOT: { state: 'TEMPLATE' },
+    expect(prismaMock.events.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: "org_1",
+          NOT: { state: "TEMPLATE" },
+        }),
       }),
-    }));
+    );
     expect(events).toEqual([
       expect.objectContaining({
-        id: 'event_1',
-        name: 'Spring League',
-        sportName: 'Soccer',
-        eventTypeLabel: 'League',
-        detailsUrl: '/o/scsoccer/events/event_1',
+        id: "event_1",
+        name: "Spring League",
+        sportName: "Soccer",
+        eventTypeLabel: "League",
+        detailsUrl: "/o/scsoccer/events/event_1",
       }),
     ]);
   });
 
-  it('applies locked event type and today rules to public event queries', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-05-01T12:00:00.000Z'));
+  it("applies locked event type and today rules to public event queries", async () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-05-01T12:00:00.000Z"));
     prismaMock.events.findMany.mockResolvedValue([]);
     prismaMock.sports.findMany.mockResolvedValue([]);
     prismaMock.divisions.findMany.mockResolvedValue([]);
 
     try {
-      await listPublicOrganizationEvents(
-        publicOrganization,
-        {
-          eventTypes: ['league', 'TOURNAMENT', 'bad-type'],
-          dateRule: 'today',
-          includeChildWeeklyEvents: false,
-          limit: 4,
-        },
-      );
+      await listPublicOrganizationEvents(publicOrganization, {
+        eventTypes: ["league", "TOURNAMENT", "bad-type"],
+        dateRule: "today",
+        includeChildWeeklyEvents: false,
+        limit: 4,
+      });
     } finally {
       jest.useRealTimers();
     }
 
     const query = prismaMock.events.findMany.mock.calls[0]?.[0];
-    expect(query).toEqual(expect.objectContaining({
-      take: expect.any(Number),
-      where: expect.objectContaining({
-        eventType: { in: ['LEAGUE', 'TOURNAMENT'] },
-        AND: expect.arrayContaining([
-          expect.objectContaining({
-            OR: expect.any(Array),
-          }),
-          { eventType: { not: 'WEEKLY_EVENT' } },
-        ]),
+    expect(query).toEqual(
+      expect.objectContaining({
+        take: expect.any(Number),
+        where: expect.objectContaining({
+          eventType: { in: ["LEAGUE", "TOURNAMENT"] },
+          AND: expect.arrayContaining([
+            expect.objectContaining({
+              OR: expect.any(Array),
+            }),
+            { eventType: { not: "WEEKLY_EVENT" } },
+          ]),
+        }),
       }),
-    }));
+    );
     expect(query.take).toBeGreaterThanOrEqual(4);
   });
 
-  it('applies custom date ranges ahead of date presets', async () => {
+  it("applies custom date ranges ahead of date presets", async () => {
     prismaMock.events.findMany.mockResolvedValue([]);
     prismaMock.sports.findMany.mockResolvedValue([]);
     prismaMock.divisions.findMany.mockResolvedValue([]);
@@ -357,9 +387,9 @@ describe('publicOrganizationCatalog', () => {
         ...publicOrganization,
       },
       {
-        dateRule: 'today',
-        dateFrom: '2026-06-01',
-        dateTo: '2026-06-03',
+        dateRule: "today",
+        dateFrom: "2026-06-01",
+        dateTo: "2026-06-03",
       },
     );
 
@@ -369,39 +399,39 @@ describe('publicOrganizationCatalog', () => {
     expect(dateClause.start.lt).toEqual(new Date(2026, 5, 4, 0, 0, 0, 0));
   });
 
-  it('returns paginated event cards with next and previous state', async () => {
+  it("returns paginated event cards with next and previous state", async () => {
     prismaMock.events.findMany.mockResolvedValue([
       {
-        id: 'event_1',
-        name: 'First Event',
-        start: new Date('2026-05-01T17:00:00.000Z'),
+        id: "event_1",
+        name: "First Event",
+        start: new Date("2026-05-01T17:00:00.000Z"),
         end: null,
-        location: 'Main Field',
-        eventType: 'EVENT',
+        location: "Main Field",
+        eventType: "EVENT",
         sportIds: [],
         price: 0,
         imageId: null,
         divisions: [],
       },
       {
-        id: 'event_2',
-        name: 'Second Event',
-        start: new Date('2026-05-02T17:00:00.000Z'),
+        id: "event_2",
+        name: "Second Event",
+        start: new Date("2026-05-02T17:00:00.000Z"),
         end: null,
-        location: 'Main Field',
-        eventType: 'EVENT',
+        location: "Main Field",
+        eventType: "EVENT",
         sportIds: [],
         price: 0,
         imageId: null,
         divisions: [],
       },
       {
-        id: 'event_3',
-        name: 'Third Event',
-        start: new Date('2026-05-03T17:00:00.000Z'),
+        id: "event_3",
+        name: "Third Event",
+        start: new Date("2026-05-03T17:00:00.000Z"),
         end: null,
-        location: 'Main Field',
-        eventType: 'EVENT',
+        location: "Main Field",
+        eventType: "EVENT",
         sportIds: [],
         price: 0,
         imageId: null,
@@ -416,14 +446,16 @@ describe('publicOrganizationCatalog', () => {
       page: 2,
     });
 
-    expect(prismaMock.events.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      take: expect.any(Number),
-    }));
+    expect(prismaMock.events.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: expect.any(Number),
+      }),
+    );
     expect(prismaMock.events.findMany.mock.calls[0]?.[0].skip).toBeUndefined();
-    expect(prismaMock.events.findMany.mock.calls[0]?.[0].take).toBeGreaterThanOrEqual(2);
-    expect(page.events).toEqual([
-      expect.objectContaining({ id: 'event_2' }),
-    ]);
+    expect(
+      prismaMock.events.findMany.mock.calls[0]?.[0].take,
+    ).toBeGreaterThanOrEqual(2);
+    expect(page.events).toEqual([expect.objectContaining({ id: "event_2" })]);
     expect(page.pageInfo).toEqual({
       limit: 1,
       page: 2,
@@ -433,27 +465,27 @@ describe('publicOrganizationCatalog', () => {
     });
   });
 
-  it('keeps explicitly selected public events in the requested order and skips date filtering', async () => {
+  it("keeps explicitly selected public events in the requested order and skips date filtering", async () => {
     prismaMock.events.findMany.mockResolvedValue([
       {
-        id: 'event_old',
-        name: 'Old League',
-        start: new Date('2026-04-01T17:00:00.000Z'),
+        id: "event_old",
+        name: "Old League",
+        start: new Date("2026-04-01T17:00:00.000Z"),
         end: null,
-        location: 'Main Field',
-        eventType: 'LEAGUE',
+        location: "Main Field",
+        eventType: "LEAGUE",
         sportIds: [],
         price: 0,
         imageId: null,
         divisions: [],
       },
       {
-        id: 'event_new',
-        name: 'New League',
-        start: new Date('2026-06-01T17:00:00.000Z'),
+        id: "event_new",
+        name: "New League",
+        start: new Date("2026-06-01T17:00:00.000Z"),
         end: null,
-        location: 'Main Field',
-        eventType: 'LEAGUE',
+        location: "Main Field",
+        eventType: "LEAGUE",
         sportIds: [],
         price: 0,
         imageId: null,
@@ -466,37 +498,44 @@ describe('publicOrganizationCatalog', () => {
     const page = await listPublicOrganizationEventPage(publicOrganization, {
       limit: 2,
       page: 1,
-      dateRule: 'upcoming',
-      eventIds: ['event_new', 'event_old'],
+      dateRule: "upcoming",
+      eventIds: ["event_new", "event_old"],
     });
 
-    expect(prismaMock.events.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        organizationId: 'org_1',
-        id: { in: ['event_new', 'event_old'] },
+    expect(prismaMock.events.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: "org_1",
+          id: { in: ["event_new", "event_old"] },
+        }),
       }),
-    }));
-    expect(prismaMock.events.findMany.mock.calls[0]?.[0].where.AND).toBeUndefined();
-    expect(page.events.map((event) => event.id)).toEqual(['event_new', 'event_old']);
+    );
+    expect(
+      prismaMock.events.findMany.mock.calls[0]?.[0].where.AND,
+    ).toBeUndefined();
+    expect(page.events.map((event) => event.id)).toEqual([
+      "event_new",
+      "event_old",
+    ]);
   });
 
-  it('loads a public standings widget page for the selected league event and division', async () => {
+  it("loads a public standings widget page for the selected league event and division", async () => {
     prismaMock.organizations.findUnique.mockResolvedValue({
-      id: 'org_1',
-      name: 'SCSoccer',
-      publicSlug: 'scsoccer',
+      id: "org_1",
+      name: "SCSoccer",
+      publicSlug: "scsoccer",
       publicPageEnabled: true,
       publicWidgetsEnabled: true,
       publicCompletionRedirectUrl: null,
     });
     prismaMock.events.findMany.mockResolvedValue([
       {
-        id: 'league_1',
-        name: 'Spring League',
-        start: new Date('2026-05-01T17:00:00.000Z'),
+        id: "league_1",
+        name: "Spring League",
+        start: new Date("2026-05-01T17:00:00.000Z"),
         end: null,
-        location: 'Main Field',
-        eventType: 'LEAGUE',
+        location: "Main Field",
+        eventType: "LEAGUE",
         sportIds: [],
         price: 0,
         imageId: null,
@@ -504,34 +543,42 @@ describe('publicOrganizationCatalog', () => {
       },
     ]);
     prismaMock.events.findUnique.mockResolvedValue({
-      id: 'league_1',
-      organizationId: 'org_1',
-      state: 'PUBLISHED',
-      eventType: 'LEAGUE',
+      id: "league_1",
+      organizationId: "org_1",
+      state: "PUBLISHED",
+      eventType: "LEAGUE",
     });
     prismaMock.sports.findMany.mockResolvedValue([]);
     prismaMock.divisions.findMany.mockResolvedValue([]);
-    loadEventWithRelationsMock.mockResolvedValue({ id: 'league_1' });
+    loadEventWithRelationsMock.mockResolvedValue({ id: "league_1" });
     toLeagueEventMock.mockReturnValue({
-      divisions: [{ id: 'open', name: 'Open Division' }],
+      divisions: [{ id: "open", name: "Open Division" }],
       matches: {},
     });
     buildDivisionStandingsResponseMock.mockReturnValue({
-      divisionName: 'Open Division',
+      divisionName: "Open Division",
       standings: [
-        { position: 1, teamName: 'Aces', wins: 3, losses: 1, draws: 0, finalPoints: 9, pointsDelta: 0 },
+        {
+          position: 1,
+          teamName: "Aces",
+          wins: 3,
+          losses: 1,
+          draws: 0,
+          finalPoints: 9,
+          pointsDelta: 0,
+        },
       ],
     });
 
-    const page = await getPublicStandingsWidgetPage('scsoccer', {
+    const page = await getPublicStandingsWidgetPage("scsoccer", {
       page: 1,
-      dateRule: 'upcoming',
-      eventIds: ['league_1'],
-      divisionId: 'open',
+      dateRule: "upcoming",
+      eventIds: ["league_1"],
+      divisionId: "open",
     });
 
     expect(prismaMock.events.findUnique).toHaveBeenCalledWith({
-      where: { id: 'league_1' },
+      where: { id: "league_1" },
       select: {
         id: true,
         organizationId: true,
@@ -540,37 +587,42 @@ describe('publicOrganizationCatalog', () => {
         archivedAt: true,
       },
     });
-    expect(loadEventWithRelationsMock).toHaveBeenCalledWith('league_1');
+    expect(loadEventWithRelationsMock).toHaveBeenCalledWith("league_1");
     expect(toLeagueEventMock).toHaveBeenCalled();
-    expect(buildDivisionStandingsResponseMock).toHaveBeenCalledWith(expect.any(Object), 'open');
-    expect(page).toEqual(expect.objectContaining({
-      currentEvent: expect.objectContaining({ id: 'league_1' }),
-      selectedDivisionId: 'open',
-      selectedDivisionName: 'Open Division',
-      divisionOptions: [{ value: 'open', label: 'Open Division' }],
-      division: expect.objectContaining({
-        divisionName: 'Open Division',
+    expect(buildDivisionStandingsResponseMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      "open",
+    );
+    expect(page).toEqual(
+      expect.objectContaining({
+        currentEvent: expect.objectContaining({ id: "league_1" }),
+        selectedDivisionId: "open",
+        selectedDivisionName: "Open Division",
+        divisionOptions: [{ value: "open", label: "Open Division" }],
+        division: expect.objectContaining({
+          divisionName: "Open Division",
+        }),
       }),
-    }));
+    );
   });
 
-  it('loads a public bracket widget page for a public tournament event', async () => {
+  it("loads a public bracket widget page for a public tournament event", async () => {
     prismaMock.organizations.findUnique.mockResolvedValue({
-      id: 'org_1',
-      name: 'SCSoccer',
-      publicSlug: 'scsoccer',
+      id: "org_1",
+      name: "SCSoccer",
+      publicSlug: "scsoccer",
       publicPageEnabled: true,
       publicWidgetsEnabled: true,
       publicCompletionRedirectUrl: null,
     });
     prismaMock.events.findMany.mockResolvedValue([
       {
-        id: 'tournament_1',
-        name: 'Spring Finals',
-        start: new Date('2026-05-10T17:00:00.000Z'),
+        id: "tournament_1",
+        name: "Spring Finals",
+        start: new Date("2026-05-10T17:00:00.000Z"),
         end: null,
-        location: 'Main Field',
-        eventType: 'TOURNAMENT',
+        location: "Main Field",
+        eventType: "TOURNAMENT",
         sportIds: [],
         price: 0,
         imageId: null,
@@ -578,23 +630,23 @@ describe('publicOrganizationCatalog', () => {
       },
     ]);
     prismaMock.events.findUnique.mockResolvedValue({
-      id: 'tournament_1',
-      organizationId: 'org_1',
-      state: 'PUBLISHED',
-      eventType: 'TOURNAMENT',
+      id: "tournament_1",
+      organizationId: "org_1",
+      state: "PUBLISHED",
+      eventType: "TOURNAMENT",
     });
     prismaMock.sports.findMany.mockResolvedValue([]);
     prismaMock.divisions.findMany
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
     prismaMock.matches.findMany.mockResolvedValue([]);
-    loadEventWithRelationsMock.mockResolvedValue({ id: 'tournament_1' });
+    loadEventWithRelationsMock.mockResolvedValue({ id: "tournament_1" });
     buildPublicBracketWidgetViewMock.mockReturnValue({
-      divisionOptions: [{ value: 'open', label: 'Open Division' }],
-      selectedDivisionId: 'open',
-      selectedDivisionName: 'Open Division',
+      divisionOptions: [{ value: "open", label: "Open Division" }],
+      selectedDivisionId: "open",
+      selectedDivisionName: "Open Division",
       winnersLane: {
-        matchIds: ['match_1'],
+        matchIds: ["match_1"],
         cardsById: {},
         metrics: {
           cardWidth: 288,
@@ -617,75 +669,82 @@ describe('publicOrganizationCatalog', () => {
       hasLosersBracket: false,
     });
 
-    const page = await getPublicBracketWidgetPage('scsoccer', {
+    const page = await getPublicBracketWidgetPage("scsoccer", {
       page: 1,
-      dateRule: 'upcoming',
-      eventIds: ['tournament_1'],
-      divisionId: 'open',
+      dateRule: "upcoming",
+      eventIds: ["tournament_1"],
+      divisionId: "open",
     });
 
     expect(prismaMock.matches.findMany).toHaveBeenCalled();
-    expect(loadEventWithRelationsMock).toHaveBeenCalledWith('tournament_1');
-    expect(buildPublicBracketWidgetViewMock).toHaveBeenCalledWith({ id: 'tournament_1' }, 'open');
-    expect(page).toEqual(expect.objectContaining({
-      currentEvent: expect.objectContaining({ id: 'tournament_1' }),
-      selectedDivisionId: 'open',
-      selectedDivisionName: 'Open Division',
-      winnersLane: expect.objectContaining({
-        matchIds: ['match_1'],
+    expect(loadEventWithRelationsMock).toHaveBeenCalledWith("tournament_1");
+    expect(buildPublicBracketWidgetViewMock).toHaveBeenCalledWith(
+      { id: "tournament_1" },
+      "open",
+    );
+    expect(page).toEqual(
+      expect.objectContaining({
+        currentEvent: expect.objectContaining({ id: "tournament_1" }),
+        selectedDivisionId: "open",
+        selectedDivisionName: "Open Division",
+        winnersLane: expect.objectContaining({
+          matchIds: ["match_1"],
+        }),
+        hasLosersBracket: false,
       }),
-      hasLosersBracket: false,
-    }));
+    );
   });
 
-  it('lists organization teams by canonical organizationId and sorts open registration first', async () => {
+  it("lists organization teams by canonical organizationId and sorts open registration first", async () => {
     prismaMock.canonicalTeams.findMany.mockResolvedValue([
       {
-        id: 'team_open',
-        name: 'Fusion Volleyball Club',
-        division: 'Open',
-        divisionTypeName: 'Open',
-        sport: 'Indoor Volleyball',
+        id: "team_open",
+        name: "Fusion Volleyball Club",
+        division: "Open",
+        divisionTypeName: "Open",
+        sport: "Indoor Volleyball",
         profileImageId: null,
         teamSize: 6,
         openRegistration: true,
         registrationPriceCents: 2500,
-        organizationId: 'org_1',
+        organizationId: "org_1",
       },
       {
-        id: 'team_closed',
-        name: 'Titan Volleyball Club',
+        id: "team_closed",
+        name: "Titan Volleyball Club",
         division: null,
         divisionTypeName: null,
-        sport: 'Indoor Volleyball',
+        sport: "Indoor Volleyball",
         profileImageId: null,
         teamSize: 8,
         openRegistration: false,
         registrationPriceCents: 0,
-        organizationId: 'org_1',
+        organizationId: "org_1",
       },
     ]);
     prismaMock.teamRegistrations.findMany.mockResolvedValue([
-      { teamId: 'team_open' },
-      { teamId: 'team_open' },
-      { teamId: 'team_closed' },
+      { teamId: "team_open" },
+      { teamId: "team_open" },
+      { teamId: "team_closed" },
     ]);
 
-    const teams = await listPublicOrganizationTeams(publicOrganization, { limit: 6 });
+    const teams = await listPublicOrganizationTeams(publicOrganization, {
+      limit: 6,
+    });
 
     expect(prismaMock.canonicalTeams.findMany).toHaveBeenCalledWith({
-      where: { organizationId: 'org_1', visibility: 'PUBLIC' },
-      orderBy: [{ openRegistration: 'desc' }, { name: 'asc' }],
+      where: { organizationId: "org_1", visibility: "PUBLIC" },
+      orderBy: [{ openRegistration: "desc" }, { name: "asc" }],
       take: 6,
     });
     expect(prismaMock.teamRegistrations.findMany).toHaveBeenCalledWith({
       where: {
-        teamId: { in: ['team_open', 'team_closed'] },
+        teamId: { in: ["team_open", "team_closed"] },
         OR: [
-          { status: 'ACTIVE' },
-          { status: 'PENDING' },
+          { status: "ACTIVE" },
+          { status: "PENDING" },
           {
-            status: 'STARTED',
+            status: "STARTED",
             createdAt: { gte: expect.any(Date) },
           },
         ],
@@ -696,21 +755,21 @@ describe('publicOrganizationCatalog', () => {
     });
     expect(teams).toEqual([
       expect.objectContaining({
-        id: 'team_open',
-        name: 'Fusion Volleyball Club',
-        sport: 'Indoor Volleyball',
-        division: 'Open',
+        id: "team_open",
+        name: "Fusion Volleyball Club",
+        sport: "Indoor Volleyball",
+        division: "Open",
         currentSize: 2,
         teamSize: 6,
         isFull: false,
         openRegistration: true,
         registrationPriceCents: 2500,
-        registrationUrl: '/o/scsoccer/teams/team_open',
+        registrationUrl: "/o/scsoccer/teams/team_open",
       }),
       expect.objectContaining({
-        id: 'team_closed',
-        name: 'Titan Volleyball Club',
-        sport: 'Indoor Volleyball',
+        id: "team_closed",
+        name: "Titan Volleyball Club",
+        sport: "Indoor Volleyball",
         division: null,
         currentSize: 1,
         teamSize: 8,
@@ -722,23 +781,23 @@ describe('publicOrganizationCatalog', () => {
     ]);
   });
 
-  it('can limit public teams to only open-registration teams', async () => {
+  it("can limit public teams to only open-registration teams", async () => {
     prismaMock.canonicalTeams.findMany.mockResolvedValue([
       {
-        id: 'team_open',
-        name: 'Fusion Volleyball Club',
-        division: 'CoEd Open',
-        divisionTypeName: 'Open',
-        sport: 'Indoor Volleyball',
+        id: "team_open",
+        name: "Fusion Volleyball Club",
+        division: "CoEd Open",
+        divisionTypeName: "Open",
+        sport: "Indoor Volleyball",
         profileImageId: null,
         teamSize: 6,
         openRegistration: true,
         registrationPriceCents: 2500,
-        organizationId: 'org_1',
+        organizationId: "org_1",
       },
     ]);
     prismaMock.teamRegistrations.findMany.mockResolvedValue([
-      { teamId: 'team_open' },
+      { teamId: "team_open" },
     ]);
 
     const teams = await listPublicOrganizationTeams(publicOrganization, {
@@ -747,47 +806,53 @@ describe('publicOrganizationCatalog', () => {
     });
 
     expect(prismaMock.canonicalTeams.findMany).toHaveBeenCalledWith({
-      where: { organizationId: 'org_1', visibility: 'PUBLIC', openRegistration: true },
-      orderBy: [{ openRegistration: 'desc' }, { name: 'asc' }],
+      where: {
+        organizationId: "org_1",
+        visibility: "PUBLIC",
+        openRegistration: true,
+      },
+      orderBy: [{ openRegistration: "desc" }, { name: "asc" }],
       take: 6,
     });
     expect(teams).toEqual([
       expect.objectContaining({
-        id: 'team_open',
+        id: "team_open",
         currentSize: 1,
         teamSize: 6,
         isFull: false,
         openRegistration: true,
-        registrationUrl: '/o/scsoccer/teams/team_open',
+        registrationUrl: "/o/scsoccer/teams/team_open",
       }),
     ]);
   });
 
-  it('removes the public registration link for full open-registration teams', async () => {
+  it("removes the public registration link for full open-registration teams", async () => {
     prismaMock.canonicalTeams.findMany.mockResolvedValue([
       {
-        id: 'team_full',
-        name: 'Packed House',
-        division: 'CoEd Open',
-        divisionTypeName: 'Open',
-        sport: 'Indoor Volleyball',
+        id: "team_full",
+        name: "Packed House",
+        division: "CoEd Open",
+        divisionTypeName: "Open",
+        sport: "Indoor Volleyball",
         profileImageId: null,
         teamSize: 2,
         openRegistration: true,
         registrationPriceCents: 2500,
-        organizationId: 'org_1',
+        organizationId: "org_1",
       },
     ]);
     prismaMock.teamRegistrations.findMany.mockResolvedValue([
-      { teamId: 'team_full' },
-      { teamId: 'team_full' },
+      { teamId: "team_full" },
+      { teamId: "team_full" },
     ]);
 
-    const teams = await listPublicOrganizationTeams(publicOrganization, { limit: 6 });
+    const teams = await listPublicOrganizationTeams(publicOrganization, {
+      limit: 6,
+    });
 
     expect(teams).toEqual([
       expect.objectContaining({
-        id: 'team_full',
+        id: "team_full",
         currentSize: 2,
         teamSize: 2,
         isFull: true,
@@ -796,99 +861,109 @@ describe('publicOrganizationCatalog', () => {
     ]);
   });
 
-  it('uses protected BracketIQ URLs for affiliate team registration cards', async () => {
+  it("uses protected BracketIQ URLs for affiliate team registration cards", async () => {
     prismaMock.canonicalTeams.findMany.mockResolvedValue([
       {
-        id: 'team_affiliate',
-        name: 'Partner Academy',
-        division: 'CoEd Open',
-        divisionTypeName: 'Open',
-        sport: 'Indoor Soccer',
+        id: "team_affiliate",
+        name: "Partner Academy",
+        division: "CoEd Open",
+        divisionTypeName: "Open",
+        sport: "Indoor Soccer",
         profileImageId: null,
         teamSize: 20,
         openRegistration: true,
-        joinPolicy: 'OPEN_REGISTRATION',
+        joinPolicy: "OPEN_REGISTRATION",
         registrationPriceCents: 0,
-        affiliateUrl: 'https://partner.example.com/teams/register',
-        organizationId: 'org_1',
+        affiliateUrl: "https://partner.example.com/teams/register",
+        organizationId: "org_1",
       },
     ]);
     prismaMock.teamRegistrations.findMany.mockResolvedValue([]);
 
-    const teams = await listPublicOrganizationTeams(publicOrganization, { limit: 6 });
+    const teams = await listPublicOrganizationTeams(publicOrganization, {
+      limit: 6,
+    });
 
     expect(teams).toEqual([
       expect.objectContaining({
-        id: 'team_affiliate',
-        affiliateUrl: expect.stringMatching(/^https:\/\/bracket-iq\.com\/out\/team\/team_affiliate\//),
-        registrationUrl: expect.stringMatching(/^https:\/\/bracket-iq\.com\/out\/team\/team_affiliate\//),
+        id: "team_affiliate",
+        affiliateUrl: expect.stringMatching(
+          /^https:\/\/bracket-iq\.com\/out\/team\/team_affiliate\//,
+        ),
+        registrationUrl: expect.stringMatching(
+          /^https:\/\/bracket-iq\.com\/out\/team\/team_affiliate\//,
+        ),
       }),
     ]);
-    expect(JSON.stringify(teams)).not.toContain('partner.example.com');
+    expect(JSON.stringify(teams)).not.toContain("partner.example.com");
   });
 
-  it('does not publish an unsafe historic affiliate URL as a public registration link', async () => {
+  it("does not publish an unsafe historic affiliate URL as a public registration link", async () => {
     prismaMock.canonicalTeams.findMany.mockResolvedValue([
       {
-        id: 'team_unsafe_affiliate',
-        name: 'Unsafe Partner Academy',
-        division: 'CoEd Open',
-        divisionTypeName: 'Open',
-        sport: 'Indoor Soccer',
+        id: "team_unsafe_affiliate",
+        name: "Unsafe Partner Academy",
+        division: "CoEd Open",
+        divisionTypeName: "Open",
+        sport: "Indoor Soccer",
         profileImageId: null,
         teamSize: 20,
         openRegistration: true,
-        joinPolicy: 'OPEN_REGISTRATION',
+        joinPolicy: "OPEN_REGISTRATION",
         registrationPriceCents: 0,
-        affiliateUrl: 'javascript:alert(1)',
-        organizationId: 'org_1',
+        affiliateUrl: "javascript:alert(1)",
+        organizationId: "org_1",
       },
     ]);
     prismaMock.teamRegistrations.findMany.mockResolvedValue([]);
 
-    const teams = await listPublicOrganizationTeams(publicOrganization, { limit: 6 });
+    const teams = await listPublicOrganizationTeams(publicOrganization, {
+      limit: 6,
+    });
 
     expect(teams).toEqual([
       expect.objectContaining({
-        id: 'team_unsafe_affiliate',
+        id: "team_unsafe_affiliate",
         affiliateUrl: null,
-        registrationUrl: '/o/scsoccer/teams/team_unsafe_affiliate',
+        registrationUrl: "/o/scsoccer/teams/team_unsafe_affiliate",
       }),
     ]);
   });
 
-  it('ignores stale started team registrations in public fullness counts', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-04-21T22:00:00.000Z'));
+  it("ignores stale started team registrations in public fullness counts", async () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-04-21T22:00:00.000Z"));
     prismaMock.canonicalTeams.findMany.mockResolvedValue([
       {
-        id: 'team_open',
-        name: 'Fusion Volleyball Club',
-        division: 'CoEd Open',
-        divisionTypeName: 'Open',
-        sport: 'Indoor Volleyball',
+        id: "team_open",
+        name: "Fusion Volleyball Club",
+        division: "CoEd Open",
+        divisionTypeName: "Open",
+        sport: "Indoor Volleyball",
         profileImageId: null,
         teamSize: 6,
         openRegistration: true,
         registrationPriceCents: 2500,
-        organizationId: 'org_1',
+        organizationId: "org_1",
       },
     ]);
     prismaMock.teamRegistrations.findMany.mockResolvedValue([
-      { teamId: 'team_open' },
+      { teamId: "team_open" },
     ]);
 
     try {
-      const teams = await listPublicOrganizationTeams(publicOrganization, { limit: 6 });
+      const teams = await listPublicOrganizationTeams(publicOrganization, {
+        limit: 6,
+      });
 
       expect(prismaMock.teamRegistrations.findMany).toHaveBeenCalledWith({
         where: {
-          teamId: { in: ['team_open'] },
+          teamId: { in: ["team_open"] },
           OR: [
-            { status: 'ACTIVE' },
-            { status: 'PENDING' },
+            { status: "ACTIVE" },
+            { status: "PENDING" },
             {
-              status: 'STARTED',
-              createdAt: { gte: new Date('2026-04-21T21:50:00.000Z') },
+              status: "STARTED",
+              createdAt: { gte: new Date("2026-04-21T21:50:00.000Z") },
             },
           ],
         },
@@ -898,11 +973,11 @@ describe('publicOrganizationCatalog', () => {
       });
       expect(teams).toEqual([
         expect.objectContaining({
-          id: 'team_open',
+          id: "team_open",
           currentSize: 1,
           teamSize: 6,
           isFull: false,
-          registrationUrl: '/o/scsoccer/teams/team_open',
+          registrationUrl: "/o/scsoccer/teams/team_open",
         }),
       ]);
     } finally {
@@ -910,31 +985,31 @@ describe('publicOrganizationCatalog', () => {
     }
   });
 
-  it('expands public weekly parent events into upcoming occurrence cards for filtered widgets', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-05-04T12:00:00.000Z'));
+  it("expands public weekly parent events into upcoming occurrence cards for filtered widgets", async () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-05-04T12:00:00.000Z"));
     prismaMock.events.findMany.mockResolvedValue([
       {
-        id: 'weekly_parent',
-        name: 'Weekly Pickup',
-        start: new Date('2026-04-01T17:00:00.000Z'),
-        end: new Date('2026-06-01T17:00:00.000Z'),
-        location: 'Main Court',
-        eventType: 'WEEKLY_EVENT',
+        id: "weekly_parent",
+        name: "Weekly Pickup",
+        start: new Date("2026-04-01T17:00:00.000Z"),
+        end: new Date("2026-06-01T17:00:00.000Z"),
+        location: "Main Court",
+        eventType: "WEEKLY_EVENT",
         parentEvent: null,
         sportIds: [],
         price: 1000,
         imageId: null,
-        divisions: ['open'],
-        timeSlotIds: ['slot_weekly'],
+        divisions: ["open"],
+        timeSlotIds: ["slot_weekly"],
       },
     ]);
     prismaMock.timeSlots.findMany.mockResolvedValue([
       {
-        id: 'slot_weekly',
+        id: "slot_weekly",
         dayOfWeek: 2,
         daysOfWeek: [2],
-        startDate: new Date('2026-04-01T00:00:00.000Z'),
-        endDate: new Date('2026-06-01T00:00:00.000Z'),
+        startDate: new Date("2026-04-01T00:00:00.000Z"),
+        endDate: new Date("2026-06-01T00:00:00.000Z"),
         startTimeMinutes: 17 * 60,
         endTimeMinutes: 18 * 60,
         repeating: true,
@@ -945,46 +1020,97 @@ describe('publicOrganizationCatalog', () => {
 
     try {
       const page = await listPublicOrganizationEventPage(publicOrganization, {
-        dateRule: 'week',
-        eventTypes: ['WEEKLY_EVENT'],
+        dateRule: "week",
+        eventTypes: ["WEEKLY_EVENT"],
         limit: 4,
         page: 1,
       });
 
       expect(page.events).toEqual([
         expect.objectContaining({
-          id: 'weekly_parent:slot_weekly:2026-05-06',
-          start: '2026-05-06T17:00:00.000Z',
-          detailsUrl: '/o/scsoccer/events/weekly_parent?slotId=slot_weekly&occurrenceDate=2026-05-06',
+          id: "weekly_parent:slot_weekly:2026-05-06",
+          start: "2026-05-06T17:00:00.000Z",
+          detailsUrl:
+            "/o/scsoccer/events/weekly_parent?slotId=slot_weekly&occurrenceDate=2026-05-06",
         }),
       ]);
     } finally {
       jest.useRealTimers();
     }
   });
-
-  it('links public rental cards to the rental selection page', async () => {
-    prismaMock.fields.findMany.mockResolvedValue([
+  it("expands weekly occurrences by the slot named date across a UTC boundary", async () => {
+    prismaMock.events.findMany.mockResolvedValue([
       {
-        id: 'field_1',
-        name: 'Main Field',
-        location: '',
-        facilityId: 'facility_1',
-        rentalSlotIds: ['slot_1'],
-      },
-    ]);
-    prismaMock.facilities.findMany.mockResolvedValue([
-      {
-        id: 'facility_1',
-        name: 'Main Park',
-        location: 'Main Park',
+        id: "weekly_named_zone_parent",
+        name: "Named Zone Pickup",
+        start: new Date("2026-05-01T00:00:00.000Z"),
+        end: new Date("2026-05-10T00:00:00.000Z"),
+        location: "Main Court",
+        eventType: "WEEKLY_EVENT",
+        parentEvent: null,
+        sportIds: [],
+        price: 1000,
+        imageId: null,
+        divisions: ["open"],
+        timeSlotIds: ["slot_named_zone"],
       },
     ]);
     prismaMock.timeSlots.findMany.mockResolvedValue([
       {
-        id: 'slot_1',
-        startDate: new Date('2026-05-01T17:00:00.000Z'),
-        endDate: new Date('2026-05-01T19:00:00.000Z'),
+        id: "slot_named_zone",
+        dayOfWeek: 6,
+        daysOfWeek: [6],
+        startDate: new Date("2026-05-03T07:00:00.000Z"),
+        endDate: new Date("2026-05-03T07:00:00.000Z"),
+        startTimeMinutes: 9 * 60,
+        endTimeMinutes: 10 * 60,
+        timeZone: "America/Los_Angeles",
+        repeating: true,
+      },
+    ]);
+    prismaMock.sports.findMany.mockResolvedValue([]);
+    prismaMock.divisions.findMany.mockResolvedValue([]);
+
+    const page = await listPublicOrganizationEventPage(publicOrganization, {
+      dateFrom: "2026-05-03",
+      dateTo: "2026-05-03",
+      eventTypes: ["WEEKLY_EVENT"],
+      limit: 4,
+      page: 1,
+    });
+
+    expect(page.events).toEqual([
+      expect.objectContaining({
+        id: "weekly_named_zone_parent:slot_named_zone:2026-05-03",
+        start: "2026-05-03T16:00:00.000Z",
+        detailsUrl:
+          "/o/scsoccer/events/weekly_named_zone_parent?slotId=slot_named_zone&occurrenceDate=2026-05-03",
+      }),
+    ]);
+  });
+
+  it("links public rental cards to the rental selection page", async () => {
+    prismaMock.fields.findMany.mockResolvedValue([
+      {
+        id: "field_1",
+        name: "Main Field",
+        location: "",
+        facilityId: "facility_1",
+        rentalSlotIds: ["slot_1"],
+      },
+    ]);
+    prismaMock.facilities.findMany.mockResolvedValue([
+      {
+        id: "facility_1",
+        name: "Main Park",
+        location: "Main Park",
+      },
+    ]);
+    prismaMock.timeSlots.findMany.mockResolvedValue([
+      {
+        id: "slot_1",
+        startDate: new Date("2026-05-01T17:00:00.000Z"),
+        endDate: new Date("2026-05-01T19:00:00.000Z"),
         price: 5000,
       },
     ]);
@@ -993,63 +1119,70 @@ describe('publicOrganizationCatalog', () => {
 
     expect(rentals).toEqual([
       expect.objectContaining({
-        id: 'slot_1',
-        fieldId: 'field_1',
-        fieldName: 'Main Field',
-        facilityId: 'facility_1',
-        facilityName: 'Main Park',
-        facilityLocation: 'Main Park',
-        location: 'Main Park',
-        detailsUrl: '/o/scsoccer/rentals',
+        id: "slot_1",
+        fieldId: "field_1",
+        fieldName: "Main Field",
+        facilityId: "facility_1",
+        facilityName: "Main Park",
+        facilityLocation: "Main Park",
+        location: "Main Park",
+        detailsUrl: "/o/scsoccer/rentals",
       }),
     ]);
   });
 
-  it('protects affiliate facility destinations in public rental selection data', async () => {
+  it("protects affiliate facility destinations in public rental selection data", async () => {
     prismaMock.organizations.findUnique.mockResolvedValue({
-      id: 'org_1',
-      name: 'SCSoccer',
-      publicSlug: 'scsoccer',
+      id: "org_1",
+      name: "SCSoccer",
+      publicSlug: "scsoccer",
       publicPageEnabled: true,
       publicWidgetsEnabled: true,
     });
-    prismaMock.fields.findMany.mockResolvedValue([{
-      id: 'field_1',
-      name: 'Main Field',
-      organizationId: 'org_1',
-      facilityId: 'facility_1',
-      rentalSlotIds: ['slot_1'],
-    }]);
-    prismaMock.facilities.findMany.mockResolvedValue([{
-      id: 'facility_1',
-      name: 'Partner Park',
-      location: 'Partner Park',
-      affiliateUrl: 'https://partner.example.com/rent',
-    }]);
-    prismaMock.timeSlots.findMany.mockResolvedValue([{
-      id: 'slot_1',
-      startDate: new Date('2026-05-01T17:00:00.000Z'),
-      endDate: new Date('2026-05-01T19:00:00.000Z'),
-      price: 5000,
-    }]);
+    prismaMock.fields.findMany.mockResolvedValue([
+      {
+        id: "field_1",
+        name: "Main Field",
+        organizationId: "org_1",
+        facilityId: "facility_1",
+        rentalSlotIds: ["slot_1"],
+      },
+    ]);
+    prismaMock.facilities.findMany.mockResolvedValue([
+      {
+        id: "facility_1",
+        name: "Partner Park",
+        location: "Partner Park",
+        affiliateUrl: "https://partner.example.com/rent",
+      },
+    ]);
+    prismaMock.timeSlots.findMany.mockResolvedValue([
+      {
+        id: "slot_1",
+        startDate: new Date("2026-05-01T17:00:00.000Z"),
+        endDate: new Date("2026-05-01T19:00:00.000Z"),
+        price: 5000,
+      },
+    ]);
 
-    const selection = await getPublicOrganizationRentalSelectionData('scsoccer');
+    const selection =
+      await getPublicOrganizationRentalSelectionData("scsoccer");
     const serialized = JSON.stringify(selection);
 
-    expect(selection?.rentalOrganization.fields[0]?.facility?.affiliateUrl).toMatch(
-      /^https:\/\/bracket-iq\.com\/out\/facility\/facility_1\//,
-    );
-    expect(serialized).not.toContain('partner.example.com');
+    expect(
+      selection?.rentalOrganization.fields[0]?.facility?.affiliateUrl,
+    ).toMatch(/^https:\/\/bracket-iq\.com\/out\/facility\/facility_1\//);
+    expect(serialized).not.toContain("partner.example.com");
   });
 
-  it('links public product cards directly to checkout pages', async () => {
+  it("links public product cards directly to checkout pages", async () => {
     prismaMock.products.findMany.mockResolvedValue([
       {
-        id: 'product_1',
-        name: 'Day Pass',
-        description: 'Drop in once',
+        id: "product_1",
+        name: "Day Pass",
+        description: "Drop in once",
         priceCents: 1500,
-        period: 'single',
+        period: "single",
       },
     ]);
 
@@ -1057,154 +1190,163 @@ describe('publicOrganizationCatalog', () => {
 
     expect(products).toEqual([
       expect.objectContaining({
-        id: 'product_1',
-        period: 'single',
-        detailsUrl: '/o/scsoccer/products/product_1',
+        id: "product_1",
+        period: "single",
+        detailsUrl: "/o/scsoccer/products/product_1",
       }),
     ]);
   });
 
-  it('filters public products by single purchase or subscription mode', async () => {
+  it("filters public products by single purchase or subscription mode", async () => {
     prismaMock.products.findMany.mockResolvedValue([]);
 
     await listPublicOrganizationProducts(publicOrganization, {
       limit: 6,
-      purchaseMode: 'subscription',
+      purchaseMode: "subscription",
     });
 
-    expect(prismaMock.products.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        organizationId: 'org_1',
-        OR: [{ isActive: true }, { isActive: null }],
-        period: { in: ['WEEK', 'MONTH', 'YEAR'] },
+    expect(prismaMock.products.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: "org_1",
+          OR: [{ isActive: true }, { isActive: null }],
+          period: { in: ["WEEK", "MONTH", "YEAR"] },
+        }),
+        take: 6,
       }),
-      take: 6,
-    }));
+    );
   });
 
-  it('loads public teams that accept immediate registration or join requests for registration pages', async () => {
+  it("loads public teams that accept immediate registration or join requests for registration pages", async () => {
     prismaMock.organizations.findUnique.mockResolvedValue({
-      id: 'org_1',
-      name: 'SCSoccer',
-      publicSlug: 'scsoccer',
+      id: "org_1",
+      name: "SCSoccer",
+      publicSlug: "scsoccer",
       publicPageEnabled: true,
       publicWidgetsEnabled: true,
       publicCompletionRedirectUrl: null,
     });
     prismaMock.canonicalTeams.findFirst.mockResolvedValue({
-      id: 'team_open',
-      name: 'Fusion Volleyball Club',
-      divisionTypeName: 'Open',
-      division: 'Open',
-      sport: 'Indoor Volleyball',
+      id: "team_open",
+      name: "Fusion Volleyball Club",
+      divisionTypeName: "Open",
+      division: "Open",
+      sport: "Indoor Volleyball",
       profileImageId: null,
       teamSize: 10,
       openRegistration: true,
-      joinPolicy: 'OPEN_REGISTRATION',
+      joinPolicy: "OPEN_REGISTRATION",
       registrationPriceCents: 2500,
-      organizationId: 'org_1',
+      organizationId: "org_1",
     });
     prismaMock.teamRegistrations.findMany.mockResolvedValue([
-      { teamId: 'team_open' },
-      { teamId: 'team_open' },
-      { teamId: 'team_open' },
+      { teamId: "team_open" },
+      { teamId: "team_open" },
+      { teamId: "team_open" },
     ]);
 
-    const result = await getPublicOrganizationTeamForRegistration('scsoccer', 'team_open');
+    const result = await getPublicOrganizationTeamForRegistration(
+      "scsoccer",
+      "team_open",
+    );
 
     expect(prismaMock.canonicalTeams.findFirst).toHaveBeenCalledWith({
       where: {
-        id: 'team_open',
-        organizationId: 'org_1',
-        OR: [
-          { openRegistration: true },
-          { joinPolicy: 'REQUEST_TO_JOIN' },
-        ],
-        visibility: 'PUBLIC',
+        id: "team_open",
+        organizationId: "org_1",
+        OR: [{ openRegistration: true }, { joinPolicy: "REQUEST_TO_JOIN" }],
+        visibility: "PUBLIC",
       },
     });
     expect(result).toEqual({
-      organization: expect.objectContaining({ slug: 'scsoccer' }),
+      organization: expect.objectContaining({ slug: "scsoccer" }),
       team: expect.objectContaining({
-        id: 'team_open',
-        name: 'Fusion Volleyball Club',
-        division: 'Open',
-        sport: 'Indoor Volleyball',
+        id: "team_open",
+        name: "Fusion Volleyball Club",
+        division: "Open",
+        sport: "Indoor Volleyball",
         currentSize: 3,
         teamSize: 10,
         isFull: false,
-        joinPolicy: 'OPEN_REGISTRATION',
+        joinPolicy: "OPEN_REGISTRATION",
         registrationPriceCents: 2500,
       }),
     });
   });
 
-  it('includes the organization logo URL in public event registration data', async () => {
+  it("includes the organization logo URL in public event registration data", async () => {
     prismaMock.organizations.findUnique.mockResolvedValue({
-      id: 'org_1',
-      name: 'RECS Pickleball',
-      logoId: 'recs_logo',
-      publicSlug: 'recs-pickleball',
+      id: "org_1",
+      name: "RECS Pickleball",
+      logoId: "recs_logo",
+      publicSlug: "recs-pickleball",
       publicPageEnabled: true,
       publicWidgetsEnabled: true,
       publicCompletionRedirectUrl: null,
     });
     prismaMock.events.findUnique.mockResolvedValue({
-      id: 'event_1',
-      name: 'Team Round Robin',
-      organizationId: 'org_1',
-      state: 'PUBLISHED',
+      id: "event_1",
+      name: "Team Round Robin",
+      organizationId: "org_1",
+      state: "PUBLISHED",
       imageId: null,
-        sportIds: [],
+      sportIds: [],
       fieldIds: [],
       timeSlotIds: [],
-      createdAt: new Date('2026-07-01T00:00:00.000Z'),
-      updatedAt: new Date('2026-07-01T00:00:00.000Z'),
-      start: new Date('2026-07-19T11:00:00.000Z'),
+      createdAt: new Date("2026-07-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-07-01T00:00:00.000Z"),
+      start: new Date("2026-07-19T11:00:00.000Z"),
       end: null,
     });
     prismaMock.fields.findMany.mockResolvedValue([]);
     prismaMock.timeSlots.findMany.mockResolvedValue([]);
     prismaMock.teams.findMany.mockResolvedValue([]);
 
-    const result = await getPublicOrganizationEventForRegistration('recs-pickleball', 'event_1');
+    const result = await getPublicOrganizationEventForRegistration(
+      "recs-pickleball",
+      "event_1",
+    );
 
-    expect(result?.event.organization).toEqual(expect.objectContaining({
-      $id: 'org_1',
-      name: 'RECS Pickleball',
-      logoUrl: '/api/files/recs_logo/preview?w=240&h=240',
-    }));
+    expect(result?.event.organization).toEqual(
+      expect.objectContaining({
+        $id: "org_1",
+        name: "RECS Pickleball",
+        logoUrl: "/api/files/recs_logo/preview?w=240&h=240",
+      }),
+    );
   });
 
-  it('links request-to-join public teams to the registration page', async () => {
+  it("links request-to-join public teams to the registration page", async () => {
     prismaMock.canonicalTeams.findMany.mockResolvedValue([
       {
-        id: 'team_request',
-        name: 'Request Team',
-        division: 'Open',
-        sport: 'Indoor Volleyball',
+        id: "team_request",
+        name: "Request Team",
+        division: "Open",
+        sport: "Indoor Volleyball",
         profileImageId: null,
         teamSize: 6,
         openRegistration: false,
-        joinPolicy: 'REQUEST_TO_JOIN',
+        joinPolicy: "REQUEST_TO_JOIN",
         registrationPriceCents: 2500,
-        organizationId: 'org_1',
+        organizationId: "org_1",
       },
     ]);
     prismaMock.teamRegistrations.findMany.mockResolvedValue([
-      { teamId: 'team_request' },
+      { teamId: "team_request" },
     ]);
 
-    const teams = await listPublicOrganizationTeams(publicOrganization, { limit: 6 });
+    const teams = await listPublicOrganizationTeams(publicOrganization, {
+      limit: 6,
+    });
 
     expect(teams).toEqual([
       expect.objectContaining({
-        id: 'team_request',
+        id: "team_request",
         openRegistration: false,
-        joinPolicy: 'REQUEST_TO_JOIN',
+        joinPolicy: "REQUEST_TO_JOIN",
         currentSize: 1,
         registrationPriceCents: 2500,
-        registrationUrl: '/o/scsoccer/teams/team_request',
+        registrationUrl: "/o/scsoccer/teams/team_request",
       }),
     ]);
   });

@@ -2,12 +2,14 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
+import com.razumly.mvp.core.data.dataTypes.RepeatingTimeSlotValidationException
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
@@ -127,7 +129,7 @@ class EventDetailWeeklyBehaviorTest {
     }
 
     @Test
-    fun weekly_schedule_options_use_slot_time_zone_for_occurrence_date_bounds() {
+    fun given_slot_with_named_time_zone_when_building_weekly_schedule_options_then_uses_slot_local_date_bounds() {
         val event = Event(
             id = "weekly-named-zone-event",
             eventType = EventType.WEEKLY_EVENT,
@@ -158,7 +160,38 @@ class EventDetailWeeklyBehaviorTest {
     }
 
     @Test
-    fun weekly_session_options_buildThreeWeeksFromTheSlotStart() {
+    fun given_invalid_repeating_slot_when_building_weekly_schedule_options_then_surfaces_resolver_failure() {
+        val event = Event(
+            id = "weekly-gap-event",
+            eventType = EventType.WEEKLY_EVENT,
+            start = Instant.parse("2099-03-01T05:00:00Z"),
+            end = Instant.parse("2099-03-15T05:00:00Z"),
+            timeZone = "UTC",
+            divisions = listOf("open"),
+        )
+        val slot = TimeSlot(
+            id = "slot-gap",
+            dayOfWeek = 6,
+            daysOfWeek = listOf(6),
+            divisions = listOf("open"),
+            startTimeMinutes = 2 * 60 + 30,
+            endTimeMinutes = 4 * 60,
+            startDate = Instant.parse("2099-03-01T05:00:00Z"),
+            timeZone = "America/New_York",
+            repeating = true,
+            endDate = Instant.parse("2099-03-15T04:00:00Z"),
+            scheduledFieldId = "field-1",
+            scheduledFieldIds = listOf("field-1"),
+            price = null,
+        )
+
+        assertFailsWith<RepeatingTimeSlotValidationException> {
+            buildWeeklyScheduleOptions(event, listOf(slot))
+        }
+    }
+
+    @Test
+    fun weekly_session_options_build_three_weeks_from_the_slot_start() {
         val event = Event(
             id = "weekly-session-event",
             name = "Weekly Sessions",
@@ -371,7 +404,7 @@ class EventDetailWeeklyBehaviorTest {
     }
 
     @Test
-    fun buildEventDetailWeeklyRoutePresentation_nonWeeklyEventUsesEventStartPolicy() {
+    fun non_weekly_event_uses_event_start_policy() {
         val event = Event(
             id = "one-off-event",
             eventType = EventType.EVENT,
@@ -404,7 +437,7 @@ class EventDetailWeeklyBehaviorTest {
     }
 
     @Test
-    fun buildEventDetailWeeklyRoutePresentation_weeklyParentBuildsSessionsAndTracksJoin() {
+    fun weekly_parent_builds_sessions_and_tracks_join() {
         val event = Event(
             id = "weekly-route-event",
             eventType = EventType.WEEKLY_EVENT,

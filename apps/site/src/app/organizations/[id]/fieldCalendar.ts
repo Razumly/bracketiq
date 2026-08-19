@@ -80,6 +80,15 @@ export type FacilityCalendarConflict = {
   hours: number;
 };
 
+export type FacilityCalendarDiagnostic = {
+  code: string;
+  message: string;
+  fieldId: string;
+  fieldName: string;
+  eventId?: string | null;
+  slotId?: string | null;
+};
+
 export type FacilityCalendarMetricTotals = {
   fieldCount: number;
   rentalSlotCount: number;
@@ -93,6 +102,7 @@ export type FacilityCalendarMetricTotals = {
   revenuePerCourtHourCents: number;
   utilizationPercent: number;
   conflicts: FacilityCalendarConflict[];
+  diagnostics: FacilityCalendarDiagnostic[];
 };
 
 export type FacilityCalendarFacilitySummary = FacilityCalendarMetricTotals & {
@@ -226,7 +236,24 @@ const emptyFacilityCalendarTotals = (fieldCount: number): FacilityCalendarMetric
   revenuePerCourtHourCents: 0,
   utilizationPercent: 0,
   conflicts: [],
+  diagnostics: [],
 });
+
+const appendFacilityCalendarDiagnostic = (
+  diagnostics: FacilityCalendarDiagnostic[],
+  diagnostic: FacilityCalendarDiagnostic,
+): void => {
+  const duplicate = diagnostics.some((existing) => (
+    existing.code === diagnostic.code
+    && existing.fieldId === diagnostic.fieldId
+    && existing.eventId === diagnostic.eventId
+    && existing.slotId === diagnostic.slotId
+    && existing.message === diagnostic.message
+  ));
+  if (!duplicate) {
+    diagnostics.push(diagnostic);
+  }
+};
 
 const normalizeMetricTotals = (totals: FacilityCalendarMetricTotals): FacilityCalendarMetricTotals => {
   const rentalInventoryHours = Math.max(0, totals.rentalInventoryHours);
@@ -255,7 +282,9 @@ const buildMetricTotalsForFields = (
   range: CalendarRange,
 ): FacilityCalendarMetricTotals => {
   const totals = emptyFacilityCalendarTotals(fields.length);
-  const entries = buildFieldCalendarEvents(fields, range);
+  const diagnostics: FacilityCalendarDiagnostic[] = [];
+  const entries = buildFieldCalendarEvents(fields, range, diagnostics);
+  totals.diagnostics.push(...diagnostics);
   const bookedEntries = entries
     .filter((entry) => entry.metaType === 'booked')
     .map((entry) => ({ entry, interval: getEntryInterval(entry, range) }))
@@ -762,7 +791,7 @@ export const buildFacilityCalendarFeed = (
 ): FacilityCalendarFeed => {
   const fieldsById = new Map(fields.map((field) => [field.$id, field]));
   const summary = buildFacilityCalendarSummary(fields, range);
-  const baseItems = buildFieldCalendarEvents(fields, range).map((entry) => buildBaseFeedItem(entry, fieldsById));
+  const baseItems = buildFieldCalendarEvents(fields, range, summary.diagnostics).map((entry) => buildBaseFeedItem(entry, fieldsById));
   const assignmentItems = buildHydratedAssignmentFeedItems(fields, range);
   const conflictItems = buildConflictFeedItems(summary.conflicts, fieldsById);
 
@@ -777,7 +806,11 @@ export const buildFacilityCalendarFeed = (
   };
 };
 
-export const buildFieldCalendarEvents = (fields: Field[], range: CalendarRange = null): FieldCalendarEntry[] => {
+export const buildFieldCalendarEvents = (
+  fields: Field[],
+  range: CalendarRange = null,
+  diagnostics?: FacilityCalendarDiagnostic[],
+): FieldCalendarEntry[] => {
   return fields.flatMap((field) => {
     const baseTitle = getFacilityScopedFieldDisplayName(field);
     const events = (field.events || []).filter((evt) => {
@@ -827,6 +860,17 @@ export const buildFieldCalendarEvents = (fields: Field[], range: CalendarRange =
             });
           } catch (error) {
             if (error instanceof RepeatingTimeSlotValidationError) {
+              if (!diagnostics) {
+                throw error;
+              }
+              appendFacilityCalendarDiagnostic(diagnostics, {
+                code: error.code,
+                message: error.message,
+                fieldId: field.$id,
+                fieldName: baseTitle,
+                eventId: evt.$id ?? null,
+                slotId: slot.$id ?? null,
+              });
               return;
             }
             throw error;
@@ -902,6 +946,16 @@ export const buildFieldCalendarEvents = (fields: Field[], range: CalendarRange =
           });
         } catch (error) {
           if (error instanceof RepeatingTimeSlotValidationError) {
+            if (!diagnostics) {
+              throw error;
+            }
+            appendFacilityCalendarDiagnostic(diagnostics, {
+              code: error.code,
+              message: error.message,
+              fieldId: field.$id,
+              fieldName: baseTitle,
+              slotId: slot.$id ?? null,
+            });
             return;
           }
           throw error;

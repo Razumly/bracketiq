@@ -556,10 +556,14 @@ function EventScheduleContent() {
       cancelled = true;
     };
   }, [activeEvent?.$id, eventId, isWeeklyParentEvent, user?.$id]);
+  const selectedWeeklyOccurrenceOption = useMemo(
+    () => resolveSelectedWeeklyOccurrenceOption(activeEvent ?? null, selectedOccurrence),
+    [activeEvent, selectedOccurrence],
+  );
   const initialWeeklyScheduleDate = useMemo(() => {
-    const selectedDate = parseDateValue(selectedOccurrence?.occurrenceDate ?? null);
-    return selectedDate ?? parseDateValue(activeEvent?.start ?? null) ?? new Date();
-  }, [activeEvent?.start, selectedOccurrence?.occurrenceDate]);
+    const selectedStart = selectedWeeklyOccurrenceOption?.startInstant ?? null;
+    return selectedStart ?? parseDateValue(activeEvent?.start ?? null) ?? new Date();
+  }, [activeEvent?.start, selectedWeeklyOccurrenceOption?.startInstant]);
   const [weeklyScheduleCalendarView, setWeeklyScheduleCalendarView] = useState<View>('month');
   const [weeklyScheduleCalendarDate, setWeeklyScheduleCalendarDate] = useState<Date>(initialWeeklyScheduleDate);
   useEffect(() => {
@@ -576,10 +580,6 @@ function EventScheduleContent() {
       weeklyScheduleCalendarRange.end,
     ),
     [activeEvent, weeklyScheduleCalendarRange.end, weeklyScheduleCalendarRange.start],
-  );
-  const selectedWeeklyOccurrenceOption = useMemo(
-    () => resolveSelectedWeeklyOccurrenceOption(activeEvent ?? null, selectedOccurrence),
-    [activeEvent, selectedOccurrence],
   );
   const weeklyParticipantSelectionRequired = isWeeklyParentEvent && !selectedOccurrence;
   const hasPendingUnsavedChanges = hasUnsavedChanges || formHasUnsavedChanges;

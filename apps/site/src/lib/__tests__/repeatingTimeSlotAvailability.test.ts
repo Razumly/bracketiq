@@ -2,8 +2,6 @@ import {
   enumerateRepeatingTimeSlotOccurrences,
   resolveRepeatingTimeSlotOccurrence,
   RepeatingTimeSlotValidationError,
-  repeatingTimeSlotSegments,
-  repeatingTimeSlotWindowsOverlap,
 } from '../repeatingTimeSlotAvailability';
 
 const slot = (overrides: Record<string, unknown> = {}) => ({
@@ -104,18 +102,4 @@ describe('strict repeating Time Slot availability', () => {
     ]);
   });
 
-  it('detects overlap when one repeating slot crosses into the other slot weekday', () => {
-    expect(repeatingTimeSlotWindowsOverlap({
-      firstDays: [0],
-      firstStart: 23 * 60,
-      firstEnd: 1 * 60,
-      secondDays: [1],
-      secondStart: 30,
-      secondEnd: 90,
-    })).toBe(true);
-    expect(repeatingTimeSlotSegments(23 * 60, 1 * 60)).toEqual([
-      { dayOffset: 0, start: 23 * 60, end: 24 * 60 },
-      { dayOffset: 1, start: 0, end: 60 },
-    ]);
-  });
 });

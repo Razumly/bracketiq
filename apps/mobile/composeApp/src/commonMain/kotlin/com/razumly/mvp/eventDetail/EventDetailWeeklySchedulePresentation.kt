@@ -1,19 +1,14 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.RepeatingTimeSlotValidationException
-import com.razumly.mvp.core.data.dataTypes.resolveRepeatingOccurrence
-
-
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
+import com.razumly.mvp.core.data.dataTypes.resolveRepeatingOccurrence
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.util.resolvedTimeZone
-import kotlin.time.Clock
-import kotlin.time.Instant
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
@@ -21,6 +16,8 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.minus
 import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Clock
+import kotlin.time.Instant
 
 internal data class WeeklySessionOption(
     val id: String,
@@ -90,12 +87,7 @@ internal fun buildWeeklySessionOptions(
                 if (slotEndDate != null && occurrenceDate > slotEndDate) {
                     return@forEach
                 }
-
-                val resolved = try {
-                    slot.resolveRepeatingOccurrence(occurrenceDate)
-                } catch (_: RepeatingTimeSlotValidationException) {
-                    return@forEach
-                }
+                val resolved = slot.resolveRepeatingOccurrence(occurrenceDate)
                 val sessionStart = resolved.start
                 val sessionEnd = resolved.end
                 val slotId = slot.id.trim().takeIf(String::isNotBlank)
@@ -178,12 +170,7 @@ internal fun buildWeeklyScheduleOptions(
                 if (occurrenceDate > slotEndDate) {
                     return@forEach
                 }
-
-                val resolved = try {
-                    slot.resolveRepeatingOccurrence(occurrenceDate)
-                } catch (_: RepeatingTimeSlotValidationException) {
-                    return@forEach
-                }
+                val resolved = slot.resolveRepeatingOccurrence(occurrenceDate)
                 val sessionStart = resolved.start
                 val sessionEnd = resolved.end
                 val slotId = slot.id.trim().takeIf(String::isNotBlank)

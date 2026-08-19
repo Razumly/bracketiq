@@ -1,17 +1,17 @@
 package com.razumly.mvp.core.data.dataTypes
-import kotlinx.serialization.Contextual
-import kotlinx.serialization.Serializable
+
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.LocalTime
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.minus
 import kotlinx.datetime.offsetAt
 import kotlinx.datetime.plus
-import kotlinx.datetime.minus
-
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
+import kotlinx.serialization.Contextual
+import kotlinx.serialization.Serializable
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -152,6 +152,7 @@ fun TimeSlot.normalizedDivisionIds(): List<String> {
         .filter(String::isNotBlank)
         .distinct()
 }
+
 fun TimeSlot.hasOvernightWindow(): Boolean {
     if (!repeating) return false
     val start = startTimeMinutes ?: return false
@@ -384,35 +385,6 @@ fun TimeSlot.enumerateRepeatingTimeSlotOccurrences(
         currentDate = currentDate.plus(DatePeriod(days = 1))
     }
     return occurrences
-}
-
-fun repeatingTimeSlotWindowsOverlap(
-    firstDays: List<Int>,
-    firstStart: Int,
-    firstEnd: Int,
-    secondDays: List<Int>,
-    secondStart: Int,
-    secondEnd: Int,
-): Boolean {
-    data class Segment(val dayOffset: Int, val start: Int, val end: Int)
-    fun segments(start: Int, end: Int): List<Segment> {
-        val absoluteEnd = if (end == 24 * 60 || end <= start) end + 24 * 60 else end
-        return listOf(
-            Segment(0, start, minOf(absoluteEnd, 24 * 60)),
-            Segment(1, 0, absoluteEnd - 24 * 60),
-        ).filter { segment -> segment.end > segment.start }
-    }
-    return firstDays.any { firstDay ->
-        secondDays.any { secondDay ->
-            segments(firstStart, firstEnd).any { first ->
-                segments(secondStart, secondEnd).any { second ->
-                    (firstDay + first.dayOffset) % 7 == (secondDay + second.dayOffset) % 7 &&
-                        first.start < second.end &&
-                        second.start < first.end
-                }
-            }
-        }
-    }
 }
 
 @OptIn(ExperimentalTime::class)

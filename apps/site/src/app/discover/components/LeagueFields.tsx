@@ -55,6 +55,19 @@ const DAYS_OF_WEEK = [
   { value: '6', label: 'Sunday' },
 ];
 
+const formatOvernightWeekdayWarning = (selectedDays: number[]): string => {
+  const labels = selectedDays
+    .map((day) => DAYS_OF_WEEK[(day + 1) % 7]?.label)
+    .filter((label): label is string => Boolean(label));
+  if (labels.length === 0) {
+    return 'Overnight slot ends on the next local day.';
+  }
+  if (labels.length === 1) {
+    return `Overnight slot ends on the next local weekday: ${labels[0]}.`;
+  }
+  return `Overnight slot ends on the next local weekdays: ${labels.join(', ')}.`;
+};
+
 const formatClockTime = (date: Date): string => new Intl.DateTimeFormat('en-US', {
   hour: 'numeric',
   minute: '2-digit',
@@ -1524,7 +1537,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
                           </div>
                           {hasOvernightWindow ? (
                             <Text size="xs" c="orange" mt={4}>
-                              Overnight slot ends on the next day.
+                              {formatOvernightWeekdayWarning(selectedDays)}
                             </Text>
                           ) : null}
                         </>

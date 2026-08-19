@@ -418,7 +418,7 @@ class EventDetailsValidationTest {
     }
 
     @Test
-    fun given_divisions_with_different_identities_and_the_same_name_then_validation_fails() {
+    fun given_divisions_with_different_identities_when_names_match_then_validation_fails() {
         val first = DivisionDetail(
             id = "event-1__division__open",
             name = "Open",
@@ -456,7 +456,7 @@ class EventDetailsValidationTest {
     }
 
     @Test
-    fun given_a_generated_phase_with_its_source_name_then_name_validation_succeeds() {
+    fun given_generated_phase_with_source_name_when_validating_names_then_validation_succeeds() {
         val source = DivisionDetail(
             id = "event-1__division__open",
             name = "Open",

@@ -1,37 +1,65 @@
-import { prisma } from '@/lib/prisma';
-import { buildDivisionStandingsResponse, type DivisionStandingsResponse, toLeagueEvent } from '@/app/api/events/[eventId]/standings/shared';
+import { prisma } from "@/lib/prisma";
+import {
+  buildDivisionStandingsResponse,
+  type DivisionStandingsResponse,
+  toLeagueEvent,
+} from "@/app/api/events/[eventId]/standings/shared";
 import {
   buildPublicBracketWidgetView,
   type PublicBracketWidgetView,
   type PublicWidgetDivisionOption,
-} from '@/server/publicWidgetBracket';
-import { loadEventWithRelations } from '@/server/repositories/events';
-import { getEventParticipantIdsForEvent } from '@/server/events/eventRegistrations';
-import { getEventOfficialIdsForEvent } from '@/server/officials/eventOfficials';
-import { TEAM_REGISTRATION_STARTED_TTL_MS } from '@/server/teams/teamOpenRegistration';
-import { getFieldDisplayName, getFieldResolvedLocation } from '@/lib/fieldUtils';
+} from "@/server/publicWidgetBracket";
+import { loadEventWithRelations } from "@/server/repositories/events";
+import { getEventParticipantIdsForEvent } from "@/server/events/eventRegistrations";
+import { getEventOfficialIdsForEvent } from "@/server/officials/eventOfficials";
+import { TEAM_REGISTRATION_STARTED_TTL_MS } from "@/server/teams/teamOpenRegistration";
 import {
-  RepeatingTimeSlotValidationError,
-  type ResolvedRepeatingTimeSlot,
-  resolveRepeatingTimeSlotOccurrence,
-} from '@/lib/repeatingTimeSlotAvailability';
+  getFieldDisplayName,
+  getFieldResolvedLocation,
+} from "@/lib/fieldUtils";
+import {
+  addRepeatingTimeSlotLocalDays,
+  enumerateRepeatingTimeSlotOccurrences,
+  getRepeatingTimeSlotLocalDate,
+} from "@/lib/repeatingTimeSlotAvailability";
 
-import { normalizeExternalHttpUrl } from '@/lib/externalUrl';
+import { normalizeExternalHttpUrl } from "@/lib/externalUrl";
 import {
   buildPublicEventPath,
   buildPublicOrganizationPath,
   normalizePublicOrganizationSlug,
-} from '@/lib/publicOrganizationSlug';
-import { buildAffiliateOutboundUrl, protectAffiliateRow } from '@/server/affiliateOutbound';
-import { attachFacilitiesToFieldRows } from '@/server/fieldFacilityPayload';
-import type { Field, Organization, Product, ProductPeriod, TimeSlot } from '@/types';
-import { getOrganizationOwnershipPresentation } from '@/lib/organizationOwnership';
-import { organizationDivisionView } from '@/server/organizationDivisions';
+} from "@/lib/publicOrganizationSlug";
+import {
+  buildAffiliateOutboundUrl,
+  protectAffiliateRow,
+} from "@/server/affiliateOutbound";
+import { attachFacilitiesToFieldRows } from "@/server/fieldFacilityPayload";
+import type {
+  Field,
+  Organization,
+  Product,
+  ProductPeriod,
+  TimeSlot,
+} from "@/types";
+import { getOrganizationOwnershipPresentation } from "@/lib/organizationOwnership";
+import { organizationDivisionView } from "@/server/organizationDivisions";
 
-export type PublicCatalogSurface = 'page' | 'widget' | 'any';
-export type PublicWidgetKind = 'all' | 'events' | 'teams' | 'rentals' | 'products' | 'standings' | 'brackets';
-export type PublicEventDateRule = 'all' | 'upcoming' | 'today' | 'week' | 'month';
-export type PublicProductPurchaseMode = 'all' | 'single' | 'subscription';
+export type PublicCatalogSurface = "page" | "widget" | "any";
+export type PublicWidgetKind =
+  | "all"
+  | "events"
+  | "teams"
+  | "rentals"
+  | "products"
+  | "standings"
+  | "brackets";
+export type PublicEventDateRule =
+  | "all"
+  | "upcoming"
+  | "today"
+  | "week"
+  | "month";
+export type PublicProductPurchaseMode = "all" | "single" | "subscription";
 
 export type PublicPaginationInfo = {
   limit: number;
@@ -57,12 +85,12 @@ export type PublicOrganizationSummary = {
   publicPageEnabled: boolean;
   publicWidgetsEnabled: boolean;
   publicCompletionRedirectUrl: string | null;
-  originType?: Organization['originType'];
-  ownershipStatus?: Organization['ownershipStatus'];
-  claimVerificationLevel?: Organization['claimVerificationLevel'];
+  originType?: Organization["originType"];
+  ownershipStatus?: Organization["ownershipStatus"];
+  claimVerificationLevel?: Organization["claimVerificationLevel"];
   claimable?: boolean;
   claimUrl?: string;
-  ownershipAction?: Organization['ownershipAction'];
+  ownershipAction?: Organization["ownershipAction"];
 };
 
 export type PublicOrganizationEventCard = {
@@ -157,8 +185,8 @@ export type PublicBracketWidgetPage = {
   divisionOptions: PublicWidgetDivisionOption[];
   selectedDivisionId: string | null;
   selectedDivisionName: string | null;
-  winnersLane: PublicBracketWidgetView['winnersLane'];
-  losersLane: PublicBracketWidgetView['losersLane'];
+  winnersLane: PublicBracketWidgetView["winnersLane"];
+  losersLane: PublicBracketWidgetView["losersLane"];
   hasLosersBracket: boolean;
 };
 
@@ -191,95 +219,129 @@ export type PublicOrganizationTeamRegistrationData = {
   };
 };
 
-const DEFAULT_PRIMARY_COLOR = '#0f766e';
-const DEFAULT_ACCENT_COLOR = '#f59e0b';
-const FALLBACK_IMAGE_URL = '/BIQ_drawing.svg';
-const PUBLIC_EVENT_STATES = ['PUBLISHED', null] as const;
-const PUBLIC_TEAM_ACTIVE_STATUS = 'ACTIVE';
-const PUBLIC_TEAM_PENDING_STATUS = 'PENDING';
-const PUBLIC_TEAM_STARTED_STATUS = 'STARTED';
-const PUBLIC_TEAM_VISIBILITY = 'PUBLIC';
+const DEFAULT_PRIMARY_COLOR = "#0f766e";
+const DEFAULT_ACCENT_COLOR = "#f59e0b";
+const FALLBACK_IMAGE_URL = "/BIQ_drawing.svg";
+const PUBLIC_EVENT_STATES = ["PUBLISHED", null] as const;
+const PUBLIC_TEAM_ACTIVE_STATUS = "ACTIVE";
+const PUBLIC_TEAM_PENDING_STATUS = "PENDING";
+const PUBLIC_TEAM_STARTED_STATUS = "STARTED";
+const PUBLIC_TEAM_VISIBILITY = "PUBLIC";
 const DEFAULT_LIMIT = 8;
 const PUBLIC_EVENT_QUERY_CAP = 300;
 const DEFAULT_WEEKLY_OCCURRENCE_WEEKS = 12;
-export const PUBLIC_EVENT_TYPES = ['EVENT', 'TOURNAMENT', 'LEAGUE', 'WEEKLY_EVENT', 'TRYOUT'] as const;
+export const PUBLIC_EVENT_TYPES = [
+  "EVENT",
+  "TOURNAMENT",
+  "LEAGUE",
+  "WEEKLY_EVENT",
+  "TRYOUT",
+] as const;
 const PUBLIC_EVENT_TYPE_SET = new Set<string>(PUBLIC_EVENT_TYPES);
 const PUBLIC_EVENT_TYPE_LABELS: Record<string, string> = {
-  EVENT: 'Event',
-  TOURNAMENT: 'Tournament',
-  LEAGUE: 'League',
-  WEEKLY_EVENT: 'Weekly Event',
+  EVENT: "Event",
+  TOURNAMENT: "Tournament",
+  LEAGUE: "League",
+  WEEKLY_EVENT: "Weekly Event",
 };
 
 const normalizeSlug = normalizePublicOrganizationSlug;
 
-const normalizeStringArray = (value: unknown): string[] => (
+const normalizeStringArray = (value: unknown): string[] =>
   Array.isArray(value)
-    ? Array.from(new Set(
-      value
-        .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
-        .filter((entry) => entry.length > 0),
-    ))
-    : []
-);
+    ? Array.from(
+        new Set(
+          value
+            .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+            .filter((entry) => entry.length > 0),
+        ),
+      )
+    : [];
 
 const normalizeIdList = normalizeStringArray;
 
 const normalizeNullableString = (value: unknown): string | undefined => {
-  if (typeof value !== 'string') {
+  if (typeof value !== "string") {
     return undefined;
   }
   const trimmed = value.trim();
   return trimmed.length ? trimmed : undefined;
 };
 
-const normalizeNumber = (value: unknown, fallback = 0): number => (
-  typeof value === 'number' && Number.isFinite(value) ? value : fallback
-);
+const normalizeNumber = (value: unknown, fallback = 0): number =>
+  typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
-const normalizePriceCents = (value: unknown): number => Math.max(0, Math.round(normalizeNumber(value)));
+const normalizePriceCents = (value: unknown): number =>
+  Math.max(0, Math.round(normalizeNumber(value)));
 
 const normalizeProductPeriodForClient = (value: unknown): ProductPeriod => {
-  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  if (normalized === 'single' || normalized === 'single_purchase' || normalized === 'one-time' || normalized === 'one_time') {
-    return 'single';
+  const normalized =
+    typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (
+    normalized === "single" ||
+    normalized === "single_purchase" ||
+    normalized === "one-time" ||
+    normalized === "one_time"
+  ) {
+    return "single";
   }
-  if (normalized === 'weekly') return 'week';
-  if (normalized === 'monthly') return 'month';
-  if (normalized === 'yearly') return 'year';
-  if (normalized === 'week' || normalized === 'month' || normalized === 'year') {
+  if (normalized === "weekly") return "week";
+  if (normalized === "monthly") return "month";
+  if (normalized === "yearly") return "year";
+  if (
+    normalized === "week" ||
+    normalized === "month" ||
+    normalized === "year"
+  ) {
     return normalized as ProductPeriod;
   }
-  return 'month';
+  return "month";
 };
 
-const normalizePublicProductPurchaseMode = (value: unknown): PublicProductPurchaseMode => {
-  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  return normalized === 'single' || normalized === 'subscription'
-    ? normalized as PublicProductPurchaseMode
-    : 'all';
+const normalizePublicProductPurchaseMode = (
+  value: unknown,
+): PublicProductPurchaseMode => {
+  const normalized =
+    typeof value === "string" ? value.trim().toLowerCase() : "";
+  return normalized === "single" || normalized === "subscription"
+    ? (normalized as PublicProductPurchaseMode)
+    : "all";
 };
 
 const toClientTimeSlot = (slot: Record<string, any>): TimeSlot => {
-  const dayOfWeek = typeof slot.dayOfWeek === 'number' && slot.dayOfWeek >= 0 && slot.dayOfWeek <= 6
-    ? slot.dayOfWeek as 0 | 1 | 2 | 3 | 4 | 5 | 6
-    : undefined;
+  const dayOfWeek =
+    typeof slot.dayOfWeek === "number" &&
+    slot.dayOfWeek >= 0 &&
+    slot.dayOfWeek <= 6
+      ? (slot.dayOfWeek as 0 | 1 | 2 | 3 | 4 | 5 | 6)
+      : undefined;
   const daysOfWeek = Array.isArray(slot.daysOfWeek)
-    ? Array.from(new Set(slot.daysOfWeek
-      .map((entry: unknown) => Number(entry))
-      .filter((entry: number): entry is 0 | 1 | 2 | 3 | 4 | 5 | 6 => Number.isInteger(entry) && entry >= 0 && entry <= 6)))
+    ? Array.from(
+        new Set(
+          slot.daysOfWeek
+            .map((entry: unknown) => Number(entry))
+            .filter(
+              (entry: number): entry is 0 | 1 | 2 | 3 | 4 | 5 | 6 =>
+                Number.isInteger(entry) && entry >= 0 && entry <= 6,
+            ),
+        ),
+      )
     : [];
   return {
     $id: String(slot.id),
     dayOfWeek,
     daysOfWeek,
     divisions: normalizeIdList(slot.divisions),
-    startTimeMinutes: typeof slot.startTimeMinutes === 'number' ? slot.startTimeMinutes : undefined,
-    endTimeMinutes: typeof slot.endTimeMinutes === 'number' ? slot.endTimeMinutes : undefined,
+    startTimeMinutes:
+      typeof slot.startTimeMinutes === "number"
+        ? slot.startTimeMinutes
+        : undefined,
+    endTimeMinutes:
+      typeof slot.endTimeMinutes === "number" ? slot.endTimeMinutes : undefined,
     startDate: toIsoString(slot.startDate) ?? new Date().toISOString(),
     endDate: toIsoString(slot.endDate),
     repeating: slot.repeating !== false,
-    price: typeof slot.price === 'number' ? slot.price : undefined,
+    price: typeof slot.price === "number" ? slot.price : undefined,
     requiredTemplateIds: normalizeIdList(slot.requiredTemplateIds),
     hostRequiredTemplateIds: normalizeIdList(slot.hostRequiredTemplateIds),
     scheduledFieldId: normalizeNullableString(slot.scheduledFieldId),
@@ -292,28 +354,36 @@ const toClientField = (
   rentalSlotsById: Map<string, TimeSlot>,
   organizationLocation: string | null,
 ): Field => {
-  const rentalSlotIds = normalizeIdList(field.rentalSlotIds)
-    .filter((slotId) => rentalSlotsById.has(slotId));
-  const facility = field.facility && typeof field.facility === 'object'
-    ? {
-        ...protectAffiliateRow(field.facility, 'facility'),
-        $id: String(field.facility.$id ?? field.facility.id ?? ''),
-      }
-    : null;
+  const rentalSlotIds = normalizeIdList(field.rentalSlotIds).filter((slotId) =>
+    rentalSlotsById.has(slotId),
+  );
+  const facility =
+    field.facility && typeof field.facility === "object"
+      ? {
+          ...protectAffiliateRow(field.facility, "facility"),
+          $id: String(field.facility.$id ?? field.facility.id ?? ""),
+        }
+      : null;
   return {
     $id: String(field.id),
-    name: normalizeNullableString(field.name) ?? '',
-    location: getFieldResolvedLocation({ ...field, facility }, organizationLocation ?? ''),
+    name: normalizeNullableString(field.name) ?? "",
+    location: getFieldResolvedLocation(
+      { ...field, facility },
+      organizationLocation ?? "",
+    ),
     lat: normalizeNumber(field.lat),
     long: normalizeNumber(field.long),
     createdAt: toIsoString(field.createdAt),
     updatedAt: toIsoString(field.updatedAt),
-    heading: typeof field.heading === 'number' ? field.heading : undefined,
-    inUse: typeof field.inUse === 'boolean' ? field.inUse : undefined,
-    facilityId: normalizeNullableString(field.facilityId) ?? facility?.$id ?? null,
+    heading: typeof field.heading === "number" ? field.heading : undefined,
+    inUse: typeof field.inUse === "boolean" ? field.inUse : undefined,
+    facilityId:
+      normalizeNullableString(field.facilityId) ?? facility?.$id ?? null,
     facility,
     rentalSlotIds,
-    rentalSlots: rentalSlotIds.map((slotId) => rentalSlotsById.get(slotId)).filter((slot): slot is TimeSlot => Boolean(slot)),
+    rentalSlots: rentalSlotIds
+      .map((slotId) => rentalSlotsById.get(slotId))
+      .filter((slot): slot is TimeSlot => Boolean(slot)),
   };
 };
 
@@ -323,7 +393,9 @@ const normalizeCoordinates = (value: unknown): [number, number] | undefined => {
   }
   const first = Number(value[0]);
   const second = Number(value[1]);
-  return Number.isFinite(first) && Number.isFinite(second) ? [first, second] : undefined;
+  return Number.isFinite(first) && Number.isFinite(second)
+    ? [first, second]
+    : undefined;
 };
 
 const normalizeLimit = (value?: number): number => {
@@ -343,41 +415,48 @@ const normalizePage = (value?: number): number => {
 export const normalizePublicEventTypes = (value: unknown): string[] => {
   const rawValues = Array.isArray(value)
     ? value
-    : typeof value === 'string'
-      ? value.split(',')
+    : typeof value === "string"
+      ? value.split(",")
       : [];
-  return Array.from(new Set(
-    rawValues
-      .map((entry) => (typeof entry === 'string' ? entry.trim().toUpperCase() : ''))
-      .filter((entry) => PUBLIC_EVENT_TYPE_SET.has(entry)),
-  ));
+  return Array.from(
+    new Set(
+      rawValues
+        .map((entry) =>
+          typeof entry === "string" ? entry.trim().toUpperCase() : "",
+        )
+        .filter((entry) => PUBLIC_EVENT_TYPE_SET.has(entry)),
+    ),
+  );
 };
 
 export const normalizePublicEventIds = (value: unknown): string[] => {
   const rawValues = Array.isArray(value)
     ? value
-    : typeof value === 'string'
-      ? value.split(',')
+    : typeof value === "string"
+      ? value.split(",")
       : [];
-  return Array.from(new Set(
-    rawValues
-      .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
-      .filter((entry) => entry.length > 0),
-  ));
+  return Array.from(
+    new Set(
+      rawValues
+        .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+        .filter((entry) => entry.length > 0),
+    ),
+  );
 };
 
 export const formatPublicEventTypeLabel = (value: unknown): string => {
-  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  const normalized =
+    typeof value === "string" ? value.trim().toUpperCase() : "";
   if (PUBLIC_EVENT_TYPE_LABELS[normalized]) {
     return PUBLIC_EVENT_TYPE_LABELS[normalized];
   }
   return normalized
     ? normalized
-      .toLowerCase()
-      .split('_')
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(' ')
-    : 'Event';
+        .toLowerCase()
+        .split("_")
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ")
+    : "Event";
 };
 
 const getStartOfToday = (): Date => {
@@ -385,43 +464,71 @@ const getStartOfToday = (): Date => {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
 };
 
-const getTomorrow = (date: Date): Date => new Date(
-  date.getFullYear(),
-  date.getMonth(),
-  date.getDate() + 1,
-  0,
-  0,
-  0,
-  0,
-);
+const getTomorrow = (date: Date): Date =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1, 0, 0, 0, 0);
 
-const normalizeDateBoundary = (value: unknown, edge: 'start' | 'end'): Date | null => {
+const normalizeDateBoundary = (
+  value: unknown,
+  edge: "start" | "end",
+): Date | null => {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return edge === 'start'
-      ? new Date(value.getFullYear(), value.getMonth(), value.getDate(), 0, 0, 0, 0)
-      : new Date(value.getFullYear(), value.getMonth(), value.getDate() + 1, 0, 0, 0, 0);
+    return edge === "start"
+      ? new Date(
+          value.getFullYear(),
+          value.getMonth(),
+          value.getDate(),
+          0,
+          0,
+          0,
+          0,
+        )
+      : new Date(
+          value.getFullYear(),
+          value.getMonth(),
+          value.getDate() + 1,
+          0,
+          0,
+          0,
+          0,
+        );
   }
-  if (typeof value === 'string' && value.trim()) {
-    const [year, month, day] = value.trim().split('-').map(Number);
+  if (typeof value === "string" && value.trim()) {
+    const [year, month, day] = value.trim().split("-").map(Number);
     if (
-      Number.isInteger(year)
-      && Number.isInteger(month)
-      && Number.isInteger(day)
-      && year > 0
-      && month >= 1
-      && month <= 12
-      && day >= 1
-      && day <= 31
+      Number.isInteger(year) &&
+      Number.isInteger(month) &&
+      Number.isInteger(day) &&
+      year > 0 &&
+      month >= 1 &&
+      month <= 12 &&
+      day >= 1 &&
+      day <= 31
     ) {
-      return edge === 'start'
+      return edge === "start"
         ? new Date(year, month - 1, day, 0, 0, 0, 0)
         : new Date(year, month - 1, day + 1, 0, 0, 0, 0);
     }
     const parsed = new Date(value);
     if (!Number.isNaN(parsed.getTime())) {
-      return edge === 'start'
-        ? new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 0, 0, 0, 0)
-        : new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate() + 1, 0, 0, 0, 0);
+      return edge === "start"
+        ? new Date(
+            parsed.getFullYear(),
+            parsed.getMonth(),
+            parsed.getDate(),
+            0,
+            0,
+            0,
+            0,
+          )
+        : new Date(
+            parsed.getFullYear(),
+            parsed.getMonth(),
+            parsed.getDate() + 1,
+            0,
+            0,
+            0,
+            0,
+          );
     }
   }
   return null;
@@ -432,8 +539,8 @@ const getPublicEventDateWindow = (
   dateFrom?: Date | string | null,
   dateTo?: Date | string | null,
 ): PublicEventDateWindow => {
-  const from = normalizeDateBoundary(dateFrom, 'start');
-  const to = normalizeDateBoundary(dateTo, 'end');
+  const from = normalizeDateBoundary(dateFrom, "start");
+  const to = normalizeDateBoundary(dateTo, "end");
   if (from || to) {
     return {
       start: from,
@@ -441,7 +548,7 @@ const getPublicEventDateWindow = (
       hasFilter: true,
     };
   }
-  if (dateRule === 'today') {
+  if (dateRule === "today") {
     const startOfToday = getStartOfToday();
     return {
       start: startOfToday,
@@ -449,23 +556,39 @@ const getPublicEventDateWindow = (
       hasFilter: true,
     };
   }
-  if (dateRule === 'week') {
+  if (dateRule === "week") {
     const startOfToday = getStartOfToday();
     return {
       start: startOfToday,
-      end: new Date(startOfToday.getFullYear(), startOfToday.getMonth(), startOfToday.getDate() + 7, 0, 0, 0, 0),
+      end: new Date(
+        startOfToday.getFullYear(),
+        startOfToday.getMonth(),
+        startOfToday.getDate() + 7,
+        0,
+        0,
+        0,
+        0,
+      ),
       hasFilter: true,
     };
   }
-  if (dateRule === 'month') {
+  if (dateRule === "month") {
     const startOfToday = getStartOfToday();
     return {
       start: startOfToday,
-      end: new Date(startOfToday.getFullYear(), startOfToday.getMonth() + 1, startOfToday.getDate(), 0, 0, 0, 0),
+      end: new Date(
+        startOfToday.getFullYear(),
+        startOfToday.getMonth() + 1,
+        startOfToday.getDate(),
+        0,
+        0,
+        0,
+        0,
+      ),
       hasFilter: true,
     };
   }
-  if (dateRule === 'upcoming') {
+  if (dateRule === "upcoming") {
     return {
       start: getStartOfToday(),
       end: null,
@@ -475,7 +598,9 @@ const getPublicEventDateWindow = (
   return { start: null, end: null, hasFilter: false };
 };
 
-const getNonWeeklyDateWhere = (window: PublicEventDateWindow): Record<string, unknown> | null => {
+const getNonWeeklyDateWhere = (
+  window: PublicEventDateWindow,
+): Record<string, unknown> | null => {
   if (!window.hasFilter) {
     return null;
   }
@@ -487,26 +612,27 @@ const getNonWeeklyDateWhere = (window: PublicEventDateWindow): Record<string, un
   };
 };
 
-const getWeeklyParentDateWhere = (window: PublicEventDateWindow): Record<string, unknown> | null => {
+const getWeeklyParentDateWhere = (
+  window: PublicEventDateWindow,
+): Record<string, unknown> | null => {
   if (!window.hasFilter) {
     return null;
   }
   return {
-    eventType: 'WEEKLY_EVENT',
+    eventType: "WEEKLY_EVENT",
     parentEvent: null,
     ...(window.end ? { start: { lt: window.end } } : {}),
     ...(window.start
       ? {
-        OR: [
-          { end: null },
-          { end: { gte: window.start } },
-        ],
-      }
+          OR: [{ end: null }, { end: { gte: window.start } }],
+        }
       : {}),
   };
 };
 
-const getPublicEventDateWhere = (window: PublicEventDateWindow): Record<string, unknown> | null => {
+const getPublicEventDateWhere = (
+  window: PublicEventDateWindow,
+): Record<string, unknown> | null => {
   if (!window.hasFilter) {
     return null;
   }
@@ -518,8 +644,8 @@ const getPublicEventDateWhere = (window: PublicEventDateWindow): Record<string, 
       {
         OR: [
           { eventType: null },
-          { eventType: { not: 'WEEKLY_EVENT' } },
-          { eventType: 'WEEKLY_EVENT', parentEvent: { not: null } },
+          { eventType: { not: "WEEKLY_EVENT" } },
+          { eventType: "WEEKLY_EVENT", parentEvent: { not: null } },
         ],
         ...(nonWeeklyDateWhere ?? {}),
       },
@@ -531,22 +657,24 @@ const toIsoString = (value: unknown): string | null => {
   if (value instanceof Date) {
     return value.toISOString();
   }
-  if (typeof value === 'string' && value.trim().length > 0) {
+  if (typeof value === "string" && value.trim().length > 0) {
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
   }
   return null;
 };
 
-const imageUrl = (fileId: unknown, width: number = 640, height: number = 360): string => (
-  typeof fileId === 'string' && fileId.trim().length > 0
+const imageUrl = (
+  fileId: unknown,
+  width: number = 640,
+  height: number = 360,
+): string =>
+  typeof fileId === "string" && fileId.trim().length > 0
     ? `/api/files/${encodeURIComponent(fileId.trim())}/preview?w=${width}&h=${height}`
-    : FALLBACK_IMAGE_URL
-);
+    : FALLBACK_IMAGE_URL;
 
-const formatEventDetailsUrl = (slug: string, eventId: string): string => (
-  buildPublicEventPath(slug, eventId)
-);
+const formatEventDetailsUrl = (slug: string, eventId: string): string =>
+  buildPublicEventPath(slug, eventId);
 
 const formatEventOccurrenceDetailsUrl = (
   slug: string,
@@ -558,11 +686,12 @@ const formatEventOccurrenceDetailsUrl = (
   return `${formatEventDetailsUrl(slug, eventId)}?${params.toString()}`;
 };
 
-const formatTeamRegistrationUrl = (slug: string, teamId: string): string => (
-  `${buildPublicOrganizationPath(slug)}/teams/${encodeURIComponent(teamId)}`
-);
+const formatTeamRegistrationUrl = (slug: string, teamId: string): string =>
+  `${buildPublicOrganizationPath(slug)}/teams/${encodeURIComponent(teamId)}`;
 
-const getPublicTeamOccupancyByTeamId = async (teamIds: string[]): Promise<Map<string, number>> => {
+const getPublicTeamOccupancyByTeamId = async (
+  teamIds: string[],
+): Promise<Map<string, number>> => {
   const normalizedIds = Array.from(new Set(teamIds.filter(Boolean)));
   if (!normalizedIds.length || !(prisma as any).teamRegistrations?.findMany) {
     return new Map();
@@ -593,62 +722,47 @@ const getPublicTeamOccupancyByTeamId = async (teamIds: string[]): Promise<Map<st
   return counts;
 };
 
-const toLocalIsoDate = (value: Date): string => {
-  const year = value.getFullYear();
-  const month = `${value.getMonth() + 1}`.padStart(2, '0');
-  const day = `${value.getDate()}`.padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const toMondayIndex = (value: Date): number => (value.getDay() + 6) % 7;
-
-const addDays = (value: Date, days: number): Date => {
-  const copy = new Date(value.getTime());
-  copy.setDate(copy.getDate() + days);
-  return copy;
-};
-
-const startOfDay = (value: Date): Date => {
-  const copy = new Date(value.getTime());
-  copy.setHours(0, 0, 0, 0);
-  return copy;
-};
-
-const resolveWeeklyExpansionWindow = (window: PublicEventDateWindow): { start: Date; end: Date } => {
-  const start = startOfDay(window.start ?? getStartOfToday());
-  const end = window.end
-    ? startOfDay(window.end)
-    : new Date(
-      start.getFullYear(),
-      start.getMonth(),
-      start.getDate() + (DEFAULT_WEEKLY_OCCURRENCE_WEEKS * 7),
-      0,
-      0,
-      0,
-      0,
+const resolveWeeklyExpansionWindow = (
+  window: PublicEventDateWindow,
+): { start: Date; end: Date } => {
+  const start = window.start ?? getStartOfToday();
+  const end =
+    window.end ??
+    new Date(
+      start.getTime() +
+        DEFAULT_WEEKLY_OCCURRENCE_WEEKS * 7 * 24 * 60 * 60 * 1000,
     );
   return end.getTime() > start.getTime()
     ? { start, end }
-    : { start, end: addDays(start, 1) };
+    : { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
 };
 
 const normalizeSlotWeekdays = (slot: Record<string, any>): number[] => {
-  const source = Array.isArray(slot.daysOfWeek) && slot.daysOfWeek.length
-    ? slot.daysOfWeek
-    : typeof slot.dayOfWeek === 'number'
-      ? [slot.dayOfWeek]
-      : [];
+  const source =
+    Array.isArray(slot.daysOfWeek) && slot.daysOfWeek.length
+      ? slot.daysOfWeek
+      : typeof slot.dayOfWeek === "number"
+        ? [slot.dayOfWeek]
+        : [];
   return Array.from(
     new Set(
       source
         .map((entry: unknown) => Number(entry))
-        .filter((entry: number) => Number.isInteger(entry) && entry >= 0 && entry <= 6),
+        .filter(
+          (entry: number) =>
+            Number.isInteger(entry) && entry >= 0 && entry <= 6,
+        ),
     ),
   ).sort((left, right) => left - right);
 };
 
 const normalizeSlotId = (slot: Record<string, any>): string | null => {
-  const id = typeof slot.$id === 'string' ? slot.$id : typeof slot.id === 'string' ? slot.id : '';
+  const id =
+    typeof slot.$id === "string"
+      ? slot.$id
+      : typeof slot.id === "string"
+        ? slot.id
+        : "";
   const trimmed = id.trim();
   return trimmed.length ? trimmed : null;
 };
@@ -660,67 +774,109 @@ const buildWeeklyOccurrenceCards = (
   slots: Array<Record<string, any>>,
   window: PublicEventDateWindow,
 ): PublicOrganizationEventCard[] => {
-  const eventType = String(parentRow.eventType ?? '').trim().toUpperCase();
-  const parentEventId = typeof parentRow.parentEvent === 'string' ? parentRow.parentEvent.trim() : '';
-  if (eventType !== 'WEEKLY_EVENT' || parentEventId || !slots.length) {
+  const eventType = String(parentRow.eventType ?? "")
+    .trim()
+    .toUpperCase();
+  const parentEventId =
+    typeof parentRow.parentEvent === "string"
+      ? parentRow.parentEvent.trim()
+      : "";
+  if (eventType !== "WEEKLY_EVENT" || parentEventId || !slots.length) {
     return [];
   }
 
   const expansionWindow = resolveWeeklyExpansionWindow(window);
-  const eventStart = startOfDay(new Date(parentCard.start));
-  const eventEnd = parentCard.end ? startOfDay(new Date(parentCard.end)) : null;
   const occurrences: PublicOrganizationEventCard[] = [];
 
   slots.forEach((slot) => {
+    if (occurrences.length >= DEFAULT_WEEKLY_OCCURRENCE_WEEKS * 7) {
+      return;
+    }
     const slotId = normalizeSlotId(slot);
-    const rawSlotStart = toIsoString(slot.startDate);
-    const slotStart = rawSlotStart ? startOfDay(new Date(rawSlotStart)) : null;
-    if (!slotId || !slotStart) {
+    if (!slotId) {
+      return;
+    }
+    const timeZone = typeof slot.timeZone === "string" ? slot.timeZone : "UTC";
+    const slotStartDate = getRepeatingTimeSlotLocalDate(
+      slot.startDate,
+      timeZone,
+    );
+    const expansionStartDate = getRepeatingTimeSlotLocalDate(
+      expansionWindow.start,
+      timeZone,
+    );
+    const expansionEndDate = expansionStartDate
+      ? window.end
+        ? getRepeatingTimeSlotLocalDate(expansionWindow.end, timeZone)
+        : addRepeatingTimeSlotLocalDays(
+            expansionStartDate,
+            DEFAULT_WEEKLY_OCCURRENCE_WEEKS * 7,
+          )
+      : null;
+    if (!slotStartDate || !expansionStartDate || !expansionEndDate) {
       return;
     }
 
-    const startMinutes = typeof slot.startTimeMinutes === 'number' ? slot.startTimeMinutes : null;
-    const endMinutes = typeof slot.endTimeMinutes === 'number' ? slot.endTimeMinutes : null;
+    const eventStartDate = getRepeatingTimeSlotLocalDate(
+      parentCard.start,
+      timeZone,
+    );
+    const eventEndDate = parentCard.end
+      ? getRepeatingTimeSlotLocalDate(parentCard.end, timeZone)
+      : null;
+    const slotEndDate = slot.endDate
+      ? getRepeatingTimeSlotLocalDate(slot.endDate, timeZone)
+      : null;
+    const slotEndExclusive = slotEndDate
+      ? addRepeatingTimeSlotLocalDays(slotEndDate, 1)
+      : null;
+    const eventEndExclusive = eventEndDate
+      ? addRepeatingTimeSlotLocalDays(eventEndDate, 1)
+      : null;
+    if ((slot.endDate && !slotEndDate) || (parentCard.end && !eventEndDate)) {
+      return;
+    }
+
+    const searchStartDate = [expansionStartDate, slotStartDate, eventStartDate]
+      .filter((date): date is string => Boolean(date))
+      .reduce((latest, date) => (date > latest ? date : latest));
+    const searchEndCandidates = [
+      expansionEndDate,
+      slotEndExclusive,
+      eventEndExclusive,
+    ].filter((date): date is string => Boolean(date));
+    const searchEndDate = searchEndCandidates.reduce((earliest, date) =>
+      date < earliest ? date : earliest,
+    );
+    if (searchEndDate <= searchStartDate) {
+      return;
+    }
+
+    const startMinutes =
+      typeof slot.startTimeMinutes === "number" ? slot.startTimeMinutes : null;
+    const endMinutes =
+      typeof slot.endTimeMinutes === "number" ? slot.endTimeMinutes : null;
     const weekdays = normalizeSlotWeekdays(slot);
     if (!weekdays.length || startMinutes === null || endMinutes === null) {
       return;
     }
 
-    const rawSlotEnd = toIsoString(slot.endDate);
-    const slotEnd = rawSlotEnd ? startOfDay(new Date(rawSlotEnd)) : null;
-    const searchStart = startOfDay(new Date(Math.max(
-      expansionWindow.start.getTime(),
-      slotStart.getTime(),
-      Number.isNaN(eventStart.getTime()) ? expansionWindow.start.getTime() : eventStart.getTime(),
-    )));
-    const searchEndCandidates = [
-      expansionWindow.end.getTime(),
-      ...(slotEnd ? [addDays(slotEnd, 1).getTime()] : []),
-      ...(eventEnd ? [addDays(eventEnd, 1).getTime()] : []),
-    ];
-    const searchEnd = startOfDay(new Date(Math.min(...searchEndCandidates)));
-    if (searchEnd.getTime() <= searchStart.getTime()) {
-      return;
-    }
-
-    for (
-      let occurrence = new Date(searchStart.getTime());
-      occurrence.getTime() < searchEnd.getTime() && occurrences.length < DEFAULT_WEEKLY_OCCURRENCE_WEEKS * 7;
-      occurrence = addDays(occurrence, 1)
-    ) {
-      if (!weekdays.includes(toMondayIndex(occurrence))) {
-        continue;
-      }
-
-      const occurrenceDate = toLocalIsoDate(occurrence);
-      let resolved: ResolvedRepeatingTimeSlot;
-      try {
-        resolved = resolveRepeatingTimeSlotOccurrence(slot, occurrenceDate);
-      } catch (error) {
-        if (error instanceof RepeatingTimeSlotValidationError) {
-          continue;
-        }
-        throw error;
+    const resolvedOccurrences = enumerateRepeatingTimeSlotOccurrences({
+      slot,
+      windowStart: new Date(
+        expansionWindow.start.getTime() - 2 * 24 * 60 * 60 * 1000,
+      ),
+      windowEnd: new Date(
+        expansionWindow.end.getTime() + 2 * 24 * 60 * 60 * 1000,
+      ),
+    });
+    resolvedOccurrences.forEach((resolved) => {
+      if (
+        occurrences.length >= DEFAULT_WEEKLY_OCCURRENCE_WEEKS * 7 ||
+        resolved.occurrenceDate < searchStartDate ||
+        resolved.occurrenceDate >= searchEndDate
+      ) {
+        return;
       }
       occurrences.push({
         ...parentCard,
@@ -734,45 +890,53 @@ const buildWeeklyOccurrenceCards = (
           resolved.occurrenceDate,
         ),
       });
-    }
+    });
   });
 
-  return occurrences.sort((left, right) => (
-    left.start.localeCompare(right.start)
-    || left.id.localeCompare(right.id)
-  ));
+  return occurrences.sort(
+    (left, right) =>
+      left.start.localeCompare(right.start) || left.id.localeCompare(right.id),
+  );
 };
 
-const publicOrgFromRow = (row: Record<string, any>): PublicOrganizationSummary => {
-  const slug = String(row.publicSlug ?? '').trim();
-  const name = String(row.name ?? 'Organization').trim() || 'Organization';
+const publicOrgFromRow = (
+  row: Record<string, any>,
+): PublicOrganizationSummary => {
+  const slug = String(row.publicSlug ?? "").trim();
+  const name = String(row.name ?? "Organization").trim() || "Organization";
   const ownership = getOrganizationOwnershipPresentation(row);
   return {
     id: String(row.id),
     slug,
     name,
-    description: typeof row.description === 'string' ? row.description : null,
-    location: typeof row.location === 'string' ? row.location : null,
-    website: typeof row.website === 'string' ? row.website : null,
+    description: typeof row.description === "string" ? row.description : null,
+    location: typeof row.location === "string" ? row.location : null,
+    website: typeof row.website === "string" ? row.website : null,
     logoUrl: imageUrl(row.logoId, 240, 240),
     sports: normalizeStringArray(row.sports),
-    brandPrimaryColor: typeof row.brandPrimaryColor === 'string' && row.brandPrimaryColor
-      ? row.brandPrimaryColor
-      : DEFAULT_PRIMARY_COLOR,
-    brandAccentColor: typeof row.brandAccentColor === 'string' && row.brandAccentColor
-      ? row.brandAccentColor
-      : DEFAULT_ACCENT_COLOR,
-    publicHeadline: typeof row.publicHeadline === 'string' && row.publicHeadline.trim()
-      ? row.publicHeadline.trim()
-      : `${name} on BracketIQ`,
-    publicIntroText: typeof row.publicIntroText === 'string' && row.publicIntroText.trim()
-      ? row.publicIntroText.trim()
-      : 'Find upcoming events, teams, rentals, and products.',
+    brandPrimaryColor:
+      typeof row.brandPrimaryColor === "string" && row.brandPrimaryColor
+        ? row.brandPrimaryColor
+        : DEFAULT_PRIMARY_COLOR,
+    brandAccentColor:
+      typeof row.brandAccentColor === "string" && row.brandAccentColor
+        ? row.brandAccentColor
+        : DEFAULT_ACCENT_COLOR,
+    publicHeadline:
+      typeof row.publicHeadline === "string" && row.publicHeadline.trim()
+        ? row.publicHeadline.trim()
+        : `${name} on BracketIQ`,
+    publicIntroText:
+      typeof row.publicIntroText === "string" && row.publicIntroText.trim()
+        ? row.publicIntroText.trim()
+        : "Find upcoming events, teams, rentals, and products.",
     publicPageEnabled: row.publicPageEnabled === true,
     publicWidgetsEnabled: row.publicWidgetsEnabled === true,
-    publicCompletionRedirectUrl: typeof row.publicCompletionRedirectUrl === 'string' && row.publicCompletionRedirectUrl.trim()
-      ? row.publicCompletionRedirectUrl.trim()
-      : null,
+    publicCompletionRedirectUrl:
+      typeof row.publicCompletionRedirectUrl === "string" &&
+      row.publicCompletionRedirectUrl.trim()
+        ? row.publicCompletionRedirectUrl.trim()
+        : null,
     ...ownership,
   };
 };
@@ -794,14 +958,18 @@ export const getPublicOrganizationBySlug = async (
   }
 
   const organization = publicOrgFromRow(row);
-  const surface = options.surface ?? 'page';
-  if (surface === 'page' && !organization.publicPageEnabled) {
+  const surface = options.surface ?? "page";
+  if (surface === "page" && !organization.publicPageEnabled) {
     return null;
   }
-  if (surface === 'widget' && !organization.publicWidgetsEnabled) {
+  if (surface === "widget" && !organization.publicWidgetsEnabled) {
     return null;
   }
-  if (surface === 'any' && !organization.publicPageEnabled && !organization.publicWidgetsEnabled) {
+  if (
+    surface === "any" &&
+    !organization.publicPageEnabled &&
+    !organization.publicWidgetsEnabled
+  ) {
     return null;
   }
   return organization;
@@ -831,7 +999,7 @@ export const getPublicOrganizationRedirectPath = async (
 
   const storedSlug = normalizeSlug(String(row.publicSlug ?? canonicalSlug));
   return requestedSlug !== storedSlug
-    ? `${buildPublicOrganizationPath(storedSlug)}${options.suffix ?? ''}`
+    ? `${buildPublicOrganizationPath(storedSlug)}${options.suffix ?? ""}`
     : null;
 };
 
@@ -854,7 +1022,9 @@ export const getDisabledPublicOrganizationRedirectPath = async (
   return `/organizations/${encodeURIComponent(String(row.id))}`;
 };
 
-const getSportsById = async (sportIds: string[]): Promise<Map<string, string>> => {
+const getSportsById = async (
+  sportIds: string[],
+): Promise<Map<string, string>> => {
   const unique = Array.from(new Set(sportIds.filter(Boolean)));
   if (!unique.length) {
     return new Map();
@@ -863,10 +1033,14 @@ const getSportsById = async (sportIds: string[]): Promise<Map<string, string>> =
     where: { id: { in: unique } },
     select: { id: true, name: true },
   });
-  return new Map(rows.map((row: { id: string; name: string }) => [row.id, row.name]));
+  return new Map(
+    rows.map((row: { id: string; name: string }) => [row.id, row.name]),
+  );
 };
 
-const getDivisionLabelsByEventId = async (events: Array<Record<string, any>>): Promise<Map<string, string[]>> => {
+const getDivisionLabelsByEventId = async (
+  events: Array<Record<string, any>>,
+): Promise<Map<string, string[]>> => {
   const eventIds = events.map((event) => String(event.id)).filter(Boolean);
   if (!eventIds.length) {
     return new Map();
@@ -874,11 +1048,11 @@ const getDivisionLabelsByEventId = async (events: Array<Record<string, any>>): P
   const rows = await (prisma as any).divisions.findMany({
     where: {
       eventId: { in: eventIds },
-      role: 'ENTRY',
-      status: 'ACTIVE',
+      role: "ENTRY",
+      status: "ACTIVE",
     },
     select: { eventId: true, id: true, key: true, name: true },
-    orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }, { id: "asc" }],
   });
   const rowsByEventId = new Map<string, Array<Record<string, string | null>>>();
   rows.forEach((row: Record<string, string | null>) => {
@@ -887,21 +1061,27 @@ const getDivisionLabelsByEventId = async (events: Array<Record<string, any>>): P
     rowsByEventId.set(String(row.eventId), eventRows);
   });
 
-  return new Map(events.map((event) => {
-    const divisionIds = normalizeIdList(event.divisions);
-    const eventRows = rowsByEventId.get(String(event.id)) ?? [];
-    const labels = divisionIds.length
-      ? divisionIds.map((divisionId) => {
-        const normalized = divisionId.toLowerCase();
-        const row = eventRows.find((candidate) => (
-          String(candidate.id ?? '').toLowerCase() === normalized
-          || String(candidate.key ?? '').toLowerCase() === normalized
-        ));
-        return row?.name || divisionId;
-      })
-      : eventRows.map((row) => row.name || row.key || row.id).filter(Boolean);
-    return [String(event.id), Array.from(new Set(labels.filter(Boolean).map(String)))] as const;
-  }));
+  return new Map(
+    events.map((event) => {
+      const divisionIds = normalizeIdList(event.divisions);
+      const eventRows = rowsByEventId.get(String(event.id)) ?? [];
+      const labels = divisionIds.length
+        ? divisionIds.map((divisionId) => {
+            const normalized = divisionId.toLowerCase();
+            const row = eventRows.find(
+              (candidate) =>
+                String(candidate.id ?? "").toLowerCase() === normalized ||
+                String(candidate.key ?? "").toLowerCase() === normalized,
+            );
+            return row?.name || divisionId;
+          })
+        : eventRows.map((row) => row.name || row.key || row.id).filter(Boolean);
+      return [
+        String(event.id),
+        Array.from(new Set(labels.filter(Boolean).map(String))),
+      ] as const;
+    }),
+  );
 };
 
 type PublicOrganizationEventListOptions = {
@@ -927,18 +1107,24 @@ const buildPublicOrganizationEventWhere = (
   const eventTypes = normalizePublicEventTypes(options.eventTypes);
   const eventIds = normalizePublicEventIds(options.eventIds);
   const dateWhere = getPublicEventDateWhere(
-    getPublicEventDateWindow(options.dateRule, options.dateFrom, options.dateTo),
+    getPublicEventDateWindow(
+      options.dateRule,
+      options.dateFrom,
+      options.dateTo,
+    ),
   );
   const andFilters = [
     eventIds.length === 0 ? dateWhere : null,
-    options.includeChildWeeklyEvents === false ? { eventType: { not: 'WEEKLY_EVENT' } } : null,
+    options.includeChildWeeklyEvents === false
+      ? { eventType: { not: "WEEKLY_EVENT" } }
+      : null,
   ].filter((filter): filter is Record<string, unknown> => Boolean(filter));
   return {
     organizationId: organization.id,
     archivedAt: null,
     ...(eventIds.length ? { id: { in: eventIds } } : {}),
     OR: PUBLIC_EVENT_STATES.map((state) => ({ state })),
-    NOT: { state: 'TEMPLATE' },
+    NOT: { state: "TEMPLATE" },
     ...(eventTypes.length ? { eventType: { in: eventTypes } } : {}),
     ...(andFilters.length ? { AND: andFilters } : {}),
   };
@@ -960,7 +1146,9 @@ const sortPublicOrganizationEventCards = (
     if (leftOrder !== rightOrder) {
       return leftOrder - rightOrder;
     }
-    return left.start.localeCompare(right.start) || left.id.localeCompare(right.id);
+    return (
+      left.start.localeCompare(right.start) || left.id.localeCompare(right.id)
+    );
   });
 };
 
@@ -976,44 +1164,61 @@ const mapPublicOrganizationEventCards = async (
   );
   const divisionLabelsByEventId = await getDivisionLabelsByEventId(events);
 
-  return events.map((event: Record<string, any>): PublicOrganizationEventCard => {
-    const eventType = String(event.eventType ?? 'EVENT').trim().toUpperCase();
-    return {
-      id: String(event.id),
-      name: String(event.name ?? 'Untitled event'),
-      description: typeof event.description === 'string' ? event.description : null,
-      start: toIsoString(event.start) ?? new Date().toISOString(),
-      end: toIsoString(event.end),
-      location: String(event.location ?? organization.location ?? 'Location TBD'),
-      eventType,
-      eventTypeLabel: formatPublicEventTypeLabel(eventType),
-      sportName: normalizeIdList(event.sportIds)[0]
-        ? sportsById.get(normalizeIdList(event.sportIds)[0]) ?? normalizeIdList(event.sportIds)[0]
-        : null,
-      sportNames: normalizeIdList(event.sportIds)
-        .map((sportId) => sportsById.get(sportId) ?? sportId),
-      priceCents: typeof event.price === 'number' ? event.price : 0,
-      imageUrl: typeof event.imageId === 'string' && event.imageId.trim().length > 0
-        ? imageUrl(event.imageId)
-        : organization.logoUrl,
-      divisionLabels: divisionLabelsByEventId.get(String(event.id)) ?? [],
-      detailsUrl: formatEventDetailsUrl(organization.slug, String(event.id)),
-    };
-  });
+  return events.map(
+    (event: Record<string, any>): PublicOrganizationEventCard => {
+      const eventType = String(event.eventType ?? "EVENT")
+        .trim()
+        .toUpperCase();
+      return {
+        id: String(event.id),
+        name: String(event.name ?? "Untitled event"),
+        description:
+          typeof event.description === "string" ? event.description : null,
+        start: toIsoString(event.start) ?? new Date().toISOString(),
+        end: toIsoString(event.end),
+        location: String(
+          event.location ?? organization.location ?? "Location TBD",
+        ),
+        eventType,
+        eventTypeLabel: formatPublicEventTypeLabel(eventType),
+        sportName: normalizeIdList(event.sportIds)[0]
+          ? (sportsById.get(normalizeIdList(event.sportIds)[0]) ??
+            normalizeIdList(event.sportIds)[0])
+          : null,
+        sportNames: normalizeIdList(event.sportIds).map(
+          (sportId) => sportsById.get(sportId) ?? sportId,
+        ),
+        priceCents: typeof event.price === "number" ? event.price : 0,
+        imageUrl:
+          typeof event.imageId === "string" && event.imageId.trim().length > 0
+            ? imageUrl(event.imageId)
+            : organization.logoUrl,
+        divisionLabels: divisionLabelsByEventId.get(String(event.id)) ?? [],
+        detailsUrl: formatEventDetailsUrl(organization.slug, String(event.id)),
+      };
+    },
+  );
 };
 
 const getWeeklyParentSlotRowsByEventId = async (
   events: Array<Record<string, any>>,
 ): Promise<Map<string, Array<Record<string, any>>>> => {
-  const slotIds = Array.from(new Set(
-    events
-      .filter((event) => {
-        const eventType = String(event.eventType ?? '').trim().toUpperCase();
-        const parentEventId = typeof event.parentEvent === 'string' ? event.parentEvent.trim() : '';
-        return eventType === 'WEEKLY_EVENT' && !parentEventId;
-      })
-      .flatMap((event) => normalizeIdList(event.timeSlotIds)),
-  ));
+  const slotIds = Array.from(
+    new Set(
+      events
+        .filter((event) => {
+          const eventType = String(event.eventType ?? "")
+            .trim()
+            .toUpperCase();
+          const parentEventId =
+            typeof event.parentEvent === "string"
+              ? event.parentEvent.trim()
+              : "";
+          return eventType === "WEEKLY_EVENT" && !parentEventId;
+        })
+        .flatMap((event) => normalizeIdList(event.timeSlotIds)),
+    ),
+  );
 
   if (!slotIds.length) {
     return new Map();
@@ -1022,7 +1227,9 @@ const getWeeklyParentSlotRowsByEventId = async (
   const rows = await (prisma as any).timeSlots.findMany({
     where: { id: { in: slotIds } },
   });
-  const slotById = new Map(rows.map((slot: Record<string, any>) => [String(slot.id), slot]));
+  const slotById = new Map(
+    rows.map((slot: Record<string, any>) => [String(slot.id), slot]),
+  );
   const slotsByEventId = new Map<string, Array<Record<string, any>>>();
   events.forEach((event) => {
     const eventId = String(event.id);
@@ -1044,7 +1251,11 @@ const mapAndExpandPublicOrganizationEventCards = async (
 ): Promise<PublicOrganizationEventCard[]> => {
   const cards = await mapPublicOrganizationEventCards(organization, events);
   if (options.includeChildWeeklyEvents === false) {
-    return cards.sort((left, right) => left.start.localeCompare(right.start) || left.id.localeCompare(right.id));
+    return cards.sort(
+      (left, right) =>
+        left.start.localeCompare(right.start) ||
+        left.id.localeCompare(right.id),
+    );
   }
 
   const slotsByEventId = await getWeeklyParentSlotRowsByEventId(events);
@@ -1054,14 +1265,17 @@ const mapAndExpandPublicOrganizationEventCards = async (
 
   events.forEach((event) => {
     const eventId = String(event.id);
-    const eventType = String(event.eventType ?? '').trim().toUpperCase();
-    const parentEventId = typeof event.parentEvent === 'string' ? event.parentEvent.trim() : '';
+    const eventType = String(event.eventType ?? "")
+      .trim()
+      .toUpperCase();
+    const parentEventId =
+      typeof event.parentEvent === "string" ? event.parentEvent.trim() : "";
     const card = cardByEventId.get(eventId);
     if (!card) {
       return;
     }
 
-    if (eventType === 'WEEKLY_EVENT' && !parentEventId) {
+    if (eventType === "WEEKLY_EVENT" && !parentEventId) {
       const occurrenceCards = buildWeeklyOccurrenceCards(
         organization,
         card,
@@ -1071,7 +1285,7 @@ const mapAndExpandPublicOrganizationEventCards = async (
       );
       if (occurrenceCards.length) {
         occurrenceCards.forEach((occurrenceCard) => {
-          const occurrenceKey = `${eventId}:${occurrenceCard.start}:${occurrenceCard.end ?? ''}`;
+          const occurrenceKey = `${eventId}:${occurrenceCard.start}:${occurrenceCard.end ?? ""}`;
           generatedOccurrenceKeys.add(occurrenceKey);
           expanded.push(occurrenceCard);
         });
@@ -1079,8 +1293,8 @@ const mapAndExpandPublicOrganizationEventCards = async (
       }
     }
 
-    if (eventType === 'WEEKLY_EVENT' && parentEventId) {
-      const occurrenceKey = `${parentEventId}:${card.start}:${card.end ?? ''}`;
+    if (eventType === "WEEKLY_EVENT" && parentEventId) {
+      const occurrenceKey = `${parentEventId}:${card.start}:${card.end ?? ""}`;
       if (generatedOccurrenceKeys.has(occurrenceKey)) {
         return;
       }
@@ -1089,7 +1303,10 @@ const mapAndExpandPublicOrganizationEventCards = async (
     expanded.push(card);
   });
 
-  return expanded.sort((left, right) => left.start.localeCompare(right.start) || left.id.localeCompare(right.id));
+  return expanded.sort(
+    (left, right) =>
+      left.start.localeCompare(right.start) || left.id.localeCompare(right.id),
+  );
 };
 
 export const listPublicOrganizationEvents = async (
@@ -1097,15 +1314,24 @@ export const listPublicOrganizationEvents = async (
   options: PublicOrganizationEventListOptions = {},
 ): Promise<PublicOrganizationEventCard[]> => {
   const limit = normalizeLimit(options.limit);
-  const dateWindow = getPublicEventDateWindow(options.dateRule, options.dateFrom, options.dateTo);
+  const dateWindow = getPublicEventDateWindow(
+    options.dateRule,
+    options.dateFrom,
+    options.dateTo,
+  );
   const events = await (prisma as any).events.findMany({
     where: buildPublicOrganizationEventWhere(organization, options),
-    orderBy: { start: 'asc' },
+    orderBy: { start: "asc" },
     take: Math.max(PUBLIC_EVENT_QUERY_CAP, limit),
   });
 
   const cards = sortPublicOrganizationEventCards(
-    await mapAndExpandPublicOrganizationEventCards(organization, events, options, dateWindow),
+    await mapAndExpandPublicOrganizationEventCards(
+      organization,
+      events,
+      options,
+      dateWindow,
+    ),
     options.eventIds,
   );
   return cards.slice(0, limit);
@@ -1114,18 +1340,30 @@ export const listPublicOrganizationEvents = async (
 export const listPublicOrganizationEventPage = async (
   organization: PublicOrganizationSummary,
   options: PublicOrganizationEventListOptions & { page?: number } = {},
-): Promise<{ events: PublicOrganizationEventCard[]; pageInfo: PublicPaginationInfo }> => {
+): Promise<{
+  events: PublicOrganizationEventCard[];
+  pageInfo: PublicPaginationInfo;
+}> => {
   const limit = normalizeLimit(options.limit);
   const page = normalizePage(options.page);
   const offset = (page - 1) * limit;
-  const dateWindow = getPublicEventDateWindow(options.dateRule, options.dateFrom, options.dateTo);
+  const dateWindow = getPublicEventDateWindow(
+    options.dateRule,
+    options.dateFrom,
+    options.dateTo,
+  );
   const rows = await (prisma as any).events.findMany({
     where: buildPublicOrganizationEventWhere(organization, options),
-    orderBy: { start: 'asc' },
+    orderBy: { start: "asc" },
     take: Math.max(PUBLIC_EVENT_QUERY_CAP, offset + limit + 1),
   });
   const expandedRows = sortPublicOrganizationEventCards(
-    await mapAndExpandPublicOrganizationEventCards(organization, rows, options, dateWindow),
+    await mapAndExpandPublicOrganizationEventCards(
+      organization,
+      rows,
+      options,
+      dateWindow,
+    ),
     options.eventIds,
   );
   const pageRows = expandedRows.slice(offset, offset + limit + 1);
@@ -1154,23 +1392,30 @@ export const listPublicOrganizationTeams = async (
       visibility: PUBLIC_TEAM_VISIBILITY,
       ...(options.openRegistrationOnly ? { openRegistration: true } : {}),
     },
-    orderBy: [{ openRegistration: 'desc' }, { name: 'asc' }],
+    orderBy: [{ openRegistration: "desc" }, { name: "asc" }],
     take: normalizeLimit(options.limit),
   });
-  const occupancyByTeamId = await getPublicTeamOccupancyByTeamId(rows.map((row: Record<string, any>) => String(row.id)));
+  const occupancyByTeamId = await getPublicTeamOccupancyByTeamId(
+    rows.map((row: Record<string, any>) => String(row.id)),
+  );
   return rows.map((team: Record<string, any>): PublicOrganizationTeamCard => {
     const affiliateUrl = normalizeExternalHttpUrl(team.affiliateUrl)
-      ? buildAffiliateOutboundUrl('team', String(team.id))
+      ? buildAffiliateOutboundUrl("team", String(team.id))
       : null;
     const teamSize = normalizeNumber(team.teamSize);
     const currentSize = occupancyByTeamId.get(String(team.id)) ?? 0;
     const isFull = teamSize > 0 && currentSize >= teamSize;
     return {
-      joinPolicy: typeof team.joinPolicy === 'string' ? team.joinPolicy : (team.openRegistration ? 'OPEN_REGISTRATION' : 'CLOSED'),
+      joinPolicy:
+        typeof team.joinPolicy === "string"
+          ? team.joinPolicy
+          : team.openRegistration
+            ? "OPEN_REGISTRATION"
+            : "CLOSED",
       id: String(team.id),
-      name: String(team.name ?? 'Unnamed team'),
-      sport: typeof team.sport === 'string' ? team.sport : null,
-      division: typeof team.division === 'string' ? team.division : null,
+      name: String(team.name ?? "Unnamed team"),
+      sport: typeof team.sport === "string" ? team.sport : null,
+      division: typeof team.division === "string" ? team.division : null,
       imageUrl: imageUrl(team.profileImageId, 240, 240),
       currentSize,
       teamSize,
@@ -1179,12 +1424,13 @@ export const listPublicOrganizationTeams = async (
       registrationPriceCents: normalizePriceCents(team.registrationPriceCents),
       affiliateUrl,
       requiredTemplateIds: normalizeIdList(team.requiredTemplateIds),
-      registrationUrl: affiliateUrl ?? (
-        (team.openRegistration || String(team.joinPolicy ?? '').toUpperCase() === 'REQUEST_TO_JOIN')
-        && !isFull
+      registrationUrl:
+        affiliateUrl ??
+        ((team.openRegistration ||
+          String(team.joinPolicy ?? "").toUpperCase() === "REQUEST_TO_JOIN") &&
+        !isFull
           ? formatTeamRegistrationUrl(organization.slug, String(team.id))
-          : null
-      ),
+          : null),
     };
   });
 };
@@ -1192,23 +1438,28 @@ export const listPublicOrganizationTeams = async (
 const mapPublicTeamCard = (
   team: Record<string, any>,
   currentSize: number,
-): PublicOrganizationTeamRegistrationData['team'] => {
+): PublicOrganizationTeamRegistrationData["team"] => {
   const teamSize = normalizeNumber(team.teamSize);
   const isFull = teamSize > 0 && currentSize >= teamSize;
   return {
     id: String(team.id),
-    name: String(team.name ?? 'Unnamed team'),
-    sport: typeof team.sport === 'string' ? team.sport : null,
-    division: typeof team.division === 'string' ? team.division : null,
+    name: String(team.name ?? "Unnamed team"),
+    sport: typeof team.sport === "string" ? team.sport : null,
+    division: typeof team.division === "string" ? team.division : null,
     imageUrl: imageUrl(team.profileImageId, 640, 360),
     currentSize,
     teamSize,
     isFull,
     openRegistration: Boolean(team.openRegistration),
-    joinPolicy: typeof team.joinPolicy === 'string' ? team.joinPolicy : (team.openRegistration ? 'OPEN_REGISTRATION' : 'CLOSED'),
+    joinPolicy:
+      typeof team.joinPolicy === "string"
+        ? team.joinPolicy
+        : team.openRegistration
+          ? "OPEN_REGISTRATION"
+          : "CLOSED",
     registrationPriceCents: normalizePriceCents(team.registrationPriceCents),
     affiliateUrl: normalizeExternalHttpUrl(team.affiliateUrl)
-      ? buildAffiliateOutboundUrl('team', String(team.id))
+      ? buildAffiliateOutboundUrl("team", String(team.id))
       : null,
     requiredTemplateIds: normalizeIdList(team.requiredTemplateIds),
   };
@@ -1217,11 +1468,11 @@ const mapPublicTeamCard = (
 const buildPublicProductPurchaseModeWhere = (
   purchaseMode: PublicProductPurchaseMode,
 ): Record<string, unknown> => {
-  if (purchaseMode === 'single') {
-    return { period: 'SINGLE' };
+  if (purchaseMode === "single") {
+    return { period: "SINGLE" };
   }
-  if (purchaseMode === 'subscription') {
-    return { period: { in: ['WEEK', 'MONTH', 'YEAR'] } };
+  if (purchaseMode === "subscription") {
+    return { period: { in: ["WEEK", "MONTH", "YEAR"] } };
   }
   return {};
 };
@@ -1237,17 +1488,20 @@ export const listPublicOrganizationProducts = async (
       OR: [{ isActive: true }, { isActive: null }],
       ...buildPublicProductPurchaseModeWhere(purchaseMode),
     },
-    orderBy: { createdAt: 'desc' },
+    orderBy: { createdAt: "desc" },
     take: normalizeLimit(options.limit),
   });
-  return rows.map((product: Record<string, any>): PublicOrganizationProductCard => ({
-    id: String(product.id),
-    name: String(product.name ?? 'Product'),
-    description: typeof product.description === 'string' ? product.description : null,
-    priceCents: normalizePriceCents(product.priceCents),
-    period: normalizeProductPeriodForClient(product.period),
-    detailsUrl: `${buildPublicOrganizationPath(organization.slug)}/products/${encodeURIComponent(String(product.id))}`,
-  }));
+  return rows.map(
+    (product: Record<string, any>): PublicOrganizationProductCard => ({
+      id: String(product.id),
+      name: String(product.name ?? "Product"),
+      description:
+        typeof product.description === "string" ? product.description : null,
+      priceCents: normalizePriceCents(product.priceCents),
+      period: normalizeProductPeriodForClient(product.period),
+      detailsUrl: `${buildPublicOrganizationPath(organization.slug)}/products/${encodeURIComponent(String(product.id))}`,
+    }),
+  );
 };
 
 export const listPublicOrganizationDivisions = async (
@@ -1257,25 +1511,30 @@ export const listPublicOrganizationDivisions = async (
     where: {
       organizationId: organization.id,
       eventId: null,
-      scope: 'ORGANIZATION',
-      status: 'ACTIVE',
+      scope: "ORGANIZATION",
+      status: "ACTIVE",
     },
-    orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }, { id: "asc" }],
   });
-  return rows.map((row: Record<string, any>): PublicOrganizationDivisionCard => {
-    const view = organizationDivisionView(row);
-    return {
-      id: String(view.id),
-      name: String(view.name || 'Division'),
-      divisionTypeName: typeof view.divisionTypeName === 'string' && view.divisionTypeName.trim()
-        ? view.divisionTypeName.trim()
-        : null,
-      description: typeof view.description === 'string' && view.description.trim()
-        ? view.description.trim()
-        : null,
-      registrationUrl: normalizeExternalHttpUrl(view.registrationUrl),
-    };
-  });
+  return rows.map(
+    (row: Record<string, any>): PublicOrganizationDivisionCard => {
+      const view = organizationDivisionView(row);
+      return {
+        id: String(view.id),
+        name: String(view.name || "Division"),
+        divisionTypeName:
+          typeof view.divisionTypeName === "string" &&
+          view.divisionTypeName.trim()
+            ? view.divisionTypeName.trim()
+            : null,
+        description:
+          typeof view.description === "string" && view.description.trim()
+            ? view.description.trim()
+            : null,
+        registrationUrl: normalizeExternalHttpUrl(view.registrationUrl),
+      };
+    },
+  );
 };
 
 export const listPublicOrganizationRentals = async (
@@ -1284,12 +1543,14 @@ export const listPublicOrganizationRentals = async (
 ): Promise<PublicOrganizationRentalCard[]> => {
   const fieldRows = await (prisma as any).fields.findMany({
     where: { organizationId: organization.id },
-    orderBy: [{ createdAt: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+    orderBy: [{ createdAt: "asc" }, { name: "asc" }, { id: "asc" }],
   });
   const fields = await attachFacilitiesToFieldRows(fieldRows);
   const fieldBySlotId = new Map<string, Record<string, any>>();
   fields.forEach((field: Record<string, any>) => {
-    normalizeIdList(field.rentalSlotIds).forEach((slotId) => fieldBySlotId.set(slotId, field));
+    normalizeIdList(field.rentalSlotIds).forEach((slotId) =>
+      fieldBySlotId.set(slotId, field),
+    );
   });
   const slotIds = Array.from(fieldBySlotId.keys());
   if (!slotIds.length) {
@@ -1300,32 +1561,44 @@ export const listPublicOrganizationRentals = async (
       id: { in: slotIds },
       price: { not: null },
     },
-    orderBy: { startDate: 'asc' },
+    orderBy: { startDate: "asc" },
     take: normalizeLimit(options.limit),
   });
-  return slots.map((slot: Record<string, any>): PublicOrganizationRentalCard => {
-    const field = fieldBySlotId.get(String(slot.id)) ?? {};
-    const facility = field.facility && typeof field.facility === 'object'
-      ? field.facility as Record<string, any>
-      : null;
-    const facilityLocation = normalizeNullableString(facility?.location) ?? normalizeNullableString(facility?.address) ?? null;
-    return {
-      id: String(slot.id),
-      fieldId: String(field.id ?? ''),
-      fieldName: getFieldDisplayName(
-        { id: String(field.id ?? ''), name: normalizeNullableString(field.name) ?? '' },
-        'Rental field',
-      ),
-      facilityId: normalizeNullableString(facility?.id) ?? normalizeNullableString(field.facilityId) ?? null,
-      facilityName: normalizeNullableString(facility?.name) ?? null,
-      facilityLocation,
-      location: getFieldResolvedLocation(field, organization.location),
-      priceCents: typeof slot.price === 'number' ? slot.price : 0,
-      start: toIsoString(slot.startDate),
-      end: toIsoString(slot.endDate),
-      detailsUrl: `${buildPublicOrganizationPath(organization.slug)}/rentals`,
-    };
-  });
+  return slots.map(
+    (slot: Record<string, any>): PublicOrganizationRentalCard => {
+      const field = fieldBySlotId.get(String(slot.id)) ?? {};
+      const facility =
+        field.facility && typeof field.facility === "object"
+          ? (field.facility as Record<string, any>)
+          : null;
+      const facilityLocation =
+        normalizeNullableString(facility?.location) ??
+        normalizeNullableString(facility?.address) ??
+        null;
+      return {
+        id: String(slot.id),
+        fieldId: String(field.id ?? ""),
+        fieldName: getFieldDisplayName(
+          {
+            id: String(field.id ?? ""),
+            name: normalizeNullableString(field.name) ?? "",
+          },
+          "Rental field",
+        ),
+        facilityId:
+          normalizeNullableString(facility?.id) ??
+          normalizeNullableString(field.facilityId) ??
+          null,
+        facilityName: normalizeNullableString(facility?.name) ?? null,
+        facilityLocation,
+        location: getFieldResolvedLocation(field, organization.location),
+        priceCents: typeof slot.price === "number" ? slot.price : 0,
+        start: toIsoString(slot.startDate),
+        end: toIsoString(slot.endDate),
+        detailsUrl: `${buildPublicOrganizationPath(organization.slug)}/rentals`,
+      };
+    },
+  );
 };
 
 export const getPublicOrganizationRentalSelectionData = async (
@@ -1349,24 +1622,35 @@ export const getPublicOrganizationRentalSelectionData = async (
 
   const rawFieldRows = await (prisma as any).fields.findMany({
     where: { organizationId: organization.id },
-    orderBy: [{ createdAt: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+    orderBy: [{ createdAt: "asc" }, { name: "asc" }, { id: "asc" }],
   });
   const fieldRows = await attachFacilitiesToFieldRows(rawFieldRows);
-  const slotIds = Array.from(new Set(fieldRows.flatMap((field: Record<string, any>) => normalizeIdList(field.rentalSlotIds))));
+  const slotIds = Array.from(
+    new Set(
+      fieldRows.flatMap((field: Record<string, any>) =>
+        normalizeIdList(field.rentalSlotIds),
+      ),
+    ),
+  );
   const slotRows = slotIds.length
     ? await (prisma as any).timeSlots.findMany({
         where: {
           id: { in: slotIds },
           price: { not: null },
         },
-        orderBy: { startDate: 'asc' },
+        orderBy: { startDate: "asc" },
       })
     : [];
   const rentalSlotsById = new Map<string, TimeSlot>(
-    slotRows.map((slot: Record<string, any>) => [String(slot.id), toClientTimeSlot(slot)]),
+    slotRows.map((slot: Record<string, any>) => [
+      String(slot.id),
+      toClientTimeSlot(slot),
+    ]),
   );
   const fields = fieldRows
-    .map((field: Record<string, any>) => toClientField(field, rentalSlotsById, organization.location))
+    .map((field: Record<string, any>) =>
+      toClientField(field, rentalSlotsById, organization.location),
+    )
     .filter((field: Field) => (field.rentalSlots ?? []).length > 0);
 
   return {
@@ -1380,7 +1664,10 @@ export const getPublicOrganizationRentalSelectionData = async (
       location: organization.location ?? undefined,
       address: normalizeNullableString(row.address),
       coordinates: normalizeCoordinates(row.coordinates),
-      hasStripeAccount: typeof row.hasStripeAccount === 'boolean' ? row.hasStripeAccount : undefined,
+      hasStripeAccount:
+        typeof row.hasStripeAccount === "boolean"
+          ? row.hasStripeAccount
+          : undefined,
       verificationStatus: row.verificationStatus,
       publicSlug: organization.slug,
       publicPageEnabled: organization.publicPageEnabled,
@@ -1403,7 +1690,9 @@ export const getPublicOrganizationProductForCheckout = async (
   slug: string,
   productId: string,
 ): Promise<PublicOrganizationProductCheckoutData | null> => {
-  const organization = await getPublicOrganizationBySlug(slug, { surface: 'page' });
+  const organization = await getPublicOrganizationBySlug(slug, {
+    surface: "page",
+  });
   if (!organization) {
     return null;
   }
@@ -1423,7 +1712,7 @@ export const getPublicOrganizationProductForCheckout = async (
     product: {
       $id: String(product.id),
       organizationId: String(product.organizationId),
-      name: String(product.name ?? 'Product'),
+      name: String(product.name ?? "Product"),
       description: normalizeNullableString(product.description),
       priceCents: normalizeNumber(product.priceCents),
       period,
@@ -1466,20 +1755,24 @@ const loadPublicSchedulableEvent = async (
     return null;
   }
 
-  const eventState = String(eventAccess.state ?? '').trim().toUpperCase();
-  if (eventState && eventState !== 'PUBLISHED') {
+  const eventState = String(eventAccess.state ?? "")
+    .trim()
+    .toUpperCase();
+  if (eventState && eventState !== "PUBLISHED") {
     return null;
   }
 
-  const eventType = String(eventAccess.eventType ?? '').trim().toUpperCase();
-  if (!['LEAGUE', 'TOURNAMENT'].includes(eventType)) {
+  const eventType = String(eventAccess.eventType ?? "")
+    .trim()
+    .toUpperCase();
+  if (!["LEAGUE", "TOURNAMENT"].includes(eventType)) {
     return null;
   }
 
   try {
     return await loadEventWithRelations(eventId);
   } catch (error) {
-    console.error('Failed to load public schedulable event', error);
+    console.error("Failed to load public schedulable event", error);
     return null;
   }
 };
@@ -1488,7 +1781,9 @@ export const getPublicStandingsWidgetPage = async (
   slug: string,
   options: PublicWidgetEventSelectionOptions = {},
 ): Promise<PublicStandingsWidgetPage | null> => {
-  const organization = await getPublicOrganizationBySlug(slug, { surface: 'widget' });
+  const organization = await getPublicOrganizationBySlug(slug, {
+    surface: "widget",
+  });
   if (!organization) {
     return null;
   }
@@ -1497,7 +1792,7 @@ export const getPublicStandingsWidgetPage = async (
     limit: 1,
     page: options.page,
     dateRule: options.dateRule,
-    eventTypes: ['LEAGUE'],
+    eventTypes: ["LEAGUE"],
     eventIds: options.eventIds,
   });
   const currentEvent = eventPage.events[0] ?? null;
@@ -1513,7 +1808,10 @@ export const getPublicStandingsWidgetPage = async (
     };
   }
 
-  const loadedEvent = await loadPublicSchedulableEvent(organization, currentEvent.id);
+  const loadedEvent = await loadPublicSchedulableEvent(
+    organization,
+    currentEvent.id,
+  );
   const league = loadedEvent ? toLeagueEvent(loadedEvent) : null;
   if (!league) {
     return {
@@ -1546,8 +1844,10 @@ export const getPublicStandingsWidgetPage = async (
     };
   }
 
-  const selectedDivisionId: string = divisionOptions.some((option) => option.value === options.divisionId)
-    ? options.divisionId as string
+  const selectedDivisionId: string = divisionOptions.some(
+    (option) => option.value === options.divisionId,
+  )
+    ? (options.divisionId as string)
     : divisionOptions[0].value;
 
   return {
@@ -1556,7 +1856,9 @@ export const getPublicStandingsWidgetPage = async (
     currentEvent,
     divisionOptions,
     selectedDivisionId,
-    selectedDivisionName: divisionOptions.find((option) => option.value === selectedDivisionId)?.label ?? null,
+    selectedDivisionName:
+      divisionOptions.find((option) => option.value === selectedDivisionId)
+        ?.label ?? null,
     division: buildDivisionStandingsResponse(league, selectedDivisionId),
   };
 };
@@ -1564,32 +1866,37 @@ export const getPublicStandingsWidgetPage = async (
 const getBracketCapableEventCards = async (
   organization: PublicOrganizationSummary,
   options: PublicWidgetEventSelectionOptions = {},
-): Promise<{ events: PublicOrganizationEventCard[]; pageInfo: PublicPaginationInfo }> => {
+): Promise<{
+  events: PublicOrganizationEventCard[];
+  pageInfo: PublicPaginationInfo;
+}> => {
   const page = normalizePage(options.page);
   const rows = await (prisma as any).events.findMany({
     where: buildPublicOrganizationEventWhere(organization, {
-      eventTypes: ['LEAGUE', 'TOURNAMENT'],
+      eventTypes: ["LEAGUE", "TOURNAMENT"],
       dateRule: options.dateRule,
       eventIds: options.eventIds,
     }),
-    orderBy: { start: 'asc' },
+    orderBy: { start: "asc" },
     take: PUBLIC_EVENT_QUERY_CAP,
   });
 
-  const eventIds = rows.map((row: Record<string, any>) => String(row.id)).filter(Boolean);
+  const eventIds = rows
+    .map((row: Record<string, any>) => String(row.id))
+    .filter(Boolean);
   const [playoffDivisionRows, bracketMatchRows] = await Promise.all([
     eventIds.length
       ? (prisma as any).divisions.findMany({
           where: {
             eventId: { in: eventIds },
-            role: 'PHASE',
-            status: 'ACTIVE',
-            kind: 'PLAYOFF',
+            role: "PHASE",
+            status: "ACTIVE",
+            kind: "PLAYOFF",
           },
           select: { eventId: true },
         })
       : Promise.resolve([]),
-    eventIds.length && typeof (prisma as any).matches?.findMany === 'function'
+    eventIds.length && typeof (prisma as any).matches?.findMany === "function"
       ? (prisma as any).matches.findMany({
           where: {
             eventId: { in: eventIds },
@@ -1607,20 +1914,22 @@ const getBracketCapableEventCards = async (
 
   const bracketEventIds = new Set<string>();
   playoffDivisionRows.forEach((row: { eventId?: string | null }) => {
-    if (typeof row.eventId === 'string' && row.eventId.trim().length > 0) {
+    if (typeof row.eventId === "string" && row.eventId.trim().length > 0) {
       bracketEventIds.add(row.eventId);
     }
   });
   bracketMatchRows.forEach((row: { eventId?: string | null }) => {
-    if (typeof row.eventId === 'string' && row.eventId.trim().length > 0) {
+    if (typeof row.eventId === "string" && row.eventId.trim().length > 0) {
       bracketEventIds.add(row.eventId);
     }
   });
 
   const eligibleRows = rows.filter((row: Record<string, any>) => {
     const eventId = String(row.id);
-    const eventType = String(row.eventType ?? '').trim().toUpperCase();
-    return eventType === 'TOURNAMENT' || bracketEventIds.has(eventId);
+    const eventType = String(row.eventType ?? "")
+      .trim()
+      .toUpperCase();
+    return eventType === "TOURNAMENT" || bracketEventIds.has(eventId);
   });
 
   const cards = sortPublicOrganizationEventCards(
@@ -1628,7 +1937,7 @@ const getBracketCapableEventCards = async (
       organization,
       eligibleRows,
       {
-        eventTypes: ['LEAGUE', 'TOURNAMENT'],
+        eventTypes: ["LEAGUE", "TOURNAMENT"],
         dateRule: options.dateRule,
         eventIds: options.eventIds,
       },
@@ -1655,7 +1964,9 @@ export const getPublicBracketWidgetPage = async (
   slug: string,
   options: PublicWidgetEventSelectionOptions = {},
 ): Promise<PublicBracketWidgetPage | null> => {
-  const organization = await getPublicOrganizationBySlug(slug, { surface: 'widget' });
+  const organization = await getPublicOrganizationBySlug(slug, {
+    surface: "widget",
+  });
   if (!organization) {
     return null;
   }
@@ -1676,7 +1987,10 @@ export const getPublicBracketWidgetPage = async (
     };
   }
 
-  const loadedEvent = await loadPublicSchedulableEvent(organization, currentEvent.id);
+  const loadedEvent = await loadPublicSchedulableEvent(
+    organization,
+    currentEvent.id,
+  );
   if (!loadedEvent) {
     return {
       organization,
@@ -1691,7 +2005,10 @@ export const getPublicBracketWidgetPage = async (
     };
   }
 
-  const bracketView = buildPublicBracketWidgetView(loadedEvent, options.divisionId);
+  const bracketView = buildPublicBracketWidgetView(
+    loadedEvent,
+    options.divisionId,
+  );
   return {
     organization,
     eventPageInfo: eventPage.pageInfo,
@@ -1721,7 +2038,9 @@ export const getPublicOrganizationCatalog = async (
     eventIds?: string[];
   } = {},
 ): Promise<PublicOrganizationCatalog | null> => {
-  const organization = await getPublicOrganizationBySlug(slug, { surface: options.surface ?? 'page' });
+  const organization = await getPublicOrganizationBySlug(slug, {
+    surface: options.surface ?? "page",
+  });
   if (!organization) {
     return null;
   }
@@ -1762,7 +2081,9 @@ export const getPublicOrganizationTeamForRegistration = async (
   slug: string,
   teamId: string,
 ): Promise<PublicOrganizationTeamRegistrationData | null> => {
-  const organization = await getPublicOrganizationBySlug(slug, { surface: 'page' });
+  const organization = await getPublicOrganizationBySlug(slug, {
+    surface: "page",
+  });
   if (!organization) {
     return null;
   }
@@ -1770,17 +2091,17 @@ export const getPublicOrganizationTeamForRegistration = async (
     where: {
       id: teamId,
       organizationId: organization.id,
-      OR: [
-        { openRegistration: true },
-        { joinPolicy: 'REQUEST_TO_JOIN' },
-      ],
+      OR: [{ openRegistration: true }, { joinPolicy: "REQUEST_TO_JOIN" }],
       visibility: PUBLIC_TEAM_VISIBILITY,
     },
   });
   if (!team) {
     return null;
   }
-  const currentSize = (await getPublicTeamOccupancyByTeamId([String(team.id)])).get(String(team.id)) ?? 0;
+  const currentSize =
+    (await getPublicTeamOccupancyByTeamId([String(team.id)])).get(
+      String(team.id),
+    ) ?? 0;
 
   return {
     organization,
@@ -1791,39 +2112,63 @@ export const getPublicOrganizationTeamForRegistration = async (
 export const getPublicOrganizationEventForRegistration = async (
   slug: string,
   eventId: string,
-): Promise<{ organization: PublicOrganizationSummary; event: Record<string, any> } | null> => {
-  const organization = await getPublicOrganizationBySlug(slug, { surface: 'page' });
+): Promise<{
+  organization: PublicOrganizationSummary;
+  event: Record<string, any>;
+} | null> => {
+  const organization = await getPublicOrganizationBySlug(slug, {
+    surface: "page",
+  });
   if (!organization) {
     return null;
   }
-  const event = await (prisma as any).events.findUnique({ where: { id: eventId } });
+  const event = await (prisma as any).events.findUnique({
+    where: { id: eventId },
+  });
   if (!event || event.organizationId !== organization.id) {
     return null;
   }
-  const eventState = String(event.state ?? '').toUpperCase();
-  if (eventState && eventState !== 'PUBLISHED') {
+  const eventState = String(event.state ?? "").toUpperCase();
+  if (eventState && eventState !== "PUBLISHED") {
     return null;
   }
 
   const participantIds = await getEventParticipantIdsForEvent(eventId, prisma);
   const teamIds = participantIds.teamIds;
-  const [sport, divisionDetails, playoffDivisionDetails, fields, timeSlots, teams, officialIds] = await Promise.all([
-    typeof event.sportIds?.[0] === 'string'
+  const [
+    sport,
+    divisionDetails,
+    playoffDivisionDetails,
+    fields,
+    timeSlots,
+    teams,
+    officialIds,
+  ] = await Promise.all([
+    typeof event.sportIds?.[0] === "string"
       ? (prisma as any).sports.findUnique({ where: { id: event.sportIds[0] } })
       : Promise.resolve(null),
     (prisma as any).divisions.findMany({
-      where: { eventId, role: 'ENTRY', status: 'ACTIVE', kind: { not: 'PLAYOFF' } },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+      where: {
+        eventId,
+        role: "ENTRY",
+        status: "ACTIVE",
+        kind: { not: "PLAYOFF" },
+      },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }, { id: "asc" }],
     }),
     (prisma as any).divisions.findMany({
-      where: { eventId, role: 'PHASE', status: 'ACTIVE', kind: 'PLAYOFF' },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+      where: { eventId, role: "PHASE", status: "ACTIVE", kind: "PLAYOFF" },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }, { id: "asc" }],
     }),
     normalizeIdList(event.fieldIds).length
-      ? (prisma as any).fields.findMany({ where: { id: { in: normalizeIdList(event.fieldIds) } } })
+      ? (prisma as any).fields.findMany({
+          where: { id: { in: normalizeIdList(event.fieldIds) } },
+        })
       : Promise.resolve([]),
     normalizeIdList(event.timeSlotIds).length
-      ? (prisma as any).timeSlots.findMany({ where: { id: { in: normalizeIdList(event.timeSlotIds) } } })
+      ? (prisma as any).timeSlots.findMany({
+          where: { id: { in: normalizeIdList(event.timeSlotIds) } },
+        })
       : Promise.resolve([]),
     teamIds.length
       ? (prisma as any).teams.findMany({ where: { id: { in: teamIds } } })
@@ -1833,48 +2178,64 @@ export const getPublicOrganizationEventForRegistration = async (
 
   return {
     organization,
-    event: protectAffiliateRow({
-      ...event,
-      $id: event.id,
-      $createdAt: toIsoString(event.createdAt) ?? '',
-      $updatedAt: toIsoString(event.updatedAt) ?? '',
-      start: toIsoString(event.start) ?? new Date().toISOString(),
-      end: toIsoString(event.end),
-      state: 'PUBLISHED',
-      userIds: participantIds.userIds,
-      teamIds,
-      waitListIds: participantIds.waitListIds,
-      freeAgentIds: participantIds.freeAgentIds,
-      officialIds,
-      divisions: divisionDetails.map((row: Record<string, any>) => row.id).filter(Boolean),
-      sport: sport ? { ...sport, $id: sport.id } : undefined,
-      organization: {
-        $id: organization.id,
-        name: organization.name,
-        logoUrl: organization.logoUrl,
-        originType: organization.originType,
-        ownershipStatus: organization.ownershipStatus,
-        claimVerificationLevel: organization.claimVerificationLevel,
-        claimable: organization.claimable,
-        claimUrl: organization.claimUrl,
-        ownershipAction: organization.ownershipAction,
+    event: protectAffiliateRow(
+      {
+        ...event,
+        $id: event.id,
+        $createdAt: toIsoString(event.createdAt) ?? "",
+        $updatedAt: toIsoString(event.updatedAt) ?? "",
+        start: toIsoString(event.start) ?? new Date().toISOString(),
+        end: toIsoString(event.end),
+        state: "PUBLISHED",
+        userIds: participantIds.userIds,
+        teamIds,
+        waitListIds: participantIds.waitListIds,
+        freeAgentIds: participantIds.freeAgentIds,
+        officialIds,
+        divisions: divisionDetails
+          .map((row: Record<string, any>) => row.id)
+          .filter(Boolean),
+        sport: sport ? { ...sport, $id: sport.id } : undefined,
+        organization: {
+          $id: organization.id,
+          name: organization.name,
+          logoUrl: organization.logoUrl,
+          originType: organization.originType,
+          ownershipStatus: organization.ownershipStatus,
+          claimVerificationLevel: organization.claimVerificationLevel,
+          claimable: organization.claimable,
+          claimUrl: organization.claimUrl,
+          ownershipAction: organization.ownershipAction,
+        },
+        divisionDetails: divisionDetails.map((row: Record<string, any>) => ({
+          ...row,
+          $id: row.id,
+        })),
+        playoffDivisionDetails: playoffDivisionDetails.map(
+          (row: Record<string, any>) => ({ ...row, $id: row.id }),
+        ),
+        fields: fields.map((row: Record<string, any>) => ({
+          ...row,
+          $id: row.id,
+        })),
+        timeSlots: timeSlots.map((row: Record<string, any>) => ({
+          ...row,
+          $id: row.id,
+        })),
+        teams: teams.map((row: Record<string, any>) => ({
+          ...row,
+          $id: row.id,
+          playerIds: [],
+          pending: [],
+          currentSize: 0,
+          isFull: false,
+        })),
+        players: [],
+        officials: [],
+        assistantHosts: [],
+        staffInvites: [],
       },
-      divisionDetails: divisionDetails.map((row: Record<string, any>) => ({ ...row, $id: row.id })),
-      playoffDivisionDetails: playoffDivisionDetails.map((row: Record<string, any>) => ({ ...row, $id: row.id })),
-      fields: fields.map((row: Record<string, any>) => ({ ...row, $id: row.id })),
-      timeSlots: timeSlots.map((row: Record<string, any>) => ({ ...row, $id: row.id })),
-      teams: teams.map((row: Record<string, any>) => ({
-        ...row,
-        $id: row.id,
-        playerIds: [],
-        pending: [],
-        currentSize: 0,
-        isFull: false,
-      })),
-      players: [],
-      officials: [],
-      assistantHosts: [],
-      staffInvites: [],
-    }, 'event'),
+      "event",
+    ),
   };
 };

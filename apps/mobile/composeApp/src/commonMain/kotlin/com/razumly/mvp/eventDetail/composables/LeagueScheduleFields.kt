@@ -110,6 +110,15 @@ private val dayOptions = listOf(
     DropdownOption("5", "Saturday"),
     DropdownOption("6", "Sunday"),
 )
+private fun overnightEndWeekdayText(selectedDays: List<Int>): String {
+    val labels = selectedDays
+        .mapNotNull { day -> dayOptions.getOrNull((day + 1) % 7)?.label }
+    return when {
+        labels.isEmpty() -> "Overnight slot ends on the next local day."
+        labels.size == 1 -> "Overnight slot ends on the next local weekday: ${labels.single()}."
+        else -> "Overnight slot ends on the next local weekdays: ${labels.joinToString(", ")}."
+    }
+}
 
 internal data class PickerTimeValue(
     val hour: Int,
@@ -1084,7 +1093,7 @@ private fun TimeslotCard(
                     }
                     if (hasOvernightWindow) {
                         Text(
-                            text = "Overnight slot ends on the next local day.",
+                            text = overnightEndWeekdayText(selectedDays),
                             color = MaterialTheme.colorScheme.tertiary,
                             style = MaterialTheme.typography.bodySmall,
                         )

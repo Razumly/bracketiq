@@ -4,24 +4,20 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.RepeatingTimeSlotValidationException
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.enumerateRepeatingTimeSlotOccurrences
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
-import com.razumly.mvp.core.data.dataTypes.enumerateRepeatingTimeSlotOccurrences
-import com.razumly.mvp.core.data.dataTypes.validateRepeatingTimeSlotOccurrences
-
 import com.razumly.mvp.core.data.dataTypes.resolveOneTimeInterval
-
+import com.razumly.mvp.core.data.dataTypes.validateRepeatingTimeSlotOccurrences
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
-
 import kotlin.time.Instant
-
-import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 
 internal fun isScheduleEditingLocked(
     event: Event,
@@ -138,7 +134,7 @@ private fun TimeSlot.resolveConflictWindow(): ConflictInterval? {
     val startLocalDate = startDate.toLocalDateTime(zone).date
     val configuredEndDate = endDate?.toLocalDateTime(zone)?.date
     val inclusiveEndDate = configuredEndDate ?: startLocalDate.plus(DatePeriod(days = 370))
-    val windowStart = startDate
+    val windowStart = startLocalDate.atStartOfDayIn(zone)
     val windowEnd = inclusiveEndDate
         .plus(DatePeriod(days = 1))
         .atStartOfDayIn(zone)

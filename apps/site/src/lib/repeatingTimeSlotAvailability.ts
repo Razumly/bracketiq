@@ -191,6 +191,30 @@ const normalizeTimeZoneStrict = (value: unknown): string => {
   return candidate;
 };
 
+export const getRepeatingTimeSlotLocalDate = (
+  value: unknown,
+  timeZone: unknown,
+): string | null => {
+  const normalizedTimeZone = normalizeTimeZoneStrict(timeZone);
+  const localDate = localDateFromInput(value, normalizedTimeZone);
+  return localDate ? formatLocalDate(localDate) : null;
+};
+
+export const addRepeatingTimeSlotLocalDays = (
+  value: string,
+  days: number,
+): string | null => {
+  const localDate = localDatePartsFromString(value);
+  return localDate ? formatLocalDate(addLocalDays(localDate, days)) : null;
+};
+
+export const getRepeatingTimeSlotLocalWeekday = (
+  value: string,
+): number | null => {
+  const localDate = localDatePartsFromString(value);
+  return localDate ? localDayIndex(localDate) : null;
+};
+
 const normalizeSlotId = (slot: RepeatingTimeSlotIntervalInput): string => {
   const values = [slot.id, slot.$id, slot.key];
   const value = values.find((candidate) => (
@@ -489,41 +513,6 @@ export const repeatingTimeSlotHasOvernightWindow = (
   return start !== null && end !== null && (end === MINUTES_PER_DAY || end <= start);
 };
 
-export const repeatingTimeSlotSegments = (
-  startTimeMinutes: unknown,
-  endTimeMinutes: unknown,
-): Array<{ dayOffset: number; start: number; end: number }> => {
-  const start = normalizeMinutes(startTimeMinutes, false);
-  const end = normalizeMinutes(endTimeMinutes, true);
-  if (start === null || end === null) return [];
-  const endAbsolute = end <= start ? end + MINUTES_PER_DAY : end;
-  if (endAbsolute <= MINUTES_PER_DAY) {
-    return [{ dayOffset: 0, start, end: endAbsolute }];
-  }
-  return [
-    { dayOffset: 0, start, end: MINUTES_PER_DAY },
-    { dayOffset: 1, start: 0, end: endAbsolute - MINUTES_PER_DAY },
-  ].filter((segment) => segment.end > segment.start);
-};
-
-export const repeatingTimeSlotWindowsOverlap = (options: {
-  firstDays: number[];
-  firstStart: unknown;
-  firstEnd: unknown;
-  secondDays: number[];
-  secondStart: unknown;
-  secondEnd: unknown;
-}): boolean => {
-  const firstSegments = repeatingTimeSlotSegments(options.firstStart, options.firstEnd);
-  const secondSegments = repeatingTimeSlotSegments(options.secondStart, options.secondEnd);
-  return options.firstDays.some((firstDay) => options.secondDays.some((secondDay) =>
-    firstSegments.some((first) => secondSegments.some((second) => (
-      (firstDay + first.dayOffset) % 7 === (secondDay + second.dayOffset) % 7
-        && first.start < second.end
-        && second.start < first.end
-    ))),
-  ));
-};
 
 
 export const assertRepeatingTimeSlotsResolvable = (options: {

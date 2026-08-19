@@ -57,8 +57,8 @@ class LeagueSlotValidationTest {
         val repeatingSlot = buildSlot(
             id = "slot-repeating",
             repeating = true,
-            dayOfWeek = 1,
-            daysOfWeek = listOf(1),
+            dayOfWeek = 0,
+            daysOfWeek = listOf(0),
             startTimeMinutes = 600,
             endTimeMinutes = 660,
             startDate = instant(1_700_000_000_000),
@@ -227,24 +227,24 @@ class LeagueSlotValidationTest {
 
     @Test
     fun given_repeating_slot_on_its_final_date_when_mixed_slot_overlaps_then_reports_conflict() {
-        val finalDate = Instant.parse("2026-08-17T00:00:00Z")
+        val finalDate = Instant.parse("2026-08-17T12:00:00Z")
         val repeatingSlot = buildSlot(
             id = "slot-final-day",
             repeating = true,
             dayOfWeek = 0,
             daysOfWeek = listOf(0),
-            startTimeMinutes = 22 * 60,
-            endTimeMinutes = 2 * 60,
+            startTimeMinutes = 9 * 60,
+            endTimeMinutes = 11 * 60,
             startDate = finalDate,
             endDate = finalDate,
         )
         val oneTimeSlot = buildSlot(
             id = "slot-once-final-day",
             repeating = false,
-            startTimeMinutes = 23 * 60,
-            endTimeMinutes = 23 * 60 + 30,
-            startDate = Instant.parse("2026-08-17T23:00:00Z"),
-            endDate = Instant.parse("2026-08-17T23:30:00Z"),
+            startTimeMinutes = 10 * 60,
+            endTimeMinutes = 10 * 60 + 30,
+            startDate = Instant.parse("2026-08-17T10:00:00Z"),
+            endDate = Instant.parse("2026-08-17T10:30:00Z"),
         )
 
         val errors = computeLeagueSlotErrors(

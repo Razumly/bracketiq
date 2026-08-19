@@ -1,29 +1,47 @@
-import type { View } from 'react-big-calendar';
+import type { View } from "react-big-calendar";
 
-import { isApiRequestError } from '@/lib/apiClient';
+import { isApiRequestError } from "@/lib/apiClient";
 import {
   hasBracketConnections as isPlayoffBracketMatch,
   toBracketDivisionKey as toDivisionKey,
-} from '@/lib/bracketViewCore';
-import { formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
+} from "@/lib/bracketViewCore";
 import {
-  RepeatingTimeSlotValidationError,
-  type ResolvedRepeatingTimeSlot,
+  formatLocalDateTime,
+  parseLocalDateTime,
+  zonedTimeToUtcDate,
+} from "@/lib/dateUtils";
+import {
+  enumerateRepeatingTimeSlotOccurrences,
+  getRepeatingTimeSlotLocalDate,
   resolveRepeatingTimeSlotOccurrence,
-} from '@/lib/repeatingTimeSlotAvailability';
+} from "@/lib/repeatingTimeSlotAvailability";
 
-import { getFieldDisplayName } from '@/lib/fieldUtils';
-import type { BillDiscountSummary, Event, EventState, Field, Match, Sport, Team, TimeSlot } from '@/types';
-import { validateAndNormalizeBracketGraph, type BracketNode } from '@/server/matches/bracketGraph';
+import { getFieldDisplayName } from "@/lib/fieldUtils";
+import type {
+  BillDiscountSummary,
+  Event,
+  EventState,
+  Field,
+  Match,
+  Sport,
+  Team,
+  TimeSlot,
+} from "@/types";
+import {
+  validateAndNormalizeBracketGraph,
+  type BracketNode,
+} from "@/server/matches/bracketGraph";
 
-import { MATCH_CONFLICT_RESOLUTION_MESSAGE } from '../lib/matchConflicts';
+import { MATCH_CONFLICT_RESOLUTION_MESSAGE } from "../lib/matchConflicts";
 
-export const cloneValue = <T,>(value: T): T => {
-  if (value === null || typeof value !== 'object') {
+export const cloneValue = <T>(value: T): T => {
+  if (value === null || typeof value !== "object") {
     return value;
   }
 
-  const structuredCloneFn = (globalThis as { structuredClone?: <U>(input: U) => U }).structuredClone;
+  const structuredCloneFn = (
+    globalThis as { structuredClone?: <U>(input: U) => U }
+  ).structuredClone;
   if (structuredCloneFn) {
     return structuredCloneFn(value);
   }
@@ -31,7 +49,7 @@ export const cloneValue = <T,>(value: T): T => {
   // Fallback handles circular references by walking the graph manually
   const seen = new WeakMap<object, any>();
   const cloneRecursive = (input: any): any => {
-    if (input === null || typeof input !== 'object') {
+    if (input === null || typeof input !== "object") {
       return input;
     }
 
@@ -66,16 +84,20 @@ export const cloneValue = <T,>(value: T): T => {
 export const getActionErrorDetail = (error: unknown): string | null => {
   if (isApiRequestError(error)) {
     const apiError = error.data;
-    if (apiError && typeof apiError === 'object' && 'error' in apiError) {
-      const message = String((apiError as { error?: unknown }).error ?? '').trim();
+    if (apiError && typeof apiError === "object" && "error" in apiError) {
+      const message = String(
+        (apiError as { error?: unknown }).error ?? "",
+      ).trim();
       if (message) {
-        const unknownKeys = Array.isArray((apiError as { unknownKeys?: unknown }).unknownKeys)
+        const unknownKeys = Array.isArray(
+          (apiError as { unknownKeys?: unknown }).unknownKeys,
+        )
           ? (apiError as { unknownKeys?: unknown[] }).unknownKeys
-            ?.map((key) => String(key).trim())
-            .filter((key) => key.length > 0)
+              ?.map((key) => String(key).trim())
+              .filter((key) => key.length > 0)
           : [];
         if (unknownKeys?.length) {
-          return `${message} Unknown fields: ${unknownKeys.join(', ')}.`;
+          return `${message} Unknown fields: ${unknownKeys.join(", ")}.`;
         }
         return message;
       }
@@ -85,14 +107,17 @@ export const getActionErrorDetail = (error: unknown): string | null => {
     const message = error.message.trim();
     return message || null;
   }
-  if (typeof error === 'string') {
+  if (typeof error === "string") {
     const message = error.trim();
     return message || null;
   }
   return null;
 };
 
-export const formatActionErrorMessage = (fallback: string, error: unknown): string => {
+export const formatActionErrorMessage = (
+  fallback: string,
+  error: unknown,
+): string => {
   const detail = getActionErrorDetail(error);
   if (!detail || detail === fallback || detail.startsWith(fallback)) {
     return detail || fallback;
@@ -101,11 +126,11 @@ export const formatActionErrorMessage = (fallback: string, error: unknown): stri
 };
 
 export const formatLatLngLabel = (lat?: number, lng?: number): string => {
-  if (typeof lat !== 'number' || typeof lng !== 'number') {
-    return '';
+  if (typeof lat !== "number" || typeof lng !== "number") {
+    return "";
   }
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return '';
+    return "";
   }
   return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
 };
@@ -115,7 +140,7 @@ export type DivisionOption = {
   label: string;
 };
 
-export type ParticipantInviteMode = 'existing' | 'email' | 'team';
+export type ParticipantInviteMode = "existing" | "email" | "team";
 
 export type ParticipantInviteRow = {
   firstName: string;
@@ -123,9 +148,16 @@ export type ParticipantInviteRow = {
   email: string;
 };
 
-export type MatchCreateContext = 'schedule' | 'bracket';
+export type MatchCreateContext = "schedule" | "bracket";
 
-export const EVENT_SCHEDULE_TABS = new Set(['details', 'participants', 'schedule', 'standings', 'bracket', 'finance']);
+export const EVENT_SCHEDULE_TABS = new Set([
+  "details",
+  "participants",
+  "schedule",
+  "standings",
+  "bracket",
+  "finance",
+]);
 
 export type StagedMatchCreateMeta = {
   clientId: string;
@@ -133,8 +165,8 @@ export type StagedMatchCreateMeta = {
   autoPlaceholderTeam: boolean;
 };
 
-export const CLIENT_MATCH_PREFIX = 'client:';
-export const LOCAL_PLACEHOLDER_PREFIX = 'placeholder-local:';
+export const CLIENT_MATCH_PREFIX = "client:";
+export const LOCAL_PLACEHOLDER_PREFIX = "placeholder-local:";
 export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const MIN_TEAM_SEARCH_QUERY_LENGTH = 2;
 
@@ -150,23 +182,26 @@ export const collectTeamRosterUserIds = (team: Team): string[] => {
       [
         ...team.playerIds,
         team.captainId,
-        team.managerId ?? '',
-        team.headCoachId ?? '',
+        team.managerId ?? "",
+        team.headCoachId ?? "",
         ...assistantCoachIds,
       ]
-        .map((value) => (typeof value === 'string' ? value.trim() : ''))
+        .map((value) => (typeof value === "string" ? value.trim() : ""))
         .filter((value) => value.length > 0),
     ),
   );
 };
 
-export const teamMatchesSearchQuery = (team: Team, normalizedQuery: string): boolean => {
-  const teamName = (team.name ?? '').toLowerCase();
-  const sportName = (team.sport ?? '').toLowerCase();
+export const teamMatchesSearchQuery = (
+  team: Team,
+  normalizedQuery: string,
+): boolean => {
+  const teamName = (team.name ?? "").toLowerCase();
+  const sportName = (team.sport ?? "").toLowerCase();
   const divisionName = (
-    typeof team.division === 'string'
+    typeof team.division === "string"
       ? team.division
-      : team.division?.name ?? team.division?.id ?? ''
+      : (team.division?.name ?? team.division?.id ?? "")
   ).toLowerCase();
 
   return (
@@ -177,16 +212,18 @@ export const teamMatchesSearchQuery = (team: Team, normalizedQuery: string): boo
 };
 
 export const isClientMatchId = (id: string | null | undefined): boolean =>
-  typeof id === 'string' && id.startsWith(CLIENT_MATCH_PREFIX);
+  typeof id === "string" && id.startsWith(CLIENT_MATCH_PREFIX);
 
 export const getClientIdFromMatchId = (id: string): string =>
   id.slice(CLIENT_MATCH_PREFIX.length);
 
 export const isLocalPlaceholderId = (id: string | null | undefined): boolean =>
-  typeof id === 'string' && id.startsWith(LOCAL_PLACEHOLDER_PREFIX);
+  typeof id === "string" && id.startsWith(LOCAL_PLACEHOLDER_PREFIX);
 
-export const asBulkMatchRef = (value: string | null | undefined): string | undefined => {
-  if (typeof value !== 'string') {
+export const asBulkMatchRef = (
+  value: string | null | undefined,
+): string | undefined => {
+  if (typeof value !== "string") {
     return undefined;
   }
   const normalized = value.trim();
@@ -195,7 +232,7 @@ export const asBulkMatchRef = (value: string | null | undefined): string | undef
 
 export const nextMatchSequenceNumber = (matches: Match[]): number => {
   const maxCurrent = matches.reduce((maxValue, match) => {
-    if (typeof match.matchId !== 'number' || !Number.isFinite(match.matchId)) {
+    if (typeof match.matchId !== "number" || !Number.isFinite(match.matchId)) {
       return maxValue;
     }
     return Math.max(maxValue, Math.trunc(match.matchId));
@@ -203,7 +240,7 @@ export const nextMatchSequenceNumber = (matches: Match[]): number => {
   return maxCurrent + 1;
 };
 
-export const buildBracketNodes = (draftMatches: Match[]): BracketNode[] => (
+export const buildBracketNodes = (draftMatches: Match[]): BracketNode[] =>
   draftMatches.reduce<BracketNode[]>((nodes, match) => {
     const id = normalizeIdToken(match.$id);
     if (!id) {
@@ -211,18 +248,19 @@ export const buildBracketNodes = (draftMatches: Match[]): BracketNode[] => (
     }
     nodes.push({
       id,
-      matchId: typeof match.matchId === 'number' ? match.matchId : null,
+      matchId: typeof match.matchId === "number" ? match.matchId : null,
       previousLeftId: asBulkMatchRef(match.previousLeftId),
       previousRightId: asBulkMatchRef(match.previousRightId),
       winnerNextMatchId: asBulkMatchRef(match.winnerNextMatchId),
       loserNextMatchId: asBulkMatchRef(match.loserNextMatchId),
     });
     return nodes;
-  }, [])
-);
+  }, []);
 
 export const normalizeDraftBracketGraph = (draftMatches: Match[]): Match[] => {
-  const graphValidation = validateAndNormalizeBracketGraph(buildBracketNodes(draftMatches));
+  const graphValidation = validateAndNormalizeBracketGraph(
+    buildBracketNodes(draftMatches),
+  );
   if (!graphValidation.ok) {
     return draftMatches;
   }
@@ -238,14 +276,18 @@ export const normalizeDraftBracketGraph = (draftMatches: Match[]): Match[] => {
       return match;
     }
 
-    const normalizedPreviousLeftId = asBulkMatchRef(normalizedNode.previousLeftId);
-    const normalizedPreviousRightId = asBulkMatchRef(normalizedNode.previousRightId);
+    const normalizedPreviousLeftId = asBulkMatchRef(
+      normalizedNode.previousLeftId,
+    );
+    const normalizedPreviousRightId = asBulkMatchRef(
+      normalizedNode.previousRightId,
+    );
     const currentPreviousLeftId = asBulkMatchRef(match.previousLeftId);
     const currentPreviousRightId = asBulkMatchRef(match.previousRightId);
 
     if (
-      currentPreviousLeftId === normalizedPreviousLeftId
-      && currentPreviousRightId === normalizedPreviousRightId
+      currentPreviousLeftId === normalizedPreviousLeftId &&
+      currentPreviousRightId === normalizedPreviousRightId
     ) {
       return match;
     }
@@ -261,7 +303,7 @@ export const normalizeDraftBracketGraph = (draftMatches: Match[]): Match[] => {
 };
 
 export const normalizeDivisionToken = (value: unknown): string | null => {
-  if (typeof value !== 'string') {
+  if (typeof value !== "string") {
     return null;
   }
   const normalized = value.trim();
@@ -269,7 +311,7 @@ export const normalizeDivisionToken = (value: unknown): string | null => {
 };
 
 export const normalizeIdToken = (value: unknown): string | null => {
-  if (typeof value !== 'string') {
+  if (typeof value !== "string") {
     return null;
   }
   const normalized = value.trim();
@@ -283,6 +325,7 @@ export type WeeklyOccurrenceOption = {
   label: string;
   start: string;
   end: string;
+  startInstant: Date;
   startMinutes: number;
   endMinutes: number;
   fieldIds: string[];
@@ -301,11 +344,18 @@ export type ViewerWeeklyRegistrationRow = {
   status?: string | null;
 };
 
-export const VIEWER_WEEKLY_REGISTRATION_STATUSES = new Set(['STARTED', 'ACTIVE', 'BLOCKED']);
+export const VIEWER_WEEKLY_REGISTRATION_STATUSES = new Set([
+  "STARTED",
+  "ACTIVE",
+  "BLOCKED",
+]);
 
 export const buildParticipantSnapshotKey = (
   eventId: unknown,
-  occurrence?: { slotId?: string | null; occurrenceDate?: string | null } | null,
+  occurrence?: {
+    slotId?: string | null;
+    occurrenceDate?: string | null;
+  } | null,
 ): string | null => {
   const normalizedEventId = normalizeIdToken(eventId);
   if (!normalizedEventId) {
@@ -322,7 +372,10 @@ export const buildParticipantSnapshotKey = (
 export const buildComplianceSnapshotKey = (
   eventId: unknown,
   participantIdsKey: string,
-  occurrence: { slotId?: string | null; occurrenceDate?: string | null } | null | undefined,
+  occurrence:
+    | { slotId?: string | null; occurrenceDate?: string | null }
+    | null
+    | undefined,
   refreshKey: number,
 ): string | null => {
   const participantKey = participantIdsKey.trim();
@@ -342,18 +395,18 @@ export const buildWeeklyOccurrenceRegistrationKey = (
   return slotId && occurrenceDate ? `${slotId}:${occurrenceDate}` : null;
 };
 
-export const ID_LIST_KEY_SEPARATOR = '|';
+export const ID_LIST_KEY_SEPARATOR = "|";
 
-export const buildStableIdListKey = (ids: string[]): string => ids.join(ID_LIST_KEY_SEPARATOR);
+export const buildStableIdListKey = (ids: string[]): string =>
+  ids.join(ID_LIST_KEY_SEPARATOR);
 
-export const parseStableIdListKey = (key: string): string[] => (
+export const parseStableIdListKey = (key: string): string[] =>
   key
     ? key
         .split(ID_LIST_KEY_SEPARATOR)
         .map((id) => id.trim())
         .filter((id): id is string => id.length > 0)
-    : []
-);
+    : [];
 
 export const parseDateValue = (value?: string | null): Date | null => {
   if (!value) return null;
@@ -361,7 +414,7 @@ export const parseDateValue = (value?: string | null): Date | null => {
   if (!trimmed) return null;
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    const [year, month, day] = trimmed.split('-').map(Number);
+    const [year, month, day] = trimmed.split("-").map(Number);
     if (![year, month, day].some(Number.isNaN)) {
       return new Date(year, (month ?? 1) - 1, day ?? 1);
     }
@@ -373,10 +426,22 @@ export const parseDateValue = (value?: string | null): Date | null => {
 
 export const toLocalIsoDate = (value: Date): string => {
   const year = value.getFullYear();
-  const month = `${value.getMonth() + 1}`.padStart(2, '0');
-  const day = `${value.getDate()}`.padStart(2, '0');
+  const month = `${value.getMonth() + 1}`.padStart(2, "0");
+  const day = `${value.getDate()}`.padStart(2, "0");
   return `${year}-${month}-${day}`;
 };
+const normalizeSlotTimeZone = (value: unknown): string =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : "UTC";
+
+const formatLocalSlotTime = (minutes: number): string =>
+  `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}:00`;
+
+const resolveLocalSlotDateTime = (
+  localDate: string,
+  minutes: number,
+  timeZone: string,
+): Date | null =>
+  zonedTimeToUtcDate(`${localDate}T${formatLocalSlotTime(minutes)}`, timeZone);
 
 export const toMondayIndex = (value: Date): number => (value.getDay() + 6) % 7;
 
@@ -386,9 +451,11 @@ export const startOfDay = (value: Date): Date => {
   return copy;
 };
 
-export const startOfMonth = (value: Date): Date => new Date(value.getFullYear(), value.getMonth(), 1);
+export const startOfMonth = (value: Date): Date =>
+  new Date(value.getFullYear(), value.getMonth(), 1);
 
-export const endOfMonth = (value: Date): Date => new Date(value.getFullYear(), value.getMonth() + 1, 0);
+export const endOfMonth = (value: Date): Date =>
+  new Date(value.getFullYear(), value.getMonth() + 1, 0);
 
 export const startOfCalendarWeek = (value: Date): Date => {
   const copy = startOfDay(value);
@@ -403,23 +470,26 @@ export const addDays = (value: Date, days: number): Date => {
 };
 
 export const formatWeeklyOccurrenceLabel = (start: Date, end: Date): string => {
-  const dayLabel = start.toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'numeric',
-    day: 'numeric',
-    year: '2-digit',
+  const dayLabel = start.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "numeric",
+    day: "numeric",
+    year: "2-digit",
   });
-  const timeLabel = `${start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}-${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+  const timeLabel = `${start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}-${end.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}`;
   return `${dayLabel} · ${timeLabel}`;
 };
 
-export const getWeeklyScheduleCalendarRange = (value: Date, calendarView: View): { start: Date; end: Date } => {
+export const getWeeklyScheduleCalendarRange = (
+  value: Date,
+  calendarView: View,
+): { start: Date; end: Date } => {
   const safeDate = Number.isNaN(value.getTime()) ? new Date() : value;
-  if (calendarView === 'day') {
+  if (calendarView === "day") {
     const day = startOfDay(safeDate);
     return { start: day, end: day };
   }
-  if (calendarView === 'week') {
+  if (calendarView === "week") {
     const start = startOfCalendarWeek(safeDate);
     return { start, end: addDays(start, 6) };
   }
@@ -435,10 +505,10 @@ export const buildWeeklyOccurrenceOptionsInRange = (
   rangeEnd: Date,
 ): WeeklyOccurrenceOption[] => {
   if (
-    !event
-    || event.eventType !== 'WEEKLY_EVENT'
-    || event.parentEvent
-    || !Array.isArray(event.timeSlots)
+    !event ||
+    event.eventType !== "WEEKLY_EVENT" ||
+    event.parentEvent ||
+    !Array.isArray(event.timeSlots)
   ) {
     return [];
   }
@@ -453,73 +523,111 @@ export const buildWeeklyOccurrenceOptionsInRange = (
 
   event.timeSlots.forEach((slot) => {
     const slotId = normalizeIdToken(slot.$id ?? (slot as { id?: string }).id);
-    const slotStartDate = parseDateValue(slot.startDate ?? null);
-    if (!slotId || !slotStartDate) {
+    if (!slotId) {
       return;
     }
-    slotStartDate.setHours(0, 0, 0, 0);
-    const slotEndDate = parseDateValue(slot.endDate ?? null);
-    if (slotEndDate) {
-      slotEndDate.setHours(0, 0, 0, 0);
-    }
+    const fieldIds = Array.from(
+      new Set(
+        (Array.isArray(slot.scheduledFieldIds) ? slot.scheduledFieldIds : [])
+          .concat(
+            typeof slot.scheduledFieldId === "string"
+              ? [slot.scheduledFieldId]
+              : [],
+          )
+          .map((entry) => normalizeIdToken(entry))
+          .filter((entry): entry is string => Boolean(entry)),
+      ),
+    );
+    const divisionIds = Array.from(
+      new Set(
+        (Array.isArray(slot.divisions) ? slot.divisions : [])
+          .map((entry) =>
+            normalizeIdToken(typeof entry === "string" ? entry : null),
+          )
+          .filter((entry): entry is string => Boolean(entry)),
+      ),
+    );
 
-    const startMinutes = typeof slot.startTimeMinutes === 'number' ? slot.startTimeMinutes : null;
-    const endMinutes = typeof slot.endTimeMinutes === 'number' ? slot.endTimeMinutes : null;
-    const weekdays = Array.from(new Set(
-      (Array.isArray(slot.daysOfWeek) && slot.daysOfWeek.length
-        ? slot.daysOfWeek
-        : typeof slot.dayOfWeek === 'number'
-          ? [slot.dayOfWeek]
-          : [])
-        .map((entry) => Number(entry))
-        .filter((entry) => Number.isInteger(entry) && entry >= 0 && entry <= 6),
-    )).sort((left, right) => left - right);
+    const startMinutes =
+      typeof slot.startTimeMinutes === "number" ? slot.startTimeMinutes : null;
+    const endMinutes =
+      typeof slot.endTimeMinutes === "number" ? slot.endTimeMinutes : null;
     if (startMinutes === null || endMinutes === null) {
       return;
     }
-
-    const fieldIds = Array.from(new Set(
-      (Array.isArray(slot.scheduledFieldIds) ? slot.scheduledFieldIds : [])
-        .concat(typeof slot.scheduledFieldId === 'string' ? [slot.scheduledFieldId] : [])
-        .map((entry) => normalizeIdToken(entry))
-        .filter((entry): entry is string => Boolean(entry)),
-    ));
-    const divisionIds = Array.from(new Set(
-      (Array.isArray(slot.divisions) ? slot.divisions : [])
-        .map((entry) => normalizeIdToken(typeof entry === 'string' ? entry : null))
-        .filter((entry): entry is string => Boolean(entry)),
-    ));
-
-    const searchStart = startOfDay(new Date(Math.max(normalizedRangeStart.getTime(), slotStartDate.getTime())));
-    const searchEnd = startOfDay(new Date(
-      Math.min(normalizedRangeEnd.getTime(), slotEndDate?.getTime() ?? normalizedRangeEnd.getTime()),
-    ));
-
-    if (searchEnd.getTime() < searchStart.getTime()) {
+    if (
+      slot.repeating !== false &&
+      (!Number.isInteger(startMinutes) ||
+        !Number.isInteger(endMinutes) ||
+        startMinutes < 0 ||
+        startMinutes >= 24 * 60 ||
+        endMinutes < 0 ||
+        endMinutes > 24 * 60 ||
+        endMinutes === startMinutes)
+    ) {
       return;
     }
 
     if (slot.repeating === false) {
+      const timeZone = normalizeSlotTimeZone(slot.timeZone);
+      const slotStartDate = getRepeatingTimeSlotLocalDate(
+        slot.startDate ?? null,
+        timeZone,
+      );
+      const rangeStartLocalDate = getRepeatingTimeSlotLocalDate(
+        normalizedRangeStart,
+        timeZone,
+      );
+      const rangeEndLocalDate = getRepeatingTimeSlotLocalDate(
+        normalizedRangeEnd,
+        timeZone,
+      );
+      if (!slotStartDate || !rangeStartLocalDate || !rangeEndLocalDate) {
+        return;
+      }
       if (
-        slotStartDate.getTime() < normalizedRangeStart.getTime()
-        || slotStartDate.getTime() > normalizedRangeEnd.getTime()
+        slotStartDate < rangeStartLocalDate ||
+        slotStartDate > rangeEndLocalDate
       ) {
         return;
       }
-      const occurrenceStart = new Date(slotStartDate.getTime());
-      occurrenceStart.setHours(Math.floor(startMinutes / 60), startMinutes % 60, 0, 0);
-      const occurrenceEnd = new Date(slotStartDate.getTime());
-      occurrenceEnd.setHours(Math.floor(endMinutes / 60), endMinutes % 60, 0, 0);
-      if (occurrenceEnd.getTime() <= occurrenceStart.getTime()) {
+      if (
+        !Number.isInteger(startMinutes) ||
+        !Number.isInteger(endMinutes) ||
+        startMinutes < 0 ||
+        startMinutes >= 24 * 60 ||
+        endMinutes < 0 ||
+        endMinutes >= 24 * 60 ||
+        endMinutes <= startMinutes
+      ) {
         return;
       }
+      const occurrenceStart = resolveLocalSlotDateTime(
+        slotStartDate,
+        startMinutes,
+        timeZone,
+      );
+      const occurrenceEnd = resolveLocalSlotDateTime(
+        slotStartDate,
+        endMinutes,
+        timeZone,
+      );
+      if (
+        !occurrenceStart ||
+        !occurrenceEnd ||
+        occurrenceEnd.getTime() <= occurrenceStart.getTime()
+      ) {
+        return;
+      }
+      const occurrenceDate = slotStartDate;
       options.push({
-        id: `${slotId}:${toLocalIsoDate(slotStartDate)}`,
+        id: `${slotId}:${occurrenceDate}`,
         slotId,
-        occurrenceDate: toLocalIsoDate(slotStartDate),
+        occurrenceDate,
         label: formatWeeklyOccurrenceLabel(occurrenceStart, occurrenceEnd),
         start: formatLocalDateTime(occurrenceStart),
         end: formatLocalDateTime(occurrenceEnd),
+        startInstant: occurrenceStart,
         startMinutes,
         endMinutes,
         fieldIds,
@@ -528,23 +636,32 @@ export const buildWeeklyOccurrenceOptionsInRange = (
       return;
     }
 
-    if (!weekdays.length) {
+    const rangeStartLocalDate = getRepeatingTimeSlotLocalDate(
+      normalizedRangeStart,
+      slot.timeZone,
+    );
+    const rangeEndLocalDate = getRepeatingTimeSlotLocalDate(
+      normalizedRangeEnd,
+      slot.timeZone,
+    );
+    if (!rangeStartLocalDate || !rangeEndLocalDate) {
       return;
     }
-
-    for (let occurrence = new Date(searchStart.getTime()); occurrence.getTime() <= searchEnd.getTime(); occurrence = addDays(occurrence, 1)) {
-      if (!weekdays.includes(toMondayIndex(occurrence))) {
-        continue;
-      }
-
-      let resolved: ResolvedRepeatingTimeSlot;
-      try {
-        resolved = resolveRepeatingTimeSlotOccurrence(slot, toLocalIsoDate(occurrence));
-      } catch (error) {
-        if (error instanceof RepeatingTimeSlotValidationError) {
-          continue;
-        }
-        throw error;
+    const resolvedOccurrences = enumerateRepeatingTimeSlotOccurrences({
+      slot,
+      windowStart: new Date(
+        normalizedRangeStart.getTime() - 2 * 24 * 60 * 60 * 1000,
+      ),
+      windowEnd: new Date(
+        normalizedRangeEnd.getTime() + 2 * 24 * 60 * 60 * 1000,
+      ),
+    });
+    resolvedOccurrences.forEach((resolved) => {
+      if (
+        resolved.occurrenceDate < rangeStartLocalDate ||
+        resolved.occurrenceDate > rangeEndLocalDate
+      ) {
+        return;
       }
       options.push({
         id: `${slotId}:${resolved.occurrenceDate}`,
@@ -553,39 +670,160 @@ export const buildWeeklyOccurrenceOptionsInRange = (
         label: formatWeeklyOccurrenceLabel(resolved.start, resolved.end),
         start: formatLocalDateTime(resolved.start),
         end: formatLocalDateTime(resolved.end),
+        startInstant: resolved.start,
         startMinutes: resolved.startTimeMinutes,
         endMinutes: resolved.endTimeMinutes,
         fieldIds,
         divisionIds,
       });
-    }
+    });
   });
 
-  return options.sort((left, right) => (
-    left.occurrenceDate.localeCompare(right.occurrenceDate)
-    || left.startMinutes - right.startMinutes
-    || left.slotId.localeCompare(right.slotId)
-  ));
+  return options.sort(
+    (left, right) =>
+      left.occurrenceDate.localeCompare(right.occurrenceDate) ||
+      left.startMinutes - right.startMinutes ||
+      left.slotId.localeCompare(right.slotId),
+  );
 };
 
 export const resolveSelectedWeeklyOccurrenceOption = (
   event: Event | null,
   selection: WeeklyOccurrenceSelection | null,
 ): WeeklyOccurrenceOption | null => {
-  if (!selection) {
+  if (!event || !selection) {
+    return null;
+  }
+  const selectedSlotId = normalizeIdToken(selection.slotId);
+  const selectedOccurrenceDate = normalizeIdToken(selection.occurrenceDate);
+  if (
+    !selectedSlotId ||
+    !selectedOccurrenceDate ||
+    !Array.isArray(event.timeSlots)
+  ) {
     return null;
   }
 
-  const occurrenceDate = parseDateValue(selection.occurrenceDate);
-  if (!occurrenceDate) {
+  const matchingSlot = event.timeSlots.find(
+    (slot) =>
+      normalizeIdToken(slot.$id ?? (slot as { id?: string }).id) ===
+      selectedSlotId,
+  );
+  if (!matchingSlot) {
     return null;
   }
 
-  const resolvedDate = startOfDay(occurrenceDate);
-  return buildWeeklyOccurrenceOptionsInRange(event, resolvedDate, resolvedDate).find((option) => (
-    option.slotId === selection.slotId
-    && option.occurrenceDate === selection.occurrenceDate
-  )) ?? null;
+  const fieldIds = Array.from(
+    new Set(
+      (Array.isArray(matchingSlot.scheduledFieldIds)
+        ? matchingSlot.scheduledFieldIds
+        : []
+      )
+        .concat(
+          typeof matchingSlot.scheduledFieldId === "string"
+            ? [matchingSlot.scheduledFieldId]
+            : [],
+        )
+        .map((entry) => normalizeIdToken(entry))
+        .filter((entry): entry is string => Boolean(entry)),
+    ),
+  );
+  const divisionIds = Array.from(
+    new Set(
+      (Array.isArray(matchingSlot.divisions) ? matchingSlot.divisions : [])
+        .map((entry) =>
+          normalizeIdToken(typeof entry === "string" ? entry : null),
+        )
+        .filter((entry): entry is string => Boolean(entry)),
+    ),
+  );
+
+  let occurrenceDate = selectedOccurrenceDate;
+  let start: Date;
+  let end: Date;
+  let startMinutes: number;
+  let endMinutes: number;
+  if (matchingSlot.repeating === false) {
+    const timeZone = normalizeSlotTimeZone(matchingSlot.timeZone);
+    const normalizedSelectedDate = getRepeatingTimeSlotLocalDate(
+      selectedOccurrenceDate,
+      "UTC",
+    );
+    const slotStartDate = getRepeatingTimeSlotLocalDate(
+      matchingSlot.startDate ?? null,
+      timeZone,
+    );
+    const configuredStartMinutes =
+      typeof matchingSlot.startTimeMinutes === "number"
+        ? matchingSlot.startTimeMinutes
+        : null;
+    const configuredEndMinutes =
+      typeof matchingSlot.endTimeMinutes === "number"
+        ? matchingSlot.endTimeMinutes
+        : null;
+    if (
+      !normalizedSelectedDate ||
+      !slotStartDate ||
+      configuredStartMinutes === null ||
+      configuredEndMinutes === null ||
+      !Number.isInteger(configuredStartMinutes) ||
+      !Number.isInteger(configuredEndMinutes) ||
+      configuredStartMinutes < 0 ||
+      configuredStartMinutes >= 24 * 60 ||
+      configuredEndMinutes < 0 ||
+      configuredEndMinutes >= 24 * 60 ||
+      configuredEndMinutes <= configuredStartMinutes ||
+      normalizedSelectedDate !== slotStartDate
+    ) {
+      return null;
+    }
+    const resolvedStart = resolveLocalSlotDateTime(
+      slotStartDate,
+      configuredStartMinutes,
+      timeZone,
+    );
+    const resolvedEnd = resolveLocalSlotDateTime(
+      slotStartDate,
+      configuredEndMinutes,
+      timeZone,
+    );
+    if (
+      !resolvedStart ||
+      !resolvedEnd ||
+      resolvedEnd.getTime() <= resolvedStart.getTime()
+    ) {
+      return null;
+    }
+    occurrenceDate = slotStartDate;
+    start = resolvedStart;
+    end = resolvedEnd;
+    startMinutes = configuredStartMinutes;
+    endMinutes = configuredEndMinutes;
+  } else {
+    const resolved = resolveRepeatingTimeSlotOccurrence(
+      matchingSlot,
+      selectedOccurrenceDate,
+    );
+    occurrenceDate = resolved.occurrenceDate;
+    start = resolved.start;
+    end = resolved.end;
+    startMinutes = resolved.startTimeMinutes;
+    endMinutes = resolved.endTimeMinutes;
+  }
+
+  return {
+    id: `${selectedSlotId}:${occurrenceDate}`,
+    slotId: selectedSlotId,
+    occurrenceDate,
+    label: formatWeeklyOccurrenceLabel(start, end),
+    start: formatLocalDateTime(start),
+    end: formatLocalDateTime(end),
+    startInstant: start,
+    startMinutes,
+    endMinutes,
+    fieldIds,
+    divisionIds,
+  };
 };
 
 export const collectMatchAssignmentUserIds = (match: Match): string[] => {
@@ -605,7 +843,10 @@ export const collectMatchAssignmentUserIds = (match: Match): string[] => {
   return Array.from(ids);
 };
 
-export const clearMatchReferencesToTarget = (match: Match, removedMatchId: string): Match => {
+export const clearMatchReferencesToTarget = (
+  match: Match,
+  removedMatchId: string,
+): Match => {
   const targetId = normalizeIdToken(removedMatchId);
   if (!targetId) {
     return match;
@@ -621,10 +862,18 @@ export const clearMatchReferencesToTarget = (match: Match, removedMatchId: strin
     next = { ...next, previousLeftId: undefined, previousLeftMatch: undefined };
   }
   if (previousRightId === targetId) {
-    next = { ...next, previousRightId: undefined, previousRightMatch: undefined };
+    next = {
+      ...next,
+      previousRightId: undefined,
+      previousRightMatch: undefined,
+    };
   }
   if (winnerNextMatchId === targetId) {
-    next = { ...next, winnerNextMatchId: undefined, winnerNextMatch: undefined };
+    next = {
+      ...next,
+      winnerNextMatchId: undefined,
+      winnerNextMatch: undefined,
+    };
   }
   if (loserNextMatchId === targetId) {
     next = { ...next, loserNextMatchId: undefined, loserNextMatch: undefined };
@@ -633,29 +882,35 @@ export const clearMatchReferencesToTarget = (match: Match, removedMatchId: strin
   return next;
 };
 
-export const getDivisionKind = (division: unknown): 'LEAGUE' | 'PLAYOFF' | null => {
-  if (!division || typeof division !== 'object') {
+export const getDivisionKind = (
+  division: unknown,
+): "LEAGUE" | "PLAYOFF" | null => {
+  if (!division || typeof division !== "object") {
     return null;
   }
   const kind = (division as { kind?: unknown }).kind;
-  if (typeof kind !== 'string') {
+  if (typeof kind !== "string") {
     return null;
   }
   const normalized = kind.trim().toUpperCase();
-  if (normalized === 'PLAYOFF') {
-    return 'PLAYOFF';
+  if (normalized === "PLAYOFF") {
+    return "PLAYOFF";
   }
-  if (normalized === 'LEAGUE') {
-    return 'LEAGUE';
+  if (normalized === "LEAGUE") {
+    return "LEAGUE";
   }
   return null;
 };
 
-export const getDivisionPlacementDivisionIds = (division: unknown): string[] => {
-  if (!division || typeof division !== 'object') {
+export const getDivisionPlacementDivisionIds = (
+  division: unknown,
+): string[] => {
+  if (!division || typeof division !== "object") {
     return [];
   }
-  const rawPlacementIds = (division as { playoffPlacementDivisionIds?: unknown }).playoffPlacementDivisionIds;
+  const rawPlacementIds = (
+    division as { playoffPlacementDivisionIds?: unknown }
+  ).playoffPlacementDivisionIds;
   if (!Array.isArray(rawPlacementIds)) {
     return [];
   }
@@ -664,40 +919,45 @@ export const getDivisionPlacementDivisionIds = (division: unknown): string[] => 
     .filter((entry): entry is string => Boolean(entry));
 };
 
-export const divisionReferencesBracket = (division: unknown, bracketDivisionId: string | null | undefined): boolean => {
+export const divisionReferencesBracket = (
+  division: unknown,
+  bracketDivisionId: string | null | undefined,
+): boolean => {
   const bracketKey = toDivisionKey(bracketDivisionId);
   if (!bracketKey) {
     return false;
   }
-  return getDivisionPlacementDivisionIds(division).some((placementDivisionId) => (
-    toDivisionKey(placementDivisionId) === bracketKey
-  ));
+  return getDivisionPlacementDivisionIds(division).some(
+    (placementDivisionId) => toDivisionKey(placementDivisionId) === bracketKey,
+  );
 };
 
-export const isTournamentPoolPlayViewEnabled = (event: Event | null | undefined): boolean => (
+export const isTournamentPoolPlayViewEnabled = (
+  event: Event | null | undefined,
+): boolean =>
   Boolean(
-    event
-      && event.eventType === 'TOURNAMENT'
-      && (event.includePlayoffsOrPools === true || event.includePlayoffs === true),
-  )
-);
+    event &&
+      event.eventType === "TOURNAMENT" &&
+      (event.includePlayoffsOrPools === true || event.includePlayoffs === true),
+  );
 
 export const isDivisionStandingsConfirmed = (division: unknown): boolean => {
-  if (!division || typeof division !== 'object') {
+  if (!division || typeof division !== "object") {
     return false;
   }
-  const confirmedAt = (division as { standingsConfirmedAt?: unknown }).standingsConfirmedAt;
+  const confirmedAt = (division as { standingsConfirmedAt?: unknown })
+    .standingsConfirmedAt;
   if (confirmedAt instanceof Date) {
     return !Number.isNaN(confirmedAt.getTime());
   }
-  if (typeof confirmedAt === 'string') {
+  if (typeof confirmedAt === "string") {
     return confirmedAt.trim().length > 0;
   }
   return false;
 };
 
 export const getDivisionTeamIds = (division: unknown): string[] => {
-  if (!division || typeof division !== 'object') {
+  if (!division || typeof division !== "object") {
     return [];
   }
   const rawTeamIds = (division as { teamIds?: unknown }).teamIds;
@@ -713,17 +973,22 @@ export const getDivisionTeamIds = (division: unknown): string[] => {
   );
 };
 
-export const shouldResetBracketMatchForRebuild = (event: Event, match: Match): boolean => {
-  if (event.eventType === 'TOURNAMENT') {
+export const shouldResetBracketMatchForRebuild = (
+  event: Event,
+  match: Match,
+): boolean => {
+  if (event.eventType === "TOURNAMENT") {
     return true;
   }
-  if (event.eventType === 'LEAGUE' && event.includePlayoffs) {
+  if (event.eventType === "LEAGUE" && event.includePlayoffs) {
     return isPlayoffBracketMatch(match);
   }
   return false;
 };
 
-export const toClearedBracketMatchUpdate = (match: Match): Partial<Match> & { $id: string } => ({
+export const toClearedBracketMatchUpdate = (
+  match: Match,
+): Partial<Match> & { $id: string } => ({
   $id: match.$id,
   team1Points: [],
   team2Points: [],
@@ -736,22 +1001,25 @@ export type MatchConflictPair = {
   secondId: string;
 };
 
-export const listMatchConflictPairs = (conflictsById: Record<string, string[]>): MatchConflictPair[] => {
+export const listMatchConflictPairs = (
+  conflictsById: Record<string, string[]>,
+): MatchConflictPair[] => {
   const seenPairs = new Set<string>();
   const pairs: MatchConflictPair[] = [];
 
   Object.keys(conflictsById)
     .sort()
     .forEach((matchId) => {
-      const conflictIds = Array.isArray(conflictsById[matchId]) ? conflictsById[matchId] : [];
+      const conflictIds = Array.isArray(conflictsById[matchId])
+        ? conflictsById[matchId]
+        : [];
       conflictIds.forEach((rawConflictId) => {
         const conflictId = normalizeIdToken(rawConflictId);
         if (!conflictId || conflictId === matchId) {
           return;
         }
-        const [firstId, secondId] = matchId < conflictId
-          ? [matchId, conflictId]
-          : [conflictId, matchId];
+        const [firstId, secondId] =
+          matchId < conflictId ? [matchId, conflictId] : [conflictId, matchId];
         const pairKey = `${firstId}|${secondId}`;
         if (seenPairs.has(pairKey)) {
           return;
@@ -770,7 +1038,7 @@ export const listMatchConflictPairs = (conflictsById: Record<string, string[]>):
 };
 
 export const getConflictMatchLabel = (match: Match): string => {
-  if (typeof match.matchId === 'number' && Number.isFinite(match.matchId)) {
+  if (typeof match.matchId === "number" && Number.isFinite(match.matchId)) {
     return `Match #${Math.trunc(match.matchId)}`;
   }
   return `Match ${match.$id}`;
@@ -779,10 +1047,13 @@ export const getConflictMatchLabel = (match: Match): string => {
 export const getConflictFieldLabel = (match: Match): string => {
   return getFieldDisplayName(
     {
-      $id: normalizeIdToken(match.field?.$id) ?? normalizeIdToken(match.fieldId) ?? undefined,
-      name: typeof match.field?.name === 'string' ? match.field.name : '',
+      $id:
+        normalizeIdToken(match.field?.$id) ??
+        normalizeIdToken(match.fieldId) ??
+        undefined,
+      name: typeof match.field?.name === "string" ? match.field.name : "",
     },
-    'an unassigned field',
+    "an unassigned field",
   );
 };
 
@@ -817,12 +1088,16 @@ export const buildMatchConflictAlertMessage = ({
 };
 
 export const getTeamWarningLabel = (team: Team): string => {
-  const name = typeof team.name === 'string' ? team.name.trim() : '';
-  return name.length > 0 ? name : 'Unnamed Team';
+  const name = typeof team.name === "string" ? team.name.trim() : "";
+  return name.length > 0 ? name : "Unnamed Team";
 };
 
-
-export type StandingsSortField = 'team' | 'wins' | 'losses' | 'draws' | 'points';
+export type StandingsSortField =
+  | "team"
+  | "wins"
+  | "losses"
+  | "draws"
+  | "points";
 
 export type StandingsRow = {
   teamId: string;
@@ -848,9 +1123,17 @@ export type LocationDefaults = {
   coordinates?: [number, number];
 };
 
-export type EventLifecycleStatus = 'DRAFT' | 'PRIVATE' | 'PUBLISHED';
-export type NotificationAudienceKey = 'managers' | 'players' | 'parents' | 'officials' | 'hosts';
-export type NotificationAudienceState = Record<NotificationAudienceKey, boolean>;
+export type EventLifecycleStatus = "DRAFT" | "PRIVATE" | "PUBLISHED";
+export type NotificationAudienceKey =
+  | "managers"
+  | "players"
+  | "parents"
+  | "officials"
+  | "hosts";
+export type NotificationAudienceState = Record<
+  NotificationAudienceKey,
+  boolean
+>;
 
 export type TeamBillingUserOption = {
   id: string;
@@ -879,7 +1162,7 @@ export type TeamBillingPaymentSnapshot = {
 
 export type TeamBillingBillSnapshot = {
   $id: string;
-  ownerType: 'TEAM' | 'USER';
+  ownerType: "TEAM" | "USER";
   ownerId: string;
   ownerName: string;
   totalAmountCents: number;
@@ -926,7 +1209,7 @@ export type PendingRentalCheckoutContext = {
 
 export type PendingSaveChangeItem = {
   id: string;
-  category: 'event' | 'match';
+  category: "event" | "match";
   label: string;
   detail?: string;
   sortOrder: number;
@@ -944,27 +1227,26 @@ export type RentalSelectionQuery = {
   endTimeMinutes?: number;
 };
 
-export const parseIdListQueryParam = (value?: string | null): string[] => (
+export const parseIdListQueryParam = (value?: string | null): string[] =>
   value
     ? Array.from(
-      new Set(
-        value
-          .split(',')
-          .map((id) => id.trim())
-          .filter((id) => id.length > 0),
-      ),
-    )
-    : []
-);
+        new Set(
+          value
+            .split(",")
+            .map((id) => id.trim())
+            .filter((id) => id.length > 0),
+        ),
+      )
+    : [];
 
 const normalizeRentalSelectionDateRange = (
   selection: Record<string, unknown>,
 ): { start: string; end: string } | null => {
   const explicitStart = formatLocalDateTime(
-    typeof selection.startDate === 'string' ? selection.startDate : null,
+    typeof selection.startDate === "string" ? selection.startDate : null,
   );
   const explicitEnd = formatLocalDateTime(
-    typeof selection.endDate === 'string' ? selection.endDate : null,
+    typeof selection.endDate === "string" ? selection.endDate : null,
   );
   if (explicitStart && explicitEnd) {
     const startDate = parseLocalDateTime(explicitStart);
@@ -987,7 +1269,12 @@ const normalizeRentalSelectionDateRange = (
   ).sort((left, right) => left - right);
   const startTimeMinutes = Number(selection.startTimeMinutes);
   const endTimeMinutes = Number(selection.endTimeMinutes);
-  if (!startBoundary || !daysOfWeek.length || !Number.isFinite(startTimeMinutes) || !Number.isFinite(endTimeMinutes)) {
+  if (
+    !startBoundary ||
+    !daysOfWeek.length ||
+    !Number.isFinite(startTimeMinutes) ||
+    !Number.isFinite(endTimeMinutes)
+  ) {
     return null;
   }
 
@@ -1015,7 +1302,9 @@ const normalizeRentalSelectionDateRange = (
   return { start: normalizedStart, end: normalizedEnd };
 };
 
-export const parseRentalSelectionsQueryParam = (value?: string | null): RentalSelectionQuery[] => {
+export const parseRentalSelectionsQueryParam = (
+  value?: string | null,
+): RentalSelectionQuery[] => {
   if (!value) {
     return [];
   }
@@ -1027,7 +1316,7 @@ export const parseRentalSelectionsQueryParam = (value?: string | null): RentalSe
     }
     const normalizedSelections: RentalSelectionQuery[] = [];
     parsed.forEach((rawSelection, index) => {
-      if (!rawSelection || typeof rawSelection !== 'object') {
+      if (!rawSelection || typeof rawSelection !== "object") {
         return;
       }
       const selection = rawSelection as Record<string, unknown>;
@@ -1037,8 +1326,13 @@ export const parseRentalSelectionsQueryParam = (value?: string | null): RentalSe
       }
       const scheduledFieldIds = Array.from(
         new Set(
-          (Array.isArray(selection.scheduledFieldIds) ? selection.scheduledFieldIds : [])
-            .map((fieldId) => (typeof fieldId === 'string' ? fieldId.trim() : ''))
+          (Array.isArray(selection.scheduledFieldIds)
+            ? selection.scheduledFieldIds
+            : []
+          )
+            .map((fieldId) =>
+              typeof fieldId === "string" ? fieldId.trim() : "",
+            )
             .filter((fieldId) => fieldId.length > 0),
         ),
       );
@@ -1050,21 +1344,28 @@ export const parseRentalSelectionsQueryParam = (value?: string | null): RentalSe
       if (!startDate || !endDate || endDate.getTime() <= startDate.getTime()) {
         return;
       }
-      const derivedDayOfWeek = ((startDate.getDay() + 6) % 7);
-      const startTimeMinutes = startDate.getHours() * 60 + startDate.getMinutes();
+      const derivedDayOfWeek = (startDate.getDay() + 6) % 7;
+      const startTimeMinutes =
+        startDate.getHours() * 60 + startDate.getMinutes();
       const endTimeMinutes = endDate.getHours() * 60 + endDate.getMinutes();
       const normalizedDays = Array.from(
         new Set(
-          (Array.isArray(selection.daysOfWeek) ? selection.daysOfWeek : [selection.dayOfWeek])
+          (Array.isArray(selection.daysOfWeek)
+            ? selection.daysOfWeek
+            : [selection.dayOfWeek]
+          )
             .map((day) => Number(day))
             .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6),
         ),
       ).sort((left, right) => left - right);
-      const daysOfWeek = normalizedDays.length ? normalizedDays : [derivedDayOfWeek];
+      const daysOfWeek = normalizedDays.length
+        ? normalizedDays
+        : [derivedDayOfWeek];
       normalizedSelections.push({
-        key: typeof selection.key === 'string' && selection.key.trim().length > 0
-          ? selection.key.trim()
-          : `rental-selection-${index + 1}`,
+        key:
+          typeof selection.key === "string" && selection.key.trim().length > 0
+            ? selection.key.trim()
+            : `rental-selection-${index + 1}`,
         scheduledFieldIds,
         dayOfWeek: daysOfWeek[0] ?? derivedDayOfWeek,
         daysOfWeek,
@@ -1077,7 +1378,7 @@ export const parseRentalSelectionsQueryParam = (value?: string | null): RentalSe
     });
     return normalizedSelections;
   } catch (error) {
-    console.warn('Invalid rentalSelections query payload:', error);
+    console.warn("Invalid rentalSelections query payload:", error);
     return [];
   }
 };
@@ -1094,7 +1395,11 @@ export const getRentalSelectionRange = (
   selections.forEach((selection) => {
     const selectionStart = parseLocalDateTime(selection.startDate);
     const selectionEnd = parseLocalDateTime(selection.endDate);
-    if (!selectionStart || !selectionEnd || selectionEnd.getTime() <= selectionStart.getTime()) {
+    if (
+      !selectionStart ||
+      !selectionEnd ||
+      selectionEnd.getTime() <= selectionStart.getTime()
+    ) {
       return;
     }
     if (!earliest || selectionStart < earliest) {
@@ -1111,9 +1416,12 @@ export const getRentalSelectionRange = (
   };
 };
 
-export const collectRentalSelectionFieldIds = (selections: RentalSelectionQuery[]): string[] => (
-  Array.from(new Set(selections.flatMap((selection) => selection.scheduledFieldIds)))
-);
+export const collectRentalSelectionFieldIds = (
+  selections: RentalSelectionQuery[],
+): string[] =>
+  Array.from(
+    new Set(selections.flatMap((selection) => selection.scheduledFieldIds)),
+  );
 
 export const DEFAULT_NOTIFICATION_AUDIENCE: NotificationAudienceState = {
   managers: false,
@@ -1123,55 +1431,64 @@ export const DEFAULT_NOTIFICATION_AUDIENCE: NotificationAudienceState = {
   hosts: false,
 };
 
-export const DRAFT_LIKE_EVENT_STATES = new Set(['UNPUBLISHED', 'DRAFT']);
-export const HIDDEN_EVENT_STATES = new Set(['UNPUBLISHED', 'DRAFT']);
+export const DRAFT_LIKE_EVENT_STATES = new Set(["UNPUBLISHED", "DRAFT"]);
+export const HIDDEN_EVENT_STATES = new Set(["UNPUBLISHED", "DRAFT"]);
 
-export const EVENT_LIFECYCLE_OPTIONS: Array<{ value: EventLifecycleStatus; label: string }> = [
-  { value: 'DRAFT', label: 'Draft' },
-  { value: 'PRIVATE', label: 'Private' },
-  { value: 'PUBLISHED', label: 'Published' },
+export const EVENT_LIFECYCLE_OPTIONS: Array<{
+  value: EventLifecycleStatus;
+  label: string;
+}> = [
+  { value: "DRAFT", label: "Draft" },
+  { value: "PRIVATE", label: "Private" },
+  { value: "PUBLISHED", label: "Published" },
 ];
 
-export const getEventLifecycleStatus = (eventInput: Pick<Event, 'state'> | null | undefined): EventLifecycleStatus => {
+export const getEventLifecycleStatus = (
+  eventInput: Pick<Event, "state"> | null | undefined,
+): EventLifecycleStatus => {
   if (!eventInput) {
-    return 'DRAFT';
+    return "DRAFT";
   }
 
-  const normalizedState = typeof eventInput.state === 'string' ? eventInput.state.toUpperCase() : 'PUBLISHED';
-  if (normalizedState === 'PRIVATE') {
-    return 'PRIVATE';
+  const normalizedState =
+    typeof eventInput.state === "string"
+      ? eventInput.state.toUpperCase()
+      : "PUBLISHED";
+  if (normalizedState === "PRIVATE") {
+    return "PRIVATE";
   }
   if (DRAFT_LIKE_EVENT_STATES.has(normalizedState)) {
-    return 'DRAFT';
+    return "DRAFT";
   }
 
-  return 'PUBLISHED';
+  return "PUBLISHED";
 };
 
 export const toStoredEventLifecycleState = (
   lifecycleStatus: EventLifecycleStatus,
-  currentState: Event['state'] | null | undefined,
+  currentState: Event["state"] | null | undefined,
 ): EventState => {
-  if (lifecycleStatus === 'PUBLISHED') {
-    return 'PUBLISHED';
+  if (lifecycleStatus === "PUBLISHED") {
+    return "PUBLISHED";
   }
-  if (lifecycleStatus === 'PRIVATE') {
-    return 'PRIVATE';
+  if (lifecycleStatus === "PRIVATE") {
+    return "PRIVATE";
   }
-  return typeof currentState === 'string' && currentState.toUpperCase() === 'DRAFT'
-    ? 'DRAFT'
-    : 'UNPUBLISHED';
+  return typeof currentState === "string" &&
+    currentState.toUpperCase() === "DRAFT"
+    ? "DRAFT"
+    : "UNPUBLISHED";
 };
 
-export const getLifecycleStatusLabel = (status: EventLifecycleStatus): string => (
-  EVENT_LIFECYCLE_OPTIONS.find((option) => option.value === status)?.label ?? status
-);
+export const getLifecycleStatusLabel = (status: EventLifecycleStatus): string =>
+  EVENT_LIFECYCLE_OPTIONS.find((option) => option.value === status)?.label ??
+  status;
 
 export const DEFAULT_SPORT: Sport = {
-  $id: '',
-  name: '',
-  resourceLabelSingular: 'Resource',
-  resourceLabelPlural: 'Resources',
+  $id: "",
+  name: "",
+  resourceLabelSingular: "Resource",
+  resourceLabelPlural: "Resources",
   usePointsForWin: false,
   usePointsForDraw: false,
   usePointsForLoss: false,
@@ -1215,6 +1532,6 @@ export const DEFAULT_SPORT: Sport = {
   useEnablePenaltyUnsporting: false,
   usePenaltyPointsUnsporting: false,
   usePointPrecision: false,
-  $createdAt: '',
-  $updatedAt: '',
+  $createdAt: "",
+  $updatedAt: "",
 };

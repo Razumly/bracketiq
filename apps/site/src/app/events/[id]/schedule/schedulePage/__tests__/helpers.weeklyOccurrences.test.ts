@@ -1,6 +1,9 @@
 import { buildEvent, buildTimeSlot } from '../../../../../../../test/factories';
 
-import { buildWeeklyOccurrenceOptionsInRange } from '../helpers';
+import {
+  buildWeeklyOccurrenceOptionsInRange,
+  resolveSelectedWeeklyOccurrenceOption,
+} from '../helpers';
 
 describe('weekly schedule occurrence options', () => {
   it('expands repeating slots but includes a fixed supplemental slot only once', () => {
@@ -76,6 +79,32 @@ describe('weekly schedule occurrence options', () => {
         endMinutes: 60,
       }),
     ]);
+  });
+  it('keeps the selected occurrence instant in the slot time zone', () => {
+    const event = buildEvent({
+      eventType: 'WEEKLY_EVENT',
+      parentEvent: null,
+      timeSlots: [
+        buildTimeSlot({
+          $id: 'slot-named-zone',
+          repeating: true,
+          daysOfWeek: [6],
+          dayOfWeek: 6,
+          startDate: '2026-03-08',
+          endDate: '2026-03-15',
+          startTimeMinutes: 18 * 60,
+          endTimeMinutes: 19 * 60,
+          timeZone: 'America/Los_Angeles',
+        }),
+      ],
+    });
+
+    const selected = resolveSelectedWeeklyOccurrenceOption(event, {
+      slotId: 'slot-named-zone',
+      occurrenceDate: '2026-03-08',
+    });
+
+    expect(selected?.startInstant.toISOString()).toBe('2026-03-09T01:00:00.000Z');
   });
 });
 
