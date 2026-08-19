@@ -66,6 +66,7 @@ interface TournamentBracketViewProps {
   conflictMatchIdsById?: Record<string, string[]>;
   showEventOfficialNames?: boolean;
   eventTimeZone?: string;
+  divisionLabel?: string;
 }
 
 export default function TournamentBracketView({
@@ -84,6 +85,7 @@ export default function TournamentBracketView({
   conflictMatchIdsById = {},
   showEventOfficialNames = true,
   eventTimeZone,
+  divisionLabel,
 }: TournamentBracketViewProps) {
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [showScoreModal, setShowScoreModal] = useState(false);
@@ -565,6 +567,7 @@ export default function TournamentBracketView({
           officialUsersById={officialLookupById}
           showEventOfficialNames={showEventOfficialNames}
           timeZone={eventTimeZone}
+          divisionLabel={divisionLabel}
           highlightDivisionBadge={matchHasHighlightedDivision(resolvedMatch)}
         />
       );
@@ -573,6 +576,7 @@ export default function TournamentBracketView({
       canManageMatch,
       conflictMatchIdSet,
       eventTimeZone,
+      divisionLabel,
       handleMatchClick,
       hasExternalMatchClick,
       leaguePlayoffPlaceholderAssignments,

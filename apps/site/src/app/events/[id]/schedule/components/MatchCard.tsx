@@ -26,6 +26,7 @@ interface MatchCardProps {
     officialUsersById?: Record<string, UserData>;
     showEventOfficialNames?: boolean;
     showDivisionBadge?: boolean;
+    divisionLabel?: string;
     highlightDivisionBadge?: boolean;
     timeZone?: string;
 }
@@ -93,6 +94,7 @@ function MatchCard({
     officialUsersById,
     showEventOfficialNames = true,
     showDivisionBadge = true,
+    divisionLabel: divisionLabelOverride,
     highlightDivisionBadge = false,
     timeZone,
 }: MatchCardProps) {
@@ -220,7 +222,7 @@ function MatchCard({
     const isCompleted = result && result.winner !== null;
     const isInProgress = Array.isArray(match.segments)
         && match.segments.some((segment) => segment.status === 'IN_PROGRESS');
-    const divisionLabel = resolveDivisionLabel(match.division);
+    const divisionLabel = divisionLabelOverride?.trim() || resolveDivisionLabel(match.division);
 
     const formatTime = (timeString?: string | null) => {
         if (!timeString || typeof timeString !== 'string') return 'TBD';

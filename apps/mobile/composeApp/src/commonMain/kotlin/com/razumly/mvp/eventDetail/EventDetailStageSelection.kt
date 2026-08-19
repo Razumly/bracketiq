@@ -52,16 +52,33 @@ internal fun Event.playoffDivisionIdsForSelection(): Set<String> = buildSet {
         .forEach(::add)
 }
 
-private fun MatchWithRelations.isBracketMatchForDivisionSelection(): Boolean =
-    match.losersBracket ||
-        !match.previousLeftId.isNullOrBlank() ||
-        !match.previousRightId.isNullOrBlank() ||
-        !match.winnerNextMatchId.isNullOrBlank() ||
-        !match.loserNextMatchId.isNullOrBlank() ||
-        previousLeftMatch != null ||
-        previousRightMatch != null ||
-        winnerNextMatch != null ||
-        loserNextMatch != null
+private fun MatchWithRelations.isBracketMatchForDivisionSelection(): Boolean {
+    val phase = match.phase
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?.uppercase()
+    return when (phase) {
+        "PLAYOFF", "BRACKET" -> true
+        null -> match.losersBracket ||
+            !match.previousLeftId.isNullOrBlank() ||
+            !match.previousRightId.isNullOrBlank() ||
+            !match.winnerNextMatchId.isNullOrBlank() ||
+            !match.loserNextMatchId.isNullOrBlank() ||
+            previousLeftMatch != null ||
+            previousRightMatch != null ||
+            winnerNextMatch != null ||
+            loserNextMatch != null
+        else -> false
+    }
+}
+
+private fun MatchWithRelations.bracketDivisionIdForSelection(): String? =
+    match.phaseDivisionId
+        ?.trim()
+        ?.takeIf { divisionId ->
+            divisionId.isNotBlank() && isBracketMatchForDivisionSelection()
+        }
+        ?: match.division
 
 internal fun Event.leagueDivisionOptionsForStandings(
     fallbackOptions: List<BracketDivisionOption>,
@@ -128,18 +145,19 @@ internal fun Event.playoffDivisionOptionsForBracket(
         options.addDivisionOption(this, divisionId)
     }
 
-    matches.forEach { match ->
-        val normalizedDivision = match.match.division
-            ?.normalizeDivisionIdentifier()
-            .orEmpty()
-        val matchesExplicitPlayoffDivision = playoffDivisionIds.isNotEmpty() &&
-            normalizedDivision in playoffDivisionIds
-        val matchesLegacyBracketShape = playoffDivisionIds.isEmpty() &&
-            match.isBracketMatchForDivisionSelection()
-        if (matchesExplicitPlayoffDivision || matchesLegacyBracketShape) {
-            options.addDivisionOption(this, match.match.division)
+    matches
+        .filter(MatchWithRelations::isBracketMatchForDivisionSelection)
+        .forEach { match ->
+            val bracketDivisionId = match.bracketDivisionIdForSelection()
+            val normalizedDivision = bracketDivisionId
+                ?.normalizeDivisionIdentifier()
+                .orEmpty()
+            val matchesKnownPlayoffDivision = playoffDivisionIds.isEmpty() ||
+                normalizedDivision in playoffDivisionIds
+            if (matchesKnownPlayoffDivision) {
+                options.addDivisionOption(this, bracketDivisionId)
+            }
         }
-    }
 
     return options
         .toBracketDivisionOptions()
@@ -402,7 +420,8 @@ internal fun Event.hasLosersBracketSelector(
 
     return matches.any { match ->
         val matchInSelectedDivision = normalizedDivisionId.isBlank() ||
-            match.match.division?.normalizeDivisionIdentifier() == normalizedDivisionId
+            match.bracketDivisionIdForSelection()
+                ?.normalizeDivisionIdentifier() == normalizedDivisionId
 
         match.match.losersBracket && matchInSelectedDivision
     }

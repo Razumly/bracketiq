@@ -3,6 +3,7 @@ export type BracketMatchLike = {
   $id?: string | null;
   matchId?: number | null;
   division?: unknown;
+  phase?: string | null;
   sourceDivisionId?: string | null;
   phaseDivisionId?: string | null;
   team1?: { division?: unknown } | null;
@@ -119,6 +120,14 @@ export const hasBracketConnections = <T extends BracketMatchLike>(match: T): boo
     || resolveLinkedMatchId(match.loserNextMatchId, match.loserNextMatch)
   )
 );
+
+export const isBracketPhaseMatch = <T extends BracketMatchLike>(match: T): boolean => {
+  const phase = normalizeToken(match.phase)?.toUpperCase();
+  if (phase) {
+    return phase === 'PLAYOFF' || phase === 'BRACKET';
+  }
+  return hasBracketConnections(match);
+};
 
 export const getBracketRootMatches = <T extends BracketMatchLike>(matches: Record<string, T>): T[] => (
   Object.values(matches).filter((match) => {

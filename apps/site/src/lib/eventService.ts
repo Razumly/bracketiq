@@ -2526,6 +2526,9 @@ class EventService {
           : null,
       losersBracket: input.losersBracket,
       matchId: input.matchId,
+      phase: input.phase ?? null,
+      sourceDivisionId: input.sourceDivisionId ?? null,
+      phaseDivisionId: input.phaseDivisionId ?? null,
       team1Points: Array.isArray(input.team1Points)
         ? (input.team1Points as number[])
         : [],

@@ -61,6 +61,7 @@ import {
   getBracketMatchSourceDivisionId as getMatchSourceDivisionId,
   getBracketMatchDivisionLabel as getMatchDivisionLabel,
   getBracketRootMatches,
+  isBracketPhaseMatch,
   pickPreferredBracketRootMatch as pickPreferredRootMatch,
   toBracketDivisionKey as toDivisionKey,
 } from '@/lib/bracketViewCore';
@@ -3614,15 +3615,7 @@ function EventScheduleContent() {
   }, [authUser?.$id, isAuthenticated, isGuest, user?.$id]);
 
   const playoffMatches = useMemo(
-    () =>
-      activeMatches.filter((match) =>
-        Boolean(
-          match.previousLeftId ||
-          match.previousRightId ||
-          match.winnerNextMatchId ||
-          match.loserNextMatchId,
-        ),
-      ),
+    () => activeMatches.filter(isBracketPhaseMatch),
     [activeMatches],
   );
 

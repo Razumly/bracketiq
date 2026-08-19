@@ -57,6 +57,9 @@ export default function BracketTabPanel({
 
   const fallbackDivision = bracketDivisionOptions[0]?.value ?? null;
   const selectedDivision = selectedBracketDivision ?? fallbackDivision;
+  const selectedDivisionLabel = bracketDivisionOptions.find(
+    (option) => option.value === selectedDivision,
+  )?.label;
 
   return (
     <Tabs.Panel value="bracket" pt="md" pb={0}>
@@ -93,6 +96,7 @@ export default function BracketTabPanel({
             canEditMatches={canEditMatches}
             showEventOfficialNames={showEventOfficialNames}
             eventTimeZone={eventTimeZone}
+            divisionLabel={selectedDivisionLabel}
             showDateOnMatches={showDateOnMatches}
             conflictMatchIdsById={matchConflictsById}
           />
