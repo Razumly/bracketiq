@@ -3723,7 +3723,7 @@ describe('EventForm dirty state', () => {
     });
   });
 
-  it('saves split playoff placement mapping from the league division editor', async () => {
+  it('saves repeated split playoff placement mappings from the league division editor', async () => {
     const onDirtyStateChange = jest.fn();
     const formRef = React.createRef<EventFormHandle>();
     const upperDivisionId = 'event_1__division__playoff_1';
@@ -3788,15 +3788,16 @@ describe('EventForm dirty state', () => {
       expect(screen.getByLabelText('Placement #1')).toHaveValue(upperDivisionId);
     });
 
-    await userEvent.selectOptions(screen.getByLabelText('Placement #1'), lowerDivisionId);
+    await userEvent.selectOptions(screen.getByLabelText('Placement #3'), upperDivisionId);
+    expect(screen.getByLabelText('Placement #3')).toHaveValue(upperDivisionId);
     await userEvent.click(screen.getByText('Update Division'));
 
     await waitFor(() => {
       const draft = getLegacyDraft(formRef);
       expect(draft?.divisionDetails?.[0]?.playoffPlacementDivisionIds).toEqual([
-        lowerDivisionId,
         upperDivisionId,
-        lowerDivisionId,
+        upperDivisionId,
+        upperDivisionId,
         lowerDivisionId,
       ]);
     });

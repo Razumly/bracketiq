@@ -17,6 +17,7 @@ import { DIVISION_FIELD_ROW_CLASS } from '../divisionLayout';
 import type { DivisionEditorState } from '../divisionForm';
 import {
     normalizeDivisionKeys,
+    normalizePlacementDivisionIds,
     normalizePlayoffDivisionParticipantCount,
 } from '../divisionForm';
 import type { EventFormValues } from '../formTypes';
@@ -263,7 +264,7 @@ export const DivisionEditorLeaguePanel = ({
                 visible={showOperationalControls && splitDivisionEditorEnabled && typeof divisionEditor.playoffTeamCount === 'number' && divisionEditor.playoffTeamCount > 0}
                 playoffTeamCount={divisionEditor.playoffTeamCount}
                 playoffDivisionOptions={playoffDivisionOptions}
-                placementDivisionIds={normalizeDivisionKeys(divisionEditor.playoffPlacementDivisionIds || [])}
+                placementDivisionIds={normalizePlacementDivisionIds(divisionEditor.playoffPlacementDivisionIds)}
                 comboboxProps={comboboxProps}
                 disabled={isImmutableField('divisions')}
                 onPlacementDivisionChange={(placementIndex, value) => {
