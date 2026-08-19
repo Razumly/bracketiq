@@ -4255,14 +4255,22 @@ export const loadEventWithRelations = async (
       [phaseDivision.id, phaseDivision],
     ]);
     const phase = String(phaseDivision.phase ?? "").toUpperCase();
-    if (phase === "BRACKET" || phase === "PLAYOFF") {
+    const isRegularPhase = phase === "LEAGUE" || phase === "POOL";
+    const isFinalPhase = phase === "PLAYOFF" || phase === "BRACKET";
+    if (isRegularPhase || isFinalPhase) {
       for (const sourceDivisionId of sourceDivisionIds) {
-        for (const sourcePhaseDivision of phaseDivisionsBySource.get(sourceDivisionId) ?? []) {
-          const sourcePhase = String(sourcePhaseDivision.phase ?? "").toUpperCase();
-          if (sourcePhase !== "POOL" && sourcePhase !== "LEAGUE") {
-            continue;
+        for (const relatedPhaseDivision of phaseDivisionsBySource.get(sourceDivisionId) ?? []) {
+          const relatedPhase = String(relatedPhaseDivision.phase ?? "").toUpperCase();
+          const isRelatedRegularPhase =
+            relatedPhase === "LEAGUE" || relatedPhase === "POOL";
+          const isRelatedFinalPhase =
+            relatedPhase === "PLAYOFF" || relatedPhase === "BRACKET";
+          if (
+            (isRegularPhase && isRelatedFinalPhase) ||
+            (isFinalPhase && isRelatedRegularPhase)
+          ) {
+            relatedDivisions.set(relatedPhaseDivision.id, relatedPhaseDivision);
           }
-          relatedDivisions.set(sourcePhaseDivision.id, sourcePhaseDivision);
         }
       }
     }

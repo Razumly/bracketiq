@@ -4453,6 +4453,7 @@ function EventScheduleContent() {
       draft: EventEditorDraft,
       mode: 'CREATE' | 'EDIT',
       createCompletionMode?: 'CREATE_ONLY' | 'CREATE_AND_BUILD_SCHEDULE',
+      preserveLocalMatchDraft = false,
     ): Promise<{ event: Event; snapshot: EventEditorSnapshot }> => {
       const contractDraft = isRentalFlow
         ? {
@@ -4576,9 +4577,12 @@ function EventScheduleContent() {
         result.snapshot.draft,
         result.snapshot.eventId,
       ) as unknown as Event;
-      const canonicalMatches = scheduleMatches ?? (
-        effectiveMode === 'EDIT' ? activeMatches : []
-      );
+      const canonicalMatches = preserveLocalMatchDraft
+        && result.scheduleOutcome.status === 'NOT_REQUESTED'
+        ? activeMatches
+        : scheduleMatches ?? (
+          effectiveMode === 'EDIT' ? activeMatches : []
+        );
       const canonicalEvent = normalizeApiEvent({
         ...(effectiveMode === 'EDIT' ? (activeEvent ?? event ?? {}) : {}),
         ...canonicalProjection,
@@ -4768,7 +4772,7 @@ function EventScheduleContent() {
         setPublishing(false);
       }
     },
-    [handlePreviewEventUpdate, pathname, router, saveEditorConfiguration, searchParams],
+    [router, saveEditorConfiguration, searchParams],
   );
 
   const scheduleRegularEvent = useCallback(
@@ -4819,7 +4823,7 @@ function EventScheduleContent() {
         setPublishing(false);
       }
     },
-    [handlePreviewEventUpdate, pathname, router, saveEditorConfiguration, searchParams],
+    [router, saveEditorConfiguration, searchParams],
   );
 
   const handleCreateWithoutSchedule = useCallback(async () => {
@@ -4921,6 +4925,7 @@ function EventScheduleContent() {
       if (matchConflictPairs.length > 0) {
         showCurrentMatchConflictOverride();
       }
+      const hasDraftMatchChanges = pendingSaveChanges.some((change) => change.category === 'match');
       setPublishing(true);
       try {
         const {
@@ -4929,6 +4934,8 @@ function EventScheduleContent() {
         } = await saveEditorConfiguration(
           legacyEventToEditorDraft(lifecycleDraft),
           'EDIT',
+          undefined,
+          hasDraftMatchChanges,
         );
         const nextEvent = cloneValue(canonicalEvent) as Event;
         const nextMatches = Array.isArray(canonicalEvent.matches)
@@ -4964,7 +4971,6 @@ function EventScheduleContent() {
         let persistedDraftMatches = false;
 
         const shouldPersistDraftMatches = !skipDraftMatchPersistenceForRemovedFields;
-        const hasDraftMatchChanges = pendingSaveChanges.some((change) => change.category === 'match');
         if (
           updatedEvent.$id
           && shouldPersistDraftMatches

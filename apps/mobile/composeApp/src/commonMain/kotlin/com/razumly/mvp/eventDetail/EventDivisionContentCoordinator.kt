@@ -46,7 +46,7 @@ internal class EventDivisionContentCoordinator {
         val divisionFilter = _selectedDivision.value
         _divisionMatches.value = relations.matches
             .filter { match ->
-                (selectedEvent.singleDivision || match.isGraphMatch()) && (
+                match.isGraphMatch() && (
                     selectedEvent.singleDivision ||
                         divisionFilter.isNullOrBlank() ||
                         match.matchesDivisionIdentifier(divisionFilter)

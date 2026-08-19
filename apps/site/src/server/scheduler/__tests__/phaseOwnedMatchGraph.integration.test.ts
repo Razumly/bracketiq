@@ -354,12 +354,254 @@ describe("phase-owned Match Graph persistence", () => {
     ))).toBe(true);
     expect((client.state.eventRegistrations ?? new Map()).size).toBe(0);
   });
-  it("loads a persisted multi-Pool Tournament scope before scheduling", async () => {
+  it("loads persisted League Time Slot scope across regular-season and non-split playoff phases", async () => {
+    const client = new InMemoryClient();
+    const eventId = "event-persisted-league-phase-scope";
+    const openEntryId = buildEventDivisionId(eventId, "open");
+    const mastersEntryId = buildEventDivisionId(eventId, "masters");
+    const openLeaguePhaseId = `${openEntryId}__phase__league`;
+    const openPlayoffPhaseId = `${openEntryId}__phase__playoff`;
+    const mastersLeaguePhaseId = `${mastersEntryId}__phase__league`;
+    const mastersPlayoffPhaseId = `${mastersEntryId}__phase__playoff`;
+
+    await client.$transaction(async (tx) => {
+      await upsertEventFromPayload({
+        ...leaguePayload(eventId),
+        name: "Persisted League Phase Scope",
+        start: "2026-08-22T09:00:00.000Z",
+        end: "2027-08-22T23:59:00.000Z",
+        singleDivision: false,
+        includePlayoffs: true,
+        splitLeaguePlayoffDivisions: false,
+        playoffTeamCount: 8,
+        maxParticipants: 16,
+        divisions: [openEntryId, mastersEntryId],
+        fieldIds: ["field-1"],
+        fields: [{
+          id: "field-1",
+          name: "Court A",
+          location: "Main Gym",
+          divisions: [openEntryId, mastersEntryId],
+        }],
+        timeSlotIds: ["slot-weekend"],
+        timeSlots: [{
+          id: "slot-weekend",
+          dayOfWeek: 6,
+          daysOfWeek: [6, 0],
+          startTimeMinutes: 9 * 60,
+          endTimeMinutes: 24 * 60,
+          startDate: "2026-08-22T09:00:00.000Z",
+          endDate: "2027-08-22T23:59:00.000Z",
+          repeating: true,
+          scheduledFieldId: "field-1",
+          scheduledFieldIds: ["field-1"],
+          divisions: [openEntryId, mastersEntryId],
+          timeZone: "UTC",
+        }],
+        divisionDetails: [
+          {
+            id: openEntryId,
+            key: "open",
+            name: "Open",
+            kind: "LEAGUE",
+            maxParticipants: 8,
+            playoffTeamCount: 8,
+            fieldIds: ["field-1"],
+            teamIds: [],
+            gamesPerOpponent: 1,
+            matchDurationMinutes: 60,
+            restTimeMinutes: 24 * 60,
+          },
+          {
+            id: mastersEntryId,
+            key: "masters",
+            name: "Masters",
+            kind: "LEAGUE",
+            maxParticipants: 8,
+            playoffTeamCount: 8,
+            fieldIds: ["field-1"],
+            teamIds: [],
+            gamesPerOpponent: 1,
+            matchDurationMinutes: 60,
+            restTimeMinutes: 24 * 60,
+          },
+        ],
+        playoffDivisionDetails: [],
+      }, tx as unknown as Parameters<typeof upsertEventFromPayload>[1]);
+    });
+    await client.timeSlots.update({
+      where: { id: "slot-weekend" },
+      data: { divisions: [openLeaguePhaseId, mastersLeaguePhaseId] },
+    });
+
+    const loaded = await loadEventWithRelations(
+      eventId,
+      client as unknown as Parameters<typeof loadEventWithRelations>[1],
+    );
+    const loadedSlot = loaded.timeSlots.find((slot) => slot.id === "slot-weekend");
+    expect(new Set(loadedSlot?.divisions.map((division) => division.id))).toEqual(
+      new Set([
+        openLeaguePhaseId,
+        openPlayoffPhaseId,
+        mastersLeaguePhaseId,
+        mastersPlayoffPhaseId,
+      ]),
+    );
+
+    const scheduled = scheduleEvent(
+      { event: loaded, includePlaceholderTeams: true },
+      { log: () => {}, error: () => {} },
+    );
+    expect(scheduled.matches).toHaveLength(70);
+    expect(scheduled.matches.every((match) => (
+      match.field?.id === "field-1"
+      && match.start.getTime() < match.end.getTime()
+    ))).toBe(true);
+  });
+
+  it("keeps split League Time Slot scope within each mapped Entry Division", async () => {
+    const client = new InMemoryClient();
+    const eventId = "event-persisted-split-league-scope";
+    const openEntryId = buildEventDivisionId(eventId, "open");
+    const mastersEntryId = buildEventDivisionId(eventId, "masters");
+    const openLeaguePhaseId = `${openEntryId}__phase__league`;
+    const mastersLeaguePhaseId = `${mastersEntryId}__phase__league`;
+    const openPlayoffPhaseId = buildEventDivisionId(eventId, "open_playoff");
+    const mastersPlayoffPhaseId = buildEventDivisionId(eventId, "masters_playoff");
+
+    await client.$transaction(async (tx) => {
+      await upsertEventFromPayload({
+        ...leaguePayload(eventId),
+        name: "Persisted Split League Scope",
+        singleDivision: false,
+        includePlayoffs: true,
+        splitLeaguePlayoffDivisions: true,
+        maxParticipants: 8,
+        divisions: [openEntryId, mastersEntryId],
+        fieldIds: ["field-1"],
+        fields: [{
+          id: "field-1",
+          name: "Court A",
+          location: "Main Gym",
+          divisions: [openEntryId, mastersEntryId],
+        }],
+        timeSlotIds: ["slot-split-league"],
+        timeSlots: [{
+          id: "slot-split-league",
+          dayOfWeek: 1,
+          daysOfWeek: [1],
+          startTimeMinutes: 9 * 60,
+          endTimeMinutes: 20 * 60,
+          startDate: "2026-09-01T09:00:00.000Z",
+          endDate: "2026-09-01T20:00:00.000Z",
+          repeating: false,
+          scheduledFieldId: "field-1",
+          scheduledFieldIds: ["field-1"],
+          divisions: [openEntryId],
+          timeZone: "UTC",
+        }],
+        divisionDetails: [
+          {
+            id: openEntryId,
+            key: "open",
+            name: "Open",
+            kind: "LEAGUE",
+            maxParticipants: 4,
+            playoffTeamCount: 2,
+            playoffPlacementDivisionIds: [openPlayoffPhaseId],
+            fieldIds: ["field-1"],
+            teamIds: [],
+            gamesPerOpponent: 1,
+            matchDurationMinutes: 60,
+          },
+          {
+            id: mastersEntryId,
+            key: "masters",
+            name: "Masters",
+            kind: "LEAGUE",
+            maxParticipants: 4,
+            playoffTeamCount: 2,
+            playoffPlacementDivisionIds: [mastersPlayoffPhaseId],
+            fieldIds: ["field-1"],
+            teamIds: [],
+            gamesPerOpponent: 1,
+            matchDurationMinutes: 60,
+          },
+        ],
+        playoffDivisionDetails: [
+          {
+            id: openPlayoffPhaseId,
+            sourceDivisionId: openEntryId,
+            key: "open_playoff",
+            name: "Open Playoff",
+            kind: "PLAYOFF",
+            maxParticipants: 2,
+            playoffTeamCount: 2,
+            fieldIds: ["field-1"],
+            playoffConfig: {
+              fieldCount: 1,
+              matchDurationMinutes: 60,
+              restTimeMinutes: 0,
+            },
+          },
+          {
+            id: mastersPlayoffPhaseId,
+            sourceDivisionId: mastersEntryId,
+            key: "masters_playoff",
+            name: "Masters Playoff",
+            kind: "PLAYOFF",
+            maxParticipants: 2,
+            playoffTeamCount: 2,
+            fieldIds: ["field-1"],
+            playoffConfig: {
+              fieldCount: 1,
+              matchDurationMinutes: 60,
+              restTimeMinutes: 0,
+            },
+          },
+        ],
+      }, tx as unknown as Parameters<typeof upsertEventFromPayload>[1]);
+    });
+
+    const loadWithSlotScope = async (divisionIds: string[]) => {
+      await client.timeSlots.update({
+        where: { id: "slot-split-league" },
+        data: { divisions: divisionIds },
+      });
+      return loadEventWithRelations(
+        eventId,
+        client as unknown as Parameters<typeof loadEventWithRelations>[1],
+      );
+    };
+
+    const leagueScoped = await loadWithSlotScope([openLeaguePhaseId]);
+    expect(new Set(
+      leagueScoped.timeSlots
+        .find((slot) => slot.id === "slot-split-league")
+        ?.divisions.map((division) => division.id) ?? [],
+    )).toEqual(new Set([openLeaguePhaseId, openPlayoffPhaseId]));
+
+    const playoffScoped = await loadWithSlotScope([openPlayoffPhaseId]);
+    expect(new Set(
+      playoffScoped.timeSlots
+        .find((slot) => slot.id === "slot-split-league")
+        ?.divisions.map((division) => division.id) ?? [],
+    )).toEqual(new Set([openLeaguePhaseId, openPlayoffPhaseId]));
+    expect(
+      playoffScoped.timeSlots
+        .find((slot) => slot.id === "slot-split-league")
+        ?.divisions.some((division) => (
+          division.id === mastersLeaguePhaseId
+          || division.id === mastersPlayoffPhaseId
+        )),
+    ).toBe(false);
+  });
+
+  it("maps persisted Tournament Pool Time Slot scope across Entry, Pool, and Bracket phases before scheduling", async () => {
     const client = new InMemoryClient();
     const eventId = "event-persisted-multi-pool-scope";
     const entryDivisionId = buildEventDivisionId(eventId, "open");
     const bracketDivisionId = entryDivisionId;
-    const bracketPhaseId = `${bracketDivisionId}__phase__bracket`;
 
     await client.$transaction(async (tx) => {
       await upsertEventFromPayload({
@@ -388,7 +630,7 @@ describe("phase-owned Match Graph persistence", () => {
           repeating: false,
           scheduledFieldId: "field-1",
           scheduledFieldIds: ["field-1"],
-          divisions: [bracketPhaseId],
+          divisions: [entryDivisionId],
           timeZone: "UTC",
         }],
         divisionDetails: [{
@@ -455,17 +697,53 @@ describe("phase-owned Match Graph persistence", () => {
       });
     }
 
-    const loaded = await loadEventWithRelations(
-      eventId,
-      client as unknown as Parameters<typeof loadEventWithRelations>[1],
+    const sourceRows = [...client.state.eventDivisionPhaseSources.values()];
+    const bracketPhaseId = String(
+      [...client.state.divisions.values()].find(
+        (row) => row.role === "PHASE" && row.phase === "BRACKET",
+      )?.id ?? "",
     );
-    const loadedSlot = loaded.timeSlots.find((slot) => slot.id === "slot-bracket");
-    expect(loadedSlot?.divisions.map((division) => division.id)).toEqual(
-      expect.arrayContaining(poolPhaseIds),
+    const firstPoolEntryId = String(
+      sourceRows.find((row) => row.phaseDivisionId === poolPhaseIds[0])
+        ?.entryDivisionId ?? "",
     );
+    expect(bracketPhaseId).not.toBe("");
+    expect(firstPoolEntryId).not.toBe("");
+
+    const loadWithSlotScope = async (divisionIds: string[]) => {
+      await client.timeSlots.update({
+        where: { id: "slot-bracket" },
+        data: { divisions: divisionIds },
+      });
+      return loadEventWithRelations(
+        eventId,
+        client as unknown as Parameters<typeof loadEventWithRelations>[1],
+      );
+    };
+
+    const entryScoped = await loadWithSlotScope([firstPoolEntryId]);
+    expect(new Set(
+      entryScoped.timeSlots
+        .find((slot) => slot.id === "slot-bracket")
+        ?.divisions.map((division) => division.id) ?? [],
+    )).toEqual(new Set([poolPhaseIds[0], bracketPhaseId]));
+
+    const poolScoped = await loadWithSlotScope([poolPhaseIds[0]]);
+    expect(new Set(
+      poolScoped.timeSlots
+        .find((slot) => slot.id === "slot-bracket")
+        ?.divisions.map((division) => division.id) ?? [],
+    )).toEqual(new Set([poolPhaseIds[0], bracketPhaseId]));
+
+    const bracketScoped = await loadWithSlotScope([bracketPhaseId]);
+    expect(new Set(
+      bracketScoped.timeSlots
+        .find((slot) => slot.id === "slot-bracket")
+        ?.divisions.map((division) => division.id) ?? [],
+    )).toEqual(new Set([...poolPhaseIds, bracketPhaseId]));
 
     const scheduled = scheduleEvent(
-      { event: loaded, includePlaceholderTeams: false },
+      { event: bracketScoped, includePlaceholderTeams: false },
       { log: () => {}, error: () => {} },
     );
     const poolMatches = scheduled.matches.filter((match) => match.division.phase === "POOL");
@@ -473,5 +751,13 @@ describe("phase-owned Match Graph persistence", () => {
       new Set(poolPhaseIds),
     );
     expect(poolMatches.every((match) => match.field?.id === "field-1")).toBe(true);
+    const bracketMatches = scheduled.matches.filter(
+      (match) => match.division.phase === "BRACKET",
+    );
+    expect(bracketMatches).toHaveLength(3);
+    expect(new Set(bracketMatches.map((match) => match.division.id))).toEqual(
+      new Set([bracketPhaseId]),
+    );
+    expect(bracketMatches.every((match) => match.field?.id === "field-1")).toBe(true);
   });
 });
