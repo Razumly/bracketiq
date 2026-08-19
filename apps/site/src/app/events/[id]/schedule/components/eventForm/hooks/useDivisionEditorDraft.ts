@@ -5,7 +5,7 @@ import {
     useState,
 } from 'react';
 
-import { MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
+import { buildDivisionName, MIN_BRACKET_TEAM_COUNT } from '@/lib/divisionTypes';
 import type { LeagueConfig, TournamentConfig } from '@/types';
 
 import {
@@ -30,6 +30,7 @@ import {
     type DivisionEditorKind,
     type DivisionEditorState,
     type PlayoffDivisionDetailForm,
+    resolveSportInput,
 } from '../divisionForm';
 import { leagueConfigEqual } from '../formEquality';
 import type { EventFormValues } from '../formTypes';
@@ -210,8 +211,22 @@ export const useDivisionEditorDraft = ({
     const updateDivisionEditorSelection = useCallback((
         updates: Partial<Pick<DivisionEditorState, 'gender' | 'skillDivisionTypeId' | 'ageDivisionTypeId'>>,
     ) => {
-        setDivisionEditor((previous) => updateDivisionEditorSelectionState(previous, updates));
-    }, []);
+        const sportInput = resolveSportInput(eventData.sportConfig ?? eventData.sportIds[0]);
+        setDivisionEditor((previous) => {
+            const next = updateDivisionEditorSelectionState(previous, updates);
+            if (!next.nameTouched) {
+                next.name = next.gender && next.skillDivisionTypeId && next.ageDivisionTypeId
+                    ? buildDivisionName({
+                        gender: next.gender,
+                        sportInput,
+                        skillDivisionTypeId: next.skillDivisionTypeId,
+                        ageDivisionTypeId: next.ageDivisionTypeId,
+                    })
+                    : '';
+            }
+            return next;
+        });
+    }, [eventData.sportConfig, eventData.sportIds]);
 
     const handleEditDivisionDetail = useCallback((divisionId: string) => {
         const detail = (eventData.divisionDetails || []).find((entry) => entry.id === divisionId);

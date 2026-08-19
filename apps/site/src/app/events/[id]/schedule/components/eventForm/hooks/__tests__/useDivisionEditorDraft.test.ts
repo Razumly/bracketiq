@@ -147,6 +147,19 @@ describe('useDivisionEditorDraft', () => {
         }));
     });
 
+    it('preserves an organizer name when division metadata changes', () => {
+        const detail = buildDivisionDetail({ name: 'Elite / 18+' });
+        const eventData = buildEventData({ divisionDetails: [detail] });
+        const { result } = renderHook(() => useDraftHarness({ eventData }));
+
+        act(() => result.current.handleEditDivisionDetail(detail.id));
+        act(() => result.current.updateDivisionEditorSelection({
+            skillDivisionTypeId: 'advanced',
+        }));
+
+        expect(result.current.divisionEditor.name).toBe('Elite / 18+');
+    });
+
     it('loads division-owned playoff and payment values into the transient editor', () => {
         const detail = buildDivisionDetail();
         const eventData = buildEventData({ divisionDetails: [detail] });
