@@ -73,7 +73,7 @@ Finally, update mobile slot validation and Compose UI. Mobile will allow overnig
 
 Run site commands from `/Users/elesesy/StudioProjects/bracketiq-issue-27/apps/site`. Run mobile commands from `/Users/elesesy/StudioProjects/bracketiq-issue-27/apps/mobile`.
 
-Use `npm test -- --runInBand <focused test paths>` for focused site tests and `npx tsc --noEmit` for site type checking. Use the repository Gradle tasks documented in `apps/mobile/AGENTS.md` for common tests. Do not start a runtime unless an explicit current request authorizes that state change.
+Run focused site checks from `apps/site` with `npm test -- --runInBand` and these paths: `src/lib/__tests__/repeatingTimeSlotAvailability.test.ts`, `src/app/events/[id]/schedule/components/eventForm/__tests__/slotValidation.test.ts`, `src/app/events/[id]/schedule/schedulePage/__tests__/helpers.weeklyOccurrences.test.ts`, `src/app/api/time-slots/__tests__/route.test.ts`, `src/app/api/time-slots/[id]/__tests__/route.test.ts`, and `src/server/scheduler/__tests__/leagueTimeSlots.test.ts`. Run site type checking with `npx tsc --noEmit`. Run mobile checks from `apps/mobile` with `./gradlew :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.core.data.dataTypes.TimeSlotCanonicalAvailabilityTest' --tests 'com.razumly.mvp.eventDetail.LeagueSlotValidationTest' --tests 'com.razumly.mvp.eventDetail.EventEditPayloadBuilderTest' --tests 'com.razumly.mvp.eventCreate.DefaultCreateEventComponentTest'`. Do not start a runtime unless an explicit current request authorizes that state change.
 
 After each implementation milestone, update this plan's `Progress`, `Surprises & Discoveries`, and `Decision Log` sections when the design changes. At completion, add the focused test results and the acceptance outcome to `Outcomes & Retrospective`.
 
@@ -93,10 +93,12 @@ The main artifacts are the strict occurrence resolver, its focused tests, the si
 
 ## Interfaces and Dependencies
 
-The canonical site resolver should expose a typed function in a site scheduling utility with an input containing `localDate`, `startTimeMinutes`, `endTimeMinutes`, `timeZone`, and optional date-bound fields, and an output containing `localStart`, `localEnd`, `start`, `end`, `durationMinutes`, and `overnight`. It must throw the existing typed scheduling validation error family with a stable code for invalid local times.
+The canonical site resolver exposes a typed function with an input containing `localDate`, `startTimeMinutes`, `endTimeMinutes`, `timeZone`, and optional date-bound fields. Its output contains `occurrenceDate`, `endDate`, `start`, `end`, `durationMinutes`, `isOvernight`, `nextWeekday`, resource IDs, and division IDs. It throws `RepeatingTimeSlotValidationError` with a stable code for invalid local times.
 
 The mobile layer must keep `TimeSlot.startTimeMinutes`, `TimeSlot.endTimeMinutes`, `TimeSlot.startDate`, `TimeSlot.endDate`, `TimeSlot.daysOfWeek`, and `TimeSlot.timeZone` as the input contract. It must not import site TypeScript or Prisma types. The server remains the authority for accepted daylight-saving resolution; mobile validation must use the same reject-before-write behavior and display the server's dated error when the server rejects the input.
 
 ### Revision note
 
 Created on 2026-08-18 after repository and dependency inspection. This plan records the issue #27 scope and the strict rejection policy for daylight-saving gaps and folds before implementation.
+
+Updated on 2026-08-18 after implementation review. Replaced placeholder validation commands with concrete site and mobile commands, aligned the interface section with the resolver output, and recorded the completed verification scope. This change makes the living plan self-contained and accurate after implementation.

@@ -172,7 +172,7 @@ data class ResolvedRepeatingTimeSlotInterval(
     val startTimeMinutes: Int,
     val endTimeMinutes: Int,
     val timeZone: String,
-    val overnight: Boolean,
+    val isOvernight: Boolean,
     val nextWeekday: String?,
     val resourceIds: List<String>,
     val divisionIds: List<String>,
@@ -287,8 +287,8 @@ fun TimeSlot.resolveRepeatingOccurrence(occurrenceDate: LocalDate): ResolvedRepe
         )
     }
 
-    val overnight = endMinutes == 24 * 60 || endMinutes <= startMinutes
-    val resolvedEndDate = if (overnight) {
+    val isOvernight = endMinutes == 24 * 60 || endMinutes <= startMinutes
+    val resolvedEndDate = if (isOvernight) {
         occurrenceDate.plus(DatePeriod(days = 1))
     } else {
         occurrenceDate
@@ -312,7 +312,7 @@ fun TimeSlot.resolveRepeatingOccurrence(occurrenceDate: LocalDate): ResolvedRepe
                 "the resolved start time.",
         )
     }
-    val nextWeekday = if (overnight) {
+    val nextWeekday = if (isOvernight) {
         resolvedEndDate.dayOfWeek.name
             .lowercase()
             .replaceFirstChar(Char::uppercase)
@@ -329,7 +329,7 @@ fun TimeSlot.resolveRepeatingOccurrence(occurrenceDate: LocalDate): ResolvedRepe
         startTimeMinutes = startMinutes,
         endTimeMinutes = endMinutes,
         timeZone = zone.id,
-        overnight = overnight,
+        isOvernight = isOvernight,
         nextWeekday = nextWeekday,
         resourceIds = normalizedScheduledFieldIds(),
         divisionIds = normalizedDivisionIds(),

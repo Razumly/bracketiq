@@ -100,9 +100,9 @@ const slotIntervalsOverlap = (
     second: LeagueSlotForm,
     context: SlotValidationContext,
 ): boolean => {
-    const firstRepeating = first.repeating !== false;
-    const secondRepeating = second.repeating !== false;
-    if (!firstRepeating && !secondRepeating) {
+    const isFirstRepeating = first.repeating !== false;
+    const isSecondRepeating = second.repeating !== false;
+    if (!isFirstRepeating && !isSecondRepeating) {
         const firstWindow = resolveConflictWindow(first, context);
         const secondWindow = resolveConflictWindow(second, context);
         return Boolean(
@@ -129,10 +129,10 @@ const slotIntervalsOverlap = (
     if (overlapWindow.end.getTime() <= overlapWindow.start.getTime()) {
         return false;
     }
-    const firstOccurrences = firstRepeating
+    const firstOccurrences = isFirstRepeating
         ? resolveRepeatingOccurrencesForConflict(first, overlapWindow)
         : [firstWindow];
-    const secondOccurrences = secondRepeating
+    const secondOccurrences = isSecondRepeating
         ? resolveRepeatingOccurrencesForConflict(second, overlapWindow)
         : [secondWindow];
     return firstOccurrences.some((firstOccurrence) => secondOccurrences.some((secondOccurrence) => (

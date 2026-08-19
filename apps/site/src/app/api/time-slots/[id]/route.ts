@@ -12,8 +12,8 @@ import {
 } from '@/lib/timeSlotAvailability';
 import {
   assertRepeatingTimeSlotsResolvable,
-  RepeatingTimeSlotValidationError,
 } from '@/lib/repeatingTimeSlotAvailability';
+import { repeatingTimeSlotValidationResponse } from '@/server/repeatingTimeSlotValidationResponse';
 import {
   localDatePartsInTimeZone,
   parseDateInputInTimeZone,
@@ -323,16 +323,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         eventEnd: null,
       });
     } catch (error) {
-      if (error instanceof RepeatingTimeSlotValidationError) {
-        return NextResponse.json(
-          {
-            error: error.message,
-            code: 'INVALID_TIME_SLOT',
-            slotIds: [error.slotId],
-            occurrenceDate: error.occurrenceDate,
-          },
-          { status: 400 },
-        );
+      const repeatingTimeSlotResponse = repeatingTimeSlotValidationResponse(error);
+      if (repeatingTimeSlotResponse) {
+        return repeatingTimeSlotResponse;
       }
       throw error;
     }

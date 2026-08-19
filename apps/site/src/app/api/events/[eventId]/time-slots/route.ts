@@ -9,8 +9,8 @@ import {
 } from '@/lib/timeSlotAvailability';
 import {
   assertRepeatingTimeSlotsResolvable,
-  RepeatingTimeSlotValidationError,
 } from '@/lib/repeatingTimeSlotAvailability';
+import { repeatingTimeSlotValidationResponse } from '@/server/repeatingTimeSlotValidationResponse';
 import { acquireEventLock } from '@/server/repositories/locks';
 
 export const dynamic = 'force-dynamic';
@@ -183,16 +183,9 @@ export async function PATCH(
     if (error instanceof Response) {
       return error;
     }
-    if (error instanceof RepeatingTimeSlotValidationError) {
-      return NextResponse.json(
-        {
-          error: error.message,
-          code: 'INVALID_TIME_SLOT',
-          slotIds: [error.slotId],
-          occurrenceDate: error.occurrenceDate,
-        },
-        { status: 400 },
-      );
+    const repeatingTimeSlotResponse = repeatingTimeSlotValidationResponse(error);
+    if (repeatingTimeSlotResponse) {
+      return repeatingTimeSlotResponse;
     }
     if (error instanceof TimeSlotValidationError) {
       return NextResponse.json(

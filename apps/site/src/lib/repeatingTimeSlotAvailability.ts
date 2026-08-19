@@ -70,7 +70,7 @@ export type ResolvedRepeatingTimeSlot = {
   startTimeMinutes: number;
   endTimeMinutes: number;
   timeZone: string;
-  overnight: boolean;
+  isOvernight: boolean;
   nextWeekday: string | null;
   resourceIds: string[];
   divisionIds: string[];
@@ -383,8 +383,8 @@ export const resolveRepeatingTimeSlotOccurrence = (
   const resolvedStartMinutes = requireMinutes(startMinutes, 'select a start time.');
   const resolvedEndMinutes = requireMinutes(endMinutes, 'select an end time.');
 
-  const overnight = resolvedEndMinutes === MINUTES_PER_DAY || resolvedEndMinutes <= resolvedStartMinutes;
-  const resolvedEndDate = overnight ? addLocalDays(parsedOccurrenceDate, 1) : parsedOccurrenceDate;
+  const isOvernight = resolvedEndMinutes === MINUTES_PER_DAY || resolvedEndMinutes <= resolvedStartMinutes;
+  const resolvedEndDate = isOvernight ? addLocalDays(parsedOccurrenceDate, 1) : parsedOccurrenceDate;
   const start = resolveStrictLocalDateTime(parsedOccurrenceDate, resolvedStartMinutes, timeZone, slotId);
   const end = resolveStrictLocalDateTime(
     resolvedEndDate,
@@ -406,8 +406,8 @@ export const resolveRepeatingTimeSlotOccurrence = (
     startTimeMinutes: resolvedStartMinutes,
     endTimeMinutes: resolvedEndMinutes,
     timeZone,
-    overnight,
-    nextWeekday: overnight ? WEEKDAY_NAMES[localDayIndex(resolvedEndDate)] : null,
+    isOvernight,
+    nextWeekday: isOvernight ? WEEKDAY_NAMES[localDayIndex(resolvedEndDate)] : null,
     resourceIds: normalizeResourceIds(slot),
     divisionIds: normalizeIds(slot.divisions),
   };
@@ -462,11 +462,11 @@ export const enumerateRepeatingTimeSlotOccurrences = (options: {
   const occurrences: ResolvedRepeatingTimeSlot[] = [];
   while (compareLocalDates(cursor, lastDate) <= 0) {
     const occurrenceDate = formatLocalDate(cursor);
-    const inConfiguredBounds = (
+    const isInConfiguredBounds = (
       (!configuredStartDate || compareLocalDates(cursor, configuredStartDate) >= 0)
       && (!configuredEndDate || compareLocalDates(cursor, configuredEndDate) <= 0)
     );
-    if (inConfiguredBounds && days.includes(localDayIndex(cursor))) {
+    if (isInConfiguredBounds && days.includes(localDayIndex(cursor))) {
       const resolved = resolveRepeatingTimeSlotOccurrence(options.slot, occurrenceDate);
       if (
         resolved.start.getTime() < options.windowEnd.getTime()
@@ -506,17 +506,6 @@ export const repeatingTimeSlotSegments = (
   ].filter((segment) => segment.end > segment.start);
 };
 
-export const repeatingTimeSlotSegmentsOverlap = (
-  firstStart: unknown,
-  firstEnd: unknown,
-  secondStart: unknown,
-  secondEnd: unknown,
-): boolean => repeatingTimeSlotSegments(firstStart, firstEnd).some((first) =>
-  repeatingTimeSlotSegments(secondStart, secondEnd).some((second) => (
-    first.dayOffset === second.dayOffset
-      && first.start < second.end
-      && second.start < first.end
-  )));
 export const repeatingTimeSlotWindowsOverlap = (options: {
   firstDays: number[];
   firstStart: unknown;
@@ -536,23 +525,6 @@ export const repeatingTimeSlotWindowsOverlap = (options: {
   ));
 };
 
-export const localDateForTimeSlotInput = (
-  value: unknown,
-  timeZone: string,
-): string | null => {
-  const parts = localDateFromInput(value, normalizeTimeZoneStrict(timeZone));
-  return parts ? formatLocalDate(parts) : null;
-};
-
-export const weekdayIndexForLocalDate = (value: string): number | null => {
-  const date = localDatePartsFromString(value);
-  return date ? localDayIndex(date) : null;
-};
-
-export const addLocalDateDays = (value: string, days: number): string | null => {
-  const date = localDatePartsFromString(value);
-  return date ? formatLocalDate(addLocalDays(date, days)) : null;
-};
 
 export const assertRepeatingTimeSlotsResolvable = (options: {
   slots: RepeatingTimeSlotIntervalInput[];

@@ -881,8 +881,8 @@ private fun TimeslotCard(
                 val selectedFieldIds = slot.normalizedScheduledFieldIds()
                 val normalizedLockedDivisionIds = lockedDivisionIds.normalizeDivisionIdentifiers()
                 val selectedDivisionIds = slot.normalizedDivisionIds().normalizeDivisionIdentifiers()
-                val repeating = slot.repeating
-                val overnightWindow = slot.hasOvernightWindow()
+                val isRepeating = slot.repeating
+                val hasOvernightWindow = slot.hasOvernightWindow()
                 val slotTimeZone = slot.timeZone.toTimeZoneOrUtc(eventTimeZone)
                 val slotIsRentalBacked = slot.isRentalBacked()
                 val slotTimingReadOnly = readOnly || slotIsRentalBacked
@@ -984,7 +984,7 @@ private fun TimeslotCard(
                     )
                 }
 
-                if (repeating) {
+                if (isRepeating) {
                     val repeatingStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: eventStart
                     DatePickerField(
                         label = "Start Date (Optional)",
@@ -1082,7 +1082,7 @@ private fun TimeslotCard(
                             enabled = !slotTimingReadOnly,
                         )
                     }
-                    if (overnightWindow) {
+                    if (hasOvernightWindow) {
                         Text(
                             text = "Overnight slot ends on the next local day.",
                             color = MaterialTheme.colorScheme.tertiary,

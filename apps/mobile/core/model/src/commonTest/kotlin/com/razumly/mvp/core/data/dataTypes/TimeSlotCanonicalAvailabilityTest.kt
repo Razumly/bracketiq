@@ -34,7 +34,7 @@ class TimeSlotCanonicalAvailabilityTest {
     )
 
     @Test
-    fun resolves_local_date_and_times_to_one_exact_interval() {
+    fun given_one_time_slot_when_resolved_then_returns_exact_local_interval() {
         val resolved = slot().resolveOneTimeInterval()
 
         assertEquals("2026-08-17", resolved.localDate)
@@ -45,7 +45,7 @@ class TimeSlotCanonicalAvailabilityTest {
     }
 
     @Test
-    fun identifies_repeating_overnight_windows_for_inline_warning() {
+    fun given_repeating_overnight_slot_when_checked_then_reports_next_day() {
         assertTrue(
             slot(startMinutes = 23 * 60, endMinutes = 60).copy(repeating = true).hasOvernightWindow(),
         )
@@ -58,7 +58,7 @@ class TimeSlotCanonicalAvailabilityTest {
     }
 
     @Test
-    fun preserves_explicit_matching_instants_including_seconds() {
+    fun given_explicit_instants_when_resolved_then_preserves_seconds() {
         val resolved = slot().copy(
             startDate = Instant.parse("2026-08-17T13:00:17Z"),
             endDate = Instant.parse("2026-08-17T14:00:43Z"),
@@ -69,7 +69,7 @@ class TimeSlotCanonicalAvailabilityTest {
     }
 
     @Test
-    fun accepts_adjacency_keeps_disjoint_resources_independent_and_rejects_disjoint_divisions() {
+    fun given_adjacent_slots_when_resources_differ_then_ignores_overlap() {
         assertNull(
             findOneTimeTimeSlotConflict(
                 slots = listOf(slot(), slot("adjacent", 10 * 60, 11 * 60)),
@@ -96,7 +96,7 @@ class TimeSlotCanonicalAvailabilityTest {
     }
 
     @Test
-    fun rejects_overlap_with_precise_resource_date_and_intervals() {
+    fun given_overlapping_slots_when_resources_match_then_reports_precise_conflict() {
         val error = assertFailsWith<OneTimeTimeSlotValidationException> {
             validateOneTimeTimeSlots(
                 slots = listOf(slot(), slot("slot-2", 9 * 60 + 30, 10 * 60 + 30)),
@@ -113,7 +113,7 @@ class TimeSlotCanonicalAvailabilityTest {
     }
 
     @Test
-    fun rejects_fixed_event_bound_violations_without_clipping() {
+    fun given_slot_outside_event_bounds_when_validated_then_rejects_without_clipping() {
         val error = assertFailsWith<OneTimeTimeSlotValidationException> {
             validateOneTimeTimeSlots(
                 slots = listOf(slot()),

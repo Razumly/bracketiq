@@ -187,7 +187,7 @@ class LeagueSlotValidationTest {
     }
 
     @Test
-    fun repeating_overnight_slots_overlap_across_adjacent_weekdays() {
+    fun given_repeating_overnight_slots_when_adjacent_weekday_windows_overlap_then_reports_conflict() {
         val first = buildSlot(
             id = "slot-overnight",
             repeating = true,

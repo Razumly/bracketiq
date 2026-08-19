@@ -1276,7 +1276,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
               slotEndDate &&
               slotEndDate.getTime() <= slotStartDate.getTime(),
             );
-            const overnightWindow = isRepeating
+            const hasOvernightWindow = isRepeating
               && repeatingTimeSlotHasOvernightWindow(slot.startTimeMinutes, slot.endTimeMinutes);
             const divisionsReadOnly = readOnly && !allowDivisionEditsWhenReadOnly;
             const resourcesReadOnly = readOnly && !allowResourceEditsWhenReadOnly;
@@ -1522,7 +1522,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
                               error={endMissing && !slotTimingReadOnly ? 'Select an end time' : undefined}
                             />
                           </div>
-                          {overnightWindow ? (
+                          {hasOvernightWindow ? (
                             <Text size="xs" c="orange" mt={4}>
                               Overnight slot ends on the next day.
                             </Text>
