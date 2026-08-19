@@ -69,6 +69,44 @@ describe("slot conflict helpers", () => {
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0]?.event.$id).toBe("event-same-day");
   });
+
+  it("reports conflicts against same-day repeating event slots", () => {
+    const slot = buildSameDaySlot();
+    const event = {
+      $id: "event-same-day-slot",
+      eventType: "LEAGUE",
+      parentEvent: null,
+      start: "2026-03-01T00:00:00.000Z",
+      end: "2026-03-02T00:00:00.000Z",
+      timeZone: "UTC",
+      timeSlots: [
+        {
+          $id: "existing-same-day-slot",
+          repeating: true,
+          daysOfWeek: [6],
+          startDate: "2026-03-01T00:00:00.000Z",
+          endDate: "2026-03-01T00:00:00.000Z",
+          timeZone: "UTC",
+          startTimeMinutes: 11 * 60,
+          endTimeMinutes: 11 * 60 + 30,
+          scheduledFieldIds: ["field-1"],
+        },
+      ],
+    } as unknown as Event;
+
+    const conflicts = buildExternalSlotConflicts(
+      slot,
+      new Map([["field-1", [event]]]),
+      {
+        eventId: "event-1",
+        eventStart: "2026-03-01T00:00:00.000Z",
+        eventEnd: "2026-03-02T00:00:00.000Z",
+      },
+    );
+
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]?.schedule?.$id).toBe("existing-same-day-slot");
+  });
   it("compares repeating occurrences in the slot and event time zones", () => {
     const slot: LeagueSlotForm = {
       ...buildSameDaySlot(),

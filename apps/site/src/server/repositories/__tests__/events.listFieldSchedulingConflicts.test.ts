@@ -151,4 +151,42 @@ describe('listFieldSchedulingConflicts', () => {
 
     expect(conflicts).toEqual([]);
   });
+
+  it('surfaces invalid repeating slot resolution errors', async () => {
+    const client = createClient();
+    client.matches.findMany.mockResolvedValue([]);
+    client.events.findMany.mockResolvedValue([
+      {
+        id: 'event_invalid_slot',
+        eventType: 'WEEKLY_EVENT',
+        parentEvent: null,
+        start: new Date('2026-06-01T00:00:00.000Z'),
+        end: new Date('2026-06-08T00:00:00.000Z'),
+        fieldIds: ['field_1'],
+        timeSlotIds: ['slot_invalid_zone'],
+      },
+    ]);
+    client.timeSlots.findMany.mockResolvedValue([
+      {
+        id: 'slot_invalid_zone',
+        daysOfWeek: [0],
+        startTimeMinutes: 12 * 60,
+        endTimeMinutes: 13 * 60,
+        startDate: new Date('2026-06-01T00:00:00.000Z'),
+        endDate: new Date('2026-06-08T00:00:00.000Z'),
+        timeZone: 'Invalid/Zone',
+        repeating: true,
+        scheduledFieldIds: ['field_1'],
+      },
+    ]);
+    client.rentalBookingItems.findMany.mockResolvedValue([]);
+
+    await expect(listFieldSchedulingConflicts({
+      client: client as any,
+      organizationId: 'organization_1',
+      fieldIds: ['field_1'],
+      windowStart,
+      windowEnd,
+    })).rejects.toThrow('invalid time zone "Invalid/Zone"');
+  });
 });

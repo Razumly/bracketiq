@@ -29,6 +29,21 @@ describe('strict repeating Time Slot availability', () => {
     expect(resolved.nextWeekday).toBe('Sunday');
   });
 
+  it('treats equal repeating start and end times as a full local day', () => {
+    const resolved = resolveRepeatingTimeSlotOccurrence(slot({
+      daysOfWeek: [5],
+      startDate: '2026-02-28',
+      endDate: '2026-02-28',
+      startTimeMinutes: 10 * 60,
+      endTimeMinutes: 10 * 60,
+      timeZone: 'UTC',
+    }), '2026-02-28');
+
+    expect(resolved.endDate).toBe('2026-03-01');
+    expect(resolved.durationMinutes).toBe(24 * 60);
+    expect(resolved.nextWeekday).toBe('Sunday');
+  });
+
   it('preserves actual elapsed duration when an overnight interval crosses DST', () => {
     const resolved = resolveRepeatingTimeSlotOccurrence(slot({
       daysOfWeek: [5],

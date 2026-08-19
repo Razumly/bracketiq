@@ -16,7 +16,7 @@ describe("weekly event session calculations", () => {
     expect(parseDateValue("not-a-date")).toBeNull();
   });
 
-  it("returns no sessions for non-weekly events or slots without a valid duration", () => {
+  it("returns no sessions for non-weekly events or slots without valid times", () => {
     const league = buildEvent({
       eventType: "LEAGUE",
       timeSlots: [buildTimeSlot({ startDate: "2026-07-13" })],
@@ -27,7 +27,7 @@ describe("weekly event session calculations", () => {
         buildTimeSlot({
           startDate: "2026-07-13",
           startTimeMinutes: 600,
-          endTimeMinutes: 600,
+          endTimeMinutes: 24 * 60 + 1,
         }),
       ],
     });
@@ -38,6 +38,39 @@ describe("weekly event session calculations", () => {
     expect(
       buildWeeklySessionOptions(invalidWeekly, 2, new Date(2026, 6, 13)),
     ).toEqual([]);
+  });
+
+  it("resolves equal repeating start and end times as a full local day", () => {
+    const event = buildEvent({
+      eventType: "WEEKLY_EVENT",
+      timeSlots: [
+        buildTimeSlot({
+          $id: "slot-full-day",
+          daysOfWeek: [0],
+          startDate: "2026-07-13",
+          endDate: "2026-07-20",
+          startTimeMinutes: 10 * 60,
+          endTimeMinutes: 10 * 60,
+          timeZone: "UTC",
+        }),
+      ],
+    });
+
+    const sessions = buildWeeklySessionOptions(
+      event,
+      2,
+      new Date("2026-07-13T00:00:00.000Z"),
+    );
+
+    expect(sessions).toHaveLength(2);
+    expect(sessions.map((session) => session.occurrenceDate)).toEqual([
+      "2026-07-13",
+      "2026-07-20",
+    ]);
+    expect(sessions[0]?.start.toISOString()).toBe(
+      "2026-07-13T10:00:00.000Z",
+    );
+    expect(sessions[0]?.end.toISOString()).toBe("2026-07-14T10:00:00.000Z");
   });
 
   it("builds sorted bounded occurrences and resolves canonical division labels", () => {

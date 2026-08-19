@@ -5,6 +5,7 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
+import com.razumly.mvp.core.data.dataTypes.resolveOneTimeInterval
 import com.razumly.mvp.core.data.dataTypes.resolveRepeatingOccurrence
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
@@ -29,6 +30,24 @@ internal data class WeeklySessionOption(
     val divisionLabel: String,
 )
 
+private fun buildOneTimeSessionOption(
+    slot: TimeSlot,
+    slotTimeZone: TimeZone,
+    divisionLabel: String,
+): WeeklySessionOption? {
+    val resolved = runCatching { slot.resolveOneTimeInterval() }.getOrNull() ?: return null
+    val slotId = slot.id.trim().takeIf(String::isNotBlank)
+    return WeeklySessionOption(
+        id = "${slotId ?: "slot"}-${resolved.localDate}",
+        slotId = slotId,
+        occurrenceDate = resolved.localDate,
+        start = resolved.start,
+        end = resolved.end,
+        label = formatWeeklySessionLabel(resolved.start, resolved.end, slotTimeZone),
+        divisionLabel = divisionLabel,
+    )
+}
+
 internal fun buildWeeklySessionOptions(
     event: Event,
     timeSlots: List<TimeSlot>,
@@ -49,7 +68,7 @@ internal fun buildWeeklySessionOptions(
         val slotTimeZone = slot.resolvedTimeZone(timeZone)
         val today = Clock.System.now().toLocalDateTime(slotTimeZone).date
         val normalizedDays = slot.normalizedDaysOfWeek()
-        if (normalizedDays.isEmpty()) {
+        if (slot.repeating && normalizedDays.isEmpty()) {
             return@forEach
         }
 
@@ -76,6 +95,21 @@ internal fun buildWeeklySessionOptions(
             .distinct()
             .joinToString(", ")
             .ifBlank { "All divisions" }
+
+        if (!slot.repeating) {
+            val option = buildOneTimeSessionOption(slot, slotTimeZone, divisionLabel)
+            val occurrenceDate = option?.occurrenceDate?.let(LocalDate::parse)
+            val rangeEnd = anchorDate.plus(DatePeriod(days = safeWeekCount * 7))
+            if (
+                option != null &&
+                    occurrenceDate != null &&
+                    occurrenceDate >= anchorDate &&
+                    occurrenceDate < rangeEnd
+            ) {
+                sessions += option
+            }
+            return@forEach
+        }
 
         for (weekOffset in 0 until safeWeekCount) {
             val weekStart = anchorWeekStart.plus(DatePeriod(days = weekOffset * 7))
@@ -129,7 +163,7 @@ internal fun buildWeeklyScheduleOptions(
         val slotTimeZone = slot.resolvedTimeZone(timeZone)
         val eventStartDate = event.start.toLocalDateTime(slotTimeZone).date
         val normalizedDays = slot.normalizedDaysOfWeek()
-        if (normalizedDays.isEmpty()) {
+        if (slot.repeating && normalizedDays.isEmpty()) {
             return@forEach
         }
 
@@ -155,6 +189,20 @@ internal fun buildWeeklyScheduleOptions(
             .distinct()
             .joinToString(", ")
             .ifBlank { "All divisions" }
+
+        if (!slot.repeating) {
+            val option = buildOneTimeSessionOption(slot, slotTimeZone, divisionLabel)
+            val occurrenceDate = option?.occurrenceDate?.let(LocalDate::parse)
+            if (
+                option != null &&
+                    occurrenceDate != null &&
+                    occurrenceDate >= effectiveStartDate &&
+                    occurrenceDate <= slotEndDate
+            ) {
+                sessions += option
+            }
+            return@forEach
+        }
 
         var weekOffset = 0
         while (true) {

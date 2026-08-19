@@ -238,7 +238,7 @@ class EventDetailsDivisionEditorHelpersTest {
     }
 
     @Test
-    fun division_type_selection_preserves_organizer_owned_name() {
+    fun given_organizer_owned_name_when_selecting_division_type_then_preserves_name() {
         val updated = applyDivisionEditorTypeSelection(
             previous = DivisionEditorState(
                 name = "Elite /  18+",

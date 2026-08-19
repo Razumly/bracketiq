@@ -25,6 +25,7 @@ A human can verify the result by running the focused site and mobile tests. The 
 - [x] (2026-08-18 00:00Z) Preserve an open-ended repeating rental end date during modal submission.
 - [x] (2026-08-19 20:06Z) Remove unused overlap-only APIs and add mobile daylight-saving regressions.
 - [x] (2026-08-18 00:00Z) Run the final focused checks and record the issue evidence.
+- [x] (2026-08-19 21:11Z) Add regressions for mobile repeating date bounds and one-time field-calendar occupancy.
 
 ## Surprises & Discoveries
 
@@ -65,7 +66,9 @@ A human can verify the result by running the focused site and mobile tests. The 
 - Site verification passed: 10 Jest suites and 117 tests passed. Site TypeScript validation passed. Changed-site ESLint completed with 0 errors and 7 exhaustive-deps warnings in the existing schedule page.
 - Mobile verification passed: the canonical model test, five targeted Compose classes, and the complete `:composeApp:testDebugUnitTest` task completed with `BUILD SUCCESSFUL`.
 - Defect remediation verification passed: canonical persistence, external conflict gating, mobile final-date overlap, named-zone weekly projections, and open-ended rental submission have regression coverage.
-- No known acceptance gap remains.
+- Latest focused verification passed: 10 site Jest suites and 121 tests passed, site TypeScript validation passed, and the five targeted mobile classes plus the canonical model suite completed with `BUILD SUCCESSFUL`.
+- Defect remediation verification on 2026-08-18: the field availability API now returns a structured 400 response for invalid repeating time zones instead of omitting availability. The public rental selection path preserves resolver messages for invalid slots. The site focused suite passed 10 suites and 124 tests. Site TypeScript validation passed. Mobile model and Compose checks passed with `BUILD SUCCESSFUL`.
+- Final acceptance verification on 2026-08-18: 13 site Jest suites and 138 tests passed. Site TypeScript and changed-file ESLint checks passed. The core model check, targeted Compose classes, and complete `:composeApp:testDebugUnitTest` task passed with `BUILD SUCCESSFUL`.
 
 ## Context and Orientation
 
@@ -154,3 +157,9 @@ Updated on 2026-08-18 after implementation review. Replaced placeholder validati
 Updated on 2026-08-19 after the standards review. Added timestamps, corrected the resolver signatures, documented expected command output, and recorded the removal of unused overlap-only APIs.
 
 Updated on 2026-08-18 after final verification. Recorded the passing site and mobile commands and the remaining lint warnings.
+
+Updated on 2026-08-19 after the final bounds and field-calendar regressions. Recorded the latest focused site and mobile verification.
+
+Updated on 2026-08-18 after defect remediation. Recorded strict resolver error propagation, slot-identified API diagnostics, the mobile warning fixture, and the latest site and mobile verification counts.
+
+Updated on 2026-08-18 after final acceptance verification. Added repository and field API resolver-error regressions and recorded the complete mobile Compose suite.

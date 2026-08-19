@@ -83,17 +83,17 @@ type ResolvedConflictInterval = {
 const resolveRepeatingOccurrencesForConflict = (
     slot: LeagueSlotForm,
     window: { start: Date; end: Date },
-): ResolvedConflictInterval[] => {
-    try {
-        return enumerateRepeatingTimeSlotOccurrences({
-            slot,
-            windowStart: window.start,
-            windowEnd: window.end,
-        });
-    } catch {
-        return [];
-    }
-};
+): ResolvedConflictInterval[] => enumerateRepeatingTimeSlotOccurrences({
+    slot,
+    windowStart: window.start,
+    windowEnd: window.end,
+});
+
+const describeRepeatingResolutionError = (error: unknown): string => (
+    error instanceof RepeatingTimeSlotValidationError
+        ? error.message
+        : 'Repeating timeslot cannot be resolved.'
+);
 
 const slotIntervalsOverlap = (
     first: LeagueSlotForm,
@@ -203,14 +203,17 @@ export const computeSlotError = (
             return describeOneTimeTimeSlotConflict(conflict);
         }
 
-        return slots.some((other, otherIndex) => (
-            otherIndex !== index
-            && other.repeating !== false
-            && hasSharedResource(other)
-            && slotIntervalsOverlap(slot, other, context)
-        ))
-            ? 'Overlaps with another timeslot in this form.'
-            : undefined;
+        try {
+            const hasOverlap = slots.some((other, otherIndex) => (
+                otherIndex !== index
+                && other.repeating !== false
+                && hasSharedResource(other)
+                && slotIntervalsOverlap(slot, other, context)
+            ));
+            return hasOverlap ? 'Overlaps with another timeslot in this form.' : undefined;
+        } catch (error) {
+            return describeRepeatingResolutionError(error);
+        }
     }
 
     const slotDays = normalizeWeekdays(slot);
@@ -235,13 +238,16 @@ export const computeSlotError = (
         return 'Select valid start and end times for this timeslot.';
     }
 
-    const hasOverlap = slots.some((other, otherIndex) => (
-        otherIndex !== index
-        && hasSharedResource(other)
-        && slotIntervalsOverlap(slot, other, context)
-    ));
-
-    return hasOverlap ? 'Overlaps with another timeslot in this form.' : undefined;
+    try {
+        const hasOverlap = slots.some((other, otherIndex) => (
+            otherIndex !== index
+            && hasSharedResource(other)
+            && slotIntervalsOverlap(slot, other, context)
+        ));
+        return hasOverlap ? 'Overlaps with another timeslot in this form.' : undefined;
+    } catch (error) {
+        return describeRepeatingResolutionError(error);
+    }
 };
 
 export const computeRepeatingSlotTemporalError = (options: {

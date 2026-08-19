@@ -371,12 +371,23 @@ fun TimeSlot.enumerateRepeatingTimeSlotOccurrences(
     }
     val zone = strictTimeZone()
     val selectedDays = normalizedDaysOfWeek()
+    val configuredStartDate = startDate.toLocalDateTime(zone).date
+    val configuredEndDate = endDate?.toLocalDateTime(zone)?.date
+    if (configuredEndDate != null && configuredEndDate < configuredStartDate) {
+        throw RepeatingTimeSlotValidationException(
+            "Repeating Time Slot \"$id\" is invalid: the end date is before the start date.",
+        )
+    }
     val firstDate = windowStart.toLocalDateTime(zone).date.minus(DatePeriod(days = 1))
     val lastDate = windowEnd.toLocalDateTime(zone).date.plus(DatePeriod(days = 1))
     val occurrences = mutableListOf<ResolvedRepeatingTimeSlotInterval>()
     var currentDate = firstDate
     while (currentDate <= lastDate) {
-        if (selectedDays.contains(currentDate.dayOfWeek.ordinal)) {
+        if (
+            currentDate >= configuredStartDate &&
+                (configuredEndDate == null || currentDate <= configuredEndDate) &&
+                selectedDays.contains(currentDate.dayOfWeek.ordinal)
+        ) {
             val occurrence = resolveRepeatingOccurrence(currentDate)
             if (occurrence.start < windowEnd && occurrence.end > windowStart) {
                 occurrences += occurrence

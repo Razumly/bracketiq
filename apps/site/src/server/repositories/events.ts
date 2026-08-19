@@ -13,9 +13,8 @@ import {
   normalizeRentalTaxHandling,
 } from "@/lib/taxPolicy";
 import { assertValidOneTimeTimeSlots } from "@/lib/timeSlotAvailability";
-import { assertRepeatingTimeSlotsResolvable } from "@/lib/repeatingTimeSlotAvailability";
 import {
-  RepeatingTimeSlotValidationError,
+  assertRepeatingTimeSlotsResolvable,
   type ResolvedRepeatingTimeSlot,
   enumerateRepeatingTimeSlotOccurrences,
 } from "@/lib/repeatingTimeSlotAvailability";
@@ -3078,19 +3077,11 @@ const appendBlockingEventsFromSlot = (params: {
     return;
   }
 
-  let occurrences: ResolvedRepeatingTimeSlot[];
-  try {
-    occurrences = enumerateRepeatingTimeSlotOccurrences({
-      slot: params.slot,
-      windowStart: effectiveStart,
-      windowEnd: effectiveEnd,
-    });
-  } catch (error) {
-    if (error instanceof RepeatingTimeSlotValidationError) {
-      return;
-    }
-    throw error;
-  }
+  const occurrences = enumerateRepeatingTimeSlotOccurrences({
+    slot: params.slot,
+    windowStart: effectiveStart,
+    windowEnd: effectiveEnd,
+  });
   occurrences.forEach((occurrence) => {
     if (!rangesOverlap(
       occurrence.start,

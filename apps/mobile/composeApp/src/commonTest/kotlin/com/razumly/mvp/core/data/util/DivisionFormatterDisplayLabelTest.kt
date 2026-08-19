@@ -42,7 +42,7 @@ class DivisionFormatterDisplayLabelTest {
     }
 
     @Test
-    fun to_division_display_label_preserves_explicit_metadata_like_name() {
+    fun given_explicit_metadata_when_formatting_division_label_then_preserves_name()
         val divisionId = buildEventDivisionId("event-1", "c_skill_open_age_u14")
         val label = divisionId.toDivisionDisplayLabel(
             divisionDetails = listOf(
@@ -59,7 +59,7 @@ class DivisionFormatterDisplayLabelTest {
     }
 
     @Test
-    fun to_division_display_label_preserves_explicit_name_when_type_name_is_blank() {
+    fun given_blank_type_name_when_formatting_division_label_then_preserves_explicit_name() {
         val divisionId = buildEventDivisionId("event-1", "c_skill_open_age_u14")
         val label = divisionId.toDivisionDisplayLabel(
             divisionDetails = listOf(
@@ -76,7 +76,7 @@ class DivisionFormatterDisplayLabelTest {
     }
 
     @Test
-    fun to_division_display_label_preserves_generated_pool_name() {
+    fun given_generated_pool_when_formatting_division_label_then_preserves_pool_name() {
         val bracketId = buildEventDivisionId("event-1", "c_skill_open_age_18plus")
         val poolId = "${bracketId}_pool_a"
         val label = poolId.toDivisionDisplayLabel(

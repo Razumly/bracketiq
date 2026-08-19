@@ -110,7 +110,7 @@ private val dayOptions = listOf(
     DropdownOption("5", "Saturday"),
     DropdownOption("6", "Sunday"),
 )
-private fun overnightEndWeekdayText(selectedDays: List<Int>): String {
+internal fun formatOvernightWeekdayWarning(selectedDays: List<Int>): String {
     val labels = selectedDays
         .mapNotNull { day -> dayOptions.getOrNull((day + 1) % 7)?.label }
     return when {
@@ -1093,7 +1093,7 @@ private fun TimeslotCard(
                     }
                     if (hasOvernightWindow) {
                         Text(
-                            text = overnightEndWeekdayText(selectedDays),
+                            text = formatOvernightWeekdayWarning(selectedDays),
                             color = MaterialTheme.colorScheme.tertiary,
                             style = MaterialTheme.typography.bodySmall,
                         )

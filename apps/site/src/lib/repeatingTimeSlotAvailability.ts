@@ -176,7 +176,10 @@ const invalidConfiguredDateError = (
 );
 
 
-const normalizeTimeZoneStrict = (value: unknown): string => {
+const normalizeTimeZoneStrict = (
+  value: unknown,
+  slotId: string | null = null,
+): string => {
   const candidate = typeof value === 'string' && value.trim().length > 0
     ? value.trim()
     : 'UTC';
@@ -186,6 +189,7 @@ const normalizeTimeZoneStrict = (value: unknown): string => {
     throw new RepeatingTimeSlotValidationError(
       'INVALID_REPEATING_TIME_SLOT',
       `Repeating Time Slot has an invalid time zone "${candidate}".`,
+      { slotId: slotId ?? undefined },
     );
   }
   return candidate;
@@ -263,9 +267,9 @@ const normalizeDays = (slot: RepeatingTimeSlotIntervalInput): number[] => {
     .sort((first, second) => first - second);
 };
 
-const normalizeMinutes = (value: unknown, allowNextDay: boolean): number | null => {
+const normalizeMinutes = (value: unknown, isNextDayAllowed: boolean): number | null => {
   const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN;
-  const max = allowNextDay ? MINUTES_PER_DAY : MINUTES_PER_DAY - 1;
+  const max = isNextDayAllowed ? MINUTES_PER_DAY : MINUTES_PER_DAY - 1;
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= max ? parsed : null;
 };
 
@@ -365,7 +369,7 @@ export const resolveRepeatingTimeSlotOccurrence = (
       { slotId, occurrenceDate: null },
     );
   }
-  const timeZone = normalizeTimeZoneStrict(slot.timeZone);
+  const timeZone = normalizeTimeZoneStrict(slot.timeZone, slotId);
   const days = normalizeDays(slot);
   const startMinutes = normalizeMinutes(slot.startTimeMinutes, false);
   const endMinutes = normalizeMinutes(slot.endTimeMinutes, true);
@@ -451,7 +455,7 @@ export const enumerateRepeatingTimeSlotOccurrences = (options: {
   ) {
     return [];
   }
-  const timeZone = normalizeTimeZoneStrict(options.slot.timeZone);
+  const timeZone = normalizeTimeZoneStrict(options.slot.timeZone, normalizeSlotId(options.slot));
   const firstParts = localDateFromDate(options.windowStart, timeZone);
   if (!firstParts) return [];
   const days = normalizeDays(options.slot);

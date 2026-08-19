@@ -151,8 +151,6 @@ const repeatingSlotOverlapsEvent = (
     | "timeZone"
   >,
   eventRange: { start: Date; end: Date },
-  _eventStart?: string,
-  _eventEnd?: string,
 ): boolean => {
   const slotDays = normalizeWeekdays(slot);
   if (
@@ -395,10 +393,10 @@ const slotOverlapsExistingSlot = (
   >,
   existingSlotContext: { eventStart?: string; eventEnd?: string },
 ): boolean => {
-  const slotRepeating = slot.repeating !== false;
-  const existingRepeating = existingSlot.repeating !== false;
+  const isSlotRepeating = slot.repeating !== false;
+  const isExistingSlotRepeating = existingSlot.repeating !== false;
 
-  if (!slotRepeating && !existingRepeating) {
+  if (!isSlotRepeating && !isExistingSlotRepeating) {
     const slotRange = parseExplicitSlotRange(slot);
     const existingRange = parseExplicitSlotRange(existingSlot);
     if (!slotRange || !existingRange) {
@@ -412,7 +410,7 @@ const slotOverlapsExistingSlot = (
     );
   }
 
-  if (slotRepeating && existingRepeating) {
+  if (isSlotRepeating && isExistingSlotRepeating) {
     return repeatingSlotsOverlap(
       slot,
       slotContext,
@@ -421,7 +419,7 @@ const slotOverlapsExistingSlot = (
     );
   }
 
-  if (slotRepeating) {
+  if (isSlotRepeating) {
     const existingRange =
       parseExplicitSlotRange(existingSlot) ??
       resolveSlotWindowRange(
@@ -435,8 +433,6 @@ const slotOverlapsExistingSlot = (
     return repeatingSlotOverlapsEvent(
       slot,
       existingRange,
-      slotContext.eventStart,
-      slotContext.eventEnd,
     );
   }
 
@@ -449,8 +445,6 @@ const slotOverlapsExistingSlot = (
   return repeatingSlotOverlapsEvent(
     existingSlot,
     slotRange,
-    existingSlotContext.eventStart,
-    existingSlotContext.eventEnd,
   );
 };
 
@@ -563,8 +557,6 @@ const slotOverlapsExistingEvent = (
   return repeatingSlotOverlapsEvent(
     slot,
     eventRange,
-    context.eventStart,
-    context.eventEnd,
   );
 };
 

@@ -68,13 +68,13 @@ export const normalizeOccurrenceDate = (value: unknown): string | null => normal
 
 export const occurrenceDateFromDate = (value: Date): string => value.toISOString().slice(0, 10);
 
-const matchesSlotOccurrenceDate = (slot: any, occurrenceDate: string): boolean => {
+const validateSlotOccurrence = (slot: any, occurrenceDate: string): string | null => {
   try {
     resolveRepeatingTimeSlotOccurrence(slot, occurrenceDate);
-    return true;
+    return null;
   } catch (error) {
     if (error instanceof RepeatingTimeSlotValidationError) {
-      return false;
+      return error.message;
     }
     throw error;
   }
@@ -140,8 +140,9 @@ export const resolveWeeklyOccurrence = async (
     return { ok: false, error: 'Selected weekly timeslot was not found.' };
   }
 
-  if (!matchesSlotOccurrenceDate(slot, occurrenceDate)) {
-    return { ok: false, error: 'Selected date is not valid for the chosen weekly timeslot.' };
+  const slotOccurrenceError = validateSlotOccurrence(slot, occurrenceDate);
+  if (slotOccurrenceError) {
+    return { ok: false, error: slotOccurrenceError };
   }
 
   const divisionIds = normalizeIdList((slot as any).divisions);

@@ -136,6 +136,26 @@ class TimeSlotCanonicalAvailabilityTest {
     }
 
     @Test
+    fun given_repeating_slot_with_final_date_when_enumerating_wide_window_then_skips_out_of_bounds_dates() {
+        val occurrences = slot(
+            startMinutes = 9 * 60,
+            endMinutes = 10 * 60,
+        ).copy(
+            dayOfWeek = 0,
+            daysOfWeek = listOf(0),
+            startDate = Instant.parse("2026-08-17T04:00:00Z"),
+            endDate = Instant.parse("2026-08-18T04:00:00Z"),
+            repeating = true,
+        ).enumerateRepeatingTimeSlotOccurrences(
+            windowStart = Instant.parse("2026-08-17T00:00:00Z"),
+            windowEnd = Instant.parse("2026-08-25T00:00:00Z"),
+        )
+
+        assertEquals(1, occurrences.size)
+        assertEquals(LocalDate(2026, 8, 17), occurrences.single().occurrenceDate)
+    }
+
+    @Test
     fun given_explicit_instants_when_resolved_then_preserves_seconds() {
         val resolved = slot().copy(
             startDate = Instant.parse("2026-08-17T13:00:17Z"),

@@ -3,6 +3,7 @@ import { getOptionalSession } from '@/lib/permissions';
 import { prisma } from '@/lib/prisma';
 import { canManageOrganization } from '@/server/accessControl';
 import { listFieldSchedulingConflicts } from '@/server/repositories/events';
+import { repeatingTimeSlotValidationResponse } from '@/server/repeatingTimeSlotValidationResponse';
 
 export const dynamic = 'force-dynamic';
 
@@ -312,6 +313,10 @@ export async function GET(
   } catch (error) {
     if (error instanceof Response) {
       return error;
+    }
+    const repeatingTimeSlotResponse = repeatingTimeSlotValidationResponse(error);
+    if (repeatingTimeSlotResponse) {
+      return repeatingTimeSlotResponse;
     }
     console.error('Failed to load rental availability', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });

@@ -562,8 +562,7 @@ export const buildWeeklyOccurrenceOptionsInRange = (
         startMinutes < 0 ||
         startMinutes >= 24 * 60 ||
         endMinutes < 0 ||
-        endMinutes > 24 * 60 ||
-        endMinutes === startMinutes)
+        endMinutes > 24 * 60)
     ) {
       return;
     }

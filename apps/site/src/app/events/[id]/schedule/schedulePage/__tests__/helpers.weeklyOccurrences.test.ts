@@ -80,6 +80,47 @@ describe('weekly schedule occurrence options', () => {
       }),
     ]);
   });
+
+  it('resolves equal repeating start and end times as a full local day', () => {
+    const event = buildEvent({
+      eventType: 'WEEKLY_EVENT',
+      parentEvent: null,
+      timeSlots: [
+        buildTimeSlot({
+          $id: 'slot-full-day',
+          repeating: true,
+          daysOfWeek: [0],
+          dayOfWeek: 0,
+          startDate: '2026-07-13',
+          endDate: '2026-07-20',
+          startTimeMinutes: 10 * 60,
+          endTimeMinutes: 10 * 60,
+          timeZone: 'UTC',
+        }),
+      ],
+    });
+
+    const occurrences = buildWeeklyOccurrenceOptionsInRange(
+      event,
+      new Date('2026-07-13T00:00:00.000Z'),
+      new Date('2026-07-27T00:00:00.000Z'),
+    );
+
+    expect(occurrences).toEqual([
+      expect.objectContaining({
+        id: 'slot-full-day:2026-07-13',
+        occurrenceDate: '2026-07-13',
+        startMinutes: 10 * 60,
+        endMinutes: 10 * 60,
+      }),
+      expect.objectContaining({
+        id: 'slot-full-day:2026-07-20',
+        occurrenceDate: '2026-07-20',
+        startMinutes: 10 * 60,
+        endMinutes: 10 * 60,
+      }),
+    ]);
+  });
   it('keeps the selected occurrence instant in the slot time zone', () => {
     const event = buildEvent({
       eventType: 'WEEKLY_EVENT',

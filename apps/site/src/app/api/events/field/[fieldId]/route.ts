@@ -5,10 +5,8 @@ import { parseDateInput } from '@/server/requestParsing';
 import { getVisibleEventIds } from '@/server/eventVisibility';
 import { canManageScheduledFields } from '@/server/timeSlotAccess';
 import { normalizeEventStaffingResponse } from '@/server/events/eventResponse';
-import {
-  RepeatingTimeSlotValidationError,
-  enumerateRepeatingTimeSlotOccurrences,
-} from '@/lib/repeatingTimeSlotAvailability';
+import { enumerateRepeatingTimeSlotOccurrences } from '@/lib/repeatingTimeSlotAvailability';
+import { repeatingTimeSlotValidationResponse } from '@/server/repeatingTimeSlotValidationResponse';
 
 
 
@@ -204,18 +202,11 @@ const slotOverlapsRange = (
     endDate: slot.endDate ?? fallbackEnd ?? null,
     timeZone: slot.timeZone ?? 'UTC',
   };
-  try {
-    return enumerateRepeatingTimeSlotOccurrences({
-      slot: resolutionSlot,
-      windowStart: rangeStart,
-      windowEnd: rangeEnd,
-    }).length > 0;
-  } catch (error) {
-    if (error instanceof RepeatingTimeSlotValidationError) {
-      return false;
-    }
-    throw error;
-  }
+  return enumerateRepeatingTimeSlotOccurrences({
+    slot: resolutionSlot,
+    windowStart: rangeStart,
+    windowEnd: rangeEnd,
+  }).length > 0;
 };
 
 const eventOverlapsRange = (
@@ -292,19 +283,11 @@ const buildSlotWindowsInRange = (
     endDate: slot.endDate ?? fallbackEnd ?? null,
     timeZone: slot.timeZone ?? 'UTC',
   };
-  let occurrences;
-  try {
-    occurrences = enumerateRepeatingTimeSlotOccurrences({
-      slot: resolutionSlot,
-      windowStart: rangeStart,
-      windowEnd: rangeEnd,
-    });
-  } catch (error) {
-    if (error instanceof RepeatingTimeSlotValidationError) {
-      return windows;
-    }
-    throw error;
-  }
+  const occurrences = enumerateRepeatingTimeSlotOccurrences({
+    slot: resolutionSlot,
+    windowStart: rangeStart,
+    windowEnd: rangeEnd,
+  });
   occurrences.forEach((occurrence) => {
     if (!rangesOverlap(occurrence.start, occurrence.end, rangeStart, rangeEnd)) {
       return;
@@ -428,6 +411,7 @@ const buildPublicRentalBookingBlocker = (
 });
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ fieldId: string }> }) {
+  try {
   const { fieldId } = await params;
   const session = await getOptionalSession(req);
   const canManageField = session
@@ -651,4 +635,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ fiel
     ),
     rentalSlots: filteredRentalSlots.map((slot) => slot),
   }, { status: 200 });
+  } catch (error) {
+    const repeatingTimeSlotResponse = repeatingTimeSlotValidationResponse(error);
+    if (repeatingTimeSlotResponse) {
+      return repeatingTimeSlotResponse;
+    }
+    throw error;
+  }
 }

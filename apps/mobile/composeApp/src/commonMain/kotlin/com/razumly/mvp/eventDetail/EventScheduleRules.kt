@@ -152,25 +152,17 @@ private fun timeSlotsOverlap(first: TimeSlot, second: TimeSlot): Boolean {
         return false
     }
 
-    val firstIntervals = try {
-        if (first.repeating) {
-            first.enumerateRepeatingTimeSlotOccurrences(overlapStart, overlapEnd)
-                .map { occurrence -> ConflictInterval(occurrence.start, occurrence.end) }
-        } else {
-            listOf(firstWindow)
-        }
-    } catch (_: RepeatingTimeSlotValidationException) {
-        return false
+    val firstIntervals = if (first.repeating) {
+        first.enumerateRepeatingTimeSlotOccurrences(overlapStart, overlapEnd)
+            .map { occurrence -> ConflictInterval(occurrence.start, occurrence.end) }
+    } else {
+        listOf(firstWindow)
     }
-    val secondIntervals = try {
-        if (second.repeating) {
-            second.enumerateRepeatingTimeSlotOccurrences(overlapStart, overlapEnd)
-                .map { occurrence -> ConflictInterval(occurrence.start, occurrence.end) }
-        } else {
-            listOf(secondWindow)
-        }
-    } catch (_: RepeatingTimeSlotValidationException) {
-        return false
+    val secondIntervals = if (second.repeating) {
+        second.enumerateRepeatingTimeSlotOccurrences(overlapStart, overlapEnd)
+            .map { occurrence -> ConflictInterval(occurrence.start, occurrence.end) }
+    } else {
+        listOf(secondWindow)
     }
     return firstIntervals.any { firstInterval ->
         secondIntervals.any { secondInterval ->
@@ -232,11 +224,16 @@ internal fun computeLeagueSlotErrors(
                     return@forEachIndexed
                 }
             }
-            val hasOverlap = slots.withIndex().any { (otherIndex, other) ->
-                if (otherIndex == index) return@any false
-                val otherFieldSet = other.normalizedScheduledFieldIds().toSet()
-                if (otherFieldSet.isEmpty() || otherFieldSet.intersect(fieldIdSet).isEmpty()) return@any false
-                timeSlotsOverlap(slot, other)
+            val hasOverlap = try {
+                slots.withIndex().any { (otherIndex, other) ->
+                    if (otherIndex == index) return@any false
+                    val otherFieldSet = other.normalizedScheduledFieldIds().toSet()
+                    if (otherFieldSet.isEmpty() || otherFieldSet.intersect(fieldIdSet).isEmpty()) return@any false
+                    timeSlotsOverlap(slot, other)
+                }
+            } catch (error: RepeatingTimeSlotValidationException) {
+                errors[index] = error.message ?: "Repeating timeslot cannot be resolved."
+                return@forEachIndexed
             }
 
             if (hasOverlap) {
@@ -284,11 +281,16 @@ internal fun computeLeagueSlotErrors(
             }
         }
 
-        val hasOverlap = slots.withIndex().any { (otherIndex, other) ->
-            if (otherIndex == index) return@any false
-            val otherFieldSet = other.normalizedScheduledFieldIds().toSet()
-            if (otherFieldSet.isEmpty() || otherFieldSet.intersect(fieldIdSet).isEmpty()) return@any false
-            timeSlotsOverlap(slot, other)
+        val hasOverlap = try {
+            slots.withIndex().any { (otherIndex, other) ->
+                if (otherIndex == index) return@any false
+                val otherFieldSet = other.normalizedScheduledFieldIds().toSet()
+                if (otherFieldSet.isEmpty() || otherFieldSet.intersect(fieldIdSet).isEmpty()) return@any false
+                timeSlotsOverlap(slot, other)
+            }
+        } catch (error: RepeatingTimeSlotValidationException) {
+            errors[index] = error.message ?: "Repeating timeslot cannot be resolved."
+            return@forEachIndexed
         }
 
         if (hasOverlap) {

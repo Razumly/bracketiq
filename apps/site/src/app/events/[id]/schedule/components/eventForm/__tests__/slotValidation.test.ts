@@ -67,4 +67,38 @@ describe('One-Time Time Slot editor validation', () => {
       eventEnd: new Date('2026-08-17T11:00:00.000Z'),
     })).toMatch(/outside the Event boundary.*rejected rather than clipped/);
   });
+
+  it('surfaces strict repeating resolver errors during conflict validation', () => {
+    const invalidRepeatingSlot = buildSlot({
+      key: 'slot-dst-gap',
+      daysOfWeek: [6],
+      startDate: '2026-03-08T05:00:00.000Z',
+      endDate: '2026-03-09T04:00:00.000Z',
+      timeZone: 'America/New_York',
+      startTimeMinutes: 2 * 60 + 30,
+      endTimeMinutes: 4 * 60,
+      repeating: true,
+    });
+    const comparableRepeatingSlot = buildSlot({
+      key: 'slot-comparable',
+      daysOfWeek: [6],
+      startDate: '2026-03-08T05:00:00.000Z',
+      endDate: '2026-03-09T04:00:00.000Z',
+      timeZone: 'America/New_York',
+      startTimeMinutes: 5 * 60,
+      endTimeMinutes: 6 * 60,
+      repeating: true,
+    });
+
+    expect(computeSlotError(
+      [invalidRepeatingSlot, comparableRepeatingSlot],
+      0,
+      'LEAGUE',
+      null,
+      {
+        eventStart: new Date('2026-03-08T00:00:00.000Z'),
+        eventEnd: new Date('2026-03-09T00:00:00.000Z'),
+      },
+    )).toMatch(/does not exist on 2026-03-08/);
+  });
 });

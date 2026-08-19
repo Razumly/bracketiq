@@ -2,6 +2,10 @@ import { addMinutes } from 'date-fns';
 import type { Field, Match, Event as EventRecord, TimeSlot } from '@/types';
 import { getFacilityScopedFieldDisplayName } from '@/lib/fieldUtils';
 import {
+  resolveOneTimeTimeSlot,
+  TimeSlotValidationError,
+} from '@/lib/timeSlotAvailability';
+import {
   enumerateRepeatingTimeSlotOccurrences,
   RepeatingTimeSlotValidationError,
   type ResolvedRepeatingTimeSlot,
@@ -243,14 +247,14 @@ const appendFacilityCalendarDiagnostic = (
   diagnostics: FacilityCalendarDiagnostic[],
   diagnostic: FacilityCalendarDiagnostic,
 ): void => {
-  const duplicate = diagnostics.some((existing) => (
+  const hasDuplicate = diagnostics.some((existing) => (
     existing.code === diagnostic.code
     && existing.fieldId === diagnostic.fieldId
     && existing.eventId === diagnostic.eventId
     && existing.slotId === diagnostic.slotId
     && existing.message === diagnostic.message
   ));
-  if (!duplicate) {
+  if (!hasDuplicate) {
     diagnostics.push(diagnostic);
   }
 };
@@ -848,6 +852,40 @@ export const buildFieldCalendarEvents = (
           }
 
           if (slot.repeating === false) {
+            try {
+              const resolved = resolveOneTimeTimeSlot(slot);
+              if (
+                resolved.start.getTime() < rangeEnd.getTime()
+                && resolved.end.getTime() > rangeStart.getTime()
+              ) {
+                generated.push({
+                  id: `field-booked-one-time-${field.$id}-${evt.$id}-${slot.$id}`,
+                  title: 'Booked',
+                  start: resolved.start,
+                  end: resolved.end,
+                  resourceId: field.$id,
+                  resource: evt,
+                  metaType: 'booked',
+                  fieldName: baseTitle,
+                });
+              }
+            } catch (error) {
+              if (error instanceof TimeSlotValidationError) {
+                if (!diagnostics) {
+                  throw error;
+                }
+                appendFacilityCalendarDiagnostic(diagnostics, {
+                  code: error.code,
+                  message: error.message,
+                  fieldId: field.$id,
+                  fieldName: baseTitle,
+                  eventId: evt.$id ?? null,
+                  slotId: slot.$id ?? null,
+                });
+                return;
+              }
+              throw error;
+            }
             return;
           }
 

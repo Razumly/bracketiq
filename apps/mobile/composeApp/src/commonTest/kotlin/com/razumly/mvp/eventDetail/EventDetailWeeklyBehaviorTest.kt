@@ -160,6 +160,61 @@ class EventDetailWeeklyBehaviorTest {
     }
 
     @Test
+    fun given_mixed_repeating_and_one_time_slots_when_building_weekly_options_then_preserves_one_time_interval() {
+        val event = Event(
+            id = "weekly-mixed-event",
+            eventType = EventType.WEEKLY_EVENT,
+            start = Instant.parse("2099-04-13T00:00:00Z"),
+            end = Instant.parse("2099-05-31T23:59:59Z"),
+            timeZone = "UTC",
+            divisions = listOf("open"),
+        )
+        val repeatingSlot = TimeSlot(
+            id = "slot-repeating",
+            dayOfWeek = 0,
+            daysOfWeek = listOf(0),
+            divisions = listOf("open"),
+            startTimeMinutes = 9 * 60,
+            endTimeMinutes = 10 * 60,
+            startDate = Instant.parse("2099-04-13T00:00:00Z"),
+            timeZone = "UTC",
+            repeating = true,
+            endDate = Instant.parse("2099-04-20T00:00:00Z"),
+            scheduledFieldId = "field-1",
+            scheduledFieldIds = listOf("field-1"),
+            price = null,
+        )
+        val oneTimeSlot = TimeSlot(
+            id = "slot-one-time",
+            dayOfWeek = null,
+            daysOfWeek = null,
+            divisions = listOf("open"),
+            startTimeMinutes = 11 * 60,
+            endTimeMinutes = 12 * 60,
+            startDate = Instant.parse("2099-04-14T11:00:00Z"),
+            timeZone = "UTC",
+            repeating = false,
+            endDate = Instant.parse("2099-04-14T12:00:00Z"),
+            scheduledFieldId = "field-1",
+            scheduledFieldIds = listOf("field-1"),
+            price = null,
+        )
+
+        val slots = listOf(repeatingSlot, oneTimeSlot)
+        val scheduleOptions = buildWeeklyScheduleOptions(event, slots)
+        val sessionOptions = buildWeeklySessionOptions(event, slots)
+
+        assertEquals(
+            Instant.parse("2099-04-14T11:00:00Z"),
+            scheduleOptions.single { option -> option.slotId == "slot-one-time" }.start,
+        )
+        assertEquals(
+            Instant.parse("2099-04-14T11:00:00Z"),
+            sessionOptions.single { option -> option.slotId == "slot-one-time" }.start,
+        )
+    }
+
+    @Test
     fun given_invalid_repeating_slot_when_building_weekly_schedule_options_then_surfaces_resolver_failure() {
         val event = Event(
             id = "weekly-gap-event",
@@ -191,7 +246,7 @@ class EventDetailWeeklyBehaviorTest {
     }
 
     @Test
-    fun weekly_session_options_build_three_weeks_from_the_slot_start() {
+    fun given_weekly_event_when_building_session_options_then_builds_three_weeks_from_slot_start() {
         val event = Event(
             id = "weekly-session-event",
             name = "Weekly Sessions",
@@ -404,7 +459,7 @@ class EventDetailWeeklyBehaviorTest {
     }
 
     @Test
-    fun non_weekly_event_uses_event_start_policy() {
+    fun given_non_weekly_event_when_building_route_presentation_then_uses_event_start_policy() {
         val event = Event(
             id = "one-off-event",
             eventType = EventType.EVENT,
@@ -437,7 +492,7 @@ class EventDetailWeeklyBehaviorTest {
     }
 
     @Test
-    fun weekly_parent_builds_sessions_and_tracks_join() {
+    fun given_weekly_parent_when_building_route_presentation_then_builds_sessions_and_tracks_join() {
         val event = Event(
             id = "weekly-route-event",
             eventType = EventType.WEEKLY_EVENT,

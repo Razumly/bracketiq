@@ -243,4 +243,51 @@ describe('/api/events/field/[fieldId]', () => {
     ]);
     expect(payload.events[0]).not.toHaveProperty('$id');
   });
+
+  it('returns repeating slot validation errors instead of hiding invalid availability', async () => {
+    prismaMock.events.findMany.mockResolvedValue([
+      {
+        id: 'league_invalid_slot',
+        state: 'PUBLISHED',
+        hostId: 'host_1',
+        assistantHostIds: [],
+        organizationId: 'org_public',
+        eventType: 'LEAGUE',
+        parentEvent: null,
+        start: new Date('2026-05-01T00:00:00.000Z'),
+        end: new Date('2026-05-02T00:00:00.000Z'),
+        fieldIds: ['field_1'],
+        timeSlotIds: ['slot_invalid_zone'],
+      },
+    ]);
+    prismaMock.fields.findFirst.mockResolvedValue({ rentalSlotIds: [] });
+    prismaMock.timeSlots.findMany.mockResolvedValue([
+      {
+        id: 'slot_invalid_zone',
+        startDate: new Date('2026-05-01T00:00:00.000Z'),
+        endDate: new Date('2026-05-02T00:00:00.000Z'),
+        startTimeMinutes: 9 * 60,
+        endTimeMinutes: 10 * 60,
+        timeZone: 'Invalid/Zone',
+        daysOfWeek: [4],
+        repeating: true,
+        scheduledFieldId: 'field_1',
+        scheduledFieldIds: ['field_1'],
+      },
+    ]);
+
+    const response = await GET(
+      new NextRequest(
+        'http://localhost/api/events/field/field_1?start=2026-05-01T00%3A00%3A00.000Z&end=2026-05-02T00%3A00%3A00.000Z',
+      ),
+      { params: Promise.resolve({ fieldId: 'field_1' }) },
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload).toEqual(expect.objectContaining({
+      code: 'INVALID_TIME_SLOT',
+      slotIds: ['slot_invalid_zone'],
+    }));
+  });
 });

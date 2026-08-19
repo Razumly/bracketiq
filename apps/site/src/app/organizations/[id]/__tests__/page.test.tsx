@@ -194,6 +194,94 @@ describe("buildFieldCalendarEvents", () => {
     ]);
   });
 
+  it("includes one-time slots in field calendar occupancy for slot-based events", () => {
+    const range = {
+      start: new Date("2026-03-10T00:00:00.000Z"),
+      end: new Date("2026-03-11T00:00:00.000Z"),
+    };
+    const fields = [
+      {
+        ...baseField,
+        events: [
+          {
+            $id: "event-mixed",
+            eventType: "LEAGUE",
+            start: "2026-03-10T00:00:00.000Z",
+            end: "2026-03-11T00:00:00.000Z",
+            timeSlots: [
+              {
+                $id: "slot-one-time",
+                repeating: false,
+                startDate: "2026-03-10T10:00:00.000Z",
+                endDate: "2026-03-10T12:00:00.000Z",
+                timeZone: "UTC",
+                scheduledFieldId: "field_1",
+                scheduledFieldIds: ["field_1"],
+              },
+            ],
+          },
+        ],
+        matches: [],
+      } as unknown as Field,
+    ];
+
+    const entries = buildFieldCalendarEvents(fields, range);
+    const entry = entries.find(
+      (candidate) => candidate.id === "field-booked-one-time-field_1-event-mixed-slot-one-time",
+    );
+
+    expect(entry).toEqual(expect.objectContaining({
+      start: new Date("2026-03-10T10:00:00.000Z"),
+      end: new Date("2026-03-10T12:00:00.000Z"),
+      resourceId: "field_1",
+    }));
+  });
+
+  it("reports invalid repeating event slots as calendar diagnostics", () => {
+    const fields = [
+      {
+        ...baseField,
+        events: [
+          {
+            $id: "event-invalid-slot",
+            eventType: "LEAGUE",
+            timeSlots: [
+              {
+                $id: "slot-invalid-gap",
+                repeating: true,
+                daysOfWeek: [6],
+                startDate: "2026-03-08T05:00:00.000Z",
+                endDate: "2026-03-09T04:00:00.000Z",
+                startTimeMinutes: 2 * 60 + 30,
+                endTimeMinutes: 4 * 60,
+                timeZone: "America/New_York",
+                scheduledFieldId: "field_1",
+                scheduledFieldIds: ["field_1"],
+              },
+            ],
+          },
+        ],
+        matches: [],
+      } as unknown as Field,
+    ];
+    const diagnostics: Array<{ code: string; message: string }> = [];
+
+    expect(buildFieldCalendarEvents(
+      fields,
+      {
+        start: new Date("2026-03-08T00:00:00.000Z"),
+        end: new Date("2026-03-09T00:00:00.000Z"),
+      },
+      diagnostics,
+    )).toEqual([]);
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        code: "REPEATING_TIME_SLOT_TIME_GAP",
+        message: expect.stringContaining("2026-03-08"),
+      }),
+    ]);
+  });
+
   it("summarizes rentable inventory, utilization, revenue per court-hour, and conflicts by facility", () => {
     const range = {
       start: new Date("2026-03-10T00:00:00.000Z"),

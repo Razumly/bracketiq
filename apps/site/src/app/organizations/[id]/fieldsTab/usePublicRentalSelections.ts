@@ -257,23 +257,16 @@ const rentalSlotCoversDraftDay = (
     );
   }
 
-  try {
-    const occurrences = enumerateRepeatingTimeSlotOccurrences({
-      slot,
-      windowStart: params.selectionStart,
-      windowEnd: params.selectionEnd,
-    });
-    return occurrences.some(
-      (occurrence) =>
-        params.selectionStart.getTime() >= occurrence.start.getTime() &&
-        params.selectionEnd.getTime() <= occurrence.end.getTime(),
-    );
-  } catch (error) {
-    if (error instanceof RepeatingTimeSlotValidationError) {
-      return false;
-    }
-    throw error;
-  }
+  const occurrences = enumerateRepeatingTimeSlotOccurrences({
+    slot,
+    windowStart: params.selectionStart,
+    windowEnd: params.selectionEnd,
+  });
+  return occurrences.some(
+    (occurrence) =>
+      params.selectionStart.getTime() >= occurrence.start.getTime() &&
+      params.selectionEnd.getTime() <= occurrence.end.getTime(),
+  );
 };
 
 export function usePublicRentalSelections({
@@ -643,15 +636,29 @@ export function usePublicRentalSelections({
             errors.push(`Resource ${fieldId} is unavailable.`);
             return;
           }
-          const matchedRentalSlot = (field.rentalSlots || []).find((slot) =>
-            rentalSlotCoversDraftDay(slot, {
-              selectionStart: dateRange.start,
-              selectionEnd: dateRange.end,
-            }),
-          );
+          let matchedRentalSlot: TimeSlot | undefined;
+          let repeatingResolutionError: string | null = null;
+          for (const slot of field.rentalSlots || []) {
+            try {
+              if (rentalSlotCoversDraftDay(slot, {
+                selectionStart: dateRange.start,
+                selectionEnd: dateRange.end,
+              })) {
+                matchedRentalSlot = slot;
+                break;
+              }
+            } catch (error) {
+              if (error instanceof RepeatingTimeSlotValidationError) {
+                repeatingResolutionError ??= error.message;
+                continue;
+              }
+              throw error;
+            }
+          }
           if (!matchedRentalSlot) {
             errors.push(
-              `${getFacilityScopedFieldDisplayName(field)} is unavailable for ${formatDisplayDateTime(dateRange.start)} - ${formatDisplayDateTime(dateRange.end)}.`,
+              repeatingResolutionError
+                ?? `${getFacilityScopedFieldDisplayName(field)} is unavailable for ${formatDisplayDateTime(dateRange.start)} - ${formatDisplayDateTime(dateRange.end)}.`,
             );
             return;
           }

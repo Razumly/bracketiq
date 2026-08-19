@@ -8,6 +8,41 @@ import {
   getEventParticipantIdsForEvent,
   syncDivisionTeamMembershipFromRegistrations,
 } from '@/server/events/eventRegistrations';
+import { resolveWeeklyOccurrence } from '@/server/events/weeklyOccurrences';
+
+describe('resolveWeeklyOccurrence', () => {
+  it('returns the strict DST resolver error for an invalid selected occurrence', async () => {
+    const result = await resolveWeeklyOccurrence({
+      event: {
+        id: 'weekly_parent',
+        eventType: 'WEEKLY_EVENT',
+        timeSlotIds: ['slot_dst_gap'],
+      },
+      occurrence: {
+        slotId: 'slot_dst_gap',
+        occurrenceDate: '2026-03-08',
+      },
+    }, {
+      timeSlots: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'slot_dst_gap',
+          daysOfWeek: [6],
+          startDate: new Date('2026-03-08T05:00:00.000Z'),
+          endDate: new Date('2026-03-09T04:00:00.000Z'),
+          startTimeMinutes: 2 * 60 + 30,
+          endTimeMinutes: 4 * 60,
+          timeZone: 'America/New_York',
+          repeating: true,
+        }),
+      },
+    } as any);
+
+    expect(result).toEqual({
+      ok: false,
+      error: expect.stringContaining('does not exist on 2026-03-08'),
+    });
+  });
+});
 
 describe('buildEventParticipantSnapshot', () => {
   const weeklySlot = {
@@ -16,6 +51,10 @@ describe('buildEventParticipantSnapshot', () => {
     daysOfWeek: [1],
     startDate: '2026-04-01',
     endDate: '2026-04-30',
+    startTimeMinutes: 10 * 60,
+    endTimeMinutes: 11 * 60,
+    timeZone: 'UTC',
+    repeating: true,
   };
 
   const divisions = [

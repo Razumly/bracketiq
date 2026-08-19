@@ -3,6 +3,7 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 class LeagueSlotValidationTest {
@@ -263,6 +264,39 @@ class LeagueSlotValidationTest {
         )
     }
 
+    @Test
+    fun given_repeating_slot_in_dst_gap_when_conflict_checked_then_preserves_resolver_error() {
+        val validSlot = buildSlot(
+            id = "slot-valid",
+            repeating = true,
+            dayOfWeek = 6,
+            daysOfWeek = listOf(6),
+            startTimeMinutes = 5 * 60,
+            endTimeMinutes = 6 * 60,
+            startDate = Instant.parse("2026-03-08T05:00:00Z"),
+            endDate = Instant.parse("2026-03-09T04:00:00Z"),
+        ).copy(timeZone = "America/New_York")
+        val invalidSlot = buildSlot(
+            id = "slot-dst-gap",
+            repeating = true,
+            dayOfWeek = 6,
+            daysOfWeek = listOf(6),
+            startTimeMinutes = 2 * 60 + 30,
+            endTimeMinutes = 4 * 60,
+            startDate = Instant.parse("2026-03-08T05:00:00Z"),
+            endDate = Instant.parse("2026-03-09T04:00:00Z"),
+        ).copy(timeZone = "America/New_York")
+
+        val errors = computeLeagueSlotErrors(
+            slots = listOf(validSlot, invalidSlot),
+            singleDivision = false,
+            selectedDivisionIds = emptyList(),
+        )
+
+        assertTrue(errors[0]?.contains("2026-03-08") == true)
+        assertTrue(errors[1]?.contains("2026-03-08") == true)
+        assertTrue(errors[1]?.contains("does not exist") == true)
+    }
 
     private fun buildSlot(
         id: String,

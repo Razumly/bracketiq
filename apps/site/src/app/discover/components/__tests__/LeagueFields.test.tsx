@@ -131,6 +131,39 @@ describe("LeagueFields", () => {
     );
   });
 
+  it("shows the following local weekday for an overnight repeating slot", () => {
+    renderWithMantine(
+      <LeagueFields
+        leagueData={{
+          gamesPerOpponent: 1,
+          includePlayoffs: false,
+          usesSets: false,
+          matchDurationMinutes: 60,
+          restTimeMinutes: 0,
+        }}
+        onLeagueDataChange={noop}
+        slots={[
+          {
+            ...baseSlot,
+            startTimeMinutes: 22 * 60,
+            endTimeMinutes: 2 * 60,
+            daysOfWeek: [0],
+            dayOfWeek: 0,
+          },
+        ]}
+        onAddSlot={noop}
+        onUpdateSlot={noop}
+        onRemoveSlot={noop}
+        fields={[field]}
+        fieldsLoading={false}
+      />,
+    );
+
+    expect(
+      screen.getByText("Overnight slot ends on the next local weekday: Tuesday."),
+    ).toBeInTheDocument();
+  });
+
   it("renders only the slot type owned by a single-style Simple Setup page", () => {
     const fixedSlot: LeagueSlotForm = {
       ...baseSlot,
