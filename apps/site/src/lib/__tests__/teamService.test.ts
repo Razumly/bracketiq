@@ -1,9 +1,10 @@
 import { teamService } from '@/lib/teamService';
-import { apiRequest } from '@/lib/apiClient';
+import { ApiRequestError, apiRequest } from '@/lib/apiClient';
 import type { UserData } from '@/types';
 
 jest.mock('@/lib/apiClient', () => ({
   apiRequest: jest.fn(),
+  ApiRequestError: jest.requireActual('@/lib/apiClient').ApiRequestError,
 }));
 
 jest.mock('@/lib/userService', () => ({
@@ -500,6 +501,36 @@ describe('teamService', () => {
       );
       expect(userServiceMock.addTeamInvitation).not.toHaveBeenCalled();
       expect(result).toBe(true);
+    });
+    it('rethrows the exact player capacity conflict', async () => {
+      const capacityError = new ApiRequestError(
+        'Team is full. Player invite was not sent.',
+        409,
+        {},
+      );
+      apiRequestMock.mockRejectedValue(capacityError);
+
+      const team = {
+        $id: 'team_1',
+        playerIds: ['captain_1'],
+        pending: [],
+        teamSize: 6,
+      } as any;
+
+      await expect(teamService.invitePlayerToTeam(team, buildUser('user_2'))).rejects.toBe(capacityError);
+    });
+
+    it('keeps returning false for generic invite failures', async () => {
+      apiRequestMock.mockRejectedValue(new Error('network failure'));
+
+      const team = {
+        $id: 'team_1',
+        playerIds: ['captain_1'],
+        pending: [],
+        teamSize: 6,
+      } as any;
+
+      await expect(teamService.invitePlayerToTeam(team, buildUser('user_2'))).resolves.toBe(false);
     });
   });
 

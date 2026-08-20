@@ -6,6 +6,7 @@ const requireSessionMock = jest.fn();
 const verifyTeamInviteShareLinkMock = jest.fn();
 const loadCanonicalTeamByIdMock = jest.fn();
 const syncCanonicalTeamRosterMock = jest.fn();
+const replaceSingletonTeamStaffAssignmentMock = jest.fn();
 const acceptTeamInviteWithGuardianRulesMock = jest.fn();
 
 const txMock = {
@@ -15,6 +16,7 @@ const txMock = {
   },
   teamStaffAssignments: {
     upsert: jest.fn(),
+    updateMany: jest.fn(),
   },
 };
 
@@ -33,6 +35,7 @@ jest.mock('@/server/teamInviteLinks', () => ({
 jest.mock('@/server/teams/teamMembership', () => ({
   loadCanonicalTeamById: (...args: any[]) => loadCanonicalTeamByIdMock(...args),
   normalizeIdList: (value: unknown) => Array.isArray(value) ? value : [],
+  replaceSingletonTeamStaffAssignment: (...args: any[]) => replaceSingletonTeamStaffAssignmentMock(...args),
   syncCanonicalTeamRoster: (...args: any[]) => syncCanonicalTeamRosterMock(...args),
 }));
 jest.mock('@/server/teams/teamGuardianInvites', () => ({
@@ -69,7 +72,8 @@ describe('/api/team-invites/[id]/claim POST', () => {
       userId: null,
       createdBy: 'creator_1',
       status: 'PENDING',
-      staffTypes: ['MANAGER'],
+      role: 'team_manager',
+      staffTypes: ['HEAD_COACH'],
       linkVersion: 1,
       linkExpiresAt: new Date(Date.now() + 60_000),
     };
@@ -82,6 +86,14 @@ describe('/api/team-invites/[id]/claim POST', () => {
       { params: Promise.resolve({ id: 'invite_manager_1' }) },
     );
     const payload = await response.json();
+    expect(replaceSingletonTeamStaffAssignmentMock).toHaveBeenCalledWith({
+      tx: txMock,
+      teamId: 'team_1',
+      role: 'MANAGER',
+      replacementInviteId: 'invite_manager_1',
+      replacementUserId: 'new_manager_1',
+      now: expect.any(Date),
+    });
 
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true });

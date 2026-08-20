@@ -1013,6 +1013,8 @@ model Invites {
   phone          String?
   status         String?
   staffTypes     String[]  @default([])
+  role           String    @default("player")
+  isAssigned     Boolean   @default(false)
   eventId        String?
   organizationId String?
   teamId         String?

@@ -25,6 +25,7 @@ const txMock = {
     count: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
   },
   authUser: {
     findUnique: jest.fn(),
@@ -108,6 +109,8 @@ describe('/api/teams/[id]/member-invites POST', () => {
     txMock.invites.create.mockResolvedValue({
       id: 'invite_1',
       type: 'TEAM',
+      role: 'player',
+      isAssigned: false,
       email: 'free@example.com',
       status: 'PENDING',
       teamId: 'team_1',
@@ -178,6 +181,8 @@ describe('/api/teams/[id]/member-invites POST', () => {
 
     expect(response.status).toBe(201);
     expect(payload.ok).toBe(true);
+    expect(payload.invite.role).toBe('player');
+    expect(payload.invite.isAssigned).toBe(false);
     expect(txMock.teamRegistrations.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
         teamId: 'team_1',
@@ -200,6 +205,7 @@ describe('/api/teams/[id]/member-invites POST', () => {
     const existingInvite = {
       id: 'invite_existing',
       type: 'TEAM',
+      role: 'player',
       email: 'free@example.com',
       status: 'PENDING',
       teamId: 'team_1',
@@ -230,12 +236,13 @@ describe('/api/teams/[id]/member-invites POST', () => {
     expect(response.status).toBe(201);
     expect(payload.ok).toBe(true);
     expect(payload.invite.id).toBe('invite_existing');
-    expect(txMock.invites.create).not.toHaveBeenCalled();
     expect(txMock.invites.update).toHaveBeenCalledWith({
       where: { id: 'invite_existing' },
       data: expect.objectContaining({
         email: 'free@example.com',
         status: 'PENDING',
+        role: 'player',
+        isAssigned: false,
       }),
     });
     expect(sendInviteEmailsMock).not.toHaveBeenCalled();
@@ -295,6 +302,66 @@ describe('/api/teams/[id]/member-invites POST', () => {
       data: expect.objectContaining({ status: 'REMOVED' }),
     }));
   });
+  it('cleans prior invited player state when a TEAM invite changes to staff', async () => {
+    const existingInvite = {
+      id: 'invite_existing_player',
+      type: 'TEAM',
+      role: 'player',
+      email: 'free@example.com',
+      status: 'PENDING',
+      teamId: 'team_1',
+      userId: 'free_1',
+      createdBy: 'manager_1',
+      staffTypes: [],
+      linkVersion: 1,
+      linkExpiresAt: new Date('2026-05-13T18:00:00.000Z'),
+    };
+    txMock.invites.findFirst.mockResolvedValue(existingInvite);
+    txMock.invites.update.mockResolvedValue({ ...existingInvite, role: 'team_manager' });
+    txMock.teamRegistrations.findMany.mockResolvedValue([
+      {
+        id: 'team_1__manager_1',
+        teamId: 'team_1',
+        userId: 'manager_1',
+        status: 'ACTIVE',
+        isCaptain: true,
+      },
+      {
+        id: 'team_1__free_1',
+        teamId: 'team_1',
+        userId: 'free_1',
+        status: 'INVITED',
+        isCaptain: false,
+      },
+    ]);
+
+    const response = await POST(
+      new NextRequest('http://localhost/api/teams/team_1/member-invites', {
+        method: 'POST',
+        body: JSON.stringify({ userId: 'free_1', role: 'team_manager' }),
+      }),
+      { params: Promise.resolve({ id: 'team_1' }) },
+    );
+    expect(txMock.teamRegistrations.updateMany).toHaveBeenCalledWith({
+      where: {
+        teamId: 'team_1',
+        userId: 'free_1',
+        status: { in: ['PENDING', 'INVITED'] },
+      },
+      data: expect.objectContaining({ status: 'REMOVED', updatedAt: expect.any(Date) }),
+    });
+    expect(txMock.teamStaffAssignments.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        teamId_userId_role: {
+          teamId: 'team_1',
+          userId: 'free_1',
+          role: 'MANAGER',
+        },
+      },
+      create: expect.objectContaining({ status: 'INVITED' }),
+    }));
+  });
+
 
   it('rejects player invites when team registrations already fill the team', async () => {
     txMock.canonicalTeams.findUnique.mockResolvedValue({
@@ -348,10 +415,56 @@ describe('/api/teams/[id]/member-invites POST', () => {
     expect(txMock.teamRegistrations.upsert).not.toHaveBeenCalled();
   });
 
+  it('does not count an anonymous staff invite toward player capacity', async () => {
+    txMock.canonicalTeams.findUnique.mockResolvedValue({
+      id: 'team_1',
+      name: 'Test team',
+      division: 'Open',
+      divisionTypeId: 'open',
+      wins: null,
+      losses: null,
+      teamSize: 2,
+      profileImageId: null,
+      sport: 'Basketball',
+      organizationId: 'org_1',
+      createdBy: 'manager_1',
+      openRegistration: false,
+      registrationPriceCents: 0,
+      requiredTemplateIds: [],
+    });
+    txMock.teamRegistrations.findMany.mockResolvedValue([{
+      id: 'team_1__manager_1',
+      teamId: 'team_1',
+      userId: 'manager_1',
+      status: 'ACTIVE',
+      isCaptain: true,
+    }]);
+    txMock.invites.count.mockImplementation(async ({ where }: { where: { role?: string } }) => (
+      where.role === 'player' ? 0 : 1
+    ));
+
+    const response = await POST(
+      new NextRequest('http://localhost/api/teams/team_1/member-invites', {
+        method: 'POST',
+        body: JSON.stringify({ userId: 'free_1', role: 'player' }),
+      }),
+      { params: Promise.resolve({ id: 'team_1' }) },
+    );
+
+    expect(response.status).toBe(201);
+    expect(txMock.invites.count).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        role: 'player',
+      }),
+    }));
+  });
+
   it('creates a share-only person invite without a placeholder account', async () => {
     txMock.invites.create.mockResolvedValueOnce({
       id: 'invite_share_1',
       type: 'TEAM',
+      role: 'player',
+      isAssigned: true,
       email: null,
       phone: null,
       status: 'PENDING',
@@ -382,6 +495,10 @@ describe('/api/teams/[id]/member-invites POST', () => {
 
     expect(response.status).toBe(201);
     expect(payload.invite.userId).toBeNull();
+    expect(payload.invite.firstName).toBe('Jordan');
+    expect(payload.invite.lastName).toBe('Guest');
+    expect(payload.invite.role).toBe('player');
+    expect(payload.invite.isAssigned).toBe(true);
     expect(payload.shareUrl).toMatch(/^http:\/\/localhost\/i\/invite_share_1\?/);
     expect(txMock.invites.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -389,6 +506,8 @@ describe('/api/teams/[id]/member-invites POST', () => {
         email: null,
         firstName: 'Jordan',
         lastName: 'Guest',
+        role: 'player',
+        isAssigned: true,
       }),
     });
     expect(sendInviteEmailsMock).not.toHaveBeenCalled();
@@ -399,6 +518,8 @@ describe('/api/teams/[id]/member-invites POST', () => {
     txMock.invites.create.mockResolvedValueOnce({
       id: 'invite_manager_1',
       type: 'TEAM',
+      role: 'team_manager',
+      isAssigned: true,
       email: 'morgan@qa.invalid',
       phone: '+15035550118',
       status: 'PENDING',
@@ -431,13 +552,33 @@ describe('/api/teams/[id]/member-invites POST', () => {
 
     expect(response.status).toBe(201);
     expect(payload.shareUrl).toMatch(/^http:\/\/localhost\/i\/invite_manager_1\?/);
+    expect(payload.invite.isAssigned).toBe(true);
     expect(txMock.invites.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         userId: null,
         email: 'morgan@qa.invalid',
         phone: '+15035550118',
         staffTypes: ['MANAGER'],
+        role: 'team_manager',
+        isAssigned: true,
       }),
+    });
+    expect(txMock.invites.updateMany).toHaveBeenCalledWith({
+      where: {
+        type: 'TEAM',
+        teamId: 'team_1',
+        role: { in: ['MANAGER', 'team_manager'] },
+        status: { in: ['PENDING', 'INVITED'] },
+      },
+      data: { status: 'CANCELLED', updatedAt: expect.any(Date) },
+    });
+    expect(txMock.teamStaffAssignments.updateMany).toHaveBeenCalledWith({
+      where: {
+        teamId: 'team_1',
+        role: 'MANAGER',
+        status: { in: ['ACTIVE', 'INVITED'] },
+      },
+      data: { status: 'REMOVED', updatedAt: expect.any(Date) },
     });
     expect(txMock.teamStaffAssignments.upsert).not.toHaveBeenCalled();
     expect(txMock.teamRegistrations.upsert).not.toHaveBeenCalled();

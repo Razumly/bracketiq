@@ -43,6 +43,8 @@ export type InvitesMinAggregateOutputType = {
   email: string | null
   phone: string | null
   status: string | null
+  role: string | null
+  isAssigned: boolean | null
   eventId: string | null
   organizationId: string | null
   teamId: string | null
@@ -64,6 +66,8 @@ export type InvitesMaxAggregateOutputType = {
   email: string | null
   phone: string | null
   status: string | null
+  role: string | null
+  isAssigned: boolean | null
   eventId: string | null
   organizationId: string | null
   teamId: string | null
@@ -86,6 +90,8 @@ export type InvitesCountAggregateOutputType = {
   phone: number
   status: number
   staffTypes: number
+  role: number
+  isAssigned: number
   eventId: number
   organizationId: number
   teamId: number
@@ -117,6 +123,8 @@ export type InvitesMinAggregateInputType = {
   email?: true
   phone?: true
   status?: true
+  role?: true
+  isAssigned?: true
   eventId?: true
   organizationId?: true
   teamId?: true
@@ -138,6 +146,8 @@ export type InvitesMaxAggregateInputType = {
   email?: true
   phone?: true
   status?: true
+  role?: true
+  isAssigned?: true
   eventId?: true
   organizationId?: true
   teamId?: true
@@ -160,6 +170,8 @@ export type InvitesCountAggregateInputType = {
   phone?: true
   status?: true
   staffTypes?: true
+  role?: true
+  isAssigned?: true
   eventId?: true
   organizationId?: true
   teamId?: true
@@ -269,6 +281,8 @@ export type InvitesGroupByOutputType = {
   phone: string | null
   status: string | null
   staffTypes: string[]
+  role: string
+  isAssigned: boolean
   eventId: string | null
   organizationId: string | null
   teamId: string | null
@@ -314,6 +328,8 @@ export type InvitesWhereInput = {
   phone?: Prisma.StringNullableFilter<"Invites"> | string | null
   status?: Prisma.StringNullableFilter<"Invites"> | string | null
   staffTypes?: Prisma.StringNullableListFilter<"Invites">
+  role?: Prisma.StringFilter<"Invites"> | string
+  isAssigned?: Prisma.BoolFilter<"Invites"> | boolean
   eventId?: Prisma.StringNullableFilter<"Invites"> | string | null
   organizationId?: Prisma.StringNullableFilter<"Invites"> | string | null
   teamId?: Prisma.StringNullableFilter<"Invites"> | string | null
@@ -336,6 +352,8 @@ export type InvitesOrderByWithRelationInput = {
   phone?: Prisma.SortOrderInput | Prisma.SortOrder
   status?: Prisma.SortOrderInput | Prisma.SortOrder
   staffTypes?: Prisma.SortOrder
+  role?: Prisma.SortOrder
+  isAssigned?: Prisma.SortOrder
   eventId?: Prisma.SortOrderInput | Prisma.SortOrder
   organizationId?: Prisma.SortOrderInput | Prisma.SortOrder
   teamId?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -361,6 +379,8 @@ export type InvitesWhereUniqueInput = Prisma.AtLeast<{
   phone?: Prisma.StringNullableFilter<"Invites"> | string | null
   status?: Prisma.StringNullableFilter<"Invites"> | string | null
   staffTypes?: Prisma.StringNullableListFilter<"Invites">
+  role?: Prisma.StringFilter<"Invites"> | string
+  isAssigned?: Prisma.BoolFilter<"Invites"> | boolean
   eventId?: Prisma.StringNullableFilter<"Invites"> | string | null
   organizationId?: Prisma.StringNullableFilter<"Invites"> | string | null
   teamId?: Prisma.StringNullableFilter<"Invites"> | string | null
@@ -383,6 +403,8 @@ export type InvitesOrderByWithAggregationInput = {
   phone?: Prisma.SortOrderInput | Prisma.SortOrder
   status?: Prisma.SortOrderInput | Prisma.SortOrder
   staffTypes?: Prisma.SortOrder
+  role?: Prisma.SortOrder
+  isAssigned?: Prisma.SortOrder
   eventId?: Prisma.SortOrderInput | Prisma.SortOrder
   organizationId?: Prisma.SortOrderInput | Prisma.SortOrder
   teamId?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -413,6 +435,8 @@ export type InvitesScalarWhereWithAggregatesInput = {
   phone?: Prisma.StringNullableWithAggregatesFilter<"Invites"> | string | null
   status?: Prisma.StringNullableWithAggregatesFilter<"Invites"> | string | null
   staffTypes?: Prisma.StringNullableListFilter<"Invites">
+  role?: Prisma.StringWithAggregatesFilter<"Invites"> | string
+  isAssigned?: Prisma.BoolWithAggregatesFilter<"Invites"> | boolean
   eventId?: Prisma.StringNullableWithAggregatesFilter<"Invites"> | string | null
   organizationId?: Prisma.StringNullableWithAggregatesFilter<"Invites"> | string | null
   teamId?: Prisma.StringNullableWithAggregatesFilter<"Invites"> | string | null
@@ -435,6 +459,8 @@ export type InvitesCreateInput = {
   phone?: string | null
   status?: string | null
   staffTypes?: Prisma.InvitesCreatestaffTypesInput | string[]
+  role?: string
+  isAssigned?: boolean
   eventId?: string | null
   organizationId?: string | null
   teamId?: string | null
@@ -457,6 +483,8 @@ export type InvitesUncheckedCreateInput = {
   phone?: string | null
   status?: string | null
   staffTypes?: Prisma.InvitesCreatestaffTypesInput | string[]
+  role?: string
+  isAssigned?: boolean
   eventId?: string | null
   organizationId?: string | null
   teamId?: string | null
@@ -479,6 +507,8 @@ export type InvitesUpdateInput = {
   phone?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   status?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   staffTypes?: Prisma.InvitesUpdatestaffTypesInput | string[]
+  role?: Prisma.StringFieldUpdateOperationsInput | string
+  isAssigned?: Prisma.BoolFieldUpdateOperationsInput | boolean
   eventId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   organizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   teamId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -501,6 +531,8 @@ export type InvitesUncheckedUpdateInput = {
   phone?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   status?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   staffTypes?: Prisma.InvitesUpdatestaffTypesInput | string[]
+  role?: Prisma.StringFieldUpdateOperationsInput | string
+  isAssigned?: Prisma.BoolFieldUpdateOperationsInput | boolean
   eventId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   organizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   teamId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -523,6 +555,8 @@ export type InvitesCreateManyInput = {
   phone?: string | null
   status?: string | null
   staffTypes?: Prisma.InvitesCreatestaffTypesInput | string[]
+  role?: string
+  isAssigned?: boolean
   eventId?: string | null
   organizationId?: string | null
   teamId?: string | null
@@ -545,6 +579,8 @@ export type InvitesUpdateManyMutationInput = {
   phone?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   status?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   staffTypes?: Prisma.InvitesUpdatestaffTypesInput | string[]
+  role?: Prisma.StringFieldUpdateOperationsInput | string
+  isAssigned?: Prisma.BoolFieldUpdateOperationsInput | boolean
   eventId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   organizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   teamId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -567,6 +603,8 @@ export type InvitesUncheckedUpdateManyInput = {
   phone?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   status?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   staffTypes?: Prisma.InvitesUpdatestaffTypesInput | string[]
+  role?: Prisma.StringFieldUpdateOperationsInput | string
+  isAssigned?: Prisma.BoolFieldUpdateOperationsInput | boolean
   eventId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   organizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   teamId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -589,6 +627,8 @@ export type InvitesCountOrderByAggregateInput = {
   phone?: Prisma.SortOrder
   status?: Prisma.SortOrder
   staffTypes?: Prisma.SortOrder
+  role?: Prisma.SortOrder
+  isAssigned?: Prisma.SortOrder
   eventId?: Prisma.SortOrder
   organizationId?: Prisma.SortOrder
   teamId?: Prisma.SortOrder
@@ -614,6 +654,8 @@ export type InvitesMaxOrderByAggregateInput = {
   email?: Prisma.SortOrder
   phone?: Prisma.SortOrder
   status?: Prisma.SortOrder
+  role?: Prisma.SortOrder
+  isAssigned?: Prisma.SortOrder
   eventId?: Prisma.SortOrder
   organizationId?: Prisma.SortOrder
   teamId?: Prisma.SortOrder
@@ -635,6 +677,8 @@ export type InvitesMinOrderByAggregateInput = {
   email?: Prisma.SortOrder
   phone?: Prisma.SortOrder
   status?: Prisma.SortOrder
+  role?: Prisma.SortOrder
+  isAssigned?: Prisma.SortOrder
   eventId?: Prisma.SortOrder
   organizationId?: Prisma.SortOrder
   teamId?: Prisma.SortOrder
@@ -672,6 +716,8 @@ export type InvitesSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs 
   phone?: boolean
   status?: boolean
   staffTypes?: boolean
+  role?: boolean
+  isAssigned?: boolean
   eventId?: boolean
   organizationId?: boolean
   teamId?: boolean
@@ -694,6 +740,8 @@ export type InvitesSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Exten
   phone?: boolean
   status?: boolean
   staffTypes?: boolean
+  role?: boolean
+  isAssigned?: boolean
   eventId?: boolean
   organizationId?: boolean
   teamId?: boolean
@@ -716,6 +764,8 @@ export type InvitesSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Exten
   phone?: boolean
   status?: boolean
   staffTypes?: boolean
+  role?: boolean
+  isAssigned?: boolean
   eventId?: boolean
   organizationId?: boolean
   teamId?: boolean
@@ -738,6 +788,8 @@ export type InvitesSelectScalar = {
   phone?: boolean
   status?: boolean
   staffTypes?: boolean
+  role?: boolean
+  isAssigned?: boolean
   eventId?: boolean
   organizationId?: boolean
   teamId?: boolean
@@ -750,7 +802,7 @@ export type InvitesSelectScalar = {
   claimedBy?: boolean
 }
 
-export type InvitesOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "sentAt" | "type" | "email" | "phone" | "status" | "staffTypes" | "eventId" | "organizationId" | "teamId" | "userId" | "createdBy" | "firstName" | "lastName" | "linkVersion" | "linkExpiresAt" | "claimedBy", ExtArgs["result"]["invites"]>
+export type InvitesOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "sentAt" | "type" | "email" | "phone" | "status" | "staffTypes" | "role" | "isAssigned" | "eventId" | "organizationId" | "teamId" | "userId" | "createdBy" | "firstName" | "lastName" | "linkVersion" | "linkExpiresAt" | "claimedBy", ExtArgs["result"]["invites"]>
 
 export type $InvitesPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "Invites"
@@ -765,6 +817,8 @@ export type $InvitesPayload<ExtArgs extends runtime.Types.Extensions.InternalArg
     phone: string | null
     status: string | null
     staffTypes: string[]
+    role: string
+    isAssigned: boolean
     eventId: string | null
     organizationId: string | null
     teamId: string | null
@@ -1207,6 +1261,8 @@ export interface InvitesFieldRefs {
   readonly phone: Prisma.FieldRef<"Invites", 'String'>
   readonly status: Prisma.FieldRef<"Invites", 'String'>
   readonly staffTypes: Prisma.FieldRef<"Invites", 'String[]'>
+  readonly role: Prisma.FieldRef<"Invites", 'String'>
+  readonly isAssigned: Prisma.FieldRef<"Invites", 'Boolean'>
   readonly eventId: Prisma.FieldRef<"Invites", 'String'>
   readonly organizationId: Prisma.FieldRef<"Invites", 'String'>
   readonly teamId: Prisma.FieldRef<"Invites", 'String'>

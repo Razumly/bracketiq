@@ -1,5 +1,6 @@
 import React from 'react';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { MantineProvider } from '@mantine/core';
 
 import { renderWithMantine } from '../../../../test/utils/renderWithMantine';
 import { buildTeam, buildUser } from '../../../../test/factories';
@@ -23,6 +24,7 @@ jest.mock('@/lib/userService', () => ({
     listInvites: jest.fn(),
     searchUsers: jest.fn(),
     getUserById: jest.fn(),
+    deleteInviteById: jest.fn(),
   },
 }));
 
@@ -108,7 +110,9 @@ const userServiceMock = jest.requireMock('@/lib/userService').userService as {
   listInvites: jest.Mock;
   searchUsers: jest.Mock;
   getUserById: jest.Mock;
+  deleteInviteById: jest.Mock;
 };
+const apiRequestMock = jest.requireMock('@/lib/apiClient').apiRequest as jest.Mock;
 const teamServiceMock = jest.requireMock('@/lib/teamService').teamService as {
   getInviteFreeAgentContext: jest.Mock;
   inviteUserToTeamRole: jest.Mock;
@@ -133,6 +137,9 @@ describe('TeamDetailModal', () => {
       user: null,
       authUser: null,
     });
+    userServiceMock.deleteInviteById.mockReset();
+    userServiceMock.deleteInviteById.mockResolvedValue(true);
+    apiRequestMock.mockClear();
     userServiceMock.getUsersByIds.mockReset();
     userServiceMock.listInvites.mockReset();
     userServiceMock.searchUsers.mockReset();
@@ -839,6 +846,622 @@ describe('TeamDetailModal', () => {
     });
     fireEvent.click(await screen.findByRole('button', { name: /copy invite link/i }));
     expect(writeText).toHaveBeenCalledWith('http://localhost:3000/i/invite_coach_1?s=signed');
+  });
+
+  it('removes the replaced account manager immediately after a new-person invite refresh', async () => {
+    const manager = buildUser({
+      $id: 'manager_1',
+      firstName: 'Morgan',
+      lastName: 'Manager',
+      fullName: 'Morgan Manager',
+    });
+    (useApp as jest.Mock).mockReturnValue({ user: manager });
+    const team = buildTeam({
+      $id: 'team_1',
+      captainId: 'manager_1',
+      managerId: 'manager_1',
+      playerIds: [],
+      pending: [],
+      teamSize: 6,
+    });
+    const refreshedTeam = {
+      ...team,
+      captainId: 'captain_1',
+      managerId: '',
+    };
+    userServiceMock.getUsersByIds
+      .mockResolvedValueOnce([manager])
+      .mockResolvedValueOnce([]);
+    teamServiceMock.getTeamById.mockResolvedValue(refreshedTeam);
+    teamServiceMock.createTeamMemberInvite.mockResolvedValue({
+      ok: true,
+      invite: { $id: 'invite_manager_2' },
+      shareUrl: null,
+    });
+
+    renderWithMantine(
+      <TeamDetailModal
+        currentTeam={team}
+        isOpen
+        onClose={jest.fn()}
+        canManage
+      />,
+    );
+
+    expect(await screen.findByText('Morgan Manager')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /invite roster members/i }));
+    fireEvent.click(await screen.findByRole('radio', { name: /^manager$/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /new person/i }));
+    fireEvent.change(screen.getByLabelText(/first name/i), { target: { value: 'Taylor' } });
+    fireEvent.change(screen.getByLabelText(/last name/i), { target: { value: 'Stone' } });
+    fireEvent.click(screen.getByRole('button', { name: /save manager invite/i }));
+
+    await waitFor(() => {
+      expect(teamServiceMock.getTeamById).toHaveBeenCalledWith('team_1', true);
+      expect(screen.queryByText('Morgan Manager')).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows an accountless player invite in the active roster with its entered name and role', async () => {
+    const manager = buildUser({
+      $id: 'manager_1',
+      firstName: 'Morgan',
+      lastName: 'Manager',
+      fullName: 'Morgan Manager',
+    });
+    (useApp as jest.Mock).mockReturnValue({ user: manager });
+    const team = buildTeam({
+      $id: 'team_1',
+      captainId: 'manager_1',
+      managerId: 'manager_1',
+      playerIds: [],
+      pending: [],
+      teamSize: 6,
+      name: 'Test team',
+    });
+    teamServiceMock.createTeamMemberInvite.mockResolvedValue({
+      ok: true,
+      invite: { $id: 'invite_player_1' },
+      shareUrl: null,
+    });
+    teamServiceMock.getTeamById.mockResolvedValue(team);
+    userServiceMock.listInvites
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{
+        $id: 'invite_player_1',
+        type: 'TEAM',
+        teamId: 'team_1',
+        status: 'PENDING',
+        isAssigned: true,
+        role: 'player',
+        firstName: 'Alex',
+        lastName: 'Player',
+      }]);
+
+    renderWithMantine(
+      <TeamDetailModal
+        currentTeam={team}
+        isOpen
+        onClose={jest.fn()}
+        canManage
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /invite roster members/i }));
+    fireEvent.click(await screen.findByRole('tab', { name: /new person/i }));
+    fireEvent.change(screen.getByLabelText(/first name/i), { target: { value: 'Alex' } });
+    fireEvent.change(screen.getByLabelText(/last name/i), { target: { value: 'Player' } });
+    expect(screen.getByLabelText('Email (optional)')).toHaveValue('');
+    expect(screen.getByLabelText(/phone \(optional\)/i)).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: /save player invite/i }));
+
+    await waitFor(() => {
+      expect(teamServiceMock.createTeamMemberInvite).toHaveBeenCalledWith('team_1', {
+        role: 'player',
+        firstName: 'Alex',
+        lastName: 'Player',
+        email: undefined,
+        phone: undefined,
+        shareOnly: true,
+      });
+    });
+    await waitFor(() => {
+      expect(userServiceMock.listInvites).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText('Alex Player')).toBeInTheDocument();
+    expect(screen.getByText('Role: Player')).toBeInTheDocument();
+    expect(screen.queryByText('Unknown user')).not.toBeInTheDocument();
+    expect(await screen.findByText(/Roster \(1\)/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Pending Invitations \(/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Invitation pending/i)).not.toBeInTheDocument();
+  });
+  it('keeps accountless players in the roster grid with copy, resend, edit, and remove actions', async () => {
+    const manager = buildUser({
+      $id: 'manager_1',
+      firstName: 'Morgan',
+      lastName: 'Manager',
+      fullName: 'Morgan Manager',
+    });
+    const regularPlayer = buildUser({
+      $id: 'player_1',
+      firstName: 'Regular',
+      lastName: 'Player',
+      fullName: 'Regular Player',
+    });
+    (useApp as jest.Mock).mockReturnValue({ user: manager });
+    const team = buildTeam({
+      $id: 'team_1',
+      captainId: 'manager_1',
+      managerId: 'manager_1',
+      playerIds: ['player_1'],
+      pending: [],
+      teamSize: 6,
+      name: 'Test team',
+    });
+    const invite = {
+      $id: 'invite_player_1',
+      type: 'TEAM' as const,
+      teamId: 'team_1',
+      status: 'PENDING' as const,
+      isAssigned: true,
+      role: 'player' as const,
+      firstName: 'Alex',
+      lastName: 'Player',
+      email: 'alex@example.com',
+      phone: '5035550142',
+      shareUrl: 'https://example.com/invite/signed',
+    };
+    userServiceMock.getUsersByIds.mockResolvedValue([regularPlayer]);
+    userServiceMock.listInvites.mockResolvedValue([invite]);
+    const writeText = jest.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    apiRequestMock.mockImplementation(async (path: string, options?: { method?: string }) => {
+      if (options?.method === 'PATCH' && path.includes('/member-invites/invite_player_1')) {
+        return {
+          invite: {
+            ...invite,
+            firstName: 'Updated',
+            lastName: 'Player',
+            email: 'updated@example.com',
+            phone: '5035550199',
+          },
+          shareUrl: invite.shareUrl,
+        };
+      }
+      return {};
+    });
+
+    renderWithMantine(
+      <TeamDetailModal
+        currentTeam={team}
+        isOpen
+        onClose={jest.fn()}
+        canManage
+      />,
+    );
+
+    expect(await screen.findByText('Regular Player')).toBeInTheDocument();
+    expect(await screen.findByText('Alex Player')).toBeInTheDocument();
+    const rosterGrid = document.querySelector('.responsive-card-grid.team-roster-player-grid');
+    expect(rosterGrid).not.toBeNull();
+    expect(rosterGrid?.querySelectorAll('.team-roster-player-card')).toHaveLength(2);
+    expect(document.querySelectorAll('.responsive-card-grid.team-roster-player-grid')).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy invite link for Alex Player' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(invite.shareUrl));
+    expect(screen.getByRole('button', { name: 'Resend invite email for Alex Player' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Alex Player'));
+    await screen.findByRole('dialog', { name: 'Edit player invite' });
+    await screen.findByLabelText(/first name/i);
+    expect(screen.getByLabelText(/first name/i)).toHaveValue('Alex');
+    expect(screen.getByLabelText(/last name/i)).toHaveValue('Player');
+    expect(screen.getByLabelText(/email \(optional\)/i)).toHaveValue('alex@example.com');
+    expect(screen.getByLabelText(/phone \(optional\)/i)).toHaveValue('5035550142');
+    fireEvent.change(screen.getByLabelText(/first name/i), { target: { value: 'Updated' } });
+    fireEvent.change(screen.getByLabelText(/email \(optional\)/i), { target: { value: 'updated@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save player invite' }));
+    await waitFor(() => {
+      expect(apiRequestMock).toHaveBeenCalledWith(
+        '/api/teams/team_1/member-invites/invite_player_1',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: expect.objectContaining({
+            firstName: 'Updated',
+            lastName: 'Player',
+            email: 'updated@example.com',
+            phone: '5035550142',
+          }),
+        }),
+      );
+      expect(screen.queryByRole('dialog', { name: 'Edit player invite' })).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resend invite email for Updated Player' }));
+    await waitFor(() => {
+      expect(apiRequestMock).toHaveBeenCalledWith(
+        '/api/teams/team_1/member-invites/invite_player_1/resend',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove invite for Updated Player' }));
+    await waitFor(() => {
+      expect(apiRequestMock).toHaveBeenCalledWith(
+        '/api/teams/team_1/member-invites/invite_player_1',
+        expect.objectContaining({ method: 'DELETE' }),
+      );
+      expect(screen.queryByText('Updated Player')).not.toBeInTheDocument();
+    });
+  });
+
+
+  it('counts an assigned player once after invite data refreshes', async () => {
+    const manager = buildUser({
+      $id: 'manager_1',
+      firstName: 'Morgan',
+      lastName: 'Manager',
+      fullName: 'Morgan Manager',
+    });
+    (useApp as jest.Mock).mockReturnValue({ user: manager });
+    const team = buildTeam({
+      $id: 'team_1',
+      captainId: 'manager_1',
+      managerId: 'manager_1',
+      playerIds: [],
+      pending: [],
+      teamSize: 2,
+      name: 'Test team',
+    });
+    const preexistingAssignedInvite = {
+      $id: 'invite_existing_player',
+      type: 'TEAM' as const,
+      teamId: 'team_1',
+      status: 'PENDING' as const,
+      isAssigned: true,
+      role: 'player' as const,
+      firstName: 'Existing',
+      lastName: 'Player',
+    };
+    const refreshedAssignedInvite = {
+      ...preexistingAssignedInvite,
+      $id: 'invite_player_1',
+      firstName: 'Alex',
+      lastName: 'Player',
+    };
+    teamServiceMock.createTeamMemberInvite.mockResolvedValue({
+      ok: true,
+      invite: { $id: 'invite_player_1' },
+      shareUrl: null,
+    });
+    teamServiceMock.getTeamById.mockResolvedValue(team);
+    userServiceMock.listInvites
+      .mockResolvedValueOnce([preexistingAssignedInvite])
+      .mockResolvedValueOnce([preexistingAssignedInvite])
+      .mockResolvedValue([preexistingAssignedInvite, refreshedAssignedInvite]);
+
+    const view = renderWithMantine(
+      <TeamDetailModal
+        currentTeam={team}
+        isOpen
+        onClose={jest.fn()}
+        canManage
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /invite roster members/i }));
+    fireEvent.click(await screen.findByRole('tab', { name: /new person/i }));
+    fireEvent.change(screen.getByLabelText(/first name/i), { target: { value: 'Alex' } });
+    fireEvent.change(screen.getByLabelText(/last name/i), { target: { value: 'Player' } });
+    fireEvent.click(screen.getByRole('button', { name: /save player invite/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/already has 2 of 2 player slots filled/i)).toBeInTheDocument();
+    });
+
+    view.rerender(
+      <MantineProvider>
+        <TeamDetailModal
+          currentTeam={{ ...team, captainId: 'captain_2' }}
+          isOpen
+          onClose={jest.fn()}
+          canManage
+        />
+      </MantineProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText('2/2')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Pending Invitations \(/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Invitation pending/i)).not.toBeInTheDocument();
+  });
+
+  it('shows only the replacement accountless manager', async () => {
+    const manager = buildUser({
+      $id: 'manager_1',
+      firstName: 'Morgan',
+      lastName: 'Manager',
+      fullName: 'Morgan Manager',
+    });
+    (useApp as jest.Mock).mockReturnValue({ user: manager });
+    const team = buildTeam({
+      $id: 'team_1',
+      captainId: 'captain_1',
+      managerId: '',
+      playerIds: [],
+      pending: [],
+      teamSize: 6,
+    });
+    userServiceMock.getUsersByIds.mockResolvedValue([manager]);
+    userServiceMock.listInvites.mockResolvedValue([{
+      $id: 'invite_manager_1',
+      type: 'TEAM',
+      teamId: 'team_1',
+      status: 'PENDING',
+      isAssigned: true,
+      role: 'team_manager',
+      firstName: 'Taylor',
+      lastName: 'Stone',
+    }]);
+
+    renderWithMantine(
+      <TeamDetailModal
+        currentTeam={team}
+        isOpen
+        onClose={jest.fn()}
+        canManage={false}
+      />,
+    );
+
+    expect(screen.queryByText('Morgan Manager')).not.toBeInTheDocument();
+    expect(await screen.findByText('Taylor Stone')).toBeInTheDocument();
+    expect(screen.queryByText(/Pending Staff Invitations \(/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('Role: Manager')).not.toBeInTheDocument();
+  });
+
+  it('shows only the replacement accountless head coach', async () => {
+    const headCoach = buildUser({
+      $id: 'coach_1',
+      firstName: 'Morgan',
+      lastName: 'Coach',
+      fullName: 'Morgan Coach',
+    });
+    (useApp as jest.Mock).mockReturnValue({ user: headCoach });
+    const team = buildTeam({
+      $id: 'team_1',
+      captainId: 'captain_1',
+      managerId: '',
+      headCoachId: null,
+      playerIds: [],
+      pending: [],
+      teamSize: 6,
+    });
+    userServiceMock.getUsersByIds.mockResolvedValue([headCoach]);
+    userServiceMock.listInvites.mockResolvedValue([{
+      $id: 'invite_head_coach_1',
+      type: 'TEAM',
+      teamId: 'team_1',
+      status: 'PENDING',
+      isAssigned: true,
+      role: 'team_head_coach',
+      firstName: 'Taylor',
+      lastName: 'Coach',
+    }]);
+
+    renderWithMantine(
+      <TeamDetailModal
+        currentTeam={team}
+        isOpen
+        onClose={jest.fn()}
+        canManage={false}
+      />,
+    );
+
+    expect(screen.queryByText('Morgan Coach')).not.toBeInTheDocument();
+    expect(await screen.findByText('Taylor Coach')).toBeInTheDocument();
+    expect(screen.queryByText(/Pending Staff Invitations \(/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('Role: Head Coach')).not.toBeInTheDocument();
+  });
+
+  it('keeps an accountless assistant slot from hiding another assistant candidate', async () => {
+    const manager = buildUser({
+      $id: 'manager_1',
+      firstName: 'Morgan',
+      lastName: 'Manager',
+      fullName: 'Morgan Manager',
+    });
+    const candidate = buildUser({
+      $id: 'assistant_2',
+      firstName: 'Jordan',
+      lastName: 'Coach',
+      fullName: 'Jordan Coach',
+    });
+    (useApp as jest.Mock).mockReturnValue({ user: manager });
+    const team = buildTeam({
+      $id: 'team_1',
+      captainId: 'manager_1',
+      managerId: 'manager_1',
+      assistantCoachIds: [],
+      playerIds: [],
+      pending: [],
+      teamSize: 6,
+      name: 'Test team',
+    });
+    userServiceMock.getUsersByIds.mockResolvedValue([manager]);
+    userServiceMock.listInvites.mockResolvedValue([{
+      $id: 'invite_assistant_1',
+      type: 'TEAM',
+      teamId: 'team_1',
+      status: 'PENDING',
+      isAssigned: true,
+      role: 'team_assistant_coach',
+      firstName: 'Taylor',
+      lastName: 'Stone',
+    }]);
+    userServiceMock.searchUsers.mockResolvedValue([candidate]);
+
+    renderWithMantine(
+      <TeamDetailModal
+        currentTeam={team}
+        isOpen
+        onClose={jest.fn()}
+        canManage
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /invite roster members/i }));
+    fireEvent.click(await screen.findByRole('radio', { name: /assistant coach/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /invite user/i }));
+    fireEvent.change(
+      screen.getByPlaceholderText(/search assistant coach/i),
+      { target: { value: 'jo' } },
+    );
+
+    expect(await screen.findByText('Jordan Coach')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^invite$/i })).toBeEnabled();
+  });
+
+  it('does not count a reused accountless player invite twice', async () => {
+    const manager = buildUser({
+      $id: 'manager_1',
+      firstName: 'Morgan',
+      lastName: 'Manager',
+      fullName: 'Morgan Manager',
+    });
+    (useApp as jest.Mock).mockReturnValue({ user: manager });
+    const team = buildTeam({
+      $id: 'team_1',
+      captainId: 'manager_1',
+      managerId: 'manager_1',
+      playerIds: [],
+      pending: [],
+      teamSize: 3,
+      name: 'Test team',
+    });
+    const assignedInvite = {
+      $id: 'invite_player_reused',
+      type: 'TEAM' as const,
+      teamId: 'team_1',
+      status: 'PENDING' as const,
+      isAssigned: true,
+      role: 'player' as const,
+      firstName: 'Alex',
+      lastName: 'Player',
+    };
+    teamServiceMock.createTeamMemberInvite.mockResolvedValue({
+      ok: true,
+      invite: { $id: assignedInvite.$id },
+      shareUrl: null,
+    });
+    teamServiceMock.getTeamById.mockResolvedValue(team);
+    userServiceMock.listInvites
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([assignedInvite]);
+
+    renderWithMantine(
+      <TeamDetailModal
+        currentTeam={team}
+        isOpen
+        onClose={jest.fn()}
+        canManage
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /invite roster members/i }));
+    fireEvent.click(await screen.findByRole('tab', { name: /new person/i }));
+    const firstName = screen.getByLabelText(/first name/i);
+    const lastName = screen.getByLabelText(/last name/i);
+    fireEvent.change(firstName, { target: { value: 'Alex' } });
+    fireEvent.change(lastName, { target: { value: 'Player' } });
+    fireEvent.click(screen.getByRole('button', { name: /save player invite/i }));
+    await waitFor(() => {
+      expect(teamServiceMock.createTeamMemberInvite).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.change(firstName, { target: { value: 'Alex' } });
+    fireEvent.change(lastName, { target: { value: 'Player' } });
+    fireEvent.click(screen.getByRole('button', { name: /save player invite/i }));
+    await waitFor(() => {
+      expect(teamServiceMock.createTeamMemberInvite).toHaveBeenCalledTimes(2);
+    });
+
+    expect(await screen.findByText(/Roster \(1\)/i)).toBeInTheDocument();
+    expect(screen.getByText('1/3')).toBeInTheDocument();
+  });
+
+  it('counts distinct accountless player assignments once each', async () => {
+    const manager = buildUser({
+      $id: 'manager_1',
+      firstName: 'Morgan',
+      lastName: 'Manager',
+      fullName: 'Morgan Manager',
+    });
+    (useApp as jest.Mock).mockReturnValue({ user: manager });
+    const team = buildTeam({
+      $id: 'team_1',
+      captainId: 'manager_1',
+      managerId: 'manager_1',
+      playerIds: [],
+      pending: [],
+      teamSize: 4,
+      name: 'Test team',
+    });
+    const alexInvite = {
+      $id: 'invite_player_alex',
+      type: 'TEAM' as const,
+      teamId: 'team_1',
+      status: 'PENDING' as const,
+      isAssigned: true,
+      role: 'player' as const,
+      firstName: 'Alex',
+      lastName: 'Player',
+    };
+    const jordanInvite = {
+      ...alexInvite,
+      $id: 'invite_player_jordan',
+      firstName: 'Jordan',
+      lastName: 'Player',
+    };
+    teamServiceMock.createTeamMemberInvite
+      .mockResolvedValueOnce({ ok: true, invite: { $id: alexInvite.$id }, shareUrl: null })
+      .mockResolvedValueOnce({ ok: true, invite: { $id: jordanInvite.$id }, shareUrl: null });
+    teamServiceMock.getTeamById.mockResolvedValue(team);
+    userServiceMock.listInvites
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([alexInvite])
+      .mockResolvedValue([alexInvite, jordanInvite]);
+
+    renderWithMantine(
+      <TeamDetailModal
+        currentTeam={team}
+        isOpen
+        onClose={jest.fn()}
+        canManage
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /invite roster members/i }));
+    fireEvent.click(await screen.findByRole('tab', { name: /new person/i }));
+    const firstName = screen.getByLabelText(/first name/i);
+    const lastName = screen.getByLabelText(/last name/i);
+    fireEvent.change(firstName, { target: { value: 'Alex' } });
+    fireEvent.change(lastName, { target: { value: 'Player' } });
+    fireEvent.click(screen.getByRole('button', { name: /save player invite/i }));
+    await waitFor(() => {
+      expect(teamServiceMock.createTeamMemberInvite).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.change(firstName, { target: { value: 'Jordan' } });
+    fireEvent.change(lastName, { target: { value: 'Player' } });
+    fireEvent.click(screen.getByRole('button', { name: /save player invite/i }));
+    await waitFor(() => {
+      expect(teamServiceMock.createTeamMemberInvite).toHaveBeenCalledTimes(2);
+    });
+
+    expect(await screen.findByText(/Roster \(2\)/i)).toBeInTheDocument();
+    expect(screen.getByText('2/4')).toBeInTheDocument();
   });
 
   it('blocks player invites when team registration slots are full', async () => {

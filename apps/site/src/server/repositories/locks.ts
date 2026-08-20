@@ -13,3 +13,11 @@ export const acquireEventLock = async (client: PrismaLike, eventId: string): Pro
   const lockId = advisoryLockId(eventId);
   await client.$executeRaw`SELECT pg_advisory_xact_lock(${lockId})`;
 };
+export const acquireTeamStaffRoleLock = async (
+  client: PrismaLike,
+  teamId: string,
+  role: string,
+): Promise<void> => {
+  const lockId = advisoryLockId(`team-staff:${teamId}:${role}`);
+  await client.$executeRaw`SELECT pg_advisory_xact_lock(${lockId})`;
+};

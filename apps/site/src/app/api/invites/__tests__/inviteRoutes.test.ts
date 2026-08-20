@@ -1,7 +1,7 @@
 /** @jest-environment node */
 
 import { NextRequest } from 'next/server';
-
+const replaceSingletonTeamStaffAssignmentMock = jest.fn();
 const prismaMock = {
   $transaction: jest.fn(),
   $executeRaw: jest.fn(),
@@ -40,12 +40,20 @@ const prismaMock = {
     upsert: jest.fn(),
     findUnique: jest.fn(),
   },
+  teamStaffAssignments: {
+    upsert: jest.fn(),
+    updateMany: jest.fn(),
+  },
+  teamRegistrations: {
+    updateMany: jest.fn(),
+  },
 };
 
 const requireSessionMock = jest.fn();
 const sendInviteEmailsMock = jest.fn();
 const ensureAuthUserAndUserDataByEmailMock = jest.fn();
 const canManageOrganizationMock = jest.fn();
+const syncCanonicalTeamRosterMock = jest.fn();
 const canManageEventMock = jest.fn();
 const hasOrgPermissionMock = jest.fn();
 const loadCanonicalTeamByIdMock = jest.fn();
@@ -63,7 +71,9 @@ jest.mock('@/server/accessControl', () => ({
   hasOrgPermission: (...args: any[]) => hasOrgPermissionMock(...args),
 }));
 jest.mock('@/server/teams/teamMembership', () => ({
-  loadCanonicalTeamById: (...args: any[]) => loadCanonicalTeamByIdMock(...args),
+  syncCanonicalTeamRoster: (...args: unknown[]) => syncCanonicalTeamRosterMock(...args),
+  loadCanonicalTeamById: (...args: unknown[]) => loadCanonicalTeamByIdMock(...args),
+  replaceSingletonTeamStaffAssignment: (...args: unknown[]) => replaceSingletonTeamStaffAssignmentMock(...args),
   normalizeId: (value: unknown) => (typeof value === 'string' && value.trim().length > 0 ? value.trim() : null),
   normalizeIdList: (value: unknown) => (
     Array.isArray(value)
@@ -103,6 +113,7 @@ describe('/api/invites', () => {
     prismaMock.invites.findFirst.mockResolvedValue(null);
     prismaMock.invites.findMany.mockResolvedValue([]);
     prismaMock.staffMembers.upsert.mockResolvedValue({});
+    prismaMock.teamStaffAssignments.upsert.mockResolvedValue({});
     prismaMock.staffMembers.findUnique.mockResolvedValue(null);
     prismaMock.teams.findUnique.mockResolvedValue({
       id: 'team_1',
@@ -133,6 +144,8 @@ describe('/api/invites', () => {
     prismaMock.invites.findMany.mockResolvedValue([{
       id: 'invite_1',
       type: 'TEAM',
+      role: 'player',
+      isAssigned: false,
       email: 'user@example.com',
       status: 'PENDING',
       eventId: null,
@@ -165,6 +178,8 @@ describe('/api/invites', () => {
       take: 51,
     });
     expect(json.invites).toHaveLength(1);
+    expect(json.invites[0].role).toBe('player');
+    expect(json.invites[0].isAssigned).toBe(false);
     expect(json.invites[0].id).toBe('invite_1');
     expect(json.invites[0]).not.toHaveProperty('$id');
     expect(json.nextCursor).toBeNull();
@@ -307,10 +322,111 @@ describe('/api/invites', () => {
     expect(json.error).toBe('Forbidden');
     expect(prismaMock.invites.findMany).not.toHaveBeenCalled();
   });
+  it('forbids a non-manager from creating a TEAM invite through the general route', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'outsider_1', isAdmin: false });
+    ensureAuthUserAndUserDataByEmailMock.mockResolvedValue({ userId: 'player_1', authUserExisted: true });
+    loadCanonicalTeamByIdMock.mockResolvedValue({
+      id: 'team_1',
+      captainId: 'captain_1',
+      managerId: 'manager_1',
+      headCoachId: null,
+      coachIds: [],
+      playerIds: [],
+      pending: [],
+      staffAssignments: [],
+    });
+
+    const response = await POST(jsonRequest({
+      invites: [{
+        type: 'TEAM',
+        teamId: 'team_1',
+        email: 'player@example.com',
+        role: 'player',
+      }],
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(payload).toEqual({ error: 'Forbidden' });
+    expect(prismaMock.invites.create).not.toHaveBeenCalled();
+    expect(prismaMock.invites.update).not.toHaveBeenCalled();
+    expect(syncCanonicalTeamRosterMock).not.toHaveBeenCalled();
+    expect(prismaMock.teamStaffAssignments.upsert).not.toHaveBeenCalled();
+  });
+  it('rejects an active player before persisting a legacy TEAM invite', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
+    ensureAuthUserAndUserDataByEmailMock.mockResolvedValue({ userId: 'player_1', authUserExisted: true });
+    loadCanonicalTeamByIdMock.mockResolvedValue({
+      id: 'team_1',
+      captainId: 'captain_1',
+      managerId: 'manager_1',
+      headCoachId: null,
+      coachIds: [],
+      playerIds: ['player_1'],
+      pending: [],
+      staffAssignments: [],
+    });
+
+    const response = await POST(jsonRequest({
+      invites: [{
+        type: 'TEAM',
+        teamId: 'team_1',
+        email: 'player@example.com',
+        role: 'player',
+      }],
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload).toEqual({ error: 'User is already on this team' });
+    expect(prismaMock.invites.create).not.toHaveBeenCalled();
+    expect(prismaMock.invites.update).not.toHaveBeenCalled();
+    expect(sendInviteEmailsMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects duplicate singleton TEAM entries before starting a batch transaction', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
+
+    const response = await POST(jsonRequest({
+      invites: [
+        {
+          type: 'TEAM',
+          teamId: 'team_1',
+          email: 'first-coach@example.com',
+          role: 'team_head_coach',
+        },
+        {
+          type: 'TEAM',
+          teamId: 'team_1',
+          email: 'second-coach@example.com',
+          role: 'team_head_coach',
+        },
+      ],
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/one head coach invite/i);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(prismaMock.invites.create).not.toHaveBeenCalled();
+    expect(sendInviteEmailsMock).not.toHaveBeenCalled();
+  });
+
+
 
   it('returns a consistent { invites: [] } response shape even for a single TEAM invite', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'inviter_1', isAdmin: false });
     ensureAuthUserAndUserDataByEmailMock.mockResolvedValue({ userId: 'user_1', authUserExisted: true });
+    loadCanonicalTeamByIdMock.mockResolvedValue({
+      id: 'team_1',
+      captainId: '',
+      managerId: 'inviter_1',
+      headCoachId: null,
+      coachIds: [],
+      playerIds: [],
+      pending: [],
+      staffAssignments: [],
+    });
 
     const createdAt = new Date('2020-01-01T00:00:00.000Z');
     prismaMock.invites.create.mockResolvedValue({
@@ -360,8 +476,174 @@ describe('/api/invites', () => {
     expect(sendInviteEmailsMock).toHaveBeenCalledWith([], 'http://localhost');
   });
 
+  it('dispatches an explicit TEAM staff role to an invited staff assignment', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
+    ensureAuthUserAndUserDataByEmailMock.mockResolvedValue({ userId: 'coach_1', authUserExisted: true });
+    loadCanonicalTeamByIdMock.mockResolvedValue({
+      id: 'team_1',
+      captainId: 'captain_1',
+      managerId: 'manager_1',
+      headCoachId: null,
+      coachIds: [],
+      playerIds: [],
+      pending: [],
+    });
+    const createdInvite = {
+      id: 'invite_staff',
+      type: 'TEAM',
+      role: 'team_head_coach',
+      status: 'PENDING',
+      teamId: 'team_1',
+      userId: 'coach_1',
+    };
+    prismaMock.invites.create.mockResolvedValue(createdInvite);
+
+    const response = await POST(jsonRequest({
+      invites: [{
+        type: 'TEAM',
+        teamId: 'team_1',
+        email: 'coach@example.com',
+        role: 'team_head_coach',
+      }],
+    }));
+
+    expect(response.status).toBe(201);
+    expect(prismaMock.invites.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        role: 'team_head_coach',
+        teamId: 'team_1',
+        userId: 'coach_1',
+      }),
+    }));
+    expect(replaceSingletonTeamStaffAssignmentMock).toHaveBeenCalledWith({
+      tx: prismaMock,
+      teamId: 'team_1',
+      role: 'HEAD_COACH',
+      replacementInviteId: null,
+      replacementUserId: 'coach_1',
+      now: expect.any(Date),
+    });
+    expect(prismaMock.teamStaffAssignments.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        teamId_userId_role: {
+          teamId: 'team_1',
+          userId: 'coach_1',
+          role: 'HEAD_COACH',
+        },
+      },
+      create: expect.objectContaining({ status: 'INVITED' }),
+    }));
+    expect(prismaMock.invites.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ staffTypes: ['HEAD_COACH'] }),
+    }));
+    expect(syncCanonicalTeamRosterMock).not.toHaveBeenCalled();
+  });
+
+  it('dispatches an explicit TEAM player role to the canonical pending roster', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
+    ensureAuthUserAndUserDataByEmailMock.mockResolvedValue({ userId: 'player_1', authUserExisted: true });
+    loadCanonicalTeamByIdMock.mockResolvedValue({
+      id: 'team_1',
+      captainId: 'captain_1',
+      managerId: 'manager_1',
+      headCoachId: null,
+      coachIds: [],
+      playerIds: ['captain_1'],
+      pending: [],
+    });
+    prismaMock.invites.create.mockResolvedValue({
+      id: 'invite_player',
+      type: 'TEAM',
+      role: 'player',
+      status: 'PENDING',
+      teamId: 'team_1',
+      userId: 'player_1',
+    });
+
+    const response = await POST(jsonRequest({
+      invites: [{
+        type: 'TEAM',
+        teamId: 'team_1',
+        email: 'player@example.com',
+        role: 'player',
+      }],
+    }));
+
+    expect(response.status).toBe(201);
+    expect(syncCanonicalTeamRosterMock).toHaveBeenCalledWith(expect.objectContaining({
+      teamId: 'team_1',
+      playerIds: ['captain_1'],
+      pendingPlayerIds: ['player_1'],
+      managerId: 'manager_1',
+    }), prismaMock);
+    expect(prismaMock.teamStaffAssignments.upsert).not.toHaveBeenCalled();
+  });
+  it('cleans prior invited staff state when a TEAM invite changes to player', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
+    ensureAuthUserAndUserDataByEmailMock.mockResolvedValue({ userId: 'player_1', authUserExisted: true });
+    prismaMock.authUser.findUnique.mockResolvedValue({ email: 'player@example.com' });
+    loadCanonicalTeamByIdMock.mockResolvedValue({
+      id: 'team_1',
+      captainId: 'captain_1',
+      managerId: 'manager_1',
+      headCoachId: null,
+      coachIds: [],
+      playerIds: ['captain_1'],
+      pending: ['player_1'],
+      staffAssignments: [{
+        userId: 'player_1',
+        role: 'HEAD_COACH',
+        status: 'INVITED',
+      }],
+    });
+    const existingInvite = {
+      id: 'invite_transition',
+      type: 'TEAM',
+      role: 'team_head_coach',
+      status: 'PENDING',
+      teamId: 'team_1',
+      userId: 'player_1',
+      staffTypes: ['HEAD_COACH'],
+    };
+    prismaMock.invites.findFirst.mockResolvedValue(existingInvite);
+    prismaMock.invites.update.mockResolvedValue({ ...existingInvite, role: 'player' });
+
+    sendInviteEmailsMock.mockResolvedValue([]);
+    const response = await POST(jsonRequest({
+      invites: [{
+        type: 'TEAM',
+        teamId: 'team_1',
+        userId: 'player_1',
+        role: 'player',
+      }],
+    }));
+    expect(response.status).toBe(201);
+    expect(prismaMock.teamStaffAssignments.updateMany).toHaveBeenCalledWith({
+      where: {
+        teamId: 'team_1',
+        userId: 'player_1',
+        status: { in: ['PENDING', 'INVITED'] },
+      },
+      data: expect.objectContaining({ status: 'REMOVED', updatedAt: expect.any(Date) }),
+    });
+    expect(syncCanonicalTeamRosterMock).toHaveBeenCalledWith(expect.objectContaining({
+      pendingPlayerIds: ['player_1'],
+    }), prismaMock);
+  });
+
+
   it('sends email when a TEAM invite targets an invite-placeholder auth account', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'captain_1', isAdmin: false });
+    loadCanonicalTeamByIdMock.mockResolvedValue({
+      id: 'team_1',
+      captainId: 'captain_1',
+      managerId: '',
+      headCoachId: null,
+      coachIds: [],
+      playerIds: [],
+      pending: [],
+      staffAssignments: [],
+    });
     prismaMock.authUser.findUnique.mockResolvedValue({
       id: 'user_placeholder',
       email: 'placeholder@example.com',
@@ -404,6 +686,16 @@ describe('/api/invites', () => {
 
   it('does not send delivery again when a TEAM user-id invite already exists', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'captain_1', isAdmin: false });
+    loadCanonicalTeamByIdMock.mockResolvedValue({
+      id: 'team_1',
+      captainId: 'captain_1',
+      managerId: '',
+      headCoachId: null,
+      coachIds: [],
+      playerIds: [],
+      pending: [],
+      staffAssignments: [],
+    });
     prismaMock.authUser.findUnique.mockResolvedValue({
       email: 'player@example.com',
       passwordHash: 'hash',
@@ -832,6 +1124,16 @@ describe('/api/invites', () => {
 
   it('rolls back earlier staged invites when a later invite in the batch fails validation', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'captain_1', isAdmin: false });
+    loadCanonicalTeamByIdMock.mockResolvedValue({
+      id: 'team_1',
+      captainId: 'captain_1',
+      managerId: '',
+      headCoachId: null,
+      coachIds: [],
+      playerIds: [],
+      pending: [],
+      staffAssignments: [],
+    });
 
     const stagedInvites: Array<{ id: string }> = [];
     const committedInviteIds: string[] = [];

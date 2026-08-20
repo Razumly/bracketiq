@@ -64,6 +64,17 @@ const EMPTY_INVITE_FREE_AGENT_CONTEXT: TeamInviteFreeAgentContext = {
 };
 const EMPTY_REGISTRATION_QUESTIONS: RegistrationQuestionDraft[] = [];
 const EMPTY_JOIN_REQUESTS: TeamJoinRequest[] = [];
+type PendingAssignedInvite = { invite: Invite; invitedUser?: UserData };
+const latestPendingAssignedInvite = (invites: PendingAssignedInvite[]): PendingAssignedInvite | null => (
+    invites.reduce<PendingAssignedInvite | null>((latest, entry) => {
+        if (!latest) {
+            return entry;
+        }
+        const latestTimestamp = Date.parse(latest.invite.$updatedAt ?? latest.invite.$createdAt ?? '') || 0;
+        const entryTimestamp = Date.parse(entry.invite.$updatedAt ?? entry.invite.$createdAt ?? '') || 0;
+        return entryTimestamp >= latestTimestamp ? entry : latest;
+    }, null)
+);
 
 const normalizeDivisionToken = (value: unknown): string => String(value ?? '')
     .trim()
@@ -114,10 +125,21 @@ const getDefaultDivisionTypeSelections = (sportInput: string | null | undefined)
         ageDivisionTypeId: age?.id ?? DEFAULT_AGE_DIVISION_FALLBACK,
     };
 };
+const isTeamInviteRole = (value: unknown): value is TeamInviteRoleType => (
+    value === 'player'
+    || value === 'team_manager'
+    || value === 'team_head_coach'
+    || value === 'team_assistant_coach'
+);
+
 const getPendingInviteRole = (
     team: Team,
     invite: Invite,
 ): TeamInviteRoleType => {
+    const explicitRole = (invite as Invite & { role?: unknown }).role;
+    if (isTeamInviteRole(explicitRole)) {
+        return explicitRole;
+    }
     if (invite.userId && Array.isArray(team.pending) && team.pending.includes(invite.userId)) {
         return 'player';
     }
@@ -128,6 +150,43 @@ const getPendingInviteRole = (
         return 'team_head_coach';
     }
     return 'team_assistant_coach';
+};
+
+const getPendingInviteDisplayName = (invite: Invite, invitedUser?: UserData): string => {
+    if (invitedUser) {
+        return getUserFullName(invitedUser);
+    }
+    const name = [invite.firstName, invite.lastName]
+        .map((value) => value?.trim() ?? '')
+        .filter((value) => value.length > 0)
+        .join(' ');
+    return name || invite.email?.trim() || 'Unknown user';
+};
+
+type AccountlessInvite = Invite & { phone?: string; shareUrl?: string };
+type AccountlessInviteDraft = {
+    inviteId: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+};
+
+const getInviteContactValue = (invite: Invite, field: 'phone' | 'shareUrl'): string => {
+    const value = (invite as AccountlessInvite)[field];
+    return typeof value === 'string' ? value.trim() : '';
+};
+
+const isAssignedInvite = (invite: Invite): boolean => (
+    (invite as Invite & { isAssigned?: boolean }).isAssigned === true
+);
+const isValidInviteEmail = (value: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+const getAccountlessInviteDisplayName = (invite: Invite): string => {
+    const name = [invite.firstName, invite.lastName]
+        .map((value) => value?.trim() ?? '')
+        .filter((value) => value.length > 0)
+        .join(' ');
+    return name || invite.email?.trim() || 'Unknown player';
 };
 
 const ACTIVE_PLAYER_REGISTRATION_STATUSES = new Set(['ACTIVE', 'PENDING', 'STARTED']);
@@ -239,6 +298,10 @@ export default function TeamDetailModal({
     const [joinRequests, setJoinRequests] = useState<TeamJoinRequest[]>(EMPTY_JOIN_REQUESTS);
     const [joinRequestsLoading, setJoinRequestsLoading] = useState(false);
     const [reviewingRequestIds, setReviewingRequestIds] = useState<Set<string>>(new Set());
+    const [editingAccountlessInvite, setEditingAccountlessInvite] = useState<AccountlessInviteDraft | null>(null);
+    const [savingAccountlessInvite, setSavingAccountlessInvite] = useState(false);
+    const [resendingAccountlessInviteId, setResendingAccountlessInviteId] = useState<string | null>(null);
+    const [removingAccountlessInviteId, setRemovingAccountlessInviteId] = useState<string | null>(null);
     const [draftRequiredTemplateIds, setDraftRequiredTemplateIds] = useState<string[]>(
         Array.isArray(currentTeam.requiredTemplateIds)
             ? currentTeam.requiredTemplateIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
@@ -299,6 +362,41 @@ export default function TeamDetailModal({
         });
         return byUserId;
     }, [currentTeam.playerRegistrations]);
+    const accountlessPlayerRoleInvites = useMemo(
+        () => pendingRoleInvites.filter(({ invite }) => isAssignedInvite(invite) && getPendingInviteRole(currentTeam, invite) === 'player'),
+        [currentTeam, pendingRoleInvites],
+    );
+    const accountlessStaffRoleInvites = useMemo(
+        () => pendingRoleInvites.filter(({ invite }) => isAssignedInvite(invite) && getPendingInviteRole(currentTeam, invite) !== 'player'),
+        [currentTeam, pendingRoleInvites],
+    );
+    const pendingPlayerRoleInvites = useMemo(
+        () => pendingRoleInvites.filter(({ invite }) => !isAssignedInvite(invite) && getPendingInviteRole(currentTeam, invite) === 'player'),
+        [currentTeam, pendingRoleInvites],
+    );
+    const pendingStaffRoleInvites = useMemo(
+        () => pendingRoleInvites.filter(({ invite }) => !isAssignedInvite(invite) && getPendingInviteRole(currentTeam, invite) !== 'player'),
+        [currentTeam, pendingRoleInvites],
+    );
+    const accountlessStaffInviteByRole = useMemo(() => {
+        const byRole: Partial<Record<TeamInviteRoleType, Array<{ invite: Invite; invitedUser?: UserData }>>> = {};
+        accountlessStaffRoleInvites.forEach((entry) => {
+            const role = getPendingInviteRole(currentTeam, entry.invite);
+            byRole[role] = [...(byRole[role] ?? []), entry];
+        });
+        return byRole;
+    }, [accountlessStaffRoleInvites, currentTeam]);
+    const accountlessManagerInvites = accountlessStaffInviteByRole.team_manager ?? [];
+    const accountlessHeadCoachInvites = accountlessStaffInviteByRole.team_head_coach ?? [];
+    const latestAccountlessManagerInvite = useMemo(
+        () => latestPendingAssignedInvite(accountlessManagerInvites),
+        [accountlessManagerInvites],
+    );
+    const latestAccountlessHeadCoachInvite = useMemo(
+        () => latestPendingAssignedInvite(accountlessHeadCoachInvites),
+        [accountlessHeadCoachInvites],
+    );
+    const accountlessAssistantCoachInvites = accountlessStaffInviteByRole.team_assistant_coach ?? [];
     const playerInviteCapacityUserIds = useMemo(() => {
         const userIds = new Set<string>();
         currentTeam.playerIds.forEach((playerId) => {
@@ -332,7 +430,9 @@ export default function TeamDetailModal({
         }
         return userIds;
     }, [currentTeam.pending, currentTeam.playerIds, currentTeam.playerRegistrations, pendingPlayers, teamPlayers]);
-    const playerInviteCapacityCount = playerInviteCapacityUserIds.size;
+    const playerInviteCapacityCount = playerInviteCapacityUserIds.size + pendingPlayerRoleInvites.length + accountlessPlayerRoleInvites.length;
+    const pendingInvitationCount = pendingPlayers.length + pendingPlayerRoleInvites.length;
+    const rosterPlayerCount = teamPlayers.length + accountlessPlayerRoleInvites.length;
     const playerInviteLimit = Math.max(0, Math.trunc(currentTeam.teamSize || 0));
     const canInviteAnotherPlayer = playerInviteLimit <= 0 || playerInviteCapacityCount < playerInviteLimit;
     const showSelfServiceRegistrationActions = Boolean(user?.$id) && !canManageTeam;
@@ -482,6 +582,30 @@ export default function TeamDetailModal({
             })),
         );
     }, [currentTeam.$id, currentTeam.pending]);
+    const refreshTeamRoleDetails = useCallback(async () => {
+        const refreshedTeam = await teamService.getTeamById(currentTeam.$id, true);
+        if (refreshedTeam) {
+            onTeamUpdated?.(refreshedTeam);
+            const refreshedAssistantCoachIds = Array.isArray(refreshedTeam.assistantCoachIds)
+                ? refreshedTeam.assistantCoachIds
+                : (Array.isArray(refreshedTeam.coachIds) ? refreshedTeam.coachIds : []);
+            const managerId = refreshedTeam.managerId ?? refreshedTeam.captainId;
+            const roleUserIds = [managerId, refreshedTeam.headCoachId, ...refreshedAssistantCoachIds]
+                .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+            const roleUsers = roleUserIds.length > 0
+                ? await userService.getUsersByIds(roleUserIds, { teamId: refreshedTeam.$id })
+                : [];
+            const roleUserMap = new Map(roleUsers.map((roleUser) => [roleUser.$id, roleUser]));
+            setManagerUser(managerId ? roleUserMap.get(managerId) ?? null : null);
+            setHeadCoachUser(refreshedTeam.headCoachId ? roleUserMap.get(refreshedTeam.headCoachId) ?? null : null);
+            setAssistantCoachUsers(
+                refreshedAssistantCoachIds
+                    .map((assistantCoachId) => roleUserMap.get(assistantCoachId))
+                    .filter((roleUser): roleUser is UserData => Boolean(roleUser)),
+            );
+        }
+        await fetchRoleInvites();
+    }, [currentTeam.$id, fetchRoleInvites, onTeamUpdated]);
 
     const fetchRegistrationQuestions = useCallback(async () => {
         if (!currentTeam.$id || !canManageTeam) {
@@ -1069,6 +1193,137 @@ export default function TeamDetailModal({
         }
     };
 
+    const handleEditAccountlessInvite = (invite: Invite) => {
+        if (!canManageTeam) {
+            return;
+        }
+        const draft: AccountlessInviteDraft = {
+            inviteId: invite.$id,
+            firstName: invite.firstName?.trim() ?? '',
+            lastName: invite.lastName?.trim() ?? '',
+            email: invite.email?.trim() ?? '',
+            phone: getInviteContactValue(invite, 'phone'),
+        };
+        window.setTimeout(() => setEditingAccountlessInvite(draft), 0);
+    };
+
+    const handleSaveAccountlessInvite = async () => {
+        if (!editingAccountlessInvite || savingAccountlessInvite) {
+            return;
+        }
+        const firstName = editingAccountlessInvite.firstName.trim();
+        const lastName = editingAccountlessInvite.lastName.trim();
+        const email = editingAccountlessInvite.email.trim();
+        const phone = editingAccountlessInvite.phone.trim();
+        if (!firstName || !lastName) {
+            notifications.show({ color: 'red', message: 'First name and last name are required.' });
+            return;
+        }
+        if (email && !isValidInviteEmail(email)) {
+            notifications.show({ color: 'red', message: 'Enter a valid email address.' });
+            return;
+        }
+        setSavingAccountlessInvite(true);
+        try {
+            const response = await apiRequest<{ invite?: Invite & { id?: string }; shareUrl?: string }>(
+                `/api/teams/${encodeURIComponent(currentTeam.$id)}/member-invites/${encodeURIComponent(editingAccountlessInvite.inviteId)}`,
+                {
+                    method: 'PATCH',
+                    body: {
+                        firstName,
+                        lastName,
+                        email,
+                        phone,
+                    },
+                },
+            );
+            const updatedInvite = response.invite ?? {
+                ...accountlessPlayerRoleInvites.find(({ invite }) => invite.$id === editingAccountlessInvite.inviteId)?.invite,
+                $id: editingAccountlessInvite.inviteId,
+                type: 'TEAM' as const,
+                status: 'PENDING' as const,
+            };
+            const normalizedInvite = {
+                ...updatedInvite,
+                $id: updatedInvite.$id ?? updatedInvite.id ?? editingAccountlessInvite.inviteId,
+                firstName,
+                lastName,
+                email: email || undefined,
+                phone: phone || undefined,
+                shareUrl: (response.shareUrl ?? getInviteContactValue(updatedInvite, 'shareUrl')) || undefined,
+            } as AccountlessInvite;
+            setPendingRoleInvites((previous) => previous.map((entry) => (
+                entry.invite.$id === editingAccountlessInvite.inviteId
+                    ? { ...entry, invite: normalizedInvite }
+                    : entry
+            )));
+            setEditingAccountlessInvite(null);
+            notifications.show({ color: 'green', message: 'Player invite updated.' });
+        } catch (saveError) {
+            const message = saveError instanceof Error ? saveError.message : 'Failed to update player invite.';
+            notifications.show({ color: 'red', message });
+        } finally {
+            setSavingAccountlessInvite(false);
+        }
+    };
+
+    const handleResendAccountlessInvite = async (invite: Invite) => {
+        const email = invite.email?.trim() ?? '';
+        if (!canManageTeam || !isValidInviteEmail(email) || resendingAccountlessInviteId) {
+            return;
+        }
+        setResendingAccountlessInviteId(invite.$id);
+        try {
+            await apiRequest(
+                `/api/teams/${encodeURIComponent(currentTeam.$id)}/member-invites/${encodeURIComponent(invite.$id)}/resend`,
+                { method: 'POST', body: {} },
+            );
+            notifications.show({ color: 'green', message: 'Invite email resent.' });
+        } catch (resendError) {
+            const message = resendError instanceof Error ? resendError.message : 'Failed to resend invite email.';
+            notifications.show({ color: 'red', message });
+        } finally {
+            setResendingAccountlessInviteId(null);
+        }
+    };
+
+    const handleRemoveAccountlessInvite = async (inviteId: string) => {
+        if (!canManageTeam || removingAccountlessInviteId) {
+            return;
+        }
+        setRemovingAccountlessInviteId(inviteId);
+        try {
+            await apiRequest(
+                `/api/teams/${encodeURIComponent(currentTeam.$id)}/member-invites/${encodeURIComponent(inviteId)}`,
+                { method: 'DELETE' },
+            );
+            setPendingRoleInvites((previous) => previous.filter((entry) => entry.invite.$id !== inviteId));
+            setEditingAccountlessInvite((current) => current?.inviteId === inviteId ? null : current);
+            notifications.show({ color: 'green', message: 'Player invite removed.' });
+        } catch (removeError) {
+            const message = removeError instanceof Error ? removeError.message : 'Failed to remove player invite.';
+            notifications.show({ color: 'red', message });
+        } finally {
+            setRemovingAccountlessInviteId(null);
+        }
+    };
+
+    const handleCopyAccountlessInvite = async (invite: Invite) => {
+        const shareUrl = getInviteContactValue(invite, 'shareUrl');
+        if (!shareUrl || typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+            notifications.show({ color: 'red', message: 'Invite link is unavailable.' });
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(shareUrl);
+            notifications.show({ color: 'green', message: 'Invite link copied.' });
+        } catch (copyError) {
+            console.error('Failed to copy invite link:', copyError);
+            notifications.show({ color: 'red', message: 'Failed to copy invite link.' });
+        }
+    };
+
+
     const handleRemovePlayer = async (playerId: string) => {
         if (removingPlayerIds.has(playerId)) {
             return;
@@ -1312,7 +1567,7 @@ export default function TeamDetailModal({
     );
 
     const renderRosterPlayerCards = () => (
-        <ResponsiveCardGrid maxCardWidth={352} className="team-roster-player-grid">
+            <ResponsiveCardGrid maxCardWidth={352} className="team-roster-player-grid">
             {teamPlayers.map(player => {
                 const playerRegistration = activePlayerRegistrationByUserId.get(player.$id);
                 const compliance = complianceByUserId.get(player.$id);
@@ -1523,7 +1778,83 @@ export default function TeamDetailModal({
                     </Paper>
                 );
             })}
-        </ResponsiveCardGrid>
+            {accountlessPlayerRoleInvites.map(({ invite, invitedUser }) => {
+                const playerName = getAccountlessInviteDisplayName(invite);
+                const shareUrl = getInviteContactValue(invite, 'shareUrl');
+                const hasEmail = isValidInviteEmail(invite.email?.trim() ?? '');
+                return (
+                    <Paper
+                        key={invite.$id}
+                        withBorder
+                        radius="md"
+                        p="sm"
+                        className="team-roster-player-card"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            handleEditAccountlessInvite(invite);
+                        }}
+                        style={{ cursor: canManageTeam ? 'pointer' : 'default' }}
+                    >
+                        <Stack gap="sm" h="100%">
+                            <Group align="flex-start" gap="sm" wrap="nowrap">
+                                <Avatar
+                                    src={invitedUser ? getUserAvatarUrl(invitedUser, 40) : undefined}
+                                    alt={playerName}
+                                    size={40}
+                                    radius="xl"
+                                    color="yellow"
+                                >
+                                    {!invitedUser ? 'P' : null}
+                                </Avatar>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <Text fw={500} truncate>{playerName}</Text>
+                                    <Text size="xs" c="dimmed">Role: Player</Text>
+                                </div>
+                            </Group>
+                            {canManageTeam && (
+                                <Group
+                                    gap="xs"
+                                    mt="auto"
+                                    wrap="wrap"
+                                    onClick={(event) => event.stopPropagation()}
+                                >
+                                    <Button
+                                        size="xs"
+                                        variant="light"
+                                        disabled={!shareUrl}
+                                        aria-label={`Copy invite link for ${playerName}`}
+                                        onClick={() => { void handleCopyAccountlessInvite(invite); }}
+                                    >
+                                        Copy link
+                                    </Button>
+                                    {hasEmail && (
+                                        <Button
+                                            size="xs"
+                                            variant="light"
+                                            loading={resendingAccountlessInviteId === invite.$id}
+                                            aria-label={`Resend invite email for ${playerName}`}
+                                            onClick={() => { void handleResendAccountlessInvite(invite); }}
+                                        >
+                                            Resend email
+                                        </Button>
+                                    )}
+                                    <Button
+                                        size="xs"
+                                        variant="subtle"
+                                        color="red"
+                                        loading={removingAccountlessInviteId === invite.$id}
+                                        aria-label={`Remove invite for ${playerName}`}
+                                        onClick={() => { void handleRemoveAccountlessInvite(invite.$id); }}
+                                    >
+                                        Remove
+                                    </Button>
+                                </Group>
+                            )}
+                        </Stack>
+                    </Paper>
+                );
+            })}
+            </ResponsiveCardGrid>
     );
 
     const editDetailsModal = canManageTeam ? (
@@ -1786,6 +2117,67 @@ export default function TeamDetailModal({
             </Stack>
         </Modal>
     ) : null;
+    const accountlessDraft = editingAccountlessInvite ?? {
+        inviteId: '',
+        firstName: '',
+        lastName: '',
+        email: '',
+        phone: '',
+    };
+    const accountlessInviteModal = canManageTeam && editingAccountlessInvite ? (
+        <div
+            role="dialog"
+            aria-label="Edit player invite"
+            style={{
+                position: 'fixed',
+                inset: 0,
+                zIndex: 300,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 24,
+                background: 'rgba(15, 23, 42, 0.45)',
+            }}
+        >
+            <Paper withBorder radius="md" p="lg" style={{ width: 'min(38rem, 100%)', maxHeight: '90vh', overflowY: 'auto' }}>
+                <Stack gap="md">
+                    <Title order={4}>Edit player invite</Title>
+                    <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+                        <TextInput
+                            label="First name"
+                            value={accountlessDraft.firstName}
+                            onChange={(event) => setEditingAccountlessInvite((current) => current ? { ...current, firstName: event.currentTarget.value } : current)}
+                            required
+                        />
+                        <TextInput
+                            label="Last name"
+                            value={accountlessDraft.lastName}
+                            onChange={(event) => setEditingAccountlessInvite((current) => current ? { ...current, lastName: event.currentTarget.value } : current)}
+                            required
+                        />
+                        <TextInput
+                            label="Email (optional)"
+                            type="email"
+                            value={accountlessDraft.email}
+                            onChange={(event) => setEditingAccountlessInvite((current) => current ? { ...current, email: event.currentTarget.value } : current)}
+                        />
+                        <TextInput
+                            label="Phone (optional)"
+                            value={accountlessDraft.phone}
+                            onChange={(event) => setEditingAccountlessInvite((current) => current ? { ...current, phone: event.currentTarget.value } : current)}
+                        />
+                    </SimpleGrid>
+                    <Group justify="flex-end">
+                        <Button variant="default" onClick={() => setEditingAccountlessInvite(null)}>Cancel</Button>
+                        <Button loading={savingAccountlessInvite} onClick={() => { void handleSaveAccountlessInvite(); }}>
+                            Save player invite
+                        </Button>
+                    </Group>
+                </Stack>
+            </Paper>
+        </div>
+    ) : null;
+
 
     const detailContent = (
         <>
@@ -1902,7 +2294,7 @@ export default function TeamDetailModal({
                             <Text c="dimmed">Player Slots</Text>
                         </Paper>
                         <Paper withBorder p="md" radius="md" ta="center">
-                            <Title order={3}>{pendingPlayers.length}</Title>
+                            <Title order={3}>{pendingInvitationCount}</Title>
                             <Text c="dimmed">Pending Invites</Text>
                         </Paper>
                     </SimpleGrid>
@@ -1911,47 +2303,73 @@ export default function TeamDetailModal({
                     <div className={rosterSectionClass('team-detail-roster-side')}>
                         <Title order={5} mb="sm">Team Staff</Title>
                         <Paper withBorder radius="md" p="md">
-                            <Group justify="space-between" mb="xs">
-                                <Text fw={500}>Manager</Text>
-                                <Group gap="xs" align="center">
-                                    <Text c="dimmed" size="sm">
-                                        {managerUser ? getUserFullName(managerUser) : 'Unassigned'}
-                                    </Text>
-                                    {canManageTeam && editingDetails && currentTeam.managerId && (
-                                        <Button
-                                            color="red"
-                                            variant="subtle"
-                                            size="xs"
-                                            onClick={() => { void handleRemoveManager(); }}
-                                            loading={updatingRoleAction === 'manager'}
-                                        >
-                                            Remove
-                                        </Button>
+                            <Group justify="space-between" mb="xs" align="flex-start">
+                                <div>
+                                    <Text fw={500}>Manager</Text>
+                                    {!latestAccountlessManagerInvite && managerUser ? (
+                                        <Text c="dimmed" size="sm">
+                                            {getUserFullName(managerUser)}
+                                        </Text>
+                                    ) : null}
+                                    {latestAccountlessManagerInvite ? (
+                                        <Text key={latestAccountlessManagerInvite.invite.$id} c="dimmed" size="sm">
+                                            {getPendingInviteDisplayName(
+                                                latestAccountlessManagerInvite.invite,
+                                                latestAccountlessManagerInvite.invitedUser,
+                                            )}
+                                        </Text>
+                                    ) : null}
+                                    {!managerUser && !latestAccountlessManagerInvite && (
+                                        <Text c="dimmed" size="sm">Unassigned</Text>
                                     )}
-                                </Group>
+                                </div>
+                                {canManageTeam && editingDetails && currentTeam.managerId && (
+                                    <Button
+                                        color="red"
+                                        variant="subtle"
+                                        size="xs"
+                                        onClick={() => { void handleRemoveManager(); }}
+                                        loading={updatingRoleAction === 'manager'}
+                                    >
+                                        Remove
+                                    </Button>
+                                )}
                             </Group>
-                            <Group justify="space-between" mb="xs">
-                                <Text fw={500}>Head Coach</Text>
-                                <Group gap="xs" align="center">
-                                    <Text c="dimmed" size="sm">
-                                        {headCoachUser ? getUserFullName(headCoachUser) : 'Unassigned'}
-                                    </Text>
-                                    {canManageTeam && editingDetails && currentTeam.headCoachId && (
-                                        <Button
-                                            color="red"
-                                            variant="subtle"
-                                            size="xs"
-                                            onClick={() => { void handleRemoveHeadCoach(); }}
-                                            loading={updatingRoleAction === 'headCoach'}
-                                        >
-                                            Remove
-                                        </Button>
+                            <Group justify="space-between" mb="xs" align="flex-start">
+                                <div>
+                                    <Text fw={500}>Head Coach</Text>
+                                    {!latestAccountlessHeadCoachInvite && headCoachUser ? (
+                                        <Text c="dimmed" size="sm">
+                                            {getUserFullName(headCoachUser)}
+                                        </Text>
+                                    ) : null}
+                                    {latestAccountlessHeadCoachInvite ? (
+                                        <Text key={latestAccountlessHeadCoachInvite.invite.$id} c="dimmed" size="sm">
+                                            {getPendingInviteDisplayName(
+                                                latestAccountlessHeadCoachInvite.invite,
+                                                latestAccountlessHeadCoachInvite.invitedUser,
+                                            )}
+                                        </Text>
+                                    ) : null}
+                                    {!headCoachUser && !latestAccountlessHeadCoachInvite && (
+                                        <Text c="dimmed" size="sm">Unassigned</Text>
                                     )}
-                                </Group>
+                                </div>
+                                {canManageTeam && editingDetails && currentTeam.headCoachId && (
+                                    <Button
+                                        color="red"
+                                        variant="subtle"
+                                        size="xs"
+                                        onClick={() => { void handleRemoveHeadCoach(); }}
+                                        loading={updatingRoleAction === 'headCoach'}
+                                    >
+                                        Remove
+                                    </Button>
+                                )}
                             </Group>
                             <div>
                                 <Text fw={500} mb={4}>Assistant Coaches</Text>
-                                {assistantCoachEntries.length > 0 ? (
+                                {assistantCoachEntries.length > 0 || accountlessAssistantCoachInvites.length > 0 ? (
                                     <div className="space-y-2">
                                         {assistantCoachEntries.map((entry) => {
                                             const actionKey = `assistant:${entry.id}`;
@@ -1974,6 +2392,13 @@ export default function TeamDetailModal({
                                                 </Group>
                                             );
                                         })}
+                                        {accountlessAssistantCoachInvites.map(({ invite, invitedUser }) => (
+                                            <Group key={invite.$id} justify="space-between" gap="xs">
+                                                <Text c="dimmed" size="sm">
+                                                    {getPendingInviteDisplayName(invite, invitedUser)}
+                                                </Text>
+                                            </Group>
+                                        ))}
                                     </div>
                                 ) : (
                                     <Text c="dimmed" size="sm">Unassigned</Text>
@@ -1983,11 +2408,11 @@ export default function TeamDetailModal({
                     </div>
 
                     {/* Pending Staff Invitations */}
-                    {pendingRoleInvites.length > 0 && (
+                    {pendingStaffRoleInvites.length > 0 && (
                         <div className={rosterSectionClass('team-detail-roster-side')}>
-                            <Title order={5} mb="sm">Pending Staff Invitations ({pendingRoleInvites.length})</Title>
+                            <Title order={5} mb="sm">Pending Staff Invitations ({pendingStaffRoleInvites.length})</Title>
                             <div className="space-y-3">
-                                {pendingRoleInvites.map(({ invite, invitedUser }) => {
+                                {pendingStaffRoleInvites.map(({ invite, invitedUser }) => {
                                     const inviteRole = getPendingInviteRole(currentTeam, invite);
                                     const inviteRoleLabel = inviteRole === 'team_manager'
                                         ? 'Manager'
@@ -1999,7 +2424,7 @@ export default function TeamDetailModal({
                                         <Paper key={invite.$id} withBorder radius="md" p="sm" bg="yellow.0">
                                             <Group justify="space-between">
                                                 <div>
-                                                    <Text fw={500}>{invitedUser ? getUserFullName(invitedUser) : invite.email ?? 'Unknown user'}</Text>
+                                                    <Text fw={500}>{getPendingInviteDisplayName(invite, invitedUser)}</Text>
                                                     {invitedUser && getUserHandle(invitedUser) && (
                                                         <Text size="xs" c="dimmed">{getUserHandle(invitedUser)}</Text>
                                                     )}
@@ -2107,7 +2532,7 @@ export default function TeamDetailModal({
                     {/* Roster */}
                     <div className={rosterSectionClass('team-detail-roster-main')}>
                         <Group justify="space-between" mb="sm">
-                            <Title order={5}>Roster ({teamPlayers.length})</Title>
+                            <Title order={5}>Roster ({rosterPlayerCount})</Title>
                             {canManageTeam && memberComplianceLoading ? (
                                 <Group gap={6}>
                                     <Loader size="xs" />
@@ -2120,7 +2545,7 @@ export default function TeamDetailModal({
                                 {memberComplianceError}
                             </Alert>
                         ) : null}
-                        {teamPlayers.length > 0 ? (
+                        {rosterPlayerCount > 0 ? (
                             isPageMode
                                 ? renderRosterPlayerCards()
                                 : (
@@ -2136,9 +2561,9 @@ export default function TeamDetailModal({
                     </div>
 
                     {/* Pending Invitations */}
-                    {pendingPlayers.length > 0 && (
+                    {pendingInvitationCount > 0 && (
                         <div className={rosterSectionClass('team-detail-roster-main')}>
-                            <h4 className="text-lg font-semibold mb-4">Pending Invitations ({pendingPlayers.length})</h4>
+                            <h4 className="text-lg font-semibold mb-4">Pending Invitations ({pendingInvitationCount})</h4>
                             <ResponsiveCardGrid maxCardWidth={352} className="team-roster-player-grid">
                                 {pendingPlayers.map(player => {
                                     const isFromEvent = localFreeAgents.some(agent => agent.$id === player.$id);
@@ -2232,8 +2657,7 @@ export default function TeamDetailModal({
                                 selectedFreeAgentUser={selectedFreeAgentUser}
                                 pendingRoleInvites={pendingRoleInvites}
                                 onPlayerInviteSent={handlePlayerInviteSent}
-                                onRoleInvitesChanged={fetchRoleInvites}
-                                onTeamUpdated={onTeamUpdated}
+                                onRoleInvitesChanged={refreshTeamRoleDetails}
                                 onInvitesSent={fetchTeamDetails}
                             />
                         </div>
@@ -2377,6 +2801,7 @@ export default function TeamDetailModal({
                 </Modal>
             )}
             {editDetailsModal}
+            {accountlessInviteModal}
             <ImageSelectionModal
                 onSelect={handleChangeImage}
                 onClose={() => setImagePickerOpen(false)}

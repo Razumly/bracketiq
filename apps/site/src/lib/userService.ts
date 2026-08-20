@@ -3,7 +3,7 @@ import { normalizeAccountVisibility, type AccountVisibility } from '@/lib/accoun
 import { normalizeOptionalName } from '@/lib/nameCase';
 import { normalizeNotificationSettings } from '@/lib/notificationSettings';
 import { normalizeOnboardingIntent } from '@/lib/onboardingIntent';
-
+import { normalizeTeamInviteRole } from '@/lib/staff';
 const apiFetch = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const res = await fetch(path, {
     credentials: 'include',
@@ -41,14 +41,18 @@ const normalizeUserDataNames = (user: UserData & CanonicalApiEntity): UserData =
 
 const normalizeUserDataList = (users: UserData[]): UserData[] => users.map(normalizeUserDataNames);
 
-const normalizeInviteNames = (invite: Invite & CanonicalApiEntity): Invite => ({
-  ...invite,
-  $id: invite.id ?? invite.$id,
-  $createdAt: invite.createdAt ?? invite.$createdAt,
-  $updatedAt: invite.updatedAt ?? invite.$updatedAt,
-  firstName: normalizeOptionalName(invite.firstName) ?? undefined,
-  lastName: normalizeOptionalName(invite.lastName) ?? undefined,
-});
+const normalizeInviteNames = (invite: Invite & CanonicalApiEntity): Invite => {
+  const role = invite.type === 'TEAM' ? normalizeTeamInviteRole(invite.role) : undefined;
+  return {
+    ...invite,
+    $id: invite.id ?? invite.$id,
+    $createdAt: invite.createdAt ?? invite.$createdAt,
+    $updatedAt: invite.updatedAt ?? invite.$updatedAt,
+    ...(invite.type === 'TEAM' ? { role } : {}),
+    firstName: normalizeOptionalName(invite.firstName) ?? undefined,
+    lastName: normalizeOptionalName(invite.lastName) ?? undefined,
+  };
+};
 
 const normalizeSubscription = (subscription: Subscription & CanonicalApiEntity): Subscription => ({
   ...subscription,

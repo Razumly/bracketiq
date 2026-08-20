@@ -1,4 +1,4 @@
-import { apiRequest } from '@/lib/apiClient';
+import { ApiRequestError, apiRequest } from '@/lib/apiClient';
 import { createId } from '@/lib/id';
 import { Bill, Invite, Team, UserData, getTeamAvatarUrl } from '@/types';
 import type {
@@ -16,6 +16,7 @@ import type { DeleteOrArchiveResult } from '@/lib/deleteOutcome';
 import { deleteOutcomeSucceeded } from '@/lib/deleteOutcome';
 
 const isDefined = <T>(value: T | null | undefined): value is T => value !== null && value !== undefined;
+const PLAYER_INVITE_CAPACITY_ERROR_MESSAGE = 'Team is full. Player invite was not sent.';
 export type TeamInviteRoleType = 'player' | 'team_manager' | 'team_head_coach' | 'team_assistant_coach';
 export type TeamInviteEventTeamOption = {
     eventId: string;
@@ -304,6 +305,13 @@ class TeamService {
             });
             return true;
         } catch (error) {
+            if (
+                error instanceof ApiRequestError
+                && error.status === 409
+                && error.message === PLAYER_INVITE_CAPACITY_ERROR_MESSAGE
+            ) {
+                throw error;
+            }
             console.error('Failed to invite user to team:', error);
             return false;
         }

@@ -19,6 +19,7 @@ import {
   deriveOrganizationRoleIds,
   deriveStaffInviteTypes,
   getBlockingStaffInvite,
+  getTeamInviteRole,
   normalizeInviteStatus,
   normalizeInviteType,
   normalizeStaffMemberTypes,
@@ -211,11 +212,13 @@ class OrganizationService {
     const result = await request;
     return result ? this.cloneValue(result) : undefined;
   }
-
   private mapInvite(row: Record<string, unknown>): Invite {
+    const inviteType = normalizeInviteType(row.type) ?? 'STAFF';
     return {
       $id: String(row.id ?? row.$id ?? ''),
-      type: normalizeInviteType(row.type) ?? 'STAFF',
+      type: inviteType,
+      ...(inviteType === 'TEAM' ? { role: getTeamInviteRole(row.role, row.type) } : {}),
+      ...(inviteType === 'TEAM' && typeof row.isAssigned === 'boolean' ? { isAssigned: row.isAssigned } : {}),
       email: typeof row.email === 'string' ? row.email : undefined,
       status: normalizeInviteStatus(row.status) ?? undefined,
       staffTypes: deriveStaffInviteTypes({ staffTypes: row.staffTypes as Invite['staffTypes'] }, typeof row.type === 'string' ? row.type : null),

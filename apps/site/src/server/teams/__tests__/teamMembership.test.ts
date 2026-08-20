@@ -16,6 +16,7 @@ import {
   listCanonicalTeamsForUser,
   listTeamsByIds,
   normalizeJerseyNumber,
+  replaceSingletonTeamStaffAssignment,
   syncCanonicalTeamRoster,
   withDerivedCanonicalTeamIds,
 } from '@/server/teams/teamMembership';
@@ -74,6 +75,98 @@ describe('canonical user-team compatibility projection', () => {
       userData: { findMany: userDataFindMany },
     })).rejects.toThrow('Canonical team membership requires TeamRegistrations and TeamStaffAssignments delegates.');
     expect(userDataFindMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('singleton team staff replacement', () => {
+  it('retires pending invites and prior assignments without touching the replacement', async () => {
+    const inviteUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const assignmentUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const now = new Date('2026-08-20T12:00:00.000Z');
+
+    await replaceSingletonTeamStaffAssignment({
+      tx: {
+        invites: { updateMany: inviteUpdateMany },
+        teamStaffAssignments: { updateMany: assignmentUpdateMany },
+      },
+      teamId: 'team_1',
+      role: 'MANAGER',
+      replacementInviteId: 'invite_new',
+      replacementUserId: 'user_new',
+      now,
+    });
+
+    expect(inviteUpdateMany).toHaveBeenCalledWith({
+      where: {
+        type: 'TEAM',
+        teamId: 'team_1',
+        role: { in: ['MANAGER', 'team_manager'] },
+        status: { in: ['PENDING', 'INVITED'] },
+        id: { not: 'invite_new' },
+      },
+      data: { status: 'CANCELLED', updatedAt: now },
+    });
+    expect(assignmentUpdateMany).toHaveBeenCalledWith({
+      where: {
+        teamId: 'team_1',
+        role: 'MANAGER',
+        status: { in: ['ACTIVE', 'INVITED'] },
+        userId: { not: 'user_new' },
+      },
+      data: { status: 'REMOVED', updatedAt: now },
+    });
+  });
+  it('acquires a team-role transaction lock before retiring singleton state', async () => {
+    const operations: string[] = [];
+    const inviteUpdateMany = jest.fn(async () => {
+      operations.push('invite-cancel');
+      return { count: 1 };
+    });
+    const assignmentUpdateMany = jest.fn(async () => {
+      operations.push('assignment-remove');
+      return { count: 1 };
+    });
+    const executeRaw = jest.fn(async () => {
+      operations.push('lock');
+      return 0;
+    });
+
+    await replaceSingletonTeamStaffAssignment({
+      tx: {
+        $executeRaw: executeRaw,
+        invites: { updateMany: inviteUpdateMany },
+        teamStaffAssignments: { updateMany: assignmentUpdateMany },
+      },
+      teamId: 'team_serialized',
+      role: 'HEAD_COACH',
+    });
+
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(operations).toEqual(['lock', 'invite-cancel', 'assignment-remove']);
+  });
+
+
+  it('retires every head coach assignment for an accountless replacement', async () => {
+    const inviteUpdateMany = jest.fn().mockResolvedValue({ count: 2 });
+    const assignmentUpdateMany = jest.fn().mockResolvedValue({ count: 2 });
+
+    await replaceSingletonTeamStaffAssignment({
+      tx: {
+        invites: { updateMany: inviteUpdateMany },
+        teamStaffAssignments: { updateMany: assignmentUpdateMany },
+      },
+      teamId: 'team_2',
+      role: 'HEAD_COACH',
+    });
+
+    expect(inviteUpdateMany.mock.calls[0][0].where.role).toEqual({
+      in: ['HEAD_COACH', 'team_head_coach'],
+    });
+    expect(assignmentUpdateMany.mock.calls[0][0].where).toEqual({
+      teamId: 'team_2',
+      role: 'HEAD_COACH',
+      status: { in: ['ACTIVE', 'INVITED'] },
+    });
   });
 });
 
