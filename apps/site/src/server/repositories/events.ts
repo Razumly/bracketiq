@@ -1777,13 +1777,11 @@ const assertSplitLeaguePlayoffMappingCounts = ({
   playoffDivisionDetails,
   persistedDivisionDetails,
   defaultPlayoffTeamCount,
-  defaultMaxParticipants,
 }: {
   divisionDetails: DivisionDetailPayload[];
   playoffDivisionDetails: DivisionDetailPayload[];
   persistedDivisionDetails: PersistedSplitLeagueDivisionDetail[];
   defaultPlayoffTeamCount: number | null;
-  defaultMaxParticipants: number | null;
 }): void => {
   if (divisionDetails.length === 0 || playoffDivisionDetails.length === 0) {
     return;
@@ -1847,7 +1845,7 @@ const assertSplitLeaguePlayoffMappingCounts = ({
         capacity: resolveDivisionValue(
           detail.maxParticipants,
           persisted?.maxParticipants,
-          defaultMaxParticipants ?? undefined,
+          undefined,
         ),
         name: detail.name,
       };
@@ -1856,7 +1854,12 @@ const assertSplitLeaguePlayoffMappingCounts = ({
   );
 
   for (const result of capacityResults) {
-    if (result.capacity === null || result.matchesCapacity) {
+    if (result.capacity === null) {
+      throw new Error(
+        `Playoff division "${result.name ?? result.playoffDivisionId}" requires maxParticipants.`,
+      );
+    }
+    if (result.matchesCapacity) {
       continue;
     }
     throw new Error(
@@ -5896,11 +5899,15 @@ export const syncEventDivisions = async (
               existing?.price,
               params.defaultPrice ?? undefined,
             ) ?? null);
+      const isLeaguePlayoffTarget =
+        normalizedEventType === "LEAGUE" && kind === "PLAYOFF";
       const rawMaxParticipants =
         resolveDivisionValue(
           detail?.maxParticipants,
           existing?.maxParticipants,
-          params.defaultMaxParticipants ?? undefined,
+          isLeaguePlayoffTarget
+            ? undefined
+            : params.defaultMaxParticipants ?? undefined,
         ) ?? null;
       const isGeneratedTournamentPool = isGeneratedTournamentPoolRecord({
         eventType: normalizedEventType,
@@ -5919,18 +5926,20 @@ export const syncEventDivisions = async (
         normalizedEventType === "TOURNAMENT" && !isGeneratedTournamentPool
           ? normalizeLegacyBracketTeamCount(rawMaxParticipants)
           : rawMaxParticipants;
-      const rawPlayoffTeamCount =
-        kind === "PLAYOFF" && !isTournamentBracketDivision
-          ? null
-          : (resolveDivisionValue(
-              detail?.playoffTeamCount,
-              existing?.playoffTeamCount,
-              params.includePlayoffs
-                ? (normalizedDefaultPlayoffTeamCount ?? undefined)
-                : undefined,
-            ) ?? null);
-      const playoffTeamCount =
-        params.includePlayoffs && !isGeneratedTournamentPool
+      // A split League playoff target owns bracket capacity in maxParticipants.
+      // It does not advance standings, so playoffTeamCount is not applicable.
+      const rawPlayoffTeamCount = isLeaguePlayoffTarget
+        ? null
+        : (resolveDivisionValue(
+            detail?.playoffTeamCount,
+            existing?.playoffTeamCount,
+            params.includePlayoffs
+              ? (normalizedDefaultPlayoffTeamCount ?? undefined)
+              : undefined,
+          ) ?? null);
+      const playoffTeamCount = isLeaguePlayoffTarget
+        ? null
+        : params.includePlayoffs && !isGeneratedTournamentPool
           ? normalizeLegacyBracketTeamCount(rawPlayoffTeamCount)
           : rawPlayoffTeamCount;
       const allowPaymentPlans =
@@ -7545,7 +7554,6 @@ export const upsertEventFromPayload = async (
       playoffDivisionDetails: normalizedPlayoffDivisionDetails,
       persistedDivisionDetails,
       defaultPlayoffTeamCount: defaultDivisionPlayoffTeamCount,
-      defaultMaxParticipants: defaultDivisionMaxParticipants,
     });
   }
 

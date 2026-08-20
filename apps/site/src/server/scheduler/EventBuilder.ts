@@ -1407,10 +1407,30 @@ export class EventBuilder {
     division: Division,
     fallbackTeamCount: number,
   ): number {
+    const isSplitLeaguePlayoffTarget =
+      this.isLeague &&
+      this.useSplitPlayoffDivisions &&
+      division.kind === "PLAYOFF";
+    if (
+      isSplitLeaguePlayoffTarget &&
+      (typeof division.maxParticipants !== "number" ||
+        !Number.isFinite(division.maxParticipants))
+    ) {
+      throw new ScheduleError(
+        `Split League playoff division "${division.name ?? division.id}" requires maxParticipants.`,
+        "PLAYING_TEAM",
+      );
+    }
     if (fallbackTeamCount < MIN_BRACKET_TEAM_COUNT) {
       return 0;
     }
     const explicitDivisionCount = (() => {
+      if (isSplitLeaguePlayoffTarget) {
+        return Math.max(
+          MIN_BRACKET_TEAM_COUNT,
+          Math.trunc(division.maxParticipants as number),
+        );
+      }
       if (
         typeof division.playoffTeamCount === "number" &&
         Number.isFinite(division.playoffTeamCount)

@@ -1301,6 +1301,55 @@ describe("upsertEventFromPayload", () => {
     );
     expect(client.events.upsert).not.toHaveBeenCalled();
   });
+  it("rejects a split playoff target without a capacity", async () => {
+    const client = createMockClient();
+    const sourceDivisionId = divisionId("open");
+    const goldDivisionId = divisionId("gold");
+    const payload = {
+      ...baseEventPayload(),
+      eventType: "LEAGUE",
+      includePlayoffs: true,
+      maxParticipants: 8,
+      playoffTeamCount: 4,
+      singleDivision: false,
+      splitLeaguePlayoffDivisions: true,
+      divisions: [sourceDivisionId],
+      divisionDetails: [
+        {
+          id: sourceDivisionId,
+          key: "open",
+          name: "Open",
+          divisionTypeId: "skill_open_age_18plus",
+          divisionTypeName: "Open 18+",
+          ratingType: "SKILL",
+          gender: "C",
+          maxParticipants: 8,
+          playoffTeamCount: 4,
+          playoffPlacementDivisionIds: [
+            goldDivisionId,
+            goldDivisionId,
+            goldDivisionId,
+            goldDivisionId,
+          ],
+        },
+      ],
+      playoffDivisionDetails: [
+        {
+          id: goldDivisionId,
+          key: "gold",
+          kind: "PLAYOFF",
+          name: "Gold",
+        },
+      ],
+    };
+
+    await expect(
+      upsertEventFromPayload(payload, client as any),
+    ).rejects.toThrow(
+      'Playoff division "Gold" requires maxParticipants.',
+    );
+    expect(client.events.upsert).not.toHaveBeenCalled();
+  });
 
   it("uses persisted split playoff values when an update omits them", async () => {
     const client = createMockClient();
@@ -1343,7 +1392,7 @@ describe("upsertEventFromPayload", () => {
         kind: "PLAYOFF",
         role: "PHASE",
         maxParticipants: 4,
-        playoffTeamCount: null,
+        playoffTeamCount: 3,
         playoffPlacementDivisionIds: [],
       },
     ]);
@@ -1392,6 +1441,15 @@ describe("upsertEventFromPayload", () => {
         where: { id: sourceDivisionId },
         update: expect.objectContaining({
           playoffPlacementDivisionIds: placementMapping,
+        }),
+      }),
+    );
+    expect(client.divisions.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: goldDivisionId },
+        update: expect.objectContaining({
+          maxParticipants: 4,
+          playoffTeamCount: null,
         }),
       }),
     );

@@ -44,7 +44,8 @@ describe("syncEventDivisionPhases", () => {
       key: "open_playoff",
       name: "Open Playoff",
       kind: "PLAYOFF" as const,
-      playoffTeamCount: 4,
+      maxParticipants: 4,
+      playoffTeamCount: 3,
     };
 
     await syncEventDivisionPhases({
@@ -82,6 +83,12 @@ describe("syncEventDivisionPhases", () => {
         isSystemGenerated: false,
         phase: "PLAYOFF",
         sourceDivisionId: entry.id,
+      }),
+    );
+    expect(phaseUpserts[1].update).toEqual(
+      expect.objectContaining({
+        maxParticipants: 4,
+        playoffTeamCount: null,
       }),
     );
     expect(client.eventDivisionPhaseSources.deleteMany).toHaveBeenCalledWith({

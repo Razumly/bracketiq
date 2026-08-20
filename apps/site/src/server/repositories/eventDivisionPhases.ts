@@ -360,16 +360,26 @@ const phaseStandingsOverridesFor = (
 
 const writeDataFor = (
   plan: PhasePlan,
+  eventType: string | null | undefined,
   eventId: string,
   organizationId: string | null | undefined,
 ): Record<string, unknown> => {
   const entry = plan.template;
   const isBracket = plan.phase === "BRACKET" || plan.phase === "PLAYOFF";
+  const isLeaguePlayoffTarget =
+    String(eventType ?? "").trim().toUpperCase() === "LEAGUE"
+    && plan.phase === "PLAYOFF"
+    && !plan.clone
+    && String(entry.kind ?? "").trim().toUpperCase() === "PLAYOFF";
   const maxParticipants = isBracket
-    ? (entry.playoffTeamCount ?? entry.maxParticipants ?? null)
+    ? isLeaguePlayoffTarget
+      ? (entry.maxParticipants ?? null)
+      : (entry.playoffTeamCount ?? entry.maxParticipants ?? null)
     : (entry.maxParticipants ?? null);
   const playoffTeamCount = isBracket
-    ? (entry.playoffTeamCount ?? entry.maxParticipants ?? null)
+    ? isLeaguePlayoffTarget
+      ? null
+      : (entry.playoffTeamCount ?? entry.maxParticipants ?? null)
     : (entry.playoffTeamCount ?? null);
   return {
     id: plan.id,
@@ -649,7 +659,12 @@ export const syncEventDivisionPhases = async (params: {
         ? asStringArray(existingPhaseRowsById.get(plan.id)?.teamIds)
         : plan.participantTeamIds;
     const data = {
-      ...writeDataFor(plan, params.eventId, params.organizationId),
+      ...writeDataFor(
+        plan,
+        params.eventType,
+        params.eventId,
+        params.organizationId,
+      ),
       isSystemGenerated:
         plan.clone ||
         existingPhaseRowsById.get(plan.id)?.isSystemGenerated === true,
