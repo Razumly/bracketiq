@@ -239,6 +239,52 @@ export class Division implements Group {
   }
 }
 
+export const timeSlotExplicitDivisionIdsSymbol = Symbol('schedulerTimeSlotExplicitDivisionIds');
+export const playingFieldExplicitDivisionIdsSymbol = Symbol('schedulerPlayingFieldExplicitDivisionIds');
+
+type ExplicitDivisionIdsCarrier = {
+  [timeSlotExplicitDivisionIdsSymbol]?: string[];
+  [playingFieldExplicitDivisionIdsSymbol]?: string[];
+};
+
+const normalizeExplicitDivisionIds = (value: unknown): string[] =>
+  Array.from(
+    new Set(
+      (Array.isArray(value) ? value : [])
+        .map((entry) => {
+          if (typeof entry === 'string') return entry.trim();
+          if (!entry || typeof entry !== 'object' || !('id' in entry)) {
+            return '';
+          }
+          const id = entry.id;
+          return typeof id === 'string' ? id.trim() : '';
+        })
+        .filter((entry) => entry.length > 0),
+    ),
+  );
+
+const readExplicitDivisionIds = (
+  value: unknown,
+  symbol: typeof timeSlotExplicitDivisionIdsSymbol | typeof playingFieldExplicitDivisionIdsSymbol,
+): string[] | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const carrier = value as ExplicitDivisionIdsCarrier;
+  const metadata = symbol === timeSlotExplicitDivisionIdsSymbol
+    ? carrier[timeSlotExplicitDivisionIdsSymbol]
+    : carrier[playingFieldExplicitDivisionIdsSymbol];
+  return Array.isArray(metadata) ? [...metadata] : null;
+};
+
+export const getTimeSlotExplicitDivisionIds = (
+  slot: unknown,
+): string[] | null => readExplicitDivisionIds(slot, timeSlotExplicitDivisionIdsSymbol);
+
+export const getPlayingFieldExplicitDivisionIds = (
+  field: unknown,
+): string[] | null => readExplicitDivisionIds(field, playingFieldExplicitDivisionIdsSymbol);
+
 export class TimeSlot {
   id: string;
   dayOfWeek: number;
@@ -275,6 +321,7 @@ export class TimeSlot {
     field?: string | null;
     fieldIds?: string[];
     divisions?: Division[];
+    explicitDivisionIds?: string[];
     timeZone?: string | null;
   }) {
     const normalizedDays = Array.from(
@@ -317,6 +364,13 @@ export class TimeSlot {
     this.fieldIds = normalizedFieldIds;
     this.field = params.field ?? normalizedFieldIds[0] ?? null;
     this.divisions = params.divisions ?? [];
+    Object.defineProperty(this, timeSlotExplicitDivisionIdsSymbol, {
+      configurable: true,
+      value: normalizeExplicitDivisionIds(
+        params.explicitDivisionIds ?? params.divisions,
+      ),
+      writable: true,
+    });
   }
 
   asDateRange(reference: Date): [Date, Date] {
@@ -367,6 +421,7 @@ export class PlayingField implements Resource {
     id: string;
     organizationId?: string | null;
     divisions?: Division[];
+    explicitDivisionIds?: string[];
     matches?: Match[];
     events?: BlockingEvent[];
     rentalSlots?: TimeSlot[];
@@ -378,6 +433,13 @@ export class PlayingField implements Resource {
     this.matches = params.matches ?? [];
     this.events = params.events ?? [];
     this.rentalSlots = params.rentalSlots ?? [];
+    Object.defineProperty(this, playingFieldExplicitDivisionIdsSymbol, {
+      configurable: true,
+      value: normalizeExplicitDivisionIds(
+        params.explicitDivisionIds ?? params.divisions,
+      ),
+      writable: true,
+    });
     this.name = params.name ?? '';
   }
 

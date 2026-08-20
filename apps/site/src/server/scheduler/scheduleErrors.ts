@@ -3,6 +3,7 @@ export type ScheduleFailureFactor =
   | 'PLAYING_TEAM'
   | 'TEAM_DUTY'
   | 'NAMED_OFFICIAL_POSITION'
+  | 'DIVISION_ORDER'
   | 'UNKNOWN';
 
 export class ScheduleError extends Error {

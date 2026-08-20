@@ -266,6 +266,11 @@ describe('league schedule matrix', () => {
         || match.loserNextMatch
       )
     ));
+    const regularMatches = scheduled.matches.filter((match) => !playoffMatches.includes(match));
+    const firstPlayoffStart = Math.min(...playoffMatches.map((match) => match.start.getTime()));
+    expect(Math.max(...regularMatches.map((match) => match.end.getTime()))).toBeLessThanOrEqual(
+      firstPlayoffStart,
+    );
     const expectedRegularMatches = regularMatchCount(
       scenario.teamCount,
       scenario.gamesPerOpponent,

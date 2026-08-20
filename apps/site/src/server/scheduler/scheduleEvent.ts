@@ -16,12 +16,13 @@ import {
   MINUTE_MS,
   SchedulerContext,
   Team,
-  type TimeSlot,
 } from './types';
 import {
   assertCanonicalSchedulerTimeSlots,
   calculateOneTimeAvailabilityMinutes,
 } from './timeSlotAvailability';
+import { captureSchedulerState, restoreSchedulerState } from './schedulerState';
+import { ensureSplitPlayoffTimeSlotCoverage } from './timeSlotCoverage';
 
 export { ScheduleError } from './scheduleErrors';
 export type { ScheduleFailureFactor } from './scheduleErrors';
@@ -39,46 +40,6 @@ export type ScheduleResult = {
   warnings: StaffingDiagnostic[];
 };
 
-type SchedulerStateSnapshot = Array<{
-  target: object;
-  values: Map<PropertyKey, unknown>;
-}>;
-
-const captureSchedulerState = (event: League | Tournament): SchedulerStateSnapshot => {
-  const snapshots: SchedulerStateSnapshot = [];
-  const pending: object[] = [event];
-  const visited = new WeakSet<object>();
-  while (pending.length) {
-    const target = pending.pop();
-    if (!target || visited.has(target) || target instanceof Date) {
-      continue;
-    }
-    visited.add(target);
-    const values = new Map<PropertyKey, unknown>();
-    for (const key of Reflect.ownKeys(target)) {
-      const value = Reflect.get(target, key);
-      values.set(key, value);
-      if (typeof value === 'object' && value !== null) {
-        pending.push(value);
-      }
-    }
-    snapshots.push({ target, values });
-  }
-  return snapshots;
-};
-
-const restoreSchedulerState = (snapshots: SchedulerStateSnapshot): void => {
-  for (const { target, values } of snapshots) {
-    for (const key of Reflect.ownKeys(target)) {
-      if (!values.has(key)) {
-        Reflect.deleteProperty(target, key);
-      }
-    }
-    for (const [key, value] of values) {
-      Reflect.set(target, key, value);
-    }
-  }
-};
 
 
 const isLeague = (event: League | Tournament): event is League => {
@@ -246,214 +207,6 @@ const hasConfiguredSplitDivisionMembership = (
   ));
 };
 
-const normalizeDivisionId = (value: unknown): string | null => {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const normalized = value.trim().toLowerCase();
-  return normalized.length > 0 ? normalized : null;
-};
-
-const normalizeDivisionRefId = (value: unknown): string | null => {
-  if (typeof value === 'string') {
-    return normalizeDivisionId(value);
-  }
-  if (!value || typeof value !== 'object' || !('id' in value)) {
-    return null;
-  }
-  return normalizeDivisionId((value as { id?: unknown }).id);
-};
-
-const extendResourceEligibilityForInheritedSlotScope = (
-  event: League | Tournament,
-  slot: TimeSlot,
-  inheritedDivisions: Division[],
-): void => {
-  if (!inheritedDivisions.length) return;
-  const slotResourceIds = slot.fieldIds.length
-    ? slot.fieldIds
-    : (slot.field ? [slot.field] : Object.keys(event.fields));
-  for (const resourceId of slotResourceIds) {
-    const resource = event.fields[resourceId];
-    if (!resource) continue;
-    const eligibleDivisionIds = new Set(resource.divisions.map((division) => division.id.toLowerCase()));
-    for (const division of inheritedDivisions) {
-      if (eligibleDivisionIds.has(division.id.toLowerCase())) continue;
-      resource.divisions.push(division);
-      eligibleDivisionIds.add(division.id.toLowerCase());
-    }
-  }
-};
-
-const ensureSplitPlayoffTimeSlotCoverage = (league: League): void => {
-  if (!league.splitLeaguePlayoffDivisions || !league.playoffDivisions.length || !league.timeSlots.length) {
-    return;
-  }
-
-  const playoffDivisionById = new Map<string, Division>();
-  for (const playoffDivision of league.playoffDivisions) {
-    const normalizedId = normalizeDivisionId(playoffDivision.id);
-    if (!normalizedId) {
-      continue;
-    }
-    playoffDivisionById.set(normalizedId, playoffDivision);
-  }
-  if (!playoffDivisionById.size) {
-    return;
-  }
-
-  const mappedPlayoffIdsByDivisionId = new Map<string, Set<string>>();
-  for (const division of league.divisions) {
-    const sourceDivisionId = normalizeDivisionId(division.id);
-    if (!sourceDivisionId) {
-      continue;
-    }
-    for (const mappedPlayoffDivisionIdRaw of division.playoffPlacementDivisionIds ?? []) {
-      const mappedPlayoffDivisionId = normalizeDivisionId(mappedPlayoffDivisionIdRaw);
-      if (!mappedPlayoffDivisionId || !playoffDivisionById.has(mappedPlayoffDivisionId)) {
-        continue;
-      }
-      const bucket = mappedPlayoffIdsByDivisionId.get(sourceDivisionId) ?? new Set<string>();
-      bucket.add(mappedPlayoffDivisionId);
-      mappedPlayoffIdsByDivisionId.set(sourceDivisionId, bucket);
-    }
-  }
-
-  if (!mappedPlayoffIdsByDivisionId.size) {
-    return;
-  }
-
-  for (const slot of league.timeSlots) {
-    const existingDivisions = Array.isArray(slot.divisions) ? slot.divisions : [];
-    if (!existingDivisions.length) {
-      continue;
-    }
-    const normalizedSlotDivisionIds = new Set<string>();
-    for (const division of existingDivisions) {
-      const normalizedId = normalizeDivisionRefId(division);
-      if (normalizedId) {
-        normalizedSlotDivisionIds.add(normalizedId);
-      }
-    }
-    if (!normalizedSlotDivisionIds.size) {
-      continue;
-    }
-
-    const nextDivisions: Division[] = [...existingDivisions];
-    let changed = false;
-    for (const divisionId of normalizedSlotDivisionIds) {
-      const mappedPlayoffIds = mappedPlayoffIdsByDivisionId.get(divisionId);
-      if (!mappedPlayoffIds) {
-        continue;
-      }
-      for (const playoffDivisionId of mappedPlayoffIds) {
-        if (normalizedSlotDivisionIds.has(playoffDivisionId)) {
-          continue;
-        }
-        const playoffDivision = playoffDivisionById.get(playoffDivisionId);
-        if (!playoffDivision) {
-          continue;
-        }
-        nextDivisions.push(playoffDivision);
-        normalizedSlotDivisionIds.add(playoffDivisionId);
-        changed = true;
-      }
-    }
-    if (changed) {
-      const inheritedDivisions = nextDivisions.slice(existingDivisions.length);
-      slot.divisions = nextDivisions;
-      extendResourceEligibilityForInheritedSlotScope(league, slot, inheritedDivisions);
-    }
-  }
-};
-
-const ensureTournamentPoolTimeSlotCoverage = (tournament: Tournament): void => {
-  const playoffDivisions = tournament.playoffDivisions ?? [];
-  if (tournament.includePlayoffs !== true || !playoffDivisions.length || !tournament.divisions.length || !tournament.timeSlots.length) {
-    return;
-  }
-
-  const playoffDivisionById = new Map<string, Division>();
-  for (const playoffDivision of playoffDivisions) {
-    const normalizedId = normalizeDivisionId(playoffDivision.id);
-    if (!normalizedId) {
-      continue;
-    }
-    playoffDivisionById.set(normalizedId, playoffDivision);
-  }
-  if (!playoffDivisionById.size) {
-    return;
-  }
-
-  const poolDivisionsByPlayoffId = new Map<string, Division[]>();
-  const seenPoolIdsByPlayoffId = new Map<string, Set<string>>();
-  for (const poolDivision of tournament.divisions) {
-    const poolDivisionId = normalizeDivisionId(poolDivision.id);
-    if (!poolDivisionId) {
-      continue;
-    }
-    for (const mappedPlayoffDivisionIdRaw of poolDivision.playoffPlacementDivisionIds ?? []) {
-      const mappedPlayoffDivisionId = normalizeDivisionId(mappedPlayoffDivisionIdRaw);
-      if (!mappedPlayoffDivisionId || !playoffDivisionById.has(mappedPlayoffDivisionId)) {
-        continue;
-      }
-      const seenPoolIds = seenPoolIdsByPlayoffId.get(mappedPlayoffDivisionId) ?? new Set<string>();
-      if (seenPoolIds.has(poolDivisionId)) {
-        continue;
-      }
-      seenPoolIds.add(poolDivisionId);
-      seenPoolIdsByPlayoffId.set(mappedPlayoffDivisionId, seenPoolIds);
-
-      const bucket = poolDivisionsByPlayoffId.get(mappedPlayoffDivisionId) ?? [];
-      bucket.push(poolDivision);
-      poolDivisionsByPlayoffId.set(mappedPlayoffDivisionId, bucket);
-    }
-  }
-
-  if (!poolDivisionsByPlayoffId.size) {
-    return;
-  }
-
-  for (const slot of tournament.timeSlots) {
-    const existingDivisions = Array.isArray(slot.divisions) ? slot.divisions : [];
-    if (!existingDivisions.length) {
-      continue;
-    }
-    const normalizedSlotDivisionIds = new Set<string>();
-    for (const division of existingDivisions) {
-      const normalizedId = normalizeDivisionRefId(division);
-      if (normalizedId) {
-        normalizedSlotDivisionIds.add(normalizedId);
-      }
-    }
-    if (!normalizedSlotDivisionIds.size) {
-      continue;
-    }
-
-    const nextDivisions: Division[] = [...existingDivisions];
-    let changed = false;
-    for (const divisionId of Array.from(normalizedSlotDivisionIds)) {
-      const poolDivisions = poolDivisionsByPlayoffId.get(divisionId);
-      if (!poolDivisions) {
-        continue;
-      }
-      for (const poolDivision of poolDivisions) {
-        const poolDivisionId = normalizeDivisionId(poolDivision.id);
-        if (!poolDivisionId || normalizedSlotDivisionIds.has(poolDivisionId)) {
-          continue;
-        }
-        nextDivisions.push(poolDivision);
-        normalizedSlotDivisionIds.add(poolDivisionId);
-        changed = true;
-      }
-    }
-    if (changed) {
-      const inheritedDivisions = nextDivisions.slice(existingDivisions.length);
-      slot.divisions = nextDivisions;
-      extendResourceEligibilityForInheritedSlotScope(tournament, slot, inheritedDivisions);
-    }
-  }
-};
 
 const OPEN_ENDED_WEEKS = 52;
 const NO_FIELDS_MESSAGE_REGEX = /^Unable to schedule event because no fields are available(?: for divisions:\s*(.+))?\.$/i;
@@ -569,7 +322,7 @@ const scheduleEventMutating = (request: ScheduleRequest, context: SchedulerConte
   const result = isLeague(event)
     ? buildLeagueSchedule(event, context, isOpenEndedSchedule, includePlaceholderTeams)
     : (() => {
-      ensureTournamentPoolTimeSlotCoverage(event);
+      ensureSplitPlayoffTimeSlotCoverage(event);
       return buildTournamentSchedule(event, context, isOpenEndedSchedule, includePlaceholderTeams);
     })();
   finalizeOpenEndedSchedule(result.event, result.matches);
