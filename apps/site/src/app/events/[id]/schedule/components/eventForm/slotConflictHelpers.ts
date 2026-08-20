@@ -7,9 +7,11 @@ import {
   zonedTimeToUtcDate,
 } from "@/lib/dateUtils";
 import {
-  addRepeatingTimeSlotLocalDays,
   enumerateRepeatingTimeSlotOccurrences,
   getRepeatingTimeSlotLocalDate,
+  RepeatingTimeSlotValidationError,
+  repeatingTimeSlotOccurrencesOverlap,
+  resolveRepeatingTimeSlotValidationWindow,
 } from "@/lib/repeatingTimeSlotAvailability";
 
 import { formatEventDateTimeForForm } from "./dateHelpers";
@@ -48,6 +50,7 @@ export type SlotConflictPayload = {
   parentEvent?: string | null;
   eventStart?: string;
   eventEnd?: string;
+  eventNoFixedEndDateTime?: boolean;
   slots: SlotConflictSnapshot[];
 };
 
@@ -55,6 +58,7 @@ export type SlotConflictContext = {
   eventId: string;
   eventStart?: string;
   eventEnd?: string;
+  eventNoFixedEndDateTime?: boolean;
 };
 
 type BuildSlotConflictPayloadOptions = {
@@ -63,6 +67,7 @@ type BuildSlotConflictPayloadOptions = {
   parentEvent?: string | null;
   eventStart?: string | null;
   eventEnd?: string | null;
+  eventNoFixedEndDateTime?: boolean;
   slots: LeagueSlotForm[];
 };
 
@@ -110,33 +115,17 @@ const resolveSlotWindowRange = (
   const parseBoundary = (value: string | null | undefined): Date | null =>
     value ? parseDateTimeInTimeZone(value, timeZone) : null;
 
-  const start = slot.startDate
-    ? localBoundary(slot.startDate)
-    : parseBoundary(eventStart);
-  if (!start) {
+  const configuredStart = slot.startDate ? localBoundary(slot.startDate) : null;
+  const validationStart = parseBoundary(eventStart) ?? configuredStart;
+  if (!validationStart) {
     return null;
   }
 
-  let end: Date | null;
-  if (slot.endDate) {
-    const endDate = localBoundary(slot.endDate);
-    const endExclusiveDate = endDate
-      ? addRepeatingTimeSlotLocalDays(
-          getRepeatingTimeSlotLocalDate(endDate, timeZone) ?? "",
-          1,
-        )
-      : null;
-    end = endExclusiveDate
-      ? zonedTimeToUtcDate(`${endExclusiveDate}T00:00:00`, timeZone)
-      : null;
-  } else {
-    end = parseBoundary(eventEnd) ?? addMinutesToDate(start, 90 * 24 * 60);
-  }
-  if (!end || end.getTime() <= start.getTime()) {
-    return null;
-  }
-
-  return { start, end };
+  return resolveRepeatingTimeSlotValidationWindow({
+    slot,
+    eventStart: validationStart,
+    eventEnd: parseBoundary(eventEnd),
+  });
 };
 
 const repeatingSlotOverlapsEvent = (
@@ -229,13 +218,15 @@ export const buildSlotConflictPayload = ({
   parentEvent,
   eventStart,
   eventEnd,
+  eventNoFixedEndDateTime,
   slots,
 }: BuildSlotConflictPayloadOptions): SlotConflictPayload => ({
   eventId: eventId ?? "",
   eventType,
   parentEvent: parentEvent ?? null,
   eventStart: eventStart ?? undefined,
-  eventEnd: eventEnd ?? undefined,
+  eventEnd: eventNoFixedEndDateTime ? undefined : (eventEnd ?? undefined),
+  eventNoFixedEndDateTime: eventNoFixedEndDateTime || undefined,
   slots: slots.map(buildSlotConflictSnapshot),
 });
 
@@ -247,13 +238,15 @@ export const buildSlotConflictContext = ({
   eventId,
   eventStart,
   eventEnd,
+  eventNoFixedEndDateTime,
 }: Pick<
   BuildSlotConflictPayloadOptions,
-  "eventId" | "eventStart" | "eventEnd"
+  "eventId" | "eventStart" | "eventEnd" | "eventNoFixedEndDateTime"
 >): SlotConflictContext => ({
   eventId: eventId ?? "",
   eventStart: eventStart ?? undefined,
-  eventEnd: eventEnd ?? undefined,
+  eventEnd: eventNoFixedEndDateTime ? undefined : (eventEnd ?? undefined),
+  eventNoFixedEndDateTime: eventNoFixedEndDateTime || undefined,
 });
 
 export const normalizeSlotBoundaryOverrideForForm = (
@@ -326,45 +319,18 @@ const repeatingSlotsOverlap = (
     contextB.eventStart,
     contextB.eventEnd,
   );
-  if (
-    !slotAWindow ||
-    !slotBWindow ||
-    !slotDateTimeRangesOverlap(
-      slotAWindow.start,
-      slotAWindow.end,
-      slotBWindow.start,
-      slotBWindow.end,
-    )
-  ) {
+  if (!slotAWindow || !slotBWindow) {
     return false;
   }
-  const overlapStart = new Date(
-    Math.max(slotAWindow.start.getTime(), slotBWindow.start.getTime()),
-  );
-  const overlapEnd = new Date(
-    Math.min(slotAWindow.end.getTime(), slotBWindow.end.getTime()),
-  );
 
-  const firstOccurrences = enumerateRepeatingTimeSlotOccurrences({
-    slot: slotA,
-    windowStart: overlapStart,
-    windowEnd: overlapEnd,
+  return repeatingTimeSlotOccurrencesOverlap({
+    firstSlot: slotA,
+    secondSlot: slotB,
+    firstWindow: slotAWindow,
+    secondWindow: slotBWindow,
+    firstOpenEnded: !slotA.endDate && !contextA.eventEnd,
+    secondOpenEnded: !slotB.endDate && !contextB.eventEnd,
   });
-  const secondOccurrences = enumerateRepeatingTimeSlotOccurrences({
-    slot: slotB,
-    windowStart: overlapStart,
-    windowEnd: overlapEnd,
-  });
-  return firstOccurrences.some((first) =>
-    secondOccurrences.some((second) =>
-      slotDateTimeRangesOverlap(
-        first.start,
-        first.end,
-        second.start,
-        second.end,
-      ),
-    ),
-  );
 };
 
 const slotOverlapsExistingSlot = (
@@ -430,10 +396,7 @@ const slotOverlapsExistingSlot = (
     if (!existingRange) {
       return false;
     }
-    return repeatingSlotOverlapsEvent(
-      slot,
-      existingRange,
-    );
+    return repeatingSlotOverlapsEvent(slot, existingRange);
   }
 
   const slotRange =
@@ -442,10 +405,7 @@ const slotOverlapsExistingSlot = (
   if (!slotRange) {
     return false;
   }
-  return repeatingSlotOverlapsEvent(
-    existingSlot,
-    slotRange,
-  );
+  return repeatingSlotOverlapsEvent(existingSlot, slotRange);
 };
 
 const findOverlappingEventSlotForField = (
@@ -477,7 +437,7 @@ const findOverlappingEventSlotForField = (
 
   const eventSlotContext = {
     eventStart: event.start ?? undefined,
-    eventEnd: event.end ?? undefined,
+    eventEnd: event.noFixedEndDateTime ? undefined : (event.end ?? undefined),
   };
 
   for (const eventSlot of event.timeSlots) {
@@ -554,10 +514,7 @@ const slotOverlapsExistingEvent = (
     );
   }
 
-  return repeatingSlotOverlapsEvent(
-    slot,
-    eventRange,
-  );
+  return repeatingSlotOverlapsEvent(slot, eventRange);
 };
 
 export const snapshotToSlotForm = (
@@ -603,9 +560,16 @@ export const slotCanCheckExternalConflicts = (
     return false;
   }
 
-  return Boolean(
-    resolveSlotWindowRange(slot, context.eventStart, context.eventEnd),
-  );
+  try {
+    return Boolean(
+      resolveSlotWindowRange(slot, context.eventStart, context.eventEnd),
+    );
+  } catch (error) {
+    if (error instanceof RepeatingTimeSlotValidationError) {
+      return false;
+    }
+    throw error;
+  }
 };
 
 const minutesFromDate = (value: Date | null): number | undefined => {

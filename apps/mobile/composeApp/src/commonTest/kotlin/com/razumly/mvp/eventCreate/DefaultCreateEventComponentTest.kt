@@ -1799,6 +1799,57 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun given_repeating_slot_in_dst_gap_when_submitted_then_no_event_editor_write_occurs() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        harness.component.setLoadingHandler(harness.loadingHandler)
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        harness.component.selectFieldCount(1)
+        harness.component.setUseManualTimeSlots(true)
+        advance()
+        val localFieldId = harness.component.localFields.value.first().id
+
+        harness.component.updateEventField {
+            copy(
+                divisions = listOf("Open"),
+                start = Instant.parse("2026-03-01T00:00:00Z"),
+                end = Instant.parse("2026-03-15T00:00:00Z"),
+                noFixedEndDateTime = false,
+                timeZone = "America/New_York",
+            )
+        }
+        harness.component.updateLeagueTimeSlot(0) {
+            copy(
+                dayOfWeek = 6,
+                daysOfWeek = listOf(6),
+                startTimeMinutes = 2 * 60 + 30,
+                endTimeMinutes = 4 * 60,
+                startDate = Instant.parse("2026-03-08T05:00:00Z"),
+                endDate = Instant.parse("2026-03-09T04:00:00Z"),
+                timeZone = "America/New_York",
+                scheduledFieldId = localFieldId,
+                scheduledFieldIds = listOf(localFieldId),
+            )
+        }
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        assertTrue(harness.eventRepository.attemptedCreateEventEditorCommands.isEmpty())
+        assertTrue(harness.eventRepository.createEventEditorCalls.isEmpty())
+        assertTrue(harness.eventRepository.createEditorCalls.isEmpty())
+
+        assertTrue(
+            harness.component.errorState.value?.message.orEmpty().contains("2026-03-08"),
+        )
+        assertTrue(
+            harness.component.errorState.value?.message.orEmpty().contains("does not exist"),
+        )
+    }
+
+    @Test
     fun given_added_league_slot_when_event_has_fixed_end_then_default_slot_end_date_uses_event_end_date_only() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()

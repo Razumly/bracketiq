@@ -17,6 +17,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Duration.Companion.days
 import kotlin.time.Instant
 
 internal fun isScheduleEditingLocked(
@@ -114,16 +115,23 @@ internal fun requiresFixedEndRangeValidation(
             )
 }
 
+private const val REPEATING_CONFLICT_HORIZON_DAYS = 370
+
+private data class ConflictWindow(
+    val start: Instant,
+    val end: Instant?,
+)
+
 private data class ConflictInterval(
     val start: Instant,
     val end: Instant,
 )
 
-private fun TimeSlot.resolveConflictWindow(): ConflictInterval? {
+private fun TimeSlot.resolveConflictWindow(): ConflictWindow? {
     if (!repeating) {
         return runCatching {
             resolveOneTimeInterval().let { resolved ->
-                ConflictInterval(resolved.start, resolved.end)
+                ConflictWindow(resolved.start, resolved.end)
             }
         }.getOrNull()
     }
@@ -133,21 +141,25 @@ private fun TimeSlot.resolveConflictWindow(): ConflictInterval? {
     }.getOrNull() ?: return null
     val startLocalDate = startDate.toLocalDateTime(zone).date
     val configuredEndDate = endDate?.toLocalDateTime(zone)?.date
-    val inclusiveEndDate = configuredEndDate ?: startLocalDate.plus(DatePeriod(days = 370))
-    val windowStart = startLocalDate.atStartOfDayIn(zone)
-    val windowEnd = inclusiveEndDate
-        .plus(DatePeriod(days = 1))
-        .atStartOfDayIn(zone)
-    return ConflictInterval(windowStart, windowEnd).takeIf { window ->
-        window.end > window.start
+    if (configuredEndDate != null && configuredEndDate < startLocalDate) {
+        throw RepeatingTimeSlotValidationException(
+            "Repeating Time Slot \"$id\" is invalid: the end date is before the start date.",
+        )
     }
+    val windowStart = startLocalDate.atStartOfDayIn(zone)
+    val windowEnd = configuredEndDate
+        ?.plus(DatePeriod(days = 1))
+        ?.atStartOfDayIn(zone)
+    return ConflictWindow(windowStart, windowEnd)
 }
 
 private fun timeSlotsOverlap(first: TimeSlot, second: TimeSlot): Boolean {
     val firstWindow = first.resolveConflictWindow() ?: return false
     val secondWindow = second.resolveConflictWindow() ?: return false
     val overlapStart = if (firstWindow.start > secondWindow.start) firstWindow.start else secondWindow.start
-    val overlapEnd = if (firstWindow.end < secondWindow.end) firstWindow.end else secondWindow.end
+    val overlapEnd = listOfNotNull(firstWindow.end, secondWindow.end)
+        .minOrNull()
+        ?: (overlapStart + REPEATING_CONFLICT_HORIZON_DAYS.days)
     if (overlapEnd <= overlapStart) {
         return false
     }
@@ -156,13 +168,23 @@ private fun timeSlotsOverlap(first: TimeSlot, second: TimeSlot): Boolean {
         first.enumerateRepeatingTimeSlotOccurrences(overlapStart, overlapEnd)
             .map { occurrence -> ConflictInterval(occurrence.start, occurrence.end) }
     } else {
-        listOf(firstWindow)
+        listOf(
+            ConflictInterval(
+                start = firstWindow.start,
+                end = requireNotNull(firstWindow.end),
+            ),
+        )
     }
     val secondIntervals = if (second.repeating) {
         second.enumerateRepeatingTimeSlotOccurrences(overlapStart, overlapEnd)
             .map { occurrence -> ConflictInterval(occurrence.start, occurrence.end) }
     } else {
-        listOf(secondWindow)
+        listOf(
+            ConflictInterval(
+                start = secondWindow.start,
+                end = requireNotNull(secondWindow.end),
+            ),
+        )
     }
     return firstIntervals.any { firstInterval ->
         secondIntervals.any { secondInterval ->

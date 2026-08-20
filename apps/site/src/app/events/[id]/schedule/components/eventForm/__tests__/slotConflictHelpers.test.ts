@@ -45,6 +45,24 @@ describe("slot conflict helpers", () => {
     ).toBe(true);
   });
 
+  it("does not throw when external eligibility sees invalid repeating bounds", () => {
+    const slot = {
+      ...buildOvernightSlot(),
+      startDate: "2026-03-10",
+      endDate: "2026-03-01",
+    };
+    let eligible = true;
+
+    expect(() => {
+      eligible = slotCanCheckExternalConflicts(slot, {
+        eventId: "event-1",
+        eventStart: "2026-03-01T00:00:00.000Z",
+        eventEnd: "2026-03-10T00:00:00.000Z",
+      });
+    }).not.toThrow();
+    expect(eligible).toBe(false);
+  });
+
   it("reports external conflicts for same-day repeating slots within their bounds", () => {
     const slot = buildSameDaySlot();
     const event = {
@@ -173,5 +191,51 @@ describe("slot conflict helpers", () => {
     );
 
     expect(conflicts).toHaveLength(1);
+  });
+
+  it("reports conflicts for open-ended repeating slots that start far apart", () => {
+    const candidate: LeagueSlotForm = {
+      ...buildSameDaySlot(),
+      key: "slot-open-ended-candidate",
+      daysOfWeek: [6],
+      startDate: "2026-01-04",
+      endDate: undefined,
+      timeZone: "UTC",
+      startTimeMinutes: 10 * 60,
+      endTimeMinutes: 11 * 60,
+    };
+    const event = {
+      $id: "event-open-ended",
+      eventType: "LEAGUE",
+      parentEvent: null,
+      start: "2026-01-01T00:00:00.000Z",
+      end: "2027-01-01T00:00:00.000Z",
+      noFixedEndDateTime: true,
+      timeSlots: [
+        {
+          $id: "existing-open-ended-slot",
+          repeating: true,
+          daysOfWeek: [6],
+          startDate: "2029-01-07",
+          endDate: undefined,
+          timeZone: "UTC",
+          startTimeMinutes: 10 * 60,
+          endTimeMinutes: 11 * 60,
+          scheduledFieldIds: ["field-1"],
+        },
+      ],
+    } as unknown as Event;
+
+    const conflicts = buildExternalSlotConflicts(
+      candidate,
+      new Map([["field-1", [event]]]),
+      {
+        eventId: "event-candidate",
+        eventStart: "2026-01-01T00:00:00.000Z",
+      },
+    );
+
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]?.schedule?.$id).toBe("existing-open-ended-slot");
   });
 });

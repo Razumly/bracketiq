@@ -34,6 +34,13 @@ A human can verify the result by running the focused site and mobile tests. The 
 - [x] (2026-08-18 00:00Z) Record the existing-branch integration sequence and conflict strategy.
 - [x] (2026-08-18 00:00Z) Address review findings by converting the warning test to interaction coverage and centralizing site warning and local-time adapters.
 - [x] (2026-08-18 00:00Z) Rerun the focused site suite and TypeScript validation after the review refactor.
+- [x] (2026-08-20 00:00Z) Reproduce the post-review defects for far-future open-ended slots, external conflict windows, named-zone labels, and mobile conflict bounds.
+- [x] (2026-08-20 00:00Z) Use event and configured local bounds for repeating validation and conflict enumeration.
+- [x] (2026-08-20 00:00Z) Render weekly occurrence labels in each slot's named time zone and add site and mobile regressions.
+
+- [x] (2026-08-20 00:00Z) Extend the open-ended validation horizon from the unpadded configured start.
+- [x] (2026-08-20 00:00Z) Preserve no-fixed-end event bounds during external slot conflict checks.
+- [x] (2026-08-20 00:00Z) Verify that mobile DST-gap submission performs no event-editor write.
 
 ## Surprises & Discoveries
 
@@ -45,7 +52,7 @@ A human can verify the result by running the focused site and mobile tests. The 
   Evidence: the installed 0.8.0 source was inspected before implementation; the implementation must compare round-tripped local components and inspect offsets before accepting a value.
 - Observation: `CreateRentalSlotModal` filled a missing repeating end date while slot props changed because the default non-repeating effect ran before the repeating state update.
   Evidence: the new modal regression observed a synthetic same-day `endDate` in the update payload for an overnight slot with no configured end date.
- 
+
 ## Decision Log
 
 - Decision: Keep one-time slots same-day and change only repeating slots to allow an end time on the next local date.
@@ -69,7 +76,7 @@ A human can verify the result by running the focused site and mobile tests. The 
 - Decision: Centralize the overnight warning formatter and local slot date-time adapter in the canonical repeating-slot helper.
   Rationale: League and rental editors, weekly sessions, and schedule helpers must use one warning and local-time contract.
   Date/Author: 2026-08-18 / Codex.
- 
+
 
 ## Outcomes & Retrospective
 
@@ -86,6 +93,8 @@ A human can verify the result by running the focused site and mobile tests. The 
 - Defect remediation verification on 2026-08-18: the field availability API now returns a structured 400 response for invalid repeating time zones instead of omitting availability. The public rental selection path preserves resolver messages for invalid slots. The site focused suite passed 10 suites and 124 tests. Site TypeScript validation passed. Mobile model and Compose checks passed with `BUILD SUCCESSFUL`.
 - Final acceptance verification on 2026-08-18: 13 site Jest suites and 138 tests passed. Site TypeScript and changed-file ESLint checks passed. The core model check, targeted Compose classes, and complete `:composeApp:testDebugUnitTest` task passed with `BUILD SUCCESSFUL`.
 - Complete site verification remains blocked by the unsynchronized branch suite: 8 failed suites, 19 failed tests, 841 passed tests, and 2 skipped tests.
+
+- Post-review verification on 2026-08-20: the complete focused site suite passed 10 Jest suites and 129 tests. Site TypeScript and formatting checks passed. The mobile create component suite passed 65 tests, including the DST-gap no-write regression.
 
 ## Context and Orientation
 
@@ -180,3 +189,6 @@ Updated on 2026-08-19 after the final bounds and field-calendar regressions. Rec
 Updated on 2026-08-18 after defect remediation. Recorded strict resolver error propagation, slot-identified API diagnostics, the mobile warning fixture, and the latest site and mobile verification counts.
 
 Updated on 2026-08-18 after final acceptance verification. Added repository and field API resolver-error regressions and recorded the complete mobile Compose suite.
+
+
+Updated on 2026-08-20 after the post-review regressions. Recorded the configured-start horizon fix, no-fixed-end external conflict handling, mobile no-write coverage, and focused verification.

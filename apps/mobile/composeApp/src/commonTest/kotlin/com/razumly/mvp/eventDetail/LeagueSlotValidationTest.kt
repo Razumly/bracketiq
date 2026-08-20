@@ -298,6 +298,45 @@ class LeagueSlotValidationTest {
         assertTrue(errors[1]?.contains("does not exist") == true)
     }
 
+    @Test
+    fun given_open_ended_repeating_slots_starting_far_apart_when_weekday_windows_match_then_reports_conflict() {
+        val first = buildSlot(
+            id = "slot-open-ended-first",
+            repeating = true,
+            dayOfWeek = 6,
+            daysOfWeek = listOf(6),
+            startTimeMinutes = 10 * 60,
+            endTimeMinutes = 11 * 60,
+            startDate = Instant.parse("2026-01-04T00:00:00Z"),
+            endDate = null,
+        )
+        val second = buildSlot(
+            id = "slot-open-ended-second",
+            repeating = true,
+            dayOfWeek = 6,
+            daysOfWeek = listOf(6),
+            startTimeMinutes = 10 * 60,
+            endTimeMinutes = 11 * 60,
+            startDate = Instant.parse("2029-01-07T00:00:00Z"),
+            endDate = null,
+        )
+
+        val errors = computeLeagueSlotErrors(
+            slots = listOf(first, second),
+            singleDivision = false,
+            selectedDivisionIds = emptyList(),
+        )
+
+        assertEquals(
+            "Overlaps with another timeslot for one or more selected resources.",
+            errors[0],
+        )
+        assertEquals(
+            "Overlaps with another timeslot for one or more selected resources.",
+            errors[1],
+        )
+    }
+
     private fun buildSlot(
         id: String,
         repeating: Boolean,

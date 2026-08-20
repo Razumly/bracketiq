@@ -5,10 +5,7 @@ import {
   hasBracketConnections as isPlayoffBracketMatch,
   toBracketDivisionKey as toDivisionKey,
 } from "@/lib/bracketViewCore";
-import {
-  formatLocalDateTime,
-  parseLocalDateTime,
-} from "@/lib/dateUtils";
+import { formatLocalDateTime, parseLocalDateTime } from "@/lib/dateUtils";
 import {
   enumerateRepeatingTimeSlotOccurrences,
   getRepeatingTimeSlotLocalDate,
@@ -458,14 +455,26 @@ export const addDays = (value: Date, days: number): Date => {
   return copy;
 };
 
-export const formatWeeklyOccurrenceLabel = (start: Date, end: Date): string => {
+export const formatWeeklyOccurrenceLabel = (
+  start: Date,
+  end: Date,
+  timeZone?: string,
+): string => {
+  const dateTimeOptions = timeZone ? { timeZone } : undefined;
   const dayLabel = start.toLocaleDateString("en-US", {
     weekday: "short",
     month: "numeric",
     day: "numeric",
     year: "2-digit",
+    ...dateTimeOptions,
   });
-  const timeLabel = `${start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}-${end.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}`;
+  const timeLabelOptions = {
+    hour: "numeric" as const,
+    minute: "2-digit" as const,
+    hour12: true,
+    ...dateTimeOptions,
+  };
+  const timeLabel = `${start.toLocaleTimeString("en-US", timeLabelOptions)}-${end.toLocaleTimeString("en-US", timeLabelOptions)}`;
   return `${dayLabel} · ${timeLabel}`;
 };
 
@@ -612,7 +621,11 @@ export const buildWeeklyOccurrenceOptionsInRange = (
         id: `${slotId}:${occurrenceDate}`,
         slotId,
         occurrenceDate,
-        label: formatWeeklyOccurrenceLabel(occurrenceStart, occurrenceEnd),
+        label: formatWeeklyOccurrenceLabel(
+          occurrenceStart,
+          occurrenceEnd,
+          timeZone,
+        ),
         start: formatLocalDateTime(occurrenceStart),
         end: formatLocalDateTime(occurrenceEnd),
         startInstant: occurrenceStart,
@@ -655,7 +668,11 @@ export const buildWeeklyOccurrenceOptionsInRange = (
         id: `${slotId}:${resolved.occurrenceDate}`,
         slotId,
         occurrenceDate: resolved.occurrenceDate,
-        label: formatWeeklyOccurrenceLabel(resolved.start, resolved.end),
+        label: formatWeeklyOccurrenceLabel(
+          resolved.start,
+          resolved.end,
+          normalizeRepeatingTimeSlotTimeZone(slot.timeZone),
+        ),
         start: formatLocalDateTime(resolved.start),
         end: formatLocalDateTime(resolved.end),
         startInstant: resolved.start,
@@ -727,12 +744,12 @@ export const resolveSelectedWeeklyOccurrenceOption = (
   );
 
   let occurrenceDate = selectedOccurrenceDate;
+  const timeZone = normalizeRepeatingTimeSlotTimeZone(matchingSlot.timeZone);
   let start: Date;
   let end: Date;
   let startMinutes: number;
   let endMinutes: number;
   if (matchingSlot.repeating === false) {
-    const timeZone = normalizeRepeatingTimeSlotTimeZone(matchingSlot.timeZone);
     const normalizedSelectedDate = getRepeatingTimeSlotLocalDate(
       selectedOccurrenceDate,
       "UTC",
@@ -803,7 +820,7 @@ export const resolveSelectedWeeklyOccurrenceOption = (
     id: `${selectedSlotId}:${occurrenceDate}`,
     slotId: selectedSlotId,
     occurrenceDate,
-    label: formatWeeklyOccurrenceLabel(start, end),
+    label: formatWeeklyOccurrenceLabel(start, end, timeZone),
     start: formatLocalDateTime(start),
     end: formatLocalDateTime(end),
     startInstant: start,

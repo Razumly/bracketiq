@@ -1,31 +1,31 @@
-import { buildEvent, buildTimeSlot } from '../../../../../../../test/factories';
+import { buildEvent, buildTimeSlot } from "../../../../../../../test/factories";
 
 import {
   buildWeeklyOccurrenceOptionsInRange,
   resolveSelectedWeeklyOccurrenceOption,
-} from '../helpers';
+} from "../helpers";
 
-describe('weekly schedule occurrence options', () => {
-  it('expands repeating slots but includes a fixed supplemental slot only once', () => {
+describe("weekly schedule occurrence options", () => {
+  it("expands repeating slots but includes a fixed supplemental slot only once", () => {
     const event = buildEvent({
-      eventType: 'WEEKLY_EVENT',
+      eventType: "WEEKLY_EVENT",
       parentEvent: null,
       timeSlots: [
         buildTimeSlot({
-          $id: 'slot-weekly',
+          $id: "slot-weekly",
           repeating: true,
           dayOfWeek: undefined,
           daysOfWeek: [0],
-          startDate: '2026-07-13',
-          endDate: '2026-08-31',
+          startDate: "2026-07-13",
+          endDate: "2026-08-31",
         }),
         buildTimeSlot({
-          $id: 'slot-fixed',
+          $id: "slot-fixed",
           repeating: false,
           dayOfWeek: undefined,
           daysOfWeek: [],
-          startDate: '2026-07-15',
-          endDate: '2026-07-15',
+          startDate: "2026-07-15",
+          endDate: "2026-07-15",
           startTimeMinutes: 11 * 60,
           endTimeMinutes: 12 * 60,
         }),
@@ -38,29 +38,33 @@ describe('weekly schedule occurrence options', () => {
       new Date(2026, 6, 31),
     );
 
-    expect(occurrences.filter((occurrence) => occurrence.slotId === 'slot-weekly')).toHaveLength(3);
-    expect(occurrences.filter((occurrence) => occurrence.slotId === 'slot-fixed')).toEqual([
+    expect(
+      occurrences.filter((occurrence) => occurrence.slotId === "slot-weekly"),
+    ).toHaveLength(3);
+    expect(
+      occurrences.filter((occurrence) => occurrence.slotId === "slot-fixed"),
+    ).toEqual([
       expect.objectContaining({
-        id: 'slot-fixed:2026-07-15',
-        occurrenceDate: '2026-07-15',
+        id: "slot-fixed:2026-07-15",
+        occurrenceDate: "2026-07-15",
       }),
     ]);
   });
-  it('keeps repeating overnight occurrences on their local start date', () => {
+  it("keeps repeating overnight occurrences on their local start date", () => {
     const event = buildEvent({
-      eventType: 'WEEKLY_EVENT',
+      eventType: "WEEKLY_EVENT",
       parentEvent: null,
       timeSlots: [
         buildTimeSlot({
-          $id: 'slot-overnight',
+          $id: "slot-overnight",
           repeating: true,
           daysOfWeek: [0],
           dayOfWeek: 0,
-          startDate: '2026-07-13',
-          endDate: '2026-07-31',
+          startDate: "2026-07-13",
+          endDate: "2026-07-31",
           startTimeMinutes: 23 * 60,
           endTimeMinutes: 60,
-          timeZone: 'UTC',
+          timeZone: "UTC",
         }),
       ],
     });
@@ -73,79 +77,78 @@ describe('weekly schedule occurrence options', () => {
 
     expect(occurrences).toEqual([
       expect.objectContaining({
-        id: 'slot-overnight:2026-07-13',
-        occurrenceDate: '2026-07-13',
+        id: "slot-overnight:2026-07-13",
+        occurrenceDate: "2026-07-13",
         startMinutes: 23 * 60,
         endMinutes: 60,
       }),
     ]);
   });
 
-  it('resolves equal repeating start and end times as a full local day', () => {
+  it("resolves equal repeating start and end times as a full local day", () => {
     const event = buildEvent({
-      eventType: 'WEEKLY_EVENT',
+      eventType: "WEEKLY_EVENT",
       parentEvent: null,
       timeSlots: [
         buildTimeSlot({
-          $id: 'slot-full-day',
+          $id: "slot-full-day",
           repeating: true,
           daysOfWeek: [0],
           dayOfWeek: 0,
-          startDate: '2026-07-13',
-          endDate: '2026-07-20',
+          startDate: "2026-07-13",
+          endDate: "2026-07-20",
           startTimeMinutes: 10 * 60,
           endTimeMinutes: 10 * 60,
-          timeZone: 'UTC',
+          timeZone: "UTC",
         }),
       ],
     });
 
     const occurrences = buildWeeklyOccurrenceOptionsInRange(
       event,
-      new Date('2026-07-13T00:00:00.000Z'),
-      new Date('2026-07-27T00:00:00.000Z'),
+      new Date("2026-07-13T00:00:00.000Z"),
+      new Date("2026-07-27T00:00:00.000Z"),
     );
 
     expect(occurrences).toEqual([
       expect.objectContaining({
-        id: 'slot-full-day:2026-07-13',
-        occurrenceDate: '2026-07-13',
+        id: "slot-full-day:2026-07-13",
+        occurrenceDate: "2026-07-13",
         startMinutes: 10 * 60,
         endMinutes: 10 * 60,
       }),
       expect.objectContaining({
-        id: 'slot-full-day:2026-07-20',
-        occurrenceDate: '2026-07-20',
+        id: "slot-full-day:2026-07-20",
+        occurrenceDate: "2026-07-20",
         startMinutes: 10 * 60,
         endMinutes: 10 * 60,
       }),
     ]);
   });
-  it('keeps the selected occurrence instant in the slot time zone', () => {
+  it("keeps the selected occurrence instant in the slot time zone", () => {
     const event = buildEvent({
-      eventType: 'WEEKLY_EVENT',
+      eventType: "WEEKLY_EVENT",
       parentEvent: null,
       timeSlots: [
         buildTimeSlot({
-          $id: 'slot-named-zone',
+          $id: "slot-named-zone",
           repeating: true,
           daysOfWeek: [6],
           dayOfWeek: 6,
-          startDate: '2026-03-08',
-          endDate: '2026-03-15',
+          startDate: "2026-03-08",
+          endDate: "2026-03-15",
           startTimeMinutes: 18 * 60,
           endTimeMinutes: 19 * 60,
-          timeZone: 'America/Los_Angeles',
+          timeZone: "America/Los_Angeles",
         }),
       ],
     });
 
     const selected = resolveSelectedWeeklyOccurrenceOption(event, {
-      slotId: 'slot-named-zone',
-      occurrenceDate: '2026-03-08',
+      slotId: "slot-named-zone",
+      occurrenceDate: "2026-03-08",
     });
 
-    expect(selected?.startInstant.toISOString()).toBe('2026-03-09T01:00:00.000Z');
+    expect(selected?.label).toBe("Sun, 3/8/26 · 6:00 PM-7:00 PM");
   });
 });
-
