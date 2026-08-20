@@ -32,29 +32,34 @@ describe('OrganizationDivisionsPanel loading', () => {
     }) as jest.Mock;
   });
 
-  it('does not reload catalogs when the change callback identity changes', async () => {
+  it('does not reload catalogs and uses the latest callback when only its identity changes', async () => {
+    const { promise: divisionsPromise, resolve: resolveDivisions } = Promise.withResolvers<never[]>();
+    listOrganizationDivisionsMock.mockReturnValue(divisionsPromise);
     const firstOnChanged = jest.fn();
+    const latestOnChanged = jest.fn();
     const { rerender } = render(
       <MantineProvider>
         <OrganizationDivisionsPanel organization={organization} onChanged={firstOnChanged} />
       </MantineProvider>,
     );
 
-    await waitFor(() => {
-      expect(firstOnChanged).toHaveBeenCalledWith([]);
-    });
+    expect(listOrganizationDivisionsMock).toHaveBeenCalledTimes(1);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
 
     rerender(
       <MantineProvider>
-        <OrganizationDivisionsPanel organization={organization} onChanged={jest.fn()} />
+        <OrganizationDivisionsPanel organization={organization} onChanged={latestOnChanged} />
       </MantineProvider>,
     );
     await act(async () => {
-      const { promise, resolve } = Promise.withResolvers<void>();
-      setTimeout(resolve, 25);
-      await promise;
+      resolveDivisions([]);
+      await divisionsPromise;
     });
 
+    await waitFor(() => {
+      expect(latestOnChanged).toHaveBeenCalledWith([]);
+    });
+    expect(firstOnChanged).not.toHaveBeenCalled();
     expect(listOrganizationDivisionsMock).toHaveBeenCalledTimes(1);
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });

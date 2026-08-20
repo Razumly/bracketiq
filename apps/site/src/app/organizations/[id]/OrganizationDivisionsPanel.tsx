@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionIcon,
   Alert,
@@ -74,6 +74,8 @@ export default function OrganizationDivisionsPanel({
   const [expanded, setExpanded] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState(emptyDraft);
+  const onChangedRef = useRef(onChanged);
+  onChangedRef.current = onChanged;
 
   useEffect(() => {
     setExpanded(false);
@@ -92,13 +94,13 @@ export default function OrganizationDivisionsPanel({
         if (!active) return;
         setDivisions(nextDivisions);
         setTypes(nextTypes);
-        onChanged?.(nextDivisions);
+        onChangedRef.current?.(nextDivisions);
       })
       .catch((loadError) => {
         if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load divisions.');
       });
     return () => { active = false; };
-  }, [canManage, onChanged, organization.$id]);
+  }, [canManage, organization.$id]);
 
   const visibleDivisions = useMemo(
     () => divisions.filter((division) => canManage || division.status === 'ACTIVE'),

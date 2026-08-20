@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 
 import { fieldService } from '@/lib/fieldService';
@@ -40,6 +40,16 @@ export const useOrganizationFieldHydration = ({
     setHydratedOrganization,
 }: UseOrganizationFieldHydrationParams) => {
     const [fieldsLoading, setFieldsLoading] = useState(false);
+    const resolvedOrganizationFieldsRef = useRef(resolvedOrganizationFields);
+    const resolvedOrganizationIdRef = useRef(resolvedOrganizationId);
+    const sanitizeFieldsRef = useRef(sanitizeFields);
+    const setFieldsRef = useRef(setFields);
+    const setHydratedOrganizationRef = useRef(setHydratedOrganization);
+    resolvedOrganizationFieldsRef.current = resolvedOrganizationFields;
+    resolvedOrganizationIdRef.current = resolvedOrganizationId;
+    sanitizeFieldsRef.current = sanitizeFields;
+    setFieldsRef.current = setFields;
+    setHydratedOrganizationRef.current = setHydratedOrganization;
 
     useEffect(() => {
         let cancelled = false;
@@ -63,11 +73,11 @@ export const useOrganizationFieldHydration = ({
         }
 
         const hydrateOrganizationFields = async () => {
-            const seededFields = Array.isArray(resolvedOrganizationFields)
-                ? sortFieldsByCreatedAt(sanitizeFields(resolvedOrganizationFields))
+            const seededFields = Array.isArray(resolvedOrganizationFieldsRef.current)
+                ? sortFieldsByCreatedAt(sanitizeFieldsRef.current(resolvedOrganizationFieldsRef.current))
                 : [];
             if (seededFields.length) {
-                setFields(
+                setFieldsRef.current(
                     (previous) => mergeOrganizationFieldsIntoPool(previous, seededFields, organizationId),
                     { shouldDirty: false, shouldValidate: false },
                 );
@@ -84,29 +94,34 @@ export const useOrganizationFieldHydration = ({
                 );
                 if (cancelled) return;
                 if (fetchedOrganization) {
-                    setHydratedOrganization(fetchedOrganization);
+                    setHydratedOrganizationRef.current(fetchedOrganization);
                 }
 
+                const latestSeededFields = Array.isArray(resolvedOrganizationFieldsRef.current)
+                    ? sortFieldsByCreatedAt(
+                        sanitizeFieldsRef.current(resolvedOrganizationFieldsRef.current),
+                    )
+                    : [];
                 let resolvedFields = Array.isArray(fetchedOrganization?.fields)
-                    ? sortFieldsByCreatedAt(sanitizeFields(fetchedOrganization.fields as Field[]))
-                    : seededFields;
+                    ? sortFieldsByCreatedAt(sanitizeFieldsRef.current(fetchedOrganization.fields as Field[]))
+                    : latestSeededFields;
                 if (!resolvedFields.length) {
                     const fallbackOrganizationId = fetchedOrganization?.$id
-                        ?? resolvedOrganizationId
+                        ?? resolvedOrganizationIdRef.current
                         ?? organizationId;
                     if (fallbackOrganizationId) {
                         const fetchedFields = await fieldService.listFields({ organizationId: fallbackOrganizationId });
                         if (cancelled) return;
-                        resolvedFields = sortFieldsByCreatedAt(sanitizeFields(fetchedFields));
+                        resolvedFields = sortFieldsByCreatedAt(sanitizeFieldsRef.current(fetchedFields));
                     }
                 }
                 if (resolvedFields.length) {
-                    setFields(
+                    setFieldsRef.current(
                         (previous) => mergeOrganizationFieldsIntoPool(previous, resolvedFields, organizationId),
                         { shouldDirty: false, shouldValidate: false },
                     );
                 } else {
-                    setFields(
+                    setFieldsRef.current(
                         (previous) => removeOrganizationFieldsFromPool(previous, organizationId),
                         { shouldDirty: false, shouldValidate: false },
                     );
@@ -126,15 +141,9 @@ export const useOrganizationFieldHydration = ({
             cancelled = true;
         };
     }, [
-        _organizationFieldSignature,
         hasRestrictedImmutableFields,
         isEditMode,
         organizationId,
-        resolvedOrganizationFields,
-        resolvedOrganizationId,
-        sanitizeFields,
-        setFields,
-        setHydratedOrganization,
     ]);
 
     return { fieldsLoading };

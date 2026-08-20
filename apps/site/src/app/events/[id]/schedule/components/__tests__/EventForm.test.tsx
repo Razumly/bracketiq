@@ -5204,8 +5204,15 @@ describe('EventForm dirty state', () => {
       fields: [],
     };
     let fieldFetchCount = 0;
+    let organizationFetchCount = 0;
+    const stalledOrganizationRequest = createDeferred<never>();
 
-    (organizationService.getOrganizationByIdForEventForm as jest.Mock).mockResolvedValue(organization);
+    (organizationService.getOrganizationByIdForEventForm as jest.Mock).mockImplementation(() => {
+      organizationFetchCount += 1;
+      return organizationFetchCount === 1
+        ? Promise.resolve({ ...organization, fields: [] })
+        : stalledOrganizationRequest.promise;
+    });
     (organizationService.getOrganizationById as jest.Mock).mockResolvedValue(organization);
     (fieldService.listFields as jest.Mock).mockImplementation(async () => {
       fieldFetchCount += 1;
@@ -5239,6 +5246,7 @@ describe('EventForm dirty state', () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
 
+    expect(organizationService.getOrganizationByIdForEventForm).toHaveBeenCalledTimes(1);
     expect(fieldService.listFields).toHaveBeenCalledTimes(1);
   });
 
