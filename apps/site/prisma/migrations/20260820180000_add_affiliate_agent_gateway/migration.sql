@@ -39,7 +39,7 @@ CREATE TABLE "AffiliateAgentGatewayJobs" (
   "expectedLifecycleGeneration" INTEGER,
   "status" "AffiliateAgentGatewayJobStatus" NOT NULL DEFAULT 'QUEUED',
   "priority" INTEGER NOT NULL DEFAULT 0,
-  "nextAttemptAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "nextAttemptAt" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP,
   "claimGeneration" INTEGER NOT NULL DEFAULT 0,
   "activeClaimId" TEXT,
   "parentClaimId" TEXT,

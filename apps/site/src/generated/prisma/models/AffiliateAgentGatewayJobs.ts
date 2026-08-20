@@ -337,7 +337,7 @@ export type AffiliateAgentGatewayJobsGroupByOutputType = {
   expectedLifecycleGeneration: number | null
   status: $Enums.AffiliateAgentGatewayJobStatus
   priority: number
-  nextAttemptAt: Date
+  nextAttemptAt: Date | null
   claimGeneration: number
   activeClaimId: string | null
   parentClaimId: string | null
@@ -391,7 +391,7 @@ export type AffiliateAgentGatewayJobsWhereInput = {
   expectedLifecycleGeneration?: Prisma.IntNullableFilter<"AffiliateAgentGatewayJobs"> | number | null
   status?: Prisma.EnumAffiliateAgentGatewayJobStatusFilter<"AffiliateAgentGatewayJobs"> | $Enums.AffiliateAgentGatewayJobStatus
   priority?: Prisma.IntFilter<"AffiliateAgentGatewayJobs"> | number
-  nextAttemptAt?: Prisma.DateTimeFilter<"AffiliateAgentGatewayJobs"> | Date | string
+  nextAttemptAt?: Prisma.DateTimeNullableFilter<"AffiliateAgentGatewayJobs"> | Date | string | null
   claimGeneration?: Prisma.IntFilter<"AffiliateAgentGatewayJobs"> | number
   activeClaimId?: Prisma.StringNullableFilter<"AffiliateAgentGatewayJobs"> | string | null
   parentClaimId?: Prisma.StringNullableFilter<"AffiliateAgentGatewayJobs"> | string | null
@@ -422,7 +422,7 @@ export type AffiliateAgentGatewayJobsOrderByWithRelationInput = {
   expectedLifecycleGeneration?: Prisma.SortOrderInput | Prisma.SortOrder
   status?: Prisma.SortOrder
   priority?: Prisma.SortOrder
-  nextAttemptAt?: Prisma.SortOrder
+  nextAttemptAt?: Prisma.SortOrderInput | Prisma.SortOrder
   claimGeneration?: Prisma.SortOrder
   activeClaimId?: Prisma.SortOrderInput | Prisma.SortOrder
   parentClaimId?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -458,7 +458,7 @@ export type AffiliateAgentGatewayJobsWhereUniqueInput = Prisma.AtLeast<{
   expectedLifecycleGeneration?: Prisma.IntNullableFilter<"AffiliateAgentGatewayJobs"> | number | null
   status?: Prisma.EnumAffiliateAgentGatewayJobStatusFilter<"AffiliateAgentGatewayJobs"> | $Enums.AffiliateAgentGatewayJobStatus
   priority?: Prisma.IntFilter<"AffiliateAgentGatewayJobs"> | number
-  nextAttemptAt?: Prisma.DateTimeFilter<"AffiliateAgentGatewayJobs"> | Date | string
+  nextAttemptAt?: Prisma.DateTimeNullableFilter<"AffiliateAgentGatewayJobs"> | Date | string | null
   claimGeneration?: Prisma.IntFilter<"AffiliateAgentGatewayJobs"> | number
   parentClaimId?: Prisma.StringNullableFilter<"AffiliateAgentGatewayJobs"> | string | null
   invocationFailureCount?: Prisma.IntFilter<"AffiliateAgentGatewayJobs"> | number
@@ -487,7 +487,7 @@ export type AffiliateAgentGatewayJobsOrderByWithAggregationInput = {
   expectedLifecycleGeneration?: Prisma.SortOrderInput | Prisma.SortOrder
   status?: Prisma.SortOrder
   priority?: Prisma.SortOrder
-  nextAttemptAt?: Prisma.SortOrder
+  nextAttemptAt?: Prisma.SortOrderInput | Prisma.SortOrder
   claimGeneration?: Prisma.SortOrder
   activeClaimId?: Prisma.SortOrderInput | Prisma.SortOrder
   parentClaimId?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -526,7 +526,7 @@ export type AffiliateAgentGatewayJobsScalarWhereWithAggregatesInput = {
   expectedLifecycleGeneration?: Prisma.IntNullableWithAggregatesFilter<"AffiliateAgentGatewayJobs"> | number | null
   status?: Prisma.EnumAffiliateAgentGatewayJobStatusWithAggregatesFilter<"AffiliateAgentGatewayJobs"> | $Enums.AffiliateAgentGatewayJobStatus
   priority?: Prisma.IntWithAggregatesFilter<"AffiliateAgentGatewayJobs"> | number
-  nextAttemptAt?: Prisma.DateTimeWithAggregatesFilter<"AffiliateAgentGatewayJobs"> | Date | string
+  nextAttemptAt?: Prisma.DateTimeNullableWithAggregatesFilter<"AffiliateAgentGatewayJobs"> | Date | string | null
   claimGeneration?: Prisma.IntWithAggregatesFilter<"AffiliateAgentGatewayJobs"> | number
   activeClaimId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateAgentGatewayJobs"> | string | null
   parentClaimId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateAgentGatewayJobs"> | string | null
@@ -557,7 +557,7 @@ export type AffiliateAgentGatewayJobsCreateInput = {
   expectedLifecycleGeneration?: number | null
   status?: $Enums.AffiliateAgentGatewayJobStatus
   priority?: number
-  nextAttemptAt?: Date | string
+  nextAttemptAt?: Date | string | null
   claimGeneration?: number
   activeClaimId?: string | null
   parentClaimId?: string | null
@@ -588,7 +588,7 @@ export type AffiliateAgentGatewayJobsUncheckedCreateInput = {
   expectedLifecycleGeneration?: number | null
   status?: $Enums.AffiliateAgentGatewayJobStatus
   priority?: number
-  nextAttemptAt?: Date | string
+  nextAttemptAt?: Date | string | null
   claimGeneration?: number
   activeClaimId?: string | null
   parentClaimId?: string | null
@@ -619,7 +619,7 @@ export type AffiliateAgentGatewayJobsUpdateInput = {
   expectedLifecycleGeneration?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   status?: Prisma.EnumAffiliateAgentGatewayJobStatusFieldUpdateOperationsInput | $Enums.AffiliateAgentGatewayJobStatus
   priority?: Prisma.IntFieldUpdateOperationsInput | number
-  nextAttemptAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  nextAttemptAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   claimGeneration?: Prisma.IntFieldUpdateOperationsInput | number
   activeClaimId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   parentClaimId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -650,7 +650,7 @@ export type AffiliateAgentGatewayJobsUncheckedUpdateInput = {
   expectedLifecycleGeneration?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   status?: Prisma.EnumAffiliateAgentGatewayJobStatusFieldUpdateOperationsInput | $Enums.AffiliateAgentGatewayJobStatus
   priority?: Prisma.IntFieldUpdateOperationsInput | number
-  nextAttemptAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  nextAttemptAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   claimGeneration?: Prisma.IntFieldUpdateOperationsInput | number
   activeClaimId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   parentClaimId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -681,7 +681,7 @@ export type AffiliateAgentGatewayJobsCreateManyInput = {
   expectedLifecycleGeneration?: number | null
   status?: $Enums.AffiliateAgentGatewayJobStatus
   priority?: number
-  nextAttemptAt?: Date | string
+  nextAttemptAt?: Date | string | null
   claimGeneration?: number
   activeClaimId?: string | null
   parentClaimId?: string | null
@@ -712,7 +712,7 @@ export type AffiliateAgentGatewayJobsUpdateManyMutationInput = {
   expectedLifecycleGeneration?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   status?: Prisma.EnumAffiliateAgentGatewayJobStatusFieldUpdateOperationsInput | $Enums.AffiliateAgentGatewayJobStatus
   priority?: Prisma.IntFieldUpdateOperationsInput | number
-  nextAttemptAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  nextAttemptAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   claimGeneration?: Prisma.IntFieldUpdateOperationsInput | number
   activeClaimId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   parentClaimId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -743,7 +743,7 @@ export type AffiliateAgentGatewayJobsUncheckedUpdateManyInput = {
   expectedLifecycleGeneration?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   status?: Prisma.EnumAffiliateAgentGatewayJobStatusFieldUpdateOperationsInput | $Enums.AffiliateAgentGatewayJobStatus
   priority?: Prisma.IntFieldUpdateOperationsInput | number
-  nextAttemptAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  nextAttemptAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   claimGeneration?: Prisma.IntFieldUpdateOperationsInput | number
   activeClaimId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   parentClaimId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1012,7 +1012,7 @@ export type $AffiliateAgentGatewayJobsPayload<ExtArgs extends runtime.Types.Exte
     expectedLifecycleGeneration: number | null
     status: $Enums.AffiliateAgentGatewayJobStatus
     priority: number
-    nextAttemptAt: Date
+    nextAttemptAt: Date | null
     claimGeneration: number
     activeClaimId: string | null
     parentClaimId: string | null

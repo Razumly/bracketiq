@@ -221,7 +221,7 @@ const unsupportedDeploymentBundleFixture = (() => {
     deploymentContractFixture;
   const unsupportedDeploymentPreimage = {
     ...deploymentPreimage,
-    version: 2,
+    gatewayVersion: 2,
   };
   return {
     ...contractBundleFixture,
@@ -1027,6 +1027,10 @@ type GatewayClaimTestPrisma = {
     findUnique(input: {
       where: GatewayTestRow;
     }): Promise<GatewayTestRow | null>;
+    findMany(input: {
+      where: GatewayTestRow;
+      take?: number;
+    }): Promise<GatewayTestRow[]>;
     updateMany(input: {
       where: GatewayTestRow;
       data: GatewayTestRow;
@@ -1036,6 +1040,11 @@ type GatewayClaimTestPrisma = {
     findUnique(input: {
       where: GatewayTestRow;
     }): Promise<GatewayTestRow | null>;
+    findFirst(input: { where: GatewayTestRow }): Promise<GatewayTestRow | null>;
+    findMany(input: {
+      where: GatewayTestRow;
+      take?: number;
+    }): Promise<GatewayTestRow[]>;
     create(input: { data: GatewayTestRow }): Promise<GatewayTestRow>;
     updateMany(input: {
       where: GatewayTestRow;
@@ -1054,6 +1063,11 @@ type GatewayClaimTestPrisma = {
     findUnique(input: {
       where: GatewayTestRow;
     }): Promise<GatewayTestRow | null>;
+    findFirst(input: { where: GatewayTestRow }): Promise<GatewayTestRow | null>;
+    findMany(input: {
+      where: GatewayTestRow;
+      take?: number;
+    }): Promise<GatewayTestRow[]>;
     create(input: { data: GatewayTestRow }): Promise<GatewayTestRow>;
     updateMany(input: {
       where: GatewayTestRow;
@@ -1071,17 +1085,25 @@ type GatewayClaimTestPrisma = {
 
 type GatewayClaimHarness = Readonly<{
   gateway: AffiliateAgentGateway;
+  recreateGateway(): AffiliateAgentGateway;
   state: {
     jobs: GatewayTestRow[];
     claims: GatewayTestRow[];
     artifacts: GatewayTestRow[];
     receipts: GatewayTestRow[];
     events: GatewayTestRow[];
+    lifecycleCalls: GatewayTestRow[];
+    lifecycleRecoverReceiptIds: string[];
+    externalStartKeys: string[];
+    externalRecoverKeys: string[];
   };
   artifactBytes: Buffer;
   setNow(value: string): void;
   setArtifactRead(value: AffiliateAgentArtifactRead): void;
   setActiveBundle(value: unknown): void;
+  setExternalCaptureMode(value: "SUCCEED" | "LOSE_RESPONSE" | "UNKNOWN"): void;
+  setLifecycleResponseLoss(value: boolean): void;
+  setClaimCreateError(value: unknown): void;
   request: AffiliateAgentClaimRequest;
 }>;
 
@@ -1102,7 +1124,60 @@ const createGatewayClaimHarness = (): GatewayClaimHarness => {
   let currentTime = new Date("2026-08-20T18:00:00.000Z");
   const initialTime = new Date(currentTime);
   let identifierSequence = 0;
+  let claimCreateError: unknown = null;
+
+  const gatewayTestMatchesWhere = (
+    row: GatewayTestRow,
+    where: GatewayTestRow,
+  ): boolean =>
+    Object.entries(where).every(([key, expected]) => {
+      if (expected === undefined) return true;
+      if (key === "OR" && Array.isArray(expected)) {
+        return expected.some(
+          (alternative) =>
+            alternative !== null &&
+            typeof alternative === "object" &&
+            gatewayTestMatchesWhere(row, alternative as GatewayTestRow),
+        );
+      }
+      const actual = row[key];
+      if (expected instanceof Date) {
+        return (
+          actual instanceof Date && actual.getTime() === expected.getTime()
+        );
+      }
+      if (
+        expected !== null &&
+        typeof expected === "object" &&
+        !Array.isArray(expected)
+      ) {
+        const filter = expected as GatewayTestRow;
+        if (Array.isArray(filter.in) && !filter.in.includes(actual))
+          return false;
+        if (Array.isArray(filter.notIn) && filter.notIn.includes(actual))
+          return false;
+        if (
+          filter.lte instanceof Date &&
+          (!(actual instanceof Date) || actual > filter.lte)
+        )
+          return false;
+        if (
+          filter.lt instanceof Date &&
+          (!(actual instanceof Date) || actual >= filter.lt)
+        )
+          return false;
+        return true;
+      }
+      return actual === expected;
+    });
   const artifactBytes = Buffer.from("verified gateway artifact", "utf8");
+  let externalCaptureMode: "SUCCEED" | "LOSE_RESPONSE" | "UNKNOWN" = "SUCCEED";
+  const externalCaptureEffects = new Map<
+    string,
+    Readonly<Record<string, unknown>>
+  >();
+  let loseLifecycleResponse = false;
+  const lifecycleEffects = new Map<string, Readonly<Record<string, unknown>>>();
   const gatewayEvidenceManifestPreimage = {
     schemaVersion: 1 as const,
     entries: [
@@ -1164,32 +1239,35 @@ const createGatewayClaimHarness = (): GatewayClaimHarness => {
     artifacts: [] as GatewayTestRow[],
     receipts: [] as GatewayTestRow[],
     events: [] as GatewayTestRow[],
+    lifecycleCalls: [] as GatewayTestRow[],
+    lifecycleRecoverReceiptIds: [] as string[],
+    externalStartKeys: [] as string[],
+    externalRecoverKeys: [] as string[],
   };
   const prismaMock: GatewayClaimTestPrisma = {
     affiliateAgentGatewayJobs: {
-      findFirst: async () =>
-        state.jobs.find(
-          (job) =>
-            job.status === "QUEUED" &&
-            job.activeClaimId === null &&
-            job.nextAttemptAt instanceof Date &&
-            job.nextAttemptAt <= currentTime,
-        ) ?? null,
+      findFirst: async ({ where }) =>
+        state.jobs.find((job) => gatewayTestMatchesWhere(job, where)) ?? null,
+      findMany: async ({ where, take }) => {
+        const matches = state.jobs.filter((job) =>
+          gatewayTestMatchesWhere(job, where),
+        );
+        return take === undefined ? matches : matches.slice(0, take);
+      },
       findUnique: async ({ where }) =>
         state.jobs.find((job) => job.id === where.id) ?? null,
       updateMany: async ({ where, data }) => {
-        const job = state.jobs.find(
-          (candidate) =>
-            candidate.id === where.id &&
-            candidate.status === where.status &&
-            candidate.claimGeneration === where.claimGeneration &&
-            candidate.activeClaimId === where.activeClaimId,
+        const job = state.jobs.find((candidate) =>
+          gatewayTestMatchesWhere(candidate, where),
         );
         if (!job) return { count: 0 };
         const claimGenerationIncrement = gatewayTestIncrement(
           data.claimGeneration,
         );
         const eventSequenceIncrement = gatewayTestIncrement(data.eventSequence);
+        const invocationFailureIncrement = gatewayTestIncrement(
+          data.invocationFailureCount,
+        );
         Object.assign(job, data, {
           claimGeneration:
             claimGenerationIncrement !== null
@@ -1199,6 +1277,10 @@ const createGatewayClaimHarness = (): GatewayClaimHarness => {
             eventSequenceIncrement !== null
               ? Number(job.eventSequence) + eventSequenceIncrement
               : (data.eventSequence ?? job.eventSequence),
+          invocationFailureCount:
+            invocationFailureIncrement !== null
+              ? Number(job.invocationFailureCount) + invocationFailureIncrement
+              : (data.invocationFailureCount ?? job.invocationFailureCount),
         });
         return { count: 1 };
       },
@@ -1210,19 +1292,31 @@ const createGatewayClaimHarness = (): GatewayClaimHarness => {
             claim.id === where.id ||
             claim.claimRequestId === where.claimRequestId,
         ) ?? null,
+      findFirst: async ({ where }) =>
+        state.claims.find((claim) => gatewayTestMatchesWhere(claim, where)) ??
+        null,
+      findMany: async ({ where, take }) => {
+        const matches = state.claims.filter((claim) =>
+          gatewayTestMatchesWhere(claim, where),
+        );
+        return take === undefined ? matches : matches.slice(0, take);
+      },
       create: async ({ data }) => {
+        if (claimCreateError !== null) throw claimCreateError;
+        const duplicate = state.claims.some(
+          (claim) =>
+            claim.claimRequestId === data.claimRequestId ||
+            claim.invocationId === data.invocationId ||
+            claim.workspaceId === data.workspaceId ||
+            claim.tokenHash === data.tokenHash,
+        );
+        if (duplicate) throw { code: "P2002" };
         state.claims.push(data);
         return data;
       },
       updateMany: async ({ where, data }) => {
-        const claim = state.claims.find(
-          (candidate) =>
-            candidate.id === where.id &&
-            candidate.status === where.status &&
-            candidate.claimGeneration === where.claimGeneration &&
-            candidate.tokenInvalidatedAt === where.tokenInvalidatedAt &&
-            candidate.leaseExpiresAt instanceof Date &&
-            candidate.hardDeadlineAt instanceof Date,
+        const claim = state.claims.find((candidate) =>
+          gatewayTestMatchesWhere(candidate, where),
         );
         if (!claim) return { count: 0 };
         Object.assign(claim, data);
@@ -1255,6 +1349,11 @@ const createGatewayClaimHarness = (): GatewayClaimHarness => {
     },
     affiliateAgentGatewayOperationReceipts: {
       findUnique: async ({ where }) => {
+        if (typeof where.id === "string") {
+          return (
+            state.receipts.find((receipt) => receipt.id === where.id) ?? null
+          );
+        }
         const compound = where.claimId_idempotencyKey;
         if (
           compound === null ||
@@ -1272,17 +1371,23 @@ const createGatewayClaimHarness = (): GatewayClaimHarness => {
           ) ?? null
         );
       },
+      findFirst: async ({ where }) =>
+        state.receipts.find((receipt) =>
+          gatewayTestMatchesWhere(receipt, where),
+        ) ?? null,
+      findMany: async ({ where, take }) => {
+        const matches = state.receipts.filter((receipt) =>
+          gatewayTestMatchesWhere(receipt, where),
+        );
+        return take === undefined ? matches : matches.slice(0, take);
+      },
       create: async ({ data }) => {
         state.receipts.push(data);
         return data;
       },
       updateMany: async ({ where, data }) => {
-        const receipt = state.receipts.find(
-          (candidate) =>
-            candidate.id === where.id &&
-            candidate.status === where.status &&
-            (where.requestHash === undefined ||
-              candidate.requestHash === where.requestHash),
+        const receipt = state.receipts.find((candidate) =>
+          gatewayTestMatchesWhere(candidate, where),
         );
         if (!receipt) return { count: 0 };
         Object.assign(receipt, data);
@@ -1313,9 +1418,13 @@ const createGatewayClaimHarness = (): GatewayClaimHarness => {
     },
     credentials: {
       verify: async (input) =>
-        input.roleCredential === "coverage-role-credential" &&
-        input.role === "COVERAGE_PLANNER" &&
-        input.executionClass === "PRODUCTION_CODEX",
+        input.roleCredential ===
+          {
+            COVERAGE_PLANNER: "coverage-role-credential",
+            MAPPING_PRODUCER: "mapping-role-credential",
+            SUPPLY_REVIEWER: "review-role-credential",
+            HUMAN_DIRECTED_EXECUTOR: "human-role-credential",
+          }[input.role] && input.executionClass === "PRODUCTION_CODEX",
     },
     workspaces: {
       verify: async (attestation) =>
@@ -1335,14 +1444,72 @@ const createGatewayClaimHarness = (): GatewayClaimHarness => {
             queryCompleted: true,
           }),
         },
+        VALIDATE_DECLARATIVE_PACKAGE: {
+          execute: async ({ command }) => ({
+            valid: true,
+            validatedPackageHash: hashAffiliateAgentValue(
+              command.data.candidatePackage,
+            ),
+          }),
+        },
+        COMMIT_DECLARATIVE_PACKAGE: {
+          execute: async ({ command }) => ({
+            packageHash: command.data.validatedPackageHash,
+            committed: true,
+          }),
+        },
       },
-      external: {},
+      external: {
+        CAPTURE_CLAIM_URL: {
+          start: async (externalOperationKey) => {
+            state.externalStartKeys.push(externalOperationKey);
+            const output = {
+              evidenceRef: "capture-evidence-1",
+              artifactId: "capture-file-1",
+              sha256: createHash("sha256").update(artifactBytes).digest("hex"),
+              mimeType: "text/markdown",
+              byteSize: artifactBytes.byteLength,
+            };
+            if (externalCaptureMode !== "UNKNOWN") {
+              externalCaptureEffects.set(externalOperationKey, output);
+            }
+            if (externalCaptureMode !== "SUCCEED") {
+              throw new Error("Simulated response loss.");
+            }
+            return output;
+          },
+          recover: async (externalOperationKey) => {
+            state.externalRecoverKeys.push(externalOperationKey);
+            return externalCaptureEffects.get(externalOperationKey) ?? null;
+          },
+        },
+      },
     },
-    lifecycle: { kind: "UNAVAILABLE" },
+    lifecycle: {
+      kind: "AVAILABLE",
+      currentGeneration: async () => 7,
+      execute: async (input) => {
+        state.lifecycleCalls.push(input);
+        const output = {
+          receiptId: input.receiptId,
+          lifecycleGeneration: 8,
+        };
+        lifecycleEffects.set(input.receiptId, output);
+        if (loseLifecycleResponse) {
+          throw new Error("Simulated lifecycle response loss.");
+        }
+        return output;
+      },
+      recover: async (receiptId) => {
+        state.lifecycleRecoverReceiptIds.push(receiptId);
+        return lifecycleEffects.get(receiptId) ?? null;
+      },
+    },
   });
 
   return {
     gateway: createPrismaAffiliateAgentGateway(dependencies),
+    recreateGateway: () => createPrismaAffiliateAgentGateway(dependencies),
     state,
     artifactBytes,
     setNow: (value: string) => {
@@ -1350,6 +1517,15 @@ const createGatewayClaimHarness = (): GatewayClaimHarness => {
     },
     setArtifactRead: (value: AffiliateAgentArtifactRead) => {
       artifactRead = value;
+    },
+    setExternalCaptureMode: (value) => {
+      externalCaptureMode = value;
+    },
+    setLifecycleResponseLoss: (value) => {
+      loseLifecycleResponse = value;
+    },
+    setClaimCreateError: (value) => {
+      claimCreateError = value;
     },
     setActiveBundle: (value: unknown) => {
       activeBundle = value;
@@ -1519,6 +1695,86 @@ describe("Prisma affiliate Agent Gateway", () => {
     });
   });
 
+  it("does not treat an unrelated Prisma unique violation as a lost claim race", async () => {
+    const harness = createGatewayClaimHarness();
+    harness.setClaimCreateError({
+      code: "P2002",
+      meta: { target: ["tokenHash"] },
+    });
+
+    await expect(harness.gateway.claim(harness.request)).rejects.toMatchObject({
+      code: "INTERNAL_ERROR",
+      retryable: true,
+    });
+  });
+
+  it("rejects an exact claim replay after an active contract changes", async () => {
+    const harness = createGatewayClaimHarness();
+    await harness.gateway.claim(harness.request);
+    harness.setActiveBundle(supplyContractStaleBundleFixture);
+
+    await expect(harness.gateway.claim(harness.request)).rejects.toMatchObject({
+      code: "SUPPLY_CONTRACT_STALE",
+      safeMessage: expect.any(String),
+    });
+  });
+
+  it("returns typed denials when an invocation or workspace identity is reused", async () => {
+    const cases = [
+      {
+        expectedCode: "INVOCATION_MISMATCH",
+        request: (request: AffiliateAgentClaimRequest) => ({
+          ...request,
+          idempotencyKey: "claim-request-reused-invocation",
+          workspaceAttestation: {
+            ...request.workspaceAttestation,
+            workspaceId: "coverage-workspace-2",
+          },
+        }),
+      },
+      {
+        expectedCode: "REVIEW_WORKSPACE_INVALID",
+        request: (request: AffiliateAgentClaimRequest) => ({
+          ...request,
+          idempotencyKey: "claim-request-reused-workspace",
+          invocationId: "coverage-invocation-2",
+          workspaceAttestation: {
+            ...request.workspaceAttestation,
+            invocationId: "coverage-invocation-2",
+          },
+        }),
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const harness = createGatewayClaimHarness();
+      await harness.gateway.claim(harness.request);
+      const initialJob = harness.state.jobs[0];
+      harness.state.jobs.push({
+        ...initialJob,
+        id: "gateway-job-2",
+        dedupeKey: "coverage:coverage-cell-2:assessment-cycle-1",
+        subjectId: "coverage-cell-2",
+        subjectJson: {
+          type: "COVERAGE_PLANNER",
+          coverageCellId: "coverage-cell-2",
+          assessmentCycleId: "assessment-cycle-1",
+        },
+        status: "QUEUED",
+        claimGeneration: 0,
+        activeClaimId: null,
+        eventSequence: 0,
+      });
+
+      await expect(
+        harness.gateway.claim(testCase.request(harness.request)),
+      ).rejects.toMatchObject({
+        code: testCase.expectedCode,
+        safeMessage: expect.any(String),
+      });
+    }
+  });
+
   it("denies invalid role credentials, workspaces, and offline execution before selection", async () => {
     const invalidRequests: readonly {
       expectedCode: string;
@@ -1565,10 +1821,185 @@ describe("Prisma affiliate Agent Gateway", () => {
     }
   });
 
+  it("enforces reviewer worker, invocation, workspace, attestation, and manifest isolation", async () => {
+    const reviewerManifestPreimage = {
+      schemaVersion: 1 as const,
+      entries: [
+        "ACTIVE_SUPPLY_CONTRACT",
+        "COMMITTED_PACKAGE",
+        "DETERMINISTIC_VALIDATION",
+        "DURABLE_EVIDENCE",
+      ].map((kind, index) => ({
+        evidenceRef: `review-evidence-${index + 1}`,
+        kind,
+        artifactId: `review-file-${index + 1}`,
+        sha256: String(index + 1).repeat(64),
+        mimeType: "application/json",
+        byteSize: 10,
+        retention: "INDEFINITE",
+      })),
+    };
+    const reviewerManifest = {
+      ...reviewerManifestPreimage,
+      hash: hashAffiliateAgentValue(reviewerManifestPreimage),
+    };
+    const configureReviewerJob = (harness: GatewayClaimHarness): void => {
+      Object.assign(harness.state.jobs[0], {
+        queue: "AFFILIATE_REVIEW",
+        lane: "SUPPLY_REVIEW",
+        role: "SUPPLY_REVIEWER",
+        subjectType: "SUPPLY_REVIEWER",
+        subjectId: "supply-source-1",
+        subjectJson: claimRoleFields.SUPPLY_REVIEWER.subject,
+        evidenceManifestJson: reviewerManifest,
+        supplySourceId: "supply-source-1",
+        expectedLifecycleGeneration: 7,
+      });
+    };
+    const reviewerRequest = (
+      overrides: Partial<AffiliateAgentClaimRequest> = {},
+    ): AffiliateAgentClaimRequest => {
+      const workerId = overrides.workerId ?? "review-worker-1";
+      const invocationId = overrides.invocationId ?? "review-invocation-1";
+      const workspaceId =
+        overrides.workspaceAttestation?.workspaceId ?? "review-workspace-1";
+      return {
+        idempotencyKey: "review-claim-request-1",
+        roleCredential: "review-role-credential",
+        role: "SUPPLY_REVIEWER",
+        workerId,
+        invocationId,
+        workspaceAttestation: {
+          schemaVersion: 1,
+          workspaceId,
+          mode: "READ_ONLY",
+          executionClass: "PRODUCTION_CODEX",
+          workerId,
+          invocationId,
+          issuedAt: "2026-08-20T17:59:00.000Z",
+          expiresAt: "2026-08-20T18:20:00.000Z",
+          signature: "valid-workspace-signature",
+        },
+        ...overrides,
+      };
+    };
+    const reuseCases = [
+      {
+        expectedCode: "PRODUCER_REVIEWER_IDENTITY_REUSED",
+        request: reviewerRequest({
+          workerId: "producer-worker-1",
+        }),
+      },
+      {
+        expectedCode: "PRODUCER_REVIEWER_IDENTITY_REUSED",
+        request: reviewerRequest({
+          invocationId: "producer-invocation-1",
+        }),
+      },
+      {
+        expectedCode: "REVIEW_WORKSPACE_INVALID",
+        request: reviewerRequest({
+          workspaceAttestation: {
+            ...reviewerRequest().workspaceAttestation,
+            workspaceId: "producer-workspace-1",
+          },
+        }),
+      },
+    ];
+
+    for (const reuseCase of reuseCases) {
+      const harness = createGatewayClaimHarness();
+      configureReviewerJob(harness);
+      await expect(
+        harness.gateway.claim(reuseCase.request),
+      ).rejects.toMatchObject({
+        code: reuseCase.expectedCode,
+        safeMessage: expect.any(String),
+      });
+    }
+
+    const writableHarness = createGatewayClaimHarness();
+    configureReviewerJob(writableHarness);
+    await expect(
+      writableHarness.gateway.claim({
+        ...reviewerRequest(),
+        workspaceAttestation: {
+          ...reviewerRequest().workspaceAttestation,
+          mode: "READ_WRITE",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "REVIEW_WORKSPACE_INVALID" });
+
+    const harness = createGatewayClaimHarness();
+    configureReviewerJob(harness);
+    const grant = await harness.gateway.claim(reviewerRequest());
+    expect(
+      grant?.envelope.evidenceManifest.entries.map(({ kind }) => kind),
+    ).toEqual([
+      "ACTIVE_SUPPLY_CONTRACT",
+      "COMMITTED_PACKAGE",
+      "DETERMINISTIC_VALIDATION",
+      "DURABLE_EVIDENCE",
+    ]);
+    expect(harness.state.claims[0]).toMatchObject({
+      role: "SUPPLY_REVIEWER",
+      workspaceMode: "READ_ONLY",
+      workerId: "review-worker-1",
+      invocationId: "review-invocation-1",
+      workspaceId: "review-workspace-1",
+    });
+    if (!grant) throw new Error("Expected one Supply Reviewer claim.");
+    const reviewerTerminal = {
+      kind: "SUBMIT_RESULT" as const,
+      idempotencyKey: "reviewer-terminal-1",
+      authorization: gatewayAuthorizationFor(grant),
+      result: {
+        schemaVersion: 1 as const,
+        jobId: grant.envelope.jobId,
+        claimId: grant.envelope.claimId,
+        claimGeneration: grant.envelope.claimGeneration,
+        lifecycleGeneration: grant.envelope.lifecycleGeneration,
+        role: grant.envelope.role,
+        roleContractVersion: grant.envelope.roleContractVersion,
+        roleContractHash: grant.envelope.roleContractHash,
+        supplyContractHash: grant.envelope.supplyContractHash,
+        workerId: grant.envelope.workerId,
+        invocationId: grant.envelope.invocationId,
+        disposition: "APPROVED" as const,
+        reasonCodes: ["EVIDENCE_VERIFIED"],
+        evidenceRefs: ["review-evidence-2"],
+        summary: "The committed mapping package passed independent review.",
+        payload: {
+          committedPackageHash: "d".repeat(64),
+        },
+      },
+    };
+    await expect(
+      harness.gateway.perform(reviewerTerminal),
+    ).rejects.toMatchObject({
+      code: "TERMINAL_DISPOSITION_NOT_PERMITTED",
+      safeMessage: expect.any(String),
+    });
+    const accepted = await harness.gateway.perform({
+      ...reviewerTerminal,
+      result: {
+        ...reviewerTerminal.result,
+        payload: {
+          committedPackageHash:
+            claimRoleFields.SUPPLY_REVIEWER.subject.committedPackageHash,
+        },
+      },
+    });
+    expect(accepted).toMatchObject({
+      kind: "TERMINAL_ACCEPTED",
+      disposition: "APPROVED",
+    });
+  });
   it("fails closed when the active contract bundle is incomplete, unsupported, or mismatched", async () => {
     const mismatchedDeployments = [
       {
         ...deploymentContractFixture,
+
         activeSupplyContract: {
           version: 2,
           hash: "d".repeat(64),
@@ -1625,6 +2056,412 @@ describe("Prisma affiliate Agent Gateway", () => {
       });
       expect(harness.state.claims).toHaveLength(0);
     }
+  });
+  it("claims Mapping Producer work, validates and commits one declarative package, and replays its terminal result", async () => {
+    const harness = createGatewayClaimHarness();
+    Object.assign(harness.state.jobs[0], {
+      queue: "AFFILIATE_MAPPING",
+      lane: "MAPPING_PRODUCTION",
+      role: "MAPPING_PRODUCER",
+      subjectType: "MAPPING_PRODUCER",
+      subjectId: "mapping-job-1",
+      subjectJson: claimRoleFields.MAPPING_PRODUCER.subject,
+      supplySourceId: "supply-source-1",
+      expectedLifecycleGeneration: 7,
+    });
+    const request: AffiliateAgentClaimRequest = {
+      idempotencyKey: "mapping-claim-request-1",
+      roleCredential: "mapping-role-credential",
+      role: "MAPPING_PRODUCER",
+      workerId: "mapping-worker-1",
+      invocationId: "mapping-invocation-1",
+      workspaceAttestation: {
+        schemaVersion: 1,
+        workspaceId: "mapping-workspace-1",
+        mode: "READ_WRITE",
+        executionClass: "PRODUCTION_CODEX",
+        workerId: "mapping-worker-1",
+        invocationId: "mapping-invocation-1",
+        issuedAt: "2026-08-20T17:59:00.000Z",
+        expiresAt: "2026-08-20T18:20:00.000Z",
+        signature: "valid-workspace-signature",
+      },
+    };
+    const grant = await harness.gateway.claim(request);
+    if (!grant) throw new Error("Expected one Mapping Producer claim.");
+    const authorization = gatewayAuthorizationFor(grant);
+    const candidatePackage = {
+      schemaVersion: 1 as const,
+      supplySourceId: "supply-source-1",
+      listingKind: "EVENT" as const,
+      listUrlRef: "list-url-1",
+      itemSelector: ".event-card",
+      fields: [
+        {
+          field: "title" as const,
+          selector: ".event-title",
+          mode: "TEXT" as const,
+          attribute: null,
+          transform: "TRIM" as const,
+        },
+      ],
+      evidenceRefs: ["evidence-1"],
+    };
+    const packageHash = hashAffiliateAgentValue(candidatePackage);
+    const validation = await harness.gateway.perform({
+      kind: "EXECUTE_COMMAND",
+      idempotencyKey: "mapping-validate-1",
+      authorization,
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: {
+          candidatePackage,
+          evidenceManifestHash: grant.envelope.evidenceManifest.hash,
+        },
+      },
+    });
+    expect(validation).toMatchObject({
+      kind: "COMMAND_SUCCEEDED",
+      commandType: "VALIDATE_DECLARATIVE_PACKAGE",
+      safeOutput: { valid: true, validatedPackageHash: packageHash },
+    });
+    const committed = await harness.gateway.perform({
+      kind: "EXECUTE_COMMAND",
+      idempotencyKey: "mapping-commit-1",
+      authorization,
+      command: {
+        type: "COMMIT_DECLARATIVE_PACKAGE",
+        data: {
+          validationReceiptId: validation.receiptId,
+          validatedPackageHash: packageHash,
+        },
+      },
+    });
+    expect(committed).toMatchObject({
+      kind: "COMMAND_SUCCEEDED",
+      commandType: "COMMIT_DECLARATIVE_PACKAGE",
+      safeOutput: { packageHash, committed: true },
+    });
+    const resultOperation = {
+      kind: "SUBMIT_RESULT" as const,
+      idempotencyKey: "mapping-terminal-1",
+      authorization,
+      result: {
+        schemaVersion: 1 as const,
+        jobId: grant.envelope.jobId,
+        claimId: grant.envelope.claimId,
+        claimGeneration: grant.envelope.claimGeneration,
+        lifecycleGeneration: grant.envelope.lifecycleGeneration,
+        role: grant.envelope.role,
+        roleContractVersion: grant.envelope.roleContractVersion,
+        roleContractHash: grant.envelope.roleContractHash,
+        supplyContractHash: grant.envelope.supplyContractHash,
+        workerId: grant.envelope.workerId,
+        invocationId: grant.envelope.invocationId,
+        disposition: "PACKAGE_COMMITTED" as const,
+        reasonCodes: ["SCHEMA_VALIDATED"],
+        evidenceRefs: ["evidence-1"],
+        summary: "The declarative mapping package is committed.",
+        payload: {
+          packageHash,
+          commitReceiptId: committed.receiptId,
+        },
+      },
+    };
+    const accepted = await harness.gateway.perform(resultOperation);
+    expect(accepted).toMatchObject({
+      kind: "TERMINAL_ACCEPTED",
+      disposition: "PACKAGE_COMMITTED",
+    });
+    expect(await harness.gateway.perform(resultOperation)).toEqual(accepted);
+    expect(harness.state.jobs[0]?.invocationFailureCount).toBe(0);
+  });
+
+  it("executes one exact human lifecycle command and records both identities", async () => {
+    const harness = createGatewayClaimHarness();
+    const humanManifestPreimage = {
+      schemaVersion: 1 as const,
+      entries: [
+        "ACTIVE_SUPPLY_CONTRACT",
+        "HUMAN_DECISION",
+        "REVIEWER_EVIDENCE",
+      ].map((kind, index) => ({
+        evidenceRef: `human-evidence-${index + 1}`,
+        kind,
+        artifactId: `human-file-${index + 1}`,
+        sha256: String(index + 5).repeat(64),
+        mimeType: "application/json",
+        byteSize: 10,
+        retention: "INDEFINITE",
+      })),
+    };
+    Object.assign(harness.state.jobs[0], {
+      queue: "AFFILIATE_HUMAN_DIRECTED",
+      lane: "HUMAN_EXECUTION",
+      role: "HUMAN_DIRECTED_EXECUTOR",
+      subjectType: "HUMAN_DIRECTED_EXECUTOR",
+      subjectId: "case-1",
+      subjectJson: claimRoleFields.HUMAN_DIRECTED_EXECUTOR.subject,
+      evidenceManifestJson: {
+        ...humanManifestPreimage,
+        hash: hashAffiliateAgentValue(humanManifestPreimage),
+      },
+      supplySourceId: "supply-source-1",
+      expectedLifecycleGeneration: 7,
+    });
+    const request: AffiliateAgentClaimRequest = {
+      idempotencyKey: "human-claim-request-1",
+      roleCredential: "human-role-credential",
+      role: "HUMAN_DIRECTED_EXECUTOR",
+      workerId: "human-worker-1",
+      invocationId: "human-invocation-1",
+      workspaceAttestation: {
+        schemaVersion: 1,
+        workspaceId: "human-workspace-1",
+        mode: "READ_WRITE",
+        executionClass: "PRODUCTION_CODEX",
+        workerId: "human-worker-1",
+        invocationId: "human-invocation-1",
+        issuedAt: "2026-08-20T17:59:00.000Z",
+        expiresAt: "2026-08-20T18:20:00.000Z",
+        signature: "valid-workspace-signature",
+      },
+    };
+    const grant = await harness.gateway.claim(request);
+    if (!grant) throw new Error("Expected one Human-directed Executor claim.");
+    const authorization = gatewayAuthorizationFor(grant);
+    await expect(
+      harness.gateway.perform({
+        kind: "EXECUTE_COMMAND",
+        idempotencyKey: "human-lifecycle-wrong-decision",
+        authorization,
+        command: {
+          type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND",
+          data: {
+            caseId: "case-1",
+            decisionHash: "d".repeat(64),
+            lifecycleCommandRef: "lifecycle-command-1",
+          },
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "COMMAND_NOT_PERMITTED",
+      safeMessage: expect.any(String),
+    });
+    const lifecycleOperation = {
+      kind: "EXECUTE_COMMAND" as const,
+      idempotencyKey: "human-lifecycle-1",
+      authorization,
+      command: {
+        type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND" as const,
+        data: {
+          caseId: "case-1",
+          decisionHash:
+            claimRoleFields.HUMAN_DIRECTED_EXECUTOR.subject.decisionHash,
+          lifecycleCommandRef: "lifecycle-command-1",
+        },
+      },
+    };
+    const executed = await harness.gateway.perform(lifecycleOperation);
+    expect(executed).toMatchObject({
+      kind: "COMMAND_SUCCEEDED",
+      commandType: "EXECUTE_RECORDED_LIFECYCLE_COMMAND",
+    });
+    expect(await harness.gateway.perform(lifecycleOperation)).toEqual(executed);
+    expect(harness.state.lifecycleCalls).toHaveLength(1);
+
+    const humanTerminal = {
+      kind: "SUBMIT_RESULT" as const,
+      idempotencyKey: "human-terminal-1",
+      authorization,
+      result: {
+        schemaVersion: 1 as const,
+        jobId: grant.envelope.jobId,
+        claimId: grant.envelope.claimId,
+        claimGeneration: grant.envelope.claimGeneration,
+        lifecycleGeneration: grant.envelope.lifecycleGeneration,
+        role: grant.envelope.role,
+        roleContractVersion: grant.envelope.roleContractVersion,
+        roleContractHash: grant.envelope.roleContractHash,
+        supplyContractHash: grant.envelope.supplyContractHash,
+        workerId: grant.envelope.workerId,
+        invocationId: grant.envelope.invocationId,
+        disposition: "LIFECYCLE_COMMAND_EXECUTED" as const,
+        reasonCodes: ["EVIDENCE_VERIFIED"],
+        evidenceRefs: ["human-evidence-2", "human-evidence-3"],
+        summary: "The recorded lifecycle command completed.",
+        payload: {
+          caseId: "case-1",
+          lifecycleCommandRef: "lifecycle-command-1",
+          receiptId: "wrong-receipt",
+        },
+      },
+    };
+    await expect(harness.gateway.perform(humanTerminal)).rejects.toMatchObject({
+      code: "TERMINAL_DISPOSITION_NOT_PERMITTED",
+      safeMessage: expect.any(String),
+    });
+    const accepted = await harness.gateway.perform({
+      ...humanTerminal,
+      result: {
+        ...humanTerminal.result,
+        payload: {
+          ...humanTerminal.result.payload,
+          receiptId: executed.receiptId,
+        },
+      },
+    });
+    expect(accepted).toMatchObject({
+      kind: "TERMINAL_ACCEPTED",
+      disposition: "LIFECYCLE_COMMAND_EXECUTED",
+    });
+    expect(harness.state.events).toContainEqual(
+      expect.objectContaining({
+        eventType: "LIFECYCLE_COMMAND_SUCCEEDED",
+        actorId: "human-invocation-1",
+        payload: expect.objectContaining({
+          recordedHumanActorId: "user-1",
+        }),
+      }),
+    );
+  });
+
+  it("recovers a lost lifecycle response after restart without executing twice", async () => {
+    const harness = createGatewayClaimHarness();
+    harness.setLifecycleResponseLoss(true);
+    const humanManifestPreimage = {
+      schemaVersion: 1 as const,
+      entries: ["HUMAN_DECISION", "REVIEWER_EVIDENCE"].map((kind, index) => ({
+        evidenceRef: `lifecycle-recovery-evidence-${index + 1}`,
+        kind,
+        artifactId: `lifecycle-recovery-file-${index + 1}`,
+        sha256: String(index + 7).repeat(64),
+        mimeType: "application/json",
+        byteSize: 10,
+        retention: "INDEFINITE",
+      })),
+    };
+    Object.assign(harness.state.jobs[0], {
+      queue: "AFFILIATE_HUMAN_DIRECTED",
+      lane: "HUMAN_EXECUTION",
+      role: "HUMAN_DIRECTED_EXECUTOR",
+      subjectType: "HUMAN_DIRECTED_EXECUTOR",
+      subjectId: "case-1",
+      subjectJson: claimRoleFields.HUMAN_DIRECTED_EXECUTOR.subject,
+      evidenceManifestJson: {
+        ...humanManifestPreimage,
+        hash: hashAffiliateAgentValue(humanManifestPreimage),
+      },
+      supplySourceId: "supply-source-1",
+      expectedLifecycleGeneration: 7,
+    });
+    const request: AffiliateAgentClaimRequest = {
+      ...harness.request,
+      idempotencyKey: "lifecycle-recovery-claim",
+      roleCredential: "human-role-credential",
+      role: "HUMAN_DIRECTED_EXECUTOR",
+      workerId: "lifecycle-recovery-worker",
+      invocationId: "lifecycle-recovery-invocation",
+      workspaceAttestation: {
+        ...harness.request.workspaceAttestation,
+        workspaceId: "lifecycle-recovery-workspace",
+        workerId: "lifecycle-recovery-worker",
+        invocationId: "lifecycle-recovery-invocation",
+      },
+    };
+    const grant = await harness.gateway.claim(request);
+    if (!grant) throw new Error("Expected one Human-directed Executor claim.");
+    const operation = {
+      kind: "EXECUTE_COMMAND" as const,
+      idempotencyKey: "lifecycle-recovery-command",
+      authorization: gatewayAuthorizationFor(grant),
+      command: {
+        type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND" as const,
+        data: {
+          caseId: "case-1",
+          decisionHash:
+            claimRoleFields.HUMAN_DIRECTED_EXECUTOR.subject.decisionHash,
+          lifecycleCommandRef: "lifecycle-command-1",
+        },
+      },
+    };
+    await expect(harness.gateway.perform(operation)).rejects.toMatchObject({
+      code: "PARTIAL_COMMAND_UNRESOLVED",
+      receiptId: expect.any(String),
+    });
+    harness.setNow("2026-08-20T18:01:00.000Z");
+
+    const restarted = harness.recreateGateway();
+    expect(await restarted.reconcile({ limit: 10 })).toMatchObject({
+      examinedReceipts: 1,
+      recoveredReceipts: 1,
+      completedReceipts: 1,
+      unresolvedReceipts: 0,
+    });
+    expect(harness.state.lifecycleCalls).toHaveLength(1);
+    expect(harness.state.lifecycleRecoverReceiptIds).toHaveLength(1);
+    expect(await restarted.perform(operation)).toMatchObject({
+      kind: "COMMAND_SUCCEEDED",
+      commandType: "EXECUTE_RECORDED_LIFECYCLE_COMMAND",
+    });
+    expect(harness.state.lifecycleCalls).toHaveLength(1);
+    expect(await restarted.reconcile({ limit: 10 })).toMatchObject({
+      examinedReceipts: 0,
+      recoveredReceipts: 0,
+      completedReceipts: 0,
+    });
+  });
+
+  it("admits independently versioned active Supply and deployment contracts", async () => {
+    const { hash: _supplyHash, ...supplyPreimageV1 } = supplyContractFixture;
+    const supplyPreimage = { ...supplyPreimageV1, version: 2 };
+    const supplyContract = {
+      ...supplyPreimage,
+      hash: hashAffiliateAgentValue(supplyPreimage),
+    };
+    const { hash: _deploymentHash, ...deploymentPreimageV1 } =
+      deploymentContractFixture;
+    const deploymentPreimage = {
+      ...deploymentPreimageV1,
+      version: 3,
+      activeSupplyContract: {
+        version: supplyContract.version,
+        hash: supplyContract.hash,
+      },
+    };
+    const harness = createGatewayClaimHarness();
+    harness.setActiveBundle({
+      ...contractBundleFixture,
+      supplyContract,
+      deploymentContract: {
+        ...deploymentPreimage,
+        hash: hashAffiliateAgentValue(deploymentPreimage),
+      },
+    });
+
+    const grant = await harness.gateway.claim(harness.request);
+
+    expect(grant?.envelope).toMatchObject({
+      supplyContractVersion: 2,
+      deploymentContractVersion: 3,
+    });
+  });
+  it("rejects an invalid heartbeat idempotency identifier", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+
+    await expect(
+      harness.gateway.perform({
+        kind: "HEARTBEAT",
+        idempotencyKey: " ",
+        authorization: gatewayAuthorizationFor(grant),
+      }),
+    ).rejects.toMatchObject({
+      code: "ROLE_NOT_ALLOWED",
+      safeMessage: expect.any(String),
+    });
+    expect(harness.state.receipts).toHaveLength(0);
   });
 
   it("extends an active lease to five minutes after a heartbeat", async () => {
@@ -1707,6 +2544,142 @@ describe("Prisma affiliate Agent Gateway", () => {
     expect(result.responseHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it("reserves, starts, finalizes, and exactly replays one external capture command", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    const operation = {
+      kind: "EXECUTE_COMMAND" as const,
+      idempotencyKey: "capture-command-1",
+      authorization: gatewayAuthorizationFor(grant),
+      command: {
+        type: "CAPTURE_CLAIM_URL" as const,
+        data: {
+          urlRef: "evidence-1",
+          captureProfileRef: "evidence-1",
+        },
+      },
+    };
+
+    const completed = await harness.gateway.perform(operation);
+
+    expect(completed).toMatchObject({
+      kind: "COMMAND_SUCCEEDED",
+      commandType: "CAPTURE_CLAIM_URL",
+      safeOutput: {
+        evidenceRef: "capture-evidence-1",
+        artifactId: "capture-file-1",
+      },
+    });
+    expect(await harness.gateway.perform(operation)).toEqual(completed);
+    expect(harness.state.externalStartKeys).toHaveLength(1);
+    expect(harness.state.externalRecoverKeys).toHaveLength(0);
+    expect(harness.state.receipts).toContainEqual(
+      expect.objectContaining({
+        id: completed.receiptId,
+        status: "SUCCEEDED",
+        externalOperationKey: harness.state.externalStartKeys[0],
+      }),
+    );
+    expect(harness.state.artifacts).toContainEqual(
+      expect.objectContaining({
+        evidenceRef: "capture-evidence-1",
+        fileId: "capture-file-1",
+      }),
+    );
+  });
+
+  it("recovers a lost external capture response by durable operation key without starting twice", async () => {
+    const harness = createGatewayClaimHarness();
+    harness.setExternalCaptureMode("LOSE_RESPONSE");
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    const operation = {
+      kind: "EXECUTE_COMMAND" as const,
+      idempotencyKey: "capture-response-loss-1",
+      authorization: gatewayAuthorizationFor(grant),
+      command: {
+        type: "CAPTURE_CLAIM_URL" as const,
+        data: {
+          urlRef: "evidence-1",
+          captureProfileRef: "evidence-1",
+        },
+      },
+    };
+
+    await expect(harness.gateway.perform(operation)).rejects.toMatchObject({
+      code: "PARTIAL_COMMAND_UNRESOLVED",
+      retryable: true,
+      receiptId: expect.any(String),
+    });
+    const recovered = await harness.gateway.perform(operation);
+
+    expect(recovered).toMatchObject({
+      kind: "COMMAND_SUCCEEDED",
+      commandType: "CAPTURE_CLAIM_URL",
+    });
+    expect(harness.state.externalStartKeys).toHaveLength(1);
+
+    expect(harness.state.externalRecoverKeys).toEqual(
+      harness.state.externalStartKeys,
+    );
+    expect(await harness.gateway.perform(operation)).toEqual(recovered);
+    expect(harness.state.externalStartKeys).toHaveLength(1);
+  });
+  it("recovers and finalizes a pending capture receipt after gateway restart", async () => {
+    const harness = createGatewayClaimHarness();
+    harness.setExternalCaptureMode("LOSE_RESPONSE");
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    const operation = {
+      kind: "EXECUTE_COMMAND" as const,
+      idempotencyKey: "capture-restart-recovery-1",
+      authorization: gatewayAuthorizationFor(grant),
+      command: {
+        type: "CAPTURE_CLAIM_URL" as const,
+        data: {
+          urlRef: "evidence-1",
+          captureProfileRef: "evidence-1",
+        },
+      },
+    };
+    await expect(harness.gateway.perform(operation)).rejects.toMatchObject({
+      code: "PARTIAL_COMMAND_UNRESOLVED",
+      receiptId: expect.any(String),
+    });
+    harness.setNow("2026-08-20T18:01:00.000Z");
+
+    const restarted = harness.recreateGateway();
+    expect(await restarted.reconcile({ limit: 10 })).toEqual({
+      examinedClaims: 0,
+      expiredClaims: 0,
+      examinedReceipts: 1,
+      recoveredReceipts: 1,
+      completedReceipts: 1,
+      unresolvedReceipts: 0,
+      admissionHalted: false,
+    });
+    expect(harness.state.externalStartKeys).toHaveLength(1);
+    expect(harness.state.externalRecoverKeys).toEqual(
+      harness.state.externalStartKeys,
+    );
+    expect(await restarted.perform(operation)).toMatchObject({
+      kind: "COMMAND_SUCCEEDED",
+      commandType: "CAPTURE_CLAIM_URL",
+    });
+    expect(harness.state.externalStartKeys).toHaveLength(1);
+    expect(harness.state.receipts[0]).toMatchObject({ status: "SUCCEEDED" });
+    expect(await restarted.reconcile({ limit: 10 })).toEqual({
+      examinedClaims: 0,
+      expiredClaims: 0,
+      examinedReceipts: 0,
+      recoveredReceipts: 0,
+      completedReceipts: 0,
+      unresolvedReceipts: 0,
+      admissionHalted: false,
+    });
+  });
+
   it("returns no artifact bytes when stored or adapter integrity checks fail", async () => {
     const verifiedBytes = Buffer.from("verified gateway artifact", "utf8");
     const invalidReads: readonly AffiliateAgentArtifactRead[] = [
@@ -1774,6 +2747,293 @@ describe("Prisma affiliate Agent Gateway", () => {
     ).rejects.toMatchObject({
       code: "ARTIFACT_INTEGRITY_FAILED",
       safeMessage: expect.any(String),
+    });
+  });
+  it("marks an unknown capture effect for reconciliation and halts only its lane", async () => {
+    const harness = createGatewayClaimHarness();
+    harness.setExternalCaptureMode("UNKNOWN");
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    const operation = {
+      kind: "EXECUTE_COMMAND" as const,
+      idempotencyKey: "capture-unknown-1",
+      authorization: gatewayAuthorizationFor(grant),
+      command: {
+        type: "CAPTURE_CLAIM_URL" as const,
+        data: {
+          urlRef: "evidence-1",
+          captureProfileRef: "evidence-1",
+        },
+      },
+    };
+    await expect(harness.gateway.perform(operation)).rejects.toMatchObject({
+      code: "PARTIAL_COMMAND_UNRESOLVED",
+      receiptId: expect.any(String),
+    });
+    harness.setNow("2026-08-20T18:01:00.000Z");
+
+    const first = await harness.gateway.reconcile({ limit: 10 });
+
+    expect(first).toEqual({
+      examinedClaims: 0,
+      expiredClaims: 0,
+      examinedReceipts: 1,
+      recoveredReceipts: 0,
+      completedReceipts: 0,
+      unresolvedReceipts: 1,
+      admissionHalted: true,
+    });
+    expect(harness.state.receipts[0]).toMatchObject({
+      status: "UNKNOWN",
+      safeErrorCode: "PARTIAL_COMMAND_UNRESOLVED",
+      reconcileAfter: null,
+    });
+    expect(harness.state.claims[0]).toMatchObject({
+      status: "RECONCILIATION_REQUIRED",
+    });
+    expect(harness.state.jobs[0]).toMatchObject({
+      status: "RECONCILIATION_REQUIRED",
+    });
+
+    const haltedLaneJob = {
+      ...harness.state.jobs[0],
+      id: "gateway-job-halted-lane",
+      dedupeKey: "coverage:halted-lane",
+      status: "QUEUED",
+      claimGeneration: 0,
+      activeClaimId: null,
+      nextAttemptAt: new Date("2026-08-20T18:00:00.000Z"),
+      eventSequence: 0,
+    };
+    const openLaneJob = {
+      ...haltedLaneJob,
+      id: "gateway-job-open-lane",
+      dedupeKey: "mapping:open-lane",
+      queue: "AFFILIATE_MAPPING",
+      lane: "MAPPING_PRODUCTION",
+      role: "MAPPING_PRODUCER",
+      subjectType: "MAPPING_PRODUCER",
+      subjectId: "mapping-job-open-lane",
+      subjectJson: {
+        ...claimRoleFields.MAPPING_PRODUCER.subject,
+        mappingJobId: "mapping-job-open-lane",
+      },
+      supplySourceId: "supply-source-1",
+      expectedLifecycleGeneration: 7,
+    };
+    harness.state.jobs.push(haltedLaneJob, openLaneJob);
+    const nextRequest: AffiliateAgentClaimRequest = {
+      ...harness.request,
+      idempotencyKey: "claim-open-lane",
+      roleCredential: "mapping-role-credential",
+      role: "MAPPING_PRODUCER",
+      workerId: "mapping-worker-open-lane",
+      invocationId: "mapping-invocation-open-lane",
+      workspaceAttestation: {
+        ...harness.request.workspaceAttestation,
+        workspaceId: "mapping-workspace-open-lane",
+        workerId: "mapping-worker-open-lane",
+        invocationId: "mapping-invocation-open-lane",
+        issuedAt: "2026-08-20T18:00:00.000Z",
+      },
+    };
+    const nextGrant = await harness.gateway.claim(nextRequest);
+    expect(nextGrant?.envelope.lane).toBe("MAPPING_PRODUCTION");
+    expect(haltedLaneJob.status).toBe("QUEUED");
+
+    expect(await harness.gateway.reconcile({ limit: 10 })).toEqual({
+      examinedClaims: 0,
+      expiredClaims: 0,
+      examinedReceipts: 0,
+      recoveredReceipts: 0,
+      completedReceipts: 0,
+      unresolvedReceipts: 0,
+      admissionHalted: true,
+    });
+  });
+
+  it("fails closed on an impossible recovered receipt, claim, and job state", async () => {
+    const harness = createGatewayClaimHarness();
+    harness.setExternalCaptureMode("LOSE_RESPONSE");
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    const operation = {
+      kind: "EXECUTE_COMMAND" as const,
+      idempotencyKey: "impossible-capture-receipt",
+      authorization: gatewayAuthorizationFor(grant),
+      command: {
+        type: "CAPTURE_CLAIM_URL" as const,
+        data: {
+          urlRef: "evidence-1",
+          captureProfileRef: "evidence-1",
+        },
+      },
+    };
+    await expect(harness.gateway.perform(operation)).rejects.toMatchObject({
+      code: "PARTIAL_COMMAND_UNRESOLVED",
+    });
+    if (!harness.state.receipts[0])
+      throw new Error("Expected one pending receipt.");
+    harness.state.receipts[0].claimGeneration = 99;
+    harness.setNow("2026-08-20T18:01:00.000Z");
+
+    expect(await harness.gateway.reconcile({ limit: 10 })).toMatchObject({
+      examinedReceipts: 1,
+      recoveredReceipts: 1,
+      unresolvedReceipts: 1,
+      admissionHalted: true,
+    });
+    expect(harness.state.receipts[0]).toMatchObject({
+      status: "UNKNOWN",
+      safeErrorCode: "GATEWAY_ADMISSION_HALTED",
+    });
+    expect(harness.state.claims[0]).toMatchObject({
+      status: "RECONCILIATION_REQUIRED",
+      safeFailureCode: "GATEWAY_ADMISSION_HALTED",
+    });
+    expect(harness.state.jobs[0]?.status).toBe("RECONCILIATION_REQUIRED");
+
+    harness.state.jobs.push({
+      ...harness.state.jobs[0],
+      id: "gateway-job-after-impossible-state",
+      role: "MAPPING_PRODUCER",
+      queue: "AFFILIATE_MAPPING",
+      lane: "MAPPING_PRODUCTION",
+      status: "QUEUED",
+      activeClaimId: null,
+      claimGeneration: 0,
+      eventSequence: 0,
+    });
+    await expect(
+      harness.gateway.claim({
+        ...harness.request,
+        idempotencyKey: "claim-after-impossible-state",
+        roleCredential: "mapping-role-credential",
+        role: "MAPPING_PRODUCER",
+        workerId: "mapping-worker-after-impossible",
+        invocationId: "mapping-invocation-after-impossible",
+        workspaceAttestation: {
+          ...harness.request.workspaceAttestation,
+          workspaceId: "mapping-workspace-after-impossible",
+          workerId: "mapping-worker-after-impossible",
+          invocationId: "mapping-invocation-after-impossible",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "GATEWAY_ADMISSION_HALTED" });
+  });
+
+  it("reconciles each expired lease once through plus five, plus fifteen, then Pipeline Blocked", async () => {
+    const harness = createGatewayClaimHarness();
+    const requestForAttempt = (
+      attempt: number,
+      issuedAt: string,
+      expiresAt: string,
+    ): AffiliateAgentClaimRequest => ({
+      ...harness.request,
+      idempotencyKey: `reconcile-claim-${attempt}`,
+      invocationId: `reconcile-invocation-${attempt}`,
+      workspaceAttestation: {
+        ...harness.request.workspaceAttestation,
+        workspaceId: `reconcile-workspace-${attempt}`,
+        invocationId: `reconcile-invocation-${attempt}`,
+        issuedAt,
+        expiresAt,
+      },
+    });
+    const firstGrant = await harness.gateway.claim(
+      requestForAttempt(
+        1,
+        "2026-08-20T17:59:00.000Z",
+        "2026-08-20T19:00:00.000Z",
+      ),
+    );
+    if (!firstGrant) throw new Error("Expected the first claim.");
+    harness.setNow("2026-08-20T18:05:00.000Z");
+
+    expect(await harness.gateway.reconcile({ limit: 10 })).toMatchObject({
+      examinedClaims: 1,
+      expiredClaims: 1,
+    });
+    expect(harness.state.jobs[0]).toMatchObject({
+      status: "RETRY_WAIT",
+      invocationFailureCount: 1,
+      nextAttemptAt: new Date("2026-08-20T18:10:00.000Z"),
+    });
+    expect(await harness.gateway.reconcile({ limit: 10 })).toMatchObject({
+      examinedClaims: 0,
+      expiredClaims: 0,
+    });
+    expect(harness.state.jobs[0]?.invocationFailureCount).toBe(1);
+
+    harness.setNow("2026-08-20T18:10:00.000Z");
+    expect(
+      await harness.gateway.claim(
+        requestForAttempt(
+          2,
+          "2026-08-20T18:09:00.000Z",
+          "2026-08-20T19:00:00.000Z",
+        ),
+      ),
+    ).not.toBeNull();
+    harness.setNow("2026-08-20T18:15:00.000Z");
+    await harness.gateway.reconcile({ limit: 10 });
+    expect(harness.state.jobs[0]).toMatchObject({
+      status: "RETRY_WAIT",
+      invocationFailureCount: 2,
+      nextAttemptAt: new Date("2026-08-20T18:30:00.000Z"),
+    });
+
+    harness.setNow("2026-08-20T18:30:00.000Z");
+    expect(
+      await harness.gateway.claim(
+        requestForAttempt(
+          3,
+          "2026-08-20T18:29:00.000Z",
+          "2026-08-20T19:00:00.000Z",
+        ),
+      ),
+    ).not.toBeNull();
+    harness.setNow("2026-08-20T18:35:00.000Z");
+    await harness.gateway.reconcile({ limit: 10 });
+    expect(harness.state.jobs[0]).toMatchObject({
+      status: "PIPELINE_BLOCKED",
+      invocationFailureCount: 3,
+      nextAttemptAt: null,
+      pipelineBlockedAt: new Date("2026-08-20T18:35:00.000Z"),
+    });
+    expect(await harness.gateway.reconcile({ limit: 10 })).toMatchObject({
+      examinedClaims: 0,
+      expiredClaims: 0,
+    });
+  });
+
+  it("reconciles a hard deadline once when heartbeats extended the lease to that deadline", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    const claim = harness.state.claims[0];
+    if (!claim?.hardDeadlineAt)
+      throw new Error("Expected one claim hard deadline.");
+    claim.leaseExpiresAt = claim.hardDeadlineAt;
+    harness.setNow("2026-08-20T18:20:00.000Z");
+
+    expect(await harness.gateway.reconcile({ limit: 10 })).toMatchObject({
+      examinedClaims: 1,
+      expiredClaims: 1,
+    });
+    expect(claim).toMatchObject({
+      status: "EXPIRED",
+      safeFailureCode: "TIMEOUT",
+      endedAt: new Date("2026-08-20T18:20:00.000Z"),
+    });
+    expect(harness.state.jobs[0]).toMatchObject({
+      status: "RETRY_WAIT",
+      invocationFailureCount: 1,
+      nextAttemptAt: new Date("2026-08-20T18:25:00.000Z"),
+    });
+    expect(await harness.gateway.reconcile({ limit: 10 })).toMatchObject({
+      examinedClaims: 0,
+      expiredClaims: 0,
     });
   });
 
@@ -1861,6 +3121,268 @@ describe("Prisma affiliate Agent Gateway", () => {
       }),
     ).rejects.toMatchObject({ code: "IDEMPOTENCY_KEY_REUSED" });
     expect(commandHarness.state.receipts).toHaveLength(1);
+  });
+
+  it("authorizes a result submission before returning schema feedback", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+
+    await expect(
+      harness.gateway.perform({
+        kind: "SUBMIT_RESULT",
+        idempotencyKey: "unauthorized-invalid-result",
+        authorization: {
+          ...gatewayAuthorizationFor(grant),
+          token: `${grant.token}-invalid`,
+        },
+        result: { untrusted: true },
+      }),
+    ).rejects.toMatchObject({
+      code: "TOKEN_INVALID",
+      safeMessage: expect.any(String),
+    });
+    expect(harness.state.receipts).toHaveLength(0);
+  });
+
+  it("returns two deterministic schema corrections and fails the invocation on the third distinct invalid result", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    const authorization = gatewayAuthorizationFor(grant);
+    const firstOperation = {
+      kind: "SUBMIT_RESULT" as const,
+      idempotencyKey: "schema-correction-1",
+      authorization,
+      result: { schemaVersion: 1 },
+    };
+
+    const first = await harness.gateway.perform(firstOperation);
+    expect(first).toEqual({
+      kind: "SCHEMA_CORRECTION_REQUIRED",
+      receiptId: expect.any(String),
+      submissionNumber: 1,
+      remainingSubmissions: 2,
+      issues: [
+        {
+          path: [],
+          code: "INVALID_VALUE",
+          message: "The result does not match an allowed terminal schema.",
+        },
+      ],
+      correctionPrompt:
+        'Correct terminal result submission 1. Remaining submissions: 2.\n{"issues":[{"code":"INVALID_VALUE","message":"The result does not match an allowed terminal schema.","path":[]}]}',
+    });
+    expect(await harness.gateway.perform(firstOperation)).toEqual(first);
+    expect(harness.state.claims[0]?.schemaCorrectionCount).toBe(1);
+
+    const second = await harness.gateway.perform({
+      ...firstOperation,
+      idempotencyKey: "schema-correction-2",
+      result: { schemaVersion: 1, role: "COVERAGE_PLANNER" },
+    });
+    expect(second).toMatchObject({
+      kind: "SCHEMA_CORRECTION_REQUIRED",
+      submissionNumber: 2,
+      remainingSubmissions: 1,
+    });
+
+    const third = await harness.gateway.perform({
+      ...firstOperation,
+      idempotencyKey: "schema-correction-3",
+      result: {
+        schemaVersion: 1,
+        role: "COVERAGE_PLANNER",
+        jobId: grant.envelope.jobId,
+      },
+    });
+    expect(third).toEqual({
+      kind: "INVOCATION_FAILED",
+      receiptId: expect.any(String),
+      failureCode: "SCHEMA_CORRECTIONS_EXHAUSTED",
+      invocationFailureCount: 1,
+      nextAttemptAt: "2026-08-20T18:05:00.000Z",
+      pipelineBlocked: false,
+    });
+    expect(harness.state.claims[0]).toMatchObject({
+      status: "FAILED",
+      schemaCorrectionCount: 3,
+      safeFailureCode: "SCHEMA_CORRECTIONS_EXHAUSTED",
+    });
+    expect(harness.state.jobs[0]).toMatchObject({
+      status: "RETRY_WAIT",
+      activeClaimId: null,
+      invocationFailureCount: 1,
+      nextAttemptAt: new Date("2026-08-20T18:05:00.000Z"),
+    });
+    expect(harness.state.receipts).toHaveLength(3);
+  });
+
+  it("uses initial, plus five minutes, plus fifteen minutes, then blocks with no fourth retry", async () => {
+    const harness = createGatewayClaimHarness();
+    const requestForAttempt = (
+      attempt: number,
+      issuedAt: string,
+      expiresAt: string,
+    ): AffiliateAgentClaimRequest => ({
+      ...harness.request,
+      idempotencyKey: `retry-claim-${attempt}`,
+      invocationId: `coverage-invocation-${attempt}`,
+      workspaceAttestation: {
+        ...harness.request.workspaceAttestation,
+        workspaceId: `coverage-workspace-${attempt}`,
+        invocationId: `coverage-invocation-${attempt}`,
+        issuedAt,
+        expiresAt,
+      },
+    });
+    const fail = async (
+      grant: AffiliateAgentClaimGrant,
+      failureNumber: number,
+      occurredAt: string,
+    ) =>
+      harness.gateway.perform({
+        kind: "RECORD_FAILURE",
+        idempotencyKey: `retry-failure-${failureNumber}`,
+        authorization: gatewayAuthorizationFor(grant),
+        failure: {
+          schemaVersion: 1,
+          jobId: grant.envelope.jobId,
+          claimId: grant.envelope.claimId,
+          claimGeneration: grant.envelope.claimGeneration,
+          lifecycleGeneration: grant.envelope.lifecycleGeneration,
+          role: grant.envelope.role,
+          workerId: grant.envelope.workerId,
+          invocationId: grant.envelope.invocationId,
+          supplyContractHash: grant.envelope.supplyContractHash,
+          code: "PROCESS_CRASH",
+          occurredAt,
+          evidenceRefs: ["evidence-1"],
+          safeSummary: "The invocation process ended before completion.",
+        },
+      });
+
+    const firstGrant = await harness.gateway.claim(harness.request);
+    if (!firstGrant) throw new Error("Expected the initial claim.");
+    expect(await fail(firstGrant, 1, "2026-08-20T18:00:00.000Z")).toMatchObject(
+      {
+        kind: "INVOCATION_FAILED",
+        invocationFailureCount: 1,
+        nextAttemptAt: "2026-08-20T18:05:00.000Z",
+        pipelineBlocked: false,
+      },
+    );
+
+    harness.setNow("2026-08-20T18:04:59.999Z");
+    const secondRequest = requestForAttempt(
+      2,
+      "2026-08-20T18:04:00.000Z",
+      "2026-08-20T18:30:00.000Z",
+    );
+    expect(await harness.gateway.claim(secondRequest)).toBeNull();
+    harness.setNow("2026-08-20T18:05:00.000Z");
+    const secondGrant = await harness.gateway.claim(secondRequest);
+    expect(secondGrant?.envelope.claimGeneration).toBe(2);
+    expect(secondGrant?.envelope).toMatchObject({
+      invocationId: "coverage-invocation-2",
+      workspaceId: "coverage-workspace-2",
+    });
+    if (!secondGrant) throw new Error("Expected the second claim.");
+
+    harness.setNow("2026-08-20T18:06:00.000Z");
+    expect(
+      await fail(secondGrant, 2, "2026-08-20T18:06:00.000Z"),
+    ).toMatchObject({
+      invocationFailureCount: 2,
+      nextAttemptAt: "2026-08-20T18:21:00.000Z",
+      pipelineBlocked: false,
+    });
+
+    harness.setNow("2026-08-20T18:21:00.000Z");
+    const thirdGrant = await harness.gateway.claim(
+      requestForAttempt(
+        3,
+        "2026-08-20T18:20:00.000Z",
+        "2026-08-20T19:00:00.000Z",
+      ),
+    );
+    expect(thirdGrant?.envelope.claimGeneration).toBe(3);
+    expect(thirdGrant?.envelope).toMatchObject({
+      invocationId: "coverage-invocation-3",
+      workspaceId: "coverage-workspace-3",
+    });
+    if (!thirdGrant) throw new Error("Expected the third claim.");
+
+    harness.setNow("2026-08-20T18:22:00.000Z");
+    expect(await fail(thirdGrant, 3, "2026-08-20T18:22:00.000Z")).toMatchObject(
+      {
+        invocationFailureCount: 3,
+        nextAttemptAt: null,
+        pipelineBlocked: true,
+      },
+    );
+    expect(harness.state.jobs[0]).toMatchObject({
+      status: "PIPELINE_BLOCKED",
+      nextAttemptAt: null,
+      pipelineBlockedAt: new Date("2026-08-20T18:22:00.000Z"),
+    });
+    harness.setNow("2026-08-20T19:07:00.000Z");
+    expect(
+      await harness.gateway.claim(
+        requestForAttempt(
+          4,
+          "2026-08-20T19:06:00.000Z",
+          "2026-08-20T20:00:00.000Z",
+        ),
+      ),
+    ).toBeNull();
+  });
+
+  it("records all six invocation failure codes once and replays each exact failure", async () => {
+    const failureCodes = [
+      "MALFORMED_OUTPUT",
+      "STALE_GENERATION",
+      "PROCESS_CRASH",
+      "TIMEOUT",
+      "TERMINAL_SUBMISSION_FAILURE",
+      "SCHEMA_CORRECTIONS_EXHAUSTED",
+    ] as const;
+
+    for (const code of failureCodes) {
+      const harness = createGatewayClaimHarness();
+      const grant = await harness.gateway.claim(harness.request);
+      if (!grant) throw new Error("Expected one Coverage Planner claim.");
+      const operation = {
+        kind: "RECORD_FAILURE" as const,
+        idempotencyKey: `failure-code-${code}`,
+        authorization: gatewayAuthorizationFor(grant),
+        failure: {
+          schemaVersion: 1 as const,
+          jobId: grant.envelope.jobId,
+          claimId: grant.envelope.claimId,
+          claimGeneration: grant.envelope.claimGeneration,
+          lifecycleGeneration: grant.envelope.lifecycleGeneration,
+          role: grant.envelope.role,
+          workerId: grant.envelope.workerId,
+          invocationId: grant.envelope.invocationId,
+          supplyContractHash: grant.envelope.supplyContractHash,
+          code,
+          occurredAt: "2026-08-20T18:00:00.000Z",
+          evidenceRefs: ["evidence-1"],
+          safeSummary: "The invocation failed at the governed boundary.",
+        },
+      };
+
+      const failed = await harness.gateway.perform(operation);
+      expect(failed).toMatchObject({
+        kind: "INVOCATION_FAILED",
+        failureCode: code,
+        invocationFailureCount: 1,
+      });
+      expect(await harness.gateway.perform(operation)).toEqual(failed);
+      expect(harness.state.jobs[0]?.invocationFailureCount).toBe(1);
+      expect(harness.state.receipts).toHaveLength(1);
+    }
   });
 
   it("accepts one terminal Coverage Planner result and invalidates the token", async () => {

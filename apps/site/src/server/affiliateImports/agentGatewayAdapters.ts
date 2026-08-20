@@ -139,6 +139,12 @@ export type AffiliateAgentCommandAdapters = Readonly<{
     RUN_DISCOVERY_QUERY?: AffiliateAgentTransactionalCommandAdapter<
       Extract<AffiliateAgentCommand, { type: "RUN_DISCOVERY_QUERY" }>
     >;
+    VALIDATE_DECLARATIVE_PACKAGE?: AffiliateAgentTransactionalCommandAdapter<
+      Extract<AffiliateAgentCommand, { type: "VALIDATE_DECLARATIVE_PACKAGE" }>
+    >;
+    COMMIT_DECLARATIVE_PACKAGE?: AffiliateAgentTransactionalCommandAdapter<
+      Extract<AffiliateAgentCommand, { type: "COMMIT_DECLARATIVE_PACKAGE" }>
+    >;
   }>;
   external: Readonly<{
     CAPTURE_CLAIM_URL?: AffiliateAgentExternalCommandAdapter<
@@ -160,6 +166,9 @@ export type AffiliateAgentLifecycleAuthority =
           commandRef: string;
         }>,
       ): Promise<Readonly<Record<string, unknown>>>;
+      recover(
+        receiptId: string,
+      ): Promise<Readonly<Record<string, unknown>> | null>;
     }>;
 
 export interface AffiliateAgentProcessLauncher {

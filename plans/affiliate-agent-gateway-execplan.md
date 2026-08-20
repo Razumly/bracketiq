@@ -25,13 +25,15 @@ A developer can see the change work in three ways. Pure contract tests show stab
 - [x] (2026-08-20 20:31Z) Implemented Milestone 4 for the confirmed slice. Added the closed transactional `RUN_DISCOVERY_QUERY` adapter path and one typed Coverage Planner terminal result. Terminal completion updates the job and claim by CAS, stores one result and receipt hash, appends one event, and invalidates the token atomically.
 - [x] (2026-08-20 20:31Z) Implemented Milestone 5 for the confirmed slice. The operation-by-denial matrix covers claim, heartbeat, artifact, command, terminal result, and failure authorization across wrong identities, generations, token, contracts, lease, and deadline. The isolated PostgreSQL race used a query barrier and observed one winner. The database also rejected a second live claim and event mutation.
 - [x] (2026-08-20 20:31Z) Implemented Milestone 6 for admitted slice operations. Claim, heartbeat, artifact, command, and terminal result use canonical request hashes and claim-scoped operation keys. Exact replays create no second receipt or event. Changed input is rejected. Only the identical terminal result can bypass token invalidation, while all five operation kinds reject the invalidated token.
-- [ ] Implement Milestone 7. Add schema correction and the exact initial, +5 minute, +15 minute, then `PIPELINE_BLOCKED` invocation policy. Prove that there is no +45 minute retry.
-- [ ] Implement Milestone 8. Add bounded restart reconciliation for expired claims and pending external receipts. Prove that reconciliation does not repeat a provider effect.
-- [ ] Implement Milestone 9. Add lifecycle receipt safety through the injected #68 lifecycle-authority interface. Do not add lifecycle-stage derivation.
-- [ ] Implement Milestone 10. Prove Supply Reviewer identity and workspace isolation.
-- [ ] Implement Milestone 11. Complete one Mapping Producer, Supply Reviewer, and Human-directed Executor claim. Prove all cross-role denials.
+- [x] (2026-08-20 20:18Z) Implemented Milestone 7. Added deterministic schema correction replay, all six invocation failure codes, fresh generation, invocation, and workspace values for each retry, and the exact initial, +5 minute, +15 minute, then `PIPELINE_BLOCKED` policy. The gateway schedules no +45 minute retry. Domain terminal results consume zero invocation failures.
+- [x] (2026-08-20 20:18Z) Implemented Milestone 8 at the focused unit seam. External capture reserves one durable `externalOperationKey`. Restart reconciliation calls `recover` and never calls `start` twice. Unknown effects move the receipt, claim, and affected job to `RECONCILIATION_REQUIRED`. Impossible state halts all admission. Expired leases and hard deadlines use CAS and consume one failure once.
+- [x] (2026-08-20 20:18Z) Implemented Milestone 9 at the injected #68 seam. A lost lifecycle response remains in one pending receipt. Restart reconciliation recovers and finalizes it without a second lifecycle execution. Lifecycle derivation remains outside this change.
+- [x] (2026-08-20 20:18Z) Implemented Milestone 10. Supply Reviewer admission enforces different worker, invocation, and workspace identities. It requires a new read-only workspace and the exact evidence-only manifest.
+- [x] (2026-08-20 20:18Z) Implemented Milestone 11. Mapping Producer, Supply Reviewer, and Human-directed Executor use the public gateway. The focused tests cover the complete command and disposition matrix, declarative mapping validation and commit, reviewer isolation, exact human decision matching, and dual human and agent identity events.
 - [ ] Implement Milestone 12. Add the one-claim supervisor and credential/container denial checks. Prove that offline open-weight evaluation cannot claim work or publish executable code.
 - [x] (2026-08-20 20:42Z) Ran the focused Milestones 2-6 contract/gateway unit file, isolated PostgreSQL integration file, TypeScript check, Prisma validation, Prisma generation, and generated-surface check. Recorded exact evidence below.
+- [x] (2026-08-20 20:18Z) Ran the Milestones 7-11 focused unit file after each red and green cycle. The final file passes 50 tests. TypeScript passes. Prisma format, validation, generation, and generated-surface checks pass. Focused Prettier check passes.
+- [ ] Add and run the Milestones 7-11 PostgreSQL restart, concurrent expiry, lifecycle response-loss, and hard-deadline integration cases. This continuation did not run the existing database integration file.
 - [ ] Run the full site suite, production build, four-role smoke run, restart smoke, and container denial probes. Record exact output in this plan.
 - [ ] Obtain separate Standards and Spec reviews against the fixed base `5aa180b721eff7e42eef86583a9f226caa2bb20f`. Resolve every finding. Re-run affected checks.
 - [ ] Update all living sections and the acceptance-criterion evidence map. Record the final outcome without doing the #68 or #70 work.
@@ -79,6 +81,18 @@ A developer can see the change work in three ways. Pure contract tests show stab
 
 - Observation: The exact lease boundary must be exclusive.
   Evidence: A red denial-matrix run showed that a heartbeat at exactly `leaseExpiresAt` renewed the claim. Authorization now treats `leaseExpiresAt <= now` as expired, and the heartbeat CAS requires `leaseExpiresAt > now`.
+
+- Observation: A durable operation key is sufficient to recover an external response loss only when the gateway separates reservation, provider start, and receipt finalization.
+  Evidence: The focused restart test recreates the gateway over the same state. Reconciliation calls `recover(externalOperationKey)`, finalizes the receipt, and leaves the `start` call count at one. A second reconciliation reports zero examined receipts and zero transitions.
+
+- Observation: An expired claim can consume the failure budget twice if claim expiry and job retry writes do not share one CAS transaction.
+  Evidence: Reconciliation now selects only active expired claims. It compares the claim and job generations, updates the job failure count and claim status in one serializable transaction, and rolls back on either zero-row CAS result. The second focused reconcile reports zero examined claims and zero expired claims.
+
+- Observation: A lost lifecycle response uses the same receipt pattern as an external command but uses the injected lifecycle receipt ID for recovery.
+  Evidence: The focused test records one lifecycle execution, recreates the gateway, recovers by receipt ID, finalizes one success event, and observes no second lifecycle execution.
+
+- Observation: A broad `P2002` handler can conceal token, event, or artifact identifier defects as an ordinary lost claim race.
+  Evidence: Claim admission now retries only identity-key conflicts that can become exact replay and returns no work only for the live-job race constraints. An unrelated `tokenHash` unique violation returns `INTERNAL_ERROR`.
 
 ## Decision Log
 
@@ -154,6 +168,22 @@ A developer can see the change work in three ways. Pure contract tests show stab
   Rationale: The replay still verifies the token hash, expiry, lease, role, worker, job, invocation, generations, active Supply Contract, role contract, prompt contract, and exact canonical request hash. It bypasses only the invalidation and terminal-state consequences of the original committed result.
   Date/Author: 2026-08-20 / Codex Milestones 2-6 implementer
 
+- Decision: Reconcile due receipts before expired claims and share one bounded request limit across both groups.
+  Rationale: Receipt recovery must resolve a possible external or lifecycle effect before claim expiry changes the authoritative claim state. One shared limit bounds restart work.
+  Date/Author: 2026-08-20 / Codex Milestones 7-11 implementer
+
+- Decision: Halt only the affected lane for a recoverable unknown effect, and halt all claim admission for an impossible receipt, claim, or job relationship.
+  Rationale: An unknown provider response affects one job lane. A contradictory authority relationship means the gateway cannot identify a safe mutation boundary.
+  Date/Author: 2026-08-20 / Codex Milestones 7-11 implementer
+
+- Decision: Convert lease and hard-deadline expiry into the same invocation-failure budget as an explicit `TIMEOUT`.
+  Rationale: Expiry is one infrastructure failure. The shared CAS path gives failure one +5 retry, failure two +15, and failure three immediate `PIPELINE_BLOCKED`.
+  Date/Author: 2026-08-20 / Codex Milestones 7-11 implementer
+
+- Decision: Recover lifecycle response loss only through `AffiliateAgentLifecycleAuthority.recover(receiptId)`.
+  Rationale: The gateway owns receipt safety. Issue #68 owns lifecycle derivation and the actual transition rules.
+  Date/Author: 2026-08-20 / Codex Milestones 7-11 implementer
+
 ## Outcomes & Retrospective
 
 Milestone 1 is complete. The pure contract seam now parses and hashes the Supply Contract, deployment contract, role contracts, evidence manifests, typed claims, closed commands, and typed terminal results. The renderer produces deterministic LF-only prompts with one terminal completion instruction. The transactional seam now declares the future gateway interface, safe results and errors, invocation-failure envelope, and the exact 60-second heartbeat, 300-second lease, 1,200-second deadline, three-correction, and three-attempt retry policy. The focused file passes 13 tests, and TypeScript passes. Milestones 2 through 12 remain. No Prisma model, persistence implementation, process launch, route, lifecycle derivation, fleet cutover, full suite, build, or database command was added or run.
@@ -161,6 +191,8 @@ Milestone 1 is complete. The pure contract seam now parses and hashes the Supply
 The Milestone 1 self-review fixes are complete. The registry can now parse one complete, internally consistent contract bundle. Version-1 role contracts cannot authorize a capability change through a recomputed self-hash. Claims reject Supply Source mismatches and producer/reviewer identity reuse. Prompts display one truthful authority projection and one terminal completion instruction. The focused file now passes 17 tests, and TypeScript passes.
 
 Milestones 2 through 6 are complete for the user-confirmed Coverage Planner slice. The gateway now owns one serializable claim, heartbeats, manifest-only artifact reads, one closed command, and one atomic terminal result. The database stores only the token hash, nonce, and key version; every claim operation rechecks the scoped capability and active contract bundle. A real PostgreSQL test proves the claim race, CAS generations, partial unique live-claim constraint, durable idempotency, atomic terminal completion, exact terminal replay, token invalidation, and immutable events. Failure admission and Milestones 7 through 12 remain intentionally outside this slice.
+
+Milestones 7 through 11 are complete at the focused unit seam. The gateway now implements schema correction exhaustion, the exact three-attempt invocation policy, public external capture, lost-response recovery, bounded receipt and expiry reconciliation, hard-deadline expiry, impossible-state containment, lifecycle receipt recovery, reviewer isolation, declarative mapping validation and commit, and all four role contracts through the public interface. The final focused file passes 50 tests. TypeScript, Prisma checks, and focused formatting pass. This continuation did not run database integration, the full suite, the production build, four-role smoke, restart smoke, or containment probes. Milestone 12 supervisor and containment work remains.
 
 ## Context and Orientation
 
@@ -912,6 +944,28 @@ The final `npx tsc --noEmit --pretty false` exited with code 0 and no output. `n
 
 The focused formatter named only the gateway adapters, Prisma gateway, two gateway test files, this ExecPlan, and the Prisma schema. Prettier completed for all named TypeScript and Markdown files with only the existing module-type warning. The first Prisma format call lacked the required local configuration environment and failed before changing the schema; the repeated scoped command loaded the Prisma config and formatted `prisma/schema.prisma` successfully.
 
+Milestones 7 through 11 used this focused unit command:
+
+    npx jest src/server/affiliateImports/__tests__/agentGateway.test.ts --runInBand
+
+The continuation recorded these restart and reconciliation red observations:
+
+    pending capture restart: Recovered capture finalization is not implemented; 1 failed, 44 passed
+    expired lease: expected one examined and expired claim, received zero; 1 failed, 45 passed
+    lifecycle response loss: expected PARTIAL_COMMAND_UNRESOLVED, received the raw simulated response-loss error; 1 failed, 47 passed
+    impossible recovered state: expected the job to require reconciliation, received CLAIMED; 1 failed, 48 passed
+
+The final focused result after formatting was:
+
+    Test Suites: 1 passed, 1 total
+    Tests:       50 passed, 50 total
+    Snapshots:   0 total
+    Time:        0.861 s
+
+The final `npx tsc --noEmit --pretty false` exited with code 0 and no output. `npm run prisma:check` reported a valid schema, generated Prisma Client 7.8.0, and verified the canonical generated surface. The first Prisma format call failed before mutation because `DATABASE_URL` was absent. The repeated command used a non-secret local placeholder URL and passed. Focused Prettier write and check covered the gateway contract, interface, adapters, Prisma implementation, and two gateway test files. The final check reported that all named files use Prettier style. It emitted only the existing module-type warning.
+
+Database and supervisor evidence remains. Add PostgreSQL tests for response-loss restart, one-winner expiry CAS, hard deadline, and lifecycle receipt recovery. Then implement Milestone 12. Do not treat the 50 focused unit tests as database, supervisor, smoke, full-suite, build, or containment proof.
+
 Expected four-role smoke evidence has this form. Replace each value with the observed identifiers and hashes:
 
     COVERAGE_PLANNER claimGeneration=1 terminal=CAMPAIGN_PROPOSED tokenInvalidated=true
@@ -941,3 +995,5 @@ Plan revision note (2026-08-20 18:19Z): Completed Milestone 1. Recorded the pure
 Plan revision note (2026-08-20 18:31Z): Resolved the Milestone 1 self-review findings. Added the strict prompt-template and complete bundle contracts, one version-1 role capability matrix with parser enforcement, claim identity consistency checks, and the deterministic authority projection. Recorded all four red observations, the 17-test focused pass, two successful TypeScript checks, focused formatting, and the revised deployment, role, and prompt-template hashes.
 
 Plan revision note (2026-08-20 20:31Z): Completed the user-confirmed Milestones 2-6 Coverage Planner authority slice. Added the adapters, Prisma schema and migration, production gateway, vertical unit behaviors, real PostgreSQL race/CAS/idempotency proof, full stale-scope matrix, artifact integrity checks, exact terminal replay, token invalidation, and explicit scope exclusions.
+
+Plan revision note (2026-08-20 20:18Z): Completed Milestones 7-11 at the focused unit seam. Added exact retry and schema-correction behavior, all role paths, public capture and durable recovery, bounded idempotent reconciliation, expiry CAS, lifecycle response-loss safety, reviewer isolation, impossible-state containment, and scoped Prisma unique-conflict handling. Recorded 50 passing focused tests, TypeScript, Prisma, and format evidence. Database integration, Milestone 12 supervisor and containment, smoke, full suite, and build remain.

@@ -2136,7 +2136,7 @@ model AffiliateAgentGatewayJobs {
   expectedLifecycleGeneration Int?
   status                      AffiliateAgentGatewayJobStatus @default(QUEUED)
   priority                    Int                            @default(0)
-  nextAttemptAt               DateTime                       @default(now())
+  nextAttemptAt               DateTime?                      @default(now())
   claimGeneration             Int                            @default(0)
   activeClaimId               String?                        @unique
   parentClaimId               String?
