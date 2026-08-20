@@ -411,7 +411,7 @@ const affiliateAgentRetentionSchema = z
   })
   .strict();
 
-export const affiliateAgentRoleContractSchema = z
+const affiliateAgentRoleContractObjectSchema = z
   .object({
     schemaVersion: z.literal(1),
     role: z.enum(AFFILIATE_AGENT_ROLES),
@@ -437,29 +437,62 @@ export const affiliateAgentRoleContractSchema = z
     retention: affiliateAgentRetentionSchema,
     executionClass: z.literal("PRODUCTION_CODEX"),
   })
-  .strict()
-  .superRefine(assertSelfHash);
+  .strict();
 
 export type AffiliateAgentRoleContract = z.infer<
-  typeof affiliateAgentRoleContractSchema
+  typeof affiliateAgentRoleContractObjectSchema
 >;
 
 const ROLE_PROMPT_TEMPLATE_HEADING_ORDER = [
-  "ROLE_CONTRACT",
-  "CLAIM_ENVELOPE",
-  "AUTHORITY",
+  "AUTHORITY_PROJECTION",
   "COMPLETION",
 ] as const;
 
-const promptTemplateHashForRole = (role: AffiliateAgentRole): string =>
-  hashAffiliateAgentValue({
-    schemaVersion: 1,
+export const affiliateAgentPromptTemplateSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    role: z.enum(AFFILIATE_AGENT_ROLES),
+    version: positiveIntegerSchema,
+    headingOrder: z.tuple([
+      z.literal("AUTHORITY_PROJECTION"),
+      z.literal("COMPLETION"),
+    ]),
+    lineEnding: z.literal("LF"),
+    terminalCommand: z.literal("SUBMIT_TERMINAL_RESULT"),
+    hash: sha256Schema,
+  })
+  .strict()
+  .superRefine(assertSelfHash);
+
+export type AffiliateAgentPromptTemplate = z.infer<
+  typeof affiliateAgentPromptTemplateSchema
+>;
+
+const createPromptTemplate = (
+  role: AffiliateAgentRole,
+): AffiliateAgentPromptTemplate => {
+  const preimage = {
+    schemaVersion: 1 as const,
     role,
     version: 1,
     headingOrder: ROLE_PROMPT_TEMPLATE_HEADING_ORDER,
-    lineEnding: "LF",
-    terminalCommand: "SUBMIT_TERMINAL_RESULT",
+    lineEnding: "LF" as const,
+    terminalCommand: "SUBMIT_TERMINAL_RESULT" as const,
+  };
+  return affiliateAgentPromptTemplateSchema.parse({
+    ...preimage,
+    hash: hashAffiliateAgentValue(preimage),
   });
+};
+
+export const AFFILIATE_AGENT_PROMPT_TEMPLATES: Readonly<
+  Record<AffiliateAgentRole, AffiliateAgentPromptTemplate>
+> = {
+  COVERAGE_PLANNER: createPromptTemplate("COVERAGE_PLANNER"),
+  MAPPING_PRODUCER: createPromptTemplate("MAPPING_PRODUCER"),
+  SUPPLY_REVIEWER: createPromptTemplate("SUPPLY_REVIEWER"),
+  HUMAN_DIRECTED_EXECUTOR: createPromptTemplate("HUMAN_DIRECTED_EXECUTOR"),
+};
 
 const ROLE_RETENTION: AffiliateAgentRoleContract["retention"] = {
   authoritativeResults: "INDEFINITE",
@@ -481,23 +514,19 @@ const COMMON_FORBIDDEN_EFFECTS = [
   "EXECUTE_ARBITRARY_CODE",
 ] as const;
 
-const createRoleContract = (
-  input: Omit<AffiliateAgentRoleContract, "hash">,
-): AffiliateAgentRoleContract =>
-  affiliateAgentRoleContractSchema.parse({
-    ...input,
-    hash: hashAffiliateAgentValue(input),
-  });
+type AffiliateAgentRoleCapability = Pick<
+  AffiliateAgentRoleContract,
+  | "inputSchemaId"
+  | "permittedCommands"
+  | "terminalDispositions"
+  | "forbiddenEffects"
+  | "retention"
+>;
 
-export const AFFILIATE_AGENT_ROLE_CONTRACTS: Readonly<
-  Record<AffiliateAgentRole, AffiliateAgentRoleContract>
+const AFFILIATE_AGENT_ROLE_CAPABILITIES: Readonly<
+  Record<AffiliateAgentRole, AffiliateAgentRoleCapability>
 > = {
-  COVERAGE_PLANNER: createRoleContract({
-    schemaVersion: 1,
-    role: "COVERAGE_PLANNER",
-    version: 1,
-    promptTemplateVersion: 1,
-    promptTemplateHash: promptTemplateHashForRole("COVERAGE_PLANNER"),
+  COVERAGE_PLANNER: {
     inputSchemaId: "affiliate-agent/coverage-planner-subject@1",
     permittedCommands: [
       "CAPTURE_CLAIM_URL",
@@ -516,14 +545,8 @@ export const AFFILIATE_AGENT_ROLE_CONTRACTS: Readonly<
       "EXECUTE_DISCOVERY_PROVIDER_DIRECTLY",
     ],
     retention: ROLE_RETENTION,
-    executionClass: "PRODUCTION_CODEX",
-  }),
-  MAPPING_PRODUCER: createRoleContract({
-    schemaVersion: 1,
-    role: "MAPPING_PRODUCER",
-    version: 1,
-    promptTemplateVersion: 1,
-    promptTemplateHash: promptTemplateHashForRole("MAPPING_PRODUCER"),
+  },
+  MAPPING_PRODUCER: {
     inputSchemaId: "affiliate-agent/mapping-producer-subject@1",
     permittedCommands: [
       "CAPTURE_CLAIM_URL",
@@ -543,14 +566,8 @@ export const AFFILIATE_AGENT_ROLE_CONTRACTS: Readonly<
       "SUBMIT_EXECUTABLE_CODE",
     ],
     retention: ROLE_RETENTION,
-    executionClass: "PRODUCTION_CODEX",
-  }),
-  SUPPLY_REVIEWER: createRoleContract({
-    schemaVersion: 1,
-    role: "SUPPLY_REVIEWER",
-    version: 1,
-    promptTemplateVersion: 1,
-    promptTemplateHash: promptTemplateHashForRole("SUPPLY_REVIEWER"),
+  },
+  SUPPLY_REVIEWER: {
     inputSchemaId: "affiliate-agent/supply-reviewer-subject@1",
     permittedCommands: ["SUBMIT_TERMINAL_RESULT"],
     terminalDispositions: [
@@ -573,14 +590,8 @@ export const AFFILIATE_AGENT_ROLE_CONTRACTS: Readonly<
       "REUSE_PRODUCER_CONTEXT",
     ],
     retention: ROLE_RETENTION,
-    executionClass: "PRODUCTION_CODEX",
-  }),
-  HUMAN_DIRECTED_EXECUTOR: createRoleContract({
-    schemaVersion: 1,
-    role: "HUMAN_DIRECTED_EXECUTOR",
-    version: 1,
-    promptTemplateVersion: 1,
-    promptTemplateHash: promptTemplateHashForRole("HUMAN_DIRECTED_EXECUTOR"),
+  },
+  HUMAN_DIRECTED_EXECUTOR: {
     inputSchemaId: "affiliate-agent/human-directed-executor-subject@1",
     permittedCommands: [
       "EXECUTE_RECORDED_LIFECYCLE_COMMAND",
@@ -593,8 +604,63 @@ export const AFFILIATE_AGENT_ROLE_CONTRACTS: Readonly<
       "SUBSTITUTE_HUMAN_DECISION",
     ],
     retention: ROLE_RETENTION,
-    executionClass: "PRODUCTION_CODEX",
-  }),
+  },
+};
+
+export const affiliateAgentRoleContractSchema =
+  affiliateAgentRoleContractObjectSchema.superRefine((contract, context) => {
+    assertSelfHash(contract, context);
+    if (contract.version !== 1) {
+      return;
+    }
+
+    const expectedCapabilities =
+      AFFILIATE_AGENT_ROLE_CAPABILITIES[contract.role];
+    const parsedCapabilities: AffiliateAgentRoleCapability = {
+      inputSchemaId: contract.inputSchemaId,
+      permittedCommands: contract.permittedCommands,
+      terminalDispositions: contract.terminalDispositions,
+      forbiddenEffects: contract.forbiddenEffects,
+      retention: contract.retention,
+    };
+    if (
+      canonicalizeAffiliateAgentValue(parsedCapabilities) !==
+      canonicalizeAffiliateAgentValue(expectedCapabilities)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Version-1 role capabilities must match the registered capability matrix.",
+      });
+    }
+  });
+
+const createRoleContract = (
+  role: AffiliateAgentRole,
+): AffiliateAgentRoleContract => {
+  const promptTemplate = AFFILIATE_AGENT_PROMPT_TEMPLATES[role];
+  const input = {
+    schemaVersion: 1 as const,
+    role,
+    version: 1,
+    promptTemplateVersion: promptTemplate.version,
+    promptTemplateHash: promptTemplate.hash,
+    ...AFFILIATE_AGENT_ROLE_CAPABILITIES[role],
+    executionClass: "PRODUCTION_CODEX" as const,
+  };
+  return affiliateAgentRoleContractSchema.parse({
+    ...input,
+    hash: hashAffiliateAgentValue(input),
+  });
+};
+
+export const AFFILIATE_AGENT_ROLE_CONTRACTS: Readonly<
+  Record<AffiliateAgentRole, AffiliateAgentRoleContract>
+> = {
+  COVERAGE_PLANNER: createRoleContract("COVERAGE_PLANNER"),
+  MAPPING_PRODUCER: createRoleContract("MAPPING_PRODUCER"),
+  SUPPLY_REVIEWER: createRoleContract("SUPPLY_REVIEWER"),
+  HUMAN_DIRECTED_EXECUTOR: createRoleContract("HUMAN_DIRECTED_EXECUTOR"),
 };
 
 const deploymentRoleReferenceSchema = (role: AffiliateAgentRole) =>
@@ -651,6 +717,112 @@ export const affiliateAgentDeploymentContractSchema = z
 
 export type AffiliateAgentDeploymentContract = z.infer<
   typeof affiliateAgentDeploymentContractSchema
+>;
+
+const affiliateAgentRoleContractBundleTupleSchema = z.tuple([
+  affiliateAgentRoleContractSchema,
+  affiliateAgentRoleContractSchema,
+  affiliateAgentRoleContractSchema,
+  affiliateAgentRoleContractSchema,
+]);
+
+const affiliateAgentPromptTemplateBundleTupleSchema = z.tuple([
+  affiliateAgentPromptTemplateSchema,
+  affiliateAgentPromptTemplateSchema,
+  affiliateAgentPromptTemplateSchema,
+  affiliateAgentPromptTemplateSchema,
+]);
+
+const addContractReferenceMismatch = (
+  context: z.RefinementCtx,
+  path: (string | number)[],
+): void => {
+  context.addIssue({
+    code: z.ZodIssueCode.custom,
+    message: "Deployment contract reference must match the parsed bundle.",
+    path,
+  });
+};
+
+export const affiliateAgentContractBundleSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    supplyContract: affiliateAgentSupplyContractSchema,
+    roleContracts: affiliateAgentRoleContractBundleTupleSchema,
+    promptTemplates: affiliateAgentPromptTemplateBundleTupleSchema,
+    deploymentContract: affiliateAgentDeploymentContractSchema,
+  })
+  .strict()
+  .superRefine((bundle, context) => {
+    const { deploymentContract } = bundle;
+    if (
+      deploymentContract.activeSupplyContract.version !==
+        bundle.supplyContract.version ||
+      deploymentContract.activeSupplyContract.hash !==
+        bundle.supplyContract.hash
+    ) {
+      addContractReferenceMismatch(context, [
+        "deploymentContract",
+        "activeSupplyContract",
+      ]);
+    }
+
+    AFFILIATE_AGENT_ROLES.forEach((role, index) => {
+      const roleContract = bundle.roleContracts[index];
+      const promptTemplate = bundle.promptTemplates[index];
+      const deploymentRole = deploymentContract.roleContracts[index];
+      const deploymentPrompt = deploymentContract.promptTemplates[index];
+
+      if (roleContract.role !== role) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Role contract ${index} must be ${role}.`,
+          path: ["roleContracts", index, "role"],
+        });
+      }
+      if (promptTemplate.role !== role) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Prompt template ${index} must be ${role}.`,
+          path: ["promptTemplates", index, "role"],
+        });
+      }
+      if (
+        deploymentRole.version !== roleContract.version ||
+        deploymentRole.hash !== roleContract.hash
+      ) {
+        addContractReferenceMismatch(context, [
+          "deploymentContract",
+          "roleContracts",
+          index,
+        ]);
+      }
+      if (
+        deploymentPrompt.version !== promptTemplate.version ||
+        deploymentPrompt.hash !== promptTemplate.hash
+      ) {
+        addContractReferenceMismatch(context, [
+          "deploymentContract",
+          "promptTemplates",
+          index,
+        ]);
+      }
+      if (
+        roleContract.promptTemplateVersion !== promptTemplate.version ||
+        roleContract.promptTemplateHash !== promptTemplate.hash
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Role contract prompt reference must match the parsed bundle.",
+          path: ["roleContracts", index, "promptTemplateHash"],
+        });
+      }
+    });
+  });
+
+export type AffiliateAgentContractBundle = z.infer<
+  typeof affiliateAgentContractBundleSchema
 >;
 
 const affiliateAgentEvidenceManifestEntrySchema = z
@@ -823,6 +995,56 @@ export const affiliateAgentClaimEnvelopeSchema = z
         code: z.ZodIssueCode.custom,
         message: "Claim commands must match the active role contract.",
         path: ["permittedCommands"],
+      });
+    }
+
+    if (claim.role === "COVERAGE_PLANNER" && claim.supplySourceId !== null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Coverage Planner claims cannot identify a Supply Source.",
+        path: ["supplySourceId"],
+      });
+    }
+
+    if (
+      (claim.role === "MAPPING_PRODUCER" || claim.role === "SUPPLY_REVIEWER") &&
+      claim.supplySourceId !== claim.subject.supplySourceId
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Claim Supply Source must match the role subject Supply Source.",
+        path: ["supplySourceId"],
+      });
+    }
+
+    if (claim.role === "SUPPLY_REVIEWER") {
+      const identityChecks = [
+        {
+          claimValue: claim.workerId,
+          producerValue: claim.subject.producerWorkerId,
+          path: "workerId",
+        },
+        {
+          claimValue: claim.invocationId,
+          producerValue: claim.subject.producerInvocationId,
+          path: "invocationId",
+        },
+        {
+          claimValue: claim.workspaceId,
+          producerValue: claim.subject.producerWorkspaceId,
+          path: "workspaceId",
+        },
+      ];
+      identityChecks.forEach(({ claimValue, producerValue, path }) => {
+        if (claimValue === producerValue) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message:
+              "Supply Reviewer identity must differ from the producer identity.",
+            path: [path],
+          });
+        }
       });
     }
   });
@@ -1207,54 +1429,115 @@ export type AffiliateAgentSchemaIssue = z.infer<
   typeof affiliateAgentSchemaIssueSchema
 >;
 
-export const renderAffiliateAgentPrompt = (
+export type AffiliateAgentPromptAuthorityProjection = {
+  schemaVersion: 1;
+  role: AffiliateAgentRole;
+  queue: AffiliateAgentClaimEnvelope["queue"];
+  lane: AffiliateAgentClaimEnvelope["lane"];
+  jobId: string;
+  claimId: string;
+  supplySourceId: string | null;
+  executionClass: "PRODUCTION_CODEX";
+  workerId: string;
+  invocationId: string;
+  workspaceId: string;
+  claimedAt: string;
+  expiresAt: string;
+  deploymentContractVersion: number;
+  deploymentContractHash: string;
+  supplyContractVersion: number;
+  supplyContractHash: string;
+  roleContractVersion: number;
+  roleContractHash: string;
+  promptTemplateVersion: number;
+  promptTemplateHash: string;
+  claimEnvelopeHash: string;
+  evidenceManifestHash: string;
+  claimGeneration: number;
+  lifecycleGeneration: number | null;
+  subject: AffiliateAgentSubject;
+  nonTerminalCommands: AffiliateAgentRoleContract["permittedCommands"];
+  terminalDispositions: AffiliateAgentRoleContract["terminalDispositions"];
+  forbiddenEffects: AffiliateAgentRoleContract["forbiddenEffects"];
+};
+
+export const projectAffiliateAgentPromptAuthority = (
   roleContract: AffiliateAgentRoleContract,
   claimEnvelope: AffiliateAgentClaimEnvelope,
-): string => {
+): AffiliateAgentPromptAuthorityProjection => {
   const parsedRoleContract =
     affiliateAgentRoleContractSchema.parse(roleContract);
   const parsedClaimEnvelope =
     affiliateAgentClaimEnvelopeSchema.parse(claimEnvelope);
+  const promptTemplate =
+    AFFILIATE_AGENT_PROMPT_TEMPLATES[parsedRoleContract.role];
   if (
     parsedClaimEnvelope.role !== parsedRoleContract.role ||
     parsedClaimEnvelope.roleContractVersion !== parsedRoleContract.version ||
     parsedClaimEnvelope.roleContractHash !== parsedRoleContract.hash ||
-    parsedClaimEnvelope.promptTemplateVersion !==
-      parsedRoleContract.promptTemplateVersion ||
-    parsedClaimEnvelope.promptTemplateHash !==
-      parsedRoleContract.promptTemplateHash
+    parsedClaimEnvelope.promptTemplateVersion !== promptTemplate.version ||
+    parsedClaimEnvelope.promptTemplateHash !== promptTemplate.hash ||
+    parsedRoleContract.promptTemplateVersion !== promptTemplate.version ||
+    parsedRoleContract.promptTemplateHash !== promptTemplate.hash
   ) {
     throw new Error(
-      "Claim contract references must match the parsed role contract.",
+      "Claim contract references must match the parsed role and prompt contracts.",
     );
   }
 
-  const promptRoleContract = {
-    ...parsedRoleContract,
-    permittedCommands: parsedRoleContract.permittedCommands.filter(
+  return {
+    schemaVersion: 1 as const,
+    role: parsedClaimEnvelope.role,
+    queue: parsedClaimEnvelope.queue,
+    lane: parsedClaimEnvelope.lane,
+    jobId: parsedClaimEnvelope.jobId,
+    claimId: parsedClaimEnvelope.claimId,
+    supplySourceId: parsedClaimEnvelope.supplySourceId,
+    executionClass: parsedClaimEnvelope.executionClass,
+    workerId: parsedClaimEnvelope.workerId,
+    invocationId: parsedClaimEnvelope.invocationId,
+    workspaceId: parsedClaimEnvelope.workspaceId,
+    claimedAt: parsedClaimEnvelope.claimedAt,
+    expiresAt: parsedClaimEnvelope.expiresAt,
+    deploymentContractVersion: parsedClaimEnvelope.deploymentContractVersion,
+    deploymentContractHash: parsedClaimEnvelope.deploymentContractHash,
+    supplyContractVersion: parsedClaimEnvelope.supplyContractVersion,
+    supplyContractHash: parsedClaimEnvelope.supplyContractHash,
+    roleContractVersion: parsedRoleContract.version,
+    roleContractHash: parsedRoleContract.hash,
+    promptTemplateVersion: promptTemplate.version,
+    promptTemplateHash: promptTemplate.hash,
+    claimEnvelopeHash: hashAffiliateAgentValue(parsedClaimEnvelope),
+    evidenceManifestHash: parsedClaimEnvelope.evidenceManifest.hash,
+    claimGeneration: parsedClaimEnvelope.claimGeneration,
+    lifecycleGeneration: parsedClaimEnvelope.lifecycleGeneration,
+    subject: parsedClaimEnvelope.subject,
+    nonTerminalCommands: parsedClaimEnvelope.permittedCommands.filter(
       (command) => command !== "SUBMIT_TERMINAL_RESULT",
     ),
+    terminalDispositions: parsedRoleContract.terminalDispositions,
+    forbiddenEffects: parsedRoleContract.forbiddenEffects,
   };
-  const promptClaimEnvelope = {
-    ...parsedClaimEnvelope,
-    permittedCommands: parsedClaimEnvelope.permittedCommands.filter(
-      (command) => command !== "SUBMIT_TERMINAL_RESULT",
-    ),
-  };
+};
+
+export const renderAffiliateAgentPrompt = (
+  roleContract: AffiliateAgentRoleContract,
+  claimEnvelope: AffiliateAgentClaimEnvelope,
+): string => {
+  const authorityProjection = projectAffiliateAgentPromptAuthority(
+    roleContract,
+    claimEnvelope,
+  );
+  const promptTemplate =
+    AFFILIATE_AGENT_PROMPT_TEMPLATES[authorityProjection.role];
 
   return [
     "# Affiliate Agent Invocation",
     "",
-    "## Role Contract",
-    canonicalizeAffiliateAgentValue(promptRoleContract),
-    "",
-    "## Claim Envelope",
-    canonicalizeAffiliateAgentValue(promptClaimEnvelope),
-    "",
-    "## Authority",
-    "Use only the claim-scoped evidence and non-terminal commands in these parsed contracts.",
+    "## Authority Projection",
+    canonicalizeAffiliateAgentValue(authorityProjection),
     "",
     "## Completion",
-    "Submit one terminal result with SUBMIT_TERMINAL_RESULT.",
+    `Submit one terminal result with ${promptTemplate.terminalCommand}.`,
   ].join("\n");
 };

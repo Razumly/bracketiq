@@ -2,10 +2,12 @@
 
 import {
   AFFILIATE_AGENT_ROLE_CONTRACTS,
+  AFFILIATE_AGENT_PROMPT_TEMPLATES,
   affiliateAgentRoleContractSchema,
   affiliateAgentClaimEnvelopeSchema,
   affiliateAgentCommandSchema,
   affiliateAgentDeploymentContractSchema,
+  affiliateAgentContractBundleSchema,
   affiliateAgentSupplyContractSchema,
   affiliateAgentTerminalResultEnvelopeSchema,
   canonicalizeAffiliateAgentValue,
@@ -141,7 +143,15 @@ const deploymentContractFixture = {
     contextReuse: false,
     executionClass: "PRODUCTION_CODEX",
   },
-  hash: "7932401e1820e4565a785fa10e92d3f78175af0b1362ef6b308529b73894767a",
+  hash: "3f12c0702667a7a32cd88a9465cf541a249fc463aadc1aa6c63b42051798d5ae",
+};
+
+const contractBundleFixture = {
+  schemaVersion: 1,
+  supplyContract: supplyContractFixture,
+  roleContracts: Object.values(AFFILIATE_AGENT_ROLE_CONTRACTS),
+  promptTemplates: Object.values(AFFILIATE_AGENT_PROMPT_TEMPLATES),
+  deploymentContract: deploymentContractFixture,
 };
 
 const evidenceManifestFixture = {
@@ -456,9 +466,9 @@ describe("affiliate Agent Gateway contracts", () => {
     ).toEqual([
       {
         role: "COVERAGE_PLANNER",
-        hash: "5a5b889f65af294cae8bf223cbf2b190ea6e62bb160a9ead84680821168fd405",
+        hash: "381db9c28c2870b8a0a530110bd5931fd18a3675707fac4641d2e1fdaab70d72",
         promptTemplateHash:
-          "08da0757c3d7d94aa632f6439f7bc841a6a9950d126ac39ff19f3c9bb2b379e4",
+          "9c0e6f32b1e935fd14c8872b8ea1ddad96cd25a7498858c4b810835cd38149fb",
         inputSchemaId: "affiliate-agent/coverage-planner-subject@1",
         permittedCommands: [
           "CAPTURE_CLAIM_URL",
@@ -478,9 +488,9 @@ describe("affiliate Agent Gateway contracts", () => {
       },
       {
         role: "MAPPING_PRODUCER",
-        hash: "21b4ac88a6d35226bbf490ba5168a50ff13e97f31dd159a79d577ede75ea736d",
+        hash: "1d1a18a7b25a084413dda5200409e236a2da465d2fa8ac062ec094d835c8cb05",
         promptTemplateHash:
-          "582e948cc6d963603a41aee2671d377cca2d783b4527f144c923d67d5eeaaac9",
+          "8523e9a1d0377a45e5a4de03f5724ed4b07294f3b1ad623a55d064e6b872b45f",
         inputSchemaId: "affiliate-agent/mapping-producer-subject@1",
         permittedCommands: [
           "CAPTURE_CLAIM_URL",
@@ -500,9 +510,9 @@ describe("affiliate Agent Gateway contracts", () => {
       },
       {
         role: "SUPPLY_REVIEWER",
-        hash: "f61f4154a5ee45489f1a79e3f139f430ea5c7b202190eb87b6c0c418d2759b6f",
+        hash: "434df5725ec14b466768c656a538d2a917afc93a900e4eeb9ccfe5191606b56b",
         promptTemplateHash:
-          "5ae580549fd01173fc99abee1e585b24301ee4ac763fdc9e97a03757cc39f357",
+          "f2a685039fac0dd4f261a645d3cfb9128f28dfbb0c86549e9d7866d858a32fe2",
         inputSchemaId: "affiliate-agent/supply-reviewer-subject@1",
         permittedCommands: ["SUBMIT_TERMINAL_RESULT"],
         terminalDispositions: [
@@ -520,9 +530,9 @@ describe("affiliate Agent Gateway contracts", () => {
       },
       {
         role: "HUMAN_DIRECTED_EXECUTOR",
-        hash: "f48ea4ffc1ce83434b24e345d7cab0876cdc136e230256ed19215117972fe360",
+        hash: "4aae27af7110f5ad4e3141f4d11882825e4db90422f1021bb4d24ee36c68527f",
         promptTemplateHash:
-          "c1a7dc9d2755fb0c2863d4c5e772e637e5d783b30c9366f2f97b3d885cce5975",
+          "514fca00a373112dec2385a0b3b527975dec41d17b2288eb04e78ba7b98a72ec",
         inputSchemaId: "affiliate-agent/human-directed-executor-subject@1",
         permittedCommands: [
           "EXECUTE_RECORDED_LIFECYCLE_COMMAND",
@@ -556,13 +566,58 @@ describe("affiliate Agent Gateway contracts", () => {
     ).toBe(false);
   });
 
+  it("rejects correctly rehashed version-1 role capability changes", () => {
+    const contract = AFFILIATE_AGENT_ROLE_CONTRACTS.COVERAGE_PLANNER;
+    const { hash: _hash, ...preimage } = contract;
+    const changedPreimages = [
+      {
+        ...preimage,
+        permittedCommands: [
+          "CAPTURE_CLAIM_URL",
+          "COMMIT_DECLARATIVE_PACKAGE",
+          "RUN_DISCOVERY_QUERY",
+          "SUBMIT_TERMINAL_RESULT",
+        ],
+      },
+      {
+        ...preimage,
+        terminalDispositions: ["APPROVED", ...preimage.terminalDispositions],
+      },
+      {
+        ...preimage,
+        inputSchemaId: "affiliate-agent/mapping-producer-subject@1",
+      },
+      {
+        ...preimage,
+        forbiddenEffects: preimage.forbiddenEffects.slice(0, -1),
+      },
+      {
+        ...preimage,
+        retention: {
+          ...preimage.retention,
+          failedInvocationDiagnosticsDays: 15,
+        },
+      },
+    ];
+
+    expect(
+      changedPreimages.map(
+        (changedPreimage) =>
+          affiliateAgentRoleContractSchema.safeParse({
+            ...changedPreimage,
+            hash: hashAffiliateAgentValue(changedPreimage),
+          }).success,
+      ),
+    ).toEqual([false, false, false, false, false]);
+  });
+
   it("parses a hashed deployment contract with the expected topology", () => {
     const parsed = affiliateAgentDeploymentContractSchema.parse(
       deploymentContractFixture,
     );
 
     expect(parsed.hash).toBe(
-      "7932401e1820e4565a785fa10e92d3f78175af0b1362ef6b308529b73894767a",
+      "3f12c0702667a7a32cd88a9465cf541a249fc463aadc1aa6c63b42051798d5ae",
     );
     expect(parsed.expectedTopology).toEqual({
       claimsPerInvocation: 1,
@@ -572,6 +627,62 @@ describe("affiliate Agent Gateway contracts", () => {
       claimLoop: false,
       contextReuse: false,
       executionClass: "PRODUCTION_CODEX",
+    });
+  });
+
+  it("parses one complete contract bundle and rejects mismatched deployment references", () => {
+    const parsed = affiliateAgentContractBundleSchema.parse(
+      contractBundleFixture,
+    );
+
+    expect(parsed.promptTemplates).toHaveLength(4);
+
+    const deploymentVariants = [
+      {
+        ...deploymentContractFixture,
+        activeSupplyContract: {
+          version: 2,
+          hash: "d".repeat(64),
+        },
+      },
+      {
+        ...deploymentContractFixture,
+        roleContracts: deploymentContractFixture.roleContracts.map(
+          (reference, index) =>
+            index === 0
+              ? {
+                  ...reference,
+                  version: reference.version + 1,
+                  hash: "d".repeat(64),
+                }
+              : reference,
+        ),
+      },
+      {
+        ...deploymentContractFixture,
+        promptTemplates: deploymentContractFixture.promptTemplates.map(
+          (reference, index) =>
+            index === 0
+              ? {
+                  ...reference,
+                  version: reference.version + 1,
+                  hash: "d".repeat(64),
+                }
+              : reference,
+        ),
+      },
+    ].map(({ hash: _hash, ...preimage }) => ({
+      ...preimage,
+      hash: hashAffiliateAgentValue(preimage),
+    }));
+
+    deploymentVariants.forEach((deploymentContract) => {
+      expect(
+        affiliateAgentContractBundleSchema.safeParse({
+          ...contractBundleFixture,
+          deploymentContract,
+        }).success,
+      ).toBe(false);
     });
   });
 
@@ -619,6 +730,42 @@ describe("affiliate Agent Gateway contracts", () => {
         lane: "HUMAN_EXECUTION",
       },
     ]);
+  });
+  it("rejects claim identity conflicts within role subjects", () => {
+    const mappingClaim = claimFixtureForRole("MAPPING_PRODUCER");
+    const reviewerClaim = claimFixtureForRole("SUPPLY_REVIEWER");
+    const conflictingClaims = [
+      {
+        ...claimFixtureForRole("COVERAGE_PLANNER"),
+        supplySourceId: "unexpected-source",
+      },
+      {
+        ...mappingClaim,
+        supplySourceId: "different-source",
+      },
+      {
+        ...reviewerClaim,
+        supplySourceId: "different-source",
+      },
+      {
+        ...reviewerClaim,
+        workerId: reviewerClaim.subject.producerWorkerId,
+      },
+      {
+        ...reviewerClaim,
+        invocationId: reviewerClaim.subject.producerInvocationId,
+      },
+      {
+        ...reviewerClaim,
+        workspaceId: reviewerClaim.subject.producerWorkspaceId,
+      },
+    ];
+
+    expect(
+      conflictingClaims.map(
+        (claim) => affiliateAgentClaimEnvelopeSchema.safeParse(claim).success,
+      ),
+    ).toEqual([false, false, false, false, false, false]);
   });
 
   it("rejects a role-forbidden command", () => {
@@ -699,6 +846,49 @@ describe("affiliate Agent Gateway contracts", () => {
     ).toBe(false);
   });
 
+  it("renders one explicit authority projection with truthful hashes", () => {
+    const roleContract = AFFILIATE_AGENT_ROLE_CONTRACTS.COVERAGE_PLANNER;
+    const claim = affiliateAgentClaimEnvelopeSchema.parse(
+      claimFixtureForRole("COVERAGE_PLANNER"),
+    );
+    const prompt = renderAffiliateAgentPrompt(roleContract, claim);
+    const projectionJson = prompt
+      .split("## Authority Projection\n")[1]
+      .split("\n\n## Completion")[0];
+
+    expect(JSON.parse(projectionJson)).toEqual({
+      schemaVersion: 1,
+      role: "COVERAGE_PLANNER",
+      queue: claim.queue,
+      lane: claim.lane,
+      jobId: claim.jobId,
+      claimId: claim.claimId,
+      supplySourceId: null,
+      executionClass: "PRODUCTION_CODEX",
+      workerId: claim.workerId,
+      invocationId: claim.invocationId,
+      workspaceId: claim.workspaceId,
+      claimedAt: claim.claimedAt,
+      expiresAt: claim.expiresAt,
+      deploymentContractVersion: claim.deploymentContractVersion,
+      deploymentContractHash: claim.deploymentContractHash,
+      supplyContractVersion: claim.supplyContractVersion,
+      supplyContractHash: claim.supplyContractHash,
+      roleContractVersion: roleContract.version,
+      roleContractHash: roleContract.hash,
+      promptTemplateVersion: roleContract.promptTemplateVersion,
+      promptTemplateHash: roleContract.promptTemplateHash,
+      claimEnvelopeHash: hashAffiliateAgentValue(claim),
+      evidenceManifestHash: claim.evidenceManifest.hash,
+      claimGeneration: claim.claimGeneration,
+      lifecycleGeneration: claim.lifecycleGeneration,
+      subject: claim.subject,
+      nonTerminalCommands: ["CAPTURE_CLAIM_URL", "RUN_DISCOVERY_QUERY"],
+      terminalDispositions: roleContract.terminalDispositions,
+      forbiddenEffects: roleContract.forbiddenEffects,
+    });
+    expect(projectionJson).not.toContain('"hash":');
+  });
   it("renders a byte-identical prompt", () => {
     const roleContract = AFFILIATE_AGENT_ROLE_CONTRACTS.COVERAGE_PLANNER;
     const claim = affiliateAgentClaimEnvelopeSchema.parse(

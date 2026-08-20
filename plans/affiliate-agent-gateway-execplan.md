@@ -19,6 +19,7 @@ A developer can see the change work in three ways. Pure contract tests show stab
 - [x] (2026-08-20 18:19Z) Implemented Milestone 1. Added pure contract types, strict parsers, canonical hashes, all four role contracts, the Supply Contract, the deployment contract, typed subjects, commands, terminal results, and deterministic prompts.
 - [x] (2026-08-20 18:19Z) Froze the public transactional gateway declarations and exact retry constants in `agentGateway.ts`. Kept invocation failures out of the pure contract module.
 - [x] (2026-08-20 18:19Z) Completed 13 vertical red-to-green contract behaviors. The focused Jest file passes 13 tests. The TypeScript check passes. Prettier formatted only the three changed TypeScript files.
+- [x] (2026-08-20 18:31Z) Resolved the Milestone 1 self-review findings with four vertical red-to-green tests. Added prompt-template contracts, the complete contract-bundle parser, version-1 capability enforcement, claim identity checks, and a truthful authority projection. The focused file passes 17 tests. TypeScript passes.
 - [ ] Implement Milestone 2. Add the gateway schema and one Coverage Planner claim with a five-minute lease, a 20-minute hard deadline, a scoped token, and one durable claim event.
 - [ ] Implement Milestone 3. Add heartbeat and manifest-bound artifact reads with hash verification and durable receipts.
 - [ ] Implement Milestone 4. Add one allowed command and one terminal Coverage Planner domain result with atomic completion and token invalidation.
@@ -58,8 +59,17 @@ A developer can see the change work in three ways. Pure contract tests show stab
 - Observation: The existing `stableAgentArtifactSha256` key ordering was useful, but its JSON behavior silently omitted `undefined`, converted non-finite numbers, and accepted non-plain objects.
   Evidence: The second red test expected `{ missing: undefined }` to fail, but the original-shaped implementation did not throw. The green implementation rejects values that canonical JSON cannot represent and rejects non-plain objects.
 
-- Observation: The prompt cannot include the terminal command name in embedded command arrays and also contain that name exactly once as an instruction.
-  Evidence: The renderer removes `SUBMIT_TERMINAL_RESULT` from the displayed non-terminal command arrays. The final line contains the only occurrence. The four-role prompt test observes one occurrence for every role.
+- Observation: The prompt cannot include the terminal command name in its authority projection and also contain that name exactly once as an instruction.
+  Evidence: The authority projection includes only non-terminal commands. The final line contains the only occurrence of `SUBMIT_TERMINAL_RESULT`. The four-role prompt test observes one occurrence for every role.
+
+- Observation: A valid self-hash proves contract integrity. It does not prove that a version-1 role has authorized capabilities.
+  Evidence: Before the fix, the role parser accepted correctly rehashed changes to commands, dispositions, input schema, and forbidden effects. The parser now compares version-1 role capabilities with one registered four-role matrix.
+
+- Observation: A self-valid deployment contract can still reference contracts outside the registry input.
+  Evidence: The complete bundle parser now parses the Supply Contract, four role contracts, four prompt templates, and deployment contract together. It rejects recomputed deployment contracts with supply, role, or prompt references that differ from the parsed bundle.
+
+- Observation: Filtering terminal commands from a displayed contract or claim makes the retained self-hash misleading.
+  Evidence: The renderer now displays one named authority projection. It gives exact source hashes and a computed full claim-envelope hash. It does not display modified self-hashed objects.
 
 ## Decision Log
 
@@ -111,13 +121,27 @@ A developer can see the change work in three ways. Pure contract tests show stab
   Rationale: Strict parsing rejects unknown authority fields. Hashing the parsed preimage prevents object key order and an object's own hash from changing the result.
   Date/Author: 2026-08-20 / Codex Milestone 1 implementer
 
-- Decision: Keep `SUBMIT_TERMINAL_RESULT` in the machine-readable role and claim contracts, but omit it from the embedded non-terminal command arrays in rendered prompts.
-  Rationale: The prompt still derives from the parsed contracts. The final completion instruction is the only byte occurrence of the terminal command name.
+- Decision: Keep `SUBMIT_TERMINAL_RESULT` in the machine-readable role and claim contracts, but omit it from the rendered authority projection.
+  Rationale: The authority projection computes its claim-envelope hash before it filters the command. The final completion instruction is the only byte occurrence of the terminal command name.
   Date/Author: 2026-08-20 / Codex Milestone 1 implementer
+
+- Decision: Register one strict prompt-template contract for each role and parse registry input through one complete contract bundle.
+  Rationale: The deployment contract self-hash protects its own bytes. The bundle parser also proves that every deployment reference names the exact parsed Supply Contract, role contract, and prompt template.
+  Date/Author: 2026-08-20 / Codex Milestone 1 review fixer
+
+- Decision: Enforce version-1 capabilities from one four-role capability matrix.
+  Rationale: Recomputing a self-hash must not authorize a new command, disposition, input schema, forbidden-effect set, or retention rule.
+  Date/Author: 2026-08-20 / Codex Milestone 1 review fixer
+
+- Decision: Render one version-1 authority projection and one completion section.
+  Rationale: The projection names each exact authority hash. It computes the claim-envelope hash from the full parsed claim before it filters the terminal command from the displayed non-terminal command list.
+  Date/Author: 2026-08-20 / Codex Milestone 1 review fixer
 
 ## Outcomes & Retrospective
 
 Milestone 1 is complete. The pure contract seam now parses and hashes the Supply Contract, deployment contract, role contracts, evidence manifests, typed claims, closed commands, and typed terminal results. The renderer produces deterministic LF-only prompts with one terminal completion instruction. The transactional seam now declares the future gateway interface, safe results and errors, invocation-failure envelope, and the exact 60-second heartbeat, 300-second lease, 1,200-second deadline, three-correction, and three-attempt retry policy. The focused file passes 13 tests, and TypeScript passes. Milestones 2 through 12 remain. No Prisma model, persistence implementation, process launch, route, lifecycle derivation, fleet cutover, full suite, build, or database command was added or run.
+
+The Milestone 1 self-review fixes are complete. The registry can now parse one complete, internally consistent contract bundle. Version-1 role contracts cannot authorize a capability change through a recomputed self-hash. Claims reject Supply Source mismatches and producer/reviewer identity reuse. Prompts display one truthful authority projection and one terminal completion instruction. The focused file now passes 17 tests, and TypeScript passes.
 
 ## Context and Orientation
 
@@ -363,6 +387,9 @@ Apply the full migration chain with `npm run migrate:deploy`. Run `npx prisma mi
     AffiliateAgentSupplyContract
     AffiliateAgentDeploymentContract
     AffiliateAgentRoleContract
+    AffiliateAgentPromptTemplate
+    AffiliateAgentContractBundle
+    AffiliateAgentPromptAuthorityProjection
     AffiliateAgentEvidenceManifestEntry
     AffiliateAgentEvidenceManifest
     AffiliateAgentSubject
@@ -372,13 +399,17 @@ Apply the full migration chain with `npm run migrate:deploy`. Run `npx prisma mi
     AffiliateAgentClaimEnvelope
     AffiliateAgentSchemaIssue
     AFFILIATE_AGENT_ROLE_CONTRACTS
+    AFFILIATE_AGENT_PROMPT_TEMPLATES
     affiliateAgentSupplyContractSchema
     affiliateAgentDeploymentContractSchema
     affiliateAgentRoleContractSchema
+    affiliateAgentPromptTemplateSchema
+    affiliateAgentContractBundleSchema
     affiliateAgentClaimEnvelopeSchema
     affiliateAgentTerminalResultEnvelopeSchema
     canonicalizeAffiliateAgentValue
     hashAffiliateAgentValue
+    projectAffiliateAgentPromptAuthority
     renderAffiliateAgentPrompt
 
 `AffiliateAgentRole` is the exact union `COVERAGE_PLANNER | MAPPING_PRODUCER | SUPPLY_REVIEWER | HUMAN_DIRECTED_EXECUTOR`. `AffiliateAgentExecutionClass` is the exact union `PRODUCTION_CODEX | OFFLINE_OPEN_WEIGHT_EVALUATION`. Production role contracts permit only `PRODUCTION_CODEX`.
@@ -388,6 +419,10 @@ Apply the full migration chain with `npm run migrate:deploy`. Run `npx prisma mi
 `AffiliateAgentDeploymentContract` contains a positive version, gateway version, active Supply Contract version and hash, all four role versions and hashes, all four prompt-template versions and hashes, and expected topology. Expected topology requires one claim, one fresh workspace, `codex exec --ephemeral`, no nested Goal, no claim loop, no context reuse, and the production execution class.
 
 `AffiliateAgentRoleContract` contains role, positive version, contract hash, prompt-template version and hash, typed input schema identifier, permitted command names, terminal dispositions, forbidden effects, retention rules, and production execution class. Retention is exact. Authoritative result, lifecycle, human-decision, evidence, and idempotency receipts are retained indefinitely. Failed-invocation diagnostics and bounded logs are retained for 14 days. The child workspace is destroyed after terminal completion or failure.
+
+`AffiliateAgentPromptTemplate` is a strict, independently hashed version-1 contract. Its heading order is `AUTHORITY_PROJECTION` and `COMPLETION`. `AffiliateAgentContractBundle` parses one Supply Contract, all four role contracts, all four prompt templates, and one deployment contract. It rejects every deployment reference that does not match the parsed bundle.
+
+`AffiliateAgentPromptAuthorityProjection` names the exact role, deployment, Supply Contract, prompt-template, claim-envelope, and evidence-manifest hashes. It includes the claim identities, generations, subject, non-terminal commands, terminal dispositions, and forbidden effects. It has no retained generic `hash` field from a modified source object.
 
 `AffiliateAgentCommand` is a closed discriminated union. It includes only typed claim-scoped capture/provider requests, declarative package parsing and validation, package commit, and exact lifecycle commands required by the four role contracts. Every member has a literal `type` and typed data. It has no arbitrary URL, path, SQL, shell, repository patch, source-code, provider-name, or storage-key member. `SUBMIT_TERMINAL_RESULT` exists as the terminal completion command in the claim and prompt. `AffiliateAgentClaimOperation` excludes it from `EXECUTE_COMMAND` and submits it through `SUBMIT_RESULT`.
 
@@ -672,6 +707,8 @@ The implementation is accepted only when all evidence below exists. A compile-on
 
 Contract fixture tests must prove stable independent hashes for the Supply Contract aggregate, each component, the deployment contract, every role contract, and every prompt template. They must prove deterministic prompt output and one terminal completion command.
 
+The complete bundle fixture must reject correctly rehashed deployment supply, role, and prompt references that do not match the parsed bundle. Version-1 role fixtures must reject correctly rehashed capability changes. Claim fixtures must reject Supply Source mismatches and producer/reviewer identity reuse. Prompt fixtures must prove that the displayed authority projection uses exact source hashes and a computed full claim-envelope hash.
+
 Gateway unit tests must prove every role input, permitted command, disposition, forbidden effect, and retention rule. They must prove one-claim supervisor behavior, three in-invocation schema corrections, the exact retry function, token scope, safe errors, terminal invalidation, exact replay, changed-input denial, reviewer isolation, credential allowlisting, and offline open-weight denial.
 
 Database integration tests must prove one winner in a concurrent claim race, stale generation rejection, five-minute lease behavior, 20-minute hard deadline, durable idempotency receipts, atomic terminal result, token invalidation, exact terminal replay, retry transitions at +5 and +15 minutes, immediate block on failure three, no +45 timestamp, one provider effect after restart, one lifecycle receipt after response loss, one expiry transition, no duplicate live claim, and no repeated lifecycle transition.
@@ -764,17 +801,41 @@ This exact focused formatter command ran:
 
 Prettier formatted all three named files. It emitted the existing `MODULE_TYPELESS_PACKAGE_JSON` warning for `prettier.config.js`. It did not report a formatting failure.
 
+The Milestone 1 self-review used this focused command for each red and green cycle:
+
+    npx jest src/server/affiliateImports/__tests__/agentGateway.test.ts --runInBand
+
+The four red observations were:
+
+    contract bundle: TypeError because AFFILIATE_AGENT_PROMPT_TEMPLATES was absent; 1 failed suite, 0 tests
+    role capabilities: expected five false results; received true for the unauthorized rehashed capability changes; 1 failed, 14 passed
+    claim identities: expected six false results; received true for the internal identity conflicts; 1 failed, 15 passed
+    prompt projection: TypeError because the Authority Projection section was absent; 1 failed, 16 passed
+
+After focused formatting, the final focused result was:
+
+    Test Suites: 1 passed, 1 total
+    Tests:       17 passed, 17 total
+    Snapshots:   0 total
+    Time:        0.527 s
+
+The stabilized interface check ran before and after focused formatting:
+
+    npx tsc --noEmit --pretty false
+
+Both checks exited with code 0 and no output. The review fix formatter named only `agentGatewayContracts.ts` and `agentGateway.test.ts`.
+
 The fixed aggregate hashes are:
 
     Supply Contract: fb7d336037f5dafbe4bfd37d4b21e369b12da6b328051744fe3fe28d8c9608c0
-    Deployment contract: 7932401e1820e4565a785fa10e92d3f78175af0b1362ef6b308529b73894767a
+    Deployment contract: 3f12c0702667a7a32cd88a9465cf541a249fc463aadc1aa6c63b42051798d5ae
 
 The fixed role-contract and prompt-template hashes are:
 
-    COVERAGE_PLANNER role=5a5b889f65af294cae8bf223cbf2b190ea6e62bb160a9ead84680821168fd405 prompt=08da0757c3d7d94aa632f6439f7bc841a6a9950d126ac39ff19f3c9bb2b379e4
-    MAPPING_PRODUCER role=21b4ac88a6d35226bbf490ba5168a50ff13e97f31dd159a79d577ede75ea736d prompt=582e948cc6d963603a41aee2671d377cca2d783b4527f144c923d67d5eeaaac9
-    SUPPLY_REVIEWER role=f61f4154a5ee45489f1a79e3f139f430ea5c7b202190eb87b6c0c418d2759b6f prompt=5ae580549fd01173fc99abee1e585b24301ee4ac763fdc9e97a03757cc39f357
-    HUMAN_DIRECTED_EXECUTOR role=f48ea4ffc1ce83434b24e345d7cab0876cdc136e230256ed19215117972fe360 prompt=c1a7dc9d2755fb0c2863d4c5e772e637e5d783b30c9366f2f97b3d885cce5975
+    COVERAGE_PLANNER role=381db9c28c2870b8a0a530110bd5931fd18a3675707fac4641d2e1fdaab70d72 prompt=9c0e6f32b1e935fd14c8872b8ea1ddad96cd25a7498858c4b810835cd38149fb
+    MAPPING_PRODUCER role=1d1a18a7b25a084413dda5200409e236a2da465d2fa8ac062ec094d835c8cb05 prompt=8523e9a1d0377a45e5a4de03f5724ed4b07294f3b1ad623a55d064e6b872b45f
+    SUPPLY_REVIEWER role=434df5725ec14b466768c656a538d2a917afc93a900e4eeb9ccfe5191606b56b prompt=f2a685039fac0dd4f261a645d3cfb9128f28dfbb0c86549e9d7866d858a32fe2
+    HUMAN_DIRECTED_EXECUTOR role=4aae27af7110f5ad4e3141f4d11882825e4db90422f1021bb4d24ee36c68527f prompt=514fca00a373112dec2385a0b3b527975dec41d17b2288eb04e78ba7b98a72ec
 
 The six component hashes, in required component order, are:
 
@@ -812,3 +873,5 @@ Plan revision note (2026-08-20 17:39Z): Created the initial self-contained execu
 Plan revision note (2026-08-20): Corrected database isolation to use `bracketiq_e2e_67_gateway`. Removed instructions that would start an unapproved PostgreSQL container. The plan now uses one already-authorized local server and requires explicit current authorization before any runtime state change.
 
 Plan revision note (2026-08-20 18:19Z): Completed Milestone 1. Recorded the pure contract and public transactional declarations, every focused red-to-green behavior, final test and typecheck results, focused formatting, fixed hashes, scope exclusions, and the remaining milestones.
+
+Plan revision note (2026-08-20 18:31Z): Resolved the Milestone 1 self-review findings. Added the strict prompt-template and complete bundle contracts, one version-1 role capability matrix with parser enforcement, claim identity consistency checks, and the deterministic authority projection. Recorded all four red observations, the 17-test focused pass, two successful TypeScript checks, focused formatting, and the revised deployment, role, and prompt-template hashes.
