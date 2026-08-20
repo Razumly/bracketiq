@@ -19,6 +19,12 @@ jest.mock('@/lib/fieldService', () => ({
 
 jest.mock('@/lib/apiClient', () => ({
   apiRequest: (...args: any[]) => apiRequestMock(...args),
+  isApiRequestError: (error: unknown) => {
+    if (!error || typeof error !== 'object' || !('name' in error)) {
+      return false;
+    }
+    return error.name === 'ApiRequestError';
+  },
 }));
 
 jest.mock('@/components/ui/PriceWithFeesPreview', () => () => null);
@@ -137,6 +143,9 @@ describe('CreateRentalSlotModal multi-field creation', () => {
         />
       </MantineProvider>,
     );
+    expect(
+      await screen.findByText('Overnight slot ends on the next local weekday: Tuesday.'),
+    ).toBeInTheDocument();
 
     await user.click(await screen.findByRole('button', { name: 'Save Rental Slot' }));
 
@@ -193,5 +202,39 @@ describe('CreateRentalSlotModal multi-field creation', () => {
     expect(await screen.findByText('Main')).toBeInTheDocument();
     expect(screen.getByTestId('rental-slot-field-chip-field_main')).toHaveStyle(`background-color: ${getIndexedEntityColorPair(0).bg}`);
     expect(screen.getByTestId('rental-slot-field-chip-field_aux')).toHaveStyle(`background-color: ${getIndexedEntityColorPair(1).bg}`);
+  });
+  it('shows the API validation error when saving a rental slot fails', async () => {
+    const field = {
+      $id: 'field_error',
+      name: 'Error Court',
+      location: '',
+      lat: 0,
+      long: 0,
+      rentalSlotIds: [],
+      rentalSlots: [],
+    } as any;
+    const serverError = new Error(
+      'Repeating Time Slot on 2030-03-10 contains a nonexistent local time.',
+    );
+    serverError.name = 'ApiRequestError';
+    createRentalSlotMock.mockRejectedValue(serverError);
+    const user = userEvent.setup();
+
+    render(
+      <MantineProvider>
+        <CreateRentalSlotModal
+          opened
+          onClose={() => undefined}
+          field={field}
+          slot={null}
+          organizationId={null}
+          organizationHasStripeAccount={false}
+        />
+      </MantineProvider>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Create Rental Slot' }));
+
+    expect(await screen.findByText(serverError.message)).toBeInTheDocument();
   });
 });

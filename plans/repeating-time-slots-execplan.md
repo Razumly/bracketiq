@@ -26,6 +26,14 @@ A human can verify the result by running the focused site and mobile tests. The 
 - [x] (2026-08-19 20:06Z) Remove unused overlap-only APIs and add mobile daylight-saving regressions.
 - [x] (2026-08-18 00:00Z) Run the final focused checks and record the issue evidence.
 - [x] (2026-08-19 21:11Z) Add regressions for mobile repeating date bounds and one-time field-calendar occupancy.
+- [x] (2026-08-18 00:00Z) Reopen issue #27 after the post-closure rental-editor review.
+- [x] (2026-08-18 00:00Z) Add and pass the site rental-editor regressions for overnight warnings and dated validation errors.
+- [x] (2026-08-18 00:00Z) Run the follow-up focused site tests and TypeScript check.
+- [ ] Synchronize this branch with clean current `main` and rerun the complete site suite.
+- [x] (2026-08-18 00:00Z) Run the complete mobile suite with the available Android SDK.
+- [x] (2026-08-18 00:00Z) Record the existing-branch integration sequence and conflict strategy.
+- [x] (2026-08-18 00:00Z) Address review findings by converting the warning test to interaction coverage and centralizing site warning and local-time adapters.
+- [x] (2026-08-18 00:00Z) Rerun the focused site suite and TypeScript validation after the review refactor.
 
 ## Surprises & Discoveries
 
@@ -55,12 +63,20 @@ A human can verify the result by running the focused site and mobile tests. The 
 - Decision: Remove overlap-only helper APIs after moving conflict checks to resolved occurrence intervals.
   Rationale: No production caller used the helpers. Keeping them would preserve a second interval model that ignores named time zones and daylight-saving transitions.
   Date/Author: 2026-08-19 / Codex.
+- Decision: Keep the follow-up on `issue/27-repeating-time-slots` and do not create an integration branch.
+  Rationale: The root `main` worktree contains unrelated uncommitted work. The issue branch keeps the review changes isolated.
+  Date/Author: 2026-08-18 / Codex.
+- Decision: Centralize the overnight warning formatter and local slot date-time adapter in the canonical repeating-slot helper.
+  Rationale: League and rental editors, weekly sessions, and schedule helpers must use one warning and local-time contract.
+  Date/Author: 2026-08-18 / Codex.
  
 
 ## Outcomes & Retrospective
 
 - The site resolver now returns strict local-date occurrences. It rejects daylight-saving gaps and folds.
 - Overnight slots end on the next local date. Site and mobile forms show the next-weekday warning.
+- Follow-up verification on 2026-08-18: four focused site suites and 46 tests passed. Site TypeScript validation passed. The overnight warning interaction test now changes the weekday and both time controls. The rental modal test preserves the dated API validation message.
+- Follow-up verification on 2026-08-18: the schedule helper regression suite passed 4 tests. The complete focused set therefore covered five suites and 50 tests.
 - Site scheduler, diagnostics, weekly sessions, field calendars, and API validation use the resolver.
 - Mobile validation, editor payloads, Room mapping, and weekly presentation use the same local-time contract.
 - Site verification passed: 10 Jest suites and 117 tests passed. Site TypeScript validation passed. Changed-site ESLint completed with 0 errors and 7 exhaustive-deps warnings in the existing schedule page.
@@ -69,6 +85,7 @@ A human can verify the result by running the focused site and mobile tests. The 
 - Latest focused verification passed: 10 site Jest suites and 121 tests passed, site TypeScript validation passed, and the five targeted mobile classes plus the canonical model suite completed with `BUILD SUCCESSFUL`.
 - Defect remediation verification on 2026-08-18: the field availability API now returns a structured 400 response for invalid repeating time zones instead of omitting availability. The public rental selection path preserves resolver messages for invalid slots. The site focused suite passed 10 suites and 124 tests. Site TypeScript validation passed. Mobile model and Compose checks passed with `BUILD SUCCESSFUL`.
 - Final acceptance verification on 2026-08-18: 13 site Jest suites and 138 tests passed. Site TypeScript and changed-file ESLint checks passed. The core model check, targeted Compose classes, and complete `:composeApp:testDebugUnitTest` task passed with `BUILD SUCCESSFUL`.
+- Complete site verification remains blocked by the unsynchronized branch suite: 8 failed suites, 19 failed tests, 841 passed tests, and 2 skipped tests.
 
 ## Context and Orientation
 

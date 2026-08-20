@@ -25,7 +25,10 @@ import type { WeeklySlotConflict } from '@/lib/leagueService';
 import { formatDisplayDate, formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
 import { getFacilityScopedFieldDisplayName, getFieldDisplayName } from '@/lib/fieldUtils';
 import { applySportResourceLabels, GENERIC_RESOURCE_LABELS, type SportResourceLabels } from '@/lib/sportResourceLabels';
-import { repeatingTimeSlotHasOvernightWindow } from '@/lib/repeatingTimeSlotAvailability';
+import {
+  formatOvernightWeekdayWarning,
+  repeatingTimeSlotHasOvernightWindow,
+} from '@/lib/repeatingTimeSlotAvailability';
 
 const DROPDOWN_PROPS = { withinPortal: true, zIndex: 1800 };
 const MAX_STANDARD_NUMBER = 99_999;
@@ -55,18 +58,6 @@ const DAYS_OF_WEEK = [
   { value: '6', label: 'Sunday' },
 ];
 
-const formatOvernightWeekdayWarning = (selectedDays: number[]): string => {
-  const labels = selectedDays
-    .map((day) => DAYS_OF_WEEK[(day + 1) % 7]?.label)
-    .filter((label): label is string => Boolean(label));
-  if (labels.length === 0) {
-    return 'Overnight slot ends on the next local day.';
-  }
-  if (labels.length === 1) {
-    return `Overnight slot ends on the next local weekday: ${labels[0]}.`;
-  }
-  return `Overnight slot ends on the next local weekdays: ${labels.join(', ')}.`;
-};
 
 const formatClockTime = (date: Date): string => new Intl.DateTimeFormat('en-US', {
   hour: 'numeric',

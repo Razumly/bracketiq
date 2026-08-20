@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { fireEvent, screen } from "@testing-library/react";
 import LeagueFields, { LeagueSlotForm } from "../LeagueFields";
 import { renderWithMantine } from "../../../../../test/utils/renderWithMantine";
@@ -24,6 +25,32 @@ const baseSlot: LeagueSlotForm = {
 };
 
 const noop = () => {};
+const InteractiveLeagueFields = () => {
+  const [slots, setSlots] = useState<LeagueSlotForm[]>([baseSlot]);
+
+  return (
+    <LeagueFields
+      leagueData={{
+        gamesPerOpponent: 1,
+        includePlayoffs: false,
+        usesSets: false,
+        matchDurationMinutes: 60,
+        restTimeMinutes: 0,
+      }}
+      onLeagueDataChange={noop}
+      slots={slots}
+      onAddSlot={noop}
+      onUpdateSlot={(index, update) => {
+        setSlots((current) => current.map((slot, slotIndex) => (
+          slotIndex === index ? { ...slot, ...update } : slot
+        )));
+      }}
+      onRemoveSlot={noop}
+      fields={[field]}
+      fieldsLoading={false}
+    />
+  );
+};
 
 const getLabeledInput = (label: RegExp): HTMLElement => {
   const input = screen
@@ -132,32 +159,20 @@ describe("LeagueFields", () => {
   });
 
   it("shows the following local weekday for an overnight repeating slot", () => {
-    renderWithMantine(
-      <LeagueFields
-        leagueData={{
-          gamesPerOpponent: 1,
-          includePlayoffs: false,
-          usesSets: false,
-          matchDurationMinutes: 60,
-          restTimeMinutes: 0,
-        }}
-        onLeagueDataChange={noop}
-        slots={[
-          {
-            ...baseSlot,
-            startTimeMinutes: 22 * 60,
-            endTimeMinutes: 2 * 60,
-            daysOfWeek: [0],
-            dayOfWeek: 0,
-          },
-        ]}
-        onAddSlot={noop}
-        onUpdateSlot={noop}
-        onRemoveSlot={noop}
-        fields={[field]}
-        fieldsLoading={false}
-      />,
-    );
+    renderWithMantine(<InteractiveLeagueFields />);
+
+    const daysInput = getLabeledInput(/Days of Week/i);
+    fireEvent.click(daysInput);
+    fireEvent.click(screen.getByRole("option", { name: "Tuesday" }));
+    fireEvent.click(screen.getByRole("option", { name: "Monday" }));
+
+    const startTimeInput = getLabeledInput(/Start Time/i);
+    fireEvent.click(startTimeInput);
+    fireEvent.click(screen.getByRole("option", { name: "10:00 PM" }));
+
+    const endTimeInput = getLabeledInput(/End Time/i);
+    fireEvent.click(endTimeInput);
+    fireEvent.click(screen.getByRole("option", { name: "2:00 AM" }));
 
     expect(
       screen.getByText("Overnight slot ends on the next local weekday: Tuesday."),

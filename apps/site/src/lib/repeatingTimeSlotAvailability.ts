@@ -91,9 +91,9 @@ const pad2 = (value: number): string => String(value).padStart(2, '0');
 const formatLocalDate = ({ year, month, day }: LocalDateParts): string =>
   `${String(year).padStart(4, '0')}-${pad2(month)}-${pad2(day)}`;
 
-const formatLocalTime = (minutes: number): string => {
+export const formatLocalTime = (minutes: number): string => {
   const normalized = ((minutes % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
-  return `${pad2(Math.floor(normalized / 60))}:${pad2(normalized % 60)}`;
+  return `${pad2(Math.floor(normalized / 60))}:${pad2(normalized % 60)}:00`;
 };
 
 const localDatePartsFromString = (value: string): LocalDateParts | null => {
@@ -195,6 +195,17 @@ const normalizeTimeZoneStrict = (
   return candidate;
 };
 
+export const normalizeRepeatingTimeSlotTimeZone = (value: unknown): string =>
+  typeof value === 'string' && value.trim().length > 0 ? value.trim() : 'UTC';
+
+export const resolveRepeatingTimeSlotLocalDateTime = (
+  localDate: string,
+  minutes: number,
+  timeZone: unknown,
+): Date | null => zonedTimeToUtcDate(
+  `${localDate}T${formatLocalTime(minutes)}`,
+  normalizeRepeatingTimeSlotTimeZone(timeZone),
+);
 export const getRepeatingTimeSlotLocalDate = (
   value: unknown,
   timeZone: unknown,
@@ -282,7 +293,7 @@ const localDayIndex = (date: LocalDateParts): number => {
 
 const buildLocalDateTimeString = (date: LocalDateParts, minutes: number): string => {
   const normalized = ((minutes % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
-  return `${formatLocalDate(date)}T${formatLocalTime(normalized)}:00`;
+  return `${formatLocalDate(date)}T${formatLocalTime(normalized)}`;
 };
 
 const offsetAt = (instant: Date, timeZone: string): number => {
@@ -515,6 +526,19 @@ export const repeatingTimeSlotHasOvernightWindow = (
   const start = normalizeMinutes(startTimeMinutes, false);
   const end = normalizeMinutes(endTimeMinutes, true);
   return start !== null && end !== null && (end === MINUTES_PER_DAY || end <= start);
+};
+export const formatOvernightWeekdayWarning = (daysOfWeek: number[]): string => {
+  const labels = Array.from(new Set(daysOfWeek))
+    .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
+    .map((day) => WEEKDAY_NAMES[(day + 1) % WEEKDAY_NAMES.length]);
+
+  if (labels.length === 0) {
+    return 'Overnight slot ends on the next local day.';
+  }
+  if (labels.length === 1) {
+    return `Overnight slot ends on the next local weekday: ${labels[0]}.`;
+  }
+  return `Overnight slot ends on the next local weekdays: ${labels.join(', ')}.`;
 };
 
 

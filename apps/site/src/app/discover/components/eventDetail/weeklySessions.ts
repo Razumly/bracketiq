@@ -8,11 +8,12 @@ import {
   addRepeatingTimeSlotLocalDays,
   enumerateRepeatingTimeSlotOccurrences,
   getRepeatingTimeSlotLocalDate,
+  normalizeRepeatingTimeSlotTimeZone,
+  resolveRepeatingTimeSlotLocalDateTime,
   resolveRepeatingTimeSlotOccurrence,
   type ResolvedRepeatingTimeSlot,
 } from "@/lib/repeatingTimeSlotAvailability";
 
-import { zonedTimeToUtcDate } from "@/lib/dateUtils";
 
 import { getDivisionIdFromEventEntry } from "./divisionRegistration";
 import { parseDateValue } from "./dateValues";
@@ -28,19 +29,6 @@ export type WeeklySessionOption = {
   label: string;
   divisionLabel: string;
 };
-
-const normalizeSlotTimeZone = (value: unknown): string =>
-  typeof value === "string" && value.trim().length > 0 ? value.trim() : "UTC";
-
-const formatLocalTime = (minutes: number): string =>
-  `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}:00`;
-
-const resolveLocalSlotDateTime = (
-  localDate: string,
-  minutes: number,
-  timeZone: string,
-): Date | null =>
-  zonedTimeToUtcDate(`${localDate}T${formatLocalTime(minutes)}`, timeZone);
 
 const formatWeeklyTimeLabel = (value: Date): string =>
   value
@@ -156,7 +144,7 @@ export const buildWeeklySessionOptions = (
       ).join(", ") || "All divisions";
 
     if (slot.repeating === false) {
-      const timeZone = normalizeSlotTimeZone(slot.timeZone);
+      const timeZone = normalizeRepeatingTimeSlotTimeZone(slot.timeZone);
       const slotStartDate = getRepeatingTimeSlotLocalDate(
         slot.startDate ?? null,
         timeZone,
@@ -187,12 +175,12 @@ export const buildWeeklySessionOptions = (
       ) {
         return;
       }
-      const sessionStart = resolveLocalSlotDateTime(
+      const sessionStart = resolveRepeatingTimeSlotLocalDateTime(
         slotStartDate,
         startMinutes,
         timeZone,
       );
-      const sessionEnd = resolveLocalSlotDateTime(
+      const sessionEnd = resolveRepeatingTimeSlotLocalDateTime(
         slotStartDate,
         endMinutes,
         timeZone,
@@ -333,7 +321,7 @@ export const resolveSelectedWeeklySessionOption = (
   let start: Date;
   let end: Date;
   if (matchingSlot.repeating === false) {
-    const timeZone = normalizeSlotTimeZone(matchingSlot.timeZone);
+    const timeZone = normalizeRepeatingTimeSlotTimeZone(matchingSlot.timeZone);
     const normalizedSelectedDate = getRepeatingTimeSlotLocalDate(
       selectedOccurrenceDate,
       "UTC",
@@ -366,12 +354,12 @@ export const resolveSelectedWeeklySessionOption = (
     ) {
       return null;
     }
-    const resolvedStart = resolveLocalSlotDateTime(
+    const resolvedStart = resolveRepeatingTimeSlotLocalDateTime(
       slotStartDate,
       startMinutes,
       timeZone,
     );
-    const resolvedEnd = resolveLocalSlotDateTime(
+    const resolvedEnd = resolveRepeatingTimeSlotLocalDateTime(
       slotStartDate,
       endMinutes,
       timeZone,

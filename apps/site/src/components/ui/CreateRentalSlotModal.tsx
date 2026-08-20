@@ -5,8 +5,12 @@ import { Button, Group, Modal, MultiSelect, Stack, Switch, Text } from '@mantine
 import { DatePickerInput, TimeInput } from '@mantine/dates';
 import type { Field, TimeSlot } from '@/types';
 import { fieldService, type ManageRentalSlotResult } from '@/lib/fieldService';
-import { apiRequest } from '@/lib/apiClient';
+import { apiRequest, isApiRequestError } from '@/lib/apiClient';
 import { formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
+import {
+  formatOvernightWeekdayWarning,
+  repeatingTimeSlotHasOvernightWindow,
+} from '@/lib/repeatingTimeSlotAvailability';
 import { getFieldDisplayName } from '@/lib/fieldUtils';
 import { getOrderedEntityColorPair, type EntityColorReferenceValue } from '@/lib/entityColors';
 import HostPriceInput from '@/components/ui/HostPriceInput';
@@ -170,6 +174,19 @@ export default function CreateRentalSlotModal({
     return field ? [field] : [];
   }, [field, selectedFields, slot]);
   const hasTargetFields = targetFields.length > 0;
+  const startMinutes = parseTimeValue(startTime);
+  const endMinutes = parseTimeValue(endTime);
+  const hasOvernightWindow = repeatingTimeSlotHasOvernightWindow(startMinutes, endMinutes);
+  const overnightWeekdayWarning = useMemo(() => {
+    if (!repeating || !hasOvernightWindow) {
+      return null;
+    }
+
+    const startDateValue = coerceDateValue(startDate);
+    return formatOvernightWeekdayWarning(
+      startDateValue ? [toMondayBasedDay(startDateValue)] : [],
+    );
+  }, [hasOvernightWindow, repeating, startDate]);
   const effectiveFieldColorReferenceList = useMemo(
     () => (
       fieldColorReferenceList?.length
@@ -502,7 +519,7 @@ export default function CreateRentalSlotModal({
       onClose();
     } catch (err) {
       console.error('Failed to save rental slot:', err);
-      setError('Failed to save rental slot. Please try again.');
+      setError(isApiRequestError(err) ? err.message : 'Failed to save rental slot. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -599,6 +616,7 @@ export default function CreateRentalSlotModal({
           />
 
           {repeating && (
+            <>
             <Group grow>
               <TimeInput
                 label="Start time"
@@ -617,6 +635,12 @@ export default function CreateRentalSlotModal({
                 required
               />
             </Group>
+            {overnightWeekdayWarning && (
+              <Text size="xs" c="orange" mt={4}>
+                {overnightWeekdayWarning}
+              </Text>
+            )}
+            </>
           )}
 
           <div>

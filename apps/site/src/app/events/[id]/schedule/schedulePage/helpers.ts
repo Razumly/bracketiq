@@ -8,11 +8,12 @@ import {
 import {
   formatLocalDateTime,
   parseLocalDateTime,
-  zonedTimeToUtcDate,
 } from "@/lib/dateUtils";
 import {
   enumerateRepeatingTimeSlotOccurrences,
   getRepeatingTimeSlotLocalDate,
+  normalizeRepeatingTimeSlotTimeZone,
+  resolveRepeatingTimeSlotLocalDateTime,
   resolveRepeatingTimeSlotOccurrence,
 } from "@/lib/repeatingTimeSlotAvailability";
 
@@ -430,18 +431,6 @@ export const toLocalIsoDate = (value: Date): string => {
   const day = `${value.getDate()}`.padStart(2, "0");
   return `${year}-${month}-${day}`;
 };
-const normalizeSlotTimeZone = (value: unknown): string =>
-  typeof value === "string" && value.trim().length > 0 ? value.trim() : "UTC";
-
-const formatLocalSlotTime = (minutes: number): string =>
-  `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}:00`;
-
-const resolveLocalSlotDateTime = (
-  localDate: string,
-  minutes: number,
-  timeZone: string,
-): Date | null =>
-  zonedTimeToUtcDate(`${localDate}T${formatLocalSlotTime(minutes)}`, timeZone);
 
 export const toMondayIndex = (value: Date): number => (value.getDay() + 6) % 7;
 
@@ -568,7 +557,7 @@ export const buildWeeklyOccurrenceOptionsInRange = (
     }
 
     if (slot.repeating === false) {
-      const timeZone = normalizeSlotTimeZone(slot.timeZone);
+      const timeZone = normalizeRepeatingTimeSlotTimeZone(slot.timeZone);
       const slotStartDate = getRepeatingTimeSlotLocalDate(
         slot.startDate ?? null,
         timeZone,
@@ -601,12 +590,12 @@ export const buildWeeklyOccurrenceOptionsInRange = (
       ) {
         return;
       }
-      const occurrenceStart = resolveLocalSlotDateTime(
+      const occurrenceStart = resolveRepeatingTimeSlotLocalDateTime(
         slotStartDate,
         startMinutes,
         timeZone,
       );
-      const occurrenceEnd = resolveLocalSlotDateTime(
+      const occurrenceEnd = resolveRepeatingTimeSlotLocalDateTime(
         slotStartDate,
         endMinutes,
         timeZone,
@@ -743,7 +732,7 @@ export const resolveSelectedWeeklyOccurrenceOption = (
   let startMinutes: number;
   let endMinutes: number;
   if (matchingSlot.repeating === false) {
-    const timeZone = normalizeSlotTimeZone(matchingSlot.timeZone);
+    const timeZone = normalizeRepeatingTimeSlotTimeZone(matchingSlot.timeZone);
     const normalizedSelectedDate = getRepeatingTimeSlotLocalDate(
       selectedOccurrenceDate,
       "UTC",
@@ -776,12 +765,12 @@ export const resolveSelectedWeeklyOccurrenceOption = (
     ) {
       return null;
     }
-    const resolvedStart = resolveLocalSlotDateTime(
+    const resolvedStart = resolveRepeatingTimeSlotLocalDateTime(
       slotStartDate,
       configuredStartMinutes,
       timeZone,
     );
-    const resolvedEnd = resolveLocalSlotDateTime(
+    const resolvedEnd = resolveRepeatingTimeSlotLocalDateTime(
       slotStartDate,
       configuredEndMinutes,
       timeZone,
