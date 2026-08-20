@@ -9,6 +9,40 @@
 * 🟢 You can import this file directly.
 */
 
+export const AffiliateAgentGatewayJobStatus = {
+  QUEUED: 'QUEUED',
+  CLAIMED: 'CLAIMED',
+  RETRY_WAIT: 'RETRY_WAIT',
+  COMPLETED: 'COMPLETED',
+  PIPELINE_BLOCKED: 'PIPELINE_BLOCKED',
+  RECONCILIATION_REQUIRED: 'RECONCILIATION_REQUIRED'
+} as const
+
+export type AffiliateAgentGatewayJobStatus = (typeof AffiliateAgentGatewayJobStatus)[keyof typeof AffiliateAgentGatewayJobStatus]
+
+
+export const AffiliateAgentGatewayClaimStatus = {
+  ACTIVE: 'ACTIVE',
+  COMPLETED: 'COMPLETED',
+  FAILED: 'FAILED',
+  EXPIRED: 'EXPIRED',
+  REVOKED: 'REVOKED',
+  RECONCILIATION_REQUIRED: 'RECONCILIATION_REQUIRED'
+} as const
+
+export type AffiliateAgentGatewayClaimStatus = (typeof AffiliateAgentGatewayClaimStatus)[keyof typeof AffiliateAgentGatewayClaimStatus]
+
+
+export const AffiliateAgentGatewayReceiptStatus = {
+  PENDING: 'PENDING',
+  SUCCEEDED: 'SUCCEEDED',
+  FAILED: 'FAILED',
+  UNKNOWN: 'UNKNOWN'
+} as const
+
+export type AffiliateAgentGatewayReceiptStatus = (typeof AffiliateAgentGatewayReceiptStatus)[keyof typeof AffiliateAgentGatewayReceiptStatus]
+
+
 export const BillsOwnerTypeEnum = {
   USER: 'USER',
   TEAM: 'TEAM',

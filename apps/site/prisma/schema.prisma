@@ -8,6 +8,31 @@ datasource db {
   provider = "postgresql"
 }
 
+enum AffiliateAgentGatewayJobStatus {
+  QUEUED
+  CLAIMED
+  RETRY_WAIT
+  COMPLETED
+  PIPELINE_BLOCKED
+  RECONCILIATION_REQUIRED
+}
+
+enum AffiliateAgentGatewayClaimStatus {
+  ACTIVE
+  COMPLETED
+  FAILED
+  EXPIRED
+  REVOKED
+  RECONCILIATION_REQUIRED
+}
+
+enum AffiliateAgentGatewayReceiptStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  UNKNOWN
+}
+
 enum BillsOwnerTypeEnum {
   USER
   TEAM
@@ -99,6 +124,7 @@ enum DivisionScopeEnum {
   ORGANIZATION
   EVENT
 }
+
 enum DivisionRoleEnum {
   ENTRY
   PHASE
@@ -818,6 +844,7 @@ model MatchOperationReceipts {
   @@index([eventId, matchId])
   @@index([matchId, actorUserId, clientDeviceId, clientSequence])
 }
+
 // Durable receipts for idempotent event-editor creates. Rows are retained so
 // delayed retries cannot create a second event after the original response is lost.
 model EventEditorCreateOperations {
@@ -833,6 +860,7 @@ model EventEditorCreateOperations {
 
   @@index([actorUserId, createdAt])
 }
+
 model Divisions {
   id                                  String             @id
   createdAt                           DateTime?
@@ -910,15 +938,16 @@ model Divisions {
   @@index([sportId])
   @@index([key])
 }
+
 model EventDivisionPhaseSources {
-  id               String             @id
-  eventId          String
-  entryDivisionId  String
-  phaseDivisionId  String
-  phase            DivisionPhaseEnum
-  sortOrder        Int?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  id              String            @id
+  eventId         String
+  entryDivisionId String
+  phaseDivisionId String
+  phase           DivisionPhaseEnum
+  sortOrder       Int?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 
   @@unique([entryDivisionId, phaseDivisionId])
   @@index([eventId, phase, sortOrder])
@@ -932,8 +961,8 @@ model EventDivisionPhaseParticipants {
   phaseDivisionId       String
   eventTeamId           String
   sourceEntryDivisionId String?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   @@unique([phaseDivisionId, eventTeamId])
   @@index([eventId, phaseDivisionId])
@@ -2091,6 +2120,179 @@ model AffiliateSourceDiscoveryCampaigns {
   @@index([createdByUserId])
 }
 
+model AffiliateAgentGatewayJobs {
+  id                          String                         @id
+  createdAt                   DateTime                       @default(now())
+  updatedAt                   DateTime                       @updatedAt
+  dedupeKey                   String                         @unique
+  queue                       String
+  lane                        String
+  role                        String
+  subjectType                 String
+  subjectId                   String
+  subjectJson                 Json
+  evidenceManifestJson        Json
+  supplySourceId              String?
+  expectedLifecycleGeneration Int?
+  status                      AffiliateAgentGatewayJobStatus @default(QUEUED)
+  priority                    Int                            @default(0)
+  nextAttemptAt               DateTime                       @default(now())
+  claimGeneration             Int                            @default(0)
+  activeClaimId               String?                        @unique
+  parentClaimId               String?
+  invocationFailureCount      Int                            @default(0)
+  lastInvocationFailedAt      DateTime?
+  pipelineBlockedAt           DateTime?
+  terminalDisposition         String?
+  resultHash                  String?
+  resultJson                  Json?
+  terminalReceiptId           String?                        @unique
+  finishedAt                  DateTime?
+  eventSequence               Int                            @default(0)
+
+  @@index([role, lane, status, nextAttemptAt, priority, createdAt])
+  @@index([queue, status, nextAttemptAt])
+  @@index([supplySourceId, status])
+  @@index([parentClaimId])
+}
+
+model AffiliateAgentGatewayClaims {
+  id                        String                           @id
+  createdAt                 DateTime                         @default(now())
+  updatedAt                 DateTime                         @updatedAt
+  jobId                     String
+  parentClaimId             String?
+  claimGeneration           Int
+  lifecycleGeneration       Int?
+  queue                     String
+  lane                      String
+  role                      String
+  workerId                  String
+  invocationId              String                           @unique
+  workspaceId               String                           @unique
+  workspaceMode             String
+  workspaceAttestationHash  String
+  status                    AffiliateAgentGatewayClaimStatus @default(ACTIVE)
+  claimRequestId            String                           @unique
+  claimRequestHash          String
+  claimedAt                 DateTime
+  lastHeartbeatAt           DateTime
+  leaseExpiresAt            DateTime
+  hardDeadlineAt            DateTime
+  endedAt                   DateTime?
+  tokenNonce                String
+  tokenHash                 String                           @unique
+  tokenKeyVersion           String
+  tokenExpiresAt            DateTime
+  tokenInvalidatedAt        DateTime?
+  deploymentContractVersion Int
+  deploymentContractHash    String
+  roleContractVersion       Int
+  roleContractHash          String
+  promptTemplateVersion     Int
+  promptTemplateHash        String
+  supplyContractVersion     Int
+  supplyContractHash        String
+  claimEnvelopeHash         String
+  claimEnvelopeJson         Json
+  evidenceManifestHash      String
+  permittedCommandHash      String
+  permittedCommands         String[]                         @default([])
+  schemaCorrectionCount     Int                              @default(0)
+  terminalReceiptId         String?                          @unique
+  safeFailureCode           String?
+  safeFailureSummary        String?
+  diagnosticRetainUntil     DateTime?
+
+  @@unique([jobId, claimGeneration])
+  @@index([jobId, status, claimedAt])
+  @@index([role, status, leaseExpiresAt])
+  @@index([hardDeadlineAt, status])
+  @@index([parentClaimId])
+}
+
+model AffiliateAgentGatewayArtifacts {
+  id                String    @id
+  createdAt         DateTime  @default(now())
+  claimId           String
+  claimGeneration   Int
+  evidenceRef       String
+  evidenceKind      String
+  sourceArtifactId  String
+  fileId            String
+  contentHash       String
+  mimeType          String
+  byteSize          Int
+  accessMode        String    @default("READ_ONLY")
+  creatingClaimId   String?
+  retentionClass    String    @default("INDEFINITE")
+  retentionDeadline DateTime?
+  isPinned          Boolean   @default(true)
+
+  @@unique([claimId, evidenceRef])
+  @@index([claimId, evidenceKind])
+  @@index([sourceArtifactId])
+  @@index([fileId])
+  @@index([contentHash])
+  @@index([retentionClass, retentionDeadline])
+}
+
+model AffiliateAgentGatewayOperationReceipts {
+  id                   String                             @id
+  createdAt            DateTime                           @default(now())
+  updatedAt            DateTime                           @updatedAt
+  claimId              String
+  jobId                String
+  claimGeneration      Int
+  idempotencyKey       String
+  operationKind        String
+  commandName          String?
+  requestHash          String
+  status               AffiliateAgentGatewayReceiptStatus @default(PENDING)
+  responseHash         String?
+  responseJson         Json?
+  safeErrorCode        String?
+  externalOperationKey String?                            @unique
+  startedAt            DateTime                           @default(now())
+  completedAt          DateTime?
+  reconcileAfter       DateTime?
+  retentionClass       String                             @default("INDEFINITE")
+  retentionDeadline    DateTime?
+
+  @@unique([claimId, idempotencyKey])
+  @@index([jobId, createdAt])
+  @@index([claimId, operationKind, createdAt])
+  @@index([status, reconcileAfter])
+  @@index([retentionClass, retentionDeadline])
+}
+
+model AffiliateAgentGatewayEvents {
+  id                String    @id
+  createdAt         DateTime  @default(now())
+  eventKey          String    @unique
+  jobId             String
+  claimId           String?
+  receiptId         String?
+  sequence          Int
+  eventType         String
+  actorKind         String
+  actorId           String
+  role              String
+  requestHash       String?
+  inputHash         String?
+  outputHash        String?
+  reasonCodes       String[]  @default([])
+  payload           Json      @default("{}")
+  retentionClass    String    @default("INDEFINITE")
+  retentionDeadline DateTime?
+
+  @@unique([jobId, sequence])
+  @@index([claimId, sequence])
+  @@index([receiptId])
+  @@index([eventType, createdAt])
+  @@index([retentionClass, retentionDeadline])
+}
+
 model AffiliateCoverageAgentJobs {
   id                 String    @id
   createdAt          DateTime  @default(now())
@@ -2140,33 +2342,33 @@ model AffiliateCoverageCities {
 }
 
 model AffiliateCoverageCells {
-  id                         String   @id
-  createdAt                  DateTime @default(now())
-  updatedAt                  DateTime @updatedAt
-  cityId                     String
-  marketKey                  String
-  cohort                     String
-  cohortPriority             Int
-  sportId                    String
-  sportName                  String
-  profileKey                 String
-  coverageStatus             String
-  searchStatus               String
-  populationWeight           Float
-  gapSeverity                Float
-  profileWeight              Float
-  stalenessWeight            Float
-  priorityScore              Float
-  directPolicyKeyCount       Int
-  approvedSourceCount        Int
-  strategyFamilyCount        Int
-  unresolvedLeadCount        Int
-  consecutiveNoYieldCycles   Int      @default(0)
-  queryStrategyVersion       Int
-  evidenceQuality            String
-  lastAssessedAt             DateTime?
-  nextReviewAt               DateTime?
-  evidence                   Json?
+  id                       String    @id
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  cityId                   String
+  marketKey                String
+  cohort                   String
+  cohortPriority           Int
+  sportId                  String
+  sportName                String
+  profileKey               String
+  coverageStatus           String
+  searchStatus             String
+  populationWeight         Float
+  gapSeverity              Float
+  profileWeight            Float
+  stalenessWeight          Float
+  priorityScore            Float
+  directPolicyKeyCount     Int
+  approvedSourceCount      Int
+  strategyFamilyCount      Int
+  unresolvedLeadCount      Int
+  consecutiveNoYieldCycles Int       @default(0)
+  queryStrategyVersion     Int
+  evidenceQuality          String
+  lastAssessedAt           DateTime?
+  nextReviewAt             DateTime?
+  evidence                 Json?
 
   @@unique([cityId, sportId, profileKey])
   @@index([cohortPriority, searchStatus, priorityScore])
@@ -2207,8 +2409,8 @@ model AffiliateSourceDiscoveryQueryExecutions {
   cityGeoid                  String?
   targetCity                 String?
   targetState                String?
-  sportId                   String?
-  sportName                 String?
+  sportId                    String?
+  sportName                  String?
   profileKey                 String
   strategyKey                String
   strategyFamilyKey          String
@@ -2315,23 +2517,23 @@ model AffiliateSourceDomainPolicies {
 }
 
 model AffiliateSourceMappingJobs {
-  id             String    @id
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  intakeId       String
-  sourceId       String?
-  mappingId      String?
-  legacyIdentityMigrationEligible Boolean @default(false)
-  status         String    @default("QUEUED")
-  claimedAt      DateTime?
-  leaseExpiresAt DateTime?
-  workerId       String?
-  attemptCount   Int       @default(0)
-  branch         String?
-  commit         String?
-  resultSummary  Json?
-  errorMessage   String?
-  finishedAt     DateTime?
+  id                              String    @id
+  createdAt                       DateTime  @default(now())
+  updatedAt                       DateTime  @updatedAt
+  intakeId                        String
+  sourceId                        String?
+  mappingId                       String?
+  legacyIdentityMigrationEligible Boolean   @default(false)
+  status                          String    @default("QUEUED")
+  claimedAt                       DateTime?
+  leaseExpiresAt                  DateTime?
+  workerId                        String?
+  attemptCount                    Int       @default(0)
+  branch                          String?
+  commit                          String?
+  resultSummary                   Json?
+  errorMessage                    String?
+  finishedAt                      DateTime?
 
   // The partial unique index for active statuses is managed in SQL because
   // Prisma schema syntax cannot express a partial unique constraint.

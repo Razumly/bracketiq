@@ -20,18 +20,18 @@ A developer can see the change work in three ways. Pure contract tests show stab
 - [x] (2026-08-20 18:19Z) Froze the public transactional gateway declarations and exact retry constants in `agentGateway.ts`. Kept invocation failures out of the pure contract module.
 - [x] (2026-08-20 18:19Z) Completed 13 vertical red-to-green contract behaviors. The focused Jest file passes 13 tests. The TypeScript check passes. Prettier formatted only the three changed TypeScript files.
 - [x] (2026-08-20 18:31Z) Resolved the Milestone 1 self-review findings with four vertical red-to-green tests. Added prompt-template contracts, the complete contract-bundle parser, version-1 capability enforcement, claim identity checks, and a truthful authority projection. The focused file passes 17 tests. TypeScript passes.
-- [ ] Implement Milestone 2. Add the gateway schema and one Coverage Planner claim with a five-minute lease, a 20-minute hard deadline, a scoped token, and one durable claim event.
-- [ ] Implement Milestone 3. Add heartbeat and manifest-bound artifact reads with hash verification and durable receipts.
-- [ ] Implement Milestone 4. Add one allowed command and one terminal Coverage Planner domain result with atomic completion and token invalidation.
-- [ ] Implement Milestone 5. Prove claim races and rejection of every wrong or stale authorization field in the isolated PostgreSQL database.
-- [ ] Implement Milestone 6. Prove exact idempotent replay, changed-input rejection, and the one allowed terminal replay after token invalidation.
+- [x] (2026-08-20 20:31Z) Implemented Milestone 2. Added the five additive gateway models, three enums, constraints, partial unique live-claim index, privilege boundary, production dependency adapters, and one Coverage Planner claim with a five-minute lease, 20-minute token/deadline, hashed HMAC capability, deterministic prompt, and immutable claim event.
+- [x] (2026-08-20 20:31Z) Implemented Milestone 3. Added serializable 60-second heartbeat receipts and two-transaction manifest-only artifact reads. Artifact reads verify the stored SHA-256 hash, MIME type, byte count, URL safety, and eight-MiB bound before returning bytes. Transaction B reauthorizes the claim.
+- [x] (2026-08-20 20:31Z) Implemented Milestone 4 for the confirmed slice. Added the closed transactional `RUN_DISCOVERY_QUERY` adapter path and one typed Coverage Planner terminal result. Terminal completion updates the job and claim by CAS, stores one result and receipt hash, appends one event, and invalidates the token atomically.
+- [x] (2026-08-20 20:31Z) Implemented Milestone 5 for the confirmed slice. The operation-by-denial matrix covers claim, heartbeat, artifact, command, terminal result, and failure authorization across wrong identities, generations, token, contracts, lease, and deadline. The isolated PostgreSQL race used a query barrier and observed one winner. The database also rejected a second live claim and event mutation.
+- [x] (2026-08-20 20:31Z) Implemented Milestone 6 for admitted slice operations. Claim, heartbeat, artifact, command, and terminal result use canonical request hashes and claim-scoped operation keys. Exact replays create no second receipt or event. Changed input is rejected. Only the identical terminal result can bypass token invalidation, while all five operation kinds reject the invalidated token.
 - [ ] Implement Milestone 7. Add schema correction and the exact initial, +5 minute, +15 minute, then `PIPELINE_BLOCKED` invocation policy. Prove that there is no +45 minute retry.
 - [ ] Implement Milestone 8. Add bounded restart reconciliation for expired claims and pending external receipts. Prove that reconciliation does not repeat a provider effect.
 - [ ] Implement Milestone 9. Add lifecycle receipt safety through the injected #68 lifecycle-authority interface. Do not add lifecycle-stage derivation.
 - [ ] Implement Milestone 10. Prove Supply Reviewer identity and workspace isolation.
 - [ ] Implement Milestone 11. Complete one Mapping Producer, Supply Reviewer, and Human-directed Executor claim. Prove all cross-role denials.
 - [ ] Implement Milestone 12. Add the one-claim supervisor and credential/container denial checks. Prove that offline open-weight evaluation cannot claim work or publish executable code.
-- [ ] Run focused contract, gateway, database, type, and Prisma checks. Record exact pass counts and short evidence in this plan.
+- [x] (2026-08-20 20:42Z) Ran the focused Milestones 2-6 contract/gateway unit file, isolated PostgreSQL integration file, TypeScript check, Prisma validation, Prisma generation, and generated-surface check. Recorded exact evidence below.
 - [ ] Run the full site suite, production build, four-role smoke run, restart smoke, and container denial probes. Record exact output in this plan.
 - [ ] Obtain separate Standards and Spec reviews against the fixed base `5aa180b721eff7e42eef86583a9f226caa2bb20f`. Resolve every finding. Re-run affected checks.
 - [ ] Update all living sections and the acceptance-criterion evidence map. Record the final outcome without doing the #68 or #70 work.
@@ -70,6 +70,15 @@ A developer can see the change work in three ways. Pure contract tests show stab
 
 - Observation: Filtering terminal commands from a displayed contract or claim makes the retained self-hash misleading.
   Evidence: The renderer now displays one named authority projection. It gives exact source hashes and a computed full claim-envelope hash. It does not display modified self-hashed objects.
+
+- Observation: An already-authorized local PostgreSQL 16 server was healthy, so this slice could run the required real database proof without changing runtime state.
+  Evidence: The dedicated `bracketiq_e2e_67_gateway` logical database was created on the existing server. All 195 migrations applied successfully. The focused integration test forced both workers past job selection with a query barrier, then observed one claim, one race winner, the partial unique-index rejection, durable heartbeat and terminal receipts, exact terminal replay, terminal token invalidation, and immutable-event rejection.
+
+- Observation: Prisma query extensions provide a deterministic database race barrier without adding a production test hook.
+  Evidence: The integration client pauses each transaction immediately after the eligible-job `findFirst` query. It releases both transactions only after the second selection. The gateway production interface and claim query remain free of test-only callbacks.
+
+- Observation: The exact lease boundary must be exclusive.
+  Evidence: A red denial-matrix run showed that a heartbeat at exactly `leaseExpiresAt` renewed the claim. Authorization now treats `leaseExpiresAt <= now` as expired, and the heartbeat CAS requires `leaseExpiresAt > now`.
 
 ## Decision Log
 
@@ -137,11 +146,21 @@ A developer can see the change work in three ways. Pure contract tests show stab
   Rationale: The projection names each exact authority hash. It computes the claim-envelope hash from the full parsed claim before it filters the terminal command from the displayed non-terminal command list.
   Date/Author: 2026-08-20 / Codex Milestone 1 review fixer
 
+- Decision: Implement only the Coverage Planner authority through terminal completion in Milestones 2 through 6.
+  Rationale: The delegated slice explicitly excludes retry-failure admission, schema corrections, reconciliation, remaining roles, lifecycle derivation, supervisor logic, provider calls, routes, and fleet cutover. `RECORD_FAILURE` still performs full claim authorization before failing closed, so it participates in the stale-scope matrix without admitting retry state.
+  Date/Author: 2026-08-20 / Codex Milestones 2-6 implementer
+
+- Decision: Allow an exact successful terminal receipt to select the completed-claim authorization path.
+  Rationale: The replay still verifies the token hash, expiry, lease, role, worker, job, invocation, generations, active Supply Contract, role contract, prompt contract, and exact canonical request hash. It bypasses only the invalidation and terminal-state consequences of the original committed result.
+  Date/Author: 2026-08-20 / Codex Milestones 2-6 implementer
+
 ## Outcomes & Retrospective
 
 Milestone 1 is complete. The pure contract seam now parses and hashes the Supply Contract, deployment contract, role contracts, evidence manifests, typed claims, closed commands, and typed terminal results. The renderer produces deterministic LF-only prompts with one terminal completion instruction. The transactional seam now declares the future gateway interface, safe results and errors, invocation-failure envelope, and the exact 60-second heartbeat, 300-second lease, 1,200-second deadline, three-correction, and three-attempt retry policy. The focused file passes 13 tests, and TypeScript passes. Milestones 2 through 12 remain. No Prisma model, persistence implementation, process launch, route, lifecycle derivation, fleet cutover, full suite, build, or database command was added or run.
 
 The Milestone 1 self-review fixes are complete. The registry can now parse one complete, internally consistent contract bundle. Version-1 role contracts cannot authorize a capability change through a recomputed self-hash. Claims reject Supply Source mismatches and producer/reviewer identity reuse. Prompts display one truthful authority projection and one terminal completion instruction. The focused file now passes 17 tests, and TypeScript passes.
+
+Milestones 2 through 6 are complete for the user-confirmed Coverage Planner slice. The gateway now owns one serializable claim, heartbeats, manifest-only artifact reads, one closed command, and one atomic terminal result. The database stores only the token hash, nonce, and key version; every claim operation rechecks the scoped capability and active contract bundle. A real PostgreSQL test proves the claim race, CAS generations, partial unique live-claim constraint, durable idempotency, atomic terminal completion, exact terminal replay, token invalidation, and immutable events. Failure admission and Milestones 7 through 12 remain intentionally outside this slice.
 
 ## Context and Orientation
 
@@ -846,7 +865,52 @@ The six component hashes, in required component order, are:
     277dd86e998a419d93a1b4fe7045b90754979a73202e0e39f3600f71edd56d76
     db8e8c028ef8876ad00d5a7dea9ddbf89fc014c1991a7c690b2b21745db26d29
 
-Database, claim-race, lifecycle, supervisor, containment, full-suite, and build evidence remain for later milestones.
+Database proof is now available for the Coverage Planner Milestones 2-6 slice. Lifecycle, supervisor, containment, remaining-role, full-suite, and build evidence remain for later milestones.
+
+Milestones 2 through 6 used the focused unit command:
+
+    npx jest src/server/affiliateImports/__tests__/agentGateway.test.ts --runInBand
+
+The vertical red observations were:
+
+    claim: missing ../agentGatewayAdapters; 1 failed suite, 0 tests
+    heartbeat: operation unavailable; 1 failed, 18 passed
+    artifact: operation unavailable; 1 failed, 19 passed
+    command: operation unavailable; 1 failed, 20 passed
+    terminal result: operation unavailable; 1 failed, 21 passed
+    failure-operation scope: expected CLAIM_NOT_FOUND, received ROLE_NOT_ALLOWED; 1 failed, 22 passed
+    terminal replay: received TOKEN_INVALIDATED; 1 failed, 23 passed
+    exact lease boundary: heartbeat resolved at lease expiry; 1 failed, 28 passed
+
+The initial stable-interface TypeScript check exposed four command-union narrowing diagnostics. Capturing the parsed discovery command before the transaction callback resolved them. The next `npx tsc --noEmit --pretty false` exited with code 0 and no output.
+
+The local `pg_isready` executable was absent. The already-running authorized `mvp-site-db` container reported `127.0.0.1:5432 - accepting connections` from its own readiness executable. No PostgreSQL, Docker, or Compose runtime was started, stopped, restarted, enabled, disabled, or reconfigured.
+
+The isolated database is `bracketiq_e2e_67_gateway`. `npx prisma migrate deploy` applied all 195 migrations, including `20260820180000_add_affiliate_agent_gateway`. The first database red run failed because the new integration fixture did not match the strict Supply Contract schema; both claim promises failed closed with `DEPLOYMENT_CONTRACT_STALE`. The corrected fixture produced:
+
+    Test Suites: 1 passed, 1 total
+    Tests:       1 passed, 1 total
+    Snapshots:   0 total
+
+That database test observed two selections behind the barrier, one claim winner, one persisted claim, two successful operation receipts, three immutable events, a completed job with no active claim, a completed claim with an invalidated token, exact terminal replay, `P2002` for a directly attempted second live claim, and rejection of an event update.
+
+The final focused unit result after formatting was:
+
+    Test Suites: 1 passed, 1 total
+    Tests:       30 passed, 30 total
+    Snapshots:   0 total
+    Time:        0.721 s
+
+The final isolated PostgreSQL result was:
+
+    Test Suites: 1 passed, 1 total
+    Tests:       1 passed, 1 total
+    Snapshots:   0 total
+    Time:        0.802 s
+
+The final `npx tsc --noEmit --pretty false` exited with code 0 and no output. `npm run prisma:validate` reported a valid schema. `npm run prisma:generate` generated Prisma Client 7.8.0 and retained all generator-owned files. `node scripts/check-prisma-generated.mjs` reported that the canonical schema, generated client, and Prisma versions match.
+
+The focused formatter named only the gateway adapters, Prisma gateway, two gateway test files, this ExecPlan, and the Prisma schema. Prettier completed for all named TypeScript and Markdown files with only the existing module-type warning. The first Prisma format call lacked the required local configuration environment and failed before changing the schema; the repeated scoped command loaded the Prisma config and formatted `prisma/schema.prisma` successfully.
 
 Expected four-role smoke evidence has this form. Replace each value with the observed identifiers and hashes:
 
@@ -875,3 +939,5 @@ Plan revision note (2026-08-20): Corrected database isolation to use `bracketiq_
 Plan revision note (2026-08-20 18:19Z): Completed Milestone 1. Recorded the pure contract and public transactional declarations, every focused red-to-green behavior, final test and typecheck results, focused formatting, fixed hashes, scope exclusions, and the remaining milestones.
 
 Plan revision note (2026-08-20 18:31Z): Resolved the Milestone 1 self-review findings. Added the strict prompt-template and complete bundle contracts, one version-1 role capability matrix with parser enforcement, claim identity consistency checks, and the deterministic authority projection. Recorded all four red observations, the 17-test focused pass, two successful TypeScript checks, focused formatting, and the revised deployment, role, and prompt-template hashes.
+
+Plan revision note (2026-08-20 20:31Z): Completed the user-confirmed Milestones 2-6 Coverage Planner authority slice. Added the adapters, Prisma schema and migration, production gateway, vertical unit behaviors, real PostgreSQL race/CAS/idempotency proof, full stale-scope matrix, artifact integrity checks, exact terminal replay, token invalidation, and explicit scope exclusions.

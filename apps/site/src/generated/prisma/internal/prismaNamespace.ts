@@ -400,7 +400,6 @@ export const ModelName = {
   EventDivisionPhaseSources: 'EventDivisionPhaseSources',
   EventDivisionPhaseParticipants: 'EventDivisionPhaseParticipants',
   UserData: 'UserData',
-  UserNotifications: 'UserNotifications',
   SensitiveUserData: 'SensitiveUserData',
   AuthMfaChallenges: 'AuthMfaChallenges',
   Invites: 'Invites',
@@ -448,6 +447,11 @@ export const ModelName = {
   AffiliateSourceIntakeRuns: 'AffiliateSourceIntakeRuns',
   AffiliateSourceIntakeArtifacts: 'AffiliateSourceIntakeArtifacts',
   AffiliateSourceDiscoveryCampaigns: 'AffiliateSourceDiscoveryCampaigns',
+  AffiliateAgentGatewayJobs: 'AffiliateAgentGatewayJobs',
+  AffiliateAgentGatewayClaims: 'AffiliateAgentGatewayClaims',
+  AffiliateAgentGatewayArtifacts: 'AffiliateAgentGatewayArtifacts',
+  AffiliateAgentGatewayOperationReceipts: 'AffiliateAgentGatewayOperationReceipts',
+  AffiliateAgentGatewayEvents: 'AffiliateAgentGatewayEvents',
   AffiliateCoverageAgentJobs: 'AffiliateCoverageAgentJobs',
   AffiliateCoverageCities: 'AffiliateCoverageCities',
   AffiliateCoverageCells: 'AffiliateCoverageCells',
@@ -490,14 +494,8 @@ export const ModelName = {
   EventTemplateRentalResourceHints: 'EventTemplateRentalResourceHints',
   EventTemplateLeagueScoringConfigs: 'EventTemplateLeagueScoringConfigs',
   Sports: 'Sports',
-  DocumentRequirements: 'DocumentRequirements',
   TemplateDocuments: 'TemplateDocuments',
-  TemplateProviderQuarantines: 'TemplateProviderQuarantines',
   SignedDocuments: 'SignedDocuments',
-  DocumentSubjects: 'DocumentSubjects',
-  DocumentRequirementSatisfactions: 'DocumentRequirementSatisfactions',
-  DocumentRequirementSatisfactionEvidence: 'DocumentRequirementSatisfactionEvidence',
-  DocumentEvidenceAuditEvents: 'DocumentEvidenceAuditEvents',
   BoldSignWebhookEvents: 'BoldSignWebhookEvents',
   BoldSignSyncOperations: 'BoldSignSyncOperations',
   ParentChildLinks: 'ParentChildLinks',
@@ -520,7 +518,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "appReleases" | "fields" | "facilities" | "matches" | "matchSegments" | "broadcastOverlays" | "broadcastOverlayStates" | "broadcastOverlayActions" | "broadcastOverlayAccessTokens" | "matchIncidents" | "matchOperationReceipts" | "eventEditorCreateOperations" | "divisions" | "eventDivisionPhaseSources" | "eventDivisionPhaseParticipants" | "userData" | "userNotifications" | "sensitiveUserData" | "authMfaChallenges" | "invites" | "teamInviteEventSyncs" | "staffMembers" | "organizationRoles" | "organizationRolePermissions" | "organizationRoleCompensationRates" | "staffCompensationRates" | "eventStaffAssignments" | "staffScheduleAssignments" | "teamStaffLaborEntries" | "financialLineItems" | "staffPayRun" | "staffPayRunItem" | "eventOfficials" | "teamCheckIns" | "matchRosterEntries" | "teams" | "canonicalTeams" | "teamRegistrations" | "registrationQuestions" | "registrationQuestionResponses" | "teamJoinRequests" | "teamStaffAssignments" | "eventTeamStaffAssignments" | "messages" | "chatGroup" | "moderationReport" | "aiConversationPointer" | "aiPendingConfirmation" | "pushDeviceTarget" | "lockFiles" | "paymentIntents" | "bills" | "billPayments" | "billPaymentProofs" | "rentalBookings" | "rentalBookingItems" | "affiliateScrapeSources" | "affiliateScrapeMappings" | "affiliateScrapeRuns" | "affiliateSourceIntakes" | "affiliateSourceIntakePages" | "affiliateSourceIntakeRuns" | "affiliateSourceIntakeArtifacts" | "affiliateSourceDiscoveryCampaigns" | "affiliateCoverageAgentJobs" | "affiliateCoverageCities" | "affiliateCoverageCells" | "affiliateCoverageCellAssessments" | "affiliateSourceDiscoveryQueryExecutions" | "affiliateSourceDiscoveryRuns" | "affiliateSourceDiscoveryResults" | "affiliateSourceDomainPolicies" | "affiliateSourceMappingJobs" | "affiliateApprovalJobs" | "affiliateImportCandidates" | "eventTags" | "eventTagAssignments" | "organizationTags" | "organizationTagAssignments" | "refundRequests" | "discounts" | "discountCodes" | "discountCodeRedemptions" | "discountCodeReservations" | "organizationAccountingConnections" | "accountingSyncRecords" | "organizationFinanceCategoryAccountingMappings" | "stripeAccounts" | "events" | "organizations" | "organizationReviews" | "organizationDomains" | "organizationClaims" | "organizationClaimEvidence" | "organizationClaimEvents" | "organizationReviewResponses" | "products" | "subscriptions" | "timeSlots" | "leagueScoringConfigs" | "eventTemplates" | "eventTemplateResources" | "eventTemplateTimeSlots" | "eventTemplateRentalResourceHints" | "eventTemplateLeagueScoringConfigs" | "sports" | "documentRequirements" | "templateDocuments" | "templateProviderQuarantines" | "signedDocuments" | "documentSubjects" | "documentRequirementSatisfactions" | "documentRequirementSatisfactionEvidence" | "documentEvidenceAuditEvents" | "boldSignWebhookEvents" | "boldSignSyncOperations" | "parentChildLinks" | "eventRegistrations" | "authUser" | "feedbackSubmissions" | "file"
+    modelProps: "appReleases" | "fields" | "facilities" | "matches" | "matchSegments" | "broadcastOverlays" | "broadcastOverlayStates" | "broadcastOverlayActions" | "broadcastOverlayAccessTokens" | "matchIncidents" | "matchOperationReceipts" | "eventEditorCreateOperations" | "divisions" | "eventDivisionPhaseSources" | "eventDivisionPhaseParticipants" | "userData" | "sensitiveUserData" | "authMfaChallenges" | "invites" | "teamInviteEventSyncs" | "staffMembers" | "organizationRoles" | "organizationRolePermissions" | "organizationRoleCompensationRates" | "staffCompensationRates" | "eventStaffAssignments" | "staffScheduleAssignments" | "teamStaffLaborEntries" | "financialLineItems" | "staffPayRun" | "staffPayRunItem" | "eventOfficials" | "teamCheckIns" | "matchRosterEntries" | "teams" | "canonicalTeams" | "teamRegistrations" | "registrationQuestions" | "registrationQuestionResponses" | "teamJoinRequests" | "teamStaffAssignments" | "eventTeamStaffAssignments" | "messages" | "chatGroup" | "moderationReport" | "aiConversationPointer" | "aiPendingConfirmation" | "pushDeviceTarget" | "lockFiles" | "paymentIntents" | "bills" | "billPayments" | "billPaymentProofs" | "rentalBookings" | "rentalBookingItems" | "affiliateScrapeSources" | "affiliateScrapeMappings" | "affiliateScrapeRuns" | "affiliateSourceIntakes" | "affiliateSourceIntakePages" | "affiliateSourceIntakeRuns" | "affiliateSourceIntakeArtifacts" | "affiliateSourceDiscoveryCampaigns" | "affiliateAgentGatewayJobs" | "affiliateAgentGatewayClaims" | "affiliateAgentGatewayArtifacts" | "affiliateAgentGatewayOperationReceipts" | "affiliateAgentGatewayEvents" | "affiliateCoverageAgentJobs" | "affiliateCoverageCities" | "affiliateCoverageCells" | "affiliateCoverageCellAssessments" | "affiliateSourceDiscoveryQueryExecutions" | "affiliateSourceDiscoveryRuns" | "affiliateSourceDiscoveryResults" | "affiliateSourceDomainPolicies" | "affiliateSourceMappingJobs" | "affiliateApprovalJobs" | "affiliateImportCandidates" | "eventTags" | "eventTagAssignments" | "organizationTags" | "organizationTagAssignments" | "refundRequests" | "discounts" | "discountCodes" | "discountCodeRedemptions" | "discountCodeReservations" | "organizationAccountingConnections" | "accountingSyncRecords" | "organizationFinanceCategoryAccountingMappings" | "stripeAccounts" | "events" | "organizations" | "organizationReviews" | "organizationDomains" | "organizationClaims" | "organizationClaimEvidence" | "organizationClaimEvents" | "organizationReviewResponses" | "products" | "subscriptions" | "timeSlots" | "leagueScoringConfigs" | "eventTemplates" | "eventTemplateResources" | "eventTemplateTimeSlots" | "eventTemplateRentalResourceHints" | "eventTemplateLeagueScoringConfigs" | "sports" | "templateDocuments" | "signedDocuments" | "boldSignWebhookEvents" | "boldSignSyncOperations" | "parentChildLinks" | "eventRegistrations" | "authUser" | "feedbackSubmissions" | "file"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -1705,80 +1703,6 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         count: {
           args: Prisma.UserDataCountArgs<ExtArgs>
           result: runtime.Types.Utils.Optional<Prisma.UserDataCountAggregateOutputType> | number
-        }
-      }
-    }
-    UserNotifications: {
-      payload: Prisma.$UserNotificationsPayload<ExtArgs>
-      fields: Prisma.UserNotificationsFieldRefs
-      operations: {
-        findUnique: {
-          args: Prisma.UserNotificationsFindUniqueArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserNotificationsPayload> | null
-        }
-        findUniqueOrThrow: {
-          args: Prisma.UserNotificationsFindUniqueOrThrowArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserNotificationsPayload>
-        }
-        findFirst: {
-          args: Prisma.UserNotificationsFindFirstArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserNotificationsPayload> | null
-        }
-        findFirstOrThrow: {
-          args: Prisma.UserNotificationsFindFirstOrThrowArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserNotificationsPayload>
-        }
-        findMany: {
-          args: Prisma.UserNotificationsFindManyArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserNotificationsPayload>[]
-        }
-        create: {
-          args: Prisma.UserNotificationsCreateArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserNotificationsPayload>
-        }
-        createMany: {
-          args: Prisma.UserNotificationsCreateManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        createManyAndReturn: {
-          args: Prisma.UserNotificationsCreateManyAndReturnArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserNotificationsPayload>[]
-        }
-        delete: {
-          args: Prisma.UserNotificationsDeleteArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserNotificationsPayload>
-        }
-        update: {
-          args: Prisma.UserNotificationsUpdateArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserNotificationsPayload>
-        }
-        deleteMany: {
-          args: Prisma.UserNotificationsDeleteManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        updateMany: {
-          args: Prisma.UserNotificationsUpdateManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        updateManyAndReturn: {
-          args: Prisma.UserNotificationsUpdateManyAndReturnArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserNotificationsPayload>[]
-        }
-        upsert: {
-          args: Prisma.UserNotificationsUpsertArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserNotificationsPayload>
-        }
-        aggregate: {
-          args: Prisma.UserNotificationsAggregateArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.AggregateUserNotifications>
-        }
-        groupBy: {
-          args: Prisma.UserNotificationsGroupByArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.UserNotificationsGroupByOutputType>[]
-        }
-        count: {
-          args: Prisma.UserNotificationsCountArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.UserNotificationsCountAggregateOutputType> | number
         }
       }
     }
@@ -5260,6 +5184,376 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    AffiliateAgentGatewayJobs: {
+      payload: Prisma.$AffiliateAgentGatewayJobsPayload<ExtArgs>
+      fields: Prisma.AffiliateAgentGatewayJobsFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.AffiliateAgentGatewayJobsFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayJobsPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.AffiliateAgentGatewayJobsFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayJobsPayload>
+        }
+        findFirst: {
+          args: Prisma.AffiliateAgentGatewayJobsFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayJobsPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.AffiliateAgentGatewayJobsFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayJobsPayload>
+        }
+        findMany: {
+          args: Prisma.AffiliateAgentGatewayJobsFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayJobsPayload>[]
+        }
+        create: {
+          args: Prisma.AffiliateAgentGatewayJobsCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayJobsPayload>
+        }
+        createMany: {
+          args: Prisma.AffiliateAgentGatewayJobsCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.AffiliateAgentGatewayJobsCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayJobsPayload>[]
+        }
+        delete: {
+          args: Prisma.AffiliateAgentGatewayJobsDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayJobsPayload>
+        }
+        update: {
+          args: Prisma.AffiliateAgentGatewayJobsUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayJobsPayload>
+        }
+        deleteMany: {
+          args: Prisma.AffiliateAgentGatewayJobsDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.AffiliateAgentGatewayJobsUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.AffiliateAgentGatewayJobsUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayJobsPayload>[]
+        }
+        upsert: {
+          args: Prisma.AffiliateAgentGatewayJobsUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayJobsPayload>
+        }
+        aggregate: {
+          args: Prisma.AffiliateAgentGatewayJobsAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateAffiliateAgentGatewayJobs>
+        }
+        groupBy: {
+          args: Prisma.AffiliateAgentGatewayJobsGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AffiliateAgentGatewayJobsGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.AffiliateAgentGatewayJobsCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AffiliateAgentGatewayJobsCountAggregateOutputType> | number
+        }
+      }
+    }
+    AffiliateAgentGatewayClaims: {
+      payload: Prisma.$AffiliateAgentGatewayClaimsPayload<ExtArgs>
+      fields: Prisma.AffiliateAgentGatewayClaimsFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.AffiliateAgentGatewayClaimsFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayClaimsPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.AffiliateAgentGatewayClaimsFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayClaimsPayload>
+        }
+        findFirst: {
+          args: Prisma.AffiliateAgentGatewayClaimsFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayClaimsPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.AffiliateAgentGatewayClaimsFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayClaimsPayload>
+        }
+        findMany: {
+          args: Prisma.AffiliateAgentGatewayClaimsFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayClaimsPayload>[]
+        }
+        create: {
+          args: Prisma.AffiliateAgentGatewayClaimsCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayClaimsPayload>
+        }
+        createMany: {
+          args: Prisma.AffiliateAgentGatewayClaimsCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.AffiliateAgentGatewayClaimsCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayClaimsPayload>[]
+        }
+        delete: {
+          args: Prisma.AffiliateAgentGatewayClaimsDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayClaimsPayload>
+        }
+        update: {
+          args: Prisma.AffiliateAgentGatewayClaimsUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayClaimsPayload>
+        }
+        deleteMany: {
+          args: Prisma.AffiliateAgentGatewayClaimsDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.AffiliateAgentGatewayClaimsUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.AffiliateAgentGatewayClaimsUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayClaimsPayload>[]
+        }
+        upsert: {
+          args: Prisma.AffiliateAgentGatewayClaimsUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayClaimsPayload>
+        }
+        aggregate: {
+          args: Prisma.AffiliateAgentGatewayClaimsAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateAffiliateAgentGatewayClaims>
+        }
+        groupBy: {
+          args: Prisma.AffiliateAgentGatewayClaimsGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AffiliateAgentGatewayClaimsGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.AffiliateAgentGatewayClaimsCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AffiliateAgentGatewayClaimsCountAggregateOutputType> | number
+        }
+      }
+    }
+    AffiliateAgentGatewayArtifacts: {
+      payload: Prisma.$AffiliateAgentGatewayArtifactsPayload<ExtArgs>
+      fields: Prisma.AffiliateAgentGatewayArtifactsFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.AffiliateAgentGatewayArtifactsFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayArtifactsPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.AffiliateAgentGatewayArtifactsFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayArtifactsPayload>
+        }
+        findFirst: {
+          args: Prisma.AffiliateAgentGatewayArtifactsFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayArtifactsPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.AffiliateAgentGatewayArtifactsFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayArtifactsPayload>
+        }
+        findMany: {
+          args: Prisma.AffiliateAgentGatewayArtifactsFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayArtifactsPayload>[]
+        }
+        create: {
+          args: Prisma.AffiliateAgentGatewayArtifactsCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayArtifactsPayload>
+        }
+        createMany: {
+          args: Prisma.AffiliateAgentGatewayArtifactsCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.AffiliateAgentGatewayArtifactsCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayArtifactsPayload>[]
+        }
+        delete: {
+          args: Prisma.AffiliateAgentGatewayArtifactsDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayArtifactsPayload>
+        }
+        update: {
+          args: Prisma.AffiliateAgentGatewayArtifactsUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayArtifactsPayload>
+        }
+        deleteMany: {
+          args: Prisma.AffiliateAgentGatewayArtifactsDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.AffiliateAgentGatewayArtifactsUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.AffiliateAgentGatewayArtifactsUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayArtifactsPayload>[]
+        }
+        upsert: {
+          args: Prisma.AffiliateAgentGatewayArtifactsUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayArtifactsPayload>
+        }
+        aggregate: {
+          args: Prisma.AffiliateAgentGatewayArtifactsAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateAffiliateAgentGatewayArtifacts>
+        }
+        groupBy: {
+          args: Prisma.AffiliateAgentGatewayArtifactsGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AffiliateAgentGatewayArtifactsGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.AffiliateAgentGatewayArtifactsCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AffiliateAgentGatewayArtifactsCountAggregateOutputType> | number
+        }
+      }
+    }
+    AffiliateAgentGatewayOperationReceipts: {
+      payload: Prisma.$AffiliateAgentGatewayOperationReceiptsPayload<ExtArgs>
+      fields: Prisma.AffiliateAgentGatewayOperationReceiptsFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.AffiliateAgentGatewayOperationReceiptsFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayOperationReceiptsPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.AffiliateAgentGatewayOperationReceiptsFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayOperationReceiptsPayload>
+        }
+        findFirst: {
+          args: Prisma.AffiliateAgentGatewayOperationReceiptsFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayOperationReceiptsPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.AffiliateAgentGatewayOperationReceiptsFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayOperationReceiptsPayload>
+        }
+        findMany: {
+          args: Prisma.AffiliateAgentGatewayOperationReceiptsFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayOperationReceiptsPayload>[]
+        }
+        create: {
+          args: Prisma.AffiliateAgentGatewayOperationReceiptsCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayOperationReceiptsPayload>
+        }
+        createMany: {
+          args: Prisma.AffiliateAgentGatewayOperationReceiptsCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.AffiliateAgentGatewayOperationReceiptsCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayOperationReceiptsPayload>[]
+        }
+        delete: {
+          args: Prisma.AffiliateAgentGatewayOperationReceiptsDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayOperationReceiptsPayload>
+        }
+        update: {
+          args: Prisma.AffiliateAgentGatewayOperationReceiptsUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayOperationReceiptsPayload>
+        }
+        deleteMany: {
+          args: Prisma.AffiliateAgentGatewayOperationReceiptsDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.AffiliateAgentGatewayOperationReceiptsUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.AffiliateAgentGatewayOperationReceiptsUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayOperationReceiptsPayload>[]
+        }
+        upsert: {
+          args: Prisma.AffiliateAgentGatewayOperationReceiptsUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayOperationReceiptsPayload>
+        }
+        aggregate: {
+          args: Prisma.AffiliateAgentGatewayOperationReceiptsAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateAffiliateAgentGatewayOperationReceipts>
+        }
+        groupBy: {
+          args: Prisma.AffiliateAgentGatewayOperationReceiptsGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AffiliateAgentGatewayOperationReceiptsGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.AffiliateAgentGatewayOperationReceiptsCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AffiliateAgentGatewayOperationReceiptsCountAggregateOutputType> | number
+        }
+      }
+    }
+    AffiliateAgentGatewayEvents: {
+      payload: Prisma.$AffiliateAgentGatewayEventsPayload<ExtArgs>
+      fields: Prisma.AffiliateAgentGatewayEventsFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.AffiliateAgentGatewayEventsFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayEventsPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.AffiliateAgentGatewayEventsFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayEventsPayload>
+        }
+        findFirst: {
+          args: Prisma.AffiliateAgentGatewayEventsFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayEventsPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.AffiliateAgentGatewayEventsFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayEventsPayload>
+        }
+        findMany: {
+          args: Prisma.AffiliateAgentGatewayEventsFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayEventsPayload>[]
+        }
+        create: {
+          args: Prisma.AffiliateAgentGatewayEventsCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayEventsPayload>
+        }
+        createMany: {
+          args: Prisma.AffiliateAgentGatewayEventsCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.AffiliateAgentGatewayEventsCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayEventsPayload>[]
+        }
+        delete: {
+          args: Prisma.AffiliateAgentGatewayEventsDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayEventsPayload>
+        }
+        update: {
+          args: Prisma.AffiliateAgentGatewayEventsUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayEventsPayload>
+        }
+        deleteMany: {
+          args: Prisma.AffiliateAgentGatewayEventsDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.AffiliateAgentGatewayEventsUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.AffiliateAgentGatewayEventsUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayEventsPayload>[]
+        }
+        upsert: {
+          args: Prisma.AffiliateAgentGatewayEventsUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AffiliateAgentGatewayEventsPayload>
+        }
+        aggregate: {
+          args: Prisma.AffiliateAgentGatewayEventsAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateAffiliateAgentGatewayEvents>
+        }
+        groupBy: {
+          args: Prisma.AffiliateAgentGatewayEventsGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AffiliateAgentGatewayEventsGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.AffiliateAgentGatewayEventsCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AffiliateAgentGatewayEventsCountAggregateOutputType> | number
+        }
+      }
+    }
     AffiliateCoverageAgentJobs: {
       payload: Prisma.$AffiliateCoverageAgentJobsPayload<ExtArgs>
       fields: Prisma.AffiliateCoverageAgentJobsFieldRefs
@@ -8368,80 +8662,6 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
-    DocumentRequirements: {
-      payload: Prisma.$DocumentRequirementsPayload<ExtArgs>
-      fields: Prisma.DocumentRequirementsFieldRefs
-      operations: {
-        findUnique: {
-          args: Prisma.DocumentRequirementsFindUniqueArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementsPayload> | null
-        }
-        findUniqueOrThrow: {
-          args: Prisma.DocumentRequirementsFindUniqueOrThrowArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementsPayload>
-        }
-        findFirst: {
-          args: Prisma.DocumentRequirementsFindFirstArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementsPayload> | null
-        }
-        findFirstOrThrow: {
-          args: Prisma.DocumentRequirementsFindFirstOrThrowArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementsPayload>
-        }
-        findMany: {
-          args: Prisma.DocumentRequirementsFindManyArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementsPayload>[]
-        }
-        create: {
-          args: Prisma.DocumentRequirementsCreateArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementsPayload>
-        }
-        createMany: {
-          args: Prisma.DocumentRequirementsCreateManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        createManyAndReturn: {
-          args: Prisma.DocumentRequirementsCreateManyAndReturnArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementsPayload>[]
-        }
-        delete: {
-          args: Prisma.DocumentRequirementsDeleteArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementsPayload>
-        }
-        update: {
-          args: Prisma.DocumentRequirementsUpdateArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementsPayload>
-        }
-        deleteMany: {
-          args: Prisma.DocumentRequirementsDeleteManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        updateMany: {
-          args: Prisma.DocumentRequirementsUpdateManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        updateManyAndReturn: {
-          args: Prisma.DocumentRequirementsUpdateManyAndReturnArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementsPayload>[]
-        }
-        upsert: {
-          args: Prisma.DocumentRequirementsUpsertArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementsPayload>
-        }
-        aggregate: {
-          args: Prisma.DocumentRequirementsAggregateArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.AggregateDocumentRequirements>
-        }
-        groupBy: {
-          args: Prisma.DocumentRequirementsGroupByArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.DocumentRequirementsGroupByOutputType>[]
-        }
-        count: {
-          args: Prisma.DocumentRequirementsCountArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.DocumentRequirementsCountAggregateOutputType> | number
-        }
-      }
-    }
     TemplateDocuments: {
       payload: Prisma.$TemplateDocumentsPayload<ExtArgs>
       fields: Prisma.TemplateDocumentsFieldRefs
@@ -8516,80 +8736,6 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
-    TemplateProviderQuarantines: {
-      payload: Prisma.$TemplateProviderQuarantinesPayload<ExtArgs>
-      fields: Prisma.TemplateProviderQuarantinesFieldRefs
-      operations: {
-        findUnique: {
-          args: Prisma.TemplateProviderQuarantinesFindUniqueArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemplateProviderQuarantinesPayload> | null
-        }
-        findUniqueOrThrow: {
-          args: Prisma.TemplateProviderQuarantinesFindUniqueOrThrowArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemplateProviderQuarantinesPayload>
-        }
-        findFirst: {
-          args: Prisma.TemplateProviderQuarantinesFindFirstArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemplateProviderQuarantinesPayload> | null
-        }
-        findFirstOrThrow: {
-          args: Prisma.TemplateProviderQuarantinesFindFirstOrThrowArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemplateProviderQuarantinesPayload>
-        }
-        findMany: {
-          args: Prisma.TemplateProviderQuarantinesFindManyArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemplateProviderQuarantinesPayload>[]
-        }
-        create: {
-          args: Prisma.TemplateProviderQuarantinesCreateArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemplateProviderQuarantinesPayload>
-        }
-        createMany: {
-          args: Prisma.TemplateProviderQuarantinesCreateManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        createManyAndReturn: {
-          args: Prisma.TemplateProviderQuarantinesCreateManyAndReturnArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemplateProviderQuarantinesPayload>[]
-        }
-        delete: {
-          args: Prisma.TemplateProviderQuarantinesDeleteArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemplateProviderQuarantinesPayload>
-        }
-        update: {
-          args: Prisma.TemplateProviderQuarantinesUpdateArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemplateProviderQuarantinesPayload>
-        }
-        deleteMany: {
-          args: Prisma.TemplateProviderQuarantinesDeleteManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        updateMany: {
-          args: Prisma.TemplateProviderQuarantinesUpdateManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        updateManyAndReturn: {
-          args: Prisma.TemplateProviderQuarantinesUpdateManyAndReturnArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemplateProviderQuarantinesPayload>[]
-        }
-        upsert: {
-          args: Prisma.TemplateProviderQuarantinesUpsertArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemplateProviderQuarantinesPayload>
-        }
-        aggregate: {
-          args: Prisma.TemplateProviderQuarantinesAggregateArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.AggregateTemplateProviderQuarantines>
-        }
-        groupBy: {
-          args: Prisma.TemplateProviderQuarantinesGroupByArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.TemplateProviderQuarantinesGroupByOutputType>[]
-        }
-        count: {
-          args: Prisma.TemplateProviderQuarantinesCountArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.TemplateProviderQuarantinesCountAggregateOutputType> | number
-        }
-      }
-    }
     SignedDocuments: {
       payload: Prisma.$SignedDocumentsPayload<ExtArgs>
       fields: Prisma.SignedDocumentsFieldRefs
@@ -8661,302 +8807,6 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         count: {
           args: Prisma.SignedDocumentsCountArgs<ExtArgs>
           result: runtime.Types.Utils.Optional<Prisma.SignedDocumentsCountAggregateOutputType> | number
-        }
-      }
-    }
-    DocumentSubjects: {
-      payload: Prisma.$DocumentSubjectsPayload<ExtArgs>
-      fields: Prisma.DocumentSubjectsFieldRefs
-      operations: {
-        findUnique: {
-          args: Prisma.DocumentSubjectsFindUniqueArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload> | null
-        }
-        findUniqueOrThrow: {
-          args: Prisma.DocumentSubjectsFindUniqueOrThrowArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>
-        }
-        findFirst: {
-          args: Prisma.DocumentSubjectsFindFirstArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload> | null
-        }
-        findFirstOrThrow: {
-          args: Prisma.DocumentSubjectsFindFirstOrThrowArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>
-        }
-        findMany: {
-          args: Prisma.DocumentSubjectsFindManyArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>[]
-        }
-        create: {
-          args: Prisma.DocumentSubjectsCreateArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>
-        }
-        createMany: {
-          args: Prisma.DocumentSubjectsCreateManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        createManyAndReturn: {
-          args: Prisma.DocumentSubjectsCreateManyAndReturnArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>[]
-        }
-        delete: {
-          args: Prisma.DocumentSubjectsDeleteArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>
-        }
-        update: {
-          args: Prisma.DocumentSubjectsUpdateArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>
-        }
-        deleteMany: {
-          args: Prisma.DocumentSubjectsDeleteManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        updateMany: {
-          args: Prisma.DocumentSubjectsUpdateManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        updateManyAndReturn: {
-          args: Prisma.DocumentSubjectsUpdateManyAndReturnArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>[]
-        }
-        upsert: {
-          args: Prisma.DocumentSubjectsUpsertArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>
-        }
-        aggregate: {
-          args: Prisma.DocumentSubjectsAggregateArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.AggregateDocumentSubjects>
-        }
-        groupBy: {
-          args: Prisma.DocumentSubjectsGroupByArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.DocumentSubjectsGroupByOutputType>[]
-        }
-        count: {
-          args: Prisma.DocumentSubjectsCountArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.DocumentSubjectsCountAggregateOutputType> | number
-        }
-      }
-    }
-    DocumentRequirementSatisfactions: {
-      payload: Prisma.$DocumentRequirementSatisfactionsPayload<ExtArgs>
-      fields: Prisma.DocumentRequirementSatisfactionsFieldRefs
-      operations: {
-        findUnique: {
-          args: Prisma.DocumentRequirementSatisfactionsFindUniqueArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload> | null
-        }
-        findUniqueOrThrow: {
-          args: Prisma.DocumentRequirementSatisfactionsFindUniqueOrThrowArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>
-        }
-        findFirst: {
-          args: Prisma.DocumentRequirementSatisfactionsFindFirstArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload> | null
-        }
-        findFirstOrThrow: {
-          args: Prisma.DocumentRequirementSatisfactionsFindFirstOrThrowArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>
-        }
-        findMany: {
-          args: Prisma.DocumentRequirementSatisfactionsFindManyArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>[]
-        }
-        create: {
-          args: Prisma.DocumentRequirementSatisfactionsCreateArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>
-        }
-        createMany: {
-          args: Prisma.DocumentRequirementSatisfactionsCreateManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        createManyAndReturn: {
-          args: Prisma.DocumentRequirementSatisfactionsCreateManyAndReturnArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>[]
-        }
-        delete: {
-          args: Prisma.DocumentRequirementSatisfactionsDeleteArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>
-        }
-        update: {
-          args: Prisma.DocumentRequirementSatisfactionsUpdateArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>
-        }
-        deleteMany: {
-          args: Prisma.DocumentRequirementSatisfactionsDeleteManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        updateMany: {
-          args: Prisma.DocumentRequirementSatisfactionsUpdateManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        updateManyAndReturn: {
-          args: Prisma.DocumentRequirementSatisfactionsUpdateManyAndReturnArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>[]
-        }
-        upsert: {
-          args: Prisma.DocumentRequirementSatisfactionsUpsertArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>
-        }
-        aggregate: {
-          args: Prisma.DocumentRequirementSatisfactionsAggregateArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.AggregateDocumentRequirementSatisfactions>
-        }
-        groupBy: {
-          args: Prisma.DocumentRequirementSatisfactionsGroupByArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.DocumentRequirementSatisfactionsGroupByOutputType>[]
-        }
-        count: {
-          args: Prisma.DocumentRequirementSatisfactionsCountArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.DocumentRequirementSatisfactionsCountAggregateOutputType> | number
-        }
-      }
-    }
-    DocumentRequirementSatisfactionEvidence: {
-      payload: Prisma.$DocumentRequirementSatisfactionEvidencePayload<ExtArgs>
-      fields: Prisma.DocumentRequirementSatisfactionEvidenceFieldRefs
-      operations: {
-        findUnique: {
-          args: Prisma.DocumentRequirementSatisfactionEvidenceFindUniqueArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload> | null
-        }
-        findUniqueOrThrow: {
-          args: Prisma.DocumentRequirementSatisfactionEvidenceFindUniqueOrThrowArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>
-        }
-        findFirst: {
-          args: Prisma.DocumentRequirementSatisfactionEvidenceFindFirstArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload> | null
-        }
-        findFirstOrThrow: {
-          args: Prisma.DocumentRequirementSatisfactionEvidenceFindFirstOrThrowArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>
-        }
-        findMany: {
-          args: Prisma.DocumentRequirementSatisfactionEvidenceFindManyArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>[]
-        }
-        create: {
-          args: Prisma.DocumentRequirementSatisfactionEvidenceCreateArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>
-        }
-        createMany: {
-          args: Prisma.DocumentRequirementSatisfactionEvidenceCreateManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        createManyAndReturn: {
-          args: Prisma.DocumentRequirementSatisfactionEvidenceCreateManyAndReturnArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>[]
-        }
-        delete: {
-          args: Prisma.DocumentRequirementSatisfactionEvidenceDeleteArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>
-        }
-        update: {
-          args: Prisma.DocumentRequirementSatisfactionEvidenceUpdateArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>
-        }
-        deleteMany: {
-          args: Prisma.DocumentRequirementSatisfactionEvidenceDeleteManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        updateMany: {
-          args: Prisma.DocumentRequirementSatisfactionEvidenceUpdateManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        updateManyAndReturn: {
-          args: Prisma.DocumentRequirementSatisfactionEvidenceUpdateManyAndReturnArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>[]
-        }
-        upsert: {
-          args: Prisma.DocumentRequirementSatisfactionEvidenceUpsertArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>
-        }
-        aggregate: {
-          args: Prisma.DocumentRequirementSatisfactionEvidenceAggregateArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.AggregateDocumentRequirementSatisfactionEvidence>
-        }
-        groupBy: {
-          args: Prisma.DocumentRequirementSatisfactionEvidenceGroupByArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.DocumentRequirementSatisfactionEvidenceGroupByOutputType>[]
-        }
-        count: {
-          args: Prisma.DocumentRequirementSatisfactionEvidenceCountArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.DocumentRequirementSatisfactionEvidenceCountAggregateOutputType> | number
-        }
-      }
-    }
-    DocumentEvidenceAuditEvents: {
-      payload: Prisma.$DocumentEvidenceAuditEventsPayload<ExtArgs>
-      fields: Prisma.DocumentEvidenceAuditEventsFieldRefs
-      operations: {
-        findUnique: {
-          args: Prisma.DocumentEvidenceAuditEventsFindUniqueArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload> | null
-        }
-        findUniqueOrThrow: {
-          args: Prisma.DocumentEvidenceAuditEventsFindUniqueOrThrowArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>
-        }
-        findFirst: {
-          args: Prisma.DocumentEvidenceAuditEventsFindFirstArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload> | null
-        }
-        findFirstOrThrow: {
-          args: Prisma.DocumentEvidenceAuditEventsFindFirstOrThrowArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>
-        }
-        findMany: {
-          args: Prisma.DocumentEvidenceAuditEventsFindManyArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>[]
-        }
-        create: {
-          args: Prisma.DocumentEvidenceAuditEventsCreateArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>
-        }
-        createMany: {
-          args: Prisma.DocumentEvidenceAuditEventsCreateManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        createManyAndReturn: {
-          args: Prisma.DocumentEvidenceAuditEventsCreateManyAndReturnArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>[]
-        }
-        delete: {
-          args: Prisma.DocumentEvidenceAuditEventsDeleteArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>
-        }
-        update: {
-          args: Prisma.DocumentEvidenceAuditEventsUpdateArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>
-        }
-        deleteMany: {
-          args: Prisma.DocumentEvidenceAuditEventsDeleteManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        updateMany: {
-          args: Prisma.DocumentEvidenceAuditEventsUpdateManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        updateManyAndReturn: {
-          args: Prisma.DocumentEvidenceAuditEventsUpdateManyAndReturnArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>[]
-        }
-        upsert: {
-          args: Prisma.DocumentEvidenceAuditEventsUpsertArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>
-        }
-        aggregate: {
-          args: Prisma.DocumentEvidenceAuditEventsAggregateArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.AggregateDocumentEvidenceAuditEvents>
-        }
-        groupBy: {
-          args: Prisma.DocumentEvidenceAuditEventsGroupByArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.DocumentEvidenceAuditEventsGroupByOutputType>[]
-        }
-        count: {
-          args: Prisma.DocumentEvidenceAuditEventsCountArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.DocumentEvidenceAuditEventsCountAggregateOutputType> | number
         }
       }
     }
@@ -9902,20 +9752,6 @@ export const UserDataScalarFieldEnum = {
 export type UserDataScalarFieldEnum = (typeof UserDataScalarFieldEnum)[keyof typeof UserDataScalarFieldEnum]
 
 
-export const UserNotificationsScalarFieldEnum = {
-  id: 'id',
-  createdAt: 'createdAt',
-  userId: 'userId',
-  notificationType: 'notificationType',
-  title: 'title',
-  body: 'body',
-  data: 'data',
-  readAt: 'readAt'
-} as const
-
-export type UserNotificationsScalarFieldEnum = (typeof UserNotificationsScalarFieldEnum)[keyof typeof UserNotificationsScalarFieldEnum]
-
-
 export const SensitiveUserDataScalarFieldEnum = {
   id: 'id',
   createdAt: 'createdAt',
@@ -9979,8 +9815,6 @@ export const InvitesScalarFieldEnum = {
   phone: 'phone',
   status: 'status',
   staffTypes: 'staffTypes',
-  role: 'role',
-  isAssigned: 'isAssigned',
   eventId: 'eventId',
   organizationId: 'organizationId',
   teamId: 'teamId',
@@ -10913,6 +10747,164 @@ export const AffiliateSourceDiscoveryCampaignsScalarFieldEnum = {
 } as const
 
 export type AffiliateSourceDiscoveryCampaignsScalarFieldEnum = (typeof AffiliateSourceDiscoveryCampaignsScalarFieldEnum)[keyof typeof AffiliateSourceDiscoveryCampaignsScalarFieldEnum]
+
+
+export const AffiliateAgentGatewayJobsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  dedupeKey: 'dedupeKey',
+  queue: 'queue',
+  lane: 'lane',
+  role: 'role',
+  subjectType: 'subjectType',
+  subjectId: 'subjectId',
+  subjectJson: 'subjectJson',
+  evidenceManifestJson: 'evidenceManifestJson',
+  supplySourceId: 'supplySourceId',
+  expectedLifecycleGeneration: 'expectedLifecycleGeneration',
+  status: 'status',
+  priority: 'priority',
+  nextAttemptAt: 'nextAttemptAt',
+  claimGeneration: 'claimGeneration',
+  activeClaimId: 'activeClaimId',
+  parentClaimId: 'parentClaimId',
+  invocationFailureCount: 'invocationFailureCount',
+  lastInvocationFailedAt: 'lastInvocationFailedAt',
+  pipelineBlockedAt: 'pipelineBlockedAt',
+  terminalDisposition: 'terminalDisposition',
+  resultHash: 'resultHash',
+  resultJson: 'resultJson',
+  terminalReceiptId: 'terminalReceiptId',
+  finishedAt: 'finishedAt',
+  eventSequence: 'eventSequence'
+} as const
+
+export type AffiliateAgentGatewayJobsScalarFieldEnum = (typeof AffiliateAgentGatewayJobsScalarFieldEnum)[keyof typeof AffiliateAgentGatewayJobsScalarFieldEnum]
+
+
+export const AffiliateAgentGatewayClaimsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  jobId: 'jobId',
+  parentClaimId: 'parentClaimId',
+  claimGeneration: 'claimGeneration',
+  lifecycleGeneration: 'lifecycleGeneration',
+  queue: 'queue',
+  lane: 'lane',
+  role: 'role',
+  workerId: 'workerId',
+  invocationId: 'invocationId',
+  workspaceId: 'workspaceId',
+  workspaceMode: 'workspaceMode',
+  workspaceAttestationHash: 'workspaceAttestationHash',
+  status: 'status',
+  claimRequestId: 'claimRequestId',
+  claimRequestHash: 'claimRequestHash',
+  claimedAt: 'claimedAt',
+  lastHeartbeatAt: 'lastHeartbeatAt',
+  leaseExpiresAt: 'leaseExpiresAt',
+  hardDeadlineAt: 'hardDeadlineAt',
+  endedAt: 'endedAt',
+  tokenNonce: 'tokenNonce',
+  tokenHash: 'tokenHash',
+  tokenKeyVersion: 'tokenKeyVersion',
+  tokenExpiresAt: 'tokenExpiresAt',
+  tokenInvalidatedAt: 'tokenInvalidatedAt',
+  deploymentContractVersion: 'deploymentContractVersion',
+  deploymentContractHash: 'deploymentContractHash',
+  roleContractVersion: 'roleContractVersion',
+  roleContractHash: 'roleContractHash',
+  promptTemplateVersion: 'promptTemplateVersion',
+  promptTemplateHash: 'promptTemplateHash',
+  supplyContractVersion: 'supplyContractVersion',
+  supplyContractHash: 'supplyContractHash',
+  claimEnvelopeHash: 'claimEnvelopeHash',
+  claimEnvelopeJson: 'claimEnvelopeJson',
+  evidenceManifestHash: 'evidenceManifestHash',
+  permittedCommandHash: 'permittedCommandHash',
+  permittedCommands: 'permittedCommands',
+  schemaCorrectionCount: 'schemaCorrectionCount',
+  terminalReceiptId: 'terminalReceiptId',
+  safeFailureCode: 'safeFailureCode',
+  safeFailureSummary: 'safeFailureSummary',
+  diagnosticRetainUntil: 'diagnosticRetainUntil'
+} as const
+
+export type AffiliateAgentGatewayClaimsScalarFieldEnum = (typeof AffiliateAgentGatewayClaimsScalarFieldEnum)[keyof typeof AffiliateAgentGatewayClaimsScalarFieldEnum]
+
+
+export const AffiliateAgentGatewayArtifactsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  claimId: 'claimId',
+  claimGeneration: 'claimGeneration',
+  evidenceRef: 'evidenceRef',
+  evidenceKind: 'evidenceKind',
+  sourceArtifactId: 'sourceArtifactId',
+  fileId: 'fileId',
+  contentHash: 'contentHash',
+  mimeType: 'mimeType',
+  byteSize: 'byteSize',
+  accessMode: 'accessMode',
+  creatingClaimId: 'creatingClaimId',
+  retentionClass: 'retentionClass',
+  retentionDeadline: 'retentionDeadline',
+  isPinned: 'isPinned'
+} as const
+
+export type AffiliateAgentGatewayArtifactsScalarFieldEnum = (typeof AffiliateAgentGatewayArtifactsScalarFieldEnum)[keyof typeof AffiliateAgentGatewayArtifactsScalarFieldEnum]
+
+
+export const AffiliateAgentGatewayOperationReceiptsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  claimId: 'claimId',
+  jobId: 'jobId',
+  claimGeneration: 'claimGeneration',
+  idempotencyKey: 'idempotencyKey',
+  operationKind: 'operationKind',
+  commandName: 'commandName',
+  requestHash: 'requestHash',
+  status: 'status',
+  responseHash: 'responseHash',
+  responseJson: 'responseJson',
+  safeErrorCode: 'safeErrorCode',
+  externalOperationKey: 'externalOperationKey',
+  startedAt: 'startedAt',
+  completedAt: 'completedAt',
+  reconcileAfter: 'reconcileAfter',
+  retentionClass: 'retentionClass',
+  retentionDeadline: 'retentionDeadline'
+} as const
+
+export type AffiliateAgentGatewayOperationReceiptsScalarFieldEnum = (typeof AffiliateAgentGatewayOperationReceiptsScalarFieldEnum)[keyof typeof AffiliateAgentGatewayOperationReceiptsScalarFieldEnum]
+
+
+export const AffiliateAgentGatewayEventsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  eventKey: 'eventKey',
+  jobId: 'jobId',
+  claimId: 'claimId',
+  receiptId: 'receiptId',
+  sequence: 'sequence',
+  eventType: 'eventType',
+  actorKind: 'actorKind',
+  actorId: 'actorId',
+  role: 'role',
+  requestHash: 'requestHash',
+  inputHash: 'inputHash',
+  outputHash: 'outputHash',
+  reasonCodes: 'reasonCodes',
+  payload: 'payload',
+  retentionClass: 'retentionClass',
+  retentionDeadline: 'retentionDeadline'
+} as const
+
+export type AffiliateAgentGatewayEventsScalarFieldEnum = (typeof AffiliateAgentGatewayEventsScalarFieldEnum)[keyof typeof AffiliateAgentGatewayEventsScalarFieldEnum]
 
 
 export const AffiliateCoverageAgentJobsScalarFieldEnum = {
@@ -12065,30 +12057,11 @@ export const SportsScalarFieldEnum = {
 export type SportsScalarFieldEnum = (typeof SportsScalarFieldEnum)[keyof typeof SportsScalarFieldEnum]
 
 
-export const DocumentRequirementsScalarFieldEnum = {
-  id: 'id',
-  createdAt: 'createdAt',
-  updatedAt: 'updatedAt',
-  organizationId: 'organizationId',
-  title: 'title',
-  description: 'description',
-  createdBy: 'createdBy',
-  status: 'status'
-} as const
-
-export type DocumentRequirementsScalarFieldEnum = (typeof DocumentRequirementsScalarFieldEnum)[keyof typeof DocumentRequirementsScalarFieldEnum]
-
-
 export const TemplateDocumentsScalarFieldEnum = {
   id: 'id',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
   templateId: 'templateId',
-  documentRequirementId: 'documentRequirementId',
-  versionSequence: 'versionSequence',
-  frozenAt: 'frozenAt',
-  providerQuarantinedAt: 'providerQuarantinedAt',
-  providerQuarantineReason: 'providerQuarantineReason',
   type: 'type',
   organizationId: 'organizationId',
   title: 'title',
@@ -12106,43 +12079,18 @@ export const TemplateDocumentsScalarFieldEnum = {
 export type TemplateDocumentsScalarFieldEnum = (typeof TemplateDocumentsScalarFieldEnum)[keyof typeof TemplateDocumentsScalarFieldEnum]
 
 
-export const TemplateProviderQuarantinesScalarFieldEnum = {
-  providerTemplateId: 'providerTemplateId',
-  quarantinedAt: 'quarantinedAt',
-  reason: 'reason',
-  createdAt: 'createdAt',
-  updatedAt: 'updatedAt'
-} as const
-
-export type TemplateProviderQuarantinesScalarFieldEnum = (typeof TemplateProviderQuarantinesScalarFieldEnum)[keyof typeof TemplateProviderQuarantinesScalarFieldEnum]
-
-
 export const SignedDocumentsScalarFieldEnum = {
   id: 'id',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
   signedDocumentId: 'signedDocumentId',
-  providerDocumentId: 'providerDocumentId',
-  provenance: 'provenance',
   templateId: 'templateId',
   userId: 'userId',
-  signerUserId: 'signerUserId',
-  documentSubjectId: 'documentSubjectId',
   documentName: 'documentName',
   hostId: 'hostId',
   organizationId: 'organizationId',
   eventId: 'eventId',
   teamId: 'teamId',
-  scopeType: 'scopeType',
-  scopeId: 'scopeId',
-  importedFileId: 'importedFileId',
-  contentHash: 'contentHash',
-  historicalSigningDate: 'historicalSigningDate',
-  sourceNote: 'sourceNote',
-  importedAt: 'importedAt',
-  uploaderId: 'uploaderId',
-  attestationText: 'attestationText',
-  attestationVersion: 'attestationVersion',
   status: 'status',
   signedAt: 'signedAt',
   signerEmail: 'signerEmail',
@@ -12153,65 +12101,6 @@ export const SignedDocumentsScalarFieldEnum = {
 } as const
 
 export type SignedDocumentsScalarFieldEnum = (typeof SignedDocumentsScalarFieldEnum)[keyof typeof SignedDocumentsScalarFieldEnum]
-
-
-export const DocumentSubjectsScalarFieldEnum = {
-  id: 'id',
-  createdAt: 'createdAt',
-  updatedAt: 'updatedAt',
-  organizationId: 'organizationId',
-  userId: 'userId'
-} as const
-
-export type DocumentSubjectsScalarFieldEnum = (typeof DocumentSubjectsScalarFieldEnum)[keyof typeof DocumentSubjectsScalarFieldEnum]
-
-
-export const DocumentRequirementSatisfactionsScalarFieldEnum = {
-  id: 'id',
-  createdAt: 'createdAt',
-  updatedAt: 'updatedAt',
-  organizationId: 'organizationId',
-  documentRequirementId: 'documentRequirementId',
-  templateDocumentId: 'templateDocumentId',
-  documentSubjectId: 'documentSubjectId',
-  scopeType: 'scopeType',
-  scopeId: 'scopeId',
-  sourceEvidenceId: 'sourceEvidenceId',
-  status: 'status',
-  isComplete: 'isComplete',
-  requiredSignerRoles: 'requiredSignerRoles',
-  completedSignerRoles: 'completedSignerRoles',
-  invalidatedAt: 'invalidatedAt'
-} as const
-
-export type DocumentRequirementSatisfactionsScalarFieldEnum = (typeof DocumentRequirementSatisfactionsScalarFieldEnum)[keyof typeof DocumentRequirementSatisfactionsScalarFieldEnum]
-
-
-export const DocumentRequirementSatisfactionEvidenceScalarFieldEnum = {
-  id: 'id',
-  createdAt: 'createdAt',
-  updatedAt: 'updatedAt',
-  satisfactionId: 'satisfactionId',
-  signedDocumentId: 'signedDocumentId',
-  completedSignerRoles: 'completedSignerRoles'
-} as const
-
-export type DocumentRequirementSatisfactionEvidenceScalarFieldEnum = (typeof DocumentRequirementSatisfactionEvidenceScalarFieldEnum)[keyof typeof DocumentRequirementSatisfactionEvidenceScalarFieldEnum]
-
-
-export const DocumentEvidenceAuditEventsScalarFieldEnum = {
-  id: 'id',
-  createdAt: 'createdAt',
-  organizationId: 'organizationId',
-  signedDocumentId: 'signedDocumentId',
-  eventType: 'eventType',
-  actorUserId: 'actorUserId',
-  reason: 'reason',
-  note: 'note',
-  payload: 'payload'
-} as const
-
-export type DocumentEvidenceAuditEventsScalarFieldEnum = (typeof DocumentEvidenceAuditEventsScalarFieldEnum)[keyof typeof DocumentEvidenceAuditEventsScalarFieldEnum]
 
 
 export const BoldSignWebhookEventsScalarFieldEnum = {
@@ -12989,6 +12878,48 @@ export type ListEnumManualPaymentProofStatusEnumFieldRefInput<$PrismaModel> = Fi
 
 
 /**
+ * Reference to a field of type 'AffiliateAgentGatewayJobStatus'
+ */
+export type EnumAffiliateAgentGatewayJobStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AffiliateAgentGatewayJobStatus'>
+
+
+
+/**
+ * Reference to a field of type 'AffiliateAgentGatewayJobStatus[]'
+ */
+export type ListEnumAffiliateAgentGatewayJobStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AffiliateAgentGatewayJobStatus[]'>
+
+
+
+/**
+ * Reference to a field of type 'AffiliateAgentGatewayClaimStatus'
+ */
+export type EnumAffiliateAgentGatewayClaimStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AffiliateAgentGatewayClaimStatus'>
+
+
+
+/**
+ * Reference to a field of type 'AffiliateAgentGatewayClaimStatus[]'
+ */
+export type ListEnumAffiliateAgentGatewayClaimStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AffiliateAgentGatewayClaimStatus[]'>
+
+
+
+/**
+ * Reference to a field of type 'AffiliateAgentGatewayReceiptStatus'
+ */
+export type EnumAffiliateAgentGatewayReceiptStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AffiliateAgentGatewayReceiptStatus'>
+
+
+
+/**
+ * Reference to a field of type 'AffiliateAgentGatewayReceiptStatus[]'
+ */
+export type ListEnumAffiliateAgentGatewayReceiptStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AffiliateAgentGatewayReceiptStatus[]'>
+
+
+
+/**
  * Reference to a field of type 'RefundRequestsStatusEnum'
  */
 export type EnumRefundRequestsStatusEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'RefundRequestsStatusEnum'>
@@ -13507,62 +13438,6 @@ export type ListEnumTemplateDocumentsTypeEnumFieldRefInput<$PrismaModel> = Field
 
 
 /**
- * Reference to a field of type 'SignedDocumentProvenanceEnum'
- */
-export type EnumSignedDocumentProvenanceEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'SignedDocumentProvenanceEnum'>
-
-
-
-/**
- * Reference to a field of type 'SignedDocumentProvenanceEnum[]'
- */
-export type ListEnumSignedDocumentProvenanceEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'SignedDocumentProvenanceEnum[]'>
-
-
-
-/**
- * Reference to a field of type 'DocumentRequirementSatisfactionScopeTypeEnum'
- */
-export type EnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DocumentRequirementSatisfactionScopeTypeEnum'>
-
-
-
-/**
- * Reference to a field of type 'DocumentRequirementSatisfactionScopeTypeEnum[]'
- */
-export type ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DocumentRequirementSatisfactionScopeTypeEnum[]'>
-
-
-
-/**
- * Reference to a field of type 'DocumentRequirementSatisfactionStatusEnum'
- */
-export type EnumDocumentRequirementSatisfactionStatusEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DocumentRequirementSatisfactionStatusEnum'>
-
-
-
-/**
- * Reference to a field of type 'DocumentRequirementSatisfactionStatusEnum[]'
- */
-export type ListEnumDocumentRequirementSatisfactionStatusEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DocumentRequirementSatisfactionStatusEnum[]'>
-
-
-
-/**
- * Reference to a field of type 'DocumentEvidenceAuditEventTypeEnum'
- */
-export type EnumDocumentEvidenceAuditEventTypeEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DocumentEvidenceAuditEventTypeEnum'>
-
-
-
-/**
- * Reference to a field of type 'DocumentEvidenceAuditEventTypeEnum[]'
- */
-export type ListEnumDocumentEvidenceAuditEventTypeEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DocumentEvidenceAuditEventTypeEnum[]'>
-
-
-
-/**
  * Reference to a field of type 'BoldSignSyncOperationTypeEnum'
  */
 export type EnumBoldSignSyncOperationTypeEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'BoldSignSyncOperationTypeEnum'>
@@ -13771,7 +13646,6 @@ export type GlobalOmitConfig = {
   eventDivisionPhaseSources?: Prisma.EventDivisionPhaseSourcesOmit
   eventDivisionPhaseParticipants?: Prisma.EventDivisionPhaseParticipantsOmit
   userData?: Prisma.UserDataOmit
-  userNotifications?: Prisma.UserNotificationsOmit
   sensitiveUserData?: Prisma.SensitiveUserDataOmit
   authMfaChallenges?: Prisma.AuthMfaChallengesOmit
   invites?: Prisma.InvitesOmit
@@ -13819,6 +13693,11 @@ export type GlobalOmitConfig = {
   affiliateSourceIntakeRuns?: Prisma.AffiliateSourceIntakeRunsOmit
   affiliateSourceIntakeArtifacts?: Prisma.AffiliateSourceIntakeArtifactsOmit
   affiliateSourceDiscoveryCampaigns?: Prisma.AffiliateSourceDiscoveryCampaignsOmit
+  affiliateAgentGatewayJobs?: Prisma.AffiliateAgentGatewayJobsOmit
+  affiliateAgentGatewayClaims?: Prisma.AffiliateAgentGatewayClaimsOmit
+  affiliateAgentGatewayArtifacts?: Prisma.AffiliateAgentGatewayArtifactsOmit
+  affiliateAgentGatewayOperationReceipts?: Prisma.AffiliateAgentGatewayOperationReceiptsOmit
+  affiliateAgentGatewayEvents?: Prisma.AffiliateAgentGatewayEventsOmit
   affiliateCoverageAgentJobs?: Prisma.AffiliateCoverageAgentJobsOmit
   affiliateCoverageCities?: Prisma.AffiliateCoverageCitiesOmit
   affiliateCoverageCells?: Prisma.AffiliateCoverageCellsOmit
@@ -13861,14 +13740,8 @@ export type GlobalOmitConfig = {
   eventTemplateRentalResourceHints?: Prisma.EventTemplateRentalResourceHintsOmit
   eventTemplateLeagueScoringConfigs?: Prisma.EventTemplateLeagueScoringConfigsOmit
   sports?: Prisma.SportsOmit
-  documentRequirements?: Prisma.DocumentRequirementsOmit
   templateDocuments?: Prisma.TemplateDocumentsOmit
-  templateProviderQuarantines?: Prisma.TemplateProviderQuarantinesOmit
   signedDocuments?: Prisma.SignedDocumentsOmit
-  documentSubjects?: Prisma.DocumentSubjectsOmit
-  documentRequirementSatisfactions?: Prisma.DocumentRequirementSatisfactionsOmit
-  documentRequirementSatisfactionEvidence?: Prisma.DocumentRequirementSatisfactionEvidenceOmit
-  documentEvidenceAuditEvents?: Prisma.DocumentEvidenceAuditEventsOmit
   boldSignWebhookEvents?: Prisma.BoldSignWebhookEventsOmit
   boldSignSyncOperations?: Prisma.BoldSignSyncOperationsOmit
   parentChildLinks?: Prisma.ParentChildLinksOmit

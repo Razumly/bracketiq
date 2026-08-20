@@ -973,6 +973,57 @@ export type EnumManualPaymentProofStatusEnumWithAggregatesFilter<$PrismaModel = 
   _max?: Prisma.NestedEnumManualPaymentProofStatusEnumFilter<$PrismaModel>
 }
 
+export type EnumAffiliateAgentGatewayJobStatusFilter<$PrismaModel = never> = {
+  equals?: $Enums.AffiliateAgentGatewayJobStatus | Prisma.EnumAffiliateAgentGatewayJobStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.AffiliateAgentGatewayJobStatus[] | Prisma.ListEnumAffiliateAgentGatewayJobStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.AffiliateAgentGatewayJobStatus[] | Prisma.ListEnumAffiliateAgentGatewayJobStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumAffiliateAgentGatewayJobStatusFilter<$PrismaModel> | $Enums.AffiliateAgentGatewayJobStatus
+}
+
+export type EnumAffiliateAgentGatewayJobStatusWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.AffiliateAgentGatewayJobStatus | Prisma.EnumAffiliateAgentGatewayJobStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.AffiliateAgentGatewayJobStatus[] | Prisma.ListEnumAffiliateAgentGatewayJobStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.AffiliateAgentGatewayJobStatus[] | Prisma.ListEnumAffiliateAgentGatewayJobStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumAffiliateAgentGatewayJobStatusWithAggregatesFilter<$PrismaModel> | $Enums.AffiliateAgentGatewayJobStatus
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumAffiliateAgentGatewayJobStatusFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumAffiliateAgentGatewayJobStatusFilter<$PrismaModel>
+}
+
+export type EnumAffiliateAgentGatewayClaimStatusFilter<$PrismaModel = never> = {
+  equals?: $Enums.AffiliateAgentGatewayClaimStatus | Prisma.EnumAffiliateAgentGatewayClaimStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.AffiliateAgentGatewayClaimStatus[] | Prisma.ListEnumAffiliateAgentGatewayClaimStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.AffiliateAgentGatewayClaimStatus[] | Prisma.ListEnumAffiliateAgentGatewayClaimStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumAffiliateAgentGatewayClaimStatusFilter<$PrismaModel> | $Enums.AffiliateAgentGatewayClaimStatus
+}
+
+export type EnumAffiliateAgentGatewayClaimStatusWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.AffiliateAgentGatewayClaimStatus | Prisma.EnumAffiliateAgentGatewayClaimStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.AffiliateAgentGatewayClaimStatus[] | Prisma.ListEnumAffiliateAgentGatewayClaimStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.AffiliateAgentGatewayClaimStatus[] | Prisma.ListEnumAffiliateAgentGatewayClaimStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumAffiliateAgentGatewayClaimStatusWithAggregatesFilter<$PrismaModel> | $Enums.AffiliateAgentGatewayClaimStatus
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumAffiliateAgentGatewayClaimStatusFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumAffiliateAgentGatewayClaimStatusFilter<$PrismaModel>
+}
+
+export type EnumAffiliateAgentGatewayReceiptStatusFilter<$PrismaModel = never> = {
+  equals?: $Enums.AffiliateAgentGatewayReceiptStatus | Prisma.EnumAffiliateAgentGatewayReceiptStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.AffiliateAgentGatewayReceiptStatus[] | Prisma.ListEnumAffiliateAgentGatewayReceiptStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.AffiliateAgentGatewayReceiptStatus[] | Prisma.ListEnumAffiliateAgentGatewayReceiptStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumAffiliateAgentGatewayReceiptStatusFilter<$PrismaModel> | $Enums.AffiliateAgentGatewayReceiptStatus
+}
+
+export type EnumAffiliateAgentGatewayReceiptStatusWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.AffiliateAgentGatewayReceiptStatus | Prisma.EnumAffiliateAgentGatewayReceiptStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.AffiliateAgentGatewayReceiptStatus[] | Prisma.ListEnumAffiliateAgentGatewayReceiptStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.AffiliateAgentGatewayReceiptStatus[] | Prisma.ListEnumAffiliateAgentGatewayReceiptStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumAffiliateAgentGatewayReceiptStatusWithAggregatesFilter<$PrismaModel> | $Enums.AffiliateAgentGatewayReceiptStatus
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumAffiliateAgentGatewayReceiptStatusFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumAffiliateAgentGatewayReceiptStatusFilter<$PrismaModel>
+}
+
 export type FloatFilter<$PrismaModel = never> = {
   equals?: number | Prisma.FloatFieldRefInput<$PrismaModel>
   in?: number[] | Prisma.ListFloatFieldRefInput<$PrismaModel>
@@ -2704,6 +2755,57 @@ export type NestedEnumManualPaymentProofStatusEnumWithAggregatesFilter<$PrismaMo
   _count?: Prisma.NestedIntFilter<$PrismaModel>
   _min?: Prisma.NestedEnumManualPaymentProofStatusEnumFilter<$PrismaModel>
   _max?: Prisma.NestedEnumManualPaymentProofStatusEnumFilter<$PrismaModel>
+}
+
+export type NestedEnumAffiliateAgentGatewayJobStatusFilter<$PrismaModel = never> = {
+  equals?: $Enums.AffiliateAgentGatewayJobStatus | Prisma.EnumAffiliateAgentGatewayJobStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.AffiliateAgentGatewayJobStatus[] | Prisma.ListEnumAffiliateAgentGatewayJobStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.AffiliateAgentGatewayJobStatus[] | Prisma.ListEnumAffiliateAgentGatewayJobStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumAffiliateAgentGatewayJobStatusFilter<$PrismaModel> | $Enums.AffiliateAgentGatewayJobStatus
+}
+
+export type NestedEnumAffiliateAgentGatewayJobStatusWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.AffiliateAgentGatewayJobStatus | Prisma.EnumAffiliateAgentGatewayJobStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.AffiliateAgentGatewayJobStatus[] | Prisma.ListEnumAffiliateAgentGatewayJobStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.AffiliateAgentGatewayJobStatus[] | Prisma.ListEnumAffiliateAgentGatewayJobStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumAffiliateAgentGatewayJobStatusWithAggregatesFilter<$PrismaModel> | $Enums.AffiliateAgentGatewayJobStatus
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumAffiliateAgentGatewayJobStatusFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumAffiliateAgentGatewayJobStatusFilter<$PrismaModel>
+}
+
+export type NestedEnumAffiliateAgentGatewayClaimStatusFilter<$PrismaModel = never> = {
+  equals?: $Enums.AffiliateAgentGatewayClaimStatus | Prisma.EnumAffiliateAgentGatewayClaimStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.AffiliateAgentGatewayClaimStatus[] | Prisma.ListEnumAffiliateAgentGatewayClaimStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.AffiliateAgentGatewayClaimStatus[] | Prisma.ListEnumAffiliateAgentGatewayClaimStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumAffiliateAgentGatewayClaimStatusFilter<$PrismaModel> | $Enums.AffiliateAgentGatewayClaimStatus
+}
+
+export type NestedEnumAffiliateAgentGatewayClaimStatusWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.AffiliateAgentGatewayClaimStatus | Prisma.EnumAffiliateAgentGatewayClaimStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.AffiliateAgentGatewayClaimStatus[] | Prisma.ListEnumAffiliateAgentGatewayClaimStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.AffiliateAgentGatewayClaimStatus[] | Prisma.ListEnumAffiliateAgentGatewayClaimStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumAffiliateAgentGatewayClaimStatusWithAggregatesFilter<$PrismaModel> | $Enums.AffiliateAgentGatewayClaimStatus
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumAffiliateAgentGatewayClaimStatusFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumAffiliateAgentGatewayClaimStatusFilter<$PrismaModel>
+}
+
+export type NestedEnumAffiliateAgentGatewayReceiptStatusFilter<$PrismaModel = never> = {
+  equals?: $Enums.AffiliateAgentGatewayReceiptStatus | Prisma.EnumAffiliateAgentGatewayReceiptStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.AffiliateAgentGatewayReceiptStatus[] | Prisma.ListEnumAffiliateAgentGatewayReceiptStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.AffiliateAgentGatewayReceiptStatus[] | Prisma.ListEnumAffiliateAgentGatewayReceiptStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumAffiliateAgentGatewayReceiptStatusFilter<$PrismaModel> | $Enums.AffiliateAgentGatewayReceiptStatus
+}
+
+export type NestedEnumAffiliateAgentGatewayReceiptStatusWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.AffiliateAgentGatewayReceiptStatus | Prisma.EnumAffiliateAgentGatewayReceiptStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.AffiliateAgentGatewayReceiptStatus[] | Prisma.ListEnumAffiliateAgentGatewayReceiptStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.AffiliateAgentGatewayReceiptStatus[] | Prisma.ListEnumAffiliateAgentGatewayReceiptStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumAffiliateAgentGatewayReceiptStatusWithAggregatesFilter<$PrismaModel> | $Enums.AffiliateAgentGatewayReceiptStatus
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumAffiliateAgentGatewayReceiptStatusFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumAffiliateAgentGatewayReceiptStatusFilter<$PrismaModel>
 }
 
 export type NestedFloatWithAggregatesFilter<$PrismaModel = never> = {

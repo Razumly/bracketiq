@@ -115,6 +115,11 @@ export const ModelName = {
   AffiliateSourceIntakeRuns: 'AffiliateSourceIntakeRuns',
   AffiliateSourceIntakeArtifacts: 'AffiliateSourceIntakeArtifacts',
   AffiliateSourceDiscoveryCampaigns: 'AffiliateSourceDiscoveryCampaigns',
+  AffiliateAgentGatewayJobs: 'AffiliateAgentGatewayJobs',
+  AffiliateAgentGatewayClaims: 'AffiliateAgentGatewayClaims',
+  AffiliateAgentGatewayArtifacts: 'AffiliateAgentGatewayArtifacts',
+  AffiliateAgentGatewayOperationReceipts: 'AffiliateAgentGatewayOperationReceipts',
+  AffiliateAgentGatewayEvents: 'AffiliateAgentGatewayEvents',
   AffiliateCoverageAgentJobs: 'AffiliateCoverageAgentJobs',
   AffiliateCoverageCities: 'AffiliateCoverageCities',
   AffiliateCoverageCells: 'AffiliateCoverageCells',
@@ -1586,6 +1591,164 @@ export const AffiliateSourceDiscoveryCampaignsScalarFieldEnum = {
 } as const
 
 export type AffiliateSourceDiscoveryCampaignsScalarFieldEnum = (typeof AffiliateSourceDiscoveryCampaignsScalarFieldEnum)[keyof typeof AffiliateSourceDiscoveryCampaignsScalarFieldEnum]
+
+
+export const AffiliateAgentGatewayJobsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  dedupeKey: 'dedupeKey',
+  queue: 'queue',
+  lane: 'lane',
+  role: 'role',
+  subjectType: 'subjectType',
+  subjectId: 'subjectId',
+  subjectJson: 'subjectJson',
+  evidenceManifestJson: 'evidenceManifestJson',
+  supplySourceId: 'supplySourceId',
+  expectedLifecycleGeneration: 'expectedLifecycleGeneration',
+  status: 'status',
+  priority: 'priority',
+  nextAttemptAt: 'nextAttemptAt',
+  claimGeneration: 'claimGeneration',
+  activeClaimId: 'activeClaimId',
+  parentClaimId: 'parentClaimId',
+  invocationFailureCount: 'invocationFailureCount',
+  lastInvocationFailedAt: 'lastInvocationFailedAt',
+  pipelineBlockedAt: 'pipelineBlockedAt',
+  terminalDisposition: 'terminalDisposition',
+  resultHash: 'resultHash',
+  resultJson: 'resultJson',
+  terminalReceiptId: 'terminalReceiptId',
+  finishedAt: 'finishedAt',
+  eventSequence: 'eventSequence'
+} as const
+
+export type AffiliateAgentGatewayJobsScalarFieldEnum = (typeof AffiliateAgentGatewayJobsScalarFieldEnum)[keyof typeof AffiliateAgentGatewayJobsScalarFieldEnum]
+
+
+export const AffiliateAgentGatewayClaimsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  jobId: 'jobId',
+  parentClaimId: 'parentClaimId',
+  claimGeneration: 'claimGeneration',
+  lifecycleGeneration: 'lifecycleGeneration',
+  queue: 'queue',
+  lane: 'lane',
+  role: 'role',
+  workerId: 'workerId',
+  invocationId: 'invocationId',
+  workspaceId: 'workspaceId',
+  workspaceMode: 'workspaceMode',
+  workspaceAttestationHash: 'workspaceAttestationHash',
+  status: 'status',
+  claimRequestId: 'claimRequestId',
+  claimRequestHash: 'claimRequestHash',
+  claimedAt: 'claimedAt',
+  lastHeartbeatAt: 'lastHeartbeatAt',
+  leaseExpiresAt: 'leaseExpiresAt',
+  hardDeadlineAt: 'hardDeadlineAt',
+  endedAt: 'endedAt',
+  tokenNonce: 'tokenNonce',
+  tokenHash: 'tokenHash',
+  tokenKeyVersion: 'tokenKeyVersion',
+  tokenExpiresAt: 'tokenExpiresAt',
+  tokenInvalidatedAt: 'tokenInvalidatedAt',
+  deploymentContractVersion: 'deploymentContractVersion',
+  deploymentContractHash: 'deploymentContractHash',
+  roleContractVersion: 'roleContractVersion',
+  roleContractHash: 'roleContractHash',
+  promptTemplateVersion: 'promptTemplateVersion',
+  promptTemplateHash: 'promptTemplateHash',
+  supplyContractVersion: 'supplyContractVersion',
+  supplyContractHash: 'supplyContractHash',
+  claimEnvelopeHash: 'claimEnvelopeHash',
+  claimEnvelopeJson: 'claimEnvelopeJson',
+  evidenceManifestHash: 'evidenceManifestHash',
+  permittedCommandHash: 'permittedCommandHash',
+  permittedCommands: 'permittedCommands',
+  schemaCorrectionCount: 'schemaCorrectionCount',
+  terminalReceiptId: 'terminalReceiptId',
+  safeFailureCode: 'safeFailureCode',
+  safeFailureSummary: 'safeFailureSummary',
+  diagnosticRetainUntil: 'diagnosticRetainUntil'
+} as const
+
+export type AffiliateAgentGatewayClaimsScalarFieldEnum = (typeof AffiliateAgentGatewayClaimsScalarFieldEnum)[keyof typeof AffiliateAgentGatewayClaimsScalarFieldEnum]
+
+
+export const AffiliateAgentGatewayArtifactsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  claimId: 'claimId',
+  claimGeneration: 'claimGeneration',
+  evidenceRef: 'evidenceRef',
+  evidenceKind: 'evidenceKind',
+  sourceArtifactId: 'sourceArtifactId',
+  fileId: 'fileId',
+  contentHash: 'contentHash',
+  mimeType: 'mimeType',
+  byteSize: 'byteSize',
+  accessMode: 'accessMode',
+  creatingClaimId: 'creatingClaimId',
+  retentionClass: 'retentionClass',
+  retentionDeadline: 'retentionDeadline',
+  isPinned: 'isPinned'
+} as const
+
+export type AffiliateAgentGatewayArtifactsScalarFieldEnum = (typeof AffiliateAgentGatewayArtifactsScalarFieldEnum)[keyof typeof AffiliateAgentGatewayArtifactsScalarFieldEnum]
+
+
+export const AffiliateAgentGatewayOperationReceiptsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  claimId: 'claimId',
+  jobId: 'jobId',
+  claimGeneration: 'claimGeneration',
+  idempotencyKey: 'idempotencyKey',
+  operationKind: 'operationKind',
+  commandName: 'commandName',
+  requestHash: 'requestHash',
+  status: 'status',
+  responseHash: 'responseHash',
+  responseJson: 'responseJson',
+  safeErrorCode: 'safeErrorCode',
+  externalOperationKey: 'externalOperationKey',
+  startedAt: 'startedAt',
+  completedAt: 'completedAt',
+  reconcileAfter: 'reconcileAfter',
+  retentionClass: 'retentionClass',
+  retentionDeadline: 'retentionDeadline'
+} as const
+
+export type AffiliateAgentGatewayOperationReceiptsScalarFieldEnum = (typeof AffiliateAgentGatewayOperationReceiptsScalarFieldEnum)[keyof typeof AffiliateAgentGatewayOperationReceiptsScalarFieldEnum]
+
+
+export const AffiliateAgentGatewayEventsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  eventKey: 'eventKey',
+  jobId: 'jobId',
+  claimId: 'claimId',
+  receiptId: 'receiptId',
+  sequence: 'sequence',
+  eventType: 'eventType',
+  actorKind: 'actorKind',
+  actorId: 'actorId',
+  role: 'role',
+  requestHash: 'requestHash',
+  inputHash: 'inputHash',
+  outputHash: 'outputHash',
+  reasonCodes: 'reasonCodes',
+  payload: 'payload',
+  retentionClass: 'retentionClass',
+  retentionDeadline: 'retentionDeadline'
+} as const
+
+export type AffiliateAgentGatewayEventsScalarFieldEnum = (typeof AffiliateAgentGatewayEventsScalarFieldEnum)[keyof typeof AffiliateAgentGatewayEventsScalarFieldEnum]
 
 
 export const AffiliateCoverageAgentJobsScalarFieldEnum = {

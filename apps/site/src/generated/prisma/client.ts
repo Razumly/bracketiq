@@ -360,6 +360,31 @@ export type AffiliateSourceIntakeArtifacts = Prisma.AffiliateSourceIntakeArtifac
  */
 export type AffiliateSourceDiscoveryCampaigns = Prisma.AffiliateSourceDiscoveryCampaignsModel
 /**
+ * Model AffiliateAgentGatewayJobs
+ *
+ */
+export type AffiliateAgentGatewayJobs = Prisma.AffiliateAgentGatewayJobsModel
+/**
+ * Model AffiliateAgentGatewayClaims
+ *
+ */
+export type AffiliateAgentGatewayClaims = Prisma.AffiliateAgentGatewayClaimsModel
+/**
+ * Model AffiliateAgentGatewayArtifacts
+ *
+ */
+export type AffiliateAgentGatewayArtifacts = Prisma.AffiliateAgentGatewayArtifactsModel
+/**
+ * Model AffiliateAgentGatewayOperationReceipts
+ *
+ */
+export type AffiliateAgentGatewayOperationReceipts = Prisma.AffiliateAgentGatewayOperationReceiptsModel
+/**
+ * Model AffiliateAgentGatewayEvents
+ *
+ */
+export type AffiliateAgentGatewayEvents = Prisma.AffiliateAgentGatewayEventsModel
+/**
  * Model AffiliateCoverageAgentJobs
  *
  */
