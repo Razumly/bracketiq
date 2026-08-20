@@ -408,6 +408,90 @@ describe('league schedule matrix', () => {
     );
   });
 
+  it('enforces rest for stable Placeholder Team Match slots', () => {
+    const division = buildDivision();
+    const teams = buildTeams(4, division);
+    for (const team of Object.values(teams)) {
+      team.kind = 'PLACEHOLDER';
+      team.captainId = '';
+    }
+    const fields = buildFields(division, 1);
+    const start = new Date(2026, 0, 5, 8, 0, 0);
+    const timeSlots = [
+      new TimeSlot({
+        id: 'placeholder_rest_monday',
+        dayOfWeek: 0,
+        startDate: start,
+        repeating: true,
+        startTimeMinutes: 8 * 60,
+        endTimeMinutes: 22 * 60,
+        field: 'field_1',
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }),
+    ];
+    const league = new League({
+      id: 'league_placeholder_team_rest',
+      name: 'Placeholder Team Rest',
+      start,
+      end: new Date(2026, 11, 31, 22, 0, 0),
+      maxParticipants: 4,
+      teamSignup: true,
+      eventType: 'LEAGUE',
+      teams,
+      divisions: [division],
+      officials: [],
+      fields,
+      timeSlots,
+      doTeamsOfficiate: false,
+      gamesPerOpponent: 1,
+      includePlayoffs: false,
+      playoffTeamCount: 0,
+      doubleElimination: false,
+      usesSets: false,
+      matchDurationMinutes: 60,
+      restTimeMinutes: 24 * 60,
+      leagueScoringConfig: {
+        pointsForWin: 3,
+        pointsForDraw: 1,
+        pointsForLoss: 0,
+      },
+    });
+
+    const scheduled = scheduleEvent({ event: league }, context);
+    const expectedPlaceholderTeamIds = new Set(Object.keys(teams));
+    const scheduledParticipantIds = new Set(
+      scheduled.matches
+        .flatMap((match) => [match.team1?.id, match.team2?.id])
+        .filter((teamId): teamId is string => Boolean(teamId)),
+    );
+    expect([...scheduledParticipantIds].sort()).toEqual(
+      [...expectedPlaceholderTeamIds].sort(),
+    );
+    const matchesByTeamId = new Map<string, typeof scheduled.matches>();
+    for (const match of scheduled.matches) {
+      for (const team of [match.team1, match.team2]) {
+        if (!team) continue;
+        const teamMatches = matchesByTeamId.get(team.id) ?? [];
+        teamMatches.push(match);
+        matchesByTeamId.set(team.id, teamMatches);
+      }
+    }
+
+    expect(scheduled.matches).toHaveLength(6);
+    expect(matchesByTeamId.size).toBe(4);
+    for (const teamMatches of matchesByTeamId.values()) {
+      teamMatches.sort(
+        (left, right) => left.start.getTime() - right.start.getTime(),
+      );
+      expect(teamMatches).toHaveLength(3);
+      for (let index = 1; index < teamMatches.length; index += 1) {
+        expect(teamMatches[index].start.getTime()).toBeGreaterThanOrEqual(
+          teamMatches[index - 1].end.getTime() + 24 * 60 * 60 * 1000,
+        );
+      }
+    }
+  });
+
   it('preserves direct seed slots on carried-through bye matches', () => {
     const division = buildDivision();
     const teams = buildTeams(9, division);

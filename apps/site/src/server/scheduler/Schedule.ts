@@ -441,7 +441,7 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
         sawTeamDutyCapacityFailure = true;
         (event as E & { placementRestriction?: 'TEAM_DUTY' }).placementRestriction = 'TEAM_DUTY';
       }
-      const participantRetry = this.nextStartAfterKnownParticipantConflict(
+      const participantRetry = this.nextStartAfterParticipantConflict(
         earliestStart,
         candidateEnd,
         event,
@@ -518,23 +518,15 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
     }
   }
 
-  private isAnonymousParticipant(participant: Participant): boolean {
-    if (!(participant instanceof Team)) {
-      return false;
-    }
-    return String(participant.kind ?? '').trim().toUpperCase() === 'PLACEHOLDER';
-  }
 
-  private nextStartAfterKnownParticipantConflict(
+  private nextStartAfterParticipantConflict(
     start: Date,
     end: Date,
     event: E,
   ): Date | null {
     const candidateParticipantIds = new Set<string>();
     for (const participant of event.getParticipants()) {
-      if (!this.isAnonymousParticipant(participant)) {
-        candidateParticipantIds.add(participant.id);
-      }
+      candidateParticipantIds.add(participant.id);
     }
     if (!candidateParticipantIds.size) {
       return null;
@@ -565,10 +557,7 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
             continue;
           }
           for (const participant of scheduledEvent.getParticipants()) {
-            if (
-              !this.isAnonymousParticipant(participant) &&
-              candidateParticipantIds.has(participant.id)
-            ) {
+            if (candidateParticipantIds.has(participant.id)) {
               const scheduledRetryTimeMs =
                 scheduledEvent.end.getTime() + scheduledBufferMs;
               retryTimeMs =
@@ -600,25 +589,17 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
     }
 
     const currentEvents = this.participantPoolEvents(start, end);
-    const busyKnownParticipantIds = new Set<string>();
-    let anonymousParticipantReservations = 0;
+    const busyParticipantIds = new Set<string>();
     for (const scheduledEvent of currentEvents) {
-      const scheduledAnonymousParticipantIds = new Set<string>();
       for (const participant of scheduledEvent.getParticipants()) {
-        if (this.isAnonymousParticipant(participant)) {
-          scheduledAnonymousParticipantIds.add(participant.id);
-        } else if (currentParticipantIds.has(participant.id)) {
-          busyKnownParticipantIds.add(participant.id);
+        if (currentParticipantIds.has(participant.id)) {
+          busyParticipantIds.add(participant.id);
         }
       }
-      anonymousParticipantReservations +=
-        scheduledAnonymousParticipantIds.size;
     }
 
     const availableParticipants =
-      currentParticipantIds.size -
-      busyKnownParticipantIds.size -
-      anonymousParticipantReservations;
+      currentParticipantIds.size - busyParticipantIds.size;
     if (availableParticipants < minParticipants) {
       return 'UNAVAILABLE';
     }
@@ -639,30 +620,29 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
       return 'UNAVAILABLE';
     }
 
-    const busyKnownTeamIds = new Set<string>();
-    let anonymousTeamReservations = 0;
+    const busyTeamIds = new Set<string>();
+    let unassignedTeamReservations = 0;
     for (const scheduledEvent of currentEvents) {
-      const scheduledKnownTeamIds = new Set<string>();
+      const scheduledTeamIds = new Set<string>();
       for (const participant of scheduledEvent.getParticipants()) {
         if (
           participant instanceof Team &&
-          !this.isAnonymousParticipant(participant) &&
           currentTeamIds.has(participant.id)
         ) {
-          scheduledKnownTeamIds.add(participant.id);
-          busyKnownTeamIds.add(participant.id);
+          scheduledTeamIds.add(participant.id);
+          busyTeamIds.add(participant.id);
         }
       }
       const scheduledRequiredTeams =
         scheduledEvent.getRequiredTeamParticipantCount?.() ??
-        scheduledKnownTeamIds.size;
-      anonymousTeamReservations += Math.max(
+        scheduledTeamIds.size;
+      unassignedTeamReservations += Math.max(
         0,
-        scheduledRequiredTeams - scheduledKnownTeamIds.size,
+        scheduledRequiredTeams - scheduledTeamIds.size,
       );
     }
     const reservedTeamSlots =
-      busyKnownTeamIds.size + anonymousTeamReservations;
+      busyTeamIds.size + unassignedTeamReservations;
     const availableTeamSlots = currentTeamIds.size - reservedTeamSlots;
 
     if (availableTeamSlots >= requiredTeamParticipants) {
