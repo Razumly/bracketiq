@@ -61,6 +61,8 @@ const buildTournament = (overrides: Partial<ConstructorParameters<typeof Tournam
     name: 'Test Tournament',
     start,
     end,
+    noFixedEndDateTime: overrides.noFixedEndDateTime,
+    generatedScheduleEnd: overrides.generatedScheduleEnd,
     maxParticipants: Object.keys(overrides.teams ?? {}).length || 4,
     teamSignup: true,
     eventType: 'TOURNAMENT',
@@ -362,6 +364,63 @@ describe('tournament scheduling (officials)', () => {
 
     expect((final as any).start.getTime()).toBeGreaterThanOrEqual(lastSemi.end.getTime());
     expect((final as any).start.getTime()).toBeGreaterThan(originalFinalStart);
+  });
+  it('uses the prepared window after stale Tournament completion', () => {
+    const division = buildDivision();
+    const teams = buildTeams(4, division);
+    const timeSlot = new TimeSlot({
+      id: 'slot_stale_completion',
+      dayOfWeek: 5,
+      startDate: new Date(2026, 0, 3),
+      repeating: true,
+      startTimeMinutes: 9 * 60,
+      endTimeMinutes: 23 * 60,
+      divisions: [division],
+    });
+    const staleEnd = new Date('2026-01-02T18:00:00.000Z');
+    const tournament = buildTournament({
+      id: 'tournament_stale_completion',
+      start: new Date('2026-01-03T09:00:00.000Z'),
+      end: staleEnd,
+      generatedScheduleEnd: staleEnd,
+      noFixedEndDateTime: true,
+      teams,
+      divisions: [division],
+      timeSlots: [timeSlot],
+      officials: [],
+      doTeamsOfficiate: false,
+      doubleElimination: false,
+    });
+
+    scheduleEvent({ event: tournament }, context);
+    const matches = Object.values(tournament.matches);
+    const final = matches.find(
+      (match) => !match.winnerNextMatch && match.previousLeftMatch && match.previousRightMatch,
+    );
+    const semi = matches.find((match) => match.winnerNextMatch === final);
+    expect(final).toBeTruthy();
+    expect(semi).toBeTruthy();
+    if (!final || !semi?.team1 || !semi.team2) {
+      throw new Error('Tournament fixture did not produce a complete bracket.');
+    }
+
+    tournament.end = staleEnd;
+    tournament.generatedScheduleEnd = staleEnd;
+    const completionTime = new Date('2026-01-03T11:00:00.000Z');
+    semi.winnerEventTeamId = semi.team1.id;
+    semi.team1Points = [21, 21];
+    semi.team2Points = [10, 10];
+    finalizeMatch(tournament, semi, context, completionTime);
+
+    const latestMatchEnd = Math.max(
+      ...Object.values(tournament.matches).map((match) => match.end.getTime()),
+    );
+    expect(tournament.end.getTime()).toBe(latestMatchEnd);
+    expect(tournament.generatedScheduleEnd?.getTime()).toBe(latestMatchEnd);
+    expect(tournament.end.getTime()).toBeLessThan(
+      completionTime.getTime() + 52 * 7 * 24 * 60 * 60 * 1000,
+    );
+    expect(final.start.getTime()).toBeGreaterThanOrEqual(semi.end.getTime());
   });
 
   it('does not reschedule locked downstream matches when a prior match runs long', () => {

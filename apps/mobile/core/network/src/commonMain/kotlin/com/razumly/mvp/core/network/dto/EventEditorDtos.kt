@@ -132,7 +132,6 @@ enum class EventEditorCreateCompletionMode {
 @Serializable
 enum class EventEditorScheduleTransitionMode {
     PRESERVE,
-    BUILD_IF_MISSING,
     RECONCILE,
 }
 

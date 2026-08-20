@@ -1,5 +1,8 @@
 import { dateWithMinutesInTimeZone, Schedule } from './Schedule';
-import { assertCanonicalSchedulerTimeSlots } from './timeSlotAvailability';
+import {
+  finalizeOpenEndedSchedule,
+  prepareSchedulePlacementWindow,
+} from './scheduleEvent';
 import { getDateTimePartsInTimeZone, normalizeTimeZone } from '@/lib/dateUtils';
 import {
   Division,
@@ -21,7 +24,6 @@ import {
 type SchedulerEvent = League | Tournament;
 
 const MIN_SCHEDULE_DURATION_MS = 5 * MINUTE_MS;
-const OPEN_ENDED_RESCHEDULE_WEEKS = 52;
 
 const isLeagueEvent = (event: SchedulerEvent): event is League => (
   event instanceof League || event.eventType === 'LEAGUE'
@@ -529,18 +531,6 @@ const slotAllowsDateTime = (
   return slotAllowsDate(slot, matchStart) && slotAllowsTime(slot, matchStart, matchEnd);
 };
 
-const isOpenEndedSchedule = (event: SchedulerEvent): boolean => event.noFixedEndDateTime === true;
-
-const resolveRescheduleEndTime = (event: SchedulerEvent): Date => {
-  if (!isOpenEndedSchedule(event)) {
-    return event.scheduleEndConstraint ?? event.end;
-  }
-  const baseline = Math.max(
-    event.start.getTime(),
-    (event.generatedScheduleEnd ?? event.end).getTime(),
-  );
-  return new Date(baseline + OPEN_ENDED_RESCHEDULE_WEEKS * 7 * 24 * 60 * MINUTE_MS);
-};
 
 const lockedMatchFitsUpdatedWindow = (event: SchedulerEvent, rescheduleEndTime: Date, match: Match): boolean => {
   if (match.start.getTime() < event.start.getTime() || match.end.getTime() > rescheduleEndTime.getTime()) {
@@ -582,15 +572,6 @@ const collectWarnings = (
   ];
 };
 
-const latestMatchEnd = (matches: Match[]): Date | null => {
-  let latest: Date | null = null;
-  for (const match of matches) {
-    if (!latest || match.end.getTime() > latest.getTime()) {
-      latest = match.end;
-    }
-  }
-  return latest;
-};
 
 const isMatchCompleted = (match: Match): boolean => {
   const status = String(match.status ?? '').trim().toUpperCase();
@@ -946,7 +927,6 @@ export const rescheduleEventMatchesPreservingLocks = (
   event: SchedulerEvent,
   teamDutyReflowContext: TeamDutyReflowContext = EMPTY_TEAM_DUTY_REFLOW_CONTEXT,
 ): LockedPreservingRescheduleResult => {
-  assertCanonicalSchedulerTimeSlots(event);
   const allMatches = Object.values(event.matches);
   if (!allMatches.length) {
     return { event, matches: [], warnings: [] };
@@ -955,6 +935,7 @@ export const rescheduleEventMatchesPreservingLocks = (
   const teamDutyReflowSnapshot = shouldReflowTeamDuties
     ? {
         eventEnd: event.end,
+        eventGeneratedScheduleEnd: event.generatedScheduleEnd,
         timeSlotDivisions: event.timeSlots.map((slot) => [slot, slot.divisions] as const),
         fieldMatches: Object.values(event.fields).map((field) => [field, field.matches] as const),
         teamMatches: Object.values(event.teams).map((team) => [team, team.matches] as const),
@@ -990,6 +971,7 @@ export const rescheduleEventMatchesPreservingLocks = (
       return;
     }
     event.end = teamDutyReflowSnapshot.eventEnd;
+    event.generatedScheduleEnd = teamDutyReflowSnapshot.eventGeneratedScheduleEnd;
     for (const [slot, divisions] of teamDutyReflowSnapshot.timeSlotDivisions) {
       slot.divisions = divisions;
     }
@@ -1009,15 +991,10 @@ export const rescheduleEventMatchesPreservingLocks = (
   };
 
   try {
-
-  const openEndedSchedule = isOpenEndedSchedule(event);
-  if (!openEndedSchedule) {
-    event.end = event.scheduleEndConstraint ?? event.end;
-  }
-  ensureSplitPlayoffTimeSlotCoverage(event);
-  const schedulingDivisions = schedulingDivisionsForEvent(event);
-  const rescheduleEndTime = resolveRescheduleEndTime(event);
-
+    ensureSplitPlayoffTimeSlotCoverage(event);
+    const isOpenEndedSchedule = prepareSchedulePlacementWindow(event, false);
+    const schedulingDivisions = schedulingDivisionsForEvent(event);
+    const rescheduleEndTime = event.end;
   const lockedMatches = allMatches.filter((match) => match.locked);
   const warnings = collectWarnings(event, lockedMatches, rescheduleEndTime);
   resetScheduleCollections(event);
@@ -1130,14 +1107,17 @@ export const rescheduleEventMatchesPreservingLocks = (
     }
   }
 
-  const latestEnd = latestMatchEnd(allMatches);
-  if (latestEnd) {
-    if (openEndedSchedule) {
-      event.end = latestEnd;
-    } else if (latestEnd.getTime() > event.end.getTime()) {
-      throw new Error('Scheduled matches exceed the fixed event end date/time. Increase the end date/time or enable "No fixed end datetime scheduling".');
-    }
+  if (
+    !isOpenEndedSchedule
+    && allMatches.some((match) => (
+      match.end instanceof Date
+      && !Number.isNaN(match.end.getTime())
+      && match.end.getTime() > event.end.getTime()
+    ))
+  ) {
+    throw new Error('Scheduled matches exceed the fixed event end date/time. Increase the end date/time or enable "No fixed end datetime scheduling".');
   }
+  finalizeOpenEndedSchedule(event, allMatches);
 
   return {
     event,

@@ -575,30 +575,12 @@ export const saveEventEditor = async (
       );
     }
     if (
-      transition.mode !== "PRESERVE" &&
+      transition.mode === "RECONCILE" &&
       transition.expectedScheduleRevision !==
         currentSnapshot.scheduleState.revision
     ) {
       throw new EventScheduleRevisionConflictError(
         currentSnapshot.scheduleState.revision,
-      );
-    }
-    const hasOnlyReusableUnplacedGraph =
-      currentSnapshot.scheduleState.matchCount === 0
-      || (
-        currentSnapshot.scheduleState.matchDemand?.total ===
-          currentSnapshot.scheduleState.matchCount
-        && currentSnapshot.scheduleState.matchDemand?.placed === 0
-        && currentSnapshot.scheduleState.matchDemand?.unplaced ===
-          currentSnapshot.scheduleState.matchCount
-      );
-    if (
-      transition.mode === "BUILD_IF_MISSING" &&
-      (!hasOnlyReusableUnplacedGraph ||
-        !["LEAGUE", "TOURNAMENT"].includes(nextEventType))
-    ) {
-      throw new EditorScheduleIntentError(
-        "Build-if-missing requires an unscheduled League or Tournament.",
       );
     }
     ({ questionIdMap, emailCandidates } = await saveWithinTransaction(
@@ -608,18 +590,12 @@ export const saveEventEditor = async (
       eventId,
       currentSnapshot,
     ));
-    if (
-      transition.mode === "BUILD_IF_MISSING" ||
-      transition.mode === "RECONCILE"
-    ) {
-      const scheduleMode =
-        transition.mode === "BUILD_IF_MISSING"
-          ? "BUILD"
-          : ["LEAGUE", "TOURNAMENT"].includes(nextEventType)
-            ? currentSnapshot.scheduleState.matchCount > 0
-              ? "REBUILD"
-              : "BUILD"
-            : "DELETE";
+    if (transition.mode === "RECONCILE") {
+      const scheduleMode = ["LEAGUE", "TOURNAMENT"].includes(nextEventType)
+        ? currentSnapshot.scheduleState.matchCount > 0
+          ? "REBUILD"
+          : "BUILD"
+        : "DELETE";
       const mutation = await reconcileEventSchedule({
         tx,
         eventId,

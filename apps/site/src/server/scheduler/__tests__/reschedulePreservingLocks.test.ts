@@ -574,6 +574,11 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     expect(result.matches.every((match) => match.end.getTime() - match.start.getTime() >= 5 * MINUTE_MS)).toBe(true);
     expect(result.matches.every((match) => match.start.getTime() >= intendedSlotStart.getTime())).toBe(true);
     expect(result.matches.every((match) => match.end.getTime() <= intendedSlotEnd.getTime())).toBe(true);
+    const latestMatchEnd = Math.max(
+      ...result.matches.map((match) => match.end.getTime()),
+    );
+    expect(event.end.getTime()).toBe(latestMatchEnd);
+    expect(event.generatedScheduleEnd?.getTime()).toBe(latestMatchEnd);
   });
 
   it('does not warn when a locked match is within a secondary day in daysOfWeek', () => {

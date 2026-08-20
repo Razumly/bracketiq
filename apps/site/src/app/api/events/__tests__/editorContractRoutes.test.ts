@@ -44,6 +44,9 @@ jest.mock('@/contracts/eventEditor', () => ({
   eventEditorBootstrapQuerySchema: { safeParse: (...args: any[]) => bootstrapQueryMock(...args) },
   parseCreateEventEditorCommand: (...args: any[]) => parseCreateMock(...args),
   parseSaveEventEditorCommand: (...args: any[]) => parseSaveMock(...args),
+  projectEventEditorDraftNestedInput: (input: unknown) => (
+    jest.requireActual('@/contracts/eventEditor').projectEventEditorDraftNestedInput(input)
+  ),
 }));
 jest.mock('@/server/events/eventEditorSnapshot', () => ({
   loadCreateEventEditorSnapshot: (...args: any[]) => loadCreateSnapshotMock(...args),
@@ -64,6 +67,11 @@ jest.mock('@/server/events/eventStaffDelivery', () => ({
 
 import { GET as createGet, POST as createPost } from '@/app/api/events/editor/route';
 import { GET as editGet, PUT as editPut } from '@/app/api/events/[eventId]/editor/route';
+import {
+  emptyEditorSnapshot,
+  legacyEventToEditorDraft,
+} from '@/app/events/[id]/schedule/components/eventForm/editorContractAdapters';
+import { eventEditorFixtures } from '@/test/eventEditor/fixtures';
 import {
   EventCreateOperationConflictError,
   EventCreateOperationPayloadMismatchError,
@@ -335,6 +343,70 @@ describe('canonical editor routes', () => {
       staffRevision: 'current-staff',
     }));
     expect(saveEventEditorMock).toHaveBeenCalledTimes(1);
+  });
+  it('normalizes a version-3 legacy BUILD_IF_MISSING Save at the PUT boundary', async () => {
+    const fixture = eventEditorFixtures.find(({ name }) => name === 'single-division league')!.event;
+    const draft = legacyEventToEditorDraft(fixture);
+    const command = {
+      contractVersion: 3,
+      editorRevision: 'editor-revision-1',
+      staffRevision: null,
+      draft,
+      scheduleTransition: {
+        mode: 'BUILD_IF_MISSING',
+        expectedScheduleRevision: 'schedule-revision-1',
+      },
+    };
+    const snapshot = emptyEditorSnapshot(draft, 'EDIT');
+    const result = {
+      status: 'SAVED',
+      snapshot: {
+        ...snapshot,
+        eventId: 'event_1',
+        editorRevision: 'editor-revision-2',
+        scheduleState: {
+          ...snapshot.scheduleState,
+          revision: 'schedule-revision-2',
+        },
+      },
+      questionIdMap: {},
+      staffEmailDelivery: 'NOT_REQUESTED',
+      scheduleOutcome: {
+        status: 'NOT_REQUESTED',
+        matchCount: 0,
+        warnings: [],
+      },
+    };
+    parseSaveMock.mockImplementation((input: unknown) => (
+      jest.requireActual('@/contracts/eventEditor').parseSaveEventEditorCommand(input)
+    ));
+    saveEventEditorMock.mockResolvedValue(result);
+
+    const response = await editPut(
+      request('http://localhost/api/events/event_1/editor', 'PUT', command),
+      editContext(),
+    );
+    const body = await response.json();
+    const domainCommand = saveEventEditorMock.mock.calls[0]?.[1];
+
+    expect(response.status).toBe(200);
+    expect(saveEventEditorMock).toHaveBeenCalledTimes(1);
+    expect(domainCommand).toEqual(expect.objectContaining({
+      scheduleTransition: { mode: 'PRESERVE' },
+    }));
+    expect(domainCommand).toEqual(expect.objectContaining({
+      scheduleTransition: expect.not.objectContaining({
+        expectedScheduleRevision: expect.anything(),
+      }),
+    }));
+    expect(body).toEqual(expect.objectContaining({
+      status: 'SAVED',
+      scheduleOutcome: {
+        status: 'NOT_REQUESTED',
+        matchCount: 0,
+        warnings: [],
+      },
+    }));
   });
   it('returns diagnostic details for unexpected edit failures', async () => {
     const command = { contractVersion: 1, editorRevision: 'current', staffRevision: 'current', draft: {} };

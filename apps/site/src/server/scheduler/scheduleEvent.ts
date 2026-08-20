@@ -460,7 +460,7 @@ const NO_FIELDS_MESSAGE_REGEX = /^Unable to schedule event because no fields are
 const SCHEDULE_OVERRUN_MESSAGE = 'Not enough time is allotted in the configured time slots to schedule this event.';
 const SCHEDULE_OVERRUN_DETAIL = 'No available time slots remaining for scheduling';
 
-const isOpenEndedSchedule = (event: League | Tournament): boolean => event.noFixedEndDateTime;
+const isOpenEndedEventSchedule = (event: League | Tournament): boolean => event.noFixedEndDateTime;
 
 const applyStoredScheduleEnd = (event: League | Tournament): void => {
   if (event.noFixedEndDateTime) {
@@ -469,10 +469,22 @@ const applyStoredScheduleEnd = (event: League | Tournament): void => {
   event.end = event.scheduleEndConstraint ?? event.end;
 };
 
-const extendOpenEndedWindow = (event: League | Tournament): void => {
+const extendOpenEndedWindow = (
+  event: League | Tournament,
+  minimumPlacementEnd?: Date,
+): void => {
+  const generatedEnd = event.generatedScheduleEnd;
+  const generatedEndMs = hasValidDate(generatedEnd)
+    ? generatedEnd.getTime()
+    : event.end.getTime();
+  const minimumEndMs = hasValidDate(minimumPlacementEnd)
+    ? minimumPlacementEnd.getTime()
+    : event.start.getTime();
   const baseEndMs = Math.max(
     event.start.getTime(),
-    (event.generatedScheduleEnd ?? event.end).getTime(),
+    event.end.getTime(),
+    generatedEndMs,
+    minimumEndMs,
   );
   event.end = new Date(baseEndMs + OPEN_ENDED_WEEKS * 7 * 24 * 60 * MINUTE_MS);
 };
@@ -500,17 +512,46 @@ const isScheduleOverrunError = (message: string): boolean => {
 };
 
 
-const scheduleEventMutating = (request: ScheduleRequest, context: SchedulerContext): ScheduleResult => {
-  const { event } = request;
-  let resolvedOneTimeSlots: ResolvedOneTimeTimeSlot[];
+const resolveSchedulerTimeSlots = (
+  event: League | Tournament,
+): ResolvedOneTimeTimeSlot[] => {
   try {
-    resolvedOneTimeSlots = assertCanonicalSchedulerTimeSlots(event);
+    return assertCanonicalSchedulerTimeSlots(event);
   } catch (error) {
     if (error instanceof TimeSlotValidationError) {
       throw new ScheduleError(error.message, 'RESOURCE');
     }
     throw error;
   }
+};
+
+export const prepareSchedulePlacementWindow = (
+  event: League | Tournament,
+  includePlaceholderTeams: boolean,
+  resolvedOneTimeSlots: ResolvedOneTimeTimeSlot[] = resolveSchedulerTimeSlots(event),
+  minimumPlacementEnd?: Date,
+): boolean => {
+  const isOpenEndedSchedule = isOpenEndedEventSchedule(event);
+  applyStoredScheduleEnd(event);
+  if (!isOpenEndedSchedule && event.end.getTime() <= event.start.getTime()) {
+    throw new ScheduleError('End date/time must be after start date/time when \"No fixed end datetime scheduling\" is disabled.', 'RESOURCE');
+  }
+  if (isOpenEndedSchedule) {
+    extendOpenEndedWindow(event, minimumPlacementEnd);
+    for (const slot of resolvedOneTimeSlots) {
+      if (slot.end.getTime() > event.end.getTime()) {
+        event.end = slot.end;
+      }
+    }
+  }
+
+  prepareScheduleWindow(event, isOpenEndedSchedule, includePlaceholderTeams);
+  return isOpenEndedSchedule;
+};
+
+const scheduleEventMutating = (request: ScheduleRequest, context: SchedulerContext): ScheduleResult => {
+  const { event } = request;
+  const resolvedOneTimeSlots = resolveSchedulerTimeSlots(event);
   const includePlaceholderTeams = request.includePlaceholderTeams !== false;
   if (!includePlaceholderTeams) {
     stripPlaceholderTeamsFromEvent(event);
@@ -519,31 +560,19 @@ const scheduleEventMutating = (request: ScheduleRequest, context: SchedulerConte
     event.maxParticipants = request.participantCount;
   }
 
-  const openEndedSchedule = isOpenEndedSchedule(event);
-  applyStoredScheduleEnd(event);
-  if (!openEndedSchedule && event.end.getTime() <= event.start.getTime()) {
-    throw new ScheduleError('End date/time must be after start date/time when \"No fixed end datetime scheduling\" is disabled.', 'RESOURCE');
-  }
-  if (openEndedSchedule) {
-    extendOpenEndedWindow(event);
-    for (const slot of resolvedOneTimeSlots) {
-      if (slot.end.getTime() > event.end.getTime()) {
-        event.end = slot.end;
-      }
-    }
-  }
-
-  prepareScheduleWindow(event, openEndedSchedule, includePlaceholderTeams);
+  const isOpenEndedSchedule = prepareSchedulePlacementWindow(
+    event,
+    includePlaceholderTeams,
+    resolvedOneTimeSlots,
+  );
 
   const result = isLeague(event)
-    ? buildLeagueSchedule(event, context, openEndedSchedule, includePlaceholderTeams)
+    ? buildLeagueSchedule(event, context, isOpenEndedSchedule, includePlaceholderTeams)
     : (() => {
       ensureTournamentPoolTimeSlotCoverage(event);
-      return buildTournamentSchedule(event, context, openEndedSchedule, includePlaceholderTeams);
+      return buildTournamentSchedule(event, context, isOpenEndedSchedule, includePlaceholderTeams);
     })();
-  if (openEndedSchedule) {
-    result.event.generatedScheduleEnd = result.event.end;
-  }
+  finalizeOpenEndedSchedule(result.event, result.matches);
   return result;
 };
 export const scheduleEvent = (request: ScheduleRequest, context: SchedulerContext): ScheduleResult => {
@@ -560,7 +589,7 @@ export const scheduleEvent = (request: ScheduleRequest, context: SchedulerContex
 const buildLeagueSchedule = (
   league: League,
   context: SchedulerContext,
-  openEndedSchedule: boolean,
+  isOpenEndedSchedule: boolean,
   includePlaceholderTeams: boolean,
 ): ScheduleResult => {
   const playoffMappingErrors = validatePlayoffDivisionReferenceCapacities(league);
@@ -626,7 +655,7 @@ const buildLeagueSchedule = (
   let extensionAttempt = 0;
   const maxExtensions = 3;
   const baseTeams = { ...league.teams };
-  const canExtendWindow = openEndedSchedule && hasExtendableRecurringSlots(league);
+  const canExtendWindow = isOpenEndedSchedule && hasExtendableRecurringSlots(league);
 
   while (!updated) {
     // Retry attempts must start from the original roster. Placeholder teams
@@ -692,15 +721,11 @@ const buildLeagueSchedule = (
 
   const matches = Object.values(updated.matches);
   const latestEnd = latestMatchEnd(matches);
-  if (latestEnd) {
-    if (openEndedSchedule) {
-      updated.end = latestEnd;
-    } else if (latestEnd.getTime() > updated.end.getTime()) {
-      throw new ScheduleError(
-        'Scheduled matches exceed the fixed event end date/time. Increase the end date/time or enable "No fixed end datetime scheduling".',
-        hasTeamDutyPlacementRestriction(matches) ? 'TEAM_DUTY' : 'RESOURCE',
-      );
-    }
+  if (latestEnd && !isOpenEndedSchedule && latestEnd.getTime() > updated.end.getTime()) {
+    throw new ScheduleError(
+      'Scheduled matches exceed the fixed event end date/time. Increase the end date/time or enable "No fixed end datetime scheduling".',
+      hasTeamDutyPlacementRestriction(matches) ? 'TEAM_DUTY' : 'RESOURCE',
+    );
   }
 
   return {
@@ -775,7 +800,7 @@ const formatNoFieldsErrorForUser = (message: string, league: League): string => 
 const buildTournamentSchedule = (
   tournament: Tournament,
   context: SchedulerContext,
-  openEndedSchedule: boolean,
+  isOpenEndedSchedule: boolean,
   includePlaceholderTeams: boolean,
 ): ScheduleResult => {
   const builder = new EventBuilder(tournament, context, { includePlaceholderTeams });
@@ -798,15 +823,11 @@ const buildTournamentSchedule = (
   }
   const matches = Object.values(scheduled.matches);
   const latestEnd = latestMatchEnd(matches);
-  if (latestEnd) {
-    if (openEndedSchedule) {
-      scheduled.end = latestEnd;
-    } else if (latestEnd.getTime() > scheduled.end.getTime()) {
-      throw new ScheduleError(
-        'Scheduled matches exceed the fixed event end date/time. Increase the end date/time or enable "No fixed end datetime scheduling".',
-        hasTeamDutyPlacementRestriction(matches) ? 'TEAM_DUTY' : 'RESOURCE',
-      );
-    }
+  if (latestEnd && !isOpenEndedSchedule && latestEnd.getTime() > scheduled.end.getTime()) {
+    throw new ScheduleError(
+      'Scheduled matches exceed the fixed event end date/time. Increase the end date/time or enable "No fixed end datetime scheduling".',
+      hasTeamDutyPlacementRestriction(matches) ? 'TEAM_DUTY' : 'RESOURCE',
+    );
   }
   return {
     preview: false,
@@ -819,11 +840,33 @@ const buildTournamentSchedule = (
 const latestMatchEnd = (matches: Match[]): Date | null => {
   let latest: Date | null = null;
   for (const match of matches) {
-    if (match.end && (!latest || match.end.getTime() > latest.getTime())) {
+    if (
+      hasValidDate(match.end)
+      && (!latest || match.end.getTime() > latest.getTime())
+    ) {
       latest = match.end;
     }
   }
   return latest;
+};
+
+export const finalizeOpenEndedSchedule = (
+  event: League | Tournament,
+  matches: Match[],
+): void => {
+  if (!event.noFixedEndDateTime) {
+    return;
+  }
+  if (!matches.length) {
+    event.generatedScheduleEnd = event.end;
+    return;
+  }
+  const latestEnd = latestMatchEnd(matches);
+  if (!latestEnd) {
+    return;
+  }
+  event.end = latestEnd;
+  event.generatedScheduleEnd = latestEnd;
 };
 const hasTeamDutyPlacementRestriction = (matches: Match[]): boolean => matches.some(
   (match) => (match as Match & { placementRestriction?: string }).placementRestriction === 'TEAM_DUTY',

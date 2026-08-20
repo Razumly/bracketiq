@@ -9,9 +9,12 @@ import {
   Tournament,
   UserData,
   TIMES,
-  MINUTE_MS,
 } from './types';
 import { rescheduleEventMatchesPreservingLocks } from './reschedulePreservingLocks';
+import {
+  finalizeOpenEndedSchedule,
+  prepareSchedulePlacementWindow,
+} from './scheduleEvent';
 import { OfficialStaffingPlanner } from './officialStaffing';
 import {
   buildLegacyOfficialAssignment,
@@ -51,22 +54,6 @@ const noopContext: SchedulerContext = {
   error: () => {},
 };
 
-const OPEN_ENDED_RESCHEDULE_WEEKS = 52;
-
-const isOpenEndedSchedule = (event: Tournament | League): boolean => {
-  if (typeof event.noFixedEndDateTime === 'boolean') {
-    return event.noFixedEndDateTime;
-  }
-  return false;
-};
-
-const resolveRescheduleEndTime = (event: Tournament | League, currentTime: Date): Date => {
-  if (!isOpenEndedSchedule(event)) {
-    return event.end;
-  }
-  const baseline = Math.max(event.end.getTime(), currentTime.getTime());
-  return new Date(baseline + OPEN_ENDED_RESCHEDULE_WEEKS * 7 * 24 * 60 * MINUTE_MS);
-};
 
 export const isScheduleWindowExceededError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error ?? '');
@@ -552,6 +539,7 @@ export const finalizeMatch = (
     return { updatedMatch, seededTeamIds };
   }
 
+  prepareSchedulePlacementWindow(event, false, undefined, currentTime);
   const participants = buildScheduleParticipants(event);
   const matchesSchedule = new Schedule<Match, PlayingField, Team | UserData, Division>(
     event.start,
@@ -559,7 +547,7 @@ export const finalizeMatch = (
     participants,
     event.divisions,
     currentTime,
-    { endTime: resolveRescheduleEndTime(event, currentTime), timeSlots: event.timeSlots },
+    { endTime: event.end, timeSlots: event.timeSlots },
   );
 
   const orderedMatches = Object.values(event.matches);
@@ -612,6 +600,7 @@ export const finalizeMatch = (
       }
     }
   }
+  finalizeOpenEndedSchedule(event, Object.values(event.matches));
 
 
   if (preserveCompletedWindow) {

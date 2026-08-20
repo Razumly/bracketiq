@@ -1144,10 +1144,6 @@ object EventEditorSessionMapper {
                 mode = EventEditorScheduleTransitionMode.RECONCILE,
                 expectedScheduleRevision = session.snapshot.scheduleState.revision,
             )
-            nextEventType in setOf("LEAGUE", "TOURNAMENT") && session.snapshot.scheduleState.matchCount == 0 -> EventEditorSaveScheduleTransitionDto(
-                mode = EventEditorScheduleTransitionMode.BUILD_IF_MISSING,
-                expectedScheduleRevision = session.snapshot.scheduleState.revision,
-            )
             else -> EventEditorSaveScheduleTransitionDto(mode = EventEditorScheduleTransitionMode.PRESERVE)
         }
         return com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto(

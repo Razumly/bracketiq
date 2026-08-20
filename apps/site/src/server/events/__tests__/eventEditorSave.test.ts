@@ -759,10 +759,26 @@ describe("saveEventEditor", () => {
     );
   });
 
-  it("executes BUILD_IF_MISSING for a reusable create-only Match Graph", async () => {
+  it("persists a Playoff count change with PRESERVE without scheduling an open-ended unplaced Match Graph", async () => {
     const tx = txFor();
     const current = snapshot();
-    current.draft = { ...current.draft, basics: { eventType: "LEAGUE" } };
+    current.draft = {
+      ...current.draft,
+      basics: {
+        ...current.draft.basics,
+        eventType: "LEAGUE",
+        start: "2026-08-19T10:00:00.000Z",
+      },
+      competition: {
+        includePlayoffs: true,
+        playoffTeamCount: 3,
+      },
+      schedule: {
+        mode: "GENERATED_END",
+        endConstraint: null,
+        generatedScheduleEnd: "2026-08-18T09:00:00.000Z",
+      },
+    };
     current.scheduleState = {
       ...current.scheduleState,
       matchCount: 3,
@@ -773,45 +789,54 @@ describe("saveEventEditor", () => {
         placed: 0,
         unplaced: 3,
       },
-      revision: "schedule_revision_create_only",
+      revision: "schedule_revision_open_ended",
     };
     (buildEventEditorSnapshot as jest.Mock).mockResolvedValue(current);
     (loadEventEditorSnapshot as jest.Mock).mockResolvedValue(current);
     (upsertEventFromPayload as jest.Mock).mockResolvedValue("event_1");
-    mockedReconcileEventSchedule.mockResolvedValue({
-      event: { id: "event_1", eventType: "LEAGUE" },
-      matches: [{ id: "create-only-match-1", eventId: "event_1", fieldId: null }],
-      warnings: [],
-      previousMatchCount: 3,
-      notification: null,
-    });
 
     const command = commandFor([]);
-    command.draft.basics.eventType = "LEAGUE";
-    command.scheduleTransition = {
-      mode: "BUILD_IF_MISSING",
-      expectedScheduleRevision: "schedule_revision_create_only",
+    command.draft.basics = {
+      ...command.draft.basics,
+      eventType: "LEAGUE",
+      start: "2026-08-19T10:00:00.000Z",
     };
+    command.draft.competition = {
+      ...command.draft.competition,
+      includePlayoffs: true,
+      playoffTeamCount: 4,
+    };
+    command.draft.schedule = {
+      mode: "GENERATED_END",
+      endConstraint: null,
+      generatedScheduleEnd: "2026-08-18T09:00:00.000Z",
+    };
+    command.scheduleTransition = { mode: "PRESERVE" };
+
     const result = await saveEventEditor(
       { userId: "host_1" },
       command,
       "event_1",
     );
 
-    expect(mockedReconcileEventSchedule).toHaveBeenCalledWith(
+    expect(upsertEventFromPayload).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "event_1" }),
+      tx,
       expect.objectContaining({
-        tx,
-        eventId: "event_1",
-        mode: "BUILD",
-        includePlaceholderTeams: true,
+        preserveOperationalState: true,
+        preserveStaffState: true,
       }),
     );
+    expect(upsertEventFromPayload).toHaveBeenCalledTimes(1);
     expect(result.scheduleOutcome).toEqual(
       expect.objectContaining({
-        status: "BUILT",
-        matchCount: 1,
+        status: "NOT_REQUESTED",
+        matchCount: 3,
+        warnings: [],
       }),
     );
+    expect(result.snapshot.scheduleState.matchCount).toBe(3);
+    expect(mockedReconcileEventSchedule).not.toHaveBeenCalled();
   });
 
   it("deletes the schedule for a transition to a non-schedulable event type", async () => {

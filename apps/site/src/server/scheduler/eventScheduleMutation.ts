@@ -35,7 +35,12 @@ import {
   type MatchDemand,
 } from "./matchGraph";
 import { League, Match, SchedulerContext, Tournament } from "./types";
-import { scheduleEvent, ScheduleError } from "./scheduleEvent";
+import {
+  finalizeOpenEndedSchedule,
+  prepareSchedulePlacementWindow,
+  scheduleEvent,
+  ScheduleError,
+} from "./scheduleEvent";
 import type {
   EventEditorMatchProjection,
   EventEditorScheduleWarning,
@@ -639,12 +644,15 @@ export const reconcileEventSchedule = async (
     (mode === "BUILD" || mode === "REBUILD") &&
     isReusableUnplacedMatchGraph(previousMatches)
   ) {
+    prepareSchedulePlacementWindow(event, false);
     const placedEvent = new EventBuilder(event, context, {
       includePlaceholderTeams: false,
     }).placeMatchGraph({ preserveMatchIds: true });
+    const placedMatches = Object.values(placedEvent.matches);
+    finalizeOpenEndedSchedule(placedEvent, placedMatches);
     scheduled = {
       event: placedEvent,
-      matches: Object.values(placedEvent.matches),
+      matches: placedMatches,
     };
   } else if (mode === "RESCHEDULE_PRESERVING_LOCKS" && previousMatches.length > 0) {
     try {

@@ -4485,12 +4485,7 @@ function EventScheduleContent() {
               mode: 'RECONCILE' as const,
               expectedScheduleRevision: currentSnapshot.scheduleState.revision,
             }
-          : ['LEAGUE', 'TOURNAMENT'].includes(scheduleType) && currentSnapshot.scheduleState.matchDemand?.placed === 0
-            ? {
-                mode: 'BUILD_IF_MISSING' as const,
-                expectedScheduleRevision: currentSnapshot.scheduleState.revision,
-              }
-            : { mode: 'PRESERVE' as const }
+          : { mode: 'PRESERVE' as const }
         : null;
       if (effectiveMode === 'CREATE') {
         const bootstrapQuery = buildCreateEditorBootstrapQuery(contractDraft);

@@ -366,4 +366,95 @@ describe("event schedule Match Graph persistence", () => {
     expect(persistScheduledRosterTeams).toHaveBeenCalled();
     expect(saveEventSchedule).toHaveBeenCalled();
   });
+  it("places a reusable open-ended graph after a stale generated end", async () => {
+    const fixture = buildReadinessGraphLeague();
+    const staleGeneratedEnd = new Date("2026-01-04T22:00:00.000Z");
+    const eventStart = new Date("2026-01-05T08:00:00.000Z");
+    const recurringSlotStart = eventStart;
+    const recurringSlotEnd = new Date("2026-01-05T22:00:00.000Z");
+    fixture.event.noFixedEndDateTime = true;
+    fixture.event.end = staleGeneratedEnd;
+    fixture.event.generatedScheduleEnd = staleGeneratedEnd;
+    const reusableMatchIds = Object.keys(fixture.event.matches).sort();
+    const tx = {
+      events: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: fixture.event.id,
+          eventType: "LEAGUE",
+        }),
+      },
+    } as unknown as Parameters<typeof reconcileEventSchedule>[0]["tx"];
+    (loadEventWithRelations as jest.Mock).mockResolvedValue(fixture.event);
+
+    const result = await reconcileEventSchedule({
+      tx,
+      eventId: fixture.event.id,
+      mode: "BUILD",
+    });
+
+    expect(result.matches.map((match) => match.id).sort()).toEqual(
+      reusableMatchIds,
+    );
+    expect(
+      result.matches.every(
+        (match) =>
+          match.placementState === "PLACED" &&
+          match.field &&
+          match.start.getTime() >= recurringSlotStart.getTime() &&
+          match.end.getTime() > match.start.getTime() &&
+          match.end.getTime() <= recurringSlotEnd.getTime(),
+      ),
+    ).toBe(true);
+    expect(result.matches.every((match) => match.start.getTime() > staleGeneratedEnd.getTime())).toBe(
+      true,
+    );
+    const latestMatchEnd = Math.max(
+      ...result.matches.map((match) => match.end.getTime()),
+    );
+    expect(result.event.end.getTime()).toBe(latestMatchEnd);
+    expect(result.event.generatedScheduleEnd?.getTime()).toBe(latestMatchEnd);
+  });
+
+  it("places a generated open-ended graph within the recurring slot", async () => {
+    const fixture = buildLeague("event_generated_stale", false, 0, 4, 1);
+    const staleGeneratedEnd = new Date("2026-01-04T22:00:00.000Z");
+    const recurringSlotStart = new Date("2026-01-05T08:00:00.000Z");
+    const recurringSlotEnd = new Date("2026-01-05T22:00:00.000Z");
+    fixture.noFixedEndDateTime = true;
+    fixture.end = staleGeneratedEnd;
+    fixture.generatedScheduleEnd = staleGeneratedEnd;
+    const tx = {
+      events: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: fixture.id,
+          eventType: "LEAGUE",
+        }),
+      },
+    } as unknown as Parameters<typeof reconcileEventSchedule>[0]["tx"];
+    (loadEventWithRelations as jest.Mock).mockResolvedValue(fixture);
+
+    const result = await reconcileEventSchedule({
+      tx,
+      eventId: fixture.id,
+      mode: "BUILD",
+    });
+
+    expect(
+      result.matches.every(
+        (match) =>
+          match.placementState === "PLACED" &&
+          match.field &&
+          match.start.getTime() >= recurringSlotStart.getTime() &&
+          match.end.getTime() <= recurringSlotEnd.getTime(),
+      ),
+    ).toBe(true);
+    const latestMatchEnd = Math.max(
+      ...result.matches.map((match) => match.end.getTime()),
+    );
+    expect(result.event.end.getTime()).toBe(latestMatchEnd);
+    expect(result.event.generatedScheduleEnd?.getTime()).toBe(latestMatchEnd);
+    expect(result.event.end.getTime()).toBeLessThanOrEqual(
+      recurringSlotEnd.getTime(),
+    );
+  });
 });

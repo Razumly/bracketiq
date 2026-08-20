@@ -780,7 +780,7 @@ export const eventEditorSaveScheduleTransitionSchema = z.discriminatedUnion(
       .strict(),
     z
       .object({
-        mode: z.enum(["BUILD_IF_MISSING", "RECONCILE"]),
+        mode: z.literal("RECONCILE"),
         expectedScheduleRevision: id,
       })
       .strict(),
@@ -884,6 +884,14 @@ export const saveEventEditorCommandSchema = z
     scheduleTransition: eventEditorSaveScheduleTransitionSchema,
   })
   .strict();
+const legacySaveEventEditorCommandSchema = saveEventEditorCommandSchema.extend({
+  scheduleTransition: z
+    .object({
+      mode: z.literal("BUILD_IF_MISSING"),
+      expectedScheduleRevision: id,
+    })
+    .strict(),
+});
 
 export const eventEditorExpectedCreateRevisionsSchema = z
   .object({
@@ -986,7 +994,24 @@ export const parseEventEditorSnapshot = (input: unknown): EventEditorSnapshot =>
   eventEditorSnapshotSchema.parse(input);
 export const parseSaveEventEditorCommand = (
   input: unknown,
-): SaveEventEditorCommand => saveEventEditorCommandSchema.parse(input);
+): SaveEventEditorCommand => {
+  const transition = isUnknownRecord(input)
+    ? input.scheduleTransition
+    : null;
+  if (
+    isUnknownRecord(input)
+    && input.contractVersion === EVENT_EDITOR_CONTRACT_VERSION
+    && isUnknownRecord(transition)
+    && transition.mode === "BUILD_IF_MISSING"
+  ) {
+    const legacyCommand = legacySaveEventEditorCommandSchema.parse(input);
+    return saveEventEditorCommandSchema.parse({
+      ...legacyCommand,
+      scheduleTransition: { mode: "PRESERVE" },
+    });
+  }
+  return saveEventEditorCommandSchema.parse(input);
+};
 export const parseCreateEventEditorCommand = (
   input: unknown,
 ): CreateEventEditorCommand => createEventEditorCommandSchema.parse(input);

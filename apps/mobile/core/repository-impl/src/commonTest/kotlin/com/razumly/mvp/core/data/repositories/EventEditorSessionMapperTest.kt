@@ -20,6 +20,7 @@ import com.razumly.mvp.core.network.dto.EventEditorQuestionDto
 import com.razumly.mvp.core.network.dto.EventEditorRegistrationDto
 import com.razumly.mvp.core.network.dto.EventEditorResourcesDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveResultDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleTransitionMode
 import com.razumly.mvp.core.network.dto.EventEditorScheduleDto
 import com.razumly.mvp.core.network.dto.EventEditorSnapshotDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeDto
@@ -608,6 +609,29 @@ class EventEditorSessionMapperTest {
             "Elite / 18+",
             command.draft.competition.playoffDivisionDetails.single().name,
         )
+    }
+
+    @Test
+    fun given_same_event_type_league_with_no_placed_matches_when_save_command_is_built_then_schedule_transition_is_preserve() {
+        val editSession = EventEditorSessionMapper.fromEditSnapshot(
+            editorProtocolSnapshot(mode = "EDIT", editorRevision = "revision-1"),
+        )
+        val mutation = EventEditorMutation(
+            editSession.canonicalState.copy(
+                event = editSession.canonicalState.event.copy(playoffTeamCount = 4),
+            ),
+        )
+
+        val command = EventEditorSessionMapper.toSaveCommand(editSession, mutation)
+
+        assertEquals(EVENT_EDITOR_CONTRACT_VERSION, command.contractVersion)
+        assertEquals("LEAGUE", command.draft.basics.eventType)
+        assertEquals(
+            EventEditorScheduleTransitionMode.PRESERVE,
+            command.scheduleTransition.mode,
+        )
+        assertNull(command.scheduleTransition.expectedScheduleRevision)
+        assertEquals(4, command.draft.competition.playoffTeamCount)
     }
 
     @Test

@@ -375,11 +375,9 @@ const buildEditorScheduleOutcome = (
   const targetSupportsSchedule = targetType === 'LEAGUE' || targetType === 'TOURNAMENT';
   const status = completionMode === 'CREATE_AND_BUILD_SCHEDULE'
     ? 'BUILT'
-    : transitionMode === 'BUILD_IF_MISSING'
-      ? 'BUILT'
-      : transitionMode === 'RECONCILE'
-        ? (targetSupportsSchedule ? 'REBUILT' : 'DELETED')
-        : 'NOT_REQUESTED';
+    : transitionMode === 'RECONCILE'
+      ? (targetSupportsSchedule ? 'REBUILT' : 'DELETED')
+      : 'NOT_REQUESTED';
   const matches = status === 'BUILT' || status === 'REBUILT'
     ? [buildApiEvent().matches[0]]
     : [];
@@ -3070,7 +3068,7 @@ describe('League schedule page', () => {
     expect(command.draft.competition.usesSets).toBe(true);
   });
 
-  it('builds a dirty unscheduled league only once through the atomic editor save', async () => {
+  it('saves dirty Event Configuration once before one explicit Build schedule operation', async () => {
     useSearchParamsMock.mockReturnValue({
       get: (key: string) => {
         if (key === 'mode') return 'edit';
@@ -3097,6 +3095,10 @@ describe('League schedule page', () => {
       }
       return Promise.resolve({});
     });
+    (eventService.reconcileEventSchedule as jest.Mock).mockResolvedValue({
+      event: { ...unscheduledEvent, matches: [buildApiEvent().matches[0]] },
+      warnings: [],
+    });
     (eventService.getEvent as jest.Mock).mockResolvedValue(eventWithoutMatches);
     (eventService.getEventById as jest.Mock).mockResolvedValue(eventWithoutMatches);
     const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
@@ -3115,14 +3117,24 @@ describe('League schedule page', () => {
         && (options as { method?: string } | undefined)?.method === 'PUT'
       ))).toHaveLength(1);
     });
-    expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(eventService.reconcileEventSchedule).toHaveBeenCalledTimes(1);
+    });
+    expect(eventService.reconcileEventSchedule).toHaveBeenCalledWith(
+      'event_1',
+      expect.objectContaining({
+        expectedScheduleRevision: 'test-schedule-revision-after-save',
+        participantCount: 24,
+        replaceExistingMatches: false,
+      }),
+    );
     expect(await screen.findByText('Schedule built.')).toBeInTheDocument();
 
     confirmSpy.mockRestore();
   });
 
   it.each(['LEAGUE', 'TOURNAMENT'] as const)(
-    'enables scheduling after create-only %s graph creation',
+    'preserves an unplaced %s Match Graph when saving an unchanged Event Type',
     async (eventType) => {
       useSearchParamsMock.mockReturnValue({
         get: (key: string) => (key === 'mode' ? 'edit' : null),
@@ -3138,17 +3150,22 @@ describe('League schedule page', () => {
         start: null,
         end: null,
       };
-      const createOnlyEvent = buildApiEvent({
+      const eventBeforeSave = buildApiEvent({
         id: 'event_1',
         $id: 'event_1',
         eventType,
         state: 'UNPUBLISHED',
+        includePlayoffs: true,
+        playoffTeamCount: 3,
         matches: [unplacedMatch],
       });
-      const eventWithoutMatches = { ...createOnlyEvent };
+      const eventWithoutMatches = { ...eventBeforeSave };
       delete (eventWithoutMatches as any).matches;
-      latestEditorEvent = createOnlyEvent;
-      mockEventFormDraft = createOnlyEvent;
+      latestEditorEvent = eventBeforeSave;
+      mockEventFormDraft = {
+        ...eventBeforeSave,
+        playoffTeamCount: 4,
+      };
       mockEventFormDirtyState = true;
       apiRequestMock.mockImplementation((path: string) => {
         if (path === '/api/events/event_1') {
@@ -3168,18 +3185,27 @@ describe('League schedule page', () => {
       await waitFor(() => expect(saveButton).toBeEnabled());
       fireEvent.click(saveButton);
 
-      let editorSaveCall: [string, any] | undefined;
+      const findEditorPutCalls = () => apiRequestMock.mock.calls.filter(([path, options]) => (
+        path === '/api/events/event_1/editor'
+        && (options as MockRequestOptions)?.method === 'PUT'
+      )) as Array<[string, MockRequestOptions]>;
       await waitFor(() => {
-        editorSaveCall = [...apiRequestMock.mock.calls].reverse().find(([path, options]) => (
-          path === '/api/events/event_1/editor'
-          && (options as { method?: string } | undefined)?.method === 'PUT'
-        )) as [string, any] | undefined;
-        expect(editorSaveCall).toBeDefined();
+        expect(findEditorPutCalls()).toHaveLength(1);
       });
+      const editorSaveCall = findEditorPutCalls()[0];
+      expect(editorSaveCall?.[1]?.body?.draft?.competition?.playoffTeamCount).toBe(4);
       expect(editorSaveCall?.[1]?.body?.scheduleTransition).toEqual({
-        mode: 'BUILD_IF_MISSING',
-        expectedScheduleRevision: 'test-schedule-revision-1',
+        mode: 'PRESERVE',
       });
+      expect(await screen.findByText(
+        `${eventType === 'LEAGUE' ? 'League' : 'Tournament'} changes saved.`,
+      )).toBeInTheDocument();
+      const editorPutCalls = findEditorPutCalls();
+      expect(editorPutCalls).toHaveLength(1);
+      expect(apiRequestMock.mock.calls.filter(([path]) => (
+        String(path).startsWith('/api/events/event_1/schedule')
+      ))).toHaveLength(0);
+      expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
     },
   );
 
