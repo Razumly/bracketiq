@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.data.dataTypes
 
 import androidx.room.Embedded
+import androidx.room.Ignore
 import androidx.room.Junction
 import androidx.room.Relation
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
@@ -36,4 +37,18 @@ data class EventWithRelations(
         )
     )
     val teams: List<Team> = listOf(),
-)
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "eventId",
+    )
+    val timeSlotCacheEntries: List<EventTimeSlotCacheEntry> = emptyList(),
+) {
+    @Ignore
+    var timeSlots: List<TimeSlot> = emptyList()
+        get() = timeSlotCacheEntries
+            .sortedBy(EventTimeSlotCacheEntry::position)
+            .map(EventTimeSlotCacheEntry::toTimeSlot)
+        private set(value) {
+            field = value
+        }
+}

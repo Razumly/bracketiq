@@ -2985,6 +2985,7 @@
         ]
       },
       {
+
         "tableName": "time_slot_cache",
         "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`viewerKey` TEXT NOT NULL, `projectionKey` TEXT NOT NULL, `id` TEXT NOT NULL, `payloadJson` TEXT NOT NULL, PRIMARY KEY(`viewerKey`, `projectionKey`, `id`))",
         "fields": [

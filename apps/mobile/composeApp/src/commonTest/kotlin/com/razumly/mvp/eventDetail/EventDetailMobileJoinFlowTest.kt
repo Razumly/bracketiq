@@ -23,6 +23,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.toEventTimeSlotCacheEntry
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
@@ -355,6 +356,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
                 players = listOf(seededParticipant),
                 teams = teams,
                 staffInvites = staffInvites,
+                timeSlots = listOf(slot),
             )
             val fieldRepository = EventDetailFakeFieldRepository(
                 fields = listOf(field),
@@ -401,7 +403,7 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             assertEquals(teams.map(Team::id), component.eventWithRelations.value.teams.map { it.team.id })
             assertEquals(matches.size, component.eventFields.value.first().matches.size)
             assertTrue(fieldRepository.requestedFieldIds.any { it == listOf(field.id) })
-            assertTrue(fieldRepository.requestedTimeSlotIds.any { it == listOf(slot.id) })
+            assertTrue(fieldRepository.requestedTimeSlotIds.isEmpty())
             assertTrue(matchRepository.requestedTournamentIds.contains(initialEvent.id))
             assertTrue(eventRepository.staffInviteRequests.isEmpty())
 
@@ -2207,6 +2209,7 @@ private class EventDetailFakeEventRepository(
     players: List<UserData>,
     private val teams: List<Team>,
     private val staffInvites: List<Invite>,
+    private val timeSlots: List<TimeSlot> = emptyList(),
     private val syncSnapshotsByOccurrence: Map<String, FakeParticipantSyncSnapshot> = emptyMap(),
     initialCachedRegistrations: List<EventRegistrationCacheEntry> = emptyList(),
     private val defaultSyncSnapshot: FakeParticipantSyncSnapshot? = null,
@@ -2214,7 +2217,9 @@ private class EventDetailFakeEventRepository(
         registrationStatus = "ACTIVE",
     ),
 ) : IEventRepository by com.razumly.mvp.eventCreate.CreateEvent_FakeEventRepository() {
-    private val eventFlow = MutableStateFlow(Result.success(initialEvent.toRelations(host, players, teams)))
+    private val eventFlow = MutableStateFlow(
+        Result.success(initialEvent.toRelations(host, players, teams, timeSlots)),
+    )
     private val cachedRegistrationsFlow = MutableStateFlow(initialCachedRegistrations)
 
     var refreshedEvent: Event? = null
@@ -2282,7 +2287,7 @@ private class EventDetailFakeEventRepository(
             userIds = (currentRelations.event.userIds + currentUser.id).distinct(),
         )
         val updatedPlayers = (currentRelations.players + currentUser).distinctBy(UserData::id)
-        eventFlow.value = Result.success(updatedEvent.toRelations(host, updatedPlayers, teams))
+        eventFlow.value = Result.success(updatedEvent.toRelations(host, updatedPlayers, teams, timeSlots))
         return Result.success(SelfRegistrationResult())
     }
 
@@ -2299,7 +2304,7 @@ private class EventDetailFakeEventRepository(
             userIds = (currentRelations.event.userIds + player.id).distinct(),
         )
         val updatedPlayers = (currentRelations.players + player).distinctBy(UserData::id)
-        eventFlow.value = Result.success(updatedEvent.toRelations(host, updatedPlayers, teams))
+        eventFlow.value = Result.success(updatedEvent.toRelations(host, updatedPlayers, teams, timeSlots))
         return Result.success(SelfRegistrationResult())
     }
 
@@ -2335,7 +2340,7 @@ private class EventDetailFakeEventRepository(
             )
             (currentRelations.players + childUser).distinctBy(UserData::id)
         }
-        eventFlow.value = Result.success(updatedEvent.toRelations(host, updatedPlayers, teams))
+        eventFlow.value = Result.success(updatedEvent.toRelations(host, updatedPlayers, teams, timeSlots))
         return Result.success(childRegistrationResult)
     }
 
@@ -2353,6 +2358,7 @@ private class EventDetailFakeEventRepository(
                     host = host,
                     players = snapshot.players,
                     teams = snapshot.teams,
+                    timeSlots = timeSlots,
                 )
             )
             return Result.success(
@@ -2797,11 +2803,15 @@ private fun Event.toRelations(
     host: UserData,
     players: List<UserData>,
     teams: List<Team>,
+    timeSlots: List<TimeSlot> = emptyList(),
 ): EventWithRelations = EventWithRelations(
     event = this,
     host = host,
     players = players,
     teams = teams,
+    timeSlotCacheEntries = timeSlots.mapIndexed { position, timeSlot ->
+        timeSlot.toEventTimeSlotCacheEntry(eventId = id, position = position)
+    },
 )
 
 private fun mobileUser(

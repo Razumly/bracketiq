@@ -12,7 +12,6 @@ import {
   TimeSlotValidationError,
 } from '@/lib/timeSlotAvailability';
 import {
-  localDatePartsInTimeZone,
   parseDateInputInTimeZone,
   resolveTimeZone,
   resolveTimeZoneFromFieldOrOrganization,
@@ -169,29 +168,6 @@ const toPublicRentalSlot = (slot: Record<string, any>) => ({
   repeating: slot.repeating === true,
   price: slot.price ?? null,
 });
-
-const toDateOnlyValue = (value: Date, timeZone: string): number => {
-  const parts = localDatePartsInTimeZone(value, timeZone);
-  if (!parts) {
-    return Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate());
-  }
-  return Date.UTC(parts.year, parts.month - 1, parts.day);
-};
-
-const normalizeRepeatingEndDate = (
-  startDate: Date,
-  endDate: Date | null,
-  repeating: boolean,
-  timeZone: string,
-): Date | null => {
-  if (!repeating) {
-    return endDate;
-  }
-  if (!(endDate instanceof Date) || Number.isNaN(endDate.getTime())) {
-    return null;
-  }
-  return toDateOnlyValue(endDate, timeZone) >= toDateOnlyValue(startDate, timeZone) ? endDate : null;
-};
 
 const resolveSlotTimeZone = async (
   scheduledFieldIds: string[],
@@ -412,7 +388,7 @@ export async function POST(req: NextRequest) {
   const slotTimeZone = await resolveSlotTimeZone(scheduledFieldIds, data.timeZone);
   let startDate = parseDateInputInTimeZone(data.startDate, slotTimeZone) ?? new Date();
   const parsedEndDate = data.endDate === null ? null : parseDateInputInTimeZone(data.endDate, slotTimeZone);
-  let endDate = normalizeRepeatingEndDate(startDate, parsedEndDate, repeating, slotTimeZone);
+  let endDate = parsedEndDate;
   let startTimeMinutes = data.startTimeMinutes ?? null;
   let endTimeMinutes = data.endTimeMinutes ?? null;
   if (!repeating) {

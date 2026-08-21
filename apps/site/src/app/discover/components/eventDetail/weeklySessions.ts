@@ -1,20 +1,19 @@
 import type { Event } from "@/types";
 import type { WeeklyOccurrenceSelection } from "@/lib/eventService";
-import {
-  buildDivisionDisplayNameIndex,
-  resolveDivisionDisplayName,
-} from "@/lib/divisionDisplay";
+import { resolveOneTimeTimeSlot } from "@/lib/timeSlotAvailability";
 import {
   addRepeatingTimeSlotLocalDays,
   enumerateRepeatingTimeSlotOccurrences,
   getRepeatingTimeSlotLocalDate,
   normalizeRepeatingTimeSlotTimeZone,
-  resolveRepeatingTimeSlotLocalDateTime,
   resolveRepeatingTimeSlotOccurrence,
   type ResolvedRepeatingTimeSlot,
 } from "@/lib/repeatingTimeSlotAvailability";
 
-
+import {
+  buildDivisionDisplayNameIndex,
+  resolveDivisionDisplayName,
+} from "@/lib/divisionDisplay";
 import { getDivisionIdFromEventEntry } from "./divisionRegistration";
 import { parseDateValue } from "./dateValues";
 
@@ -30,19 +29,41 @@ export type WeeklySessionOption = {
   divisionLabel: string;
 };
 
-const formatWeeklyTimeLabel = (value: Date): string =>
+const formatWeeklyTimeLabel = (value: Date, timeZone: string): string =>
   value
     .toLocaleTimeString("en-US", {
       hour: "numeric",
       minute: "2-digit",
       hour12: true,
+      timeZone,
     })
     .replace(" ", "")
     .toLowerCase();
 
-const formatWeeklySessionLabel = (start: Date, end: Date): string => {
-  const dateLabel = `${start.toLocaleDateString("en-US", { weekday: "short" })} ${start.toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "2-digit" })}`;
-  return `${dateLabel}, ${formatWeeklyTimeLabel(start)}-${formatWeeklyTimeLabel(end)}`;
+const formatWeeklySessionLabel = (
+  start: Date,
+  end: Date,
+  timeZone: string,
+): string => {
+  const dateLabel = start.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "numeric",
+    day: "numeric",
+    year: "2-digit",
+    timeZone,
+  });
+  return `${dateLabel}, ${formatWeeklyTimeLabel(start, timeZone)}-${formatWeeklyTimeLabel(end, timeZone)}`;
+};
+
+const resolveOneTimeWeeklySlot = (
+  slot: Parameters<typeof resolveOneTimeTimeSlot>[0],
+  timeZone: string,
+) => {
+  try {
+    return resolveOneTimeTimeSlot(slot, timeZone);
+  } catch {
+    return null;
+  }
 };
 
 const resolveDivisionNames = (
@@ -145,10 +166,6 @@ export const buildWeeklySessionOptions = (
 
     if (slot.repeating === false) {
       const timeZone = normalizeRepeatingTimeSlotTimeZone(slot.timeZone);
-      const slotStartDate = getRepeatingTimeSlotLocalDate(
-        slot.startDate ?? null,
-        timeZone,
-      );
       const referenceLocalDate = getRepeatingTimeSlotLocalDate(
         referenceDate,
         timeZone,
@@ -160,7 +177,6 @@ export const buildWeeklySessionOptions = (
       const endMinutes =
         typeof slot.endTimeMinutes === "number" ? slot.endTimeMinutes : null;
       if (
-        !slotStartDate ||
         !referenceLocalDate ||
         startMinutes === null ||
         endMinutes === null ||
@@ -169,36 +185,21 @@ export const buildWeeklySessionOptions = (
         startMinutes < 0 ||
         startMinutes >= 24 * 60 ||
         endMinutes < 0 ||
-        endMinutes >= 24 * 60 ||
-        endMinutes <= startMinutes ||
-        slotStartDate < referenceLocalDate
+        endMinutes >= 24 * 60
       ) {
         return;
       }
-      const sessionStart = resolveRepeatingTimeSlotLocalDateTime(
-        slotStartDate,
-        startMinutes,
-        timeZone,
-      );
-      const sessionEnd = resolveRepeatingTimeSlotLocalDateTime(
-        slotStartDate,
-        endMinutes,
-        timeZone,
-      );
-      if (
-        !sessionStart ||
-        !sessionEnd ||
-        sessionEnd.getTime() <= sessionStart.getTime()
-      ) {
+      const resolved = resolveOneTimeWeeklySlot(slot, timeZone);
+      if (!resolved || resolved.localDate < referenceLocalDate) {
         return;
       }
       sessions.push({
-        id: `${slot.$id}-${slotStartDate}`,
-        slotId: String(slot.$id ?? ""),
-        occurrenceDate: slotStartDate,
-        start: sessionStart,
-        end: sessionEnd,
-        label: formatWeeklySessionLabel(sessionStart, sessionEnd),
+        id: `${resolved.slotId}-${resolved.localDate}`,
+        slotId: resolved.slotId,
+        occurrenceDate: resolved.localDate,
+        start: resolved.start,
+        end: resolved.end,
+        label: formatWeeklySessionLabel(resolved.start, resolved.end, timeZone),
         divisionLabel,
       });
       return;
@@ -259,7 +260,11 @@ export const buildWeeklySessionOptions = (
         occurrenceDate: resolved.occurrenceDate,
         start: resolved.start,
         end: resolved.end,
-        label: formatWeeklySessionLabel(resolved.start, resolved.end),
+        label: formatWeeklySessionLabel(
+          resolved.start,
+          resolved.end,
+          normalizeRepeatingTimeSlotTimeZone(slot.timeZone),
+        ),
         divisionLabel,
       });
     });
@@ -317,18 +322,14 @@ export const resolveSelectedWeeklySessionOption = (
       sportInput,
     ).join(", ") || "All divisions";
 
+  const timeZone = normalizeRepeatingTimeSlotTimeZone(matchingSlot.timeZone);
   let occurrenceDate = selectedOccurrenceDate;
   let start: Date;
   let end: Date;
   if (matchingSlot.repeating === false) {
-    const timeZone = normalizeRepeatingTimeSlotTimeZone(matchingSlot.timeZone);
     const normalizedSelectedDate = getRepeatingTimeSlotLocalDate(
       selectedOccurrenceDate,
       "UTC",
-    );
-    const slotStartDate = getRepeatingTimeSlotLocalDate(
-      matchingSlot.startDate ?? null,
-      timeZone,
     );
     const startMinutes =
       typeof matchingSlot.startTimeMinutes === "number"
@@ -340,7 +341,6 @@ export const resolveSelectedWeeklySessionOption = (
         : null;
     if (
       !normalizedSelectedDate ||
-      !slotStartDate ||
       startMinutes === null ||
       endMinutes === null ||
       !Number.isInteger(startMinutes) ||
@@ -348,32 +348,17 @@ export const resolveSelectedWeeklySessionOption = (
       startMinutes < 0 ||
       startMinutes >= 24 * 60 ||
       endMinutes < 0 ||
-      endMinutes >= 24 * 60 ||
-      endMinutes <= startMinutes ||
-      normalizedSelectedDate !== slotStartDate
+      endMinutes >= 24 * 60
     ) {
       return null;
     }
-    const resolvedStart = resolveRepeatingTimeSlotLocalDateTime(
-      slotStartDate,
-      startMinutes,
-      timeZone,
-    );
-    const resolvedEnd = resolveRepeatingTimeSlotLocalDateTime(
-      slotStartDate,
-      endMinutes,
-      timeZone,
-    );
-    if (
-      !resolvedStart ||
-      !resolvedEnd ||
-      resolvedEnd.getTime() <= resolvedStart.getTime()
-    ) {
+    const resolved = resolveOneTimeWeeklySlot(matchingSlot, timeZone);
+    if (!resolved || normalizedSelectedDate !== resolved.localDate) {
       return null;
     }
-    occurrenceDate = slotStartDate;
-    start = resolvedStart;
-    end = resolvedEnd;
+    occurrenceDate = resolved.localDate;
+    start = resolved.start;
+    end = resolved.end;
   } else {
     const resolved = resolveRepeatingTimeSlotOccurrence(
       matchingSlot,
@@ -390,7 +375,7 @@ export const resolveSelectedWeeklySessionOption = (
     occurrenceDate,
     start,
     end,
-    label: formatWeeklySessionLabel(start, end),
+    label: formatWeeklySessionLabel(start, end, timeZone),
     divisionLabel,
   };
 };

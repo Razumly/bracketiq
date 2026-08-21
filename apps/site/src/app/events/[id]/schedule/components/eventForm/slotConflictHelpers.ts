@@ -50,7 +50,7 @@ export type SlotConflictPayload = {
   parentEvent?: string | null;
   eventStart?: string;
   eventEnd?: string;
-  eventNoFixedEndDateTime?: boolean;
+  hasNoFixedEventEnd?: boolean;
   slots: SlotConflictSnapshot[];
 };
 
@@ -58,7 +58,7 @@ export type SlotConflictContext = {
   eventId: string;
   eventStart?: string;
   eventEnd?: string;
-  eventNoFixedEndDateTime?: boolean;
+  hasNoFixedEventEnd?: boolean;
 };
 
 type BuildSlotConflictPayloadOptions = {
@@ -67,7 +67,7 @@ type BuildSlotConflictPayloadOptions = {
   parentEvent?: string | null;
   eventStart?: string | null;
   eventEnd?: string | null;
-  eventNoFixedEndDateTime?: boolean;
+  hasNoFixedEventEnd?: boolean;
   slots: LeagueSlotForm[];
 };
 
@@ -83,6 +83,18 @@ type ComparableConflictSlot = {
   scheduledFieldId?: string;
   scheduledFieldIds?: string[];
 };
+
+type ComparableConflictSlotInput = Pick<
+  ComparableConflictSlot,
+  | "repeating"
+  | "startDate"
+  | "endDate"
+  | "timeZone"
+  | "dayOfWeek"
+  | "daysOfWeek"
+  | "startTimeMinutes"
+  | "endTimeMinutes"
+>;
 
 const addMinutesToDate = (date: Date, minutes: number): Date =>
   new Date(date.getTime() + minutes * 60 * 1000);
@@ -218,15 +230,15 @@ export const buildSlotConflictPayload = ({
   parentEvent,
   eventStart,
   eventEnd,
-  eventNoFixedEndDateTime,
+  hasNoFixedEventEnd,
   slots,
 }: BuildSlotConflictPayloadOptions): SlotConflictPayload => ({
   eventId: eventId ?? "",
   eventType,
   parentEvent: parentEvent ?? null,
   eventStart: eventStart ?? undefined,
-  eventEnd: eventNoFixedEndDateTime ? undefined : (eventEnd ?? undefined),
-  eventNoFixedEndDateTime: eventNoFixedEndDateTime || undefined,
+  eventEnd: hasNoFixedEventEnd ? undefined : (eventEnd ?? undefined),
+  hasNoFixedEventEnd: hasNoFixedEventEnd || undefined,
   slots: slots.map(buildSlotConflictSnapshot),
 });
 
@@ -238,15 +250,15 @@ export const buildSlotConflictContext = ({
   eventId,
   eventStart,
   eventEnd,
-  eventNoFixedEndDateTime,
+  hasNoFixedEventEnd,
 }: Pick<
   BuildSlotConflictPayloadOptions,
-  "eventId" | "eventStart" | "eventEnd" | "eventNoFixedEndDateTime"
+  "eventId" | "eventStart" | "eventEnd" | "hasNoFixedEventEnd"
 >): SlotConflictContext => ({
   eventId: eventId ?? "",
   eventStart: eventStart ?? undefined,
-  eventEnd: eventNoFixedEndDateTime ? undefined : (eventEnd ?? undefined),
-  eventNoFixedEndDateTime: eventNoFixedEndDateTime || undefined,
+  eventEnd: hasNoFixedEventEnd ? undefined : (eventEnd ?? undefined),
+  hasNoFixedEventEnd: hasNoFixedEventEnd || undefined,
 });
 
 export const normalizeSlotBoundaryOverrideForForm = (
@@ -328,35 +340,15 @@ const repeatingSlotsOverlap = (
     secondSlot: slotB,
     firstWindow: slotAWindow,
     secondWindow: slotBWindow,
-    firstOpenEnded: !slotA.endDate && !contextA.eventEnd,
-    secondOpenEnded: !slotB.endDate && !contextB.eventEnd,
+    isFirstOpenEnded: !slotA.endDate && !contextA.eventEnd,
+    isSecondOpenEnded: !slotB.endDate && !contextB.eventEnd,
   });
 };
 
 const slotOverlapsExistingSlot = (
-  slot: Pick<
-    ComparableConflictSlot,
-    | "repeating"
-    | "dayOfWeek"
-    | "daysOfWeek"
-    | "startTimeMinutes"
-    | "endTimeMinutes"
-    | "startDate"
-    | "endDate"
-    | "timeZone"
-  >,
+  slot: ComparableConflictSlotInput,
   slotContext: { eventStart?: string; eventEnd?: string },
-  existingSlot: Pick<
-    ComparableConflictSlot,
-    | "repeating"
-    | "dayOfWeek"
-    | "daysOfWeek"
-    | "startTimeMinutes"
-    | "endTimeMinutes"
-    | "startDate"
-    | "endDate"
-    | "timeZone"
-  >,
+  existingSlot: ComparableConflictSlotInput,
   existingSlotContext: { eventStart?: string; eventEnd?: string },
 ): boolean => {
   const isSlotRepeating = slot.repeating !== false;
@@ -409,17 +401,7 @@ const slotOverlapsExistingSlot = (
 };
 
 const findOverlappingEventSlotForField = (
-  slot: Pick<
-    ComparableConflictSlot,
-    | "repeating"
-    | "startDate"
-    | "endDate"
-    | "dayOfWeek"
-    | "daysOfWeek"
-    | "startTimeMinutes"
-    | "endTimeMinutes"
-    | "timeZone"
-  >,
+  slot: ComparableConflictSlotInput,
   event: Event,
   context: SlotConflictContext,
   fieldId?: string,
@@ -457,17 +439,7 @@ const findOverlappingEventSlotForField = (
 };
 
 const slotOverlapsExistingEvent = (
-  slot: Pick<
-    ComparableConflictSlot,
-    | "repeating"
-    | "startDate"
-    | "endDate"
-    | "dayOfWeek"
-    | "daysOfWeek"
-    | "startTimeMinutes"
-    | "endTimeMinutes"
-    | "timeZone"
-  >,
+  slot: ComparableConflictSlotInput,
   event: Event,
   context: SlotConflictContext,
   fieldId?: string,

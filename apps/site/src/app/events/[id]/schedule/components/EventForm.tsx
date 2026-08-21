@@ -777,7 +777,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       clearErrors,
       eventEnd: eventData.end,
       eventId: eventData.$id,
-      eventNoFixedEndDateTime: eventData.noFixedEndDateTime,
+      hasNoFixedEventEnd: eventData.noFixedEndDateTime,
       eventStart: eventData.start,
       eventSupportsScheduleSlots,
       eventTimeZone: eventData.timeZone,

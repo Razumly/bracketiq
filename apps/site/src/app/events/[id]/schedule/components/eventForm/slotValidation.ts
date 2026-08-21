@@ -103,6 +103,49 @@ const describeRepeatingResolutionError = (error: unknown): string =>
     ? error.message
     : "Repeating timeslot cannot be resolved.";
 
+const mixedSlotIntervalsOverlap = (
+  first: LeagueSlotForm,
+  second: LeagueSlotForm,
+  context: SlotValidationContext,
+): boolean => {
+  const firstIsRepeating = first.repeating !== false;
+  const repeatingSlot = firstIsRepeating ? first : second;
+  const oneTimeSlot = firstIsRepeating ? second : first;
+  const oneTimeWindow = resolveConflictWindow(oneTimeSlot, context);
+  if (!oneTimeWindow) {
+    return false;
+  }
+
+  const overlapStart = new Date(
+    Math.max(
+      oneTimeWindow.start.getTime(),
+      context.eventStart?.getTime() ?? oneTimeWindow.start.getTime(),
+    ),
+  );
+  const overlapEnd = new Date(
+    Math.min(
+      oneTimeWindow.end.getTime(),
+      context.eventEnd?.getTime() ?? oneTimeWindow.end.getTime(),
+    ),
+  );
+  if (overlapEnd.getTime() <= overlapStart.getTime()) {
+    return false;
+  }
+
+  const repeatingOccurrences = resolveRepeatingOccurrencesForConflict(
+    repeatingSlot,
+    { start: overlapStart, end: overlapEnd },
+  );
+  return repeatingOccurrences.some((occurrence) =>
+    slotDateTimeRangesOverlap(
+      occurrence.start,
+      occurrence.end,
+      oneTimeWindow.start,
+      oneTimeWindow.end,
+    ),
+  );
+};
+
 const slotIntervalsOverlap = (
   first: LeagueSlotForm,
   second: LeagueSlotForm,
@@ -125,54 +168,24 @@ const slotIntervalsOverlap = (
     );
   }
 
+  if (isFirstRepeating !== isSecondRepeating) {
+    return mixedSlotIntervalsOverlap(first, second, context);
+  }
+
   const firstWindow = resolveConflictWindow(first, context);
   const secondWindow = resolveConflictWindow(second, context);
   if (!firstWindow || !secondWindow) {
     return false;
   }
 
-  if (isFirstRepeating && isSecondRepeating) {
-    return repeatingTimeSlotOccurrencesOverlap({
-      firstSlot: first,
-      secondSlot: second,
-      firstWindow,
-      secondWindow,
-      firstOpenEnded: !first.endDate && !context.eventEnd,
-      secondOpenEnded: !second.endDate && !context.eventEnd,
-    });
-  }
-
-  const overlapStart = new Date(
-    Math.max(firstWindow.start.getTime(), secondWindow.start.getTime()),
-  );
-  const overlapEnd = new Date(
-    Math.min(firstWindow.end.getTime(), secondWindow.end.getTime()),
-  );
-  if (overlapEnd.getTime() <= overlapStart.getTime()) {
-    return false;
-  }
-  const firstOccurrences = isFirstRepeating
-    ? resolveRepeatingOccurrencesForConflict(first, {
-        start: overlapStart,
-        end: overlapEnd,
-      })
-    : [firstWindow];
-  const secondOccurrences = isSecondRepeating
-    ? resolveRepeatingOccurrencesForConflict(second, {
-        start: overlapStart,
-        end: overlapEnd,
-      })
-    : [secondWindow];
-  return firstOccurrences.some((firstOccurrence) =>
-    secondOccurrences.some((secondOccurrence) =>
-      slotDateTimeRangesOverlap(
-        firstOccurrence.start,
-        firstOccurrence.end,
-        secondOccurrence.start,
-        secondOccurrence.end,
-      ),
-    ),
-  );
+  return repeatingTimeSlotOccurrencesOverlap({
+    firstSlot: first,
+    secondSlot: second,
+    firstWindow,
+    secondWindow,
+    isFirstOpenEnded: !first.endDate && !context.eventEnd,
+    isSecondOpenEnded: !second.endDate && !context.eventEnd,
+  });
 };
 
 // Evaluates the current slot against other form slots to surface inline validation errors for schedulable event types.

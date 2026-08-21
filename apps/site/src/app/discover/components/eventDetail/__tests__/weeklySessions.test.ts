@@ -115,6 +115,7 @@ describe("weekly event session calculations", () => {
     expect(sessions[0]?.start.getHours()).toBe(9);
     expect(sessions[0]?.end.getHours()).toBe(10);
     expect(sessions[0]?.end.getMinutes()).toBe(30);
+    expect(sessions[0]?.label).toContain("9:00am-10:30am");
   });
 
   it("shows a fixed supplemental slot once alongside weekly occurrences", () => {

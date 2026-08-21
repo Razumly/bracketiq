@@ -15,7 +15,6 @@ import {
 } from '@/lib/repeatingTimeSlotAvailability';
 import { repeatingTimeSlotValidationResponse } from '@/server/repeatingTimeSlotValidationResponse';
 import {
-  localDatePartsInTimeZone,
   parseDateInputInTimeZone,
   resolveTimeZone,
   resolveTimeZoneFromFieldOrOrganization,
@@ -64,28 +63,6 @@ const normalizeDaysOfWeek = (input: { dayOfWeek?: number | null; daysOfWeek?: nu
   ).sort((a, b) => a - b);
 };
 
-const toDateOnlyValue = (value: Date, timeZone: string): number => {
-  const parts = localDatePartsInTimeZone(value, timeZone);
-  if (!parts) {
-    return Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate());
-  }
-  return Date.UTC(parts.year, parts.month - 1, parts.day);
-};
-
-const normalizeRepeatingEndDate = (
-  startDate: Date,
-  endDate: Date | null,
-  repeating: boolean,
-  timeZone: string,
-): Date | null => {
-  if (!repeating) {
-    return endDate;
-  }
-  if (!(endDate instanceof Date) || Number.isNaN(endDate.getTime())) {
-    return null;
-  }
-  return toDateOnlyValue(endDate, timeZone) >= toDateOnlyValue(startDate, timeZone) ? endDate : null;
-};
 
 const resolveSlotTimeZone = async (
   scheduledFieldIds: string[],
@@ -299,12 +276,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     ? requestedEndDate
     : currentEndDate;
   if (effectiveRepeating) {
-    payload.endDate = normalizeRepeatingEndDate(
-      effectiveStartDate,
-      endDateCandidate,
-      true,
-      effectiveTimeZone,
-    );
+    payload.endDate = endDateCandidate;
     try {
       assertRepeatingTimeSlotsResolvable({
         slots: [{

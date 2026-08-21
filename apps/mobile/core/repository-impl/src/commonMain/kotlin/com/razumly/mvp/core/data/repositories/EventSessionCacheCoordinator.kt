@@ -23,6 +23,7 @@ internal class EventSessionCacheCoordinator(
     init {
         scope.launch {
             databaseService.getEventDao.deleteAllEvents()
+            databaseService.getEventTimeSlotDao.deleteAllTimeSlots()
         }
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             var hasObservedUser = false
@@ -71,6 +72,7 @@ internal class EventSessionCacheCoordinator(
 
     private suspend fun clearForSessionChange() {
         databaseService.getEventDao.clearAllEventsWithCrossRefs()
+        databaseService.getEventTimeSlotDao.deleteAllTimeSlots()
         databaseService.getEventParticipantManagementDao.clearAll()
         databaseService.getEventComplianceDao.clearAll()
     }

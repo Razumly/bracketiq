@@ -42,6 +42,11 @@ A human can verify the result by running the focused site and mobile tests. The 
 - [x] (2026-08-20 00:00Z) Preserve no-fixed-end event bounds during external slot conflict checks.
 - [x] (2026-08-20 00:00Z) Verify that mobile DST-gap submission performs no event-editor write.
 
+- [x] (2026-08-21 03:02Z) Persist fetched event Time Slots through the Room event relation, return Room-backed data after refreshes, and share the v100-to-v101 migration SQL across Android and iOS.
+- [x] (2026-08-21 03:02Z) Rename the iOS migration regression with the repository's `given_when_then` test convention.
+- [x] (2026-08-20 00:00Z) Use each existing slot or facility named time zone in the rental editor and preserve the slot zone on edit.
+- [x] (2026-08-20 00:00Z) Rerun the focused site and mobile checks after the rental editor change.
+
 ## Surprises & Discoveries
 
 - Observation: Existing repeating validation rejects every `endTimeMinutes <= startTimeMinutes`, so it cannot represent an overnight interval.
@@ -77,6 +82,14 @@ A human can verify the result by running the focused site and mobile tests. The 
   Rationale: League and rental editors, weekly sessions, and schedule helpers must use one warning and local-time contract.
   Date/Author: 2026-08-18 / Codex.
 
+- Decision: Treat the Room event relation as the mobile read path for event Time Slots after refresh.
+  Rationale: Room is the mobile source of truth. The detail screen must observe persisted data instead of a separate bootstrap list.
+  Date/Author: 2026-08-21 / Codex.
+- Decision: Keep the current commit subject `Fix: Complete repeating time-slot review regressions`.
+  Rationale: It follows the mobile commit format `<Type>: <Sentence case summary>`. Rewriting an existing commit would change history without a confirmed subject requirement.
+  Date/Author: 2026-08-21 / Codex.
+
+
 
 ## Outcomes & Retrospective
 
@@ -93,8 +106,15 @@ A human can verify the result by running the focused site and mobile tests. The 
 - Defect remediation verification on 2026-08-18: the field availability API now returns a structured 400 response for invalid repeating time zones instead of omitting availability. The public rental selection path preserves resolver messages for invalid slots. The site focused suite passed 10 suites and 124 tests. Site TypeScript validation passed. Mobile model and Compose checks passed with `BUILD SUCCESSFUL`.
 - Final acceptance verification on 2026-08-18: 13 site Jest suites and 138 tests passed. Site TypeScript and changed-file ESLint checks passed. The core model check, targeted Compose classes, and complete `:composeApp:testDebugUnitTest` task passed with `BUILD SUCCESSFUL`.
 - Complete site verification remains blocked by the unsynchronized branch suite: 8 failed suites, 19 failed tests, 841 passed tests, and 2 skipped tests.
+- Verification on 2026-08-21: 11 focused site Jest suites and 131 tests passed. Site TypeScript and changed-file ESLint checks passed. The complete Android Compose unit suite and the iOS Room migration test passed with `BUILD SUCCESSFUL`.
+
 
 - Post-review verification on 2026-08-20: the complete focused site suite passed 10 Jest suites and 129 tests. Site TypeScript and formatting checks passed. The mobile create component suite passed 65 tests, including the DST-gap no-write regression.
+
+- Mobile persistence follow-up on 2026-08-21: event Time Slots now use the Room event relation during detail refreshes. The v100-to-v101 cache migration uses one shared SQL definition on Android and iOS. The iOS migration regression uses the repository naming convention.
+- Rental editor verification on 2026-08-20: persisted Asia/Tokyo calendar dates round-trip as local calendar values, and the focused modal suite passed.
+- Latest follow-up verification: 7 focused site suites and 53 tests passed. Site TypeScript and targeted ESLint checks passed. Focused Android and iOS Gradle tests passed with `BUILD SUCCESSFUL`.
+- Full site suite on 2026-08-20: `npm run test:ci` ran all test suites and reported 9 failed suites, 1 skipped suite, and 841 passed suites. It reported 21 failed tests and 2 skipped tests. Jest exited before `coverage:check-routes`.
 
 ## Context and Orientation
 
@@ -192,3 +212,11 @@ Updated on 2026-08-18 after final acceptance verification. Added repository and 
 
 
 Updated on 2026-08-20 after the post-review regressions. Recorded the configured-start horizon fix, no-fixed-end external conflict handling, mobile no-write coverage, and focused verification.
+
+Updated on 2026-08-21 after the Room persistence follow-up. Recorded the event relation read path, shared migration SQL, and migration test naming.
+
+Updated on 2026-08-21 after the commit-history review. Confirmed the latest subject follows the repository format and recorded that no history rewrite is needed.
+
+Updated on 2026-08-21 after final verification. Recorded 11 passing site suites, TypeScript and ESLint checks, the complete Android unit suite, and the iOS migration test.
+
+Updated on 2026-08-20 after the rental editor named-zone fix. Recorded the local calendar projection, payload preservation, and focused site and mobile verification.

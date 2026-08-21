@@ -445,6 +445,27 @@ describe('time-slots routes', () => {
   });
 
 
+  it('POST rejects a repeating end date before its start date', async () => {
+    const response = await POST(jsonRequest('http://localhost/api/time-slots', {
+      id: 'slot_reversed_create',
+      scheduledFieldId: 'field_1',
+      daysOfWeek: [0],
+      startDate: '2026-08-24T00:00:00Z',
+      endDate: '2026-08-23T00:00:00Z',
+      startTimeMinutes: 9 * 60,
+      endTimeMinutes: 10 * 60,
+      timeZone: 'UTC',
+      repeating: true,
+    }));
+    const json = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(json).toEqual(expect.objectContaining({
+      code: 'INVALID_TIME_SLOT',
+      slotIds: ['slot_reversed_create'],
+    }));
+    expect(prismaMock.timeSlots.create).not.toHaveBeenCalled();
+  });
   it('POST rejects a caller who cannot manage the requested field inventory', async () => {
     canManageScheduledFieldsMock.mockResolvedValueOnce(false);
 
@@ -540,6 +561,29 @@ describe('time-slots routes', () => {
       code: 'INVALID_TIME_SLOT',
       slotIds: ['slot_dst_patch'],
       occurrenceDate: '2026-03-08',
+    }));
+    expect(prismaMock.timeSlots.update).not.toHaveBeenCalled();
+  });
+  it('PATCH rejects a repeating end date before its start date', async () => {
+    const response = await PATCH(
+      jsonRequest('http://localhost/api/time-slots/slot_reversed_patch', {
+        slot: {
+          daysOfWeek: [0],
+          startDate: '2026-08-24T00:00:00Z',
+          endDate: '2026-08-23T00:00:00Z',
+          startTimeMinutes: 9 * 60,
+          endTimeMinutes: 10 * 60,
+          timeZone: 'UTC',
+        },
+      }, 'PATCH'),
+      { params: Promise.resolve({ id: 'slot_reversed_patch' }) },
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(json).toEqual(expect.objectContaining({
+      code: 'INVALID_TIME_SLOT',
+      slotIds: ['slot_reversed_patch'],
     }));
     expect(prismaMock.timeSlots.update).not.toHaveBeenCalled();
   });

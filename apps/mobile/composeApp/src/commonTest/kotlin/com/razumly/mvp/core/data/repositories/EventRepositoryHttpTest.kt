@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventParticipantManagementCacheEntry
+import com.razumly.mvp.core.data.dataTypes.EventTimeSlotCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventTeamComplianceCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventUserComplianceCacheEntry
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
@@ -31,6 +32,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.CatalogCacheDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventComplianceDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventParticipantManagementDao
+import com.razumly.mvp.core.data.dataTypes.daos.EventTimeSlotDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
@@ -115,6 +117,7 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
     val deleteEventWithCrossRefsCalls = mutableListOf<String>()
     val deleteEventCrossRefsCalls = mutableListOf<String>()
     var clearAllEventsWithCrossRefsCalls = 0
+    var eventTimeSlotCacheEntries: Map<String, List<EventTimeSlotCacheEntry>> = emptyMap()
 
     override suspend fun upsertEvent(game: Event) {
         events.value = events.value + (game.id to game)
@@ -151,7 +154,12 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
     override suspend fun deleteEventById(id: String) { events.value = events.value - id }
     override suspend fun getEventById(id: String): Event? = events.value[id]
     override suspend fun getEventsByIds(ids: List<String>): List<Event> = ids.mapNotNull(events.value::get)
-    override suspend fun getEventWithRelationsById(id: String): EventWithRelations = error("unused")
+    override suspend fun getEventWithRelationsById(id: String): EventWithRelations =
+        EventWithRelations(
+            event = events.value[id] ?: error("Missing event $id"),
+            host = null,
+            timeSlotCacheEntries = eventTimeSlotCacheEntries[id].orEmpty(),
+        )
     override fun getEventWithRelationsFlow(id: String): Flow<EventWithRelations> = error("unused")
     override suspend fun deleteEventWithCrossRefs(eventId: String) {
         deleteEventWithCrossRefsCalls += eventId
@@ -240,6 +248,32 @@ private class EventRepositoryHttp_FakeFieldDao : FieldDao {
     }
     override fun getFieldById(id: String): Flow<FieldWithMatches?> = flowOf(null)
     override fun getFieldsWithMatches(ids: List<String>): Flow<List<FieldWithMatches>> = flowOf(emptyList())
+}
+private class EventRepositoryHttp_FakeEventTimeSlotDao(
+    private val onUpsert: suspend (List<EventTimeSlotCacheEntry>) -> Unit = {},
+) : EventTimeSlotDao {
+    val entries = mutableListOf<EventTimeSlotCacheEntry>()
+
+    override suspend fun getTimeSlotsByEventId(eventId: String): List<EventTimeSlotCacheEntry> =
+        entries.filter { entry -> entry.eventId == eventId }.sortedBy(EventTimeSlotCacheEntry::position)
+
+    override suspend fun upsertTimeSlots(entries: List<EventTimeSlotCacheEntry>) {
+        entries.forEach { entry ->
+            this.entries.removeAll { existing ->
+                existing.eventId == entry.eventId && existing.slotId == entry.slotId
+            }
+            this.entries += entry
+        }
+        onUpsert(entries)
+    }
+
+    override suspend fun deleteTimeSlotsByEventId(eventId: String) {
+        entries.removeAll { entry -> entry.eventId == eventId }
+    }
+
+    override suspend fun deleteAllTimeSlots() {
+        entries.clear()
+    }
 }
 
 private class EventRepositoryHttp_FakeMatchDao : MatchDao {
@@ -431,6 +465,7 @@ private class EventRepositoryHttp_FakeDatabaseService(
     override val getTeamDao: TeamDao,
     override val getMatchDao: MatchDao = EventRepositoryHttp_FakeMatchDao(),
     override val getFieldDao: FieldDao = EventRepositoryHttp_FakeFieldDao(),
+    override val getEventTimeSlotDao: EventTimeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao(),
     override val getEventParticipantManagementDao: EventParticipantManagementDao =
         EventRepositoryHttp_FakeParticipantManagementDao(),
     override val getEventComplianceDao: EventComplianceDao = EventRepositoryHttp_FakeComplianceDao(),
@@ -1407,7 +1442,7 @@ class EventRepositoryHttpTest {
 
     @Test
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun getCachedEventsFlow_clears_cached_events_when_current_user_changes() = runTest {
+    fun getCachedEventsFlow_clears_cached_events_and_time_slots_when_current_user_changes() = runTest {
         val eventDao = EventRepositoryHttp_FakeEventDao()
         eventDao.upsertEvents(
             listOf(
@@ -1415,10 +1450,12 @@ class EventRepositoryHttpTest {
                 makeEvent(id = "visible_event", hostId = "host_2"),
             )
         )
+        val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao()
         val db = EventRepositoryHttp_FakeDatabaseService(
             eventDao,
             EventRepositoryHttp_FakeUserDataDao(),
             EventRepositoryHttp_FakeTeamDao(),
+            getEventTimeSlotDao = timeSlotDao,
         )
         val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
         val api = MvpApiClient(
@@ -1435,6 +1472,30 @@ class EventRepositoryHttpTest {
             userRepo,
             coroutineDispatcher = StandardTestDispatcher(testScheduler),
         )
+        advanceUntilIdle()
+        timeSlotDao.entries += EventTimeSlotCacheEntry(
+            eventId = "visible_event",
+            slotId = "slot_session_change",
+            position = 0,
+            dayOfWeek = 1,
+            daysOfWeek = listOf(1),
+            divisions = emptyList(),
+            startTimeMinutes = 9 * 60,
+            endTimeMinutes = 10 * 60,
+            startDate = Instant.parse("2026-01-05T00:00:00Z"),
+            timeZone = "UTC",
+            repeating = true,
+            endDate = null,
+            scheduledFieldId = "field_1",
+            scheduledFieldIds = listOf("field_1"),
+            price = null,
+            requiredTemplateIds = emptyList(),
+            hostRequiredTemplateIds = emptyList(),
+            sourceType = null,
+            rentalBookingId = null,
+            rentalBookingItemId = null,
+            rentalLocked = null,
+        )
 
         userRepo.emitCurrentUser(makeUser("u2"))
         advanceUntilIdle()
@@ -1443,6 +1504,7 @@ class EventRepositoryHttpTest {
 
         assertTrue(events.isEmpty())
         assertEquals(1, eventDao.clearAllEventsWithCrossRefsCalls)
+        assertTrue(timeSlotDao.entries.isEmpty())
     }
 
     @Test
@@ -2132,16 +2194,40 @@ class EventRepositoryHttpTest {
 
         assertEquals(listOf("Tryouts"), tags.map { it.name })
     }
-
     @Test
-    fun getEvent_removes_cached_event_when_server_returns_forbidden() = runTest {
+    fun getEvent_removes_cached_event_and_time_slots_when_server_returns_forbidden() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()
+        val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao()
         eventDao.upsertEvent(makeEvent(id = "e1", hostId = "h1"))
+        timeSlotDao.entries += EventTimeSlotCacheEntry(
+            eventId = "e1",
+            slotId = "slot_1",
+            position = 0,
+            dayOfWeek = 1,
+            daysOfWeek = listOf(1),
+            divisions = emptyList(),
+            startTimeMinutes = 9 * 60,
+            endTimeMinutes = 10 * 60,
+            startDate = Instant.parse("2026-01-05T00:00:00Z"),
+            timeZone = "UTC",
+            repeating = true,
+            endDate = null,
+            scheduledFieldId = "field_1",
+            scheduledFieldIds = listOf("field_1"),
+            price = null,
+            requiredTemplateIds = emptyList(),
+            hostRequiredTemplateIds = emptyList(),
+            sourceType = null,
+            rentalBookingId = null,
+            rentalBookingItemId = null,
+            rentalLocked = null,
+        )
         val db = EventRepositoryHttp_FakeDatabaseService(
             eventDao,
             EventRepositoryHttp_FakeUserDataDao(),
             EventRepositoryHttp_FakeTeamDao(),
+            getEventTimeSlotDao = timeSlotDao,
         )
         val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
         val engine = MockEngine { request ->
@@ -2162,6 +2248,7 @@ class EventRepositoryHttpTest {
         assertTrue(result.isFailure)
         assertEquals(listOf("e1"), eventDao.deleteEventWithCrossRefsCalls)
         assertEquals(null, eventDao.getEventById("e1"))
+        assertTrue(timeSlotDao.entries.isEmpty())
     }
 
     @Test
@@ -2251,6 +2338,9 @@ class EventRepositoryHttpTest {
         val matchDao = EventRepositoryHttp_FakeMatchDao()
         matchDao.upsertMatch(MatchMVP(matchId = 99, eventId = "e1", id = "stale_match"))
         val fieldDao = EventRepositoryHttp_FakeFieldDao()
+        val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao { entries ->
+            eventDao.eventTimeSlotCacheEntries = mapOf("e1" to entries)
+        }
         val managementDao = EventRepositoryHttp_FakeParticipantManagementDao()
         val complianceDao = EventRepositoryHttp_FakeComplianceDao()
         val db = EventRepositoryHttp_FakeDatabaseService(
@@ -2259,6 +2349,7 @@ class EventRepositoryHttpTest {
             EventRepositoryHttp_FakeTeamDao(),
             getMatchDao = matchDao,
             getFieldDao = fieldDao,
+            getEventTimeSlotDao = timeSlotDao,
             getEventParticipantManagementDao = managementDao,
             getEventComplianceDao = complianceDao,
         )
@@ -2422,12 +2513,14 @@ class EventRepositoryHttpTest {
         assertEquals(listOf(listOf("stale_match")), matchDao.deletedMatchIds)
         assertEquals(listOf("field_1"), fieldDao.fields.keys.toList())
         assertEquals(listOf("slot_1"), detail.timeSlots.map { slot -> slot.id })
+        assertEquals(listOf("slot_1"), timeSlotDao.getTimeSlotsByEventId("e1").map(EventTimeSlotCacheEntry::slotId))
         assertEquals("config_1", detail.leagueScoringConfig?.id)
         assertEquals(3, detail.leagueScoringConfig?.pointsForWin)
         assertEquals(listOf("invite_1"), detail.staffInvites.map(Invite::id))
         assertEquals("staff_revision_1", detail.staffRevision)
         assertEquals(1, managementDao.entries.size)
         assertEquals(1, complianceDao.teamSummaries.size)
+        assertEquals(1, db.transactionCalls)
     }
 
     @Test
@@ -4976,12 +5069,14 @@ class EventRepositoryHttpTest {
         val userDao = EventRepositoryHttp_FakeUserDataDao()
         val fieldDao = EventRepositoryHttp_FakeFieldDao()
         val matchDao = EventRepositoryHttp_FakeMatchDao()
+        val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao()
         val database = EventRepositoryHttp_FakeDatabaseService(
             getEventDao = eventDao,
             getUserDataDao = userDao,
             getTeamDao = EventRepositoryHttp_FakeTeamDao(),
             getMatchDao = matchDao,
             getFieldDao = fieldDao,
+            getEventTimeSlotDao = timeSlotDao,
         )
         val start = "2026-07-14T10:00:00Z"
         val end = "2026-07-14T12:00:00Z"
@@ -5137,6 +5232,10 @@ class EventRepositoryHttpTest {
         assertEquals("entry-open", cachedMatch.division)
         assertEquals(listOf(EventUserCrossRef("host-1", "event-created")), userDao.eventCrossRefs)
         assertEquals("slot-created", result.session.canonicalState.timeSlots.single().id)
+        assertEquals(
+            listOf("slot-created"),
+            timeSlotDao.getTimeSlotsByEventId("event-created").map(EventTimeSlotCacheEntry::slotId),
+        )
     }
 
     @Test

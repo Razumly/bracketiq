@@ -246,13 +246,6 @@ export const addRepeatingTimeSlotLocalDays = (
   return localDate ? formatLocalDate(addLocalDays(localDate, days)) : null;
 };
 
-export const getRepeatingTimeSlotLocalWeekday = (
-  value: string,
-): number | null => {
-  const localDate = localDatePartsFromString(value);
-  return localDate ? localDayIndex(localDate) : null;
-};
-
 const normalizeSlotId = (slot: RepeatingTimeSlotIntervalInput): string => {
   const values = [slot.id, slot.$id, slot.key];
   const value = values.find(
@@ -702,8 +695,8 @@ export const repeatingTimeSlotOccurrencesOverlap = (options: {
   secondSlot: RepeatingTimeSlotIntervalInput;
   firstWindow: RepeatingTimeSlotValidationWindow;
   secondWindow: RepeatingTimeSlotValidationWindow;
-  firstOpenEnded: boolean;
-  secondOpenEnded: boolean;
+  isFirstOpenEnded: boolean;
+  isSecondOpenEnded: boolean;
 }): boolean => {
   const overlapStart = new Date(
     Math.max(
@@ -712,11 +705,11 @@ export const repeatingTimeSlotOccurrencesOverlap = (options: {
     ),
   );
   const boundedEnds = [
-    options.firstOpenEnded ? null : options.firstWindow.end,
-    options.secondOpenEnded ? null : options.secondWindow.end,
+    options.isFirstOpenEnded ? null : options.firstWindow.end,
+    options.isSecondOpenEnded ? null : options.secondWindow.end,
   ].filter((value): value is Date => Boolean(value));
   const horizonEnd =
-    options.firstOpenEnded || options.secondOpenEnded
+    options.isFirstOpenEnded || options.isSecondOpenEnded
       ? new Date(
           overlapStart.getTime() +
             REPEATING_TIME_SLOT_VALIDATION_WINDOW_DAYS * DAY_MS,

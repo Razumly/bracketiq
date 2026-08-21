@@ -5,6 +5,7 @@ import { parseDateInput } from '@/server/requestParsing';
 import { getVisibleEventIds } from '@/server/eventVisibility';
 import { canManageScheduledFields } from '@/server/timeSlotAccess';
 import { normalizeEventStaffingResponse } from '@/server/events/eventResponse';
+import { resolveOneTimeTimeSlot } from '@/lib/timeSlotAvailability';
 import { enumerateRepeatingTimeSlotOccurrences } from '@/lib/repeatingTimeSlotAvailability';
 import { repeatingTimeSlotValidationResponse } from '@/server/repeatingTimeSlotValidationResponse';
 
@@ -168,6 +169,25 @@ const shouldIncludeEventType = (eventType: string, parentEvent: string | null): 
   return false;
 };
 
+const resolveOneTimeSlotWindow = (
+  slot: TimeSlotRow,
+  fallbackStart?: Date | null,
+  fallbackEnd?: Date | null,
+): TimeWindow | null => {
+  try {
+    const resolved = resolveOneTimeTimeSlot({
+      ...slot,
+      startDate: slot.startDate ?? fallbackStart ?? null,
+      endDate: slot.endDate ?? fallbackEnd ?? null,
+      timeZone: slot.timeZone ?? 'UTC',
+      repeating: false,
+    }, slot.timeZone ?? 'UTC');
+    return { start: resolved.start, end: resolved.end };
+  } catch {
+    return null;
+  }
+};
+
 const slotOverlapsRange = (
   slot: TimeSlotRow,
   rangeStart: Date,
@@ -175,25 +195,13 @@ const slotOverlapsRange = (
   fallbackStart?: Date | null,
   fallbackEnd?: Date | null,
 ): boolean => {
-  const slotStart = normalizeToDate(slot.startDate ?? fallbackStart ?? null);
-  if (!slotStart) {
-    return false;
-  }
-
-  const startMinutes = typeof slot.startTimeMinutes === 'number' ? slot.startTimeMinutes : null;
-  const endMinutes = typeof slot.endTimeMinutes === 'number' ? slot.endTimeMinutes : null;
   const repeating = slot.repeating !== false;
 
   if (!repeating) {
-    const inferredEnd = normalizeToDate(slot.endDate ?? fallbackEnd ?? null);
-    const derivedEnd = inferredEnd
-      ?? (startMinutes !== null && endMinutes !== null && endMinutes > startMinutes
-        ? new Date(slotStart.getTime() + (endMinutes - startMinutes) * 60 * 1000)
-        : null);
-    if (!derivedEnd || derivedEnd.getTime() <= slotStart.getTime()) {
-      return false;
-    }
-    return rangesOverlap(slotStart, derivedEnd, rangeStart, rangeEnd);
+    const resolved = resolveOneTimeSlotWindow(slot, fallbackStart, fallbackEnd);
+    return Boolean(
+      resolved && rangesOverlap(resolved.start, resolved.end, rangeStart, rangeEnd),
+    );
   }
 
   const resolutionSlot = {
@@ -250,30 +258,20 @@ const buildSlotWindowsInRange = (
   fallbackEnd?: Date | null,
 ): TimeWindow[] => {
   const windows: TimeWindow[] = [];
-  const slotStart = normalizeToDate(slot.startDate ?? fallbackStart ?? null);
-  if (!slotStart) {
-    return windows;
-  }
-
-  const startMinutes = typeof slot.startTimeMinutes === 'number' ? slot.startTimeMinutes : null;
-  const endMinutes = typeof slot.endTimeMinutes === 'number' ? slot.endTimeMinutes : null;
   const repeating = slot.repeating !== false;
 
   if (!repeating) {
-    const inferredEnd = normalizeToDate(slot.endDate ?? fallbackEnd ?? null);
-    const derivedEnd = inferredEnd
-      ?? (startMinutes !== null && endMinutes !== null && endMinutes > startMinutes
-        ? new Date(slotStart.getTime() + (endMinutes - startMinutes) * 60 * 1000)
-        : null);
-    if (!derivedEnd || derivedEnd.getTime() <= slotStart.getTime()) {
+    const resolved = resolveOneTimeSlotWindow(slot, fallbackStart, fallbackEnd);
+    if (
+      !resolved
+      || !rangesOverlap(resolved.start, resolved.end, rangeStart, rangeEnd)
+    ) {
       return windows;
     }
-    if (rangesOverlap(slotStart, derivedEnd, rangeStart, rangeEnd)) {
-      windows.push({
-        start: new Date(Math.max(slotStart.getTime(), rangeStart.getTime())),
-        end: new Date(Math.min(derivedEnd.getTime(), rangeEnd.getTime())),
-      });
-    }
+    windows.push({
+      start: new Date(Math.max(resolved.start.getTime(), rangeStart.getTime())),
+      end: new Date(Math.min(resolved.end.getTime(), rangeEnd.getTime())),
+    });
     return windows;
   }
 

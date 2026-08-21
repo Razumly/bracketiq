@@ -58,7 +58,7 @@ type UseEventSlotControllerOptions = {
   clearErrors: UseFormClearErrors<EventFormValues>;
   eventEnd?: string | null;
   eventId?: string | null;
-  eventNoFixedEndDateTime?: boolean;
+  hasNoFixedEventEnd?: boolean;
   eventStart?: string | null;
   eventSupportsScheduleSlots: boolean;
   eventTimeZone?: string | null;
@@ -109,7 +109,7 @@ export const useEventSlotController = ({
   clearErrors,
   eventEnd,
   eventId,
-  eventNoFixedEndDateTime,
+  hasNoFixedEventEnd,
   eventStart,
   eventSupportsScheduleSlots,
   eventTimeZone,
@@ -214,12 +214,12 @@ export const useEventSlotController = ({
         parentEvent,
         eventStart,
         eventEnd,
-        eventNoFixedEndDateTime,
+        hasNoFixedEventEnd,
         slots: leagueSlots,
       }),
     [
       eventEnd,
-      eventNoFixedEndDateTime,
+      hasNoFixedEventEnd,
       eventStart,
       eventType,
       leagueSlots,
@@ -233,9 +233,9 @@ export const useEventSlotController = ({
         eventId: slotConflictEventId,
         eventStart,
         eventEnd,
-        eventNoFixedEndDateTime,
+        hasNoFixedEventEnd,
       }),
-    [eventEnd, eventNoFixedEndDateTime, eventStart, slotConflictEventId],
+    [eventEnd, hasNoFixedEventEnd, eventStart, slotConflictEventId],
   );
   const { hasPendingExternalConflictChecks, hasExternalSlotConflictWarnings } =
     useMemo(() => {
@@ -363,7 +363,7 @@ export const useEventSlotController = ({
       eventId: payload.eventId,
       eventStart: payload.eventStart,
       eventEnd: payload.eventEnd,
-      eventNoFixedEndDateTime: payload.eventNoFixedEndDateTime,
+      hasNoFixedEventEnd: payload.hasNoFixedEventEnd,
     };
     const slotForms = payload.slots.map(snapshotToSlotForm);
     const eligibleSlots = slotForms.filter((slot) =>
@@ -595,9 +595,11 @@ export const useEventSlotController = ({
       hasExternalRentalField,
       hasImmutableTimeSlots,
       leagueSlots,
+      parentEvent,
       setLeagueSlots,
       singleDivision,
       slotDivisionKeys,
+      slotDivisionLookup,
       slotValidationContext,
       updateLeagueSlots,
     ],

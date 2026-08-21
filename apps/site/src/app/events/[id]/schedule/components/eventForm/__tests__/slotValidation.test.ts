@@ -151,4 +151,34 @@ describe("One-Time Time Slot editor validation", () => {
       }),
     ).toBe("Overlaps with another timeslot in this form.");
   });
+  it("reports a far-future one-time conflict with an open-ended repeat", () => {
+    const repeatingSlot = buildSlot({
+      key: "slot-open-ended",
+      daysOfWeek: [0],
+      startDate: "2026-01-05",
+      endDate: undefined,
+      startTimeMinutes: 10 * 60,
+      endTimeMinutes: 11 * 60,
+      repeating: true,
+    });
+    const oneTimeSlot = buildSlot({
+      key: "slot-future-one-time",
+      startDate: "2029-01-01T10:00:00",
+      endDate: "2029-01-01T11:00:00",
+      startTimeMinutes: 10 * 60,
+      endTimeMinutes: 11 * 60,
+      repeating: false,
+    });
+
+    expect(
+      computeSlotError([repeatingSlot, oneTimeSlot], 0, "LEAGUE", null, {
+        eventStart: new Date("2026-01-01T00:00:00.000Z"),
+      }),
+    ).toBe("Overlaps with another timeslot in this form.");
+    expect(
+      computeSlotError([repeatingSlot, oneTimeSlot], 1, "LEAGUE", null, {
+        eventStart: new Date("2026-01-01T00:00:00.000Z"),
+      }),
+    ).toBe("Overlaps with another timeslot in this form.");
+  });
 });

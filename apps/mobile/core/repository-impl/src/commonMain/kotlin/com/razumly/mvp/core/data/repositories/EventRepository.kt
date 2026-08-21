@@ -320,6 +320,10 @@ class EventRepository(
                 event = canonical.event,
                 expectedEventId = canonical.event.id,
             )
+            roomStore.cacheEventTimeSlots(
+                eventId = persistedEvent.id,
+                timeSlots = canonical.timeSlots,
+            )
             participantSyncCoordinator.persistEventRelations(
                 event = persistedEvent,
                 allowWeeklyParticipantRoster = true,
@@ -355,16 +359,28 @@ class EventRepository(
     ): Result<EventEditorSaveOutcome> = runCatching {
         val response = editorRemoteGateway.save(eventId, command)
         val canonical = EventEditorSessionMapper.canonicalState(response.snapshot)
-        EventEditorSaveOutcome(
-            session = EventEditorSession(
-                snapshot = response.snapshot,
-                canonicalState = canonical,
-                baseline = canonical,
-            ),
-            questionIdMap = response.questionIdMap,
-            staffEmailDelivery = response.staffEmailDelivery,
-            scheduleOutcome = response.scheduleOutcome,
-        )
+        val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
+            ?: error("Event id is required.")
+        databaseService.withTransaction {
+            val persistedEvent = roomStore.cacheAndReadEvent(
+                event = canonical.event,
+                expectedEventId = normalizedEventId,
+            )
+            roomStore.cacheEventTimeSlots(
+                eventId = persistedEvent.id,
+                timeSlots = canonical.timeSlots,
+            )
+            EventEditorSaveOutcome(
+                session = EventEditorSession(
+                    snapshot = response.snapshot,
+                    canonicalState = canonical,
+                    baseline = canonical,
+                ),
+                questionIdMap = response.questionIdMap,
+                staffEmailDelivery = response.staffEmailDelivery,
+                scheduleOutcome = response.scheduleOutcome,
+            )
+        }
     }
 
     override suspend fun scheduleEventEditor(
@@ -412,45 +428,53 @@ class EventRepository(
         val baseEvent = bootstrapEvent ?: cachedEvent ?: event
         val participantSnapshot = bootstrap.participantSnapshot
             ?: EventParticipantsSnapshotResponseDto(event = bootstrap.event)
-        val participantResult = participantSyncCoordinator.mergeParticipantsSnapshot(
-            baseEvent = baseEvent,
-            snapshot = participantSnapshot,
-        )
-        participantSyncCoordinator.persistDetailCaches(
-            eventId = normalizedEventId,
-            occurrence = occurrence,
-            manage = manage,
-            registrations = participantSnapshot.registrations,
-            teamCompliance = bootstrap.teamCompliance?.teams,
-            userCompliance = bootstrap.userCompliance?.users,
-        )
 
-        val fields = bootstrap.fields
-        if (fields.isNotEmpty()) {
-            databaseService.getFieldDao.upsertFields(fields)
+        databaseService.withTransaction {
+            val participantResult = participantSyncCoordinator.mergeParticipantsSnapshot(
+                baseEvent = baseEvent,
+                snapshot = participantSnapshot,
+            )
+            participantSyncCoordinator.persistDetailCaches(
+                eventId = normalizedEventId,
+                occurrence = occurrence,
+                manage = manage,
+                registrations = participantSnapshot.registrations,
+                teamCompliance = bootstrap.teamCompliance?.teams,
+                userCompliance = bootstrap.userCompliance?.users,
+            )
+
+            val fields = bootstrap.fields
+            if (fields.isNotEmpty()) {
+                databaseService.getFieldDao.upsertFields(fields)
+            }
+            roomStore.cacheEventTimeSlots(
+                eventId = normalizedEventId,
+                timeSlots = bootstrap.timeSlots,
+            )
+
+            val matches = bootstrap.matches.mapNotNull { dto -> dto.toMatchOrNull() }
+            persistBootstrapMatches(participantResult.event.id, matches)
+
+            val scoringConfigId = participantResult.event.leagueScoringConfigId
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+            val leagueScoringConfig = if (scoringConfigId != null) {
+                bootstrap.leagueScoringConfig?.toLeagueScoringConfig(scoringConfigId)
+            } else {
+                null
+            }
+            val persistedRelations = roomStore.getEventWithRelations(normalizedEventId)
+
+            EventDetailSyncResult(
+                participants = participantResult.copy(event = persistedRelations.event),
+                matches = matches,
+                fields = fields,
+                timeSlots = persistedRelations.timeSlots,
+                leagueScoringConfig = leagueScoringConfig,
+                staffInvites = bootstrap.staffInvites,
+                staffRevision = bootstrap.staffRevision?.trim()?.takeIf(String::isNotBlank),
+            )
         }
-
-        val matches = bootstrap.matches.mapNotNull { dto -> dto.toMatchOrNull() }
-        persistBootstrapMatches(participantResult.event.id, matches)
-
-        val scoringConfigId = participantResult.event.leagueScoringConfigId
-            ?.trim()
-            ?.takeIf(String::isNotBlank)
-        val leagueScoringConfig = if (scoringConfigId != null) {
-            bootstrap.leagueScoringConfig?.toLeagueScoringConfig(scoringConfigId)
-        } else {
-            null
-        }
-
-        EventDetailSyncResult(
-            participants = participantResult,
-            matches = matches,
-            fields = fields,
-            timeSlots = bootstrap.timeSlots,
-            leagueScoringConfig = leagueScoringConfig,
-            staffInvites = bootstrap.staffInvites,
-            staffRevision = bootstrap.staffRevision?.trim()?.takeIf(String::isNotBlank),
-        )
     }
 
     override suspend fun getEventParticipantsSummary(

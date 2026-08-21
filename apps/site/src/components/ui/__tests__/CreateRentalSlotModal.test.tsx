@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
+import type { Field, TimeSlot } from '@/types';
 import CreateRentalSlotModal from '../CreateRentalSlotModal';
 import { getIndexedEntityColorPair } from '@/lib/entityColors';
 
@@ -156,6 +157,62 @@ describe('CreateRentalSlotModal multi-field creation', () => {
           endTimeMinutes: 60,
           endDate: null,
           repeating: true,
+        }),
+      }));
+    });
+  });
+
+  it('uses the persisted slot time zone when editing a calendar date', async () => {
+    const field: Field = {
+      $id: 'field_tokyo',
+      name: 'Tokyo Court',
+      location: '',
+      lat: 0,
+      long: 0,
+      rentalSlotIds: ['slot_tokyo'],
+      rentalSlots: [],
+    };
+    const slot: TimeSlot = {
+      $id: 'slot_tokyo',
+      dayOfWeek: 0,
+      daysOfWeek: [0],
+      startDate: '2030-06-09T15:00:00.000Z',
+      endDate: null,
+      startTimeMinutes: 9 * 60,
+      endTimeMinutes: 10 * 60,
+      timeZone: 'Asia/Tokyo',
+      repeating: true,
+    };
+    const onSubmitOverride = jest.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <MantineProvider>
+        <CreateRentalSlotModal
+          opened
+          onClose={() => undefined}
+          field={field}
+          slot={slot}
+          onSubmitOverride={onSubmitOverride}
+          organizationId={null}
+          organizationHasStripeAccount={false}
+        />
+      </MantineProvider>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Save Rental Slot' }));
+
+    await waitFor(() => {
+      expect(onSubmitOverride).toHaveBeenCalledWith(expect.objectContaining({
+        payload: expect.objectContaining({
+          dayOfWeek: 0,
+          startDate: '2030-06-10T09:00:00',
+          timeZone: 'Asia/Tokyo',
+        }),
+        updatePayload: expect.objectContaining({
+          dayOfWeek: 0,
+          startDate: '2030-06-10T09:00:00',
+          timeZone: 'Asia/Tokyo',
         }),
       }));
     });

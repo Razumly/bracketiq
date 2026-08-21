@@ -423,9 +423,7 @@ class DefaultEventDetailComponent(
     override val selectedEvent = relationStateCoordinator.selectedEvent
 
     private val bootstrapResourcesCoordinator = EventBootstrapResourcesCoordinator(
-        selectedEvent = selectedEvent,
         eventRelations = eventRelations,
-        fieldRepository = fieldRepository,
         eventRepository = eventRepository,
         scope = scope,
     )

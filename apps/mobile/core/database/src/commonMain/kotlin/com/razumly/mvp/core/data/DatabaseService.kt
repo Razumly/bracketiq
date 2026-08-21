@@ -7,6 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.EventComplianceDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventParticipantManagementDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
+import com.razumly.mvp.core.data.dataTypes.daos.EventTimeSlotDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.InviteDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
@@ -33,6 +34,8 @@ interface DatabaseService {
     val getFieldDao: FieldDao
     val getUserDataDao: UserDataDao
     val getEventDao: EventDao
+    val getEventTimeSlotDao: EventTimeSlotDao
+        get() = error("EventTimeSlotDao is not configured.")
     val getEventRegistrationDao: EventRegistrationDao
     val getEventParticipantManagementDao: EventParticipantManagementDao
         get() = error("EventParticipantManagementDao is not configured.")
