@@ -1,20 +1,20 @@
 # Workstream execution
 
-Use this runbook for concurrent issue implementation in the BracketIQ monorepo. A worker owns one prepared issue branch. This runbook defines issue selection, worktree isolation, integration, and test database isolation.
+Use this runbook for concurrent issue implementation in the BracketIQ monorepo. A worker owns one prepared Workstream branch. A Workstream may contain a parallel batch of related issues. This runbook defines issue selection, worktree isolation, integration, and test database isolation.
 
 ## Terms and ownership
 
-- A **Workstream** is an ownership lease and an integration lane. It is not a long-lived branch.
+- A **Workstream** is an ownership lease and an integration lane. It can carry multiple related issues in parallel.
 - A **worker** owns one Workstream at a time.
-- A worker has at most one issue in progress.
+- A worker may work on multiple issues in one Workstream when the coordinator approves the batch and native blockers are clear.
 - A **coordinator** owns the clean `main` worktree.
 - The coordinator creates isolated worktrees.
-- The coordinator integrates completed issue branches.
+- The coordinator integrates completed Workstream branches.
 - A worker can reuse one isolated worktree.
-- A worker uses a fresh branch for each issue.
+- A Workstream batch uses one fresh branch. Keep commits and close comments traceable to their issue.
 - A worker uses a fresh test database for each database-backed issue.
 
-The coordinator sequences issues that change the same API, Prisma, Room, or fixture contract. A native issue blocker represents a real implementation prerequisite. The Workstream limit controls likely merge overlap.
+The same Workstream branch may carry multiple issue slices. The coordinator sequences issues that change the same API, Prisma, Room, or fixture contract. A native issue blocker represents a real implementation prerequisite. The Workstream limit controls likely merge overlap.
 
 ## Ready issue gate
 
@@ -26,69 +26,96 @@ An issue is ready when all these conditions are true:
 - The issue has no assignee.
 - The project Status is `Todo`.
 - The issue has one Workstream value.
-- No other issue in that Workstream has Status `In progress`.
 - The issue has no sub-issues.
 
 Treat every issue with sub-issues as a tracking issue.
 
-Select the first ready issue in project order.
+Select the first ready issue in project order. The coordinator may add other ready issues in the same Workstream to a parallel batch when their native blockers are clear and their contracts can share one branch.
 
-Claim it with `gh issue edit <number> --add-assignee @me` before any implementation work.
+Claim each selected issue with `gh issue edit <number> --add-assignee @me` before implementing that issue.
 
-Set its project Status to `In progress`.
+Set each selected issue's project Status to `In progress`.
 
 Return an issue with a missing decision to triage. Apply `needs-info` or `needs-triage` as specified in `triage-labels.md`.
 
 ## Issue lifecycle
 
-1. The coordinator assigns one Workstream to one worker.
-2. The worker claims the first ready issue in that Workstream.
+1. The coordinator assigns one Workstream to one worker and declares the issue batch.
+2. The worker claims the first ready issue in that Workstream. The worker claims each additional approved issue before implementing it.
 3. The coordinator prepares an isolated worktree from the current clean `main` branch.
-4. The coordinator creates the issue branch in the isolated worktree.
+4. The coordinator creates the Workstream branch in the isolated worktree.
    - Create the branch from the current `main`.
-   - Name the branch `issue/<number>-<short-name>`.
+   - Name the branch `workstream/<short-name>`.
    - Use an existing repository branch convention when one exists.
+   - Keep every issue in the approved batch on this branch.
 
    Git worktree tooling can complete steps 3 and 4 in one command.
 
-5. The worker implements the complete issue.
+5. The worker implements each issue in the batch.
    - Read the complete issue body.
    - Read all issue comments.
    - Record every changed API, Prisma, Room, or fixture contract before another issue consumes it.
    - Run focused type checks during implementation.
    - Run focused tests during implementation.
-   - Commit the implementation.
-6. **Issue-branch synchronization**
+   - Keep commits and changed files traceable to the issue that owns them.
+6. **Workstream synchronization**
    1. The coordinator confirms that `main` is clean.
    2. The coordinator confirms that `main` is current.
-   3. The worker merges the current local `main` branch into the issue branch.
+   3. The worker merges the current local `main` into the Workstream branch before the final issue gate.
 7. The worker resolves every merge conflict inside the isolated worktree.
    - Use `/resolving-merge-conflicts`.
-   - Commit the merge resolution on the issue branch.
-8. The worker completes the final issue gate.
+   - Commit the merge resolution on the Workstream branch.
+8. The worker completes the final issue gate for every issue in the batch.
    - Rerun the affected type checks after conflict resolution.
    - Rerun the affected tests after conflict resolution.
    - Run each complete suite that covers a changed site or mobile contract once.
-   - Run `/code-review` against the pre-issue base.
-   - Address every review finding.
+   - Run `/code-review` against the batch base and each issue specification.
+   - Address every review finding before closing the affected issue.
    - Rerun each affected check after a review fix.
    - Commit the final changes.
-   - Add the close comment when the acceptance criteria are complete.
-   - Include the outcome, verification, available commit reference, and changed-contract notes in the close comment.
-   - Set the project Status to `Done`.
-   - Close the issue.
-   - Defer the close comment, Status change, and closure only when an acceptance criterion requires integration.
-9. The coordinator integrates the issue branch with `git merge --ff-only <issue-branch>`.
+   - Add a close comment when an issue's acceptance criteria are complete.
+   - Include the outcome, verification, available commit reference, and changed-contract notes in each close comment.
+   - Set the completed issue's project Status to `Done`.
+   - Close the completed issue.
+   - Defer a close comment, Status change, or closure only when an acceptance criterion requires integration.
+9. The coordinator integrates the Workstream branch with `git merge --ff-only <workstream-branch>`.
    - Return the branch to step 6 when `main` moved.
    - Run the integrated checks.
-   - Complete the deferred close actions after every integration acceptance criterion passes.
-10. The worker starts the next issue from the new `main`.
-    - Wait until the prior branch is integrated.
+   - Complete deferred close actions after every integration acceptance criterion passes.
+10. The worker starts the next batch from the new `main`.
+    - Wait until the prior Workstream branch is integrated.
     - Return to the ready issue gate.
-    - Reuse the isolated worktree only after the prior branch is inactive.
+    - Reuse the isolated worktree only after the prior Workstream is inactive.
 
-The coordinator keeps issue-branch conflict resolution off `main`. A successful fast-forward proves that the worker resolved conflicts against the integration state.
+The coordinator keeps Workstream conflict resolution off `main`. A successful fast-forward proves that the worker resolved conflicts against the integration state.
 
 ## Test database isolation
 
 Before preparing test storage, read [Workstream test database isolation](workstream-database-isolation.md) when an issue needs Prisma-backed tests, E2E seeding, backend-calling mobile tests, or Room persistence tests.
+
+## Review record
+
+This record captures the two-axis review of `main...workstream/document-versions` for [#99](https://github.com/Razumly/bracketiq/issues/99) and [#100](https://github.com/Razumly/bracketiq/issues/100). It records findings for later issue work. It does not change application code.
+
+### Workflow decision
+
+- The review's one-issue and fresh-branch finding is not a defect. A Workstream may carry multiple related issues in parallel on one branch when the coordinator approves the batch, native blockers are clear, and each issue remains traceable.
+
+### Open standards findings
+
+- `plans/immutable-document-template-versions-execplan.md` and related Progress records do not fully describe the combined workstream state.
+- `boldsignWebhookSync.ts` still performs Satisfaction work inside a signer loop. A later failure can leave an incomplete related save.
+- The import route must validate every referenced User, Event or Team scope, and File against the Organization before writing.
+- New cross-boundary row mappings need typed row interfaces. New Boolean names should follow the `is*` or `has*` convention.
+- The UI must fail explicitly when Version data is missing. It must not invent Version numbers or placeholder notifications.
+- Review smells remain: unrelated billing change, repeated evidence context and scope logic, a provider edit-url middle man, and primitive status and normalization names.
+
+### Open specification findings
+
+- [#99](https://github.com/Razumly/bracketiq/issues/99) lacks persistence proof for frozen assignments, the `030000` migration trigger and backfill, and a real rejected material update.
+- [#100](https://github.com/Razumly/bracketiq/issues/100) lacks complete no-loss migration coverage for existing evidence fields and context.
+- The customer-bill label change is outside the Version and evidence specifications.
+- Frozen BoldSign content can still mutate through an existing provider edit session and provider ID.
+- The Satisfaction backfill can mark incomplete multi-signer evidence as complete.
+- Imported evidence can infer a Signer from the Document Subject when the signer is unknown.
+- Evidence with a missing stored Organization can be skipped during migration and later fail in accepted completion paths.
