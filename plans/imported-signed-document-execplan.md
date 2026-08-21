@@ -21,6 +21,9 @@ This plan starts with the data expansion required for that behavior. The first m
 - [x] Validate the schema, generated client, focused tests, and site checks.
 - [x] Run the two-axis code review against the pre-issue base and address findings.
 - [x] Commit the issue #98 implementation and publish the issue outcome.
+- [ ] (2026-08-21T17:20Z) Implement the review handoff for immutable Versions, evidence provenance, Satisfaction, ownership, atomicity, and cross-cutting cleanup.
+- [ ] (2026-08-21T17:20Z) Run focused tests, type checks, the full site suite, and a two-axis review against `main`.
+- [ ] (2026-08-21T17:20Z) Commit the review remediation and integrate the workstream into `main`.
 
 ## Surprises & Discoveries
 
@@ -205,7 +208,7 @@ Each later milestone must keep the backend HTTP interface compatible with instal
 
 ## Downstream review handoff
 
-Review scope: `main...workstream/document-versions` through `0e0d3b097`, covering issue #99 and issue #100. This section is a handoff for the next Workstream. The findings are not fixed here.
+Review scope: `main...workstream/document-versions` through `0e0d3b097`, covering issue #99 and issue #100. This section records the remediation now in progress. Each item remains traceable to a focused test or a documented cross-cutting correction.
 
 ### Issue #99: immutable Version enforcement
 
@@ -231,4 +234,26 @@ Review scope: `main...workstream/document-versions` through `0e0d3b097`, coverin
 - [ ] Remove duplicated evidence context and scope logic. Remove provider edit-url middle-man helpers when the real target can be called directly.
 - [ ] Keep unrelated customer-billing label changes outside the Version and evidence work.
 
-2026-08-20: Added this downstream review handoff after the two-axis review. Another agent can claim #99 or #100 and consume the unchecked items above.
+2026-08-21T17:20Z: Started the review remediation in the existing clean document workstream. The source branch is an ancestor of `main` plus the reviewed implementation; the remediation will remain isolated until final checks pass.
+### 2026-08-21 two-axis review findings
+
+Review target: local `main` at `445b9d3dc`, compared with `4705ea6df`. The review found the following open items. Do not close the related issue until each item has a focused fix and proof.
+
+#### Standards
+
+- [ ] Fix the billing permission bypass in `apps/site/src/app/api/organizations/[id]/bills/route.ts`. Await both permission checks. Keep this unrelated billing workflow outside this Workstream.
+- [ ] Preserve the installed mobile template-list contract in `apps/site/src/app/api/organizations/[id]/templates/route.ts`.
+- [ ] Move customer billing and document HTTP calls from `apps/site/src/app/organizations/[id]/page.tsx` into service modules.
+- [ ] Rename new Boolean state fields to use the repository `is*` or `has*` convention.
+- [ ] Consolidate repeated pending evidence writes across event, rental, team, guest, and customer routes.
+
+#### Specification
+
+- [ ] #99: Prevent an existing BoldSign edit session or provider template ID from changing frozen content. Add a rejection or quarantine path and a regression test.
+- [ ] #100: Repair uniquely owned ownerless evidence before Satisfaction backfill. Reject only ambiguous rows. Add fixture coverage.
+- [ ] #100/#101: Track every contributing evidence row or recompute Satisfaction when a later combined-signer row is voided.
+- [ ] #101: Derive required signer roles for guest TEXT and imported completion paths. Add combined-signer tests.
+- [ ] #101: Invalidate active Satisfaction after terminal BoldSign failures. Add replay and failure tests.
+- [ ] Scope: Move the customer-billing workflow to a separate change.
+
+The issue comments for #97, #99, #100, and #101 record this review. The existing unchecked remediation items above remain the execution checklist.
