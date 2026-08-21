@@ -319,3 +319,72 @@ _Avoid_: Official
 **Staffing Priority**:
 The host's choice among Full Coverage Required, Team Coverage Required, Official Coverage Required, Best Available Coverage, and Full Coverage with Conflicts Allowed. It determines which officiating constraints can leave a Match unscheduled.
 _Avoid_: Official scheduling mode, staffing mode
+
+
+**Imported Signed Document**:
+An externally completed signed document that authorized Organization staff attach to an existing Document Subject. Its Imported provenance records the external origin, and it satisfies only the document requirement scope selected during import.
+_Avoid_: BoldSign-verified document, BracketIQ-verified document
+
+**Document Subject**:
+The existing customer whose document requirement an Imported Signed Document satisfies. A Document Subject is not necessarily a Signer.
+_Avoid_: Signer, Uploader
+
+**Signer**:
+A person whose signature appears in a signed document.
+_Avoid_: Document Subject, Uploader
+
+**Uploader**:
+The authorized Organization staff member who imports an Imported Signed Document and attests to its provenance.
+_Avoid_: Signer, Document Subject
+
+**Document Requirement**:
+An Organization-defined obligation for a Document Subject to provide a completed document. One Document Requirement keeps its identity across its Document Template Versions.
+_Avoid_: Document Template Version, file
+
+**Document Template Version**:
+One immutable content and signing-configuration version of a Document Requirement. A material change creates a new version.
+_Avoid_: Document Requirement, editable template
+
+**Document Requirement Satisfaction**:
+The conclusion that one signed document completes every required signer role for one Document Subject within one Organization-wide or Event Participation scope. An Imported Signed Document can establish this conclusion through Uploader attestation without structured Signer identities.
+_Avoid_: Signer record, upload
+
+**Voided Imported Signed Document**:
+An Imported Signed Document whose attestation was withdrawn to correct an error. It remains in the evidence history but no longer establishes Document Requirement Satisfaction.
+_Avoid_: Deleted document, edited document
+
+**Event Participation**:
+A User's participation in one Event through direct registration or membership on one or more registered Teams. It is specific to the User and does not satisfy requirements for teammates.
+_Avoid_: Event Registration, Team Registration
+
+**Document Requirement Assignment**:
+An association that pins one immutable Document Template Version to an Organization-wide or Event scope. A new version does not change an existing assignment.
+_Avoid_: Current template, mutable requirement
+
+**Document Validity Policy**:
+The Document Requirement rule that determines how long a Document Requirement Satisfaction remains valid. It can be Never, a fixed expiration date, or a calendar duration after signing, applies equally to all signing sources, and uses the Organization time zone. Calendar arithmetic clamps a missing target day to the last day of its month.
+_Avoid_: Per-upload expiration
+
+**Document Import Attestation**:
+The Uploader's immutable, versioned assertion that an Imported Signed Document is complete for its Document Subject, Document Template Version, and scope and contains all required signatures.
+_Avoid_: Signature verification, document approval
+
+**Document Erasure Tombstone**:
+The minimal audit record retained after an authorized process erases document evidence. It records the erasure authority, actor, reason category, and time without retaining document content or document-derived personal data.
+_Avoid_: Redacted document, retained file
+
+**Duplicate Imported Signed Document**:
+An Imported Signed Document with the same file content, Document Subject, Document Template Version, and scope as an existing import. It cannot create a second evidence record.
+_Avoid_: Matching file name
+
+**Document Review**:
+A Document Subject's request for authorized Organization staff to examine imported evidence. Under Review does not withdraw Document Requirement Satisfaction until the review resolves with a void or another outcome.
+_Avoid_: Void, erasure
+
+**Document Import Batch**:
+A reviewed group of normalized import rows covered by one Document Import Attestation. Each committed row remains independently traceable and retryable.
+_Avoid_: Single transaction
+
+**Document Audit Trail**:
+The append-only application history of document import, attestation, review, void, and erasure actions. It provides traceability but is not a tamper-proof ledger.
+_Avoid_: Tamper-proof audit log

@@ -2820,6 +2820,8 @@ model Organizations {
   taxResponsibilityAcceptedAt        DateTime?
   taxResponsibilityAcceptedByUserId  String?
   taxResponsibilityAgreementVersion  String?
+  documentRequirements               DocumentRequirements[] @relation("OrganizationDocumentRequirements")
+  templateDocuments                  TemplateDocuments[]   @relation("OrganizationTemplateDocuments")
 
   @@index([verificationStatus])
   @@index([verificationReviewStatus])
@@ -3286,9 +3288,13 @@ model DocumentRequirements {
   description    String?
   createdBy      String?
   status         String?
+  organization   Organizations       @relation("OrganizationDocumentRequirements", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "DocumentRequirements_organizationId_fkey")
+  versions       TemplateDocuments[] @relation("DocumentRequirementVersions")
 
+  @@unique([id, organizationId], map: "DocumentRequirements_id_organizationId_key")
   @@index([organizationId])
 }
+
 
 model TemplateDocuments {
   id                   String                     @id
@@ -3296,20 +3302,22 @@ model TemplateDocuments {
   updatedAt            DateTime?
   templateId           String?
   documentRequirementId String
-  versionSequence      Int                        @default(1)
-  frozenAt             DateTime?
+  versionSequence      Int
+  frozenAt              DateTime?
   type                 TemplateDocumentsTypeEnum?
   organizationId       String
   title                String
   description          String?
-  signOnce             Boolean?
+  signOnce              Boolean?
   requiredSignerType   String                     @default("PARTICIPANT")
   status               String?
-  createdBy            String?
+  createdBy             String?
   roleIndex            Int?
   roleIndexes          Int[]
   signerRoles          String[]
   content              String?
+  organization         Organizations       @relation("OrganizationTemplateDocuments", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "TemplateDocuments_organizationId_fkey")
+  documentRequirement  DocumentRequirements @relation("DocumentRequirementVersions", fields: [documentRequirementId, organizationId], references: [id, organizationId], onDelete: Restrict, onUpdate: Cascade, map: "TemplateDocuments_documentRequirement_organization_fkey")
 
   @@unique([documentRequirementId, versionSequence])
   @@index([documentRequirementId])

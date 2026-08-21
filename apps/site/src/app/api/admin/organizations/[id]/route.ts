@@ -47,6 +47,13 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
     const now = new Date();
     await prisma.$transaction(async (tx: any) => {
+      await tx.templateDocuments.deleteMany({
+        where: { organizationId },
+      });
+      await tx.documentRequirements.deleteMany({
+        where: { organizationId },
+      });
+
       await Promise.all([
         tx.staffMembers?.deleteMany?.({
           where: { organizationId },
@@ -58,12 +65,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
           where: { organizationId },
         }),
         tx.fields?.deleteMany?.({
-          where: { organizationId },
-        }),
-        tx.templateDocuments?.deleteMany?.({
-          where: { organizationId },
-        }),
-        tx.documentRequirements?.deleteMany?.({
           where: { organizationId },
         }),
         tx.signedDocuments?.updateMany?.({

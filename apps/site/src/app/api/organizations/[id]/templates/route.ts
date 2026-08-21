@@ -18,6 +18,7 @@ import {
   normalizeRequiredSignerType,
   type TemplateRequiredSignerType,
 } from '@/lib/templateSignerTypes';
+import { createDocumentRequirementWithVersion } from '@/server/documents/documentTemplateVersions';
 
 export const dynamic = 'force-dynamic';
 
@@ -170,43 +171,35 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const documentRequirementId = crypto.randomUUID();
     const templateDocumentId = crypto.randomUUID();
-    const record = await prisma.$transaction(async (tx) => {
-      await tx.documentRequirements.create({
-        data: {
-          id: documentRequirementId,
-          organizationId: id,
-          title,
-          description,
-          createdBy,
-          status: 'ACTIVE',
-          createdAt: now,
-          updatedAt: now,
-        },
-      });
-
-      return tx.templateDocuments.create({
-        data: {
-          id: templateDocumentId,
-          templateId: null,
-          documentRequirementId,
-          versionSequence: 1,
-          type: 'TEXT',
-          organizationId: id,
-          title,
-          description,
-          signOnce,
-          requiredSignerType,
-          status: 'ACTIVE',
-          createdBy,
-          roleIndex: 0,
-          roleIndexes: [],
-          signerRoles: [],
-          content,
-          createdAt: now,
-          updatedAt: now,
-        },
-      });
-    });
+    const record = await prisma.$transaction((tx) => createDocumentRequirementWithVersion(tx, {
+      requirement: {
+        id: documentRequirementId,
+        organizationId: id,
+        title,
+        description,
+        createdBy,
+        status: 'ACTIVE',
+        createdAt: now,
+        updatedAt: now,
+      },
+      version: {
+        id: templateDocumentId,
+        templateId: null,
+        type: 'TEXT',
+        title,
+        description,
+        signOnce,
+        requiredSignerType,
+        status: 'ACTIVE',
+        createdBy,
+        roleIndex: 0,
+        roleIndexes: [],
+        signerRoles: [],
+        content,
+        createdAt: now,
+        updatedAt: now,
+      },
+    }));
 
     return NextResponse.json({ template: record }, { status: 201 });
   }

@@ -35,6 +35,7 @@ const prismaMock = {
     findUnique: jest.fn(),
   },
   $transaction: jest.fn(),
+  $queryRaw: jest.fn(),
 };
 
 const findLatestBoldSignOperationMock = jest.fn();
@@ -82,6 +83,7 @@ jest.mock('@/lib/boldsignSyncOperations', () => ({
 import {
   parseBoldSignWebhookEvent,
   processBoldSignWebhookEvent,
+  projectTemplateProjectionFromOperation,
 } from '@/lib/boldsignWebhookSync';
 
 describe('boldsignWebhookSync operation status projection', () => {
@@ -363,8 +365,8 @@ describe('boldsignWebhookSync operation status projection', () => {
     );
   });
 
-  it('projects the operation Requirement ID onto a PDF Version', async () => {
-    findLatestBoldSignOperationMock.mockResolvedValue({
+  it('projects the operation Requirement ID through the normalized template projection seam', async () => {
+    const operation = {
       id: 'op_template_1',
       operationType: 'TEMPLATE_CREATE',
       status: 'PENDING_WEBHOOK',
@@ -380,28 +382,23 @@ describe('boldsignWebhookSync operation status projection', () => {
         type: 'PDF',
         roles: [{ roleIndex: 1, signerRole: 'participant' }],
       },
+    };
+    prismaMock.documentRequirements.upsert.mockResolvedValue({
+      id: 'requirement_1',
+      organizationId: 'org_1',
     });
+    prismaMock.$queryRaw.mockResolvedValue([{ id: 'requirement_1' }]);
     prismaMock.templateDocuments.findFirst.mockResolvedValue(null);
-    prismaMock.documentRequirements.upsert.mockResolvedValue({ id: 'requirement_1' });
     prismaMock.templateDocuments.create.mockResolvedValue({ id: 'version_1' });
 
-    const event = parseBoldSignWebhookEvent({
-      payload: {
-        eventType: 'TemplateCreated',
-        data: {
-          object: {
-            templateId: 'bold_template_1',
-            status: 'Active',
-          },
-        },
-      },
-      rawBody: JSON.stringify({ eventType: 'TemplateCreated', templateId: 'bold_template_1' }),
-      headerEventType: 'TemplateCreated',
+    const projectedTemplate = await projectTemplateProjectionFromOperation({
+      templateId: 'bold_template_1',
+      operation,
+      status: 'ACTIVE',
     });
 
-    await processBoldSignWebhookEvent(event);
+    expect(projectedTemplate).toEqual({ id: 'version_1' });
     expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
-
     expect(prismaMock.documentRequirements.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'requirement_1' },
@@ -417,6 +414,7 @@ describe('boldsignWebhookSync operation status projection', () => {
         data: expect.objectContaining({
           id: 'version_1',
           documentRequirementId: 'requirement_1',
+          organizationId: 'org_1',
           versionSequence: 1,
         }),
       }),

@@ -2,15 +2,19 @@
 
 import { NextRequest } from 'next/server';
 
+const transactionPrisma = {
+  documentRequirements: {
+    upsert: jest.fn(),
+  },
+  templateDocuments: {
+    findFirst: jest.fn(),
+    create: jest.fn(),
+  },
+  $queryRaw: jest.fn(),
+};
 const mockPrisma = {
   organizations: {
     findUnique: jest.fn(),
-  },
-  documentRequirements: {
-    create: jest.fn(),
-  },
-  templateDocuments: {
-    create: jest.fn(),
   },
   $transaction: jest.fn(),
 };
@@ -42,9 +46,20 @@ describe('POST /api/organizations/[id]/templates', () => {
     mockRequireSession.mockResolvedValue({ userId: 'staff_1' });
     mockHasOrgPermission.mockResolvedValue(true);
     mockPrisma.organizations.findUnique.mockResolvedValue({ id: 'org_1' });
-    mockPrisma.documentRequirements.create.mockImplementation(({ data }: { data: Record<string, unknown> }) => data);
-    mockPrisma.templateDocuments.create.mockImplementation(({ data }: { data: Record<string, unknown> }) => data);
-    mockPrisma.$transaction.mockImplementation(async (callback: (tx: typeof mockPrisma) => unknown) => callback(mockPrisma));
+    transactionPrisma.documentRequirements.upsert.mockImplementation(
+      ({ create }: { create: Record<string, unknown> }) => ({
+        id: create.id,
+        organizationId: create.organizationId,
+      }),
+    );
+    transactionPrisma.templateDocuments.findFirst.mockResolvedValue(null);
+    transactionPrisma.$queryRaw.mockResolvedValue([{ id: 'locked_requirement' }]);
+    transactionPrisma.templateDocuments.create.mockImplementation(
+      ({ data }: { data: Record<string, unknown> }) => data,
+    );
+    mockPrisma.$transaction.mockImplementation(
+      async (callback: (tx: typeof transactionPrisma) => unknown) => callback(transactionPrisma),
+    );
   });
 
   it('creates the first text version with one stable requirement in one transaction', async () => {
@@ -66,10 +81,17 @@ describe('POST /api/organizations/[id]/templates', () => {
     );
 
     expect(response.status).toBe(201);
-    const requirementData = mockPrisma.documentRequirements.create.mock.calls[0][0].data;
-    const versionData = mockPrisma.templateDocuments.create.mock.calls[0][0].data;
+    const requirementData = transactionPrisma.documentRequirements.upsert.mock.calls[0][0].create;
+    const versionData = transactionPrisma.templateDocuments.create.mock.calls[0][0].data;
 
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(transactionPrisma.documentRequirements.upsert).toHaveBeenCalledTimes(1);
+    expect(transactionPrisma.templateDocuments.findFirst).toHaveBeenCalledWith({
+      where: { documentRequirementId: requirementData.id },
+      orderBy: { versionSequence: 'desc' },
+      select: { versionSequence: true },
+    });
+    expect(transactionPrisma.$queryRaw).toHaveBeenCalledTimes(1);
     expect(requirementData).toEqual(expect.objectContaining({
       organizationId: 'org_1',
       title: 'Photo waiver',

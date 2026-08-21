@@ -17,9 +17,15 @@ SET
     WHEN "type" = 'TEAM' AND 'HEAD_COACH' = ANY(COALESCE("staffTypes", ARRAY[]::TEXT[])) THEN 'team_head_coach'
     WHEN "type" = 'TEAM' AND 'ASSISTANT_COACH' = ANY(COALESCE("staffTypes", ARRAY[]::TEXT[])) THEN 'team_assistant_coach'
     ELSE 'player'
-  END,
-  "isAssigned" = COALESCE("isAssigned", false)
-WHERE "role" IS NULL OR "isAssigned" IS NULL;
+  END
+WHERE "role" IS NULL;
+
+UPDATE "Invites"
+SET "isAssigned" = CASE
+  WHEN UPPER("type") = 'TEAM' AND "userId" IS NULL THEN true
+  ELSE false
+END
+WHERE "isAssigned" IS NULL;
 
 -- Finalize the Prisma contract after all existing rows have safe values.
 ALTER TABLE "Invites"

@@ -297,6 +297,7 @@ type OrganizationBillPaymentSummary = {
   sequence: number;
   dueDate?: string;
   amountCents: number;
+  paidAmountCents: number;
   status?: string;
   paidAt?: string;
   paymentIntentId?: string | null;
@@ -312,6 +313,8 @@ type OrganizationBillSummary = {
   ownerId: string;
   ownerName: string;
   eventId?: string | null;
+  sourceType?: string | null;
+  label?: string;
   eventName?: string;
   parentBillId?: string | null;
   totalAmountCents: number;
@@ -516,6 +519,11 @@ const mapOrganizationBillRow = (row: Record<string, any>): OrganizationBillSumma
       sequence: Number.isFinite(Number(paymentRow?.sequence)) ? Number(paymentRow.sequence) : 0,
       dueDate: typeof paymentRow?.dueDate === 'string' ? paymentRow.dueDate : undefined,
       amountCents: Number.isFinite(Number(paymentRow?.amountCents)) ? Math.max(0, Math.round(Number(paymentRow.amountCents))) : 0,
+      paidAmountCents: Number.isFinite(Number(paymentRow?.paidAmountCents))
+        ? Math.max(0, Math.round(Number(paymentRow.paidAmountCents)))
+        : paymentRow?.status === 'PAID'
+          ? Number.isFinite(Number(paymentRow?.amountCents)) ? Math.max(0, Math.round(Number(paymentRow.amountCents))) : 0
+          : 0,
       status: typeof paymentRow?.status === 'string' ? paymentRow.status : undefined,
       paidAt: typeof paymentRow?.paidAt === 'string' ? paymentRow.paidAt : undefined,
       paymentIntentId: typeof paymentRow?.paymentIntentId === 'string' ? paymentRow.paymentIntentId : null,
@@ -551,7 +559,9 @@ const mapOrganizationBillRow = (row: Record<string, any>): OrganizationBillSumma
     ownerId: String(row?.ownerId ?? ''),
     ownerName: typeof row?.ownerName === 'string' && row.ownerName.trim() ? row.ownerName.trim() : String(row?.ownerId ?? ''),
     eventId: typeof row?.eventId === 'string' ? row.eventId : null,
+    sourceType: typeof row?.sourceType === 'string' ? row.sourceType : null,
     eventName: typeof row?.eventName === 'string' ? row.eventName : undefined,
+    label: typeof row?.label === 'string' && row.label.trim() ? row.label.trim() : undefined,
     parentBillId: typeof row?.parentBillId === 'string' ? row.parentBillId : null,
     totalAmountCents,
     paidAmountCents: Number.isFinite(Number(row?.paidAmountCents)) ? Math.max(0, Math.round(Number(row.paidAmountCents))) : 0,
@@ -1205,6 +1215,17 @@ function OrganizationDetailContent() {
   const [cancellingCustomerPaymentId, setCancellingCustomerPaymentId] = useState<string | null>(null);
   const [cancellingCustomerPlanBillId, setCancellingCustomerPlanBillId] = useState<string | null>(null);
   const [previewSignedTextDocument, setPreviewSignedTextDocument] = useState<OrganizationUserDocumentSummary | null>(null);
+  const [customerBillModalOpen, setCustomerBillModalOpen] = useState(false);
+  const [editingCustomerBill, setEditingCustomerBill] = useState<OrganizationBillSummary | null>(null);
+  const [customerBillLabel, setCustomerBillLabel] = useState('Manual bill');
+  const [customerBillAmount, setCustomerBillAmount] = useState<number | string>('');
+  const [customerBillPaidAmount, setCustomerBillPaidAmount] = useState<number | string>(0);
+  const [customerBillDueDate, setCustomerBillDueDate] = useState('');
+  const [creatingCustomerBill, setCreatingCustomerBill] = useState(false);
+  const [customerDocumentModalOpen, setCustomerDocumentModalOpen] = useState(false);
+  const [selectedCustomerDocumentTemplateId, setSelectedCustomerDocumentTemplateId] = useState<string | null>(null);
+  const [selectedCustomerDocumentEventId, setSelectedCustomerDocumentEventId] = useState<string | null>(null);
+  const [sendingCustomerDocument, setSendingCustomerDocument] = useState(false);
 
   const closeTemplateBuilder = useCallback(() => {
     setTemplateBuilderOpen(false);
@@ -3003,6 +3024,200 @@ function OrganizationDetailContent() {
     }
     await loadOrganizationUsers(org.$id, { silent: true });
   }, [loadOrganizationUsers, org?.$id]);
+  const closeCustomerBillModal = useCallback(() => {
+    if (creatingCustomerBill) {
+      return;
+    }
+    setCustomerBillModalOpen(false);
+    setEditingCustomerBill(null);
+  }, [creatingCustomerBill]);
+
+  const openCustomerBillModal = useCallback(() => {
+    if (!selectedOrganizationCustomer) {
+      return;
+    }
+    setEditingCustomerBill(null);
+    setCustomerBillLabel(`${selectedOrganizationCustomer.name} bill`);
+    setCustomerBillAmount('');
+    setCustomerBillPaidAmount(0);
+    setCustomerBillDueDate(new Date().toISOString().slice(0, 10));
+    setCustomerBillModalOpen(true);
+  }, [selectedOrganizationCustomer]);
+
+  const openCustomerBillEditModal = useCallback((bill: OrganizationBillSummary) => {
+    if (!selectedOrganizationCustomer) {
+      return;
+    }
+    const dueDate = bill.payments
+      .slice()
+      .sort((a, b) => a.sequence - b.sequence)[0]?.dueDate;
+    const parsedDueDate = dueDate ? new Date(dueDate) : null;
+    setEditingCustomerBill(bill);
+    setCustomerBillLabel(bill.label ?? `${selectedOrganizationCustomer.name} bill`);
+    setCustomerBillAmount(bill.totalAmountCents / 100);
+    setCustomerBillPaidAmount(bill.paidAmountCents / 100);
+    setCustomerBillDueDate(
+      parsedDueDate && !Number.isNaN(parsedDueDate.getTime())
+        ? parsedDueDate.toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10),
+    );
+    setCustomerBillModalOpen(true);
+  }, [selectedOrganizationCustomer]);
+
+  const handleCreateCustomerBill = useCallback(async () => {
+    if (!org?.$id || !selectedOrganizationCustomer) {
+      return;
+    }
+
+    const totalAmountCents = Math.round(Number(customerBillAmount) * 100);
+    const paidAmountCents = Math.round(Number(customerBillPaidAmount) * 100);
+    if (!Number.isFinite(totalAmountCents) || totalAmountCents <= 0) {
+      notifications.show({ color: 'red', message: 'Enter a bill amount greater than zero.' });
+      return;
+    }
+    if (!Number.isFinite(paidAmountCents) || paidAmountCents < 0 || paidAmountCents > totalAmountCents) {
+      notifications.show({ color: 'red', message: 'Paid amount must be between zero and the bill amount.' });
+      return;
+    }
+    if (!customerBillDueDate) {
+      notifications.show({ color: 'red', message: 'Choose a due date.' });
+      return;
+    }
+
+    const isEditing = Boolean(editingCustomerBill);
+    setCreatingCustomerBill(true);
+    try {
+      await apiRequest(
+        editingCustomerBill
+          ? `/api/organizations/${encodeURIComponent(org.$id)}/bills/${encodeURIComponent(editingCustomerBill.billId)}`
+          : `/api/organizations/${encodeURIComponent(org.$id)}/bills`,
+        {
+          method: editingCustomerBill ? 'PATCH' : 'POST',
+          body: editingCustomerBill
+            ? {
+              label: customerBillLabel.trim() || 'Manual bill',
+              totalAmountCents,
+              paidAmountCents,
+              dueDate: customerBillDueDate,
+            }
+            : {
+              ownerType: selectedOrganizationCustomer.type === 'teams' ? 'TEAM' : 'USER',
+              ownerId: selectedOrganizationCustomer.id,
+              label: customerBillLabel.trim() || 'Manual bill',
+              totalAmountCents,
+              paidAmountCents,
+              dueDate: customerBillDueDate,
+            },
+        },
+      );
+      notifications.show({ color: 'green', message: isEditing ? 'Bill updated.' : 'Bill added.' });
+      setCustomerBillModalOpen(false);
+      setEditingCustomerBill(null);
+      await refreshOrganizationCustomers();
+    } catch (error) {
+      notifications.show({
+        color: 'red',
+        message: error instanceof Error ? error.message : (isEditing ? 'Failed to update bill.' : 'Failed to add bill.'),
+      });
+    } finally {
+      setCreatingCustomerBill(false);
+    }
+  }, [
+    customerBillAmount,
+    customerBillDueDate,
+    customerBillLabel,
+    customerBillPaidAmount,
+    editingCustomerBill,
+    org?.$id,
+    refreshOrganizationCustomers,
+    selectedOrganizationCustomer,
+  ]);
+  const customerDocumentTemplateOptions = useMemo(
+    () => templateDocuments
+      .filter((template) => normalizeRequiredSignerType(template.requiredSignerType) === 'PARTICIPANT')
+      .map((template) => ({
+        value: template.$id,
+        label: template.title?.trim() || 'Untitled document',
+      }))
+      .filter((template) => template.value.length > 0),
+    [templateDocuments],
+  );
+
+  const selectedCustomerDocumentTemplate = templateDocuments.find(
+    (template) => template.$id === selectedCustomerDocumentTemplateId,
+  );
+  const selectedCustomerDocumentRequiresEvent = selectedCustomerDocumentTemplate?.type === 'PDF';
+
+  const closeCustomerDocumentModal = useCallback(() => {
+    if (sendingCustomerDocument) {
+      return;
+    }
+    setCustomerDocumentModalOpen(false);
+  }, [sendingCustomerDocument]);
+
+  const openCustomerDocumentModal = useCallback(() => {
+    const customer = selectedOrganizationCustomer?.user;
+    if (!customer) {
+      return;
+    }
+    if (customerDocumentTemplateOptions.length === 0) {
+      notifications.show({ color: 'red', message: 'Create a participant document template before adding a document.' });
+      return;
+    }
+    setSelectedCustomerDocumentTemplateId(customerDocumentTemplateOptions[0].value);
+    setSelectedCustomerDocumentEventId(customer.events[0]?.eventId ?? null);
+    setCustomerDocumentModalOpen(true);
+  }, [customerDocumentTemplateOptions, selectedOrganizationCustomer]);
+
+  const handleAddCustomerDocument = useCallback(async () => {
+    const customer = selectedOrganizationCustomer?.user;
+    if (!org?.$id || !customer || !selectedCustomerDocumentTemplateId) {
+      return;
+    }
+    if (selectedCustomerDocumentRequiresEvent && !selectedCustomerDocumentEventId) {
+      notifications.show({ color: 'red', message: 'Select an event for a PDF document.' });
+      return;
+    }
+
+    setSendingCustomerDocument(true);
+    try {
+      await apiRequest(`/api/organizations/${encodeURIComponent(org.$id)}/documents`, {
+        method: 'POST',
+        body: {
+          userId: customer.userId,
+          eventId: selectedCustomerDocumentEventId,
+          templateId: selectedCustomerDocumentTemplateId,
+        },
+      });
+      notifications.show({ color: 'green', message: 'Document added.' });
+      setCustomerDocumentModalOpen(false);
+      await refreshOrganizationCustomers();
+    } catch (error) {
+      notifications.show({
+        color: 'red',
+        message: error instanceof Error ? error.message : 'Failed to add document.',
+      });
+    } finally {
+      setSendingCustomerDocument(false);
+    }
+  }, [
+    org?.$id,
+    refreshOrganizationCustomers,
+    selectedCustomerDocumentEventId,
+    selectedCustomerDocumentRequiresEvent,
+    selectedCustomerDocumentTemplateId,
+    selectedOrganizationCustomer,
+  ]);
+
+  const customerBillAmountCents = Math.round(Number(customerBillAmount) * 100);
+  const customerBillPaidAmountCents = Math.round(Number(customerBillPaidAmount) * 100);
+  const customerBillPaidAmountError = (
+    Number.isFinite(customerBillAmountCents)
+    && Number.isFinite(customerBillPaidAmountCents)
+    && customerBillPaidAmountCents > customerBillAmountCents
+      ? 'Paid amount cannot exceed the bill amount.'
+      : undefined
+  );
 
   const handleRefundCustomerBillPayment = useCallback(async (
     bill: OrganizationBillSummary,
@@ -3207,6 +3422,7 @@ function OrganizationDetailContent() {
           const paymentSummary = formatBillPaidProgress(bill);
           const paymentLine = [
             paymentSummary,
+            payments[0]?.dueDate ? `Due ${formatSummaryDate(payments[0].dueDate)}` : null,
             bill.refundedAmountCents > 0 ? `${formatPrice(bill.refundedAmountCents)} refunded` : null,
             bill.refundableAmountCents > 0 ? `${formatPrice(bill.refundableAmountCents)} refundable` : null,
           ].filter(Boolean);
@@ -3219,6 +3435,11 @@ function OrganizationDetailContent() {
               && bill.status !== 'CANCELLED'
               && hasUnpaidPlanPayments,
           );
+          const canEditCustomerBill = Boolean(
+            canManageFinance
+            && !bill.eventId
+            && (!bill.sourceType || bill.sourceType === 'MANUAL_CUSTOMER_BILL'),
+          );
 
           return (
             <Paper
@@ -3227,10 +3448,31 @@ function OrganizationDetailContent() {
               radius="md"
               p="sm"
               className="org-customer-detail-item org-customer-bill-card"
+              onClick={canEditCustomerBill ? (event) => {
+                const target = event.target as HTMLElement;
+                if (target.closest('button, input, [role="button"]')) {
+                  return;
+                }
+                openCustomerBillEditModal(bill);
+              } : undefined}
+              onKeyDown={canEditCustomerBill ? (event) => {
+                const target = event.target as HTMLElement;
+                if (target.closest('button, input, [role="button"]')) {
+                  return;
+                }
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  openCustomerBillEditModal(bill);
+                }
+              } : undefined}
+              role={canEditCustomerBill ? 'button' : undefined}
+              tabIndex={canEditCustomerBill ? 0 : undefined}
+              aria-label={canEditCustomerBill ? `Edit bill ${bill.label ?? bill.eventName ?? bill.billId}` : undefined}
+              style={canEditCustomerBill ? { cursor: 'pointer' } : undefined}
             >
               <Group justify="space-between" align="flex-start" gap="xs" wrap="wrap">
                 <Stack gap={0} className="min-w-0">
-                  <Text size="sm" fw={500}>{bill.eventName ?? 'Event bill'}</Text>
+                  <Text size="sm" fw={500}>{bill.eventName ?? bill.label ?? 'Customer bill'}</Text>
                   <Text size="xs" c="dimmed">{billMeta.join(' • ')}</Text>
                   {paymentLine.length > 0 && (
                     <Text size="xs" c="dimmed">{paymentLine.join(' • ')}</Text>
@@ -3360,6 +3602,14 @@ function OrganizationDetailContent() {
             p="sm"
             className="org-customer-detail-item org-customer-document-card"
             onClick={() => openSignedDocumentPreview(documentSummary)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openSignedDocumentPreview(documentSummary);
+              }
+            }}
+            role="button"
+            tabIndex={0}
           >
             <Stack gap={0} className="min-w-0">
               <Text size="sm" fw={700}>{documentSummary.title}</Text>
@@ -3429,11 +3679,17 @@ function OrganizationDetailContent() {
                 {summary.userName && <Text size="sm" c="dimmed">@{summary.userName}</Text>}
               </Stack>
             </Group>
-            <Group gap={6}>
-              <Badge variant="light" color="blue">{summary.events.length} events</Badge>
-              <Badge variant="light" color="gray">{summary.teams.length} org teams</Badge>
-              <Badge variant="light" color="green">{summary.bills.length} bills</Badge>
-              <Badge variant="light" color="grape">{summary.documents.length} documents</Badge>
+            <Group gap="xs">
+              {canManageFinance && (
+                <Button size="xs" onClick={openCustomerBillModal}>
+                  Add bill
+                </Button>
+              )}
+              {canManageTemplates && (
+                <Button size="xs" variant="light" onClick={openCustomerDocumentModal}>
+                  Add document
+                </Button>
+              )}
             </Group>
           </Group>
           <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
@@ -3470,10 +3726,12 @@ function OrganizationDetailContent() {
               </Text>
             </Stack>
           </Group>
-          <Group gap={6}>
-            <Badge variant="light" color="blue">{summary.registrations.length} events</Badge>
-            <Badge variant="light" color="green">{summary.bills.length} bills</Badge>
-            <Badge variant="light" color="grape">{summary.documents.length} documents</Badge>
+          <Group gap="xs">
+            {canManageFinance && (
+              <Button size="xs" onClick={openCustomerBillModal}>
+                Add bill
+              </Button>
+            )}
           </Group>
         </Group>
         <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
@@ -3542,7 +3800,6 @@ function OrganizationDetailContent() {
         ))}
         <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
           {renderCustomerDetailSection('Team bills', renderCustomerBills(summary.bills))}
-          {renderCustomerDetailSection('Team documents', renderCustomerDocuments(summary.documents))}
         </SimpleGrid>
       </Stack>
     );
@@ -4663,6 +4920,136 @@ function OrganizationDetailContent() {
             </Paper>
           </Stack>
         ) : null}
+      </Modal>
+      <Modal
+        opened={customerBillModalOpen}
+        onClose={closeCustomerBillModal}
+        title={selectedOrganizationCustomer
+          ? `${editingCustomerBill ? 'Edit' : 'Add'} bill for ${selectedOrganizationCustomer.name}`
+          : `${editingCustomerBill ? 'Edit' : 'Add'} bill`}
+        centered
+      >
+        <Stack gap="sm">
+          <Text size="sm" c="dimmed">
+            Record the bill amount, paid amount, and due date for this customer.
+          </Text>
+          <TextInput
+            label="Bill description"
+            value={customerBillLabel}
+            onChange={(event) => setCustomerBillLabel(event.currentTarget.value)}
+            required
+          />
+          <Group grow align="flex-start">
+            <NumberInput
+              label="Bill amount"
+              prefix="$"
+              min={0}
+              decimalScale={2}
+              fixedDecimalScale
+              value={customerBillAmount}
+              onChange={setCustomerBillAmount}
+              required
+            />
+            <NumberInput
+              label="Paid amount"
+              prefix="$"
+              min={0}
+              max={customerBillAmountCents > 0 ? customerBillAmountCents / 100 : undefined}
+              decimalScale={2}
+              fixedDecimalScale
+              value={customerBillPaidAmount}
+              onChange={setCustomerBillPaidAmount}
+              error={customerBillPaidAmountError}
+              required
+            />
+          </Group>
+          <TextInput
+            label="Due date"
+            type="date"
+            value={customerBillDueDate}
+            onChange={(event) => setCustomerBillDueDate(event.currentTarget.value)}
+            required
+          />
+          <Text size="xs" c="dimmed">
+            Remaining balance: {formatPrice(Math.max(0, customerBillAmountCents - customerBillPaidAmountCents))}
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={closeCustomerBillModal} disabled={creatingCustomerBill}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateCustomerBill}
+              loading={creatingCustomerBill}
+              disabled={
+                !customerBillLabel.trim()
+                || !customerBillDueDate
+                || !Number.isFinite(customerBillAmountCents)
+                || customerBillAmountCents <= 0
+                || !Number.isFinite(customerBillPaidAmountCents)
+                || customerBillPaidAmountCents < 0
+                || customerBillPaidAmountCents > customerBillAmountCents
+              }
+            >
+              {editingCustomerBill ? 'Save changes' : 'Add bill'}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+      <Modal
+        opened={customerDocumentModalOpen}
+        onClose={closeCustomerDocumentModal}
+        title={selectedOrganizationCustomer ? `Add document for ${selectedOrganizationCustomer.name}` : 'Add document'}
+        centered
+      >
+        {selectedOrganizationCustomer?.user ? (
+          <Stack gap="sm">
+            <Text size="sm" c="dimmed">
+              Choose a participant document template. An event is optional for text documents.
+            </Text>
+            <Select
+              label="Document template"
+              data={customerDocumentTemplateOptions}
+              value={selectedCustomerDocumentTemplateId}
+              onChange={setSelectedCustomerDocumentTemplateId}
+              searchable
+              allowDeselect={false}
+              nothingFoundMessage="No participant templates found"
+            />
+            <Select
+              label={selectedCustomerDocumentRequiresEvent ? 'Event' : 'Event (optional for text documents)'}
+              data={selectedOrganizationCustomer.user.events.map((event) => ({
+                value: event.eventId,
+                label: `${event.eventName} • ${formatSummaryDateTime(event.start)}`,
+              }))}
+              value={selectedCustomerDocumentEventId}
+              onChange={setSelectedCustomerDocumentEventId}
+              searchable
+              clearable
+              allowDeselect
+              nothingFoundMessage="No organization events found"
+            />
+            {selectedCustomerDocumentRequiresEvent && !selectedCustomerDocumentEventId && (
+              <Text size="xs" c="dimmed">PDF documents use BoldSign and require an event.</Text>
+            )}
+            <Group justify="flex-end">
+              <Button variant="default" onClick={closeCustomerDocumentModal} disabled={sendingCustomerDocument}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleAddCustomerDocument}
+                loading={sendingCustomerDocument}
+                disabled={
+                  !selectedCustomerDocumentTemplateId
+                  || (selectedCustomerDocumentRequiresEvent && !selectedCustomerDocumentEventId)
+                }
+              >
+                Add document
+              </Button>
+            </Group>
+          </Stack>
+        ) : (
+          <Text size="sm" c="dimmed">Select a player before adding a document.</Text>
+        )}
       </Modal>
       <Modal
         opened={templateModalOpen}

@@ -328,6 +328,8 @@ export type TemplateDocumentsWhereInput = {
   roleIndexes?: Prisma.IntNullableListFilter<"TemplateDocuments">
   signerRoles?: Prisma.StringNullableListFilter<"TemplateDocuments">
   content?: Prisma.StringNullableFilter<"TemplateDocuments"> | string | null
+  organization?: Prisma.XOR<Prisma.OrganizationsScalarRelationFilter, Prisma.OrganizationsWhereInput>
+  documentRequirement?: Prisma.XOR<Prisma.DocumentRequirementsScalarRelationFilter, Prisma.DocumentRequirementsWhereInput>
 }
 
 export type TemplateDocumentsOrderByWithRelationInput = {
@@ -350,6 +352,8 @@ export type TemplateDocumentsOrderByWithRelationInput = {
   roleIndexes?: Prisma.SortOrder
   signerRoles?: Prisma.SortOrder
   content?: Prisma.SortOrderInput | Prisma.SortOrder
+  organization?: Prisma.OrganizationsOrderByWithRelationInput
+  documentRequirement?: Prisma.DocumentRequirementsOrderByWithRelationInput
 }
 
 export type TemplateDocumentsWhereUniqueInput = Prisma.AtLeast<{
@@ -376,6 +380,8 @@ export type TemplateDocumentsWhereUniqueInput = Prisma.AtLeast<{
   roleIndexes?: Prisma.IntNullableListFilter<"TemplateDocuments">
   signerRoles?: Prisma.StringNullableListFilter<"TemplateDocuments">
   content?: Prisma.StringNullableFilter<"TemplateDocuments"> | string | null
+  organization?: Prisma.XOR<Prisma.OrganizationsScalarRelationFilter, Prisma.OrganizationsWhereInput>
+  documentRequirement?: Prisma.XOR<Prisma.DocumentRequirementsScalarRelationFilter, Prisma.DocumentRequirementsWhereInput>
 }, "id" | "documentRequirementId_versionSequence">
 
 export type TemplateDocumentsOrderByWithAggregationInput = {
@@ -435,11 +441,9 @@ export type TemplateDocumentsCreateInput = {
   createdAt?: Date | string | null
   updatedAt?: Date | string | null
   templateId?: string | null
-  documentRequirementId: string
-  versionSequence?: number
+  versionSequence: number
   frozenAt?: Date | string | null
   type?: $Enums.TemplateDocumentsTypeEnum | null
-  organizationId: string
   title: string
   description?: string | null
   signOnce?: boolean | null
@@ -450,6 +454,8 @@ export type TemplateDocumentsCreateInput = {
   roleIndexes?: Prisma.TemplateDocumentsCreateroleIndexesInput | number[]
   signerRoles?: Prisma.TemplateDocumentsCreatesignerRolesInput | string[]
   content?: string | null
+  organization: Prisma.OrganizationsCreateNestedOneWithoutTemplateDocumentsInput
+  documentRequirement: Prisma.DocumentRequirementsCreateNestedOneWithoutVersionsInput
 }
 
 export type TemplateDocumentsUncheckedCreateInput = {
@@ -458,7 +464,7 @@ export type TemplateDocumentsUncheckedCreateInput = {
   updatedAt?: Date | string | null
   templateId?: string | null
   documentRequirementId: string
-  versionSequence?: number
+  versionSequence: number
   frozenAt?: Date | string | null
   type?: $Enums.TemplateDocumentsTypeEnum | null
   organizationId: string
@@ -479,11 +485,9 @@ export type TemplateDocumentsUpdateInput = {
   createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   templateId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  documentRequirementId?: Prisma.StringFieldUpdateOperationsInput | string
   versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
   frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
-  organizationId?: Prisma.StringFieldUpdateOperationsInput | string
   title?: Prisma.StringFieldUpdateOperationsInput | string
   description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   signOnce?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -494,6 +498,8 @@ export type TemplateDocumentsUpdateInput = {
   roleIndexes?: Prisma.TemplateDocumentsUpdateroleIndexesInput | number[]
   signerRoles?: Prisma.TemplateDocumentsUpdatesignerRolesInput | string[]
   content?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  organization?: Prisma.OrganizationsUpdateOneRequiredWithoutTemplateDocumentsNestedInput
+  documentRequirement?: Prisma.DocumentRequirementsUpdateOneRequiredWithoutVersionsNestedInput
 }
 
 export type TemplateDocumentsUncheckedUpdateInput = {
@@ -524,7 +530,7 @@ export type TemplateDocumentsCreateManyInput = {
   updatedAt?: Date | string | null
   templateId?: string | null
   documentRequirementId: string
-  versionSequence?: number
+  versionSequence: number
   frozenAt?: Date | string | null
   type?: $Enums.TemplateDocumentsTypeEnum | null
   organizationId: string
@@ -545,11 +551,9 @@ export type TemplateDocumentsUpdateManyMutationInput = {
   createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   templateId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  documentRequirementId?: Prisma.StringFieldUpdateOperationsInput | string
   versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
   frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
-  organizationId?: Prisma.StringFieldUpdateOperationsInput | string
   title?: Prisma.StringFieldUpdateOperationsInput | string
   description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   signOnce?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
@@ -582,6 +586,16 @@ export type TemplateDocumentsUncheckedUpdateManyInput = {
   roleIndexes?: Prisma.TemplateDocumentsUpdateroleIndexesInput | number[]
   signerRoles?: Prisma.TemplateDocumentsUpdatesignerRolesInput | string[]
   content?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+}
+
+export type TemplateDocumentsListRelationFilter = {
+  every?: Prisma.TemplateDocumentsWhereInput
+  some?: Prisma.TemplateDocumentsWhereInput
+  none?: Prisma.TemplateDocumentsWhereInput
+}
+
+export type TemplateDocumentsOrderByRelationAggregateInput = {
+  _count?: Prisma.SortOrder
 }
 
 export type TemplateDocumentsDocumentRequirementIdVersionSequenceCompoundUniqueInput = {
@@ -663,6 +677,90 @@ export type TemplateDocumentsSumOrderByAggregateInput = {
   roleIndexes?: Prisma.SortOrder
 }
 
+export type TemplateDocumentsCreateNestedManyWithoutOrganizationInput = {
+  create?: Prisma.XOR<Prisma.TemplateDocumentsCreateWithoutOrganizationInput, Prisma.TemplateDocumentsUncheckedCreateWithoutOrganizationInput> | Prisma.TemplateDocumentsCreateWithoutOrganizationInput[] | Prisma.TemplateDocumentsUncheckedCreateWithoutOrganizationInput[]
+  connectOrCreate?: Prisma.TemplateDocumentsCreateOrConnectWithoutOrganizationInput | Prisma.TemplateDocumentsCreateOrConnectWithoutOrganizationInput[]
+  createMany?: Prisma.TemplateDocumentsCreateManyOrganizationInputEnvelope
+  connect?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+}
+
+export type TemplateDocumentsUncheckedCreateNestedManyWithoutOrganizationInput = {
+  create?: Prisma.XOR<Prisma.TemplateDocumentsCreateWithoutOrganizationInput, Prisma.TemplateDocumentsUncheckedCreateWithoutOrganizationInput> | Prisma.TemplateDocumentsCreateWithoutOrganizationInput[] | Prisma.TemplateDocumentsUncheckedCreateWithoutOrganizationInput[]
+  connectOrCreate?: Prisma.TemplateDocumentsCreateOrConnectWithoutOrganizationInput | Prisma.TemplateDocumentsCreateOrConnectWithoutOrganizationInput[]
+  createMany?: Prisma.TemplateDocumentsCreateManyOrganizationInputEnvelope
+  connect?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+}
+
+export type TemplateDocumentsUpdateManyWithoutOrganizationNestedInput = {
+  create?: Prisma.XOR<Prisma.TemplateDocumentsCreateWithoutOrganizationInput, Prisma.TemplateDocumentsUncheckedCreateWithoutOrganizationInput> | Prisma.TemplateDocumentsCreateWithoutOrganizationInput[] | Prisma.TemplateDocumentsUncheckedCreateWithoutOrganizationInput[]
+  connectOrCreate?: Prisma.TemplateDocumentsCreateOrConnectWithoutOrganizationInput | Prisma.TemplateDocumentsCreateOrConnectWithoutOrganizationInput[]
+  upsert?: Prisma.TemplateDocumentsUpsertWithWhereUniqueWithoutOrganizationInput | Prisma.TemplateDocumentsUpsertWithWhereUniqueWithoutOrganizationInput[]
+  createMany?: Prisma.TemplateDocumentsCreateManyOrganizationInputEnvelope
+  set?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+  disconnect?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+  delete?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+  connect?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+  update?: Prisma.TemplateDocumentsUpdateWithWhereUniqueWithoutOrganizationInput | Prisma.TemplateDocumentsUpdateWithWhereUniqueWithoutOrganizationInput[]
+  updateMany?: Prisma.TemplateDocumentsUpdateManyWithWhereWithoutOrganizationInput | Prisma.TemplateDocumentsUpdateManyWithWhereWithoutOrganizationInput[]
+  deleteMany?: Prisma.TemplateDocumentsScalarWhereInput | Prisma.TemplateDocumentsScalarWhereInput[]
+}
+
+export type TemplateDocumentsUncheckedUpdateManyWithoutOrganizationNestedInput = {
+  create?: Prisma.XOR<Prisma.TemplateDocumentsCreateWithoutOrganizationInput, Prisma.TemplateDocumentsUncheckedCreateWithoutOrganizationInput> | Prisma.TemplateDocumentsCreateWithoutOrganizationInput[] | Prisma.TemplateDocumentsUncheckedCreateWithoutOrganizationInput[]
+  connectOrCreate?: Prisma.TemplateDocumentsCreateOrConnectWithoutOrganizationInput | Prisma.TemplateDocumentsCreateOrConnectWithoutOrganizationInput[]
+  upsert?: Prisma.TemplateDocumentsUpsertWithWhereUniqueWithoutOrganizationInput | Prisma.TemplateDocumentsUpsertWithWhereUniqueWithoutOrganizationInput[]
+  createMany?: Prisma.TemplateDocumentsCreateManyOrganizationInputEnvelope
+  set?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+  disconnect?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+  delete?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+  connect?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+  update?: Prisma.TemplateDocumentsUpdateWithWhereUniqueWithoutOrganizationInput | Prisma.TemplateDocumentsUpdateWithWhereUniqueWithoutOrganizationInput[]
+  updateMany?: Prisma.TemplateDocumentsUpdateManyWithWhereWithoutOrganizationInput | Prisma.TemplateDocumentsUpdateManyWithWhereWithoutOrganizationInput[]
+  deleteMany?: Prisma.TemplateDocumentsScalarWhereInput | Prisma.TemplateDocumentsScalarWhereInput[]
+}
+
+export type TemplateDocumentsCreateNestedManyWithoutDocumentRequirementInput = {
+  create?: Prisma.XOR<Prisma.TemplateDocumentsCreateWithoutDocumentRequirementInput, Prisma.TemplateDocumentsUncheckedCreateWithoutDocumentRequirementInput> | Prisma.TemplateDocumentsCreateWithoutDocumentRequirementInput[] | Prisma.TemplateDocumentsUncheckedCreateWithoutDocumentRequirementInput[]
+  connectOrCreate?: Prisma.TemplateDocumentsCreateOrConnectWithoutDocumentRequirementInput | Prisma.TemplateDocumentsCreateOrConnectWithoutDocumentRequirementInput[]
+  createMany?: Prisma.TemplateDocumentsCreateManyDocumentRequirementInputEnvelope
+  connect?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+}
+
+export type TemplateDocumentsUncheckedCreateNestedManyWithoutDocumentRequirementInput = {
+  create?: Prisma.XOR<Prisma.TemplateDocumentsCreateWithoutDocumentRequirementInput, Prisma.TemplateDocumentsUncheckedCreateWithoutDocumentRequirementInput> | Prisma.TemplateDocumentsCreateWithoutDocumentRequirementInput[] | Prisma.TemplateDocumentsUncheckedCreateWithoutDocumentRequirementInput[]
+  connectOrCreate?: Prisma.TemplateDocumentsCreateOrConnectWithoutDocumentRequirementInput | Prisma.TemplateDocumentsCreateOrConnectWithoutDocumentRequirementInput[]
+  createMany?: Prisma.TemplateDocumentsCreateManyDocumentRequirementInputEnvelope
+  connect?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+}
+
+export type TemplateDocumentsUpdateManyWithoutDocumentRequirementNestedInput = {
+  create?: Prisma.XOR<Prisma.TemplateDocumentsCreateWithoutDocumentRequirementInput, Prisma.TemplateDocumentsUncheckedCreateWithoutDocumentRequirementInput> | Prisma.TemplateDocumentsCreateWithoutDocumentRequirementInput[] | Prisma.TemplateDocumentsUncheckedCreateWithoutDocumentRequirementInput[]
+  connectOrCreate?: Prisma.TemplateDocumentsCreateOrConnectWithoutDocumentRequirementInput | Prisma.TemplateDocumentsCreateOrConnectWithoutDocumentRequirementInput[]
+  upsert?: Prisma.TemplateDocumentsUpsertWithWhereUniqueWithoutDocumentRequirementInput | Prisma.TemplateDocumentsUpsertWithWhereUniqueWithoutDocumentRequirementInput[]
+  createMany?: Prisma.TemplateDocumentsCreateManyDocumentRequirementInputEnvelope
+  set?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+  disconnect?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+  delete?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+  connect?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+  update?: Prisma.TemplateDocumentsUpdateWithWhereUniqueWithoutDocumentRequirementInput | Prisma.TemplateDocumentsUpdateWithWhereUniqueWithoutDocumentRequirementInput[]
+  updateMany?: Prisma.TemplateDocumentsUpdateManyWithWhereWithoutDocumentRequirementInput | Prisma.TemplateDocumentsUpdateManyWithWhereWithoutDocumentRequirementInput[]
+  deleteMany?: Prisma.TemplateDocumentsScalarWhereInput | Prisma.TemplateDocumentsScalarWhereInput[]
+}
+
+export type TemplateDocumentsUncheckedUpdateManyWithoutDocumentRequirementNestedInput = {
+  create?: Prisma.XOR<Prisma.TemplateDocumentsCreateWithoutDocumentRequirementInput, Prisma.TemplateDocumentsUncheckedCreateWithoutDocumentRequirementInput> | Prisma.TemplateDocumentsCreateWithoutDocumentRequirementInput[] | Prisma.TemplateDocumentsUncheckedCreateWithoutDocumentRequirementInput[]
+  connectOrCreate?: Prisma.TemplateDocumentsCreateOrConnectWithoutDocumentRequirementInput | Prisma.TemplateDocumentsCreateOrConnectWithoutDocumentRequirementInput[]
+  upsert?: Prisma.TemplateDocumentsUpsertWithWhereUniqueWithoutDocumentRequirementInput | Prisma.TemplateDocumentsUpsertWithWhereUniqueWithoutDocumentRequirementInput[]
+  createMany?: Prisma.TemplateDocumentsCreateManyDocumentRequirementInputEnvelope
+  set?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+  disconnect?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+  delete?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+  connect?: Prisma.TemplateDocumentsWhereUniqueInput | Prisma.TemplateDocumentsWhereUniqueInput[]
+  update?: Prisma.TemplateDocumentsUpdateWithWhereUniqueWithoutDocumentRequirementInput | Prisma.TemplateDocumentsUpdateWithWhereUniqueWithoutDocumentRequirementInput[]
+  updateMany?: Prisma.TemplateDocumentsUpdateManyWithWhereWithoutDocumentRequirementInput | Prisma.TemplateDocumentsUpdateManyWithWhereWithoutDocumentRequirementInput[]
+  deleteMany?: Prisma.TemplateDocumentsScalarWhereInput | Prisma.TemplateDocumentsScalarWhereInput[]
+}
+
 export type TemplateDocumentsCreateroleIndexesInput = {
   set: number[]
 }
@@ -683,6 +781,331 @@ export type TemplateDocumentsUpdateroleIndexesInput = {
 export type TemplateDocumentsUpdatesignerRolesInput = {
   set?: string[]
   push?: string | string[]
+}
+
+export type TemplateDocumentsCreateWithoutOrganizationInput = {
+  id: string
+  createdAt?: Date | string | null
+  updatedAt?: Date | string | null
+  templateId?: string | null
+  versionSequence: number
+  frozenAt?: Date | string | null
+  type?: $Enums.TemplateDocumentsTypeEnum | null
+  title: string
+  description?: string | null
+  signOnce?: boolean | null
+  requiredSignerType?: string
+  status?: string | null
+  createdBy?: string | null
+  roleIndex?: number | null
+  roleIndexes?: Prisma.TemplateDocumentsCreateroleIndexesInput | number[]
+  signerRoles?: Prisma.TemplateDocumentsCreatesignerRolesInput | string[]
+  content?: string | null
+  documentRequirement: Prisma.DocumentRequirementsCreateNestedOneWithoutVersionsInput
+}
+
+export type TemplateDocumentsUncheckedCreateWithoutOrganizationInput = {
+  id: string
+  createdAt?: Date | string | null
+  updatedAt?: Date | string | null
+  templateId?: string | null
+  documentRequirementId: string
+  versionSequence: number
+  frozenAt?: Date | string | null
+  type?: $Enums.TemplateDocumentsTypeEnum | null
+  title: string
+  description?: string | null
+  signOnce?: boolean | null
+  requiredSignerType?: string
+  status?: string | null
+  createdBy?: string | null
+  roleIndex?: number | null
+  roleIndexes?: Prisma.TemplateDocumentsCreateroleIndexesInput | number[]
+  signerRoles?: Prisma.TemplateDocumentsCreatesignerRolesInput | string[]
+  content?: string | null
+}
+
+export type TemplateDocumentsCreateOrConnectWithoutOrganizationInput = {
+  where: Prisma.TemplateDocumentsWhereUniqueInput
+  create: Prisma.XOR<Prisma.TemplateDocumentsCreateWithoutOrganizationInput, Prisma.TemplateDocumentsUncheckedCreateWithoutOrganizationInput>
+}
+
+export type TemplateDocumentsCreateManyOrganizationInputEnvelope = {
+  data: Prisma.TemplateDocumentsCreateManyOrganizationInput | Prisma.TemplateDocumentsCreateManyOrganizationInput[]
+  skipDuplicates?: boolean
+}
+
+export type TemplateDocumentsUpsertWithWhereUniqueWithoutOrganizationInput = {
+  where: Prisma.TemplateDocumentsWhereUniqueInput
+  update: Prisma.XOR<Prisma.TemplateDocumentsUpdateWithoutOrganizationInput, Prisma.TemplateDocumentsUncheckedUpdateWithoutOrganizationInput>
+  create: Prisma.XOR<Prisma.TemplateDocumentsCreateWithoutOrganizationInput, Prisma.TemplateDocumentsUncheckedCreateWithoutOrganizationInput>
+}
+
+export type TemplateDocumentsUpdateWithWhereUniqueWithoutOrganizationInput = {
+  where: Prisma.TemplateDocumentsWhereUniqueInput
+  data: Prisma.XOR<Prisma.TemplateDocumentsUpdateWithoutOrganizationInput, Prisma.TemplateDocumentsUncheckedUpdateWithoutOrganizationInput>
+}
+
+export type TemplateDocumentsUpdateManyWithWhereWithoutOrganizationInput = {
+  where: Prisma.TemplateDocumentsScalarWhereInput
+  data: Prisma.XOR<Prisma.TemplateDocumentsUpdateManyMutationInput, Prisma.TemplateDocumentsUncheckedUpdateManyWithoutOrganizationInput>
+}
+
+export type TemplateDocumentsScalarWhereInput = {
+  AND?: Prisma.TemplateDocumentsScalarWhereInput | Prisma.TemplateDocumentsScalarWhereInput[]
+  OR?: Prisma.TemplateDocumentsScalarWhereInput[]
+  NOT?: Prisma.TemplateDocumentsScalarWhereInput | Prisma.TemplateDocumentsScalarWhereInput[]
+  id?: Prisma.StringFilter<"TemplateDocuments"> | string
+  createdAt?: Prisma.DateTimeNullableFilter<"TemplateDocuments"> | Date | string | null
+  updatedAt?: Prisma.DateTimeNullableFilter<"TemplateDocuments"> | Date | string | null
+  templateId?: Prisma.StringNullableFilter<"TemplateDocuments"> | string | null
+  documentRequirementId?: Prisma.StringFilter<"TemplateDocuments"> | string
+  versionSequence?: Prisma.IntFilter<"TemplateDocuments"> | number
+  frozenAt?: Prisma.DateTimeNullableFilter<"TemplateDocuments"> | Date | string | null
+  type?: Prisma.EnumTemplateDocumentsTypeEnumNullableFilter<"TemplateDocuments"> | $Enums.TemplateDocumentsTypeEnum | null
+  organizationId?: Prisma.StringFilter<"TemplateDocuments"> | string
+  title?: Prisma.StringFilter<"TemplateDocuments"> | string
+  description?: Prisma.StringNullableFilter<"TemplateDocuments"> | string | null
+  signOnce?: Prisma.BoolNullableFilter<"TemplateDocuments"> | boolean | null
+  requiredSignerType?: Prisma.StringFilter<"TemplateDocuments"> | string
+  status?: Prisma.StringNullableFilter<"TemplateDocuments"> | string | null
+  createdBy?: Prisma.StringNullableFilter<"TemplateDocuments"> | string | null
+  roleIndex?: Prisma.IntNullableFilter<"TemplateDocuments"> | number | null
+  roleIndexes?: Prisma.IntNullableListFilter<"TemplateDocuments">
+  signerRoles?: Prisma.StringNullableListFilter<"TemplateDocuments">
+  content?: Prisma.StringNullableFilter<"TemplateDocuments"> | string | null
+}
+
+export type TemplateDocumentsCreateWithoutDocumentRequirementInput = {
+  id: string
+  createdAt?: Date | string | null
+  updatedAt?: Date | string | null
+  templateId?: string | null
+  versionSequence: number
+  frozenAt?: Date | string | null
+  type?: $Enums.TemplateDocumentsTypeEnum | null
+  title: string
+  description?: string | null
+  signOnce?: boolean | null
+  requiredSignerType?: string
+  status?: string | null
+  createdBy?: string | null
+  roleIndex?: number | null
+  roleIndexes?: Prisma.TemplateDocumentsCreateroleIndexesInput | number[]
+  signerRoles?: Prisma.TemplateDocumentsCreatesignerRolesInput | string[]
+  content?: string | null
+  organization: Prisma.OrganizationsCreateNestedOneWithoutTemplateDocumentsInput
+}
+
+export type TemplateDocumentsUncheckedCreateWithoutDocumentRequirementInput = {
+  id: string
+  createdAt?: Date | string | null
+  updatedAt?: Date | string | null
+  templateId?: string | null
+  versionSequence: number
+  frozenAt?: Date | string | null
+  type?: $Enums.TemplateDocumentsTypeEnum | null
+  title: string
+  description?: string | null
+  signOnce?: boolean | null
+  requiredSignerType?: string
+  status?: string | null
+  createdBy?: string | null
+  roleIndex?: number | null
+  roleIndexes?: Prisma.TemplateDocumentsCreateroleIndexesInput | number[]
+  signerRoles?: Prisma.TemplateDocumentsCreatesignerRolesInput | string[]
+  content?: string | null
+}
+
+export type TemplateDocumentsCreateOrConnectWithoutDocumentRequirementInput = {
+  where: Prisma.TemplateDocumentsWhereUniqueInput
+  create: Prisma.XOR<Prisma.TemplateDocumentsCreateWithoutDocumentRequirementInput, Prisma.TemplateDocumentsUncheckedCreateWithoutDocumentRequirementInput>
+}
+
+export type TemplateDocumentsCreateManyDocumentRequirementInputEnvelope = {
+  data: Prisma.TemplateDocumentsCreateManyDocumentRequirementInput | Prisma.TemplateDocumentsCreateManyDocumentRequirementInput[]
+  skipDuplicates?: boolean
+}
+
+export type TemplateDocumentsUpsertWithWhereUniqueWithoutDocumentRequirementInput = {
+  where: Prisma.TemplateDocumentsWhereUniqueInput
+  update: Prisma.XOR<Prisma.TemplateDocumentsUpdateWithoutDocumentRequirementInput, Prisma.TemplateDocumentsUncheckedUpdateWithoutDocumentRequirementInput>
+  create: Prisma.XOR<Prisma.TemplateDocumentsCreateWithoutDocumentRequirementInput, Prisma.TemplateDocumentsUncheckedCreateWithoutDocumentRequirementInput>
+}
+
+export type TemplateDocumentsUpdateWithWhereUniqueWithoutDocumentRequirementInput = {
+  where: Prisma.TemplateDocumentsWhereUniqueInput
+  data: Prisma.XOR<Prisma.TemplateDocumentsUpdateWithoutDocumentRequirementInput, Prisma.TemplateDocumentsUncheckedUpdateWithoutDocumentRequirementInput>
+}
+
+export type TemplateDocumentsUpdateManyWithWhereWithoutDocumentRequirementInput = {
+  where: Prisma.TemplateDocumentsScalarWhereInput
+  data: Prisma.XOR<Prisma.TemplateDocumentsUpdateManyMutationInput, Prisma.TemplateDocumentsUncheckedUpdateManyWithoutDocumentRequirementInput>
+}
+
+export type TemplateDocumentsCreateManyOrganizationInput = {
+  id: string
+  createdAt?: Date | string | null
+  updatedAt?: Date | string | null
+  templateId?: string | null
+  documentRequirementId: string
+  versionSequence: number
+  frozenAt?: Date | string | null
+  type?: $Enums.TemplateDocumentsTypeEnum | null
+  title: string
+  description?: string | null
+  signOnce?: boolean | null
+  requiredSignerType?: string
+  status?: string | null
+  createdBy?: string | null
+  roleIndex?: number | null
+  roleIndexes?: Prisma.TemplateDocumentsCreateroleIndexesInput | number[]
+  signerRoles?: Prisma.TemplateDocumentsCreatesignerRolesInput | string[]
+  content?: string | null
+}
+
+export type TemplateDocumentsUpdateWithoutOrganizationInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  templateId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
+  frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
+  title?: Prisma.StringFieldUpdateOperationsInput | string
+  description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  signOnce?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
+  requiredSignerType?: Prisma.StringFieldUpdateOperationsInput | string
+  status?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  createdBy?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  roleIndex?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  roleIndexes?: Prisma.TemplateDocumentsUpdateroleIndexesInput | number[]
+  signerRoles?: Prisma.TemplateDocumentsUpdatesignerRolesInput | string[]
+  content?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  documentRequirement?: Prisma.DocumentRequirementsUpdateOneRequiredWithoutVersionsNestedInput
+}
+
+export type TemplateDocumentsUncheckedUpdateWithoutOrganizationInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  templateId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  documentRequirementId?: Prisma.StringFieldUpdateOperationsInput | string
+  versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
+  frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
+  title?: Prisma.StringFieldUpdateOperationsInput | string
+  description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  signOnce?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
+  requiredSignerType?: Prisma.StringFieldUpdateOperationsInput | string
+  status?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  createdBy?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  roleIndex?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  roleIndexes?: Prisma.TemplateDocumentsUpdateroleIndexesInput | number[]
+  signerRoles?: Prisma.TemplateDocumentsUpdatesignerRolesInput | string[]
+  content?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+}
+
+export type TemplateDocumentsUncheckedUpdateManyWithoutOrganizationInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  templateId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  documentRequirementId?: Prisma.StringFieldUpdateOperationsInput | string
+  versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
+  frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
+  title?: Prisma.StringFieldUpdateOperationsInput | string
+  description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  signOnce?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
+  requiredSignerType?: Prisma.StringFieldUpdateOperationsInput | string
+  status?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  createdBy?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  roleIndex?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  roleIndexes?: Prisma.TemplateDocumentsUpdateroleIndexesInput | number[]
+  signerRoles?: Prisma.TemplateDocumentsUpdatesignerRolesInput | string[]
+  content?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+}
+
+export type TemplateDocumentsCreateManyDocumentRequirementInput = {
+  id: string
+  createdAt?: Date | string | null
+  updatedAt?: Date | string | null
+  templateId?: string | null
+  versionSequence: number
+  frozenAt?: Date | string | null
+  type?: $Enums.TemplateDocumentsTypeEnum | null
+  title: string
+  description?: string | null
+  signOnce?: boolean | null
+  requiredSignerType?: string
+  status?: string | null
+  createdBy?: string | null
+  roleIndex?: number | null
+  roleIndexes?: Prisma.TemplateDocumentsCreateroleIndexesInput | number[]
+  signerRoles?: Prisma.TemplateDocumentsCreatesignerRolesInput | string[]
+  content?: string | null
+}
+
+export type TemplateDocumentsUpdateWithoutDocumentRequirementInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  templateId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
+  frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
+  title?: Prisma.StringFieldUpdateOperationsInput | string
+  description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  signOnce?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
+  requiredSignerType?: Prisma.StringFieldUpdateOperationsInput | string
+  status?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  createdBy?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  roleIndex?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  roleIndexes?: Prisma.TemplateDocumentsUpdateroleIndexesInput | number[]
+  signerRoles?: Prisma.TemplateDocumentsUpdatesignerRolesInput | string[]
+  content?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  organization?: Prisma.OrganizationsUpdateOneRequiredWithoutTemplateDocumentsNestedInput
+}
+
+export type TemplateDocumentsUncheckedUpdateWithoutDocumentRequirementInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  templateId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
+  frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
+  title?: Prisma.StringFieldUpdateOperationsInput | string
+  description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  signOnce?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
+  requiredSignerType?: Prisma.StringFieldUpdateOperationsInput | string
+  status?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  createdBy?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  roleIndex?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  roleIndexes?: Prisma.TemplateDocumentsUpdateroleIndexesInput | number[]
+  signerRoles?: Prisma.TemplateDocumentsUpdatesignerRolesInput | string[]
+  content?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+}
+
+export type TemplateDocumentsUncheckedUpdateManyWithoutDocumentRequirementInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  templateId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
+  frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
+  title?: Prisma.StringFieldUpdateOperationsInput | string
+  description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  signOnce?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
+  requiredSignerType?: Prisma.StringFieldUpdateOperationsInput | string
+  status?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  createdBy?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  roleIndex?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  roleIndexes?: Prisma.TemplateDocumentsUpdateroleIndexesInput | number[]
+  signerRoles?: Prisma.TemplateDocumentsUpdatesignerRolesInput | string[]
+  content?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
 }
 
 
@@ -707,6 +1130,8 @@ export type TemplateDocumentsSelect<ExtArgs extends runtime.Types.Extensions.Int
   roleIndexes?: boolean
   signerRoles?: boolean
   content?: boolean
+  organization?: boolean | Prisma.OrganizationsDefaultArgs<ExtArgs>
+  documentRequirement?: boolean | Prisma.DocumentRequirementsDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["templateDocuments"]>
 
 export type TemplateDocumentsSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -729,6 +1154,8 @@ export type TemplateDocumentsSelectCreateManyAndReturn<ExtArgs extends runtime.T
   roleIndexes?: boolean
   signerRoles?: boolean
   content?: boolean
+  organization?: boolean | Prisma.OrganizationsDefaultArgs<ExtArgs>
+  documentRequirement?: boolean | Prisma.DocumentRequirementsDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["templateDocuments"]>
 
 export type TemplateDocumentsSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -751,6 +1178,8 @@ export type TemplateDocumentsSelectUpdateManyAndReturn<ExtArgs extends runtime.T
   roleIndexes?: boolean
   signerRoles?: boolean
   content?: boolean
+  organization?: boolean | Prisma.OrganizationsDefaultArgs<ExtArgs>
+  documentRequirement?: boolean | Prisma.DocumentRequirementsDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["templateDocuments"]>
 
 export type TemplateDocumentsSelectScalar = {
@@ -776,10 +1205,25 @@ export type TemplateDocumentsSelectScalar = {
 }
 
 export type TemplateDocumentsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "templateId" | "documentRequirementId" | "versionSequence" | "frozenAt" | "type" | "organizationId" | "title" | "description" | "signOnce" | "requiredSignerType" | "status" | "createdBy" | "roleIndex" | "roleIndexes" | "signerRoles" | "content", ExtArgs["result"]["templateDocuments"]>
+export type TemplateDocumentsInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  organization?: boolean | Prisma.OrganizationsDefaultArgs<ExtArgs>
+  documentRequirement?: boolean | Prisma.DocumentRequirementsDefaultArgs<ExtArgs>
+}
+export type TemplateDocumentsIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  organization?: boolean | Prisma.OrganizationsDefaultArgs<ExtArgs>
+  documentRequirement?: boolean | Prisma.DocumentRequirementsDefaultArgs<ExtArgs>
+}
+export type TemplateDocumentsIncludeUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  organization?: boolean | Prisma.OrganizationsDefaultArgs<ExtArgs>
+  documentRequirement?: boolean | Prisma.DocumentRequirementsDefaultArgs<ExtArgs>
+}
 
 export type $TemplateDocumentsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "TemplateDocuments"
-  objects: {}
+  objects: {
+    organization: Prisma.$OrganizationsPayload<ExtArgs>
+    documentRequirement: Prisma.$DocumentRequirementsPayload<ExtArgs>
+  }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
     createdAt: Date | null
@@ -1194,6 +1638,8 @@ readonly fields: TemplateDocumentsFieldRefs;
  */
 export interface Prisma__TemplateDocumentsClient<T, Null = never, ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
   readonly [Symbol.toStringTag]: "PrismaPromise"
+  organization<T extends Prisma.OrganizationsDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.OrganizationsDefaultArgs<ExtArgs>>): Prisma.Prisma__OrganizationsClient<runtime.Types.Result.GetResult<Prisma.$OrganizationsPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
+  documentRequirement<T extends Prisma.DocumentRequirementsDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.DocumentRequirementsDefaultArgs<ExtArgs>>): Prisma.Prisma__DocumentRequirementsClient<runtime.Types.Result.GetResult<Prisma.$DocumentRequirementsPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -1259,6 +1705,10 @@ export type TemplateDocumentsFindUniqueArgs<ExtArgs extends runtime.Types.Extens
    */
   omit?: Prisma.TemplateDocumentsOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TemplateDocumentsInclude<ExtArgs> | null
+  /**
    * Filter, which TemplateDocuments to fetch.
    */
   where: Prisma.TemplateDocumentsWhereUniqueInput
@@ -1277,6 +1727,10 @@ export type TemplateDocumentsFindUniqueOrThrowArgs<ExtArgs extends runtime.Types
    */
   omit?: Prisma.TemplateDocumentsOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TemplateDocumentsInclude<ExtArgs> | null
+  /**
    * Filter, which TemplateDocuments to fetch.
    */
   where: Prisma.TemplateDocumentsWhereUniqueInput
@@ -1294,6 +1748,10 @@ export type TemplateDocumentsFindFirstArgs<ExtArgs extends runtime.Types.Extensi
    * Omit specific fields from the TemplateDocuments
    */
   omit?: Prisma.TemplateDocumentsOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TemplateDocumentsInclude<ExtArgs> | null
   /**
    * Filter, which TemplateDocuments to fetch.
    */
@@ -1343,6 +1801,10 @@ export type TemplateDocumentsFindFirstOrThrowArgs<ExtArgs extends runtime.Types.
    */
   omit?: Prisma.TemplateDocumentsOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TemplateDocumentsInclude<ExtArgs> | null
+  /**
    * Filter, which TemplateDocuments to fetch.
    */
   where?: Prisma.TemplateDocumentsWhereInput
@@ -1390,6 +1852,10 @@ export type TemplateDocumentsFindManyArgs<ExtArgs extends runtime.Types.Extensio
    * Omit specific fields from the TemplateDocuments
    */
   omit?: Prisma.TemplateDocumentsOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TemplateDocumentsInclude<ExtArgs> | null
   /**
    * Filter, which TemplateDocuments to fetch.
    */
@@ -1439,6 +1905,10 @@ export type TemplateDocumentsCreateArgs<ExtArgs extends runtime.Types.Extensions
    */
   omit?: Prisma.TemplateDocumentsOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TemplateDocumentsInclude<ExtArgs> | null
+  /**
    * The data needed to create a TemplateDocuments.
    */
   data: Prisma.XOR<Prisma.TemplateDocumentsCreateInput, Prisma.TemplateDocumentsUncheckedCreateInput>
@@ -1472,6 +1942,10 @@ export type TemplateDocumentsCreateManyAndReturnArgs<ExtArgs extends runtime.Typ
    */
   data: Prisma.TemplateDocumentsCreateManyInput | Prisma.TemplateDocumentsCreateManyInput[]
   skipDuplicates?: boolean
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TemplateDocumentsIncludeCreateManyAndReturn<ExtArgs> | null
 }
 
 /**
@@ -1486,6 +1960,10 @@ export type TemplateDocumentsUpdateArgs<ExtArgs extends runtime.Types.Extensions
    * Omit specific fields from the TemplateDocuments
    */
   omit?: Prisma.TemplateDocumentsOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TemplateDocumentsInclude<ExtArgs> | null
   /**
    * The data needed to update a TemplateDocuments.
    */
@@ -1538,6 +2016,10 @@ export type TemplateDocumentsUpdateManyAndReturnArgs<ExtArgs extends runtime.Typ
    * Limit how many TemplateDocuments to update.
    */
   limit?: number
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TemplateDocumentsIncludeUpdateManyAndReturn<ExtArgs> | null
 }
 
 /**
@@ -1552,6 +2034,10 @@ export type TemplateDocumentsUpsertArgs<ExtArgs extends runtime.Types.Extensions
    * Omit specific fields from the TemplateDocuments
    */
   omit?: Prisma.TemplateDocumentsOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TemplateDocumentsInclude<ExtArgs> | null
   /**
    * The filter to search for the TemplateDocuments to update in case it exists.
    */
@@ -1578,6 +2064,10 @@ export type TemplateDocumentsDeleteArgs<ExtArgs extends runtime.Types.Extensions
    * Omit specific fields from the TemplateDocuments
    */
   omit?: Prisma.TemplateDocumentsOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TemplateDocumentsInclude<ExtArgs> | null
   /**
    * Filter which TemplateDocuments to delete.
    */
@@ -1610,4 +2100,8 @@ export type TemplateDocumentsDefaultArgs<ExtArgs extends runtime.Types.Extension
    * Omit specific fields from the TemplateDocuments
    */
   omit?: Prisma.TemplateDocumentsOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TemplateDocumentsInclude<ExtArgs> | null
 }

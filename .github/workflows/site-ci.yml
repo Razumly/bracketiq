@@ -67,6 +67,8 @@ jobs:
 
       - name: Validate Prisma schema
         run: npm run prisma:validate
+      - name: Run site tests
+        run: npm run test:ci
 
       - name: Type-check
         run: npx tsc --noEmit

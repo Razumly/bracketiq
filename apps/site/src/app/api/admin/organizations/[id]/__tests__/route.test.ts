@@ -99,6 +99,9 @@ describe('DELETE /api/admin/organizations/[id]', () => {
     expect(prismaMock.documentRequirements.deleteMany).toHaveBeenCalledWith({
       where: { organizationId: 'org_1' },
     });
+    expect(prismaMock.templateDocuments.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      prismaMock.documentRequirements.deleteMany.mock.invocationCallOrder[0],
+    );
     expect(prismaMock.organizations.delete).toHaveBeenCalledWith({ where: { id: 'org_1' } });
   });
 });

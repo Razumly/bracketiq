@@ -23,6 +23,10 @@ import {
 } from '@/lib/boldsignServer';
 import { normalizeRequiredSignerType } from '@/lib/templateSignerTypes';
 import { acquireEventLockAndLoadStructure } from '@/server/events/eventRegistrations';
+import {
+  createDocumentTemplateVersion,
+  ensureDocumentRequirement,
+} from '@/server/documents/documentTemplateVersions';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -838,17 +842,23 @@ const updateOperationState = async (
   await updateBoldSignOperationById(normalizedId, patch);
 };
 
-const createOrUpdateTemplateProjectionFromOperation = async (params: {
-  event: ParsedBoldSignWebhookEvent;
+export const projectTemplateProjectionFromOperation = async (params: {
+  templateId: string | null;
+  dataObject?: JsonRecord | null;
+  payload?: JsonRecord;
   operation: BoldSignSyncOperation | null;
   status: string;
 }) => {
   const operationPayload = getOperationPayload(params.operation);
-  const payloadRoles = parseRoles(operationPayload.roles ?? params.event.dataObject?.roles ?? params.event.dataObject?.Roles);
+  const payloadRoles = parseRoles(
+    operationPayload.roles
+      ?? params.dataObject?.roles
+      ?? params.dataObject?.Roles,
+  );
 
-  const existing = params.event.templateId
+  const existing = params.templateId
     ? await prisma.templateDocuments.findFirst({
-      where: { templateId: params.event.templateId },
+      where: { templateId: params.templateId },
       orderBy: { updatedAt: 'desc' },
     })
     : null;
@@ -861,13 +871,13 @@ const createOrUpdateTemplateProjectionFromOperation = async (params: {
 
   const title = pickString(
     operationPayload.title,
-    params.event.dataObject?.title,
-    params.event.dataObject?.Title,
-    params.event.payload.title,
+    params.dataObject?.title,
+    params.dataObject?.Title,
+    params.payload?.title,
     existing?.title,
   );
 
-  if (!organizationId || !title || !params.event.templateId) {
+  if (!organizationId || !title || !params.templateId) {
     return null;
   }
 
@@ -880,39 +890,34 @@ const createOrUpdateTemplateProjectionFromOperation = async (params: {
   const signOnce = parseBoolean(operationPayload.signOnce) ?? existing?.signOnce ?? false;
   const description = pickString(
     operationPayload.description,
-    params.event.dataObject?.description,
-    params.event.dataObject?.Description,
+    params.dataObject?.description,
+    params.dataObject?.Description,
     existing?.description,
   );
-
   const now = new Date();
   const documentRequirementId = existing?.documentRequirementId
     ?? pickString(operationPayload.documentRequirementId)
-    ?? `document-requirement:boldsign:${params.event.templateId}`;
-  const projectedTemplate = await prisma.$transaction(async (tx) => {
-    await tx.documentRequirements.upsert({
-      where: { id: documentRequirementId },
-      create: {
-        id: documentRequirementId,
-        createdAt: now,
-        updatedAt: now,
-        organizationId,
-        title,
-        description,
-        createdBy: pickString(params.operation?.userId, operationPayload.createdBy) ?? null,
-        status: 'ACTIVE',
-      },
-      update: {
-        updatedAt: now,
-      },
-    });
+    ?? `document-requirement:boldsign:${params.templateId}`;
+  const requirementData = {
+    id: documentRequirementId,
+    createdAt: now,
+    updatedAt: now,
+    organizationId,
+    title,
+    description,
+    createdBy: pickString(params.operation?.userId, operationPayload.createdBy) ?? null,
+    status: 'ACTIVE',
+  };
+
+  return prisma.$transaction(async (tx) => {
+    const requirement = await ensureDocumentRequirement(tx, requirementData);
 
     if (existing) {
       return tx.templateDocuments.update({
         where: { id: existing.id },
         data: {
           updatedAt: now,
-          templateId: params.event.templateId,
+          templateId: params.templateId,
           type: 'PDF',
           organizationId,
           title,
@@ -920,7 +925,11 @@ const createOrUpdateTemplateProjectionFromOperation = async (params: {
           signOnce,
           requiredSignerType,
           status: params.status,
-          createdBy: pickString(params.operation?.userId, operationPayload.createdBy, existing.createdBy) ?? null,
+          createdBy: pickString(
+            params.operation?.userId,
+            operationPayload.createdBy,
+            existing.createdBy,
+          ) ?? null,
           roleIndex: payloadRoles[0]?.roleIndex ?? existing.roleIndex ?? null,
           roleIndexes: payloadRoles.map((entry) => entry.roleIndex),
           signerRoles: payloadRoles.map((entry) => entry.signerRole),
@@ -929,16 +938,17 @@ const createOrUpdateTemplateProjectionFromOperation = async (params: {
       });
     }
 
-    return tx.templateDocuments.create({
-      data: {
-        id: pickString(params.operation?.templateDocumentId, operationPayload.templateDocumentId) ?? crypto.randomUUID(),
+    return createDocumentTemplateVersion(tx, {
+      requirement,
+      version: {
+        id: pickString(
+          params.operation?.templateDocumentId,
+          operationPayload.templateDocumentId,
+        ) ?? crypto.randomUUID(),
         createdAt: now,
         updatedAt: now,
-        templateId: params.event.templateId,
-        documentRequirementId,
-        versionSequence: 1,
+        templateId: params.templateId,
         type: 'PDF',
-        organizationId,
         title,
         description,
         signOnce,
@@ -952,8 +962,6 @@ const createOrUpdateTemplateProjectionFromOperation = async (params: {
       },
     });
   });
-
-  return projectedTemplate;
 };
 
 const projectTemplateEvent = async (event: ParsedBoldSignWebhookEvent): Promise<void> => {
@@ -994,8 +1002,10 @@ const projectTemplateEvent = async (event: ParsedBoldSignWebhookEvent): Promise<
     templateStatus = 'DRAFT';
   }
 
-  const projectedTemplate = await createOrUpdateTemplateProjectionFromOperation({
-    event,
+  const projectedTemplate = await projectTemplateProjectionFromOperation({
+    templateId: event.templateId,
+    dataObject: event.dataObject,
+    payload: event.payload,
     operation,
     status: templateStatus,
   });

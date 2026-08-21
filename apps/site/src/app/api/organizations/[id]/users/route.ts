@@ -40,6 +40,7 @@ type BillPaymentSummary = {
   sequence: number;
   dueDate?: string;
   amountCents: number;
+  paidAmountCents: number;
   status?: string;
   paidAt?: string;
   paymentIntentId?: string | null;
@@ -55,6 +56,8 @@ type BillSummary = {
   ownerId: string;
   ownerName: string;
   eventId?: string | null;
+  sourceType?: string | null;
+  label?: string;
   eventName?: string;
   parentBillId?: string | null;
   totalAmountCents: number;
@@ -872,11 +875,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 	  });
 
 		  const teamBillOwnerIds = Array.from(new Set([...canonicalTeamIds, ...activeEventTeamIds]));
-	  const teamBills = eventIds.length && teamBillOwnerIds.length
+  const teamBills = teamBillOwnerIds.length
 	    ? await prisma.bills.findMany({
 	      where: {
 	        organizationId: id,
-	        eventId: { in: eventIds },
 	        ownerType: 'TEAM',
 	        ownerId: { in: teamBillOwnerIds },
 	      },
@@ -907,11 +909,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 	    ...(userIds.length ? [{ ownerId: { in: userIds } }] : []),
 	    ...(parentBillIds.length ? [{ parentBillId: { in: parentBillIds } }] : []),
 	  ];
-	  const userBills = eventIds.length && userBillFilters.length
+  const userBills = userBillFilters.length
 	    ? await prisma.bills.findMany({
 	      where: {
 	        organizationId: id,
-	        eventId: { in: eventIds },
 	        ownerType: 'USER',
 	        OR: userBillFilters,
 	      },
@@ -948,6 +949,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 	        sequence: true,
 	        dueDate: true,
 	        amountCents: true,
+        paidAmountCents: true,
 	        status: true,
 	        paidAt: true,
 	        paymentIntentId: true,
@@ -990,17 +992,29 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 	  });
 	  const billSummariesById = new Map<string, BillSummary>();
 	  allBills.forEach((bill) => {
+	    const firstLineItem = Array.isArray(bill.lineItems) ? bill.lineItems[0] : null;
+	    const label = firstLineItem
+	      && typeof firstLineItem === 'object'
+	      && 'label' in firstLineItem
+	      && typeof firstLineItem.label === 'string'
+	      && firstLineItem.label.trim().length > 0
+	      ? firstLineItem.label.trim()
+	      : undefined;
 	    const discountAmounts = withBillDiscountAmounts(bill, discountAmountsByBillId);
 	    const payments = (paymentsByBillId.get(bill.id) ?? []).map((payment): BillPaymentSummary => {
 	      const refundedAmountCents = normalizeAmountCents(payment.refundedAmountCents);
 	      const amountCents = normalizeAmountCents(payment.amountCents);
 	      const refundableAmountCents = Math.max(0, amountCents - refundedAmountCents);
 	      const status = normalizeStatus(payment.status) ?? undefined;
+	      const paidAmountCents = Number.isFinite(Number(payment.paidAmountCents))
+	        ? normalizeAmountCents(payment.paidAmountCents)
+	        : status === 'PAID' ? amountCents : 0;
 	      return {
 	        paymentId: payment.id,
 	        billId: payment.billId,
 	        sequence: Number.isFinite(Number(payment.sequence)) ? Number(payment.sequence) : 0,
 	        dueDate: toIsoString(payment.dueDate),
+	        paidAmountCents,
 	        amountCents,
 	        status,
 	        paidAt: toIsoString(payment.paidAt),
@@ -1011,9 +1025,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 	        isRefundable: refundableAmountCents > 0 && status === 'PAID',
 	      };
 	    });
-	    const paidAmountCents = payments.reduce((sum, payment) => (
-	      payment.status === 'PAID' ? sum + payment.amountCents : sum
-	    ), 0);
+    const paidAmountCents = payments.reduce((sum, payment) => sum + payment.paidAmountCents, 0);
 	    const refundedAmountCents = payments.reduce((sum, payment) => sum + payment.refundedAmountCents, 0);
 	    const ownerName = bill.ownerType === 'TEAM'
 	      ? (
@@ -1030,12 +1042,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 	      billId: bill.id,
 	      ownerType: bill.ownerType,
 	      ownerId: bill.ownerId,
-	      ownerName,
-	      eventId: bill.eventId,
-	      eventName: event?.name,
-	      parentBillId: bill.parentBillId ?? null,
-	      totalAmountCents: normalizeAmountCents(bill.totalAmountCents),
-	      paidAmountCents,
+      label,
+      ownerName,
+      eventId: bill.eventId,
+      sourceType: bill.sourceType ?? null,
+      eventName: event?.name,
+      parentBillId: bill.parentBillId ?? null,
+      totalAmountCents: normalizeAmountCents(bill.totalAmountCents),
+      paidAmountCents,
 	      originalAmountCents: discountAmounts.originalAmountCents,
 	      discountAmountCents: discountAmounts.discountAmountCents,
 	      discountedAmountCents: discountAmounts.discountedAmountCents,
