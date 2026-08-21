@@ -702,6 +702,9 @@ describe('POST /api/events/[eventId]/participants', () => {
       startDate: occurrenceDate,
       endDate: occurrenceDate,
       startTimeMinutes: 18 * 60,
+      endTimeMinutes: 19 * 60,
+      timeZone: 'UTC',
+      repeating: true,
       divisions: ['div_a'],
     });
     canManageEventMock.mockResolvedValue(false);
@@ -769,6 +772,9 @@ describe('POST /api/events/[eventId]/participants', () => {
       startDate: occurrenceDate,
       endDate: occurrenceDate,
       startTimeMinutes: 18 * 60,
+      endTimeMinutes: 19 * 60,
+      timeZone: 'UTC',
+      repeating: true,
       divisions: ['div_a'],
     });
     const paidDivision = {

@@ -1187,6 +1187,7 @@ describe('event form slot helpers', () => {
     const payload = buildSlotConflictPayload({
       eventId: 'event_1',
       eventType: 'LEAGUE',
+      organizationId: 'organization_1',
       parentEvent: null,
       eventStart: '2026-06-24T09:00',
       eventEnd: null,
@@ -1211,6 +1212,7 @@ describe('event form slot helpers', () => {
     expect(payload).toMatchObject({
       eventId: 'event_1',
       eventType: 'LEAGUE',
+      organizationId: 'organization_1',
       parentEvent: null,
       eventStart: '2026-06-24T09:00',
       eventEnd: undefined,

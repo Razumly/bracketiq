@@ -31,6 +31,12 @@ const createId = () => crypto.randomUUID();
 
 type EventBuilderOptions = {
   includePlaceholderTeams?: boolean;
+  canUseCandidate?: (candidate: {
+    event: Match;
+    resource: PlayingField;
+    start: Date;
+    end: Date;
+  }) => boolean;
 };
 
 type RegularSeasonMatchConfig = {
@@ -46,6 +52,7 @@ export class EventBuilder {
   context: SchedulerContext;
   schedule: Schedule<Match, any, any, Division>;
   private includePlaceholderTeams: boolean;
+  private canUseCandidate: EventBuilderOptions["canUseCandidate"];
   private shouldPlaceMatches = true;
   private regularPlaceholderIds: Set<string> = new Set();
   private playoffPlaceholderIds: Set<string> = new Set();
@@ -61,6 +68,7 @@ export class EventBuilder {
     this.context = context;
     this.event = event;
     this.includePlaceholderTeams = options.includePlaceholderTeams !== false;
+    this.canUseCandidate = options.canUseCandidate;
     this.participants = this.participantsForSchedule(this.event.teams);
     this.schedule = new Schedule(
       this.event.start,
@@ -1404,15 +1412,20 @@ export class EventBuilder {
     match.reservesTeamOfficial =
       match.requiresTeamOfficial &&
       Boolean(planner?.isTeamDutySlotReserved(match));
-    if (
+    const requiresOfficialCoverage = Boolean(
       planner?.isHardOfficialCoverageRequired() &&
-      planner.hasRequiredSlots(match)
-    ) {
+      planner.hasRequiredSlots(match),
+    );
+    if (this.canUseCandidate || requiresOfficialCoverage) {
       this.schedule.scheduleEventWithOptions(match, durationMs, {
-        canUseCandidate: ({ resource, start, end }) =>
-          planner.previewSchedulingCandidate(match, resource, start, end),
+        canUseCandidate: ({ resource, start, end }) => (
+          (this.canUseCandidate?.({ event: match, resource, start, end }) ?? true) &&
+          (!requiresOfficialCoverage || planner?.previewSchedulingCandidate(match, resource, start, end) === true)
+        ),
       });
-      planner.commitScheduledMatch(match);
+      if (requiresOfficialCoverage) {
+        planner?.commitScheduledMatch(match);
+      }
       return;
     }
     this.schedule.scheduleEvent(match, durationMs);

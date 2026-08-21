@@ -14,8 +14,10 @@ import {
   Tournament,
   TIMES,
   MINUTE_MS,
+  PlayingField,
   SchedulerContext,
   Team,
+  type TimeSlot,
 } from './types';
 import {
   assertCanonicalSchedulerTimeSlots,
@@ -35,6 +37,12 @@ export type ScheduleRequest = {
   event: League | Tournament;
   participantCount?: number;
   includePlaceholderTeams?: boolean;
+  canUseCandidate?: (candidate: {
+    event: Match;
+    resource: PlayingField;
+    start: Date;
+    end: Date;
+  }) => boolean;
 };
 
 export type ScheduleResult = {
@@ -267,6 +275,22 @@ const isScheduleOverrunError = (message: string): boolean => {
   return normalized.includes(SCHEDULE_OVERRUN_DETAIL.toLowerCase())
     || normalized.includes('not enough time is allotted');
 };
+const setGeneratedScheduleEndFromMatches = (
+  result: ScheduleResult,
+): void => {
+  if (!result.event.noFixedEndDateTime) return;
+  const placedMatchEnds = result.matches
+    .filter((match) => (
+      match.placementState === "PLACED"
+      && match.end instanceof Date
+      && !Number.isNaN(match.end.getTime())
+    ))
+    .map((match) => match.end.getTime());
+  if (!placedMatchEnds.length) return;
+  const generatedScheduleEnd = new Date(Math.max(...placedMatchEnds));
+  result.event.generatedScheduleEnd = generatedScheduleEnd;
+  result.event.end = generatedScheduleEnd;
+};
 
 
 const resolveSchedulerTimeSlots = (
@@ -324,10 +348,10 @@ const scheduleEventMutating = (request: ScheduleRequest, context: SchedulerConte
   );
 
   const result = isLeague(event)
-    ? buildLeagueSchedule(event, context, isOpenEndedSchedule, includePlaceholderTeams)
+    ? buildLeagueSchedule(event, context, isOpenEndedSchedule, includePlaceholderTeams, request.canUseCandidate)
     : (() => {
       ensureSplitPlayoffTimeSlotCoverage(event);
-      return buildTournamentSchedule(event, context, isOpenEndedSchedule, includePlaceholderTeams);
+      return buildTournamentSchedule(event, context, isOpenEndedSchedule, includePlaceholderTeams, request.canUseCandidate);
     })();
   finalizeOpenEndedSchedule(result.event, result.matches);
   return result;
@@ -348,6 +372,7 @@ const buildLeagueSchedule = (
   context: SchedulerContext,
   isOpenEndedSchedule: boolean,
   includePlaceholderTeams: boolean,
+  canUseCandidate?: ScheduleRequest["canUseCandidate"],
 ): ScheduleResult => {
   const playoffMappingErrors = validatePlayoffDivisionReferenceCapacities(league);
   if (playoffMappingErrors.length > 0) {
@@ -422,7 +447,7 @@ const buildLeagueSchedule = (
       team.matches = [];
     }
 
-    const builder = new EventBuilder(league, context, { includePlaceholderTeams });
+    const builder = new EventBuilder(league, context, { includePlaceholderTeams, canUseCandidate });
     try {
       const scheduled = builder.buildSchedule();
       if (!(scheduled instanceof League)) {
@@ -559,8 +584,9 @@ const buildTournamentSchedule = (
   context: SchedulerContext,
   isOpenEndedSchedule: boolean,
   includePlaceholderTeams: boolean,
+  canUseCandidate?: ScheduleRequest["canUseCandidate"],
 ): ScheduleResult => {
-  const builder = new EventBuilder(tournament, context, { includePlaceholderTeams });
+  const builder = new EventBuilder(tournament, context, { includePlaceholderTeams, canUseCandidate });
   let scheduled: Tournament;
   try {
     const result = builder.buildSchedule();

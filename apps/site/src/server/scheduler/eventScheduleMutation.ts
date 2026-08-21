@@ -7,6 +7,12 @@ import {
   saveMatches,
 } from "@/server/repositories/events";
 import {
+  findFieldConflictsForInterval,
+  loadFieldBlockerCatalog,
+  type FieldBlockerCatalog,
+  type PrismaLike,
+} from "@/server/repositories/fieldSchedulingConflicts";
+import {
   collectPhaseDivisions,
   collectPhaseTeamIdsByDivision,
   persistPhaseParticipantAssignments,
@@ -25,6 +31,7 @@ import {
   type StandingsAdvancementEvent,
 } from "./standings";
 import { rescheduleEventMatchesPreservingLocks } from "./reschedulePreservingLocks";
+import { acquireFieldLocks } from "@/server/repositories/locks";
 import { EventBuilder } from "./EventBuilder";
 import {
   assertPhaseOwnedMatchGraph,
@@ -563,6 +570,81 @@ const isReusableUnplacedMatchGraph = (matches: Match[]): boolean =>
       Boolean(match.division.phase),
   );
 
+const scheduledFieldIdsFor = (event: League | Tournament): string[] =>
+  Object.keys(event.fields ?? {}).sort();
+
+const scheduleConflictLowerBound = (event: League | Tournament): Date => {
+  const candidates = [
+    ...(event.start instanceof Date && !Number.isNaN(event.start.getTime()) ? [event.start] : []),
+    ...(Array.isArray(event.timeSlots)
+      ? event.timeSlots
+        .map((slot) => slot.startDate)
+        .filter((value): value is Date => value instanceof Date && !Number.isNaN(value.getTime()))
+      : []),
+  ];
+  return new Date(Math.min(...candidates.map((value) => value.getTime())));
+};
+
+const assertScheduledFieldConflicts = (
+  catalog: FieldBlockerCatalog,
+  matches: Match[],
+): void => {
+  for (const match of matches) {
+    if (
+      match.placementState !== "PLACED"
+      || !match.field
+      || !(match.start instanceof Date)
+      || !(match.end instanceof Date)
+      || Number.isNaN(match.start.getTime())
+      || Number.isNaN(match.end.getTime())
+      || match.end.getTime() <= match.start.getTime()
+    ) {
+      continue;
+    }
+    const conflict = findFieldConflictsForInterval(
+      catalog,
+      [match.field.id],
+      match.start,
+      match.end,
+    )[0];
+    if (!conflict) continue;
+    throw new ScheduleError(
+      `Field ${match.field.id} is occupied from ${conflict.start.toISOString()} to ${conflict.end.toISOString()} by ${conflict.source.kind}.`,
+      "RESOURCE",
+    );
+  }
+};
+const buildFieldCandidateGuard = (
+  catalog: FieldBlockerCatalog | null,
+): ((candidate: {
+  event: Match;
+  resource: { id: string };
+  start: Date;
+  end: Date;
+}) => boolean) | undefined => {
+  if (!catalog) return undefined;
+  return ({ resource, start, end }) =>
+    findFieldConflictsForInterval(catalog, [resource.id], start, end).length === 0;
+};
+
+const setGeneratedScheduleEnd = (
+  event: League | Tournament,
+  matches: Match[],
+): void => {
+  if (!event.noFixedEndDateTime) return;
+  const placedMatchEnds = matches
+    .filter((match) => (
+      match.placementState === "PLACED"
+      && match.end instanceof Date
+      && !Number.isNaN(match.end.getTime())
+    ))
+    .map((match) => match.end.getTime());
+  if (!placedMatchEnds.length) return;
+  const generatedScheduleEnd = new Date(Math.max(...placedMatchEnds));
+  event.generatedScheduleEnd = generatedScheduleEnd;
+  event.end = generatedScheduleEnd;
+};
+
 export const reconcileEventSchedule = async (
   options: EventScheduleMutationOptions,
 ): Promise<EventScheduleMutationResult> => {
@@ -590,6 +672,17 @@ export const reconcileEventSchedule = async (
   }
 
   const event = await loadEventWithRelations(eventId, tx);
+  const fieldIds = scheduledFieldIdsFor(event);
+  await acquireFieldLocks(tx, fieldIds);
+  const blockerCatalog = mode === "DELETE"
+    ? null
+    : await loadFieldBlockerCatalog({
+      client: tx as unknown as PrismaLike,
+      fieldIds,
+      lowerBound: scheduleConflictLowerBound(event),
+      excludeEventId: eventId,
+    });
+  const canUseFieldCandidate = buildFieldCandidateGuard(blockerCatalog);
   const previousMatches = Object.values(event.matches);
   if (
     mode !== "RESCHEDULE_PRESERVING_LOCKS" &&
@@ -647,6 +740,7 @@ export const reconcileEventSchedule = async (
     prepareSchedulePlacementWindow(event, false);
     const placedEvent = new EventBuilder(event, context, {
       includePlaceholderTeams: false,
+      canUseCandidate: canUseFieldCandidate,
     }).placeMatchGraph({ preserveMatchIds: true });
     const placedMatches = Object.values(placedEvent.matches);
     finalizeOpenEndedSchedule(placedEvent, placedMatches);
@@ -676,10 +770,14 @@ export const reconcileEventSchedule = async (
         checkedInTeamIds.add(teamId);
         checkedInTeamIdsByMatch.set(matchId, checkedInTeamIds);
       }
-      scheduled = rescheduleEventMatchesPreservingLocks(event, {
-        eventCheckedInTeamIds,
-        checkedInTeamIdsByMatch,
-      });
+      scheduled = rescheduleEventMatchesPreservingLocks(
+        event,
+        {
+          eventCheckedInTeamIds,
+          checkedInTeamIdsByMatch,
+        },
+        canUseFieldCandidate,
+      );
       scheduleWarnings = scheduled.warnings ?? [];
     } catch (error) {
       if (error instanceof ScheduleError) {
@@ -700,7 +798,12 @@ export const reconcileEventSchedule = async (
       );
     }
     scheduled = scheduleEvent(
-      { event, participantCount, includePlaceholderTeams },
+      {
+        event,
+        participantCount,
+        includePlaceholderTeams,
+        canUseCandidate: canUseFieldCandidate,
+      },
       context,
     );
   }
@@ -709,6 +812,10 @@ export const reconcileEventSchedule = async (
       "The scheduler did not produce any matches.",
     );
   }
+  if (blockerCatalog) {
+    assertScheduledFieldConflicts(blockerCatalog, scheduled.matches);
+  }
+  setGeneratedScheduleEnd(scheduled.event, scheduled.matches);
   await updateConfirmedPlayoffDivisions(tx, scheduled.event, context);
   await persistScheduledRosterTeams(
     {

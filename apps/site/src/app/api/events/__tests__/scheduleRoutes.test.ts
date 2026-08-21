@@ -56,6 +56,7 @@ const saveMatchesMock = jest.fn();
 const upsertEventFromPayloadMock = jest.fn();
 const deleteMatchesByEventMock = jest.fn();
 const acquireEventLockMock = jest.fn();
+const acquireFieldLocksMock = jest.fn();
 const isEventFieldConflictErrorMock = jest.fn();
 const scheduleEventMock = jest.fn();
 const serializeEventMock = jest.fn();
@@ -105,6 +106,7 @@ jest.mock('@/server/repositories/events', () => ({
 
 jest.mock('@/server/repositories/locks', () => ({
   acquireEventLock: (...args: any[]) => acquireEventLockMock(...args),
+  acquireFieldLocks: (...args: any[]) => acquireFieldLocksMock(...args),
 }));
 
 jest.mock('@/server/scheduler/scheduleEvent', () => ({

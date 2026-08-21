@@ -6,6 +6,8 @@ import {
 const MINUTES_PER_DAY = 24 * 60;
 const MINUTE_MS = 60 * 1000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
+/** One complete recurrence cycle. It is a proof boundary, not a search horizon. */
+export const REPEATING_TIME_SLOT_WEEKLY_CYCLE_DAYS = 7;
 export const REPEATING_TIME_SLOT_VALIDATION_WINDOW_DAYS = 370;
 const REPEATING_TIME_SLOT_VALIDATION_PADDING_MS = 2 * DAY_MS;
 
@@ -708,16 +710,17 @@ export const repeatingTimeSlotOccurrencesOverlap = (options: {
     options.isFirstOpenEnded ? null : options.firstWindow.end,
     options.isSecondOpenEnded ? null : options.secondWindow.end,
   ].filter((value): value is Date => Boolean(value));
-  const horizonEnd =
-    options.isFirstOpenEnded || options.isSecondOpenEnded
+  // An unbounded pair needs one complete local recurrence cycle only.
+  const cycleEnd =
+    options.isFirstOpenEnded && options.isSecondOpenEnded
       ? new Date(
-          overlapStart.getTime() +
-            REPEATING_TIME_SLOT_VALIDATION_WINDOW_DAYS * DAY_MS,
+          overlapStart.getTime()
+            + REPEATING_TIME_SLOT_WEEKLY_CYCLE_DAYS * DAY_MS,
         )
       : null;
   const overlapEndCandidates = [
     ...boundedEnds,
-    ...(horizonEnd ? [horizonEnd] : []),
+    ...(cycleEnd ? [cycleEnd] : []),
   ];
   const overlapEnd = new Date(
     Math.min(...overlapEndCandidates.map((value) => value.getTime())),

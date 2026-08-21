@@ -42,7 +42,7 @@ class DivisionFormatterDisplayLabelTest {
     }
 
     @Test
-    fun given_explicit_metadata_when_formatting_division_label_then_preserves_name()
+    fun given_explicit_metadata_when_formatting_division_label_then_preserves_name() {
         val divisionId = buildEventDivisionId("event-1", "c_skill_open_age_u14")
         val label = divisionId.toDivisionDisplayLabel(
             divisionDetails = listOf(

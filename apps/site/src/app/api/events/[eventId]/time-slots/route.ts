@@ -11,7 +11,7 @@ import {
   assertRepeatingTimeSlotsResolvable,
 } from '@/lib/repeatingTimeSlotAvailability';
 import { repeatingTimeSlotValidationResponse } from '@/server/repeatingTimeSlotValidationResponse';
-import { acquireEventLock } from '@/server/repositories/locks';
+import { acquireEventLock, acquireFieldLocks } from '@/server/repositories/locks';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,6 +68,7 @@ export async function PATCH(
       if (!existing) {
         throw new Response('Not found', { status: 404 });
       }
+      await acquireFieldLocks(tx, existing.fieldIds ?? []);
       if (!(await canManageEvent(session, existing, tx))) {
         throw new Response('Forbidden', { status: 403 });
       }

@@ -94,6 +94,7 @@ const MINUTES_PER_DAY = 24 * 60;
 
 type RentalSlotMinuteBounds = {
   startMinutes: number;
+  endMinutes: number;
   normalizedEndMinutes: number;
   durationMinutes: number;
   isOvernight: boolean;
@@ -129,7 +130,30 @@ const resolveRentalSlotMinuteBounds = (
   if (durationMinutes <= 0) {
     return null;
   }
-  return { startMinutes, normalizedEndMinutes, durationMinutes, isOvernight };
+  return { startMinutes, endMinutes, normalizedEndMinutes, durationMinutes, isOvernight };
+};
+
+const withResolvedRentalSlotMinuteBounds = (
+  slot: RentalAvailabilitySlot,
+  slotStart: Date | null,
+  slotEnd: Date | null,
+  slotTimeZone: string,
+): RentalAvailabilitySlot | null => {
+  const bounds = resolveRentalSlotMinuteBounds(slot, slotStart, slotEnd, slotTimeZone);
+  if (!bounds) {
+    return null;
+  }
+  if (
+    typeof slot.startTimeMinutes === 'number'
+    && typeof slot.endTimeMinutes === 'number'
+  ) {
+    return slot;
+  }
+  return {
+    ...slot,
+    startTimeMinutes: bounds.startMinutes,
+    endTimeMinutes: bounds.endMinutes,
+  };
 };
 
 const normalizedRentalSlotDurationMinutes = (
@@ -192,6 +216,16 @@ const rentalSlotCoversSelection = (
     );
   }
 
+  const resolvedSlot = withResolvedRentalSlotMinuteBounds(
+    slot,
+    slotStart,
+    slotEnd,
+    slotTimeZone,
+  );
+  if (!resolvedSlot) {
+    return false;
+  }
+
   const selectionStartLocalDate = getRepeatingTimeSlotLocalDate(
     selectionStart,
     slotTimeZone,
@@ -207,7 +241,7 @@ const rentalSlotCoversSelection = (
     try {
       const occurrence = resolveRepeatingTimeSlotOccurrence(
         {
-          ...slot,
+          ...resolvedSlot,
           timeZone: slotTimeZone,
         },
         anchorDate,

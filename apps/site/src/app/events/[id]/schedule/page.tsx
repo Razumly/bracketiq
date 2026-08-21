@@ -493,7 +493,7 @@ function EventScheduleContent() {
   );
   const selectedOccurrenceSlotId = normalizeIdToken(searchParams?.get('slotId'));
   const selectedOccurrenceDate = normalizeIdToken(searchParams?.get('occurrenceDate'));
-  const selectedOccurrence = useMemo<WeeklyOccurrenceSelection | null>(
+  const rawSelectedOccurrence = useMemo<WeeklyOccurrenceSelection | null>(
     () => (
       selectedOccurrenceSlotId && selectedOccurrenceDate
         ? {
@@ -504,6 +504,20 @@ function EventScheduleContent() {
     ),
     [selectedOccurrenceDate, selectedOccurrenceSlotId],
   );
+  const selectedOccurrence = useMemo<WeeklyOccurrenceSelection | null>(() => {
+    if (!rawSelectedOccurrence || !activeEvent) {
+      return rawSelectedOccurrence;
+    }
+    try {
+      return resolveSelectedWeeklyOccurrenceOption(activeEvent, rawSelectedOccurrence)
+        ? rawSelectedOccurrence
+        : null;
+    } catch (occurrenceError) {
+      console.warn('Ignoring unavailable weekly occurrence context for schedule display:', occurrenceError);
+      return null;
+    }
+  }, [activeEvent, rawSelectedOccurrence]);
+  const selectedOccurrenceCalendarDate = rawSelectedOccurrence?.occurrenceDate ?? null;
   const [viewerWeeklyOccurrenceKeys, setViewerWeeklyOccurrenceKeys] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     let cancelled = false;
@@ -556,14 +570,22 @@ function EventScheduleContent() {
       cancelled = true;
     };
   }, [activeEvent?.$id, eventId, isWeeklyParentEvent, user?.$id]);
-  const selectedWeeklyOccurrenceOption = useMemo(
-    () => resolveSelectedWeeklyOccurrenceOption(activeEvent ?? null, selectedOccurrence),
-    [activeEvent, selectedOccurrence],
-  );
+  const selectedWeeklyOccurrenceOption = useMemo(() => {
+    if (!selectedOccurrence) {
+      return null;
+    }
+    try {
+      return resolveSelectedWeeklyOccurrenceOption(activeEvent ?? null, selectedOccurrence);
+    } catch (occurrenceError) {
+      console.warn('Ignoring unavailable weekly occurrence option for schedule display:', occurrenceError);
+      return null;
+    }
+  }, [activeEvent, selectedOccurrence]);
   const initialWeeklyScheduleDate = useMemo(() => {
-    const selectedStart = selectedWeeklyOccurrenceOption?.startInstant ?? null;
+    const selectedStart = selectedWeeklyOccurrenceOption?.startInstant
+      ?? parseDateValue(selectedOccurrenceCalendarDate);
     return selectedStart ?? parseDateValue(activeEvent?.start ?? null) ?? new Date();
-  }, [activeEvent?.start, selectedWeeklyOccurrenceOption?.startInstant]);
+  }, [activeEvent?.start, selectedOccurrenceCalendarDate, selectedWeeklyOccurrenceOption?.startInstant]);
   const [weeklyScheduleCalendarView, setWeeklyScheduleCalendarView] = useState<View>('month');
   const [weeklyScheduleCalendarDate, setWeeklyScheduleCalendarDate] = useState<Date>(initialWeeklyScheduleDate);
   useEffect(() => {

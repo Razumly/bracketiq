@@ -115,6 +115,11 @@ describe('listFieldSchedulingConflicts', () => {
     expect(client.matches.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ eventId: { not: 'draft_event_1' } }),
     }));
+    expect(client.events.findMany).toHaveBeenCalled();
+    const eventQuery = client.events.findMany.mock.calls[0]?.[0] as {
+      where?: Record<string, unknown>;
+    };
+    expect(eventQuery.where).not.toHaveProperty('organizationId');
     expect(client.rentalBookingItems.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         OR: [{ eventId: null }, { eventId: { not: 'draft_event_1' } }],

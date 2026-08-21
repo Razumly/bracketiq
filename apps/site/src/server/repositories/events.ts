@@ -42,6 +42,7 @@ import {
   normalizeDivisionTypeIds,
   parseCompositeDivisionTypeId,
   type DivisionGender,
+  type DivisionNameCandidate,
   type DivisionRatingType,
 } from "@/lib/divisionTypes";
 import { evaluatePlayoffPlacementCapacities } from "@/lib/divisionCapacity";
@@ -109,6 +110,13 @@ import {
   syncEventDivisionPhases,
   type PhasePersistenceClient,
 } from "./eventDivisionPhases";
+import {
+  fieldSchedulingConflictDetails,
+  loadFieldBlockerCatalog,
+  type FieldBlockerCatalog,
+  type LoadFieldBlockerCatalogInput,
+} from "./fieldSchedulingConflicts";
+import { acquireFieldLocks } from "@/server/repositories/locks";
 import {
   DEFAULT_EVENT_TIME_ZONE,
   localDatePartsInTimeZone,
@@ -2510,6 +2518,10 @@ const buildDivisions = (
 
   return { divisions: result, map, fieldIdsByDivision };
 };
+type EventDivisionPayloadRow = DivisionNameCandidate & {
+  [key: string]: unknown;
+  installmentDueDates?: unknown[];
+};
 
 const collectSystemGeneratedDivisionIds = (
   rows: readonly any[],
@@ -2558,7 +2570,7 @@ const assertUniqueSubmittedEventDivisionNames = (
 };
 
 const serializeDivisionDetailsForTemplate = (
-  divisionRows: any[],
+  divisionRows: EventDivisionPayloadRow[],
 ): Array<Record<string, unknown>> =>
   divisionRows.map((row, index) => ({
     id: row.id,
@@ -3113,8 +3125,7 @@ type FieldSchedulingConflictDetail = FieldSchedulingConflict & {
  */
 const listFieldSchedulingConflictDetails = async (
   params: ListFieldSchedulingConflictsInput,
-): Promise<FieldSchedulingConflictDetail[]> => {
-  const client = params.client ?? prisma;
+): Promise<EventFieldScheduleConflict[]> => {
   const fieldIds = normalizeFieldIds(params.fieldIds);
   if (
     !fieldIds.length ||
@@ -3123,267 +3134,18 @@ const listFieldSchedulingConflictDetails = async (
     return [];
   }
 
-  const fields = buildConflictFieldMap(fieldIds);
-  const excludeEventId = normalizeEntityId(params.excludeEventId);
-  const shouldLookupCurrentEvent =
-    !normalizeEntityId(params.organizationId) && Boolean(excludeEventId);
-  const currentEventRow = shouldLookupCurrentEvent
-    ? await client.events.findUnique({
-        where: { id: excludeEventId! },
-        select: { organizationId: true },
-      })
-    : null;
-  const scopedOrganizationId =
-    normalizeEntityId(params.organizationId) ??
-    normalizeEntityId(currentEventRow?.organizationId);
-
-  const [externalMatchRowsRaw, externalEventRowsRaw] = await Promise.all([
-    client.matches.findMany({
-      where: {
-        fieldId: { in: fieldIds },
-        ...(excludeEventId ? { eventId: { not: excludeEventId } } : {}),
-        start: { not: null, lt: params.windowEnd },
-        end: { not: null, gt: params.windowStart },
-      } as any,
-      select: {
-        id: true,
-        eventId: true,
-        fieldId: true,
-        start: true,
-        end: true,
-      },
-    }),
-    client.events.findMany({
-      where: {
-        ...(excludeEventId ? { id: { not: excludeEventId } } : {}),
-        fieldIds: { hasSome: fieldIds },
-        NOT: { state: "TEMPLATE" },
-        start: { lt: params.windowEnd },
-        end: { gt: params.windowStart },
-        ...(scopedOrganizationId
-          ? { organizationId: scopedOrganizationId }
-          : {}),
-      } as any,
-      select: {
-        id: true,
-        eventType: true,
-        parentEvent: true,
-        start: true,
-        end: true,
-        fieldIds: true,
-        timeSlotIds: true,
-      },
-    }),
-  ]);
-
-  let externalMatchRows = externalMatchRowsRaw;
-  if (scopedOrganizationId) {
-    const matchEventIds = Array.from(
-      new Set(
-        externalMatchRows
-          .map((row: any) =>
-            typeof row.eventId === "string" ? row.eventId : "",
-          )
-          .filter((eventId: string) => eventId.length > 0),
-      ),
-    );
-    if (matchEventIds.length) {
-      const allowedEventRows = await client.events.findMany({
-        where: {
-          id: { in: matchEventIds },
-          organizationId: scopedOrganizationId,
-          NOT: { state: "TEMPLATE" },
-        },
-        select: { id: true },
-      });
-      const allowedEventIds = new Set(
-        allowedEventRows.map((event: any) => event.id),
-      );
-      externalMatchRows = externalMatchRows.filter(
-        (row: any) =>
-          typeof row.eventId === "string" && allowedEventIds.has(row.eventId),
-      );
-    } else {
-      externalMatchRows = [];
-    }
-  }
-
-  for (const row of externalMatchRows) {
-    const fieldId = typeof row.fieldId === "string" ? row.fieldId : "";
-    const field = fieldId ? fields[fieldId] : undefined;
-    if (!field) {
-      continue;
-    }
-    const start = toOptionalDate(row.start);
-    const end = toOptionalDate(row.end);
-    if (!start || !end || end.getTime() <= start.getTime()) {
-      continue;
-    }
-    field.events.push(
-      new BlockingEvent({
-        id: `${FIELD_MATCH_BLOCK_PREFIX}${row.id}`,
-        start,
-        end,
-        participants: [],
-        field,
-        parentId: row.eventId ?? "",
-      }),
-    );
-  }
-
-  const externalEventRows = externalEventRowsRaw.filter((row: any) => {
-    const eventType =
-      typeof row.eventType === "string" ? row.eventType.toUpperCase() : "";
-    const parentEventId = normalizeEntityId(row.parentEvent);
-    if (eventType === "WEEKLY_EVENT" && parentEventId) {
-      return false;
-    }
-    if (scopedOrganizationId) {
-      const rowOrganizationId = normalizeEntityId((row as any).organizationId);
-      if (rowOrganizationId && rowOrganizationId !== scopedOrganizationId) {
-        return false;
-      }
-    }
-    return true;
+  const catalog = await loadFieldBlockerCatalog({
+    client: params.client,
+    fieldIds,
+    lowerBound: params.windowStart,
+    excludeEventId: params.excludeEventId,
   });
-  const externalEventSlotIds = Array.from(
-    new Set(
-      externalEventRows.flatMap((row: any) =>
-        ensureStringArray(row.timeSlotIds),
-      ),
-    ),
+
+  return fieldSchedulingConflictDetails(
+    catalog,
+    params.windowStart,
+    params.windowEnd,
   );
-  const externalEventSlotRows =
-    externalEventSlotIds.length > 0
-      ? await client.timeSlots.findMany({
-          where: { id: { in: externalEventSlotIds } },
-        })
-      : [];
-  const externalEventSlotById = new Map(
-    externalEventSlotRows.map((slot: any) => [slot.id, slot]),
-  );
-
-  for (const row of externalEventRows) {
-    const eventType =
-      typeof row.eventType === "string" ? row.eventType.toUpperCase() : "";
-    const parentEventId = normalizeEntityId(row.parentEvent);
-    if (eventType === "WEEKLY_EVENT" && parentEventId) {
-      continue;
-    }
-    const eventFieldIds = normalizeFieldIds(row.fieldIds);
-    const relevantFieldIds = eventFieldIds.filter((fieldId) =>
-      Boolean(fields[fieldId]),
-    );
-    if (!relevantFieldIds.length) {
-      continue;
-    }
-
-    const start = toOptionalDate(row.start);
-    const end = toOptionalDate(row.end);
-    const isWeeklyParent = eventType === "WEEKLY_EVENT" && !parentEventId;
-    const slotBased = isSchedulableEventType(eventType) || isWeeklyParent;
-
-    if (!slotBased) {
-      if (!start || !end || end.getTime() <= start.getTime()) {
-        continue;
-      }
-      for (const fieldId of relevantFieldIds) {
-        const field = fields[fieldId];
-        if (!field) {
-          continue;
-        }
-        appendBlockingEvent({
-          field,
-          id: `${FIELD_EVENT_BLOCK_PREFIX}${row.id}__${fieldId}`,
-          start,
-          end,
-          parentId: row.id,
-        });
-      }
-      continue;
-    }
-
-    const timeSlots = ensureStringArray(row.timeSlotIds)
-      .map((slotId) => externalEventSlotById.get(slotId))
-      .filter((slot): slot is any => Boolean(slot));
-    for (const slot of timeSlots) {
-      const slotFieldIds = normalizeBlockingSlotFieldIds(slot).filter(
-        (fieldId) => Boolean(fields[fieldId]),
-      );
-      for (const fieldId of slotFieldIds) {
-        const field = fields[fieldId];
-        if (!field) {
-          continue;
-        }
-        appendBlockingEventsFromSlot({
-          slot,
-          field,
-          fieldId,
-          blockPrefix: `${FIELD_EVENT_BLOCK_PREFIX}${row.id}__${slot.id}__`,
-          parentId: row.id,
-          windowStart: params.windowStart,
-          windowEnd: params.windowEnd,
-          fallbackStart: start,
-          fallbackEnd: end,
-        });
-      }
-    }
-  }
-
-  if (typeof client.rentalBookingItems?.findMany === "function") {
-    const rentalBookingRows = await client.rentalBookingItems.findMany({
-      where: {
-        fieldId: { in: fieldIds },
-        status: { in: ["PENDING_PAYMENT", "CONFIRMED"] },
-        start: { lt: params.windowEnd },
-        end: { gt: params.windowStart },
-        ...(excludeEventId
-          ? {
-              OR: [{ eventId: null }, { eventId: { not: excludeEventId } }],
-            }
-          : {}),
-      } as any,
-      select: {
-        id: true,
-        bookingId: true,
-        fieldId: true,
-        start: true,
-        end: true,
-      },
-    });
-
-    for (const row of rentalBookingRows) {
-      const fieldId = typeof row.fieldId === "string" ? row.fieldId : "";
-      const field = fieldId ? fields[fieldId] : undefined;
-      if (!field) {
-        continue;
-      }
-      const start = toOptionalDate(row.start);
-      const end = toOptionalDate(row.end);
-      if (!start || !end || end.getTime() <= start.getTime()) {
-        continue;
-      }
-      appendBlockingEvent({
-        field,
-        id: `rental-booking:${row.bookingId}:${row.id}`,
-        start,
-        end,
-        parentId: row.bookingId ?? "",
-      });
-    }
-  }
-
-  return collectFieldScheduleConflicts({
-    fields,
-    start: params.windowStart,
-    end: params.windowEnd,
-  }).map((conflict) => ({
-    fieldId: conflict.fieldId,
-    blockId: conflict.blockId,
-    parentId: conflict.parentId,
-    start: conflict.start,
-    end: conflict.end,
-  }));
 };
 
 /**
@@ -3408,7 +3170,6 @@ export const listFieldSchedulingConflicts = async (
 const attachFieldSchedulingConflicts = async (params: {
   client: PrismaLike;
   eventId: string;
-  organizationId?: string | null;
   fields: Record<string, PlayingField>;
   windowStart: Date;
   windowEnd: Date;
@@ -3420,14 +3181,17 @@ const attachFieldSchedulingConflicts = async (params: {
     return;
   }
   clearManagedFieldBlockingEvents(params.fields);
-  const conflicts = await listFieldSchedulingConflictDetails({
+  const catalog = await loadFieldBlockerCatalog({
     client: params.client,
-    organizationId: params.organizationId,
     fieldIds: Object.keys(params.fields),
-    windowStart: params.windowStart,
-    windowEnd: params.windowEnd,
+    lowerBound: params.windowStart,
     excludeEventId: params.eventId,
   });
+  const conflicts = fieldSchedulingConflictDetails(
+    catalog,
+    params.windowStart,
+    params.windowEnd,
+  );
   for (const conflict of conflicts) {
     const field = params.fields[conflict.fieldId];
     if (!field) {
@@ -3538,12 +3302,11 @@ export const assertNoEventFieldSchedulingConflicts = async (params: {
   if (conflictWindowEnd.getTime() <= params.start.getTime()) {
     return;
   }
-
+  await acquireFieldLocks(params.client, fieldIds);
   const fields = buildConflictFieldMap(fieldIds);
   await attachFieldSchedulingConflicts({
     client: params.client,
     eventId: params.eventId,
-    organizationId: params.organizationId ?? null,
     fields,
     windowStart: params.start,
     windowEnd: conflictWindowEnd,
@@ -4502,7 +4265,6 @@ export const loadEventWithRelations = async (
     await attachFieldSchedulingConflicts({
       client,
       eventId: event.id,
-      organizationId: event.organizationId ?? null,
       fields,
       windowStart: eventStart,
       windowEnd: conflictWindowEnd,

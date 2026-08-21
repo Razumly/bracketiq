@@ -22,6 +22,10 @@ import {
 } from "@/types";
 import type { RegistrationQuestionAnswerInput, TeamPlayerRegistration } from "@/types";
 import { ensureLocalDateTimeString } from "@/lib/dateUtils";
+import type {
+  FieldSchedulingConflictBatchRequest,
+  FieldSchedulingConflictBatchResponse,
+} from "@/contracts/fieldSchedulingConflicts";
 import { sportsService } from "@/lib/sportsService";
 import { userService } from "@/lib/userService";
 import { buildPayload } from "./utils";
@@ -1529,7 +1533,22 @@ class EventService {
       status: row.status as EventStatus | undefined,
       state,
       leagueConfig: this.buildLeagueConfig(row),
+
       leagueScoringConfig: row.leagueScoringConfig,
+    };
+  }
+  async getFieldSchedulingConflicts(
+    payload: FieldSchedulingConflictBatchRequest,
+  ): Promise<FieldSchedulingConflictBatchResponse> {
+    const response = await apiRequest<Partial<FieldSchedulingConflictBatchResponse>>(
+      "/api/events/field-conflicts",
+      {
+        method: "POST",
+        body: payload,
+      },
+    );
+    return {
+      conflicts: Array.isArray(response?.conflicts) ? response.conflicts : [],
     };
   }
 

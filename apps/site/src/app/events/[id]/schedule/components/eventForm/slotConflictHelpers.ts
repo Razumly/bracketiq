@@ -19,14 +19,9 @@ import { normalizeDivisionKeys } from "./divisionForm";
 import { hasParentEventRef } from "./eventRules";
 import { normalizeSlotFieldIds, normalizeWeekdays } from "./slotForm";
 import { slotDateTimeRangesOverlap } from "./slotValidation";
+import type { FieldSchedulingConflictResponse } from "@/contracts/fieldSchedulingConflicts";
 
 type EventType = Event["eventType"];
-
-export const CONFLICT_LOOKUP_START = "1970-01-01T00:00:00.000Z";
-export const CONFLICT_LOOKUP_END = "2100-01-01T00:00:00.000Z";
-
-const AUTO_RESOLVE_STEP_MINUTES = 15;
-const AUTO_RESOLVE_MAX_STEPS = 96;
 
 export type SlotConflictSnapshot = {
   key: string;
@@ -44,9 +39,14 @@ export type SlotConflictSnapshot = {
   repeating: boolean;
 };
 
+const AUTO_RESOLVE_STEP_MINUTES = 15;
+const AUTO_RESOLVE_MAX_STEPS = 96;
+
+
 export type SlotConflictPayload = {
   eventId: string;
   eventType: EventType;
+  organizationId?: string;
   parentEvent?: string | null;
   eventStart?: string;
   eventEnd?: string;
@@ -64,6 +64,7 @@ export type SlotConflictContext = {
 type BuildSlotConflictPayloadOptions = {
   eventId?: string | null;
   eventType: EventType;
+  organizationId?: string | null;
   parentEvent?: string | null;
   eventStart?: string | null;
   eventEnd?: string | null;
@@ -227,6 +228,7 @@ export const buildSlotConflictSnapshot = (
 export const buildSlotConflictPayload = ({
   eventId,
   eventType,
+  organizationId,
   parentEvent,
   eventStart,
   eventEnd,
@@ -235,11 +237,30 @@ export const buildSlotConflictPayload = ({
 }: BuildSlotConflictPayloadOptions): SlotConflictPayload => ({
   eventId: eventId ?? "",
   eventType,
+  ...(organizationId?.trim()
+    ? { organizationId: organizationId.trim() }
+    : {}),
   parentEvent: parentEvent ?? null,
   eventStart: eventStart ?? undefined,
   eventEnd: hasNoFixedEventEnd ? undefined : (eventEnd ?? undefined),
   hasNoFixedEventEnd: hasNoFixedEventEnd || undefined,
-  slots: slots.map(buildSlotConflictSnapshot),
+  slots: slots.map((slot) => {
+    const snapshot = buildSlotConflictSnapshot(slot);
+    const timeZone = slot.timeZone ?? "UTC";
+    const eventStartForSlot = formatEventDateTimeForForm(eventStart ?? null, timeZone);
+    const eventEndForSlot = formatEventDateTimeForForm(eventEnd ?? null, timeZone);
+    return {
+      ...snapshot,
+      startDate:
+        snapshot.startDate && snapshot.startDate === eventStartForSlot
+          ? undefined
+          : snapshot.startDate,
+      endDate:
+        snapshot.endDate && snapshot.endDate === eventEndForSlot
+          ? undefined
+          : snapshot.endDate,
+    };
+  }),
 });
 
 export const buildSlotConflictCheckKey = (
@@ -487,6 +508,92 @@ const slotOverlapsExistingEvent = (
   }
 
   return repeatingSlotOverlapsEvent(slot, eventRange);
+};
+
+const fieldConflictLabel = (
+  kind: FieldSchedulingConflictResponse["kind"],
+): string => {
+  switch (kind) {
+    case "MATCH":
+      return "Scheduled Match";
+    case "ONE_TIME_EVENT":
+      return "Scheduled Event";
+    case "EVENT_TIME_SLOT":
+      return "Scheduled Time Slot";
+    case "RENTAL_BOOKING":
+      return "Unavailable Resource";
+    case "OCCUPIED":
+      return "Occupied Resource";
+    default:
+      return "Scheduling Conflict";
+  }
+};
+
+const transientEventForFieldConflict = (
+  conflict: FieldSchedulingConflictResponse,
+): Event => {
+  const source = conflict.source;
+  return ({
+    $id:
+      source?.eventId ??
+      source?.id ??
+      `field-conflict:${conflict.fieldId}:${conflict.start}`,
+    name: fieldConflictLabel(conflict.kind),
+    // The response is a concrete blocker interval, not a source event.
+    eventType: "EVENT",
+    parentEvent: source?.parentId ?? null,
+    start: conflict.start,
+    end: conflict.end,
+    noFixedEndDateTime: source?.noFixedEndDateTime ?? false,
+    timeZone:
+      source?.timeZone ??
+      source?.eventTimeZone ??
+      "UTC",
+    timeSlots: [],
+  }) as unknown as Event;
+};
+
+export const buildServerSlotConflicts = (
+  slot: LeagueSlotForm,
+  responses: FieldSchedulingConflictResponse[],
+): LeagueSlotForm["conflicts"] => {
+  const fieldIds = new Set(normalizeSlotFieldIds(slot));
+  const seen = new Set<string>();
+  return responses
+    .filter(
+      (response) =>
+        response.slotKey === slot.key && fieldIds.has(response.fieldId),
+    )
+    .filter((response) => {
+      const key = [
+        response.kind,
+        response.source?.id ?? "",
+        response.fieldId,
+        response.start,
+        response.end,
+      ].join(":");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((response) => {
+      const event = transientEventForFieldConflict(response);
+      const source = response.source;
+      const schedule = {
+        $id:
+          source?.id ??
+          `field-conflict:${response.fieldId}:${response.start}`,
+        repeating: false,
+        startDate: response.start,
+        endDate: response.end,
+        timeZone: source?.timeZone ?? source?.eventTimeZone ?? "UTC",
+        startTimeMinutes: source?.startTimeMinutes ?? undefined,
+        endTimeMinutes: source?.endTimeMinutes ?? undefined,
+        scheduledFieldId: response.fieldId,
+        scheduledFieldIds: [response.fieldId],
+      } as unknown as TimeSlot;
+      return { event, schedule };
+    });
 };
 
 export const snapshotToSlotForm = (

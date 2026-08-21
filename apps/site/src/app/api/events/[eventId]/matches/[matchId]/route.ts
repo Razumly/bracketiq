@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { loadEventForMatchMutation, loadEventWithRelations, saveMatches } from '@/server/repositories/events';
-import { acquireEventLock } from '@/server/repositories/locks';
+import { acquireEventLock, acquireFieldLocks } from '@/server/repositories/locks';
 import {
   applyMatchUpdates,
   applyPersistentAutoLock,
@@ -1303,6 +1303,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
       }
       const isHostOrAdmin = await canManageEvent(session, eventAccess, tx);
       const event = await loadEventForMatchMutation(eventId, matchId, tx);
+      await acquireFieldLocks(tx, Object.keys(event.fields ?? {}));
       const beforeMatchSnapshot = snapshotMatchScheduleState(Object.values(event.matches));
       const officialPositions = Array.isArray(event.officialPositions) ? event.officialPositions : [];
       const eventOfficials = Array.isArray(event.eventOfficials) ? event.eventOfficials : [];

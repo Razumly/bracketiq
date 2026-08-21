@@ -330,9 +330,12 @@ describe('POST /api/billing/refund', () => {
     prismaMock.timeSlots.findUnique.mockResolvedValueOnce({
       id: 'slot_1',
       startTimeMinutes: 12 * 60,
+      endTimeMinutes: 13 * 60,
       daysOfWeek: [occurrenceDay],
       startDate: occurrenceDate,
       endDate: occurrenceDate,
+      timeZone: 'UTC',
+      repeating: true,
       divisions: [],
     });
     prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([
@@ -420,9 +423,12 @@ describe('POST /api/billing/refund', () => {
     prismaMock.timeSlots.findUnique.mockResolvedValueOnce({
       id: 'slot_1',
       startTimeMinutes: 12 * 60,
+      endTimeMinutes: 13 * 60,
       daysOfWeek: [occurrenceDay],
       startDate: occurrenceDate,
       endDate: occurrenceDate,
+      timeZone: 'UTC',
+      repeating: true,
       divisions: [],
     });
     prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([

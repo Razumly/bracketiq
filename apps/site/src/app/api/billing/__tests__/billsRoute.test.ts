@@ -204,6 +204,8 @@ describe('POST /api/billing/bills', () => {
       startDate: new Date('2026-07-01T00:00:00.000Z'),
       endDate: null,
       startTimeMinutes: 600,
+      endTimeMinutes: 660,
+      timeZone: 'UTC',
       divisions: ['open'],
     });
 
@@ -289,6 +291,8 @@ describe('POST /api/billing/bills', () => {
       startDate: new Date('2026-07-01T00:00:00.000Z'),
       endDate: null,
       startTimeMinutes: 600,
+      endTimeMinutes: 660,
+      timeZone: 'UTC',
       divisions: ['open'],
     });
 
@@ -335,6 +339,8 @@ describe('POST /api/billing/bills', () => {
       startDate: new Date('2026-07-01T00:00:00.000Z'),
       endDate: null,
       startTimeMinutes: 600,
+      endTimeMinutes: 660,
+      timeZone: 'UTC',
       divisions: ['open'],
     });
 

@@ -4,6 +4,10 @@ jest.mock("@/lib/prisma", () => ({
   prisma: {},
 }));
 
+jest.mock("@/server/repositories/locks", () => ({
+  acquireFieldLocks: jest.fn().mockResolvedValue(undefined),
+}));
+
 jest.mock("@/server/repositories/events", () => ({
   deletePristineScheduleByEvent: jest.fn(),
   loadEventWithRelations: jest.fn(),
@@ -456,5 +460,97 @@ describe("event schedule Match Graph persistence", () => {
     expect(result.event.end.getTime()).toBeLessThanOrEqual(
       recurringSlotEnd.getTime(),
     );
+  });
+
+  it("avoids a stored Field blocker before persisting a proposed match", async () => {
+    const event = buildLeague("event_field_blocked", false, 0, 4, 1);
+    const tx = {
+      events: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: event.id,
+          eventType: "LEAGUE",
+        }),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      matches: {
+        findMany: jest.fn().mockResolvedValue([{
+          id: "stored_match",
+          eventId: "other_event",
+          fieldId: "field_1",
+          start: new Date("2026-01-05T08:00:00.000Z"),
+          end: new Date("2026-01-05T09:00:00.000Z"),
+          placementState: "PLACED",
+        }]),
+      },
+    } as unknown as Parameters<typeof reconcileEventSchedule>[0]["tx"];
+    (loadEventWithRelations as jest.Mock).mockResolvedValue(event);
+
+    const result = await reconcileEventSchedule({
+      tx,
+      eventId: event.id,
+      mode: "BUILD",
+    });
+
+    expect(
+      result.matches.every(
+        (match) =>
+          match.end.getTime() <= new Date("2026-01-05T08:00:00.000Z").getTime() ||
+          match.start.getTime() >= new Date("2026-01-05T09:00:00.000Z").getTime(),
+      ),
+    ).toBe(true);
+    expect(saveMatches).toHaveBeenCalledWith(event.id, result.matches, tx);
+  });
+
+  it("rejects a far-future Match blocked by one unbounded Weekly Event rule", async () => {
+    const event = buildLeague("event_recurring_field_blocked", false, 0, 4, 1);
+    event.timeSlots[0].endTimeMinutes = 9 * 60;
+    const tx = {
+      events: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: event.id,
+          eventType: "LEAGUE",
+        }),
+        findMany: jest.fn().mockResolvedValue([{
+          id: "weekly_blocker",
+          eventType: "WEEKLY_EVENT",
+          parentEvent: null,
+          start: new Date("2026-01-05T00:00:00.000Z"),
+          end: null,
+          scheduleEndConstraint: null,
+          generatedScheduleEnd: null,
+          noFixedEndDateTime: true,
+          timeZone: "UTC",
+          fieldIds: ["field_1"],
+          timeSlotIds: ["weekly_blocker_slot"],
+          state: "PUBLISHED",
+          archivedAt: null,
+        }]),
+      },
+      matches: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      timeSlots: {
+        findMany: jest.fn().mockResolvedValue([{
+          id: "weekly_blocker_slot",
+          repeating: true,
+          startDate: new Date("2026-01-05T00:00:00.000Z"),
+          endDate: null,
+          daysOfWeek: [0],
+          startTimeMinutes: 8 * 60,
+          endTimeMinutes: 9 * 60,
+          timeZone: "UTC",
+          scheduledFieldIds: ["field_1"],
+          divisions: [],
+        }]),
+      },
+    } as unknown as Parameters<typeof reconcileEventSchedule>[0]["tx"];
+    (loadEventWithRelations as jest.Mock).mockResolvedValue(event);
+
+    await expect(reconcileEventSchedule({
+      tx,
+      eventId: event.id,
+      mode: "BUILD",
+    })).rejects.toThrow(/Not enough time is allotted|No available time slots remaining/);
+    expect(saveMatches).not.toHaveBeenCalled();
   });
 });

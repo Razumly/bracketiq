@@ -38,3 +38,20 @@ export const acquireTeamStaffRoleLock = async (
   const lockId = advisoryLockId(`team-staff:${teamId}:${role}`);
   await client.$executeRaw`SELECT pg_advisory_xact_lock(${lockId})`;
 };
+
+export const acquireFieldLocks = async (
+  client: PrismaLike,
+  fieldIds: string[],
+): Promise<void> => {
+  const normalizedFieldIds = Array.from(
+    new Set(
+      fieldIds
+        .map((fieldId) => fieldId.trim())
+        .filter((fieldId) => fieldId.length > 0),
+    ),
+  ).sort();
+  for (const fieldId of normalizedFieldIds) {
+    const lockId = advisoryLockId(`field:${fieldId}`);
+    await client.$executeRaw`SELECT pg_advisory_xact_lock(${lockId})`;
+  }
+};

@@ -1,6 +1,7 @@
 /** @jest-environment node */
 
 const prismaMock = {
+  $executeRaw: jest.fn(),
   eventRegistrations: {
     findFirst: jest.fn(),
     update: jest.fn(),

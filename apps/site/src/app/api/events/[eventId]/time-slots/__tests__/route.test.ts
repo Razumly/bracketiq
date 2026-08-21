@@ -21,7 +21,7 @@ const prismaMock = {
 const requireSessionMock = jest.fn();
 const canManageEventMock = jest.fn();
 const acquireEventLockMock = jest.fn();
-
+const acquireFieldLocksMock = jest.fn();
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/permissions', () => ({ requireSession: requireSessionMock }));
 jest.mock('@/server/accessControl', () => ({
@@ -29,6 +29,7 @@ jest.mock('@/server/accessControl', () => ({
 }));
 jest.mock('@/server/repositories/locks', () => ({
   acquireEventLock: (...args: unknown[]) => acquireEventLockMock(...args),
+  acquireFieldLocks: (...args: unknown[]) => acquireFieldLocksMock(...args),
 }));
 
 import { PATCH } from '@/app/api/events/[eventId]/time-slots/route';

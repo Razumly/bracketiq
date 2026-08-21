@@ -20,11 +20,9 @@ import { toFieldIdList } from "../resourceGroups";
 import { buildLeagueScheduleWarning } from "../scheduleMessages";
 import {
   buildAutoResolvedSlotUpdate,
-  buildExternalSlotConflicts,
+  buildServerSlotConflicts,
   buildSlotConflictCheckKey,
   buildSlotConflictContext,
-  CONFLICT_LOOKUP_END,
-  CONFLICT_LOOKUP_START,
   slotCanCheckExternalConflicts,
   snapshotToSlotForm,
   type SlotConflictContext,
@@ -103,6 +101,26 @@ const isResourceOnlyUpdate = (updates: Partial<LeagueSlotForm>): boolean =>
       key === "hostRequiredTemplateIds" ||
       key === "error",
   );
+const dateTimeMatches = (
+  value: string | undefined,
+  expected: string | null,
+  timeZone: string | null | undefined,
+): boolean => {
+  if (!value || !expected) {
+    return false;
+  }
+  if (value === expected) {
+    return true;
+  }
+  const parsedValue = parseDateTimeInTimeZone(value, timeZone);
+  const parsedExpected = parseDateTimeInTimeZone(expected, timeZone);
+  return Boolean(
+    parsedValue &&
+      parsedExpected &&
+      parsedValue.getTime() === parsedExpected.getTime(),
+  );
+};
+
 
 export const useEventSlotController = ({
   activeEditingEvent,
@@ -142,6 +160,10 @@ export const useEventSlotController = ({
   );
   const slotConflictRequestRef = useRef(0);
   const slotDivisionKeysRef = useRef<string[]>(slotDivisionKeys);
+  const previousEventBoundsRef = useRef({
+    start: eventStart ?? null,
+    end: eventEnd ?? null,
+  });
 
   useEffect(() => {
     slotDivisionKeysRef.current = slotDivisionKeys;
@@ -205,12 +227,84 @@ export const useEventSlotController = ({
     ],
   );
 
+  useEffect(() => {
+    const previousBounds = previousEventBoundsRef.current;
+    const nextStart = eventStart ?? null;
+    const nextEnd = eventEnd ?? null;
+    previousEventBoundsRef.current = { start: nextStart, end: nextEnd };
+
+    const startChanged = previousBounds.start !== nextStart;
+    const endChanged = previousBounds.end !== nextEnd;
+    if (
+      hasImmutableTimeSlots ||
+      (!startChanged && !endChanged) ||
+      (!nextStart && !nextEnd)
+    ) {
+      return;
+    }
+
+    setLeagueSlots(
+      (previous) => {
+        let changed = false;
+        const next = previous.map((slot) => {
+          if (slot.repeating === false) {
+            return slot;
+          }
+
+          const slotTimeZone = slot.timeZone ?? eventTimeZone;
+          const updates: Partial<LeagueSlotForm> = {};
+          if (
+            startChanged &&
+            nextStart &&
+            (!slot.startDate ||
+              dateTimeMatches(
+                slot.startDate,
+                previousBounds.start,
+                slotTimeZone,
+              ))
+          ) {
+            updates.startDate = nextStart;
+          }
+          if (
+            endChanged &&
+            nextEnd &&
+            (!slot.endDate ||
+              dateTimeMatches(slot.endDate, previousBounds.end, slotTimeZone))
+          ) {
+            updates.endDate = nextEnd;
+          }
+          if (!Object.keys(updates).length) {
+            return slot;
+          }
+
+          changed = true;
+          return {
+            ...slot,
+            ...updates,
+            conflicts: [],
+            checking: false,
+          };
+        });
+        return changed ? next : previous;
+      },
+      { shouldDirty: false, shouldValidate: false },
+    );
+  }, [
+    eventEnd,
+    eventStart,
+    eventTimeZone,
+    hasImmutableTimeSlots,
+    setLeagueSlots,
+  ]);
+
+
   const slotConflictEventId = activeEditingEvent?.$id ?? eventId ?? "";
   const slotConflictCheckKey = useMemo(
     () =>
       buildSlotConflictCheckKey({
         eventId: slotConflictEventId,
         eventType,
+        organizationId: resolvedOrganizationId,
         parentEvent,
         eventStart,
         eventEnd,
@@ -224,6 +318,7 @@ export const useEventSlotController = ({
       eventType,
       leagueSlots,
       parentEvent,
+      resolvedOrganizationId,
       slotConflictEventId,
     ],
   );
@@ -398,35 +493,16 @@ export const useEventSlotController = ({
     let cancelled = false;
     const loadConflicts = async () => {
       try {
-        const blockingByFieldRows = await Promise.all(
-          fieldIds.map(async (fieldId) => {
-            const blocking = await eventService.getBlockingForFieldInRange(
-              fieldId,
-              CONFLICT_LOOKUP_START,
-              CONFLICT_LOOKUP_END,
-              {
-                organizationId: resolvedOrganizationId || undefined,
-                excludeEventId: context.eventId || undefined,
-              },
-            );
-            return [fieldId, blocking] as const;
-          }),
-        );
+        const response = await eventService.getFieldSchedulingConflicts(payload);
         if (cancelled || slotConflictRequestRef.current !== requestId) {
           return;
         }
 
-        const eventsByFieldId = new Map(
-          blockingByFieldRows.map(([fieldId, blocking]) => [
-            fieldId,
-            blocking.events,
-          ]),
-        );
         const conflictsBySlotKey = new Map(
           slotForms.map((slot) => [
             slot.key,
             slotCanCheckExternalConflicts(slot, context)
-              ? buildExternalSlotConflicts(slot, eventsByFieldId, context)
+              ? buildServerSlotConflicts(slot, response.conflicts)
               : [],
           ]),
         );

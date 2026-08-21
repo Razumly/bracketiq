@@ -51,17 +51,18 @@ class EventDetailDivisionOptionsTest {
     }
 
     @Test
-    fun buildRegistrationDivisionOptions_tournamentPoolPlay_synthesizesBracketFromPoolNames() {
+    fun buildRegistrationDivisionOptions_tournamentPoolPlay_withoutBracketDetails_usesExplicitPoolDetails() {
         val bracketId = "event-1__division__c_skill_open_age_18plus"
+        val poolId = "${bracketId}_pool_a"
         val event = Event(
             id = "event-1",
             eventType = EventType.TOURNAMENT,
             includePlayoffs = true,
             singleDivision = false,
-            divisions = listOf("${bracketId}_pool_a"),
+            divisions = listOf(poolId),
             divisionDetails = listOf(
                 DivisionDetail(
-                    id = "${bracketId}_pool_a",
+                    id = poolId,
                     key = "c_skill_open_age_18plus_pool_a",
                     name = "CoEd Open 18+ Pool A",
                     isSystemGenerated = true,
@@ -72,22 +73,23 @@ class EventDetailDivisionOptionsTest {
 
         val options = buildRegistrationDivisionOptions(event)
 
-        assertEquals(listOf(bracketId), options.map { option -> option.id })
-        assertEquals("CoEd Open 18+", options.single().label)
+        assertEquals(listOf(poolId), options.map { option -> option.id })
+        assertEquals("CoEd Open 18+ Pool A", options.single().label)
     }
 
     @Test
-    fun buildRegistrationDivisionOptions_tournamentPoolPlay_synthesizesBracketFromSimplePoolNames() {
+    fun buildRegistrationDivisionOptions_tournamentPoolPlay_withoutBracketDetails_doesNotInventBracketLabel() {
         val bracketId = "event-1__division__c_skill_open_age_18plus"
+        val poolId = "${bracketId}_pool_a"
         val event = Event(
             id = "event-1",
             eventType = EventType.TOURNAMENT,
             includePlayoffs = true,
             singleDivision = false,
-            divisions = listOf("${bracketId}_pool_a"),
+            divisions = listOf(poolId),
             divisionDetails = listOf(
                 DivisionDetail(
-                    id = "${bracketId}_pool_a",
+                    id = poolId,
                     key = "c_skill_open_age_18plus_pool_a",
                     name = "Pool A",
                     isSystemGenerated = true,
@@ -98,8 +100,8 @@ class EventDetailDivisionOptionsTest {
 
         val options = buildRegistrationDivisionOptions(event)
 
-        assertEquals(listOf(bracketId), options.map { option -> option.id })
-        assertEquals("CoEd Open 18+", options.single().label)
+        assertEquals(listOf(poolId), options.map { option -> option.id })
+        assertEquals("Pool A", options.single().label)
     }
 
     @Test

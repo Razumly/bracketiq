@@ -81,6 +81,32 @@ const createDeferred = <T,>() => {
   });
   return { promise, resolve, reject };
 };
+const buildServerFieldConflict = (slotKey = 'slot_1') => ({
+  slotKey,
+  fieldId: 'field_1',
+  kind: 'ONE_TIME_EVENT',
+  start: '2026-04-20T09:00:00.000Z',
+  end: '2026-04-20T17:00:00.000Z',
+  source: {
+    id: 'event_blocking_1',
+    eventId: 'event_blocking_1',
+    parentId: 'event_blocking_1',
+    kind: 'ONE_TIME_EVENT',
+    eventType: 'EVENT',
+    eventStart: '2026-04-20T09:00:00.000Z',
+    eventEnd: '2026-04-20T17:00:00.000Z',
+    eventTimeZone: 'UTC',
+    noFixedEndDateTime: false,
+    repeating: false,
+    startDate: '2026-04-20T09:00:00.000Z',
+    endDate: '2026-04-20T17:00:00.000Z',
+    timeZone: 'UTC',
+    startTimeMinutes: 540,
+    endTimeMinutes: 1020,
+    daysOfWeek: [],
+    scheduledFieldIds: ['field_1'],
+  },
+});
 
 jest.mock('@mantine/core', () => {
   const actual = jest.requireActual('@mantine/core');
@@ -335,7 +361,7 @@ jest.mock('@/lib/eventService', () => ({
   eventService: {
     getEventWithRelations: jest.fn().mockResolvedValue(null),
     getEventsForFieldInRange: jest.fn().mockResolvedValue([]),
-    getBlockingForFieldInRange: jest.fn().mockResolvedValue([]),
+    getFieldSchedulingConflicts: jest.fn().mockResolvedValue({ conflicts: [] }),
   },
 }));
 
@@ -388,7 +414,7 @@ describe('EventForm dirty state', () => {
     mockUseSportsState = buildMockUseSportsState();
     (eventService.getEventWithRelations as jest.Mock).mockResolvedValue(null);
     (eventService.getEventsForFieldInRange as jest.Mock).mockResolvedValue([]);
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockResolvedValue([]);
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockResolvedValue({ conflicts: [] });
     (userService.getUsersByIds as jest.Mock).mockResolvedValue([]);
     (userService.searchUsers as jest.Mock).mockResolvedValue([]);
     (userService.lookupEmailMembership as jest.Mock).mockResolvedValue([]);
@@ -2145,8 +2171,7 @@ describe('EventForm dirty state', () => {
 
   it('does not mark edit mode dirty when timeslot conflict checks update slot metadata', async () => {
     const onDirtyStateChange = jest.fn();
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockResolvedValue([]);
-
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockResolvedValue({ conflicts: [] });
     renderForm(onDirtyStateChange, undefined, {
       state: 'UNPUBLISHED',
       eventType: 'LEAGUE',
@@ -2173,7 +2198,7 @@ describe('EventForm dirty state', () => {
     });
 
     await waitFor(() => {
-      expect(eventService.getBlockingForFieldInRange).toHaveBeenCalled();
+      expect(eventService.getFieldSchedulingConflicts).toHaveBeenCalled();
     });
 
     await waitForStableDirtyState(onDirtyStateChange, false);
@@ -2213,18 +2238,11 @@ describe('EventForm dirty state', () => {
     const onDirtyStateChange = jest.fn();
     const formRef = React.createRef<EventFormHandle>();
     mockDateTimePickerValuesByLabel['Start Date & Time'] = '2026-05-04T09:00:00';
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockResolvedValue({
-      events: [
-        {
-          $id: 'event_blocking_1',
-          name: 'TEST DOC',
-          eventType: 'EVENT',
-          start: '2026-04-20T09:00:00',
-          end: '2026-04-20T17:00:00',
-        },
-      ],
-      rentalSlots: [],
-    });
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockImplementation((payload: any) => (
+      String(payload?.eventStart ?? '').startsWith('2026-04-20')
+        ? Promise.resolve({ conflicts: [buildServerFieldConflict()] })
+        : Promise.resolve({ conflicts: [] })
+    ));
 
     renderForm(onDirtyStateChange, formRef, {
       state: 'UNPUBLISHED',
@@ -2269,11 +2287,11 @@ describe('EventForm dirty state', () => {
   });
 
   it('ignores a late slot-conflict response after the event schedule changes', async () => {
-    const firstRequest = createDeferred<{ events: any[]; rentalSlots: any[] }>();
-    const secondRequest = createDeferred<{ events: any[]; rentalSlots: any[] }>();
+    const firstRequest = createDeferred<{ conflicts: any[] }>();
+    const secondRequest = createDeferred<{ conflicts: any[] }>();
     let requestCount = 0;
     mockDateTimePickerValuesByLabel['Start Date & Time'] = '2026-05-04T09:00:00';
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockImplementation(() => {
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockImplementation(() => {
       requestCount += 1;
       return requestCount === 1 ? firstRequest.promise : secondRequest.promise;
     });
@@ -2304,17 +2322,17 @@ describe('EventForm dirty state', () => {
     });
 
     await waitFor(() => {
-      expect(eventService.getBlockingForFieldInRange).toHaveBeenCalledTimes(1);
+      expect(eventService.getFieldSchedulingConflicts).toHaveBeenCalledTimes(1);
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Start Date & Time' }));
 
     await waitFor(() => {
-      expect(eventService.getBlockingForFieldInRange).toHaveBeenCalledTimes(2);
+      expect(eventService.getFieldSchedulingConflicts).toHaveBeenCalledTimes(2);
     });
 
     await act(async () => {
-      secondRequest.resolve({ events: [], rentalSlots: [] });
+      secondRequest.resolve({ conflicts: [] });
       await secondRequest.promise;
     });
     await waitFor(() => {
@@ -2322,16 +2340,7 @@ describe('EventForm dirty state', () => {
     });
 
     await act(async () => {
-      firstRequest.resolve({
-        events: [{
-          $id: 'stale_blocking_event',
-          name: 'Stale blocking event',
-          eventType: 'EVENT',
-          start: '2026-04-20T09:00:00',
-          end: '2026-04-20T17:00:00',
-        }],
-        rentalSlots: [],
-      });
+      firstRequest.resolve({ conflicts: [buildServerFieldConflict()] });
       await firstRequest.promise;
     });
 
@@ -2341,31 +2350,8 @@ describe('EventForm dirty state', () => {
   it('keeps external timeslot field conflicts as warnings during validation', async () => {
     const onDirtyStateChange = jest.fn();
     const formRef = React.createRef<EventFormHandle>();
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockResolvedValue({
-      events: [
-        {
-          $id: 'event_blocking_1',
-          name: 'Conflicting League',
-          eventType: 'LEAGUE',
-          start: '2026-04-20T09:00:00',
-          end: '2026-06-01T17:00:00',
-          timeSlots: [
-            {
-              $id: 'blocking_slot_1',
-              scheduledFieldId: 'field_1',
-              scheduledFieldIds: ['field_1'],
-              dayOfWeek: 0,
-              daysOfWeek: [0],
-              startTimeMinutes: 9 * 60,
-              endTimeMinutes: 21 * 60,
-              repeating: true,
-              startDate: '2026-04-20T09:00:00',
-              endDate: '2026-06-01T17:00:00',
-            },
-          ],
-        },
-      ],
-      rentalSlots: [],
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockResolvedValue({
+      conflicts: [buildServerFieldConflict()],
     });
 
     renderForm(onDirtyStateChange, formRef, {
@@ -2409,25 +2395,21 @@ describe('EventForm dirty state', () => {
     expect(screen.getByText(/Timeslot court conflicts are warnings/i)).toBeInTheDocument();
   });
 
-  it('does not treat rental slots as external timeslot field conflicts', async () => {
+  it('reports rental booking conflicts as external timeslot warnings', async () => {
     const onDirtyStateChange = jest.fn();
     const formRef = React.createRef<EventFormHandle>();
-    (eventService.getBlockingForFieldInRange as jest.Mock).mockResolvedValue({
-      events: [],
-      rentalSlots: [
-        {
-          $id: 'rental_slot_1',
-          scheduledFieldId: 'field_1',
-          scheduledFieldIds: ['field_1'],
-          dayOfWeek: 0,
-          daysOfWeek: [0],
-          startTimeMinutes: 9 * 60,
-          endTimeMinutes: 21 * 60,
-          repeating: true,
-          startDate: '2026-04-20T09:00:00',
-          endDate: '2026-06-01T17:00:00',
+    const baseConflict = buildServerFieldConflict();
+    (eventService.getFieldSchedulingConflicts as jest.Mock).mockResolvedValue({
+      conflicts: [{
+        ...baseConflict,
+        kind: 'RENTAL_BOOKING',
+        source: {
+          ...baseConflict.source,
+          kind: 'RENTAL_BOOKING',
+          eventId: null,
+          parentId: 'booking_1',
         },
-      ],
+      }],
     });
 
     renderForm(onDirtyStateChange, formRef, {
@@ -2458,9 +2440,9 @@ describe('EventForm dirty state', () => {
     });
 
     await waitFor(() => {
-      expect(eventService.getBlockingForFieldInRange).toHaveBeenCalled();
+      expect(eventService.getFieldSchedulingConflicts).toHaveBeenCalled();
     });
-    expect(screen.getByTestId('league-conflict-count')).toHaveTextContent('0');
+    expect(screen.getByTestId('league-conflict-count')).toHaveTextContent('1');
 
     let isValid: boolean | undefined;
     await act(async () => {
@@ -2469,7 +2451,7 @@ describe('EventForm dirty state', () => {
 
     expect(isValid).toBe(true);
     expect(formRef.current?.getValidationErrors()).toEqual([]);
-    expect(screen.queryByText(/Timeslot court conflicts are warnings/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Timeslot court conflicts are warnings/i)).toBeInTheDocument();
   });
 
   it('does not display a fixed end input in generated-end mode', async () => {

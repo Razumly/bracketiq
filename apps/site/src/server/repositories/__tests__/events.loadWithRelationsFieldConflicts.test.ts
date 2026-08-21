@@ -13,6 +13,7 @@ import { ensureSplitPlayoffTimeSlotCoverage } from '@/server/scheduler/timeSlotC
 import { getTimeSlotExplicitDivisionIds } from '@/server/scheduler/types';
 
 type LoadClient = {
+  $executeRaw: jest.Mock;
   events: {
     findUnique: jest.Mock;
     findMany: jest.Mock;
@@ -72,6 +73,7 @@ const baseEventRow = (overrides: Record<string, unknown> = {}) => ({
 const createClient = (eventOverrides: Record<string, unknown> = {}): LoadClient => {
   const eventRow = baseEventRow(eventOverrides);
   return {
+    $executeRaw: jest.fn().mockResolvedValue(1),
     events: {
       findUnique: jest.fn().mockResolvedValue(eventRow),
       findMany: jest.fn().mockResolvedValue([]),
@@ -509,12 +511,11 @@ describe('loadEventWithRelations field conflict hydration', () => {
 
     const matchConflictWhere = client.matches.findMany.mock.calls[1][0].where;
     const eventConflictWhere = client.events.findMany.mock.calls[0][0].where;
-    const expectedWindowEnd = new Date(end.getTime() + 52 * 7 * 24 * 60 * 60 * 1000);
-
-    expect(matchConflictWhere.start.lt.toISOString()).toBe(expectedWindowEnd.toISOString());
+    expect(matchConflictWhere.start).toEqual({ not: null });
+    expect(matchConflictWhere.start).not.toHaveProperty("lt");
     expect(matchConflictWhere.end.gt.toISOString()).toBe(start.toISOString());
-    expect(eventConflictWhere.start.lt.toISOString()).toBe(expectedWindowEnd.toISOString());
-    expect(eventConflictWhere.end.gt.toISOString()).toBe(start.toISOString());
+    expect(eventConflictWhere).not.toHaveProperty("start");
+    expect(eventConflictWhere).not.toHaveProperty("end");
   });
 
   it('does not hydrate rental-slot blocking windows when event and field organizations match', async () => {

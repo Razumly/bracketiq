@@ -395,6 +395,12 @@ export type TeamDutyReflowContext = {
   eventCheckedInTeamIds: ReadonlySet<string>;
   checkedInTeamIdsByMatch: ReadonlyMap<string, ReadonlySet<string>>;
 };
+export type FieldCandidateValidator = (candidate: {
+  event: Match;
+  resource: PlayingField;
+  start: Date;
+  end: Date;
+}) => boolean;
 
 const EMPTY_TEAM_DUTY_REFLOW_CONTEXT: TeamDutyReflowContext = {
   eventCheckedInTeamIds: new Set<string>(),
@@ -624,6 +630,7 @@ const assignMissingCheckedInTeamOfficials = (
 export const rescheduleEventMatchesPreservingLocks = (
   event: SchedulerEvent,
   teamDutyReflowContext: TeamDutyReflowContext = EMPTY_TEAM_DUTY_REFLOW_CONTEXT,
+  canUseFieldCandidate?: FieldCandidateValidator,
 ): LockedPreservingRescheduleResult => {
   const allMatches = Object.values(event.matches);
   if (!allMatches.length) {
@@ -760,14 +767,18 @@ export const rescheduleEventMatchesPreservingLocks = (
 
         for (const match of nextBatch) {
           const matchDuration = durationForReschedule(match);
+          const requiresStaffing = staffingPlanner.hasStaffingRequirement(match);
           try {
-            if (staffingPlanner.hasStaffingRequirement(match)) {
+            if (requiresStaffing || canUseFieldCandidate) {
               schedule.scheduleEventWithOptions(match, matchDuration, {
                 canUseCandidate: ({ resource, start, end }) => (
-                  staffingPlanner.previewSchedulingCandidate(match, resource, start, end)
+                  (canUseFieldCandidate?.({ event: match, resource, start, end }) ?? true) &&
+                  (!requiresStaffing || staffingPlanner.previewSchedulingCandidate(match, resource, start, end))
                 ),
               });
-              staffingPlanner.commitScheduledMatch(match);
+              if (requiresStaffing) {
+                staffingPlanner.commitScheduledMatch(match);
+              }
             } else {
               schedule.scheduleEvent(match, matchDuration);
             }

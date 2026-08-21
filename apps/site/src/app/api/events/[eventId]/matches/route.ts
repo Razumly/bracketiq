@@ -5,7 +5,7 @@ import { createId } from '@/lib/id';
 import { requireSession } from '@/lib/permissions';
 import { canManageEvent } from '@/server/accessControl';
 import { loadEventWithRelations, saveMatches } from '@/server/repositories/events';
-import { acquireEventLock } from '@/server/repositories/locks';
+import { acquireEventLock, acquireFieldLocks } from '@/server/repositories/locks';
 import { parseMatchInstantInput } from '@/server/matches/instantPayloads';
 import { assertCanViewEventSchedule } from '@/server/eventVisibility';
 import { validateAndNormalizeBracketGraph, type BracketNode } from '@/server/matches/bracketGraph';
@@ -504,6 +504,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
       }
 
       const event = await loadEventWithRelations(eventId, tx);
+      await acquireFieldLocks(tx, Object.keys(event.fields ?? {}));
       const beforeMatchSnapshot = snapshotMatchScheduleState(Object.values(event.matches));
       const officialPositions = Array.isArray(event.officialPositions) ? event.officialPositions : [];
       const eventOfficials = Array.isArray(event.eventOfficials) ? event.eventOfficials : [];

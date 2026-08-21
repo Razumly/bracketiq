@@ -12,7 +12,7 @@ import { useEventSlotController } from '../useEventSlotController';
 
 jest.mock('@/lib/eventService', () => ({
     eventService: {
-        getBlockingForFieldInRange: jest.fn(),
+        getFieldSchedulingConflicts: jest.fn(),
     },
 }));
 
@@ -21,8 +21,8 @@ jest.mock('@/lib/clientId', () => ({
     createClientId: jest.fn(() => `slot_new_${++clientIdSequence}`),
 }));
 
-const mockedGetBlockingForFieldInRange = eventService.getBlockingForFieldInRange as jest.MockedFunction<
-    typeof eventService.getBlockingForFieldInRange
+const mockedGetFieldSchedulingConflicts = eventService.getFieldSchedulingConflicts as jest.MockedFunction<
+    typeof eventService.getFieldSchedulingConflicts
 >;
 
 const SLOT_DIVISION_KEYS = ['open'];
@@ -79,25 +79,32 @@ const buildEditingEvent = (): Event => ({
     end: '2026-08-31T21:00:00',
 } as Event);
 
-const buildBlockingEvent = (): Event => ({
-    $id: 'event_blocking',
-    name: 'Conflicting League',
-    eventType: 'LEAGUE',
-    start: '2026-07-20T09:00:00',
-    end: '2026-08-31T21:00:00',
-    timeSlots: [{
-        $id: 'blocking_slot_1',
-        scheduledFieldId: FIELD.$id,
-        scheduledFieldIds: [FIELD.$id],
-        dayOfWeek: 0,
-        daysOfWeek: [0],
+const buildServerFieldConflict = () => ({
+    slotKey: 'slot_1',
+    fieldId: FIELD.$id,
+    kind: 'EVENT_TIME_SLOT',
+    start: '2026-07-20T18:30:00.000Z',
+    end: '2026-07-20T19:30:00.000Z',
+    source: {
+        id: 'blocking_slot_1',
+        eventId: 'event_blocking',
+        parentId: 'event_blocking',
+        kind: 'EVENT_TIME_SLOT',
+        eventType: 'LEAGUE',
+        eventStart: '2026-07-20T09:00:00.000Z',
+        eventEnd: '2026-08-31T21:00:00.000Z',
+        eventTimeZone: 'America/Los_Angeles',
+        noFixedEndDateTime: false,
+        repeating: true,
+        startDate: '2026-07-20T00:00:00.000Z',
+        endDate: '2026-08-31T00:00:00.000Z',
+        timeZone: 'America/Los_Angeles',
         startTimeMinutes: 18 * 60 + 30,
         endTimeMinutes: 19 * 60 + 30,
-        startDate: '2026-07-20T09:00:00',
-        endDate: '2026-08-31T21:00:00',
-        repeating: true,
-    } as TimeSlot],
-} as Event);
+        daysOfWeek: [0],
+        scheduledFieldIds: [FIELD.$id],
+    },
+});
 
 type HarnessProps = {
     eventData: EventFormValues;
@@ -174,7 +181,7 @@ describe('useEventSlotController', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         clientIdSequence = 0;
-        mockedGetBlockingForFieldInRange.mockResolvedValue({ events: [], rentalSlots: [] });
+        mockedGetFieldSchedulingConflicts.mockResolvedValue({ conflicts: [] });
     });
 
     it('normalizes add, update, and remove commands through the React Hook Form slot field', async () => {
@@ -187,7 +194,6 @@ describe('useEventSlotController', () => {
             })],
         });
         const { result } = renderHook(() => useSlotHarness({ eventData }));
-
         act(() => result.current.handleAddSlot());
         await waitFor(() => expect(result.current.formValues.leagueSlots).toHaveLength(2));
         expect(result.current.formValues.leagueSlots[1]).toEqual(expect.objectContaining({
@@ -271,9 +277,8 @@ describe('useEventSlotController', () => {
     });
 
     it('applies a successful external-conflict response and auto-resolves the slot', async () => {
-        mockedGetBlockingForFieldInRange.mockResolvedValue({
-            events: [buildBlockingEvent()],
-            rentalSlots: [],
+        mockedGetFieldSchedulingConflicts.mockResolvedValue({
+            conflicts: [buildServerFieldConflict()],
         });
         const { result } = renderHook(() => useSlotHarness({ eventData: buildEventData() }));
 
@@ -281,9 +286,11 @@ describe('useEventSlotController', () => {
         expect(result.current.formValues.leagueSlots[0].checking).toBe(false);
         expect(result.current.leagueWarning).toMatch(/Timeslot court conflicts are warnings/i);
 
-        const previousStart = result.current.formValues.leagueSlots[0].startTimeMinutes;
         act(() => result.current.handleAutoResolveSlotConflict(0));
-        await waitFor(() => expect(result.current.formValues.leagueSlots[0].startTimeMinutes).not.toBe(previousStart));
+        await waitFor(() =>
+            expect(result.current.formValues.leagueSlots[0].startTimeMinutes).toBeGreaterThanOrEqual(19 * 60 + 30),
+        );
+        expect(result.current.formValues.leagueSlots[0].startTimeMinutes).toBe(19 * 60 + 30);
         expect(result.current.formValues.leagueSlots[0].endTimeMinutes).toBeGreaterThan(
             result.current.formValues.leagueSlots[0].startTimeMinutes ?? 0,
         );
@@ -291,7 +298,7 @@ describe('useEventSlotController', () => {
 
     it('clears pending conflict metadata when the external lookup fails', async () => {
         const warningSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-        mockedGetBlockingForFieldInRange.mockRejectedValue(new Error('Conflict lookup failed'));
+        mockedGetFieldSchedulingConflicts.mockRejectedValue(new Error('Conflict lookup failed'));
         const { result } = renderHook(() => useSlotHarness({ eventData: buildEventData() }));
 
         await waitFor(() => expect(warningSpy).toHaveBeenCalledWith(
@@ -358,19 +365,19 @@ describe('useEventSlotController', () => {
     });
 
     it('ignores a stale conflict response after the event schedule changes', async () => {
-        const firstRequest = createDeferred<{ events: Event[]; rentalSlots: TimeSlot[] }>();
-        const secondRequest = createDeferred<{ events: Event[]; rentalSlots: TimeSlot[] }>();
-        mockedGetBlockingForFieldInRange
+        const firstRequest = createDeferred<{ conflicts: any[] }>();
+        const secondRequest = createDeferred<{ conflicts: any[] }>();
+        mockedGetFieldSchedulingConflicts
             .mockReturnValueOnce(firstRequest.promise)
             .mockReturnValueOnce(secondRequest.promise);
         const { result } = renderHook(() => useSlotHarness({ eventData: buildEventData() }));
 
-        await waitFor(() => expect(mockedGetBlockingForFieldInRange).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(mockedGetFieldSchedulingConflicts).toHaveBeenCalledTimes(1));
         act(() => result.current.setValue('start', '2026-07-27T09:00:00'));
-        await waitFor(() => expect(mockedGetBlockingForFieldInRange).toHaveBeenCalledTimes(2));
+        await waitFor(() => expect(mockedGetFieldSchedulingConflicts).toHaveBeenCalledTimes(2));
 
         await act(async () => {
-            secondRequest.resolve({ events: [], rentalSlots: [] });
+            secondRequest.resolve({ conflicts: [] });
             await secondRequest.promise;
         });
         await waitFor(() => expect(result.current.formValues.leagueSlots[0]).toEqual(expect.objectContaining({
@@ -379,7 +386,7 @@ describe('useEventSlotController', () => {
         })));
 
         await act(async () => {
-            firstRequest.resolve({ events: [buildBlockingEvent()], rentalSlots: [] });
+            firstRequest.resolve({ conflicts: [buildServerFieldConflict()] });
             await firstRequest.promise;
         });
         expect(result.current.formValues.leagueSlots[0].conflicts).toEqual([]);

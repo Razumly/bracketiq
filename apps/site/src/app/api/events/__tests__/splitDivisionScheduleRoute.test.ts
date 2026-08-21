@@ -38,11 +38,13 @@ const prismaMock = {
 
 const requireSessionMock = jest.fn();
 const acquireEventLockMock = jest.fn();
+const acquireFieldLocksMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/permissions', () => ({ requireSession: requireSessionMock }));
 jest.mock('@/server/repositories/locks', () => ({
   acquireEventLock: (...args: any[]) => acquireEventLockMock(...args),
+  acquireFieldLocks: (...args: any[]) => acquireFieldLocksMock(...args),
 }));
 jest.mock('@/server/matchScheduleNotifications', () => ({
   collectMatchScheduleChanges: jest.fn(() => []),
@@ -64,6 +66,7 @@ describe('event schedule route - split divisions regression', () => {
     jest.clearAllMocks();
     prismaMock.$transaction.mockImplementation(async (fn: any) => fn(prismaMock));
     requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
+    acquireFieldLocksMock.mockResolvedValue(undefined);
     acquireEventLockMock.mockResolvedValue(undefined);
     prismaMock.events.findMany.mockResolvedValue([]);
     prismaMock.events.update.mockResolvedValue(undefined);
