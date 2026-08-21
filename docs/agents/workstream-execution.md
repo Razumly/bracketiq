@@ -93,29 +93,3 @@ The coordinator keeps Workstream conflict resolution off `main`. A successful fa
 
 Before preparing test storage, read [Workstream test database isolation](workstream-database-isolation.md) when an issue needs Prisma-backed tests, E2E seeding, backend-calling mobile tests, or Room persistence tests.
 
-## Review record
-
-This record captures the two-axis review of `main...workstream/document-versions` for [#99](https://github.com/Razumly/bracketiq/issues/99) and [#100](https://github.com/Razumly/bracketiq/issues/100). It records findings for later issue work. It does not change application code.
-
-### Workflow decision
-
-- The review's one-issue and fresh-branch finding is not a defect. A Workstream may carry multiple related issues in parallel on one branch when the coordinator approves the batch, native blockers are clear, and each issue remains traceable.
-
-### Open standards findings
-
-- `plans/immutable-document-template-versions-execplan.md` and related Progress records do not fully describe the combined workstream state.
-- `boldsignWebhookSync.ts` still performs Satisfaction work inside a signer loop. A later failure can leave an incomplete related save.
-- The import route must validate every referenced User, Event or Team scope, and File against the Organization before writing.
-- New cross-boundary row mappings need typed row interfaces. New Boolean names should follow the `is*` or `has*` convention.
-- The UI must fail explicitly when Version data is missing. It must not invent Version numbers or placeholder notifications.
-- Review smells remain: unrelated billing change, repeated evidence context and scope logic, a provider edit-url middle man, and primitive status and normalization names.
-
-### Open specification findings
-
-- [#99](https://github.com/Razumly/bracketiq/issues/99) lacks persistence proof for frozen assignments, the `030000` migration trigger and backfill, and a real rejected material update.
-- [#100](https://github.com/Razumly/bracketiq/issues/100) lacks complete no-loss migration coverage for existing evidence fields and context.
-- The customer-bill label change is outside the Version and evidence specifications.
-- Frozen BoldSign content can still mutate through an existing provider edit session and provider ID.
-- The Satisfaction backfill can mark incomplete multi-signer evidence as complete.
-- Imported evidence can infer a Signer from the Document Subject when the signer is unknown.
-- Evidence with a missing stored Organization can be skipped during migration and later fail in accepted completion paths.

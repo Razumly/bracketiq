@@ -201,3 +201,34 @@ Each later milestone must keep the backend HTTP interface compatible with instal
 2026-08-21T00:55Z: Created this plan while starting issue #98. The plan records the existing dual template/provider identity, the chosen Requirement/Version storage shape, the required creation-path updates, and the full parent-feature sequence so later tickets can consume the same domain model without adding a second lineage.
 
 2026-08-21: Updated the progress and outcome records after completing issue #98 and carrying the lineage into the later immutable-Version and evidence work. The current workstream also records the service-seam and review corrections made after the two-axis review.
+
+
+## Downstream review handoff
+
+Review scope: `main...workstream/document-versions` through `0e0d3b097`, covering issue #99 and issue #100. This section is a handoff for the next Workstream. The findings are not fixed here.
+
+### Issue #99: immutable Version enforcement
+
+- [ ] Add persistence-backed proof that an assigned or used Version remains frozen after reload and remains pinned when a later Version is created.
+- [ ] Extend the migration fixture to exercise the `030000` trigger and backfill path.
+- [ ] Add a real rejected material update for frozen PDF and TEXT Versions.
+- [ ] Prevent an existing BoldSign provider edit session or provider template ID from mutating frozen content.
+- [ ] Keep Requirement display metadata edits separate from frozen Version content and signing configuration.
+
+### Issue #100: evidence provenance and Satisfaction
+
+- [ ] Expand no-loss migration coverage to preserve document name, timestamps, status, signing time, signer details, role fields, IP and request identifiers, provider identifiers, content, and Event or Team context.
+- [ ] Preserve incomplete multi-signer evidence as incomplete. Do not mark Satisfaction complete until every required signer role is present.
+- [ ] Keep an unknown structured Signer unknown. Do not infer a Signer from the Document Subject.
+- [ ] Validate every referenced User, Event or Team scope, and File against the Organization before writing imported evidence.
+- [ ] Do not skip existing evidence with a missing Organization when the accepted completion path can still use it. Define and test the ownership repair or rejection path.
+- [ ] Keep evidence, Subject, and Satisfaction writes atomic. A later failure must roll back earlier signer or evidence writes.
+
+### Cross-cutting review corrections
+
+- [ ] Make the customer-page Version state fail explicitly when Version data is missing. Do not invent Version numbers or placeholder notifications.
+- [ ] Replace new cross-boundary row mappings with typed row interfaces. Use `is*` or `has*` names for new Boolean fields.
+- [ ] Remove duplicated evidence context and scope logic. Remove provider edit-url middle-man helpers when the real target can be called directly.
+- [ ] Keep unrelated customer-billing label changes outside the Version and evidence work.
+
+2026-08-20: Added this downstream review handoff after the two-axis review. Another agent can claim #99 or #100 and consume the unchecked items above.
