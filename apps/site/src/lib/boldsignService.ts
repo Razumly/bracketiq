@@ -35,20 +35,23 @@ type CreateTemplateResponse = {
   error?: string;
 };
 
-export type TemplateEditSession = {
-  editUrl?: string;
-  selectedVersion?: number;
-  frozen?: boolean;
-  willCreateNewVersion?: boolean;
-  nextVersionSequence?: number;
-  error?: string;
-};
 export type TemplateUpdateResult = {
   template?: TemplateDocument;
   previousVersionId?: string | null;
   newVersionCreated?: boolean;
   newVersionSequence?: number;
   error?: string;
+};
+
+export type TemplateEditSession = {
+  editUrl: string;
+  selectedVersion?: number;
+  frozen?: boolean;
+  willCreateNewVersion?: boolean;
+  nextVersionSequence?: number;
+  operationId?: string;
+  templateId?: string;
+  newVersionId?: string;
 };
 
 
@@ -151,32 +154,7 @@ class BoldSignService {
     };
   }
 
-  async getTemplateEditSession(params: {
-    organizationId: string;
-    templateDocumentId: string;
-  }): Promise<TemplateEditSession> {
-    const result = await apiRequest<TemplateEditSession>(
-      `/api/organizations/${params.organizationId}/templates/${params.templateDocumentId}/edit-url`,
-      {
-        method: 'GET',
-      },
-    );
-    if (result?.error) {
-      throw new Error(result.error);
-    }
-    if (!result?.editUrl) {
-      throw new Error('Template edit response is missing editUrl.');
-    }
-    return result;
-  }
 
-  async getTemplateEditUrl(params: {
-    organizationId: string;
-    templateDocumentId: string;
-  }): Promise<string> {
-    const result = await this.getTemplateEditSession(params);
-    return result.editUrl as string;
-  }
   async updateTemplate(params: {
     organizationId: string;
     templateDocumentId: string;
@@ -200,6 +178,23 @@ class BoldSignService {
     }
     return result;
   }
+  async getTemplateEditSession(params: {
+    organizationId: string;
+    templateDocumentId: string;
+  }): Promise<TemplateEditSession> {
+    const result = await apiRequest<TemplateEditSession & { error?: string }>(
+      `/api/organizations/${params.organizationId}/templates/${params.templateDocumentId}/edit-url`,
+      { method: 'GET' },
+    );
+    if (result?.error) {
+      throw new Error(result.error);
+    }
+    if (!result?.editUrl) {
+      throw new Error('Template edit response is missing editUrl.');
+    }
+    return result;
+  }
+
 
   async deleteTemplate(params: {
     organizationId: string;

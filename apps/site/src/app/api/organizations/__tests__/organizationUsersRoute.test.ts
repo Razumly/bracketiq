@@ -206,6 +206,18 @@ describe('GET /api/organizations/[id]/users', () => {
         signedAt: '2026-02-14T18:30:00.000Z',
         createdAt: new Date('2026-02-14T18:30:00.000Z'),
       },
+      {
+        id: 'signed_subject_only_1',
+        signedDocumentId: 'doc_subject_only_1',
+        templateId: 'tmpl_pdf',
+        userId: null,
+        documentSubjectId: 'document-subject:org_1:player_1',
+        documentName: 'Imported historical waiver',
+        eventId: null,
+        status: 'SIGNED',
+        signedAt: '2026-02-20T18:30:00.000Z',
+        createdAt: new Date('2026-02-20T18:30:00.000Z'),
+      },
     ]);
     prismaMock.bills.findMany.mockResolvedValueOnce([
       {
@@ -263,6 +275,11 @@ describe('GET /api/organizations/[id]/users', () => {
         signedDocumentRecordId: 'signed_pdf_1',
         type: 'PDF',
         viewUrl: '/api/documents/signed/signed_pdf_1/file',
+      }),
+      expect.objectContaining({
+        signedDocumentRecordId: 'signed_subject_only_1',
+        title: 'Liability Waiver',
+        type: 'PDF',
       }),
       expect.objectContaining({
         signedDocumentRecordId: 'signed_text_1',

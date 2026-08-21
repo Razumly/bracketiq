@@ -12,6 +12,7 @@ CREATE TYPE "DocumentRequirementSatisfactionScopeTypeEnum" AS ENUM (
 );
 
 CREATE TYPE "DocumentRequirementSatisfactionStatusEnum" AS ENUM (
+  'PENDING',
   'SATISFIED',
   'INVALIDATED'
 );
@@ -89,6 +90,7 @@ SELECT DISTINCT
   COALESCE(sd."hostId", sd."userId")
 FROM "SignedDocuments" sd
 WHERE sd."organizationId" IS NOT NULL
+  AND COALESCE(sd."hostId", sd."userId") IS NOT NULL
 ON CONFLICT ("id") DO NOTHING;
 
 UPDATE "SignedDocuments" sd
@@ -123,6 +125,131 @@ SET
 FROM "TemplateDocuments" td
 WHERE td."id" = sd."templateId";
 
+WITH eligible AS (
+  SELECT
+    sd."id" AS evidence_id,
+    sd."createdAt" AS created_at,
+    sd."organizationId" AS organization_id,
+    td."documentRequirementId" AS document_requirement_id,
+    sd."templateId" AS template_id,
+    sd."documentSubjectId" AS document_subject_id,
+    sd."scopeType" AS scope_type,
+    sd."scopeId" AS scope_id,
+    sd."signerRole" AS signer_role,
+    CASE
+      WHEN COALESCE(array_length(td."signerRoles", 1), 0) > 0 THEN td."signerRoles"
+      WHEN UPPER(COALESCE(td."requiredSignerType", 'PARTICIPANT')) = 'PARENT_GUARDIAN_CHILD'
+        THEN ARRAY['Parent/Guardian', 'Child']::TEXT[]
+      WHEN UPPER(COALESCE(td."requiredSignerType", 'PARTICIPANT')) = 'PARENT_GUARDIAN'
+        THEN ARRAY['Parent/Guardian']::TEXT[]
+      WHEN UPPER(COALESCE(td."requiredSignerType", 'PARTICIPANT')) = 'CHILD'
+        THEN ARRAY['Child']::TEXT[]
+      ELSE ARRAY['Participant']::TEXT[]
+    END AS required_signer_roles
+  FROM "SignedDocuments" sd
+  JOIN "TemplateDocuments" td ON td."id" = sd."templateId"
+  WHERE UPPER(COALESCE(sd."status", '')) IN ('SIGNED', 'COMPLETED')
+    AND sd."organizationId" IS NOT NULL
+    AND sd."documentSubjectId" IS NOT NULL
+    AND sd."scopeType" IS NOT NULL
+    AND sd."scopeId" IS NOT NULL
+),
+representative AS (
+  SELECT DISTINCT ON (
+    organization_id,
+    document_requirement_id,
+    template_id,
+    document_subject_id,
+    scope_type,
+    scope_id
+  )
+    *
+  FROM eligible
+  ORDER BY
+    organization_id,
+    document_requirement_id,
+    template_id,
+    document_subject_id,
+    scope_type,
+    scope_id,
+    created_at NULLS LAST,
+    evidence_id
+),
+grouped AS (
+  SELECT
+    organization_id,
+    document_requirement_id,
+    template_id,
+    document_subject_id,
+    scope_type,
+    scope_id,
+    COALESCE(
+      array_agg(DISTINCT signer_role ORDER BY signer_role)
+        FILTER (WHERE signer_role IS NOT NULL),
+      ARRAY[]::TEXT[]
+    ) AS completed_signer_roles
+  FROM eligible
+  GROUP BY
+    organization_id,
+    document_requirement_id,
+    template_id,
+    document_subject_id,
+    scope_type,
+    scope_id
+),
+scored AS (
+  SELECT
+    representative.*,
+    grouped.completed_signer_roles,
+    NOT EXISTS (
+      SELECT 1
+      FROM unnest(representative.required_signer_roles) AS required_role(role)
+      WHERE NULLIF(
+        regexp_replace(
+          UPPER(COALESCE(required_role.role, '')),
+          '[^A-Z0-9]',
+          '',
+          'g'
+        ),
+        ''
+      ) IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM eligible completed
+          WHERE completed.organization_id = representative.organization_id
+            AND completed.document_requirement_id = representative.document_requirement_id
+            AND completed.template_id = representative.template_id
+            AND completed.document_subject_id = representative.document_subject_id
+            AND completed.scope_type = representative.scope_type
+            AND completed.scope_id = representative.scope_id
+            AND NULLIF(
+              regexp_replace(
+                UPPER(COALESCE(completed.signer_role, '')),
+                '[^A-Z0-9]',
+                '',
+                'g'
+              ),
+              ''
+            ) = NULLIF(
+              regexp_replace(
+                UPPER(COALESCE(required_role.role, '')),
+                '[^A-Z0-9]',
+                '',
+                'g'
+              ),
+              ''
+            )
+        )
+    ) AS is_complete
+  FROM representative
+  JOIN grouped
+    ON grouped.organization_id = representative.organization_id
+    AND grouped.document_requirement_id = representative.document_requirement_id
+    AND grouped.template_id = representative.template_id
+    AND grouped.document_subject_id = representative.document_subject_id
+    AND grouped.scope_type = representative.scope_type
+    AND grouped.scope_id = representative.scope_id
+)
 INSERT INTO "DocumentRequirementSatisfactions" (
   "id",
   "createdAt",
@@ -140,27 +267,24 @@ INSERT INTO "DocumentRequirementSatisfactions" (
   "completedSignerRoles"
 )
 SELECT
-  'document-satisfaction:' || sd."id",
-  COALESCE(sd."createdAt", CURRENT_TIMESTAMP),
-  COALESCE(sd."updatedAt", CURRENT_TIMESTAMP),
-  sd."organizationId",
-  td."documentRequirementId",
-  sd."templateId",
-  sd."documentSubjectId",
-  sd."scopeType",
-  sd."scopeId",
-  sd."id",
-  'SATISFIED'::"DocumentRequirementSatisfactionStatusEnum",
-  TRUE,
-  COALESCE(td."signerRoles", ARRAY[]::TEXT[]),
-  CASE WHEN sd."signerRole" IS NULL THEN ARRAY[]::TEXT[] ELSE ARRAY[sd."signerRole"] END
-FROM "SignedDocuments" sd
-JOIN "TemplateDocuments" td ON td."id" = sd."templateId"
-WHERE UPPER(COALESCE(sd."status", '')) IN ('SIGNED', 'COMPLETED')
-  AND sd."organizationId" IS NOT NULL
-  AND sd."documentSubjectId" IS NOT NULL
-  AND sd."scopeType" IS NOT NULL
-  AND sd."scopeId" IS NOT NULL;
+  'document-satisfaction:' || scored.evidence_id,
+  COALESCE(scored.created_at, CURRENT_TIMESTAMP),
+  COALESCE(scored.created_at, CURRENT_TIMESTAMP),
+  scored.organization_id,
+  scored.document_requirement_id,
+  scored.template_id,
+  scored.document_subject_id,
+  scored.scope_type,
+  scored.scope_id,
+  scored.evidence_id,
+  CASE
+    WHEN scored.is_complete THEN 'SATISFIED'::"DocumentRequirementSatisfactionStatusEnum"
+    ELSE 'PENDING'::"DocumentRequirementSatisfactionStatusEnum"
+  END,
+  scored.is_complete,
+  scored.required_signer_roles,
+  scored.completed_signer_roles
+FROM scored;
 
 -- A satisfaction stores the Version used for the completed Requirement.
 -- Freeze that Version before later material edits can occur.

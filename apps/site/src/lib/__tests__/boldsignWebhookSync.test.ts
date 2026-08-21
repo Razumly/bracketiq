@@ -1,11 +1,30 @@
 /** @jest-environment node */
 
 import crypto from 'crypto';
-jest.mock('@/lib/prisma', () => ({ prisma: {} }));
+import type { BoldSignSyncOperation } from '@/lib/boldsignSyncOperations';
+const mockPrisma = {
+  templateDocuments: {
+    findFirst: jest.fn(),
+    findUnique: jest.fn(),
+  },
+  $transaction: jest.fn(),
+};
+const mockEnsureDocumentRequirement = jest.fn();
+const mockEditDocumentTemplateVersion = jest.fn();
+
+jest.mock('@/lib/prisma', () => ({ prisma: mockPrisma }));
+jest.mock('@/server/documents/documentTemplateVersions', () => ({
+  createDocumentTemplateVersion: jest.fn(),
+  editDocumentTemplateVersion: mockEditDocumentTemplateVersion,
+  ensureDocumentRequirement: mockEnsureDocumentRequirement,
+  isDocumentTemplateVersionFrozen: jest.fn(),
+}));
+
 import {
   isAuthEventType,
   isVerificationEvent,
   parseBoldSignWebhookEvent,
+  projectTemplateProjectionFromOperation,
   shouldProcessBoldSignEvent,
   verifyBoldSignWebhookSignature,
 } from '@/lib/boldsignWebhookSync';
@@ -18,6 +37,12 @@ describe('boldsignWebhookSync', () => {
       ...originalEnv,
       BOLDSIGN_WEBHOOK_SECRET: 'test_webhook_secret',
     };
+    mockPrisma.templateDocuments.findFirst.mockReset();
+    mockPrisma.templateDocuments.findUnique.mockReset();
+    mockPrisma.$transaction.mockReset();
+    mockEnsureDocumentRequirement.mockReset();
+    mockEditDocumentTemplateVersion.mockReset();
+    mockPrisma.$transaction.mockImplementation(async (callback) => callback({}));
   });
 
   afterAll(() => {
@@ -106,5 +131,106 @@ describe('boldsignWebhookSync', () => {
     expect(shouldProcessBoldSignEvent('AuthenticationFailed')).toBe(false);
     expect(shouldProcessBoldSignEvent('Sent')).toBe(true);
     expect(isVerificationEvent('Verification', 'TemplateCreated')).toBe(true);
+  });
+  it('does not project a deferred template before the edit webhook', async () => {
+    const operation: BoldSignSyncOperation = {
+      id: 'operation_1',
+      operationType: 'TEMPLATE_CREATE',
+      status: 'PENDING_WEBHOOK',
+      idempotencyKey: 'idempotency_1',
+      organizationId: 'org_1',
+      templateId: 'bold_template_1',
+      payload: {
+        deferProjectionUntilEdit: true,
+        sourceTemplateDocumentId: 'version_1',
+      },
+    };
+
+    const result = await projectTemplateProjectionFromOperation({
+      templateId: 'bold_template_1',
+      operation,
+      status: 'ACTIVE',
+      eventToken: 'templatecreated',
+    });
+
+    expect(result).toBeNull();
+    expect(mockPrisma.templateDocuments.findFirst).not.toHaveBeenCalled();
+    expect(mockPrisma.templateDocuments.findUnique).not.toHaveBeenCalled();
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('projects the cloned template when the edit webhook arrives', async () => {
+    mockPrisma.templateDocuments.findFirst.mockResolvedValue(null);
+    mockPrisma.templateDocuments.findUnique.mockResolvedValue({
+      id: 'version_1',
+      organizationId: 'org_1',
+      title: 'Original title',
+      description: null,
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARTICIPANT',
+      signOnce: false,
+      roleIndex: 1,
+      roleIndexes: [1],
+      signerRoles: ['participant'],
+    });
+    mockEnsureDocumentRequirement.mockResolvedValue({ id: 'requirement_1' });
+    mockEditDocumentTemplateVersion.mockResolvedValue({
+      template: { id: 'version_2' },
+    });
+
+    const operation: BoldSignSyncOperation = {
+      id: 'operation_1',
+      operationType: 'TEMPLATE_CREATE',
+      status: 'PENDING_WEBHOOK',
+      idempotencyKey: 'idempotency_1',
+      organizationId: 'org_1',
+      templateId: 'bold_template_edited',
+      templateDocumentId: 'version_2',
+      payload: {
+        deferProjectionUntilEdit: true,
+        sourceTemplateDocumentId: 'version_1',
+        title: 'Edited title',
+        roles: [{ roleIndex: 2, signerRole: 'participant' }],
+      },
+    };
+
+    const result = await projectTemplateProjectionFromOperation({
+      templateId: 'bold_template_edited',
+      operation,
+      status: 'ACTIVE',
+      eventToken: 'templateedited',
+    });
+
+    expect(result).toEqual({ id: 'version_2' });
+    expect(mockEditDocumentTemplateVersion).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({
+        versionId: 'version_1',
+        organizationId: 'org_1',
+        isFrozenRejectionRequired: false,
+        isNewVersionRequired: true,
+        newVersionId: 'version_2',
+        material: expect.objectContaining({
+          templateId: 'bold_template_edited',
+        }),
+      }),
+    );
+
+    mockPrisma.templateDocuments.findFirst.mockResolvedValue({
+      id: 'version_2',
+      templateId: 'bold_template_edited',
+    });
+    const duplicate = await projectTemplateProjectionFromOperation({
+      templateId: 'bold_template_edited',
+      operation,
+      status: 'ACTIVE',
+      eventToken: 'templateedited',
+    });
+
+    expect(duplicate).toEqual(expect.objectContaining({
+      id: 'version_2',
+      templateId: 'bold_template_edited',
+    }));
+    expect(mockEditDocumentTemplateVersion).toHaveBeenCalledTimes(1);
   });
 });

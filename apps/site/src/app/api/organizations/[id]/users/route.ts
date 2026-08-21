@@ -756,12 +756,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const templateById = new Map(templates.map((template) => [template.id, template]));
   const templateIds = templates.map((template) => template.id);
-		  const documentParticipantScopes = [
-		    ...(userIds.length ? [{ userId: { in: userIds } }] : []),
-		    ...(activeEventTeamIds.length || canonicalTeamIds.length
-		      ? [{ teamId: { in: Array.from(new Set([...activeEventTeamIds, ...canonicalTeamIds])) } }]
-		      : []),
-		  ];
+  const documentSubjectIds = userIds.map((userId) => `document-subject:${id}:${userId}`);
+  const documentSubjectUserIdById = new Map(
+    documentSubjectIds.map((subjectId, index) => [subjectId, userIds[index]] as const),
+  );
+  const documentParticipantScopes = [
+    ...(userIds.length ? [{ userId: { in: userIds } }] : []),
+    ...(documentSubjectIds.length ? [{ documentSubjectId: { in: documentSubjectIds } }] : []),
+    ...(activeEventTeamIds.length || canonicalTeamIds.length
+      ? [{ teamId: { in: Array.from(new Set([...activeEventTeamIds, ...canonicalTeamIds])) } }]
+      : []),
+  ];
   const documentEventOrTemplateScopes = [
     ...(eventIds.length ? [{ eventId: { in: eventIds } }] : []),
     ...(templateIds.length ? [{ templateId: { in: templateIds } }] : []),
@@ -782,6 +787,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         signedDocumentId: true,
         templateId: true,
         userId: true,
+        documentSubjectId: true,
         teamId: true,
         documentName: true,
         eventId: true,
@@ -1262,9 +1268,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       status: normalizeStatus(registration.status) ?? existing?.status,
     });
   });
-
   signedDocuments.forEach((document) => {
-    const summary = summariesByUserId.get(document.userId);
+    const subjectUserId = document.userId
+      ?? (document.documentSubjectId
+        ? documentSubjectUserIdById.get(document.documentSubjectId)
+        : undefined);
+    if (!subjectUserId) {
+      return;
+    }
+    const summary = summariesByUserId.get(subjectUserId);
     const template = templateById.get(document.templateId);
     const type: 'PDF' | 'TEXT' = template?.type === 'TEXT' ? 'TEXT' : 'PDF';
     const event = document.eventId ? eventsById.get(document.eventId) : undefined;

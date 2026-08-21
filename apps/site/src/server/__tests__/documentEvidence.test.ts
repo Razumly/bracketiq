@@ -141,6 +141,117 @@ describe('document evidence storage seam', () => {
     }));
   });
 
+  it('normalizes signer role boundaries when deciding Satisfaction completion', async () => {
+    const documentRequirementSatisfactions = {
+      findFirst: jest.fn().mockResolvedValue(null),
+      upsert: jest.fn().mockResolvedValue({}),
+    };
+    const database = { documentRequirementSatisfactions };
+
+    await createDocumentRequirementSatisfaction({
+      evidenceId: 'evidence_normalized_role',
+      templateDocumentId: 'version_1',
+      documentRequirementId: 'requirement_1',
+      organizationId: 'org_1',
+      documentSubjectId: 'document-subject:org_1:child_1',
+      scopeType: DOCUMENT_SATISFACTION_SCOPE.EVENT_PARTICIPATION,
+      scopeId: 'event_1',
+      requiredSignerRoles: ['Parent Guardian'],
+      signerRole: ' parent_guardian ',
+    }, database);
+
+    expect(documentRequirementSatisfactions.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        status: 'SATISFIED',
+        isComplete: true,
+        requiredSignerRoles: ['Parent Guardian'],
+        completedSignerRoles: ['parent_guardian'],
+      }),
+    }));
+  });
+
+  it('creates a replacement Satisfaction after an invalidated source is excluded', async () => {
+    const documentRequirementSatisfactions = {
+      findFirst: jest.fn().mockResolvedValue(null),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      upsert: jest.fn().mockResolvedValue({}),
+    };
+    const database = { documentRequirementSatisfactions };
+
+    await invalidateDocumentRequirementSatisfaction({
+      evidenceId: 'evidence_invalidated',
+      invalidatedAt: new Date('2026-08-21T00:00:00.000Z'),
+    }, database);
+
+    await createDocumentRequirementSatisfaction({
+      evidenceId: 'evidence_replacement',
+      templateDocumentId: 'version_1',
+      documentRequirementId: 'requirement_1',
+      organizationId: 'org_1',
+      documentSubjectId: 'document-subject:org_1:child_1',
+      scopeType: DOCUMENT_SATISFACTION_SCOPE.EVENT_PARTICIPATION,
+      scopeId: 'event_1',
+      signerRole: 'participant',
+    }, database);
+
+    expect(documentRequirementSatisfactions.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        status: { not: 'INVALIDATED' },
+      }),
+    }));
+    expect(documentRequirementSatisfactions.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'document-satisfaction:evidence_replacement' },
+      create: expect.objectContaining({
+        sourceEvidenceId: 'evidence_replacement',
+      }),
+    }));
+
+    expect(documentRequirementSatisfactions.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        sourceEvidenceId: 'evidence_invalidated',
+        status: { in: ['PENDING', 'SATISFIED'] },
+      },
+    }));
+  });
+
+  it('rejects missing Organization or Subject identity before writing', async () => {
+    const documentSubjects = { upsert: jest.fn().mockResolvedValue({}) };
+    const database = { documentSubjects };
+
+    await expect(ensureDocumentSubject({
+      organizationId: null,
+      userId: 'child_1',
+    }, database)).rejects.toThrow('Organization and Document Subject identity are required.');
+    expect(documentSubjects.upsert).not.toHaveBeenCalled();
+
+    await expect(ensureDocumentSubject({
+      organizationId: 'org_1',
+      userId: null,
+    }, database)).rejects.toThrow('Organization and Document Subject identity are required.');
+    expect(documentSubjects.upsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects incomplete Satisfaction identity before writing', async () => {
+    const documentRequirementSatisfactions = {
+      findFirst: jest.fn(),
+      upsert: jest.fn(),
+    };
+
+    await expect(createDocumentRequirementSatisfaction({
+      evidenceId: 'evidence_missing_scope',
+      templateDocumentId: 'version_1',
+      documentRequirementId: 'requirement_1',
+      organizationId: 'org_1',
+      documentSubjectId: 'document-subject:org_1:child_1',
+      scopeType: null,
+      scopeId: null,
+    }, { documentRequirementSatisfactions })).rejects.toThrow(
+      'Complete Document Requirement Satisfaction identity is required.',
+    );
+    expect(documentRequirementSatisfactions.findFirst).not.toHaveBeenCalled();
+    expect(documentRequirementSatisfactions.upsert).not.toHaveBeenCalled();
+  });
+
 
   it('records import and void audit events and invalidates Satisfaction', async () => {
     const documentEvidenceAuditEvents = { create: jest.fn().mockResolvedValue({}) };

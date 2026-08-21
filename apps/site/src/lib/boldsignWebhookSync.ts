@@ -531,13 +531,18 @@ const mapConsentStatusUpdate = (eventToken: string): {
   };
 };
 
-const maybeResolveUserIdFromSignerEmail = async (email: string | null): Promise<string | null> => {
+type DocumentProjectionUserDatabase = Pick<typeof prisma, 'sensitiveUserData' | 'authUser'>;
+
+const maybeResolveUserIdFromSignerEmail = async (
+  email: string | null,
+  database: DocumentProjectionUserDatabase = prisma,
+): Promise<string | null> => {
   const normalizedEmail = normalizeText(email)?.toLowerCase();
   if (!normalizedEmail) {
     return null;
   }
 
-  const sensitive = await prisma.sensitiveUserData.findFirst({
+  const sensitive = await database.sensitiveUserData.findFirst({
     where: { email: normalizedEmail },
     select: { userId: true },
   });
@@ -545,7 +550,7 @@ const maybeResolveUserIdFromSignerEmail = async (email: string | null): Promise<
     return sensitive.userId;
   }
 
-  const auth = await prisma.authUser.findUnique({
+  const auth = await database.authUser.findUnique({
     where: { email: normalizedEmail },
     select: { id: true },
   });
@@ -588,7 +593,7 @@ const toIsoDateFromValue = (value: unknown): string | null => {
   return toIsoTimestamp(seconds);
 };
 
-type EventSignerProjection = {
+export type DocumentSignerProjection = {
   signerEmail: string | null;
   signerRole: string | null;
   roleIndex: number | null;
@@ -597,11 +602,25 @@ type EventSignerProjection = {
   userId: string | null;
 };
 
+export type SignedDocumentProjectionCommand = {
+  documentId: string;
+  eventToken: string;
+  status: string | null;
+  signedAt: string | null;
+  templateId: string | null;
+  templateDocumentId: string | null;
+  documentName: string | null;
+  organizationId: string | null;
+  eventId: string | null;
+  teamId: string | null;
+  signers: DocumentSignerProjection[];
+};
+
 const extractSignerProjectionsFromEvent = (params: {
   event: ParsedBoldSignWebhookEvent;
   operation: BoldSignSyncOperation | null;
   operationPayload: JsonRecord;
-}): EventSignerProjection[] => {
+}): DocumentSignerProjection[] => {
   const payloadData = asRecord(params.event.payload.data) ?? asRecord(params.event.payload.Data) ?? null;
   const payloadDocument = asRecord(params.event.payload.document) ?? asRecord(params.event.payload.Document) ?? null;
 
@@ -733,6 +752,11 @@ const resolveSignerDocumentStatus = (params: {
   return params.fallbackStatus;
 };
 
+type DocumentProjectionContextDatabase = Pick<
+  typeof prisma,
+  'canonicalTeams' | 'events' | 'eventRegistrations'
+>;
+
 const inferEventContextForDocumentProjection = async (params: {
   explicitEventId: string | null;
   explicitTeamId: string | null;
@@ -740,12 +764,37 @@ const inferEventContextForDocumentProjection = async (params: {
   templateDocumentId: string | null;
   childUserId: string | null;
   representativeUserId: string | null;
+  database?: DocumentProjectionContextDatabase;
 }): Promise<{ eventId: string | null; teamId: string | null; organizationId: string | null }> => {
+  const database = params.database ?? prisma;
+
   if (params.explicitTeamId) {
-    const team = await prisma.canonicalTeams.findUnique({
+    const team = await database.canonicalTeams.findUnique({
       where: { id: params.explicitTeamId },
       select: { organizationId: true },
     });
+    if (
+      team?.organizationId
+      && params.explicitOrganizationId
+      && team.organizationId !== params.explicitOrganizationId
+    ) {
+      throw new Error('BoldSign document projection team Organization ownership mismatch.');
+    }
+    if (params.explicitEventId) {
+      const eventRows = await database.events.findMany({
+        where: { id: params.explicitEventId },
+        select: { id: true, organizationId: true },
+        take: 1,
+      });
+      const event = eventRows[0];
+      if (
+        event?.organizationId
+        && params.explicitOrganizationId
+        && event.organizationId !== params.explicitOrganizationId
+      ) {
+        throw new Error('BoldSign document projection event Organization ownership mismatch.');
+      }
+    }
     return {
       eventId: params.explicitEventId,
       teamId: params.explicitTeamId,
@@ -761,7 +810,7 @@ const inferEventContextForDocumentProjection = async (params: {
     };
   }
 
-  const candidateEvents = await prisma.events.findMany({
+  let candidateEvents = await database.events.findMany({
     where: { requiredTemplateIds: { has: params.templateDocumentId } },
     select: {
       id: true,
@@ -770,6 +819,29 @@ const inferEventContextForDocumentProjection = async (params: {
     orderBy: { updatedAt: 'desc' },
     take: 25,
   });
+
+  if (params.explicitEventId && !candidateEvents.some((row) => row.id === params.explicitEventId)) {
+    const explicitEvents = await database.events.findMany({
+      where: { id: params.explicitEventId },
+      select: {
+        id: true,
+        organizationId: true,
+      },
+      take: 1,
+    });
+    candidateEvents = [...candidateEvents, ...explicitEvents];
+  }
+
+  const explicitEvent = params.explicitEventId
+    ? candidateEvents.find((row) => row.id === params.explicitEventId)
+    : null;
+  if (
+    explicitEvent?.organizationId
+    && params.explicitOrganizationId
+    && explicitEvent.organizationId !== params.explicitOrganizationId
+  ) {
+    throw new Error('BoldSign document projection event Organization ownership mismatch.');
+  }
 
   if (candidateEvents.length === 0) {
     return {
@@ -784,6 +856,13 @@ const inferEventContextForDocumentProjection = async (params: {
     const selected = eventId
       ? candidateEvents.find((row) => row.id === eventId)
       : candidateEvents[0];
+    if (
+      selected?.organizationId
+      && params.explicitOrganizationId
+      && selected.organizationId !== params.explicitOrganizationId
+    ) {
+      throw new Error('BoldSign document projection event Organization ownership mismatch.');
+    }
     return {
       eventId: selected?.id ?? eventId,
       teamId: null,
@@ -796,7 +875,7 @@ const inferEventContextForDocumentProjection = async (params: {
   }
 
   if (params.childUserId) {
-    const childRegistration = await prisma.eventRegistrations.findFirst({
+    const childRegistration = await database.eventRegistrations.findFirst({
       where: {
         eventId: { in: candidateEventIds },
         registrantType: 'CHILD',
@@ -812,7 +891,7 @@ const inferEventContextForDocumentProjection = async (params: {
   }
 
   if (params.representativeUserId) {
-    const userRegistration = await prisma.eventRegistrations.findFirst({
+    const userRegistration = await database.eventRegistrations.findFirst({
       where: {
         eventId: { in: candidateEventIds },
         status: { in: ['STARTED', 'PENDING', 'ACTIVE'] },
@@ -856,13 +935,28 @@ export const projectTemplateProjectionFromOperation = async (params: {
   payload?: JsonRecord;
   operation: BoldSignSyncOperation | null;
   status: string;
+  eventToken?: string;
 }) => {
   const operationPayload = getOperationPayload(params.operation);
-  const payloadRoles = parseRoles(
-    operationPayload.roles
-      ?? params.dataObject?.roles
+  const deferProjectionUntilEdit = parseBoolean(operationPayload.deferProjectionUntilEdit) === true;
+  const isDeferredTemplateEdit = deferProjectionUntilEdit && params.eventToken === 'templateedited';
+  const targetVersionId = pickString(
+    params.operation?.templateDocumentId,
+    operationPayload.templateDocumentId,
+  );
+  if (deferProjectionUntilEdit && params.eventToken !== 'templateedited') {
+    return null;
+  }
+  const eventRoles = parseRoles(
+    params.dataObject?.roles
       ?? params.dataObject?.Roles,
   );
+  const operationRoles = parseRoles(operationPayload.roles);
+  const payloadRoles = params.eventToken === 'templateedited' && eventRoles.length > 0
+    ? eventRoles
+    : operationRoles.length > 0
+      ? operationRoles
+      : eventRoles;
 
   const existing = params.templateId
     ? await prisma.templateDocuments.findFirst({
@@ -870,19 +964,41 @@ export const projectTemplateProjectionFromOperation = async (params: {
       orderBy: { updatedAt: 'desc' },
     })
     : null;
+  const sourceTemplateDocumentId = pickString(operationPayload.sourceTemplateDocumentId);
+  const source = sourceTemplateDocumentId
+    ? await prisma.templateDocuments.findUnique({
+      where: { id: sourceTemplateDocumentId },
+    })
+    : null;
+  const baseTemplate = existing ?? source;
+  if (isDeferredTemplateEdit && existing && (!targetVersionId || existing.id === targetVersionId)) {
+    return existing;
+  }
 
   const organizationId = pickString(
     params.operation?.organizationId,
     operationPayload.organizationId,
     existing?.organizationId,
+    source?.organizationId,
   );
 
+  const isTemplateEdit = params.eventToken === 'templateedited';
   const title = pickString(
-    operationPayload.title,
-    params.dataObject?.title,
-    params.dataObject?.Title,
-    params.payload?.title,
-    existing?.title,
+    ...(isTemplateEdit
+      ? [
+        params.dataObject?.title,
+        params.dataObject?.Title,
+        operationPayload.title,
+        params.payload?.title,
+        baseTemplate?.title,
+      ]
+      : [
+        operationPayload.title,
+        params.dataObject?.title,
+        params.dataObject?.Title,
+        params.payload?.title,
+        baseTemplate?.title,
+      ]),
   );
 
   if (!organizationId || !title || !params.templateId) {
@@ -891,19 +1007,28 @@ export const projectTemplateProjectionFromOperation = async (params: {
 
   const requiredSignerType = normalizeRequiredSignerType(
     operationPayload.requiredSignerType
-      ?? existing?.requiredSignerType
+      ?? baseTemplate?.requiredSignerType
       ?? 'PARTICIPANT',
   );
 
-  const signOnce = parseBoolean(operationPayload.signOnce) ?? existing?.signOnce ?? false;
+  const signOnce = parseBoolean(operationPayload.signOnce) ?? baseTemplate?.signOnce ?? false;
   const description = pickString(
-    operationPayload.description,
-    params.dataObject?.description,
-    params.dataObject?.Description,
-    existing?.description,
+    ...(isTemplateEdit
+      ? [
+        params.dataObject?.description,
+        params.dataObject?.Description,
+        operationPayload.description,
+        baseTemplate?.description,
+      ]
+      : [
+        operationPayload.description,
+        params.dataObject?.description,
+        params.dataObject?.Description,
+        baseTemplate?.description,
+      ]),
   );
   const now = new Date();
-  const documentRequirementId = existing?.documentRequirementId
+  const documentRequirementId = baseTemplate?.documentRequirementId
     ?? pickString(operationPayload.documentRequirementId)
     ?? `document-requirement:boldsign:${params.templateId}`;
   const requirementData = {
@@ -919,18 +1044,14 @@ export const projectTemplateProjectionFromOperation = async (params: {
 
   return prisma.$transaction(async (tx) => {
     const requirement = await ensureDocumentRequirement(tx, requirementData);
-
-    if (existing) {
-      const projectedVersionId = pickString(
-        params.operation?.templateDocumentId,
-        operationPayload.templateDocumentId,
-      );
+    const projectionVersionId = existing?.id ?? source?.id;
+    if (projectionVersionId) {
       const editResult = await editDocumentTemplateVersion(tx, {
-        versionId: existing.id,
+        versionId: projectionVersionId,
         organizationId,
-        newVersionId: projectedVersionId && projectedVersionId !== existing.id
-          ? projectedVersionId
-          : undefined,
+        isFrozenRejectionRequired: params.operation === null,
+        isNewVersionRequired: isDeferredTemplateEdit,
+        newVersionId: targetVersionId ?? undefined,
         display: {
           title,
           description: description ?? null,
@@ -938,13 +1059,13 @@ export const projectTemplateProjectionFromOperation = async (params: {
         material: {
           templateId: params.templateId,
           type: 'PDF',
-          roleIndex: payloadRoles[0]?.roleIndex ?? existing.roleIndex ?? null,
+          roleIndex: payloadRoles[0]?.roleIndex ?? baseTemplate?.roleIndex ?? null,
           roleIndexes: payloadRoles.length > 0
             ? payloadRoles.map((entry) => entry.roleIndex)
-            : existing.roleIndexes,
+            : baseTemplate?.roleIndexes,
           signerRoles: payloadRoles.length > 0
             ? payloadRoles.map((entry) => entry.signerRole)
-            : existing.signerRoles,
+            : baseTemplate?.signerRoles,
           content: null,
         },
       });
@@ -954,10 +1075,7 @@ export const projectTemplateProjectionFromOperation = async (params: {
     return createDocumentTemplateVersion(tx, {
       requirement,
       version: {
-        id: pickString(
-          params.operation?.templateDocumentId,
-          operationPayload.templateDocumentId,
-        ) ?? crypto.randomUUID(),
+        id: targetVersionId ?? crypto.randomUUID(),
         createdAt: now,
         updatedAt: now,
         templateId: params.templateId,
@@ -1010,6 +1128,12 @@ const projectTemplateEvent = async (event: ParsedBoldSignWebhookEvent): Promise<
     return;
   }
 
+  const operationPayload = getOperationPayload(operation);
+  const deferProjectionUntilEdit = parseBoolean(operationPayload.deferProjectionUntilEdit) === true;
+  if (deferProjectionUntilEdit && event.eventToken !== 'templateedited') {
+    return;
+  }
+
   let templateStatus = 'ACTIVE';
   if (event.eventToken === 'templatedraftcreated') {
     templateStatus = 'DRAFT';
@@ -1021,8 +1145,17 @@ const projectTemplateEvent = async (event: ParsedBoldSignWebhookEvent): Promise<
     payload: event.payload,
     operation,
     status: templateStatus,
+    eventToken: event.eventToken,
   });
 
+  if (deferProjectionUntilEdit && !projectedTemplate) {
+    await updateOperationState(operation?.id, {
+      status: BOLDSIGN_OPERATION_STATUSES.FAILED,
+      lastError: 'BoldSign template edit did not produce a Document Template Version.',
+      completedAt: new Date(),
+    });
+    return;
+  }
   if (event.eventToken === 'templateedited' && event.templateId && !projectedTemplate) {
     const existing = await prisma.templateDocuments.findFirst({
       where: { templateId: event.templateId },
@@ -1033,6 +1166,7 @@ const projectTemplateEvent = async (event: ParsedBoldSignWebhookEvent): Promise<
       await prisma.$transaction((tx) => editDocumentTemplateVersion(tx, {
         versionId: existing.id,
         organizationId: existing.organizationId,
+        isFrozenRejectionRequired: true,
         display: {
           ...(pickString(event.dataObject?.title, event.dataObject?.Title)
             ? { title: pickString(event.dataObject?.title, event.dataObject?.Title) ?? undefined }
@@ -1189,7 +1323,7 @@ const syncTeamConsentFromRows = async (rows: Array<{
 };
 
 const createOrUpdateSignedDocumentProjection = async (params: {
-  event: ParsedBoldSignWebhookEvent;
+  command: SignedDocumentProjectionCommand;
   operation: BoldSignSyncOperation | null;
 }): Promise<{
   rowId: string | null;
@@ -1207,10 +1341,10 @@ const createOrUpdateSignedDocumentProjection = async (params: {
     roleIndex: number | null;
   };
 }> => {
-  const { event, operation } = params;
+  const { command, operation } = params;
   const operationPayload = getOperationPayload(operation);
 
-  if (!event.documentId) {
+  if (!command.documentId) {
     return {
       rowId: null,
       updatedRows: 0,
@@ -1229,19 +1363,17 @@ const createOrUpdateSignedDocumentProjection = async (params: {
     };
   }
 
-  const fallbackStatus = resolveDocumentStatusFromEventToken(event.eventToken, event.status);
-  const eventSignedAt = resolveDocumentSignedAtIso(event);
-  const payloadData = asRecord(event.payload.data) ?? asRecord(event.payload.Data) ?? null;
-  const payloadDocument = asRecord(event.payload.document) ?? asRecord(event.payload.Document) ?? null;
+  const fallbackStatus = resolveDocumentStatusFromEventToken(command.eventToken, command.status);
+  const eventSignedAt = command.signedAt;
 
   let templateId = pickString(
     operation?.templateId,
     operationPayload.templateId,
-    event.templateId,
+    command.templateId,
   );
   if (!templateId) {
     try {
-      const remoteDocument = await getDocumentProperties({ documentId: event.documentId });
+      const remoteDocument = await getDocumentProperties({ documentId: command.documentId });
       templateId = pickString(remoteDocument.templateId);
     } catch {
       templateId = null;
@@ -1263,73 +1395,91 @@ const createOrUpdateSignedDocumentProjection = async (params: {
     })
     : null;
 
+  let projectionTemplateRow = templateRow;
   const templateDocumentId = pickString(
     operation?.templateDocumentId,
     operationPayload.templateDocumentId,
+    command.templateDocumentId,
     templateRow?.id,
   );
-  const documentName = pickString(
-    operationPayload.templateTitle,
-    event.dataObject?.title,
-    event.dataObject?.Title,
-    payloadData?.messageTitle,
-    payloadData?.MessageTitle,
-    payloadDocument?.messageTitle,
-    payloadDocument?.MessageTitle,
-    event.payload.title,
-    event.payload.Title,
-    templateRow?.title,
-  ) ?? 'Signed Document';
-
-  const signerRows = extractSignerProjectionsFromEvent({
-    event,
-    operation,
-    operationPayload,
-  });
-  for (const signerRow of signerRows) {
-    let resolvedUserId = pickString(signerRow.userId);
-    if (!resolvedUserId && signerRow.signerEmail) {
-      const sameAsOperationSigner = Boolean(
-        operation?.signerEmail
-        && signerRow.signerEmail.toLowerCase() === operation.signerEmail.toLowerCase(),
-      );
-      if (sameAsOperationSigner) {
-        resolvedUserId = pickString(operation?.userId, operationPayload.userId);
-      }
-      if (!resolvedUserId) {
-        resolvedUserId = await maybeResolveUserIdFromSignerEmail(signerRow.signerEmail);
-      }
+  const declaredOrganizationId = pickString(
+    operation?.organizationId,
+    operationPayload.organizationId,
+    command.organizationId,
+  );
+  if (
+    templateRow?.organizationId
+    && declaredOrganizationId
+    && templateRow.organizationId !== declaredOrganizationId
+  ) {
+    throw new Error('BoldSign document projection template Organization ownership mismatch.');
+  }
+  if (templateDocumentId && (!templateRow || templateRow.id !== templateDocumentId)) {
+    const versionRow = await prisma.templateDocuments.findUnique({
+      where: { id: templateDocumentId },
+      select: {
+        id: true,
+        organizationId: true,
+        title: true,
+        documentRequirementId: true,
+        signOnce: true,
+        signerRoles: true,
+      },
+    });
+    if (!versionRow) {
+      throw new Error('BoldSign document projection template Version was not found.');
     }
-    if (!resolvedUserId && signerRows.length === 1) {
-      resolvedUserId = pickString(operation?.userId, operationPayload.userId);
-    }
-    signerRow.userId = resolvedUserId;
+    projectionTemplateRow = versionRow;
+  }
+  if (
+    templateRow?.organizationId
+    && projectionTemplateRow?.organizationId
+    && templateRow.organizationId !== projectionTemplateRow.organizationId
+  ) {
+    throw new Error('BoldSign document projection template Version Organization ownership mismatch.');
+  }
+  if (
+    projectionTemplateRow?.organizationId
+    && declaredOrganizationId
+    && projectionTemplateRow.organizationId !== declaredOrganizationId
+  ) {
+    throw new Error('BoldSign document projection template Version Organization ownership mismatch.');
   }
 
-  const childSignerRow = signerRows.find((row) => normalizeSignerRoleForProjection(row.signerRole) === 'child');
-  const childUserId = pickString(
-    operation?.childUserId,
-    operationPayload.childUserId,
-    childSignerRow?.userId,
-  );
-  const representativeUserId = pickString(
-    operation?.userId,
-    operationPayload.userId,
-    signerRows.find((row) => pickString(row.userId))?.userId,
-  );
+  const documentName = pickString(
+    operationPayload.templateTitle,
+    command.documentName,
+    projectionTemplateRow?.title,
+  ) ?? 'Signed Document';
 
-  const inferredContext = await inferEventContextForDocumentProjection({
-    explicitEventId: pickString(operation?.eventId, operationPayload.eventId),
-    explicitTeamId: pickString(operation?.teamId, operationPayload.teamId),
-    explicitOrganizationId: pickString(
+  const signerRows = command.signers;
+  const explicitEventId = pickString(
+    operation?.eventId,
+    operationPayload.eventId,
+    command.eventId,
+  );
+  const explicitTeamId = pickString(
+    operation?.teamId,
+    operationPayload.teamId,
+    command.teamId,
+  );
+  const providerDocumentId = pickString(command.documentId);
+  let childUserId: string | null = null;
+  let representativeUserId: string | null = null;
+  let inferredContext: {
+    eventId: string | null;
+    teamId: string | null;
+    organizationId: string | null;
+  } = {
+    eventId: explicitEventId,
+    teamId: explicitTeamId,
+    organizationId: pickString(
       operation?.organizationId,
       operationPayload.organizationId,
-      templateRow?.organizationId,
+      command.organizationId,
+      projectionTemplateRow?.organizationId,
     ),
-    templateDocumentId,
-    childUserId,
-    representativeUserId,
-  });
+  };
 
   let updatedRows = 0;
   const projectedRows: Array<{
@@ -1339,57 +1489,121 @@ const createOrUpdateSignedDocumentProjection = async (params: {
     signerEmail: string | null;
     roleIndex: number | null;
   }> = [];
+  let primaryRowId = pickString(operation?.signedDocumentRecordId);
 
-  for (const signerRow of signerRows) {
-    const signerRole = normalizeSignerRoleForProjection(
-      pickString(signerRow.signerRole),
-    ) ?? normalizeSignerRoleForProjection(pickString(operation?.signerRole, operationPayload.signerRole))
-      ?? 'participant';
-    const signerEmail = pickString(signerRow.signerEmail, operation?.signerEmail, operationPayload.signerEmail)?.toLowerCase() ?? null;
-    const userId = pickString(signerRow.userId);
-    const roleIndex = parseNumber(
-      signerRow.roleIndex
-      ?? operation?.roleIndex
-      ?? operationPayload.roleIndex,
+  await prisma.$transaction(async (tx) => {
+    for (const signerRow of signerRows) {
+      let resolvedUserId = pickString(signerRow.userId);
+      if (!resolvedUserId && signerRow.signerEmail) {
+        const sameAsOperationSigner = Boolean(
+          operation?.signerEmail
+          && signerRow.signerEmail.toLowerCase() === operation.signerEmail.toLowerCase(),
+        );
+        if (sameAsOperationSigner) {
+          resolvedUserId = pickString(operation?.userId, operationPayload.userId);
+        }
+        if (!resolvedUserId) {
+          resolvedUserId = await maybeResolveUserIdFromSignerEmail(signerRow.signerEmail, tx);
+        }
+      }
+      signerRow.userId = resolvedUserId;
+    }
+
+    const childSignerRow = signerRows.find((row) => normalizeSignerRoleForProjection(row.signerRole) === 'child');
+    childUserId = pickString(
+      operation?.childUserId,
+      operationPayload.childUserId,
+      childSignerRow?.userId,
     );
-    const hostId = signerRole === 'child'
-      ? (childUserId ?? userId)
-      : signerRole === 'parent_guardian'
-        ? childUserId
-        : pickString(operation?.childUserId, operationPayload.childUserId);
+    representativeUserId = pickString(
+      operation?.userId,
+      operationPayload.userId,
+      signerRows.find((row) => pickString(row.userId))?.userId,
+    );
 
-    const signerStatus = resolveSignerDocumentStatus({
-      eventToken: event.eventToken,
-      fallbackStatus,
-      signerStatusToken: signerRow.signerStatusToken,
-    });
-    const defaultSignedAt = signerStatus === 'SIGNED'
-      ? (signerRow.signedAt ?? eventSignedAt)
-      : null;
-
-    let existing = await prisma.signedDocuments.findFirst({
-      where: {
-        signedDocumentId: event.documentId,
-        ...(templateDocumentId ? { templateId: templateDocumentId } : {}),
-        ...(userId ? { userId } : {}),
-        ...(signerRole ? { signerRole } : {}),
-        ...(hostId ? { hostId } : {}),
-      },
-      orderBy: { updatedAt: 'desc' },
-      select: {
-        id: true,
-        status: true,
-        signedAt: true,
-      },
+    inferredContext = await inferEventContextForDocumentProjection({
+      explicitEventId,
+      explicitTeamId,
+      explicitOrganizationId: pickString(
+        operation?.organizationId,
+        operationPayload.organizationId,
+        command.organizationId,
+        projectionTemplateRow?.organizationId,
+      ),
+      templateDocumentId,
+      childUserId,
+      representativeUserId,
+      database: tx,
     });
 
-    if (!existing && signerEmail) {
-      existing = await prisma.signedDocuments.findFirst({
+    if (!providerDocumentId || !templateDocumentId || !inferredContext.organizationId) {
+      return;
+    }
+    if (
+      projectionTemplateRow?.organizationId
+      && projectionTemplateRow.organizationId !== inferredContext.organizationId
+    ) {
+      throw new Error('BoldSign document projection context Organization ownership mismatch.');
+    }
+
+    const existingEvidenceRows = await tx.signedDocuments.findMany({
+      where: { signedDocumentId: providerDocumentId },
+      select: { id: true, organizationId: true },
+    });
+    const foreignEvidence = existingEvidenceRows.find((row) =>
+      row.organizationId !== null
+      && row.organizationId !== inferredContext.organizationId);
+    if (foreignEvidence) {
+      throw new Error('BoldSign document projection evidence Organization ownership mismatch.');
+    }
+
+    for (const signerRow of signerRows) {
+      const signerRole = normalizeSignerRoleForProjection(
+        pickString(signerRow.signerRole),
+      ) ?? normalizeSignerRoleForProjection(pickString(operation?.signerRole, operationPayload.signerRole))
+        ?? 'participant';
+      const signerEmail = pickString(signerRow.signerEmail, operation?.signerEmail, operationPayload.signerEmail)?.toLowerCase() ?? null;
+      const userId = pickString(signerRow.userId);
+      const roleIndex = parseNumber(
+        signerRow.roleIndex
+        ?? operation?.roleIndex
+        ?? operationPayload.roleIndex,
+      );
+      const hostId = signerRole === 'child'
+        ? (childUserId ?? userId)
+        : signerRole === 'parent_guardian'
+          ? childUserId
+          : pickString(operation?.childUserId, operationPayload.childUserId);
+      const subjectHostId = userId ? hostId : null;
+
+      const signerStatus = resolveSignerDocumentStatus({
+        eventToken: command.eventToken,
+        fallbackStatus,
+        signerStatusToken: signerRow.signerStatusToken,
+      });
+      const defaultSignedAt = signerStatus === 'SIGNED'
+        ? (signerRow.signedAt ?? eventSignedAt)
+        : null;
+
+      let existing: {
+        id: string;
+        status: string | null;
+        signedAt: Date | string | null;
+      } | null = await tx.signedDocuments.findFirst({
         where: {
-          signedDocumentId: event.documentId,
+          signedDocumentId: providerDocumentId,
+          OR: [
+            { organizationId: inferredContext.organizationId },
+            { organizationId: null },
+          ],
           ...(templateDocumentId ? { templateId: templateDocumentId } : {}),
-          signerEmail,
+          ...(userId
+            ? { userId }
+            : signerEmail
+              ? { signerEmail }
+              : { id: '__unmatched-signer__' }),
           ...(signerRole ? { signerRole } : {}),
+          ...(subjectHostId ? { hostId: subjectHostId } : {}),
         },
         orderBy: { updatedAt: 'desc' },
         select: {
@@ -1398,39 +1612,64 @@ const createOrUpdateSignedDocumentProjection = async (params: {
           signedAt: true,
         },
       });
-    }
 
-    const preserveSignedState = Boolean(
-      existing
-      && isSignedStatus(existing.status)
-      && !isSignedStatus(signerStatus)
-      && !TERMINAL_FAILURE_STATUS_TOKENS.has(event.eventToken),
-    );
-    const nextStatus = preserveSignedState ? 'SIGNED' : signerStatus;
-    const nextSignedAt = nextStatus === 'SIGNED'
-      ? (normalizeText(existing?.signedAt) ?? defaultSignedAt)
-      : null;
-    const providerDocumentId = pickString(event.documentId);
-    if (!userId || !templateDocumentId || !providerDocumentId) {
-      continue;
-    }
-    const evidenceFields = signedDocumentEvidenceFields({
-      organizationId: inferredContext.organizationId,
-      userId,
-      hostId,
-      eventId: inferredContext.eventId,
-      teamId: inferredContext.teamId,
-      signOnce: templateRow?.signOnce,
-      provenance: DOCUMENT_EVIDENCE_PROVENANCE.BOLDSIGN,
-      providerDocumentId,
-    });
-    let projectedRowId = existing?.id ?? null;
-    await prisma.$transaction(async (tx) => {
-      await ensureDocumentSubject({
+      if (!existing && signerEmail) {
+        existing = await tx.signedDocuments.findFirst({
+          where: {
+            signedDocumentId: providerDocumentId,
+            OR: [
+              { organizationId: inferredContext.organizationId },
+              { organizationId: null },
+            ],
+            ...(templateDocumentId ? { templateId: templateDocumentId } : {}),
+            signerEmail,
+            ...(signerRole ? { signerRole } : {}),
+          },
+          orderBy: { updatedAt: 'desc' },
+          select: {
+            id: true,
+            status: true,
+            signedAt: true,
+          },
+        });
+      }
+
+      const preserveSignedState = Boolean(
+        existing
+        && isSignedStatus(existing.status)
+        && !isSignedStatus(signerStatus)
+        && !TERMINAL_FAILURE_STATUS_TOKENS.has(command.eventToken),
+      );
+      const nextStatus = preserveSignedState ? 'SIGNED' : signerStatus;
+      const nextSignedAt = nextStatus === 'SIGNED'
+        ? (normalizeText(existing?.signedAt) ?? defaultSignedAt)
+        : null;
+      const evidenceFields = signedDocumentEvidenceFields({
         organizationId: inferredContext.organizationId,
         userId,
-        hostId,
-      }, tx);
+        hostId: subjectHostId,
+        eventId: inferredContext.eventId,
+        teamId: inferredContext.teamId,
+        signOnce: projectionTemplateRow?.signOnce,
+        provenance: DOCUMENT_EVIDENCE_PROVENANCE.BOLDSIGN,
+        providerDocumentId,
+      });
+      const satisfactionReady = nextStatus === 'SIGNED'
+        && Boolean(
+          projectionTemplateRow?.documentRequirementId
+          && evidenceFields.documentSubjectId
+          && evidenceFields.scopeType
+          && evidenceFields.scopeId,
+        );
+      let projectedRowId = existing?.id ?? null;
+
+      if (evidenceFields.documentSubjectId) {
+        await ensureDocumentSubject({
+          organizationId: inferredContext.organizationId,
+          userId,
+          hostId: subjectHostId,
+        }, tx);
+      }
 
       if (existing) {
         await tx.signedDocuments.update({
@@ -1441,7 +1680,7 @@ const createOrUpdateSignedDocumentProjection = async (params: {
             templateId: templateDocumentId,
             userId,
             documentName,
-            hostId,
+            hostId: subjectHostId,
             organizationId: inferredContext.organizationId,
             eventId: inferredContext.eventId,
             teamId: inferredContext.teamId,
@@ -1453,106 +1692,133 @@ const createOrUpdateSignedDocumentProjection = async (params: {
             signerRole,
           },
         });
-        if (nextStatus === 'SIGNED') {
+        if (satisfactionReady) {
+          const existingSatisfaction: { organizationId: string } | null =
+            await tx.documentRequirementSatisfactions.findFirst({
+              where: { id: `document-satisfaction:${existing.id}` },
+              select: { organizationId: true },
+            });
+          if (
+            existingSatisfaction
+            && existingSatisfaction.organizationId !== inferredContext.organizationId
+          ) {
+            throw new Error('BoldSign document projection Satisfaction Organization ownership mismatch.');
+          }
           await createDocumentRequirementSatisfaction({
             evidenceId: existing.id,
             templateDocumentId,
-            documentRequirementId: templateRow?.documentRequirementId,
+            documentRequirementId: projectionTemplateRow?.documentRequirementId,
             organizationId: inferredContext.organizationId,
             documentSubjectId: evidenceFields.documentSubjectId,
             scopeType: evidenceFields.scopeType,
             scopeId: evidenceFields.scopeId,
-            requiredSignerRoles: templateRow?.signerRoles,
+            requiredSignerRoles: projectionTemplateRow?.signerRoles,
             signerRole,
           }, tx);
         }
-        return;
+      } else {
+        const createdAt = new Date();
+        const created: { id: string } = await tx.signedDocuments.create({
+          data: {
+            id: crypto.randomUUID(),
+            createdAt,
+            updatedAt: createdAt,
+            signedDocumentId: providerDocumentId,
+            templateId: templateDocumentId,
+            userId,
+            documentName,
+            hostId: subjectHostId,
+            organizationId: inferredContext.organizationId,
+            eventId: inferredContext.eventId,
+            teamId: inferredContext.teamId,
+            ...evidenceFields,
+            status: nextStatus,
+            signedAt: nextSignedAt,
+            signerEmail,
+            roleIndex,
+            signerRole,
+            ipAddress: null,
+            requestId: null,
+          },
+          select: { id: true },
+        });
+        projectedRowId = created.id;
+        if (satisfactionReady) {
+          const existingSatisfaction: { organizationId: string } | null =
+            await tx.documentRequirementSatisfactions.findFirst({
+            where: { id: `document-satisfaction:${created.id}` },
+            select: { organizationId: true },
+          });
+          if (
+            existingSatisfaction
+            && existingSatisfaction.organizationId !== inferredContext.organizationId
+          ) {
+            throw new Error('BoldSign document projection Satisfaction Organization ownership mismatch.');
+          }
+          await createDocumentRequirementSatisfaction({
+            evidenceId: created.id,
+            templateDocumentId,
+            documentRequirementId: projectionTemplateRow?.documentRequirementId,
+            organizationId: inferredContext.organizationId,
+            documentSubjectId: evidenceFields.documentSubjectId,
+            scopeType: evidenceFields.scopeType,
+            requiredSignerRoles: projectionTemplateRow?.signerRoles,
+            scopeId: evidenceFields.scopeId,
+            signerRole,
+          }, tx);
+        }
       }
 
-      const createdAt = new Date();
-      const created = await tx.signedDocuments.create({
-        data: {
-          id: crypto.randomUUID(),
-          createdAt,
-          updatedAt: createdAt,
+      if (!projectedRowId) {
+        continue;
+      }
+      updatedRows += 1;
+      projectedRows.push({
+        id: projectedRowId,
+        userId,
+        signerRole,
+        signerEmail,
+        roleIndex,
+      });
+    }
+
+    if (updatedRows === 0) {
+      const existingRows = await tx.signedDocuments.findMany({
+        where: {
           signedDocumentId: providerDocumentId,
-          templateId: templateDocumentId,
-          userId,
-          documentName,
-          hostId,
           organizationId: inferredContext.organizationId,
-          eventId: inferredContext.eventId,
-          teamId: inferredContext.teamId,
-          ...evidenceFields,
-          status: nextStatus,
-          signedAt: nextSignedAt,
-          signerEmail,
-          roleIndex,
-          signerRole,
-          ipAddress: null,
-          requestId: null,
         },
+        orderBy: { updatedAt: 'desc' },
         select: { id: true },
       });
-      projectedRowId = created.id;
-      if (nextStatus === 'SIGNED') {
-        await createDocumentRequirementSatisfaction({
-          evidenceId: created.id,
-          templateDocumentId,
-          documentRequirementId: templateRow?.documentRequirementId,
-          organizationId: inferredContext.organizationId,
-          documentSubjectId: evidenceFields.documentSubjectId,
-          scopeType: evidenceFields.scopeType,
-          requiredSignerRoles: templateRow?.signerRoles,
-          scopeId: evidenceFields.scopeId,
-          signerRole,
-        }, tx);
-      }
-    });
-    if (!projectedRowId) {
-      continue;
-    }
-    updatedRows += 1;
-    projectedRows.push({
-      id: projectedRowId,
-      userId,
-      signerRole,
-      signerEmail,
-      roleIndex,
-    });
-  }
 
-  let primaryRowId = pickString(operation?.signedDocumentRecordId);
+      if (existingRows.length > 0) {
+        const ids = existingRows.map((row) => row.id);
+        await tx.signedDocuments.updateMany({
+          where: {
+            id: { in: ids },
+            organizationId: inferredContext.organizationId,
+          },
+          data: {
+            updatedAt: new Date(),
+            provenance: DOCUMENT_EVIDENCE_PROVENANCE.BOLDSIGN,
+            providerDocumentId: providerDocumentId,
+            status: fallbackStatus,
+            signedAt: eventSignedAt ?? undefined,
+          },
+        });
+        primaryRowId = existingRows[0]?.id ?? null;
+        updatedRows = existingRows.length;
+      }
+    }
+  });
+
   if (!primaryRowId && projectedRows.length > 0) {
     const preferred = projectedRows.find((row) =>
       (operation?.userId && row.userId === operation.userId)
       || (operation?.signerRole && row.signerRole === normalizeSignerRoleForProjection(operation.signerRole)),
     );
     primaryRowId = preferred?.id ?? projectedRows[0]?.id ?? null;
-  }
-
-  if (updatedRows === 0) {
-    const existingRows = await prisma.signedDocuments.findMany({
-      where: { signedDocumentId: event.documentId },
-      orderBy: { updatedAt: 'desc' },
-      select: { id: true },
-    });
-
-    if (existingRows.length > 0) {
-      const ids = existingRows.map((row) => row.id);
-      await prisma.signedDocuments.updateMany({
-        where: { id: { in: ids } },
-        data: {
-          updatedAt: new Date(),
-          provenance: DOCUMENT_EVIDENCE_PROVENANCE.BOLDSIGN,
-          providerDocumentId: event.documentId,
-          status: fallbackStatus,
-          signedAt: eventSignedAt ?? undefined,
-        },
-      });
-      primaryRowId = existingRows[0]?.id ?? primaryRowId ?? null;
-      updatedRows = existingRows.length;
-    }
   }
 
   const preferredProjection = projectedRows.find((row) => row.id === primaryRowId) ?? projectedRows[0] ?? null;
@@ -1583,6 +1849,53 @@ const createOrUpdateSignedDocumentProjection = async (params: {
   };
 };
 
+export const projectSignedDocumentEvidence = async (params: {
+  command: SignedDocumentProjectionCommand;
+  operation?: BoldSignSyncOperation | null;
+}) => createOrUpdateSignedDocumentProjection({
+  command: params.command,
+  operation: params.operation ?? null,
+});
+
+const buildSignedDocumentProjectionCommand = (
+  event: ParsedBoldSignWebhookEvent,
+  operation: BoldSignSyncOperation | null,
+): SignedDocumentProjectionCommand => {
+  const operationPayload = getOperationPayload(operation);
+  const payloadData = asRecord(event.payload.data) ?? asRecord(event.payload.Data) ?? null;
+  const payloadDocument = asRecord(event.payload.document) ?? asRecord(event.payload.Document) ?? null;
+  return {
+    documentId: event.documentId ?? '',
+    eventToken: event.eventToken,
+    status: event.status,
+    signedAt: resolveDocumentSignedAtIso(event),
+    templateId: pickString(operation?.templateId, operationPayload.templateId, event.templateId),
+    templateDocumentId: pickString(
+      operation?.templateDocumentId,
+      operationPayload.templateDocumentId,
+    ),
+    documentName: pickString(
+      operationPayload.templateTitle,
+      event.dataObject?.title,
+      event.dataObject?.Title,
+      payloadData?.messageTitle,
+      payloadData?.MessageTitle,
+      payloadDocument?.messageTitle,
+      payloadDocument?.MessageTitle,
+      event.payload.title,
+      event.payload.Title,
+    ),
+    organizationId: pickString(operation?.organizationId, operationPayload.organizationId),
+    eventId: pickString(operation?.eventId, operationPayload.eventId),
+    teamId: pickString(operation?.teamId, operationPayload.teamId),
+    signers: extractSignerProjectionsFromEvent({
+      event,
+      operation,
+      operationPayload,
+    }),
+  };
+};
+
 const projectDocumentEvent = async (event: ParsedBoldSignWebhookEvent): Promise<void> => {
   if (!event.documentId) {
     return;
@@ -1590,8 +1903,9 @@ const projectDocumentEvent = async (event: ParsedBoldSignWebhookEvent): Promise<
 
   let operation = await resolveDocumentOperation(event);
   const hadOperation = Boolean(operation);
-  const projection = await createOrUpdateSignedDocumentProjection({
-    event,
+  const command = buildSignedDocumentProjectionCommand(event, operation);
+  const projection = await projectSignedDocumentEvidence({
+    command,
     operation,
   });
 

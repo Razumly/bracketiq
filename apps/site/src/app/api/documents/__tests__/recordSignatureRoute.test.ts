@@ -9,11 +9,14 @@ const prismaMock = {
   authUser: {
     findUnique: jest.fn(),
   },
-  parentChildLinks: {
-    findFirst: jest.fn(),
-  },
   events: {
     findUnique: jest.fn(),
+  },
+  canonicalTeams: {
+    findUnique: jest.fn(),
+  },
+  parentChildLinks: {
+    findFirst: jest.fn(),
   },
   documentSubjects: {
     upsert: jest.fn(),
@@ -30,8 +33,14 @@ const prismaMock = {
   templateDocuments: {
     findUnique: jest.fn(),
   },
+  documentRequirements: {
+    findUnique: jest.fn(),
+  },
   eventRegistrations: {
     findMany: jest.fn(),
+  },
+  teamRegistrations: {
+    findFirst: jest.fn(),
   },
   $transaction: jest.fn(),
 };
@@ -73,21 +82,43 @@ describe('POST /api/documents/record-signature', () => {
     jest.clearAllMocks();
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
     requireSessionMock.mockResolvedValue({ userId: 'parent_1', isAdmin: false });
-    prismaMock.events.findUnique.mockResolvedValue({ organizationId: 'org_1' });
+    prismaMock.events.findUnique.mockResolvedValue({
+      id: 'event_1',
+      organizationId: 'org_1',
+    });
+    prismaMock.canonicalTeams.findUnique.mockResolvedValue(null);
     prismaMock.parentChildLinks.findFirst.mockResolvedValue({ id: 'link_1' });
     prismaMock.signedDocuments.findFirst.mockResolvedValue({
       id: 'signed_1',
+      templateId: 'template_1',
+      organizationId: 'org_1',
+      userId: 'parent_1',
+      signerUserId: 'parent_1',
+      documentSubjectId: 'document-subject:org_1:child_1',
+      hostId: 'child_1',
+      eventId: 'event_1',
+      teamId: null,
+      scopeType: 'EVENT_PARTICIPATION',
+      scopeId: 'event_1',
       status: 'UNSIGNED',
       signedAt: null,
+      signerRole: 'parent_guardian',
     });
     prismaMock.signedDocuments.create.mockResolvedValue({ id: 'signed_1' });
     prismaMock.templateDocuments.findUnique.mockResolvedValue({
+      id: 'template_1',
+      organizationId: 'org_1',
       signOnce: false,
       type: 'TEXT',
       documentRequirementId: 'requirement_1',
       signerRoles: ['parent_guardian'],
     });
+    prismaMock.documentRequirements.findUnique.mockResolvedValue({
+      id: 'requirement_1',
+      organizationId: 'org_1',
+    });
     prismaMock.eventRegistrations.findMany.mockResolvedValue([]);
+    prismaMock.teamRegistrations.findFirst.mockResolvedValue(null);
     syncChildRegistrationConsentStatusMock.mockResolvedValue(undefined);
     findLatestBoldSignOperationMock.mockResolvedValue({
       id: 'op_1',
@@ -113,7 +144,14 @@ describe('POST /api/documents/record-signature', () => {
   });
 
   it('acknowledges PDF callbacks without mutating signedDocuments directly', async () => {
-    prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({ signOnce: false, type: 'PDF' });
+    prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
+      id: 'template_1',
+      organizationId: 'org_1',
+      signOnce: false,
+      type: 'PDF',
+      documentRequirementId: 'requirement_1',
+      signerRoles: ['parent_guardian'],
+    });
     const response = await POST(jsonPost('http://localhost/api/documents/record-signature', {
       templateId: 'template_1',
       documentId: 'document_1',
@@ -162,12 +200,54 @@ describe('POST /api/documents/record-signature', () => {
     expect(prismaMock.signedDocuments.create).not.toHaveBeenCalled();
   });
 
+  it('derives required roles from the template signer type when roles are absent', async () => {
+    prismaMock.templateDocuments.findUnique.mockResolvedValue({
+      id: 'template_1',
+      organizationId: 'org_1',
+      signOnce: false,
+      type: 'TEXT',
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARENT_GUARDIAN',
+      signerRoles: [],
+    });
+
+    const response = await POST(jsonPost('http://localhost/api/documents/record-signature', {
+      templateId: 'template_1',
+      documentId: 'document_1',
+      eventId: 'event_1',
+      userId: 'parent_1',
+      childUserId: 'child_1',
+      signerContext: 'parent_guardian',
+      user: { email: 'parent@example.com' },
+      type: 'TEXT',
+    }));
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.documentRequirementSatisfactions.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          requiredSignerRoles: ['Parent/Guardian'],
+        }),
+      }),
+    );
+  });
+
   it('does not downgrade an already signed text row when receiving another text callback', async () => {
     prismaMock.signedDocuments.findFirst.mockResolvedValue({
       id: 'signed_1',
+      templateId: 'template_1',
       organizationId: 'org_1',
+      userId: 'parent_1',
+      signerUserId: 'parent_1',
+      documentSubjectId: 'document-subject:org_1:child_1',
+      hostId: 'child_1',
+      eventId: 'event_1',
+      teamId: null,
+      scopeType: 'EVENT_PARTICIPATION',
+      scopeId: 'event_1',
       status: 'SIGNED',
       signedAt: '2026-03-01T01:02:03.000Z',
+      signerRole: 'parent_guardian',
     });
 
     await POST(jsonPost('http://localhost/api/documents/record-signature', {
@@ -186,6 +266,8 @@ describe('POST /api/documents/record-signature', () => {
 
   it('syncs all pending/active child registrations when a sign-once text template is signed', async () => {
     prismaMock.templateDocuments.findUnique.mockResolvedValue({
+      id: 'template_1',
+      organizationId: 'org_1',
       signOnce: true,
       type: 'TEXT',
       documentRequirementId: 'requirement_1',
@@ -197,6 +279,22 @@ describe('POST /api/documents/record-signature', () => {
       { eventId: 'event_2', parentId: 'parent_1' },
       { eventId: 'event_3', parentId: null },
     ]);
+    prismaMock.signedDocuments.findFirst.mockResolvedValueOnce({
+      id: 'signed_1',
+      templateId: 'template_1',
+      organizationId: 'org_1',
+      userId: 'parent_1',
+      signerUserId: 'parent_1',
+      documentSubjectId: 'document-subject:org_1:child_1',
+      hostId: 'child_1',
+      eventId: 'event_1',
+      teamId: null,
+      scopeType: 'ORGANIZATION',
+      scopeId: 'org_1',
+      status: 'UNSIGNED',
+      signedAt: null,
+      signerRole: 'parent_guardian',
+    });
 
     const response = await POST(jsonPost('http://localhost/api/documents/record-signature', {
       templateId: 'template_1',
@@ -245,6 +343,143 @@ describe('POST /api/documents/record-signature', () => {
     expect(response.status).toBe(403);
     expect(payload.error).toContain('server-issued');
     expect(prismaMock.signedDocuments.create).not.toHaveBeenCalled();
+    expect(syncChildRegistrationConsentStatusMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects evidence from a different Organization before changing it', async () => {
+    prismaMock.signedDocuments.findFirst.mockResolvedValue({
+      id: 'signed_1',
+      templateId: 'template_1',
+      organizationId: 'org_2',
+      userId: 'parent_1',
+      signerUserId: 'parent_1',
+      documentSubjectId: 'document-subject:org_2:child_1',
+      hostId: 'child_1',
+      eventId: 'event_1',
+      teamId: null,
+      scopeType: 'EVENT_PARTICIPATION',
+      scopeId: 'event_1',
+      status: 'UNSIGNED',
+    });
+
+    const response = await POST(jsonPost('http://localhost/api/documents/record-signature', {
+      templateId: 'template_1',
+      documentId: 'document_1',
+      eventId: 'event_1',
+      userId: 'parent_1',
+      childUserId: 'child_1',
+      signerContext: 'parent_guardian',
+      type: 'TEXT',
+    }));
+
+    expect(response.status).toBe(403);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(prismaMock.signedDocuments.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects a callback whose Event or Team scope differs from existing evidence', async () => {
+    const response = await POST(jsonPost('http://localhost/api/documents/record-signature', {
+      templateId: 'template_1',
+      documentId: 'document_1',
+      eventId: 'event_2',
+      userId: 'parent_1',
+      childUserId: 'child_1',
+      signerContext: 'parent_guardian',
+      type: 'TEXT',
+    }));
+
+    expect(response.status).toBe(403);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(prismaMock.signedDocuments.update).not.toHaveBeenCalled();
+  });
+
+  it('repairs missing evidence Organization only when an owned Event proves it', async () => {
+    prismaMock.signedDocuments.findFirst.mockResolvedValue({
+      id: 'signed_1',
+      templateId: 'template_1',
+      organizationId: null,
+      userId: 'parent_1',
+      signerUserId: 'parent_1',
+      documentSubjectId: 'document-subject:org_1:child_1',
+      hostId: 'child_1',
+      eventId: 'event_1',
+      teamId: null,
+      scopeType: 'EVENT_PARTICIPATION',
+      scopeId: 'event_1',
+      status: 'UNSIGNED',
+    });
+
+    const response = await POST(jsonPost('http://localhost/api/documents/record-signature', {
+      templateId: 'template_1',
+      documentId: 'document_1',
+      eventId: 'event_1',
+      userId: 'parent_1',
+      childUserId: 'child_1',
+      signerContext: 'parent_guardian',
+      type: 'TEXT',
+    }));
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.signedDocuments.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ organizationId: 'org_1' }),
+      }),
+    );
+  });
+
+  it('rejects missing Organization evidence when no owned scope can repair it', async () => {
+    prismaMock.signedDocuments.findFirst.mockResolvedValue({
+      id: 'signed_1',
+      templateId: 'template_1',
+      organizationId: null,
+      userId: 'parent_1',
+      signerUserId: 'parent_1',
+      documentSubjectId: 'document-subject:org_1:child_1',
+      hostId: 'child_1',
+      eventId: null,
+      teamId: null,
+      scopeType: null,
+      scopeId: null,
+      status: 'UNSIGNED',
+    });
+
+    const response = await POST(jsonPost('http://localhost/api/documents/record-signature', {
+      templateId: 'template_1',
+      documentId: 'document_1',
+      userId: 'parent_1',
+      childUserId: 'child_1',
+      signerContext: 'parent_guardian',
+      type: 'TEXT',
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({
+        error: 'Unable to derive Organization ownership for this evidence.',
+      }),
+    );
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('returns a client error when Satisfaction fails', async () => {
+    prismaMock.documentRequirementSatisfactions.upsert.mockRejectedValue(
+      new Error('Satisfaction write failed.'),
+    );
+
+    const response = await POST(jsonPost('http://localhost/api/documents/record-signature', {
+      templateId: 'template_1',
+      documentId: 'document_1',
+      eventId: 'event_1',
+      userId: 'parent_1',
+      childUserId: 'child_1',
+      signerContext: 'parent_guardian',
+      type: 'TEXT',
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ error: 'Satisfaction write failed.' }),
+    );
     expect(syncChildRegistrationConsentStatusMock).not.toHaveBeenCalled();
   });
 });

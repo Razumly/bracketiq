@@ -5,7 +5,6 @@ import { requireSession } from '@/lib/permissions';
 import {
   cloneEmbeddedTemplate,
   deleteTemplate,
-  getEmbeddedTemplateEditUrl,
   isBoldSignConfigured,
   isBoldSignForbiddenError,
   isBoldSignInvalidTemplateIdError,
@@ -72,72 +71,60 @@ export async function GET(
         select: { versionSequence: true },
       });
       const nextVersionSequence = Math.max(
-        (latestVersion?.versionSequence ?? template.versionSequence ?? 0) + 1,
-        (template.versionSequence ?? 0) + 1,
+        (latestVersion?.versionSequence ?? template.versionSequence) + 1,
+        template.versionSequence + 1,
       );
       return { frozen: locked.frozen, nextVersionSequence };
     });
 
-    if (editState.frozen) {
-      const cloned = await cloneEmbeddedTemplate({ templateId: template.templateId });
-      clonedTemplateId = cloned.templateId;
-      const newVersionId = randomUUID();
-      const roleIndexes = Array.isArray(template.roleIndexes) ? template.roleIndexes : [];
-      const signerRoles = Array.isArray(template.signerRoles) ? template.signerRoles : [];
-      const roles = roleIndexes.length > 0
-        ? roleIndexes.map((roleIndex, index) => ({
-          roleIndex,
-          signerRole: signerRoles[index] ?? 'Participant',
-        }))
-        : [{
-          roleIndex: template.roleIndex ?? 1,
-          signerRole: signerRoles[0] ?? 'Participant',
-        }];
-      const operation = await createOrUpdateBoldSignOperation({
-        operationType: BOLDSIGN_OPERATION_TYPES.TEMPLATE_CREATE,
-        status: BOLDSIGN_OPERATION_STATUSES.PENDING_WEBHOOK,
-        idempotencyKey: `template-edit:${template.id}:${cloned.templateId}`,
-        organizationId: id,
+    const cloned = await cloneEmbeddedTemplate({ templateId: template.templateId });
+    clonedTemplateId = cloned.templateId;
+    const newVersionId = randomUUID();
+    const roleIndexes = Array.isArray(template.roleIndexes) ? template.roleIndexes : [];
+    const signerRoles = Array.isArray(template.signerRoles) ? template.signerRoles : [];
+    const roles = roleIndexes.length > 0
+      ? roleIndexes.map((roleIndex, index) => ({
+        roleIndex,
+        signerRole: signerRoles[index] ?? 'Participant',
+      }))
+      : [{
+        roleIndex: template.roleIndex ?? 1,
+        signerRole: signerRoles[0] ?? 'Participant',
+      }];
+    const operation = await createOrUpdateBoldSignOperation({
+      operationType: BOLDSIGN_OPERATION_TYPES.TEMPLATE_CREATE,
+      status: BOLDSIGN_OPERATION_STATUSES.PENDING_WEBHOOK,
+      idempotencyKey: `template-edit:${template.id}:${cloned.templateId}`,
+      organizationId: id,
+      templateDocumentId: newVersionId,
+      templateId: cloned.templateId,
+      userId: session.userId,
+      payload: {
         templateDocumentId: newVersionId,
-        templateId: cloned.templateId,
-        userId: session.userId,
-        payload: {
-          templateDocumentId: newVersionId,
-          documentRequirementId: template.documentRequirementId,
-          organizationId: id,
-          title: template.documentRequirement?.title ?? template.title,
-          description: template.documentRequirement?.description ?? template.description,
-          signOnce: template.signOnce,
-          requiredSignerType: template.requiredSignerType,
-          createdBy: template.createdBy,
-          roles,
-          type: 'PDF',
-          sourceTemplateDocumentId: template.id,
-          sourceTemplateId: template.templateId,
-        },
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-      });
-      return NextResponse.json({
-        editUrl: cloned.editUrl,
-        selectedVersion: template.versionSequence,
-        frozen: true,
-        willCreateNewVersion: true,
-        nextVersionSequence: editState.nextVersionSequence,
-        operationId: operation.id,
-        templateId: cloned.templateId,
-        newVersionId,
-      }, { status: 200 });
-    }
-
-    const { editUrl } = await getEmbeddedTemplateEditUrl({
-      templateId: template.templateId,
+        documentRequirementId: template.documentRequirementId,
+        organizationId: id,
+        title: template.documentRequirement?.title ?? template.title,
+        description: template.documentRequirement?.description ?? template.description,
+        signOnce: template.signOnce,
+        requiredSignerType: template.requiredSignerType,
+        createdBy: template.createdBy,
+        roles,
+        type: 'PDF',
+        sourceTemplateDocumentId: template.id,
+        sourceTemplateId: template.templateId,
+        deferProjectionUntilEdit: true,
+      },
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
     });
     return NextResponse.json({
-      editUrl,
+      editUrl: cloned.editUrl,
       selectedVersion: template.versionSequence,
-      frozen: false,
-      willCreateNewVersion: false,
+      frozen: editState.frozen,
+      willCreateNewVersion: true,
       nextVersionSequence: editState.nextVersionSequence,
+      operationId: operation.id,
+      templateId: cloned.templateId,
+      newVersionId,
     }, { status: 200 });
   } catch (error) {
     if (clonedTemplateId) {

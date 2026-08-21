@@ -91,24 +91,6 @@ describe('boldsignService', () => {
     );
   });
 
-  it('fetches edit url for existing PDF templates', async () => {
-    apiRequestMock.mockResolvedValue({
-      editUrl: 'https://app.boldsign.com/template/edit/tmpl_pdf',
-    });
-
-    const editUrl = await boldsignService.getTemplateEditUrl({
-      organizationId: 'org_1',
-      templateDocumentId: 'tmpl_doc_1',
-    });
-
-    expect(editUrl).toBe('https://app.boldsign.com/template/edit/tmpl_pdf');
-    expect(apiRequestMock).toHaveBeenCalledWith(
-      '/api/organizations/org_1/templates/tmpl_doc_1/edit-url',
-      expect.objectContaining({
-        method: 'GET',
-      }),
-    );
-  });
 
   it('updates a text template through the organization template service', async () => {
     apiRequestMock.mockResolvedValue({
