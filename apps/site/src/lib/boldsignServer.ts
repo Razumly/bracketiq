@@ -513,31 +513,6 @@ export const cloneEmbeddedTemplate = async (params: {
   return { templateId, editUrl };
 };
 
-export const getEmbeddedTemplateEditUrl = async (params: {
-  templateId: string;
-}) => {
-  const form = new FormData();
-  form.set('ShowTooltip', 'false');
-  form.set('ViewOption', 'PreparePage');
-  form.set('ShowSaveButton', 'true');
-  form.set('ShowCreateButton', 'true');
-  form.set('ShowPreviewButton', 'true');
-  form.set('ShowNavigationButtons', 'true');
-  form.set('ShowToolbar', 'true');
-
-  const payload = await boldSignFormRequest<JsonRecord>({
-    path: '/v1/template/getEmbeddedTemplateEditUrl',
-    query: { templateId: params.templateId },
-    form,
-  });
-
-  const editUrl = pickString(payload.editUrl, payload.EditUrl, payload.url, payload.Url);
-  if (!editUrl) {
-    throw new Error('BoldSign embedded template edit response is missing editUrl.');
-  }
-
-  return { editUrl };
-};
 
 export const deleteTemplate = async (params: {
   templateId: string;

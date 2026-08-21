@@ -3,6 +3,10 @@
 import { NextRequest } from 'next/server';
 
 const prismaMock = {
+  $transaction: jest.fn(),
+  documentSubjects: {
+    upsert: jest.fn(),
+  },
   organizations: {
     findUnique: jest.fn(),
   },
@@ -54,6 +58,8 @@ import { POST } from '@/app/api/organizations/[id]/documents/route';
 describe('POST /api/organizations/[id]/documents', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => Promise<unknown>) => callback(prismaMock));
+    prismaMock.documentSubjects.upsert.mockResolvedValue({});
     requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
     prismaMock.organizations.findUnique.mockResolvedValue({ id: 'org_1', ownerId: 'owner_1' });
     canManageOrganizationMock.mockResolvedValue(false);

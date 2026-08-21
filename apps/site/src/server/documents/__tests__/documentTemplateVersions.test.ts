@@ -120,6 +120,71 @@ describe('Document Template Version storage', () => {
     expect(client.templateDocuments.create).not.toHaveBeenCalled();
 
   });
+  it('updates frozen Version display metadata without changing material fields', async () => {
+    const client = createClient();
+    const current = {
+      id: 'version_pdf_1',
+      documentRequirementId: requirement.id,
+      versionSequence: 1,
+      frozenAt: new Date('2026-01-01T00:00:00.000Z'),
+      organizationId: requirement.organizationId,
+      templateId: 'bold_template_1',
+      type: 'PDF' as const,
+      title: requirement.title,
+      description: null,
+      signOnce: true,
+      requiredSignerType: 'PARENT_GUARDIAN_CHILD',
+      status: 'ACTIVE',
+      createdBy: 'staff_1',
+      roleIndex: 1,
+      roleIndexes: [1, 2],
+      signerRoles: ['parent', 'child'],
+      content: null,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+    client.$queryRaw.mockResolvedValueOnce([current]);
+    client.documentRequirements.findUnique.mockResolvedValue({
+      id: requirement.id,
+      organizationId: requirement.organizationId,
+      title: requirement.title,
+      description: null,
+    });
+    client.documentRequirements.update.mockResolvedValue({
+      id: requirement.id,
+      organizationId: requirement.organizationId,
+      title: 'Updated display title',
+      description: 'Updated display description',
+    });
+
+    const result = await editDocumentTemplateVersion(client as never, {
+      versionId: current.id,
+      organizationId: requirement.organizationId,
+      display: {
+        title: 'Updated display title',
+        description: 'Updated display description',
+      },
+    });
+
+    expect(result.newVersionCreated).toBe(false);
+    expect(result.previousVersionId).toBeNull();
+    expect(result.template).toEqual(expect.objectContaining({
+      id: current.id,
+      templateId: current.templateId,
+      type: current.type,
+      signOnce: current.signOnce,
+      requiredSignerType: current.requiredSignerType,
+      roleIndexes: current.roleIndexes,
+      signerRoles: current.signerRoles,
+      content: current.content,
+    }));
+    expect(result.requirement).toEqual(expect.objectContaining({
+      title: 'Updated display title',
+      description: 'Updated display description',
+    }));
+    expect(client.templateDocuments.update).not.toHaveBeenCalled();
+    expect(client.templateDocuments.create).not.toHaveBeenCalled();
+  });
 
   it('freezes the referenced Version and creates the next Version without rewriting assignments', async () => {
     const client = createClient();
@@ -187,6 +252,171 @@ describe('Document Template Version storage', () => {
       data: expect.objectContaining({ signerRoles: expect.anything() }),
     }));
   });
+  it('creates a new TEXT Version when an assigned Version content changes', async () => {
+    const client = createClient();
+    const current = {
+      id: 'version_text_1',
+      documentRequirementId: requirement.id,
+      versionSequence: 1,
+      frozenAt: null,
+      organizationId: requirement.organizationId,
+      templateId: null,
+      type: 'TEXT' as const,
+      title: requirement.title,
+      description: null,
+      signOnce: false,
+      requiredSignerType: 'PARTICIPANT',
+      status: 'ACTIVE',
+      createdBy: 'staff_1',
+      roleIndex: 0,
+      roleIndexes: [],
+      signerRoles: [],
+      content: 'Old text',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+    client.$queryRaw
+      .mockResolvedValueOnce([current])
+      .mockResolvedValueOnce([{ id: 'team_1' }])
+      .mockResolvedValueOnce([{ id: requirement.id }]);
+    client.documentRequirements.findUnique.mockResolvedValue({
+      id: requirement.id,
+      organizationId: requirement.organizationId,
+      title: requirement.title,
+      description: null,
+    });
+    client.templateDocuments.findFirst.mockResolvedValue({ versionSequence: 1 });
+    client.templateDocuments.update.mockImplementation(async ({ data }) => ({ ...current, ...data }));
+    client.templateDocuments.create.mockImplementation(async ({ data }) => data);
+
+    const result = await editDocumentTemplateVersion(client as never, {
+      versionId: current.id,
+      organizationId: requirement.organizationId,
+      newVersionId: 'version_text_2',
+      material: { content: 'New text' },
+    });
+
+    expect(result.newVersionCreated).toBe(true);
+    expect(result.previousVersionId).toBe(current.id);
+    expect(result.template).toEqual(expect.objectContaining({
+      id: 'version_text_2',
+      versionSequence: 2,
+      content: 'New text',
+      templateId: null,
+      signerRoles: [],
+    }));
+    expect(client.templateDocuments.update).not.toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: current.id },
+      data: expect.objectContaining({ content: 'New text' }),
+    }));
+  });
+  it('forces an unassigned provider edit into a new Version', async () => {
+    const client = createClient();
+    const current = {
+      id: 'version_pdf_1',
+      documentRequirementId: requirement.id,
+      versionSequence: 1,
+      frozenAt: null,
+      organizationId: requirement.organizationId,
+      templateId: 'bold_template_1',
+      type: 'PDF' as const,
+      title: requirement.title,
+      description: null,
+      signOnce: false,
+      requiredSignerType: 'PARTICIPANT',
+      status: 'ACTIVE',
+      createdBy: 'staff_1',
+      roleIndex: 1,
+      roleIndexes: [1],
+      signerRoles: ['participant'],
+      content: null,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+    client.$queryRaw
+      .mockResolvedValueOnce([current])
+      .mockResolvedValueOnce([{ id: requirement.id }]);
+    client.templateDocuments.findUnique.mockResolvedValue(null);
+    client.documentRequirements.findUnique.mockResolvedValue({
+      id: requirement.id,
+      organizationId: requirement.organizationId,
+      title: requirement.title,
+      description: null,
+    });
+    client.templateDocuments.findFirst.mockResolvedValue({ versionSequence: 1 });
+    client.templateDocuments.update.mockImplementation(async ({ data }) => ({ ...current, ...data }));
+    client.templateDocuments.create.mockImplementation(async ({ data }) => data);
+
+    const result = await editDocumentTemplateVersion(client as never, {
+      versionId: current.id,
+      organizationId: requirement.organizationId,
+      isNewVersionRequired: true,
+      newVersionId: 'version_pdf_2',
+      material: {
+        templateId: 'bold_template_edited',
+        signerRoles: ['participant', 'guardian'],
+        roleIndexes: [1, 2],
+      },
+    });
+
+    expect(result.newVersionCreated).toBe(true);
+    expect(result.previousVersionId).toBe(current.id);
+    expect(result.template).toEqual(expect.objectContaining({
+      id: 'version_pdf_2',
+      templateId: 'bold_template_edited',
+      signerRoles: ['participant', 'guardian'],
+      roleIndexes: [1, 2],
+      versionSequence: 2,
+    }));
+    expect(client.templateDocuments.update).not.toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: current.id },
+      data: expect.objectContaining({ templateId: 'bold_template_edited' }),
+    }));
+  });
+
+  it('rejects provider material updates for a frozen Version without changing metadata', async () => {
+    const client = createClient();
+    const current = {
+      id: 'version_1',
+      documentRequirementId: requirement.id,
+      versionSequence: 1,
+      frozenAt: new Date('2026-01-01T00:00:00.000Z'),
+      organizationId: requirement.organizationId,
+      templateId: 'bold_template_1',
+      type: 'PDF' as const,
+      title: requirement.title,
+      description: null,
+      signOnce: false,
+      requiredSignerType: 'PARTICIPANT',
+      status: 'ACTIVE',
+      createdBy: 'staff_1',
+      roleIndex: 1,
+      roleIndexes: [1],
+      signerRoles: ['participant'],
+      content: null,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+    client.$queryRaw.mockResolvedValueOnce([current]);
+
+    await expect(editDocumentTemplateVersion(client as never, {
+      versionId: current.id,
+      organizationId: requirement.organizationId,
+      isFrozenRejectionRequired: true,
+      material: { signerRoles: ['guardian'] },
+      display: { title: 'Provider edit' },
+    })).rejects.toMatchObject({
+      name: 'DocumentTemplateVersionFrozenError',
+      versionId: current.id,
+    });
+
+    expect(client.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(client.documentRequirements.findUnique).not.toHaveBeenCalled();
+    expect(client.documentRequirements.update).not.toHaveBeenCalled();
+    expect(client.templateDocuments.update).not.toHaveBeenCalled();
+    expect(client.templateDocuments.create).not.toHaveBeenCalled();
+  });
+
   it.each([
     { latestSequence: null, expectedSequence: 1 },
     { latestSequence: 4, expectedSequence: 5 },

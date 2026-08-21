@@ -177,62 +177,150 @@ const normalizeTemplateType = (value: unknown): TemplateDocument['type'] => {
   return 'PDF';
 };
 
-const mapTemplateRow = (row: Record<string, any>): TemplateDocument => {
-  const roleIndexRaw = row?.roleIndex;
+interface TemplateDocumentApiRow {
+  $id?: unknown;
+  id?: unknown;
+  templateId?: unknown;
+  organizationId?: unknown;
+  documentRequirementId?: unknown;
+  versionSequence?: unknown;
+  frozenAt?: unknown;
+  documentRequirement?: unknown;
+  requirement?: unknown;
+  title?: unknown;
+  description?: unknown;
+  requirementTitle?: unknown;
+  requirementDescription?: unknown;
+  signOnce?: unknown;
+  status?: unknown;
+  roleIndex?: unknown;
+  roleIndexes?: unknown;
+  signerRoles?: unknown;
+  requiredSignerType?: unknown;
+  type?: unknown;
+  content?: unknown;
+  $createdAt?: unknown;
+  createdAt?: unknown;
+}
+
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null
+);
+
+const toTemplateDocumentApiRow = (value: unknown): TemplateDocumentApiRow => {
+  if (!isRecord(value)) {
+    throw new Error('Template row is not a valid object.');
+  }
+  return value;
+};
+
+type TemplateDocumentWithVersionState = TemplateDocument & {
+  documentRequirementId: string;
+  versionSequence: number;
+};
+
+const requireTemplateVersionState = (
+  template: TemplateDocument,
+): TemplateDocumentWithVersionState => {
+  const documentRequirementId = template.documentRequirementId?.trim();
+  const versionSequence = template.versionSequence;
+  if (!documentRequirementId) {
+    throw new Error('Template selection is missing documentRequirementId.');
+  }
+  if (typeof versionSequence !== 'number' || !Number.isInteger(versionSequence) || versionSequence < 1) {
+    throw new Error('Template selection is missing a valid versionSequence.');
+  }
+  return {
+    ...template,
+    documentRequirementId,
+    versionSequence,
+  };
+};
+
+const mapTemplateRow = (row: TemplateDocumentApiRow): TemplateDocument => {
+  const templateDocumentId = typeof row.$id === 'string' && row.$id.trim()
+    ? row.$id.trim()
+    : typeof row.id === 'string' && row.id.trim()
+      ? row.id.trim()
+      : undefined;
+  if (!templateDocumentId) {
+    throw new Error('Template row is missing a template document id.');
+  }
+
+  const documentRequirementId = typeof row.documentRequirementId === 'string'
+    && row.documentRequirementId.trim()
+    ? row.documentRequirementId.trim()
+    : undefined;
+  if (!documentRequirementId) {
+    throw new Error('Template row is missing documentRequirementId.');
+  }
+
+  const roleIndexRaw = row.roleIndex;
   const roleIndex = typeof roleIndexRaw === 'number' ? roleIndexRaw : Number(roleIndexRaw);
-  const roleIndexesRaw = Array.isArray(row?.roleIndexes) ? row.roleIndexes : undefined;
+  const roleIndexesRaw = Array.isArray(row.roleIndexes) ? row.roleIndexes : undefined;
   const roleIndexes = roleIndexesRaw
     ? roleIndexesRaw
         .map((entry: unknown) => Number(entry))
         .filter((value: number) => Number.isFinite(value))
     : undefined;
-  const signerRolesRaw = Array.isArray(row?.signerRoles) ? row.signerRoles : undefined;
+  const signerRolesRaw = Array.isArray(row.signerRoles) ? row.signerRoles : undefined;
   const signerRoles = signerRolesRaw
     ? signerRolesRaw
         .filter((entry: unknown): entry is string => typeof entry === 'string' && Boolean(entry.trim()))
         .map((entry: string) => entry.trim())
     : undefined;
-  const signOnceRaw = row?.signOnce;
-  const requiredSignerType = normalizeRequiredSignerType(row?.requiredSignerType);
+  const signOnceRaw = row.signOnce;
+  const versionSequenceRaw = row.versionSequence;
+  const versionSequenceValue = typeof versionSequenceRaw === 'number'
+    ? versionSequenceRaw
+    : typeof versionSequenceRaw === 'string' && versionSequenceRaw.trim()
+      ? Number(versionSequenceRaw)
+      : Number.NaN;
+  if (!Number.isInteger(versionSequenceValue) || versionSequenceValue < 1) {
+    throw new Error('Template row is missing a valid versionSequence.');
+  }
+  const requiredSignerType = normalizeRequiredSignerType(row.requiredSignerType);
 
-  const requirement = row?.documentRequirement && typeof row.documentRequirement === 'object'
+  const requirement = isRecord(row.documentRequirement)
     ? row.documentRequirement
-    : row?.requirement && typeof row.requirement === 'object'
+    : isRecord(row.requirement)
       ? row.requirement
       : undefined;
   const requirementTitle = typeof requirement?.title === 'string'
     ? requirement.title
-    : typeof row?.requirementTitle === 'string'
+    : typeof row.requirementTitle === 'string'
       ? row.requirementTitle
       : undefined;
   const requirementDescription = typeof requirement?.description === 'string'
     ? requirement.description
-    : typeof row?.requirementDescription === 'string'
+    : typeof row.requirementDescription === 'string'
       ? row.requirementDescription
       : undefined;
 
   return {
-    $id: String(row?.$id ?? row?.id ?? ''),
-    templateId: row?.templateId ?? undefined,
-    organizationId: row?.organizationId ?? '',
-    documentRequirementId: row?.documentRequirementId ?? undefined,
-    versionSequence: typeof row?.versionSequence === 'number'
-      ? row.versionSequence
-      : Number.isFinite(Number(row?.versionSequence)) ? Number(row.versionSequence) : undefined,
-    frozenAt: row?.frozenAt ? String(row.frozenAt) : undefined,
+    $id: templateDocumentId,
+    templateId: typeof row.templateId === 'string' ? row.templateId : undefined,
+    organizationId: typeof row.organizationId === 'string' ? row.organizationId : '',
+    documentRequirementId,
+    versionSequence: versionSequenceValue,
+    frozenAt: row.frozenAt ? String(row.frozenAt) : undefined,
     requirementTitle,
     requirementDescription,
-    title: requirementTitle ?? row?.title ?? 'Untitled Template',
-    description: requirementDescription ?? row?.description ?? undefined,
+    title: requirementTitle ?? (typeof row.title === 'string' ? row.title : 'Untitled Template'),
+    description: requirementDescription
+      ?? (typeof row.description === 'string' ? row.description : undefined),
     signOnce: typeof signOnceRaw === 'boolean' ? signOnceRaw : signOnceRaw == null ? true : Boolean(signOnceRaw),
-    status: row?.status ?? undefined,
+    status: typeof row.status === 'string' ? row.status : undefined,
     roleIndex: Number.isFinite(roleIndex) ? roleIndex : undefined,
     roleIndexes: roleIndexes && roleIndexes.length ? roleIndexes : undefined,
     signerRoles: signerRoles && signerRoles.length ? signerRoles : undefined,
     requiredSignerType,
-    type: normalizeTemplateType(row?.type),
-    content: row?.content ?? undefined,
-    $createdAt: row?.$createdAt ?? row?.createdAt ?? undefined,
+    type: normalizeTemplateType(row.type),
+    content: typeof row.content === 'string' ? row.content : undefined,
+    $createdAt: typeof row.$createdAt === 'string'
+      ? row.$createdAt
+      : typeof row.createdAt === 'string' ? row.createdAt : undefined,
   };
 };
 
@@ -1218,10 +1306,10 @@ function OrganizationDetailContent() {
   const [templateBuilderOpen, setTemplateBuilderOpen] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [templateEditContext, setTemplateEditContext] = useState<{
-    requirementId?: string;
-    selectedVersion?: number;
+    requirementId: string;
+    selectedVersion: number;
     nextVersionSequence?: number;
-    willCreateNewVersion: boolean;
+    isNewVersionRequired: boolean;
   } | null>(null);
   const [editingTextTemplate, setEditingTextTemplate] = useState<TemplateDocument | null>(null);
   const [textEditTitle, setTextEditTitle] = useState('');
@@ -1261,14 +1349,18 @@ function OrganizationDetailContent() {
   const [selectedCustomerDocumentEventId, setSelectedCustomerDocumentEventId] = useState<string | null>(null);
   const [sendingCustomerDocument, setSendingCustomerDocument] = useState(false);
   const selectedTemplateVersionByRequirement = useMemo(() => {
-    const selectedRows = new Map<string, TemplateDocument>();
+    const selectedRows = new Map<string, TemplateDocumentWithVersionState>();
     templateDocuments.forEach((template) => {
-      if (!template.documentRequirementId || template.versionSequence === undefined) {
-        return;
-      }
-      const current = selectedRows.get(template.documentRequirementId);
-      if (!current || (current.versionSequence ?? 0) < template.versionSequence) {
-        selectedRows.set(template.documentRequirementId, template);
+      const templateWithVersionState = requireTemplateVersionState(template);
+      const current = selectedRows.get(templateWithVersionState.documentRequirementId);
+      if (
+        !current
+        || current.versionSequence < templateWithVersionState.versionSequence
+      ) {
+        selectedRows.set(
+          templateWithVersionState.documentRequirementId,
+          templateWithVersionState,
+        );
       }
     });
     return new Map(
@@ -1650,12 +1742,16 @@ function OrganizationDetailContent() {
       const response = await fetch(`/api/organizations/${orgId}/templates`, {
         credentials: 'include',
       });
-      const payload = await response.json().catch(() => ({}));
+      const payloadValue: unknown = await response.json().catch(() => ({}));
+      const payload = isRecord(payloadValue) ? payloadValue : {};
       if (!response.ok) {
-        throw new Error(payload?.error || 'Failed to load templates');
+        const errorMessage = typeof payload.error === 'string'
+          ? payload.error
+          : 'Failed to load templates';
+        throw new Error(errorMessage);
       }
-      const rows = Array.isArray(payload?.templates) ? payload.templates : [];
-      const mappedRows = rows.map((row: any) => mapTemplateRow(row));
+      const rows = Array.isArray(payload.templates) ? payload.templates : [];
+      const mappedRows = rows.map((row: unknown) => mapTemplateRow(toTemplateDocumentApiRow(row)));
       setTemplateDocuments(mappedRows);
       if (!silent) {
         setTemplatesError(null);
@@ -1833,22 +1929,34 @@ function OrganizationDetailContent() {
       if (org?.$id) {
         void (async () => {
           const templates = await loadTemplates(org.$id, { silent: true });
-          const newVersion = editContext?.willCreateNewVersion && editContext.requirementId
+          const isNewVersionRequired = Boolean(editContext?.isNewVersionRequired);
+          const newVersion = isNewVersionRequired && editContext
             ? templates
+              .map(requireTemplateVersionState)
               .filter((template) => (
                 template.documentRequirementId === editContext.requirementId
-                && (template.versionSequence ?? 0) > (editContext.selectedVersion ?? 0)
+                && template.versionSequence > editContext.selectedVersion
               ))
-              .sort((left, right) => (right.versionSequence ?? 0) - (left.versionSequence ?? 0))[0]
+              .sort((left, right) => right.versionSequence - left.versionSequence)[0]
             : undefined;
-          const expectedNewVersionSequence = editContext?.willCreateNewVersion
-            ? editContext.nextVersionSequence
-            : undefined;
+          if (isNewVersionRequired && editContext) {
+            const createdVersionSequence = newVersion?.versionSequence;
+            if (!Number.isInteger(createdVersionSequence)) {
+              notifications.show({
+                color: 'red',
+                message: 'Version state is missing. Refresh the template list before continuing.',
+              });
+              return;
+            }
+            notifications.show({
+              color: 'green',
+              message: `Created Version ${createdVersionSequence}; existing assignments remain pinned to Version ${editContext.selectedVersion}.`,
+            });
+            return;
+          }
           notifications.show({
             color: 'green',
-            message: newVersion || expectedNewVersionSequence
-              ? `Created Version ${newVersion?.versionSequence ?? expectedNewVersionSequence ?? '?'}; existing assignments remain pinned to Version ${editContext?.selectedVersion ?? '?'}.`
-              : 'Template saved successfully.',
+            message: 'Template saved successfully.',
           });
         })();
         return;
@@ -2260,25 +2368,38 @@ function OrganizationDetailContent() {
       return;
     }
     try {
+      const templateVersionState = requireTemplateVersionState(template);
       setEditingTemplateId(template.$id);
       setTemplatesError(null);
       const session = await boldsignService.getTemplateEditSession({
         organizationId: org.$id,
         templateDocumentId: template.$id,
       });
+      const isNewVersionRequired = Boolean(session.willCreateNewVersion);
+      const selectedVersion = session.selectedVersion ?? templateVersionState.versionSequence;
+      if (!Number.isInteger(selectedVersion) || selectedVersion < 1) {
+        throw new Error('Cannot open the template editor because Version state is missing.');
+      }
+      if (isNewVersionRequired && (
+        typeof session.nextVersionSequence !== 'number'
+        || !Number.isInteger(session.nextVersionSequence)
+        || session.nextVersionSequence < 1
+      )) {
+        throw new Error('Cannot open the template editor because the next Version is missing.');
+      }
       setTemplateEditContext({
-        requirementId: template.documentRequirementId,
-        selectedVersion: session.selectedVersion ?? template.versionSequence,
+        requirementId: templateVersionState.documentRequirementId,
+        selectedVersion,
         nextVersionSequence: session.nextVersionSequence,
-        willCreateNewVersion: Boolean(session.willCreateNewVersion),
+        isNewVersionRequired,
       });
-      if (session.willCreateNewVersion) {
+      if (isNewVersionRequired) {
         notifications.show({
           color: 'blue',
-          message: `You are editing Version ${session.selectedVersion ?? template.versionSequence ?? '?'}; saving will create Version ${session.nextVersionSequence ?? '?'} and keep existing assignments pinned.`,
+          message: `You are editing Version ${selectedVersion}; saving will create Version ${session.nextVersionSequence} and keep existing assignments pinned.`,
         });
       }
-      setTemplateEmbedUrl(session.editUrl ?? null);
+      setTemplateEmbedUrl(session.editUrl);
       setTemplateBuilderOpen(true);
     } catch (error) {
       setTemplatesError(
@@ -2293,15 +2414,35 @@ function OrganizationDetailContent() {
     if (template.type !== 'TEXT') {
       return;
     }
+    try {
+      requireTemplateVersionState(template);
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : 'Cannot edit the template because Version state is missing.';
+      setTemplatesError(message);
+      notifications.show({ color: 'red', message });
+      return;
+    }
     setEditingTextTemplate(template);
     setTextEditTitle(template.requirementTitle ?? template.title);
     setTextEditDescription(template.requirementDescription ?? template.description ?? '');
     setTextEditContent(template.content ?? '');
     setTemplatesError(null);
   }, []);
-
   const handleSaveTextTemplate = useCallback(async () => {
     if (!org || !editingTextTemplate) {
+      return;
+    }
+    let templateVersionState: TemplateDocumentWithVersionState;
+    try {
+      templateVersionState = requireTemplateVersionState(editingTextTemplate);
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : 'Cannot save the template because Version state is missing.';
+      setTemplatesError(message);
+      notifications.show({ color: 'red', message });
       return;
     }
     if (!textEditContent.trim()) {
@@ -2318,12 +2459,16 @@ function OrganizationDetailContent() {
         description: textEditDescription.trim() || null,
         content: textEditContent.trim(),
       });
+      const hasNewVersion = Boolean(result.newVersionCreated);
+      if (hasNewVersion && !Number.isInteger(result.newVersionSequence)) {
+        throw new Error('Template save returned incomplete Version state.');
+      }
       setEditingTextTemplate(null);
       await loadTemplates(org.$id, { silent: true });
       notifications.show({
         color: 'green',
-        message: result.newVersionCreated
-          ? `Created Version ${result.newVersionSequence ?? '?'}; existing assignments remain pinned to Version ${editingTextTemplate.versionSequence ?? '?'}.`
+        message: hasNewVersion
+          ? `Created Version ${result.newVersionSequence}; existing assignments remain pinned to Version ${templateVersionState.versionSequence}.`
           : 'Template Version updated.',
       });
     } catch (error) {
@@ -4520,7 +4665,7 @@ function OrganizationDetailContent() {
                       <Paper key={template.$id} withBorder p="sm" radius="md" className="org-tab-item">
                         <Text fw={600}>{template.title || 'Untitled Template'}</Text>
                         <Text size="xs" c="dimmed">
-                          Version {template.versionSequence ?? 1}
+                          {`Version ${template.versionSequence}`}
                           {template.documentRequirementId
                             && selectedTemplateVersionByRequirement.get(template.documentRequirementId) === template.$id
                             ? ' · Selected version'
@@ -5042,7 +5187,9 @@ function OrganizationDetailContent() {
         onClose={() => setEditingTextTemplate(null)}
         centered
         size="lg"
-        title={editingTextTemplate ? `Edit Version ${editingTextTemplate.versionSequence ?? 1}` : 'Edit text template'}
+        title={editingTextTemplate
+          ? `Edit Version ${editingTextTemplate.versionSequence}`
+          : 'Edit text template'}
       >
         {editingTextTemplate ? (
           <Stack gap="sm">

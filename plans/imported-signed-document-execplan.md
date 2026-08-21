@@ -205,7 +205,7 @@ Each later milestone must keep the backend HTTP interface compatible with instal
 
 ## Downstream review handoff
 
-Review scope: `main...workstream/document-versions` through `0e0d3b097`, covering issue #99 and issue #100. This section is a handoff for the next Workstream. The findings are not fixed here.
+Review scope: `main...workstream/document-versions` through `0e0d3b097`, covering issue #99 and issue #100. The reviewed implementation is now integrated into `main` through `4ff3c9735`. This section tracks the remaining remediation and its focused proof.
 
 ### Issue #99: immutable Version enforcement
 
@@ -217,18 +217,32 @@ Review scope: `main...workstream/document-versions` through `0e0d3b097`, coverin
 
 ### Issue #100: evidence provenance and Satisfaction
 
-- [ ] Expand no-loss migration coverage to preserve document name, timestamps, status, signing time, signer details, role fields, IP and request identifiers, provider identifiers, content, and Event or Team context.
-- [ ] Preserve incomplete multi-signer evidence as incomplete. Do not mark Satisfaction complete until every required signer role is present.
-- [ ] Keep an unknown structured Signer unknown. Do not infer a Signer from the Document Subject.
-- [ ] Validate every referenced User, Event or Team scope, and File against the Organization before writing imported evidence.
-- [ ] Do not skip existing evidence with a missing Organization when the accepted completion path can still use it. Define and test the ownership repair or rejection path.
-- [ ] Keep evidence, Subject, and Satisfaction writes atomic. A later failure must roll back earlier signer or evidence writes.
+- [x] Expand no-loss migration coverage to preserve document name, timestamps, status, signing time, signer details, role fields, IP and request identifiers, provider identifiers, content, and Event or Team context.
+- [x] Preserve incomplete multi-signer evidence as incomplete. Do not mark Satisfaction complete until every required signer role is present.
+- [x] Keep an unknown structured Signer unknown. Do not infer a Signer from the Document Subject.
+- [x] Validate every referenced User, Event or Team scope, and File against the Organization before writing imported evidence.
+- [x] Do not skip existing evidence with a missing Organization when the accepted completion path can still use it. Define and test the ownership repair or rejection path.
+- [x] Keep evidence, Subject, and Satisfaction writes atomic. A later failure must roll back earlier signer or evidence writes.
 
 ### Cross-cutting review corrections
 
-- [ ] Make the customer-page Version state fail explicitly when Version data is missing. Do not invent Version numbers or placeholder notifications.
-- [ ] Replace new cross-boundary row mappings with typed row interfaces. Use `is*` or `has*` names for new Boolean fields.
-- [ ] Remove duplicated evidence context and scope logic. Remove provider edit-url middle-man helpers when the real target can be called directly.
+- [x] Make the customer-page Version state fail explicitly when Version data is missing. Do not invent Version numbers or placeholder notifications.
+- [x] Replace new cross-boundary row mappings with typed row interfaces. Use `is*` or `has*` names for new Boolean fields.
+- [x] Remove duplicated evidence context and scope logic. Remove provider edit-url middle-man helpers when the real target can be called directly.
 - [ ] Keep unrelated customer-billing label changes outside the Version and evidence work.
 
-2026-08-20: Added this downstream review handoff after the two-axis review. Another agent can claim #99 or #100 and consume the unchecked items above.
+2026-08-21T17:20Z: Integrated the reviewed document workstream into `main`. The remaining work is the unchecked review remediation above.
+
+2026-08-21T21:25Z: Added the applied-schema migration seam. The existing immutable Version trigger migration is restored, and migration `20260821070000_repair_document_evidence_and_version_guards` repairs nullable signer storage, required signer roles, duplicate Satisfaction rows, and frozen-Version guards after the earlier migrations have run. The database fixture now verifies that a later write failure rolls back Subject, evidence, Satisfaction, and audit rows.
+
+2026-08-21T21:25Z: Replaced the provider-bound template projection regression payload with the normalized operation payload. The import route now builds one validated scope object and reuses it for ownership, persisted evidence fields, and Satisfaction.
+
+### Review test seams
+
+- `src/server/documents/documentTemplateVersions.ts` and its unit test cover freeze detection, sequence allocation, pinned assignment, rejected material writes, and display-only edits.
+- `prisma/migrations/20260821030000_enforce_immutable_document_template_versions/migration.sql` and `scripts/test-document-requirement-version-migration.mjs` cover trigger and backfill persistence.
+- `src/app/api/organizations/[id]/templates/[templateDocumentId]/route.ts` and its route test cover frozen TEXT edits and requirement metadata.
+- `src/app/api/organizations/[id]/templates/[templateDocumentId]/edit-url/route.ts`, `src/lib/boldsignWebhookSync.ts`, and BoldSign tests cover provider edit sessions and frozen provider projections.
+- `prisma/migrations/20260821040000_add_document_evidence_satisfaction/migration.sql`, the evidence migration fixture, and `src/server/__tests__/documentEvidence.test.ts` cover no-loss migration, subject identity, and multi-signer Satisfaction.
+- `src/app/api/organizations/[id]/documents/import/route.ts` and its route test cover User, Event, Team, and File ownership plus atomic import writes.
+- Signature and void route tests cover atomic evidence, Subject, Satisfaction, and audit transitions.

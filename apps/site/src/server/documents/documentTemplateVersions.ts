@@ -343,6 +343,8 @@ export const editDocumentTemplateVersion = async (
     material?: DocumentTemplateVersionMaterialData;
     display?: DocumentRequirementDisplayData;
     newVersionId?: string;
+    isFrozenRejectionRequired?: boolean;
+    isNewVersionRequired?: boolean;
   },
 ): Promise<DocumentTemplateVersionEditResult> => {
   const current = await lockTemplateDocumentVersion(tx, params.versionId);
@@ -351,13 +353,39 @@ export const editDocumentTemplateVersion = async (
   }
 
   const material = params.material ?? {};
-  const requirement = await updateRequirementDisplayMetadata(tx, current, params.display);
   const changed = hasMaterialChanges(current, material);
   const lifecyclePatch = material.status !== undefined
     ? { status: material.status }
     : {};
+  const referenced = params.isFrozenRejectionRequired
+    ? current.frozenAt !== null || await hasPersistedVersionReference(tx, current.id)
+    : false;
 
-  if (!changed) {
+  if (referenced) {
+    throw new DocumentTemplateVersionFrozenError(current.id);
+  }
+  if (params.isNewVersionRequired && params.newVersionId) {
+    const existingNewVersion = await tx.templateDocuments.findUnique({
+      where: { id: params.newVersionId },
+    });
+    if (
+      existingNewVersion
+      && existingNewVersion.documentRequirementId === current.documentRequirementId
+      && existingNewVersion.organizationId === current.organizationId
+    ) {
+      return {
+        template: existingNewVersion,
+        requirement: await requirementForVersion(tx, current),
+        previousVersionId: current.id,
+        newVersionCreated: false,
+      };
+    }
+  }
+
+  const requirement = await updateRequirementDisplayMetadata(tx, current, params.display);
+
+  if (!changed && !params.isNewVersionRequired) {
+
     const template = Object.keys(lifecyclePatch).length > 0
       ? await tx.templateDocuments.update({
         where: { id: current.id },
@@ -372,9 +400,10 @@ export const editDocumentTemplateVersion = async (
     };
   }
 
-  const referenced = current.frozenAt !== null
+  const shouldCreateVersion = params.isNewVersionRequired
+    || current.frozenAt !== null
     || await hasPersistedVersionReference(tx, current.id);
-  if (!referenced) {
+  if (!shouldCreateVersion) {
     const template = await tx.templateDocuments.update({
       where: { id: current.id },
       data: {

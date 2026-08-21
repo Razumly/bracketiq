@@ -3,6 +3,10 @@
 import { NextRequest } from 'next/server';
 
 const prismaMock = {
+  $transaction: jest.fn(),
+  documentSubjects: {
+    upsert: jest.fn(),
+  },
   events: {
     findUnique: jest.fn(),
   },
@@ -76,10 +80,13 @@ const jsonPost = (url: string, body: unknown) =>
 describe('POST /api/events/[eventId]/sign', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => Promise<unknown>) => callback(prismaMock));
+    prismaMock.documentSubjects.upsert.mockResolvedValue({});
     delete process.env.BOLDSIGN_DEV_REDIRECT_BASE_URL;
     requireSessionMock.mockResolvedValue({ userId: 'user_1', isAdmin: false });
     prismaMock.events.findUnique.mockResolvedValue({
       id: 'event_1',
+      organizationId: 'org_1',
       requiredTemplateIds: ['tmpl_1'],
       name: 'Weekend Open',
     });
@@ -257,6 +264,7 @@ describe('POST /api/events/[eventId]/sign', () => {
     ]);
     prismaMock.events.findUnique.mockResolvedValue({
       id: 'event_1',
+      organizationId: 'org_1',
       requiredTemplateIds: ['tmpl_participant', 'tmpl_parent'],
       name: 'Weekend Open',
     });
@@ -299,6 +307,7 @@ describe('POST /api/events/[eventId]/sign', () => {
     ]);
     prismaMock.events.findUnique.mockResolvedValue({
       id: 'event_1',
+      organizationId: 'org_1',
       requiredTemplateIds: ['tmpl_parent', 'tmpl_child'],
       name: 'Weekend Open',
     });
@@ -379,6 +388,7 @@ describe('POST /api/events/[eventId]/sign', () => {
     ]);
     prismaMock.events.findUnique.mockResolvedValue({
       id: 'event_1',
+      organizationId: 'org_1',
       requiredTemplateIds: ['tmpl_parent_child'],
       name: 'Weekend Open',
     });

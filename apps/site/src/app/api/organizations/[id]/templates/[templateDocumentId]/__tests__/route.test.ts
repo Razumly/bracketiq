@@ -114,6 +114,46 @@ describe('Document Template Version item routes', () => {
     expect(mockDeleteTemplate).not.toHaveBeenCalled();
   });
 
+  it('updates frozen Version metadata without creating or mutating a Version', async () => {
+    mockPrisma.templateDocuments.findUnique.mockResolvedValue(baseTemplate);
+    transactionPrisma.documentRequirements.findUnique.mockResolvedValue({
+      id: 'requirement_1',
+      organizationId: 'org_1',
+      title: 'Waiver',
+      description: null,
+    });
+    transactionPrisma.documentRequirements.update.mockResolvedValue({
+      id: 'requirement_1',
+      organizationId: 'org_1',
+      title: 'Updated waiver',
+      description: null,
+    });
+
+    const response = await PATCH(request('PATCH', { title: 'Updated waiver' }), {
+      params: Promise.resolve({ id: 'org_1', templateDocumentId: 'version_1' }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.newVersionCreated).toBe(false);
+    expect(body.previousVersionId).toBeNull();
+    expect(body.requirement).toEqual(expect.objectContaining({ title: 'Updated waiver' }));
+    expect(transactionPrisma.documentRequirements.update).toHaveBeenCalledTimes(1);
+    expect(transactionPrisma.templateDocuments.update).not.toHaveBeenCalled();
+    expect(transactionPrisma.templateDocuments.create).not.toHaveBeenCalled();
+    expect(body.template).toEqual(expect.objectContaining({
+      id: 'version_1',
+      title: 'Waiver',
+      description: null,
+      templateId: null,
+      type: 'TEXT',
+      content: 'Old text',
+      signerRoles: [],
+      roleIndexes: [],
+    }));
+  });
+
+
   it('creates the next Version when a referenced TEXT Version is edited', async () => {
     const current = { ...baseTemplate, frozenAt: null };
     mockPrisma.templateDocuments.findUnique.mockResolvedValue(current);
@@ -148,5 +188,63 @@ describe('Document Template Version item routes', () => {
       content: 'New text',
     }));
     expect(transactionPrisma.templateDocuments.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates the next Version when a referenced PDF Version is edited', async () => {
+    const current = {
+      ...baseTemplate,
+      type: 'PDF',
+      templateId: 'bold_template_1',
+      frozenAt: null,
+      content: null,
+      roleIndex: 1,
+      roleIndexes: [1],
+      signerRoles: ['participant'],
+    };
+    mockPrisma.templateDocuments.findUnique.mockResolvedValue(current);
+    transactionPrisma.$queryRaw
+      .mockResolvedValueOnce([current])
+      .mockResolvedValueOnce([{ id: 'team_1' }])
+      .mockResolvedValueOnce([{ id: 'requirement_1' }]);
+    transactionPrisma.documentRequirements.findUnique.mockResolvedValue({
+      id: 'requirement_1',
+      organizationId: 'org_1',
+      title: 'Waiver',
+      description: null,
+    });
+    transactionPrisma.documentRequirements.update.mockResolvedValue({
+      id: 'requirement_1',
+      organizationId: 'org_1',
+      title: 'Waiver',
+      description: null,
+    });
+    transactionPrisma.templateDocuments.findFirst.mockResolvedValue({ versionSequence: 1 });
+    transactionPrisma.templateDocuments.update.mockImplementation(async ({ data }) => ({ ...current, ...data }));
+    transactionPrisma.templateDocuments.create.mockImplementation(async ({ data }) => data);
+
+    const pdfResponse = await PATCH(request('PATCH', {
+      templateId: 'bold_template_2',
+      signerRoles: ['participant', 'guardian'],
+      roleIndexes: [1, 2],
+    }), {
+      params: Promise.resolve({ id: 'org_1', templateDocumentId: 'version_1' }),
+    });
+    const pdfBody = await pdfResponse.json();
+
+    expect(pdfResponse.status).toBe(200);
+    expect(pdfBody.newVersionCreated).toBe(true);
+    expect(pdfBody.previousVersionId).toBe('version_1');
+    expect(pdfBody.template).toEqual(expect.objectContaining({
+      id: expect.not.stringMatching(/^version_1$/),
+      documentRequirementId: 'requirement_1',
+      versionSequence: 2,
+      templateId: 'bold_template_2',
+      type: 'PDF',
+      roleIndexes: [1, 2],
+      signerRoles: ['participant', 'guardian'],
+    }));
+    expect(transactionPrisma.events.update).not.toHaveBeenCalled();
+    expect(transactionPrisma.canonicalTeams.update).not.toHaveBeenCalled();
+    expect(transactionPrisma.timeSlots.update).not.toHaveBeenCalled();
   });
 });
