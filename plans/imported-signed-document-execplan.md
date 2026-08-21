@@ -221,17 +221,17 @@ Review scope: `main...workstream/document-versions` through `0e0d3b097`, coverin
 ### Issue #100: evidence provenance and Satisfaction
 
 - [x] Expand no-loss migration coverage to preserve document name, timestamps, status, signing time, signer details, role fields, IP and request identifiers, provider identifiers, content, and Event or Team context.
-- [x] Preserve incomplete multi-signer evidence as incomplete. Do not mark Satisfaction complete until every required signer role is present.
+- [ ] Preserve incomplete multi-signer evidence as incomplete. Do not mark Satisfaction complete until every required signer role is present.
 - [x] Keep an unknown structured Signer unknown. Do not infer a Signer from the Document Subject.
 - [x] Validate every referenced User, Event or Team scope, and File against the Organization before writing imported evidence.
-- [x] Do not skip existing evidence with a missing Organization when the accepted completion path can still use it. Define and test the ownership repair or rejection path.
+- [ ] Do not skip existing evidence with a missing Organization when the accepted completion path can still use it. Define and test the ownership repair or rejection path.
 - [x] Keep evidence, Subject, and Satisfaction writes atomic. A later failure must roll back earlier signer or evidence writes.
 
 ### Cross-cutting review corrections
 
 - [x] Make the customer-page Version state fail explicitly when Version data is missing. Do not invent Version numbers or placeholder notifications.
-- [x] Replace new cross-boundary row mappings with typed row interfaces. Use `is*` or `has*` names for new Boolean fields.
-- [x] Remove duplicated evidence context and scope logic. Remove provider edit-url middle-man helpers when the real target can be called directly.
+- [ ] Replace new cross-boundary row mappings with typed row interfaces. Use `is*` or `has*` names for new Boolean fields.
+- [ ] Remove duplicated evidence context and scope logic. Remove provider edit-url middle-man helpers when the real target can be called directly.
 - [ ] Keep unrelated customer-billing label changes outside the Version and evidence work.
 
 2026-08-21T17:20Z: Started the review remediation in the existing clean document workstream. The source branch is an ancestor of `main` plus the reviewed implementation; the remediation will remain isolated until final checks pass.
