@@ -14,13 +14,13 @@ This plan starts with the data expansion required for that behavior. The first m
 - [x] (2026-08-21T00:55Z) Selected `Contract guard and cleanup` as the Workstream and claimed issue #98.
 - [x] (2026-08-21T00:55Z) Confirmed the current repository has unrelated uncommitted customer billing and document changes. Those changes must remain untouched.
 - [x] (2026-08-21T00:55Z) Chose existing `TemplateDocuments.id` as the immutable Document Template Version identity, with a new Document Requirement lineage and automatic `versionSequence`.
-- [ ] Add the DocumentRequirements model and Version expansion fields to the Prisma schema.
-- [ ] Add the idempotent migration that creates one Requirement and Version 1 lineage for every existing template.
-- [ ] Update new TEXT and BoldSign-projected template creation to create or preserve a Requirement lineage.
-- [ ] Add migration and template-contract test coverage.
-- [ ] Validate the schema, generated client, focused tests, and full site suite.
-- [ ] Run the two-axis code review against the pre-issue base and address findings.
-- [ ] Commit only the implementation files for issue #98 and publish the issue outcome.
+- [x] Add the `DocumentRequirements` model and Version expansion fields to the Prisma schema.
+- [x] Add the idempotent migration that creates one Requirement and Version 1 lineage for every existing template.
+- [x] Update new TEXT and BoldSign-projected template creation to create or preserve a Requirement lineage.
+- [x] Add migration and template-contract test coverage.
+- [x] Validate the schema, generated client, focused tests, and site checks.
+- [x] Run the two-axis code review against the pre-issue base and address findings.
+- [x] Commit the issue #98 implementation and publish the issue outcome.
 
 ## Surprises & Discoveries
 
@@ -64,7 +64,8 @@ This plan starts with the data expansion required for that behavior. The first m
 
 ## Outcomes & Retrospective
 
-To be completed after issue #98 validation. The expected outcome is an additive storage contract with no change to current template listing, signing, or assignment behavior. Later issues must consume the new lineage instead of creating a second template identity model.
+Issue #98 delivered the additive Requirement and immutable Version storage contract. Existing template IDs, assignment arrays, signing behavior, and provider identifiers remain unchanged. Schema validation, generated-client validation, migration fixture coverage, focused route tests, and the site checks passed. Later issues now consume this lineage for Version enforcement and document evidence.
+
 
 ## Context and Orientation
 
@@ -198,3 +199,5 @@ Each later milestone must keep the backend HTTP interface compatible with instal
 ## Change Note
 
 2026-08-21T00:55Z: Created this plan while starting issue #98. The plan records the existing dual template/provider identity, the chosen Requirement/Version storage shape, the required creation-path updates, and the full parent-feature sequence so later tickets can consume the same domain model without adding a second lineage.
+
+2026-08-21: Updated the progress and outcome records after completing issue #98 and carrying the lineage into the later immutable-Version and evidence work. The current workstream also records the service-seam and review corrections made after the two-axis review.

@@ -43,6 +43,14 @@ export type TemplateEditSession = {
   nextVersionSequence?: number;
   error?: string;
 };
+export type TemplateUpdateResult = {
+  template?: TemplateDocument;
+  previousVersionId?: string | null;
+  newVersionCreated?: boolean;
+  newVersionSequence?: number;
+  error?: string;
+};
+
 
 type SignLinksResponse = {
   signLinks?: SignStep[];
@@ -168,6 +176,29 @@ class BoldSignService {
   }): Promise<string> {
     const result = await this.getTemplateEditSession(params);
     return result.editUrl as string;
+  }
+  async updateTemplate(params: {
+    organizationId: string;
+    templateDocumentId: string;
+    title?: string;
+    description?: string | null;
+    content?: string;
+  }): Promise<TemplateUpdateResult> {
+    const result = await apiRequest<TemplateUpdateResult>(
+      `/api/organizations/${params.organizationId}/templates/${params.templateDocumentId}`,
+      {
+        method: 'PATCH',
+        body: {
+          ...(params.title !== undefined ? { title: params.title } : {}),
+          ...(params.description !== undefined ? { description: params.description } : {}),
+          ...(params.content !== undefined ? { content: params.content } : {}),
+        },
+      },
+    );
+    if (result?.error) {
+      throw new Error(result.error);
+    }
+    return result;
   }
 
   async deleteTemplate(params: {

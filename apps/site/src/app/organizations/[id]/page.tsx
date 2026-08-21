@@ -2311,17 +2311,12 @@ function OrganizationDetailContent() {
     try {
       setSavingTemplateVersion(true);
       setTemplatesError(null);
-      const result = await apiRequest<{
-        newVersionCreated?: boolean;
-        newVersionSequence?: number;
-        previousVersionId?: string | null;
-      }>(`/api/organizations/${org.$id}/templates/${editingTextTemplate.$id}`, {
-        method: 'PATCH',
-        body: {
-          title: textEditTitle.trim(),
-          description: textEditDescription.trim() || null,
-          content: textEditContent.trim(),
-        },
+      const result = await boldsignService.updateTemplate({
+        organizationId: org.$id,
+        templateDocumentId: editingTextTemplate.$id,
+        title: textEditTitle.trim(),
+        description: textEditDescription.trim() || null,
+        content: textEditContent.trim(),
       });
       setEditingTextTemplate(null);
       await loadTemplates(org.$id, { silent: true });

@@ -109,4 +109,36 @@ describe('boldsignService', () => {
       }),
     );
   });
+
+  it('updates a text template through the organization template service', async () => {
+    apiRequestMock.mockResolvedValue({
+      newVersionCreated: true,
+      newVersionSequence: 2,
+      previousVersionId: 'tmpl_doc_1',
+    });
+
+    const result = await boldsignService.updateTemplate({
+      organizationId: 'org_1',
+      templateDocumentId: 'tmpl_doc_1',
+      title: 'Updated waiver',
+      description: null,
+      content: 'Updated waiver content',
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      newVersionCreated: true,
+      newVersionSequence: 2,
+    }));
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      '/api/organizations/org_1/templates/tmpl_doc_1',
+      {
+        method: 'PATCH',
+        body: {
+          title: 'Updated waiver',
+          description: null,
+          content: 'Updated waiver content',
+        },
+      },
+    );
+  });
 });
