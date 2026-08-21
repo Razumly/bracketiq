@@ -17,6 +17,11 @@ import {
   templateMatchesSignerContext,
   type SignerContext,
 } from '@/lib/templateSignerTypes';
+import {
+  ensureDocumentSubject,
+  signedDocumentEvidenceFields,
+  DOCUMENT_EVIDENCE_PROVENANCE,
+} from '@/server/documentEvidence';
 import { resolveBoldSignRedirectUrl } from '@/lib/signRedirect';
 
 export const dynamic = 'force-dynamic';
@@ -547,6 +552,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
         const textDocumentId = pendingDocumentId ?? `text-${crypto.randomUUID()}`;
         const now = new Date();
         if (!signerRowToReuse) {
+          await ensureDocumentSubject({
+            organizationId: event.organizationId ?? null,
+            userId: signerUserId,
+            hostId: scopedChildUserId,
+          });
           await prisma.signedDocuments.create({
             data: {
               id: crypto.randomUUID(),
@@ -559,6 +569,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
               hostId: scopedChildUserId,
               organizationId: event.organizationId ?? null,
               eventId,
+              teamId: null,
+              ...signedDocumentEvidenceFields({
+                organizationId: event.organizationId ?? null,
+                userId: signerUserId,
+                hostId: scopedChildUserId,
+                eventId,
+                teamId: null,
+                signOnce: template.signOnce,
+                provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
+              }),
               status: 'UNSIGNED',
               signedAt: null,
               signerEmail: signerIdentity.email ?? null,
@@ -569,6 +589,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
             },
           });
         } else {
+          await ensureDocumentSubject({
+            organizationId: event.organizationId ?? null,
+            userId: signerUserId,
+            hostId: scopedChildUserId,
+          });
           await prisma.signedDocuments.update({
             where: { id: signerRowToReuse.id },
             data: {
@@ -579,13 +604,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
               hostId: scopedChildUserId,
               organizationId: event.organizationId ?? null,
               eventId,
+              teamId: null,
+              ...signedDocumentEvidenceFields({
+                organizationId: event.organizationId ?? null,
+                userId: signerUserId,
+                hostId: scopedChildUserId,
+                eventId,
+                teamId: null,
+                signOnce: template.signOnce,
+                provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
+              }),
               signerEmail: signerIdentity.email ?? null,
               roleIndex: null,
               signerRole: signerContext,
             },
           });
         }
-
         const content = template.content ?? `Please acknowledge ${template.title ?? 'this document'}.`;
         signLinks.push({
           templateId: template.id,

@@ -35,8 +35,12 @@ type CreateTemplateResponse = {
   error?: string;
 };
 
-type TemplateEditUrlResponse = {
+export type TemplateEditSession = {
   editUrl?: string;
+  selectedVersion?: number;
+  frozen?: boolean;
+  willCreateNewVersion?: boolean;
+  nextVersionSequence?: number;
   error?: string;
 };
 
@@ -139,11 +143,11 @@ class BoldSignService {
     };
   }
 
-  async getTemplateEditUrl(params: {
+  async getTemplateEditSession(params: {
     organizationId: string;
     templateDocumentId: string;
-  }): Promise<string> {
-    const result = await apiRequest<TemplateEditUrlResponse>(
+  }): Promise<TemplateEditSession> {
+    const result = await apiRequest<TemplateEditSession>(
       `/api/organizations/${params.organizationId}/templates/${params.templateDocumentId}/edit-url`,
       {
         method: 'GET',
@@ -155,7 +159,15 @@ class BoldSignService {
     if (!result?.editUrl) {
       throw new Error('Template edit response is missing editUrl.');
     }
-    return result.editUrl;
+    return result;
+  }
+
+  async getTemplateEditUrl(params: {
+    organizationId: string;
+    templateDocumentId: string;
+  }): Promise<string> {
+    const result = await this.getTemplateEditSession(params);
+    return result.editUrl as string;
   }
 
   async deleteTemplate(params: {

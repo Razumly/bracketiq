@@ -195,12 +195,35 @@ const mapTemplateRow = (row: Record<string, any>): TemplateDocument => {
   const signOnceRaw = row?.signOnce;
   const requiredSignerType = normalizeRequiredSignerType(row?.requiredSignerType);
 
+  const requirement = row?.documentRequirement && typeof row.documentRequirement === 'object'
+    ? row.documentRequirement
+    : row?.requirement && typeof row.requirement === 'object'
+      ? row.requirement
+      : undefined;
+  const requirementTitle = typeof requirement?.title === 'string'
+    ? requirement.title
+    : typeof row?.requirementTitle === 'string'
+      ? row.requirementTitle
+      : undefined;
+  const requirementDescription = typeof requirement?.description === 'string'
+    ? requirement.description
+    : typeof row?.requirementDescription === 'string'
+      ? row.requirementDescription
+      : undefined;
+
   return {
-    $id: String(row?.$id ?? ''),
+    $id: String(row?.$id ?? row?.id ?? ''),
     templateId: row?.templateId ?? undefined,
     organizationId: row?.organizationId ?? '',
-    title: row?.title ?? 'Untitled Template',
-    description: row?.description ?? undefined,
+    documentRequirementId: row?.documentRequirementId ?? undefined,
+    versionSequence: typeof row?.versionSequence === 'number'
+      ? row.versionSequence
+      : Number.isFinite(Number(row?.versionSequence)) ? Number(row.versionSequence) : undefined,
+    frozenAt: row?.frozenAt ? String(row.frozenAt) : undefined,
+    requirementTitle,
+    requirementDescription,
+    title: requirementTitle ?? row?.title ?? 'Untitled Template',
+    description: requirementDescription ?? row?.description ?? undefined,
     signOnce: typeof signOnceRaw === 'boolean' ? signOnceRaw : signOnceRaw == null ? true : Boolean(signOnceRaw),
     status: row?.status ?? undefined,
     roleIndex: Number.isFinite(roleIndex) ? roleIndex : undefined,
@@ -209,7 +232,7 @@ const mapTemplateRow = (row: Record<string, any>): TemplateDocument => {
     requiredSignerType,
     type: normalizeTemplateType(row?.type),
     content: row?.content ?? undefined,
-    $createdAt: row?.$createdAt ?? undefined,
+    $createdAt: row?.$createdAt ?? row?.createdAt ?? undefined,
   };
 };
 
@@ -1194,6 +1217,17 @@ function OrganizationDetailContent() {
   const [templateEmbedUrl, setTemplateEmbedUrl] = useState<string | null>(null);
   const [templateBuilderOpen, setTemplateBuilderOpen] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [templateEditContext, setTemplateEditContext] = useState<{
+    requirementId?: string;
+    selectedVersion?: number;
+    nextVersionSequence?: number;
+    willCreateNewVersion: boolean;
+  } | null>(null);
+  const [editingTextTemplate, setEditingTextTemplate] = useState<TemplateDocument | null>(null);
+  const [textEditTitle, setTextEditTitle] = useState('');
+  const [textEditDescription, setTextEditDescription] = useState('');
+  const [textEditContent, setTextEditContent] = useState('');
+  const [savingTemplateVersion, setSavingTemplateVersion] = useState(false);
   const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null);
   const [pendingTemplateCreates, setPendingTemplateCreates] = useState<PendingTemplateCreateCard[]>([]);
   const [previewTemplate, setPreviewTemplate] = useState<TemplateDocument | null>(null);
@@ -1217,19 +1251,35 @@ function OrganizationDetailContent() {
   const [previewSignedTextDocument, setPreviewSignedTextDocument] = useState<OrganizationUserDocumentSummary | null>(null);
   const [customerBillModalOpen, setCustomerBillModalOpen] = useState(false);
   const [editingCustomerBill, setEditingCustomerBill] = useState<OrganizationBillSummary | null>(null);
-  const [customerBillLabel, setCustomerBillLabel] = useState('Manual bill');
-  const [customerBillAmount, setCustomerBillAmount] = useState<number | string>('');
-  const [customerBillPaidAmount, setCustomerBillPaidAmount] = useState<number | string>(0);
-  const [customerBillDueDate, setCustomerBillDueDate] = useState('');
   const [creatingCustomerBill, setCreatingCustomerBill] = useState(false);
+  const [customerBillLabel, setCustomerBillLabel] = useState('');
+  const [customerBillAmount, setCustomerBillAmount] = useState<string | number>('');
+  const [customerBillPaidAmount, setCustomerBillPaidAmount] = useState<string | number>(0);
+  const [customerBillDueDate, setCustomerBillDueDate] = useState('');
   const [customerDocumentModalOpen, setCustomerDocumentModalOpen] = useState(false);
   const [selectedCustomerDocumentTemplateId, setSelectedCustomerDocumentTemplateId] = useState<string | null>(null);
   const [selectedCustomerDocumentEventId, setSelectedCustomerDocumentEventId] = useState<string | null>(null);
   const [sendingCustomerDocument, setSendingCustomerDocument] = useState(false);
+  const selectedTemplateVersionByRequirement = useMemo(() => {
+    const selectedRows = new Map<string, TemplateDocument>();
+    templateDocuments.forEach((template) => {
+      if (!template.documentRequirementId || template.versionSequence === undefined) {
+        return;
+      }
+      const current = selectedRows.get(template.documentRequirementId);
+      if (!current || (current.versionSequence ?? 0) < template.versionSequence) {
+        selectedRows.set(template.documentRequirementId, template);
+      }
+    });
+    return new Map(
+      Array.from(selectedRows.entries()).map(([requirementId, template]) => [requirementId, template.$id]),
+    );
+  }, [templateDocuments]);
 
   const closeTemplateBuilder = useCallback(() => {
     setTemplateBuilderOpen(false);
     setTemplateEmbedUrl(null);
+    setTemplateEditContext(null);
   }, []);
 
   const pollBoldSignOperation = useCallback(async (operationId: string) => {
@@ -1778,21 +1828,39 @@ function OrganizationDetailContent() {
         return;
       }
 
+      const editContext = templateEditContext;
       closeTemplateBuilder();
-      notifications.show({
-        color: 'green',
-        message: 'Template saved successfully.',
-      });
       if (org?.$id) {
-        void loadTemplates(org.$id, { silent: true });
+        void (async () => {
+          const templates = await loadTemplates(org.$id, { silent: true });
+          const newVersion = editContext?.willCreateNewVersion && editContext.requirementId
+            ? templates
+              .filter((template) => (
+                template.documentRequirementId === editContext.requirementId
+                && (template.versionSequence ?? 0) > (editContext.selectedVersion ?? 0)
+              ))
+              .sort((left, right) => (right.versionSequence ?? 0) - (left.versionSequence ?? 0))[0]
+            : undefined;
+          const expectedNewVersionSequence = editContext?.willCreateNewVersion
+            ? editContext.nextVersionSequence
+            : undefined;
+          notifications.show({
+            color: 'green',
+            message: newVersion || expectedNewVersionSequence
+              ? `Created Version ${newVersion?.versionSequence ?? expectedNewVersionSequence ?? '?'}; existing assignments remain pinned to Version ${editContext?.selectedVersion ?? '?'}.`
+              : 'Template saved successfully.',
+          });
+        })();
+        return;
       }
+      notifications.show({ color: 'green', message: 'Template saved successfully.' });
     };
 
     window.addEventListener('message', handleMessage);
     return () => {
       window.removeEventListener('message', handleMessage);
     };
-  }, [templateBuilderOpen, closeTemplateBuilder, org?.$id, loadTemplates]);
+  }, [templateBuilderOpen, templateEditContext, closeTemplateBuilder, org?.$id, loadTemplates]);
 
   useEffect(() => {
     if (!authLoading) {
@@ -2194,11 +2262,23 @@ function OrganizationDetailContent() {
     try {
       setEditingTemplateId(template.$id);
       setTemplatesError(null);
-      const editUrl = await boldsignService.getTemplateEditUrl({
+      const session = await boldsignService.getTemplateEditSession({
         organizationId: org.$id,
         templateDocumentId: template.$id,
       });
-      setTemplateEmbedUrl(editUrl);
+      setTemplateEditContext({
+        requirementId: template.documentRequirementId,
+        selectedVersion: session.selectedVersion ?? template.versionSequence,
+        nextVersionSequence: session.nextVersionSequence,
+        willCreateNewVersion: Boolean(session.willCreateNewVersion),
+      });
+      if (session.willCreateNewVersion) {
+        notifications.show({
+          color: 'blue',
+          message: `You are editing Version ${session.selectedVersion ?? template.versionSequence ?? '?'}; saving will create Version ${session.nextVersionSequence ?? '?'} and keep existing assignments pinned.`,
+        });
+      }
+      setTemplateEmbedUrl(session.editUrl ?? null);
       setTemplateBuilderOpen(true);
     } catch (error) {
       setTemplatesError(
@@ -2209,6 +2289,63 @@ function OrganizationDetailContent() {
     }
   }, [org]);
 
+  const handleEditTextTemplate = useCallback((template: TemplateDocument) => {
+    if (template.type !== 'TEXT') {
+      return;
+    }
+    setEditingTextTemplate(template);
+    setTextEditTitle(template.requirementTitle ?? template.title);
+    setTextEditDescription(template.requirementDescription ?? template.description ?? '');
+    setTextEditContent(template.content ?? '');
+    setTemplatesError(null);
+  }, []);
+
+  const handleSaveTextTemplate = useCallback(async () => {
+    if (!org || !editingTextTemplate) {
+      return;
+    }
+    if (!textEditContent.trim()) {
+      setTemplatesError('Template text is required.');
+      return;
+    }
+    try {
+      setSavingTemplateVersion(true);
+      setTemplatesError(null);
+      const result = await apiRequest<{
+        newVersionCreated?: boolean;
+        newVersionSequence?: number;
+        previousVersionId?: string | null;
+      }>(`/api/organizations/${org.$id}/templates/${editingTextTemplate.$id}`, {
+        method: 'PATCH',
+        body: {
+          title: textEditTitle.trim(),
+          description: textEditDescription.trim() || null,
+          content: textEditContent.trim(),
+        },
+      });
+      setEditingTextTemplate(null);
+      await loadTemplates(org.$id, { silent: true });
+      notifications.show({
+        color: 'green',
+        message: result.newVersionCreated
+          ? `Created Version ${result.newVersionSequence ?? '?'}; existing assignments remain pinned to Version ${editingTextTemplate.versionSequence ?? '?'}.`
+          : 'Template Version updated.',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save template.';
+      setTemplatesError(message);
+      notifications.show({ color: 'red', message });
+    } finally {
+      setSavingTemplateVersion(false);
+    }
+  }, [
+    editingTextTemplate,
+    loadTemplates,
+    org,
+    textEditContent,
+    textEditDescription,
+    textEditTitle,
+  ]);
   const handleDeleteTemplate = useCallback(async (template: TemplateDocument) => {
     if (!org) return;
 
@@ -4387,6 +4524,16 @@ function OrganizationDetailContent() {
                     {templateDocuments.map((template) => (
                       <Paper key={template.$id} withBorder p="sm" radius="md" className="org-tab-item">
                         <Text fw={600}>{template.title || 'Untitled Template'}</Text>
+                        <Text size="xs" c="dimmed">
+                          Version {template.versionSequence ?? 1}
+                          {template.documentRequirementId
+                            && selectedTemplateVersionByRequirement.get(template.documentRequirementId) === template.$id
+                            ? ' · Selected version'
+                            : ''}
+                        </Text>
+                        <Text size="xs" c={template.frozenAt ? 'orange' : 'green'}>
+                          {template.frozenAt ? 'Frozen: existing assignments stay pinned' : 'Editable until assigned or signed'}
+                        </Text>
                         <Text size="sm" c="dimmed">
                           {template.signOnce ? 'Sign once per participant' : 'Sign for every event'}
                         </Text>
@@ -4402,6 +4549,16 @@ function OrganizationDetailContent() {
                           </Text>
                         )}
                         <Group justify="flex-end" mt="sm">
+                          {template.type === 'TEXT' && (
+                            <Button
+                              size="xs"
+                              variant="light"
+                              onClick={() => handleEditTextTemplate(template)}
+                              disabled={deletingTemplateId === template.$id || savingTemplateVersion}
+                            >
+                              Edit
+                            </Button>
+                          )}
                           {template.type === 'TEXT' && (
                             <Button
                               size="xs"
@@ -4882,6 +5039,45 @@ function OrganizationDetailContent() {
                 </Group>
               </Stack>
             )}
+          </Stack>
+        ) : null}
+      </Modal>
+      <Modal
+        opened={Boolean(editingTextTemplate)}
+        onClose={() => setEditingTextTemplate(null)}
+        centered
+        size="lg"
+        title={editingTextTemplate ? `Edit Version ${editingTextTemplate.versionSequence ?? 1}` : 'Edit text template'}
+      >
+        {editingTextTemplate ? (
+          <Stack gap="sm">
+            {editingTextTemplate.frozenAt && (
+              <Text size="sm" c="orange">
+                This Version is frozen. Saving text changes creates the next Version and keeps existing assignments pinned.
+              </Text>
+            )}
+            <TextInput label="Requirement title" value={textEditTitle} onChange={(event) => setTextEditTitle(event.currentTarget.value)} />
+            <Textarea
+              label="Requirement description"
+              value={textEditDescription}
+              onChange={(event) => setTextEditDescription(event.currentTarget.value)}
+              minRows={2}
+            />
+            <Textarea
+              label="Text content"
+              value={textEditContent}
+              onChange={(event) => setTextEditContent(event.currentTarget.value)}
+              minRows={10}
+              required
+            />
+            <Group justify="flex-end">
+              <Button variant="default" onClick={() => setEditingTextTemplate(null)} disabled={savingTemplateVersion}>
+                Cancel
+              </Button>
+              <Button onClick={() => void handleSaveTextTemplate()} loading={savingTemplateVersion}>
+                Save Version
+              </Button>
+            </Group>
           </Stack>
         ) : null}
       </Modal>

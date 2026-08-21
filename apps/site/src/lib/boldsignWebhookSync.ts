@@ -25,8 +25,16 @@ import { normalizeRequiredSignerType } from '@/lib/templateSignerTypes';
 import { acquireEventLockAndLoadStructure } from '@/server/events/eventRegistrations';
 import {
   createDocumentTemplateVersion,
+  editDocumentTemplateVersion,
   ensureDocumentRequirement,
+  isDocumentTemplateVersionFrozen,
 } from '@/server/documents/documentTemplateVersions';
+import {
+  ensureDocumentSubject,
+  signedDocumentEvidenceFields,
+  createDocumentRequirementSatisfaction,
+  DOCUMENT_EVIDENCE_PROVENANCE,
+} from '@/server/documentEvidence';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -913,29 +921,34 @@ export const projectTemplateProjectionFromOperation = async (params: {
     const requirement = await ensureDocumentRequirement(tx, requirementData);
 
     if (existing) {
-      return tx.templateDocuments.update({
-        where: { id: existing.id },
-        data: {
-          updatedAt: now,
+      const projectedVersionId = pickString(
+        params.operation?.templateDocumentId,
+        operationPayload.templateDocumentId,
+      );
+      const editResult = await editDocumentTemplateVersion(tx, {
+        versionId: existing.id,
+        organizationId,
+        newVersionId: projectedVersionId && projectedVersionId !== existing.id
+          ? projectedVersionId
+          : undefined,
+        display: {
+          title,
+          description: description ?? null,
+        },
+        material: {
           templateId: params.templateId,
           type: 'PDF',
-          organizationId,
-          title,
-          description,
-          signOnce,
-          requiredSignerType,
-          status: params.status,
-          createdBy: pickString(
-            params.operation?.userId,
-            operationPayload.createdBy,
-            existing.createdBy,
-          ) ?? null,
           roleIndex: payloadRoles[0]?.roleIndex ?? existing.roleIndex ?? null,
-          roleIndexes: payloadRoles.map((entry) => entry.roleIndex),
-          signerRoles: payloadRoles.map((entry) => entry.signerRole),
+          roleIndexes: payloadRoles.length > 0
+            ? payloadRoles.map((entry) => entry.roleIndex)
+            : existing.roleIndexes,
+          signerRoles: payloadRoles.length > 0
+            ? payloadRoles.map((entry) => entry.signerRole)
+            : existing.signerRoles,
           content: null,
         },
       });
+      return editResult.template;
     }
 
     return createDocumentTemplateVersion(tx, {
@@ -1017,22 +1030,30 @@ const projectTemplateEvent = async (event: ParsedBoldSignWebhookEvent): Promise<
     });
     if (existing) {
       const roles = parseRoles(event.dataObject?.roles ?? event.dataObject?.Roles);
-      await prisma.templateDocuments.update({
-        where: { id: existing.id },
-        data: {
-          title: pickString(event.dataObject?.title, event.dataObject?.Title, existing.title) ?? existing.title,
-          description: pickString(
-            event.dataObject?.description,
-            event.dataObject?.Description,
-            existing.description,
-          ),
+      await prisma.$transaction((tx) => editDocumentTemplateVersion(tx, {
+        versionId: existing.id,
+        organizationId: existing.organizationId,
+        display: {
+          ...(pickString(event.dataObject?.title, event.dataObject?.Title)
+            ? { title: pickString(event.dataObject?.title, event.dataObject?.Title) ?? undefined }
+            : {}),
+          ...(pickString(event.dataObject?.description, event.dataObject?.Description) !== undefined
+            ? {
+              description: pickString(
+                event.dataObject?.description,
+                event.dataObject?.Description,
+                existing.description,
+              ) ?? null,
+            }
+            : {}),
+        },
+        material: {
           roleIndex: roles[0]?.roleIndex ?? existing.roleIndex,
           roleIndexes: roles.length > 0 ? roles.map((entry) => entry.roleIndex) : existing.roleIndexes,
           signerRoles: roles.length > 0 ? roles.map((entry) => entry.signerRole) : existing.signerRoles,
           status: templateStatus,
-          updatedAt: new Date(),
         },
-      });
+      }));
     }
   }
 
@@ -1235,6 +1256,9 @@ const createOrUpdateSignedDocumentProjection = async (params: {
         id: true,
         organizationId: true,
         title: true,
+        documentRequirementId: true,
+        signOnce: true,
+        signerRoles: true,
       },
     })
     : null;
@@ -1386,6 +1410,21 @@ const createOrUpdateSignedDocumentProjection = async (params: {
     const nextSignedAt = nextStatus === 'SIGNED'
       ? (normalizeText(existing?.signedAt) ?? defaultSignedAt)
       : null;
+    const evidenceFields = signedDocumentEvidenceFields({
+      organizationId: inferredContext.organizationId,
+      userId,
+      hostId,
+      eventId: inferredContext.eventId,
+      teamId: inferredContext.teamId,
+      signOnce: templateRow?.signOnce,
+      provenance: DOCUMENT_EVIDENCE_PROVENANCE.BOLDSIGN,
+      providerDocumentId: event.documentId,
+    });
+    await ensureDocumentSubject({
+      organizationId: inferredContext.organizationId,
+      userId,
+      hostId,
+    });
 
     if (existing) {
       await prisma.signedDocuments.update({
@@ -1400,6 +1439,7 @@ const createOrUpdateSignedDocumentProjection = async (params: {
           organizationId: inferredContext.organizationId,
           eventId: inferredContext.eventId,
           teamId: inferredContext.teamId,
+          ...evidenceFields,
           status: nextStatus,
           signedAt: nextSignedAt ?? undefined,
           signerEmail,
@@ -1407,6 +1447,19 @@ const createOrUpdateSignedDocumentProjection = async (params: {
           signerRole,
         },
       });
+      if (nextStatus === 'SIGNED') {
+        await createDocumentRequirementSatisfaction({
+          evidenceId: existing.id,
+          templateDocumentId: templateDocumentId ?? '',
+          documentRequirementId: templateRow?.documentRequirementId,
+          organizationId: inferredContext.organizationId,
+          documentSubjectId: evidenceFields.documentSubjectId,
+          scopeType: evidenceFields.scopeType,
+          scopeId: evidenceFields.scopeId,
+          requiredSignerRoles: templateRow?.signerRoles,
+          signerRole,
+        });
+      }
       updatedRows += 1;
       projectedRows.push({
         id: existing.id,
@@ -1422,11 +1475,12 @@ const createOrUpdateSignedDocumentProjection = async (params: {
       continue;
     }
 
+    const createdAt = new Date();
     const created = await prisma.signedDocuments.create({
       data: {
         id: crypto.randomUUID(),
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt,
+        updatedAt: createdAt,
         signedDocumentId: event.documentId,
         templateId: templateDocumentId,
         userId,
@@ -1435,6 +1489,7 @@ const createOrUpdateSignedDocumentProjection = async (params: {
         organizationId: inferredContext.organizationId,
         eventId: inferredContext.eventId,
         teamId: inferredContext.teamId,
+        ...evidenceFields,
         status: nextStatus,
         signedAt: nextSignedAt,
         signerEmail,
@@ -1445,6 +1500,19 @@ const createOrUpdateSignedDocumentProjection = async (params: {
       },
       select: { id: true },
     });
+    if (nextStatus === 'SIGNED') {
+      await createDocumentRequirementSatisfaction({
+        evidenceId: created.id,
+        templateDocumentId,
+        documentRequirementId: templateRow?.documentRequirementId,
+        organizationId: inferredContext.organizationId,
+        documentSubjectId: evidenceFields.documentSubjectId,
+        scopeType: evidenceFields.scopeType,
+        requiredSignerRoles: templateRow?.signerRoles,
+        scopeId: evidenceFields.scopeId,
+        signerRole,
+      });
+    }
     updatedRows += 1;
     projectedRows.push({
       id: created.id,
@@ -1477,6 +1545,8 @@ const createOrUpdateSignedDocumentProjection = async (params: {
         where: { id: { in: ids } },
         data: {
           updatedAt: new Date(),
+          provenance: DOCUMENT_EVIDENCE_PROVENANCE.BOLDSIGN,
+          providerDocumentId: event.documentId,
           status: fallbackStatus,
           signedAt: eventSignedAt ?? undefined,
         },
@@ -1761,6 +1831,19 @@ const reconcileTemplateDeleteOperation = async (operation: BoldSignSyncOperation
   }
 
   const now = new Date();
+  const localTemplate = await prisma.templateDocuments.findUnique({
+    where: { id: templateDocumentId },
+  });
+  if (localTemplate && (
+    localTemplate.frozenAt
+    || await prisma.$transaction((tx) => isDocumentTemplateVersionFrozen(tx, templateDocumentId))
+  )) {
+    await updateBoldSignOperationById(operation.id, {
+      status: BOLDSIGN_OPERATION_STATUSES.FAILED_RETRYABLE,
+      lastError: 'Frozen Document Template Versions cannot be deleted.',
+    });
+    return;
+  }
   const [eventsToUpdate, timeSlotsToUpdate] = await Promise.all([
     prisma.events.findMany({
       where: { requiredTemplateIds: { has: templateDocumentId } },

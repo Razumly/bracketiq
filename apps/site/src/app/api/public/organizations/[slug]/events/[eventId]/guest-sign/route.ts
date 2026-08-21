@@ -22,6 +22,12 @@ import {
   type SignerContext,
 } from '@/lib/templateSignerTypes';
 import {
+  ensureDocumentSubject,
+  signedDocumentEvidenceFields,
+  DOCUMENT_EVIDENCE_PROVENANCE,
+} from '@/server/documentEvidence';
+
+import {
   assertPublicWidgetEvent,
   normalizeGuestText,
   normalizeRequiredTemplateIds,
@@ -270,6 +276,20 @@ export async function POST(req: NextRequest, context: RouteContext) {
       if (templateType === 'TEXT') {
         const documentId = normalizeGuestText(existingSignedRows[0]?.signedDocumentId) ?? `text-${crypto.randomUUID()}`;
         const now = new Date();
+        await ensureDocumentSubject({
+          organizationId: organization.id,
+          userId: signerUserId,
+          hostId: childUserId ?? null,
+        });
+        const evidenceFields = signedDocumentEvidenceFields({
+          organizationId: organization.id,
+          userId: signerUserId,
+          hostId: childUserId ?? null,
+          eventId: event.id,
+          teamId: null,
+          signOnce: template.signOnce,
+          provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
+        });
         if (existingSignedRows[0]?.id) {
           await (prisma as any).signedDocuments.update({
             where: { id: existingSignedRows[0].id },
@@ -281,6 +301,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
               hostId: childUserId ?? null,
               organizationId: organization.id,
               eventId: event.id,
+              ...evidenceFields,
               signerEmail: signerIdentity.email ?? null,
               signerRole: signerContext,
             },
@@ -298,6 +319,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
               hostId: childUserId ?? null,
               organizationId: organization.id,
               eventId: event.id,
+              ...evidenceFields,
               status: 'UNSIGNED',
               signedAt: null,
               signerEmail: signerIdentity.email ?? null,

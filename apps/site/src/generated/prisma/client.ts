@@ -580,6 +580,21 @@ export type TemplateDocuments = Prisma.TemplateDocumentsModel
  */
 export type SignedDocuments = Prisma.SignedDocumentsModel
 /**
+ * Model DocumentSubjects
+ *
+ */
+export type DocumentSubjects = Prisma.DocumentSubjectsModel
+/**
+ * Model DocumentRequirementSatisfactions
+ *
+ */
+export type DocumentRequirementSatisfactions = Prisma.DocumentRequirementSatisfactionsModel
+/**
+ * Model DocumentEvidenceAuditEvents
+ *
+ */
+export type DocumentEvidenceAuditEvents = Prisma.DocumentEvidenceAuditEventsModel
+/**
  * Model BoldSignWebhookEvents
  *
  */

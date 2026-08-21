@@ -245,6 +245,40 @@ export const TemplateDocumentsTypeEnum = {
 export type TemplateDocumentsTypeEnum = (typeof TemplateDocumentsTypeEnum)[keyof typeof TemplateDocumentsTypeEnum]
 
 
+export const SignedDocumentProvenanceEnum = {
+  BOLDSIGN: 'BOLDSIGN',
+  BRACKETIQ: 'BRACKETIQ',
+  IMPORTED: 'IMPORTED'
+} as const
+
+export type SignedDocumentProvenanceEnum = (typeof SignedDocumentProvenanceEnum)[keyof typeof SignedDocumentProvenanceEnum]
+
+
+export const DocumentRequirementSatisfactionScopeTypeEnum = {
+  ORGANIZATION: 'ORGANIZATION',
+  EVENT_PARTICIPATION: 'EVENT_PARTICIPATION',
+  TEAM_MEMBERSHIP: 'TEAM_MEMBERSHIP'
+} as const
+
+export type DocumentRequirementSatisfactionScopeTypeEnum = (typeof DocumentRequirementSatisfactionScopeTypeEnum)[keyof typeof DocumentRequirementSatisfactionScopeTypeEnum]
+
+
+export const DocumentRequirementSatisfactionStatusEnum = {
+  SATISFIED: 'SATISFIED',
+  INVALIDATED: 'INVALIDATED'
+} as const
+
+export type DocumentRequirementSatisfactionStatusEnum = (typeof DocumentRequirementSatisfactionStatusEnum)[keyof typeof DocumentRequirementSatisfactionStatusEnum]
+
+
+export const DocumentEvidenceAuditEventTypeEnum = {
+  IMPORT: 'IMPORT',
+  VOID: 'VOID'
+} as const
+
+export type DocumentEvidenceAuditEventTypeEnum = (typeof DocumentEvidenceAuditEventTypeEnum)[keyof typeof DocumentEvidenceAuditEventTypeEnum]
+
+
 export const ParentChildLinksStatusEnum = {
   PENDING: 'PENDING',
   ACTIVE: 'ACTIVE',

@@ -12,8 +12,15 @@ import { createDocumentSendOperation } from '@/lib/boldsignWebhookSync';
 import { BOLDSIGN_OPERATION_STATUSES, findLatestBoldSignOperation } from '@/lib/boldsignSyncOperations';
 import { getRequiredSignerTypeLabel, normalizeRequiredSignerType } from '@/lib/templateSignerTypes';
 import { resolveBoldSignRedirectUrl } from '@/lib/signRedirect';
+import {
+  ensureDocumentSubject,
+  signedDocumentEvidenceFields,
+  DOCUMENT_EVIDENCE_PROVENANCE,
+} from '@/server/documentEvidence';
 
 export const dynamic = 'force-dynamic';
+
+
 
 const schema = z.object({
   userId: z.string().optional(),
@@ -321,6 +328,11 @@ export async function POST(req: NextRequest) {
         const textDocumentId = pendingDocumentId ?? `text-${crypto.randomUUID()}`;
         const now = new Date();
         if (!signerRowToReuse) {
+          await ensureDocumentSubject({
+            organizationId: normalizedOrganizationId ?? null,
+            userId: signerUserId,
+            hostId: null,
+          });
           await prisma.signedDocuments.create({
             data: {
               id: crypto.randomUUID(),
@@ -333,6 +345,16 @@ export async function POST(req: NextRequest) {
               hostId: null,
               organizationId: normalizedOrganizationId ?? null,
               eventId: normalizedEventId ?? null,
+              teamId: null,
+              ...signedDocumentEvidenceFields({
+                organizationId: normalizedOrganizationId ?? null,
+                userId: signerUserId,
+                hostId: null,
+                eventId: normalizedEventId ?? null,
+                teamId: null,
+                signOnce: template.signOnce,
+                provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
+              }),
               status: 'UNSIGNED',
               signedAt: null,
               signerEmail: signerEmail ?? null,
@@ -343,6 +365,11 @@ export async function POST(req: NextRequest) {
             },
           });
         } else {
+          await ensureDocumentSubject({
+            organizationId: normalizedOrganizationId ?? null,
+            userId: signerUserId,
+            hostId: null,
+          });
           await prisma.signedDocuments.update({
             where: { id: signerRowToReuse.id },
             data: {
@@ -353,6 +380,16 @@ export async function POST(req: NextRequest) {
               hostId: null,
               organizationId: normalizedOrganizationId ?? null,
               eventId: normalizedEventId ?? null,
+              teamId: null,
+              ...signedDocumentEvidenceFields({
+                organizationId: normalizedOrganizationId ?? null,
+                userId: signerUserId,
+                hostId: null,
+                eventId: normalizedEventId ?? null,
+                teamId: null,
+                signOnce: template.signOnce,
+                provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
+              }),
               signerEmail: signerEmail ?? null,
               roleIndex: null,
               signerRole: 'participant',

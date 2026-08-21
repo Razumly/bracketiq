@@ -167,6 +167,28 @@ enum TemplateDocumentsTypeEnum {
   PDF
   TEXT
 }
+enum SignedDocumentProvenanceEnum {
+  BOLDSIGN
+  BRACKETIQ
+  IMPORTED
+}
+
+enum DocumentRequirementSatisfactionScopeTypeEnum {
+  ORGANIZATION
+  EVENT_PARTICIPATION
+  TEAM_MEMBERSHIP
+}
+
+enum DocumentRequirementSatisfactionStatusEnum {
+  SATISFIED
+  INVALIDATED
+}
+
+enum DocumentEvidenceAuditEventTypeEnum {
+  IMPORT
+  VOID
+}
+
 
 enum ParentChildLinksStatusEnum {
   PENDING
@@ -3324,24 +3346,92 @@ model TemplateDocuments {
 }
 
 model SignedDocuments {
-  id               String    @id
+  id                       String                                  @id
+  createdAt                DateTime?
+  updatedAt                DateTime?
+  signedDocumentId         String
+  providerDocumentId       String?
+  provenance               SignedDocumentProvenanceEnum            @default(BRACKETIQ)
+  templateId               String
+  userId                   String
+  signerUserId             String?
+  documentSubjectId        String?
+  documentName             String
+  hostId                   String?
+  organizationId           String?
+  eventId                 String?
+  teamId                  String?
+  scopeType                DocumentRequirementSatisfactionScopeTypeEnum?
+  scopeId                  String?
+  importedFileId           String?
+  contentHash              String?
+  historicalSigningDate    DateTime?
+  sourceNote               String?
+  importedAt               DateTime?
+  uploaderId               String?
+  attestationText          String?
+  attestationVersion       String?
+  status                   String?
+  signedAt                 String?
+  signerEmail              String?
+  roleIndex                Int?
+  signerRole               String?
+  ipAddress                String?
+  requestId                String?
+
+  @@unique([organizationId, contentHash, documentSubjectId, templateId, scopeType, scopeId], map: "SignedDocuments_import_identity_key")
+  @@index([documentSubjectId])
+  @@index([providerDocumentId])
+  @@index([scopeType, scopeId])
+}
+
+model DocumentSubjects {
+  id             String   @id
+  createdAt      DateTime?
+  updatedAt      DateTime?
+  organizationId String
+  userId         String
+
+  @@unique([organizationId, userId], map: "DocumentSubjects_organizationId_userId_key")
+  @@index([userId])
+}
+
+model DocumentRequirementSatisfactions {
+  id                    String                                              @id
+  createdAt             DateTime?
+  updatedAt             DateTime?
+  organizationId        String
+  documentRequirementId  String
+  templateDocumentId    String
+  documentSubjectId     String
+  scopeType             DocumentRequirementSatisfactionScopeTypeEnum
+  scopeId               String
+  sourceEvidenceId      String
+  status                DocumentRequirementSatisfactionStatusEnum            @default(SATISFIED)
+  isComplete            Boolean                                             @default(false)
+  requiredSignerRoles   String[]                                            @default([])
+  completedSignerRoles  String[]                                            @default([])
+  invalidatedAt         DateTime?
+
+  @@index([organizationId, documentSubjectId])
+  @@index([documentRequirementId, templateDocumentId])
+  @@index([scopeType, scopeId])
+  @@index([sourceEvidenceId])
+}
+
+model DocumentEvidenceAuditEvents {
+  id               String                              @id
   createdAt        DateTime?
-  updatedAt        DateTime?
+  organizationId   String
   signedDocumentId String
-  templateId       String
-  userId           String
-  documentName     String
-  hostId           String?
-  organizationId   String?
-  eventId          String?
-  teamId           String?
-  status           String?
-  signedAt         String?
-  signerEmail      String?
-  roleIndex        Int?
-  signerRole       String?
-  ipAddress        String?
-  requestId        String?
+  eventType        DocumentEvidenceAuditEventTypeEnum
+  actorUserId      String?
+  reason           String?
+  note             String?
+  payload          Json?
+
+  @@index([signedDocumentId, createdAt])
+  @@index([organizationId, createdAt])
 }
 
 model BoldSignWebhookEvents {

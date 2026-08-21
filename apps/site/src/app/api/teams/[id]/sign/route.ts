@@ -18,6 +18,11 @@ import {
   templateMatchesSignerContext,
   type SignerContext,
 } from '@/lib/templateSignerTypes';
+import {
+  ensureDocumentSubject,
+  signedDocumentEvidenceFields,
+  DOCUMENT_EVIDENCE_PROVENANCE,
+} from '@/server/documentEvidence';
 import { dispatchRequiredTeamDocuments } from '@/server/teams/teamRegistrationDocuments';
 
 export const dynamic = 'force-dynamic';
@@ -387,6 +392,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             : normalizeText(payload.userEmail),
         );
         const existingRow = existingSignerRows[0];
+        await ensureDocumentSubject({
+          organizationId: team.organizationId ?? null,
+          userId: signerUserId,
+          hostId: scopedChildUserId,
+        });
         if (existingRow) {
           await prisma.signedDocuments.update({
             where: { id: existingRow.id },
@@ -397,7 +407,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               userId: signerUserId,
               hostId: scopedChildUserId,
               organizationId: team.organizationId ?? null,
+              eventId: null,
               teamId,
+              ...signedDocumentEvidenceFields({
+                organizationId: team.organizationId ?? null,
+                userId: signerUserId,
+                hostId: scopedChildUserId,
+                eventId: null,
+                teamId,
+                signOnce: template.signOnce,
+                provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
+              }),
               signerEmail: signerEmail ?? null,
               signerRole: signerContext,
             },
@@ -416,6 +436,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               organizationId: team.organizationId ?? null,
               eventId: null,
               teamId,
+              ...signedDocumentEvidenceFields({
+                organizationId: team.organizationId ?? null,
+                userId: signerUserId,
+                hostId: scopedChildUserId,
+                eventId: null,
+                teamId,
+                signOnce: template.signOnce,
+                provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
+              }),
               status: 'UNSIGNED',
               signedAt: null,
               signerEmail: signerEmail ?? null,

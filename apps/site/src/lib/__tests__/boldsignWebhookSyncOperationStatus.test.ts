@@ -11,11 +11,14 @@ const prismaMock = {
   },
   templateDocuments: {
     findFirst: jest.fn(),
+    findUnique: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
   },
   documentRequirements: {
     upsert: jest.fn(),
+    findUnique: jest.fn(),
+    update: jest.fn(),
   },
   eventRegistrations: {
     findFirst: jest.fn(),
@@ -419,5 +422,89 @@ describe('boldsignWebhookSync operation status projection', () => {
         }),
       }),
     );
+  });
+  it('creates a new PDF Version when BoldSign edits a referenced Version', async () => {
+    const current = {
+      id: 'version_1',
+      documentRequirementId: 'requirement_1',
+      versionSequence: 1,
+      frozenAt: null,
+      organizationId: 'org_1',
+      templateId: 'bold_template_1',
+      type: 'PDF',
+      title: 'Photo waiver',
+      description: 'Event photography consent',
+      signOnce: false,
+      requiredSignerType: 'PARTICIPANT',
+      status: 'ACTIVE',
+      createdBy: 'staff_1',
+      roleIndex: 1,
+      roleIndexes: [1],
+      signerRoles: ['participant'],
+      content: null,
+    };
+    const operation = {
+      id: 'op_template_edit',
+      operationType: 'TEMPLATE_CREATE',
+      status: 'PENDING_WEBHOOK',
+      organizationId: 'org_1',
+      templateDocumentId: 'version_2',
+      templateId: 'bold_template_1',
+      userId: 'staff_1',
+      payload: {
+        documentRequirementId: 'requirement_1',
+        organizationId: 'org_1',
+        title: 'Photo waiver',
+        description: 'Updated consent',
+        type: 'PDF',
+        roles: [{ roleIndex: 2, signerRole: 'guardian' }],
+      },
+    };
+    prismaMock.documentRequirements.upsert.mockResolvedValue({
+      id: 'requirement_1',
+      organizationId: 'org_1',
+    });
+    prismaMock.documentRequirements.findUnique.mockResolvedValue({
+      id: 'requirement_1',
+      organizationId: 'org_1',
+      title: 'Photo waiver',
+      description: 'Updated consent',
+    });
+    prismaMock.templateDocuments.findFirst
+      .mockResolvedValueOnce(current)
+      .mockResolvedValueOnce({ versionSequence: 1 });
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([current])
+      .mockResolvedValueOnce([{ id: 'event_1' }])
+      .mockResolvedValueOnce([{ id: 'requirement_1' }]);
+    prismaMock.templateDocuments.update.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+      ...current,
+      ...data,
+    }));
+    prismaMock.templateDocuments.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => data);
+
+    const projectedTemplate = await projectTemplateProjectionFromOperation({
+      templateId: 'bold_template_1',
+      operation,
+      status: 'ACTIVE',
+    });
+
+    expect(projectedTemplate).toEqual(expect.objectContaining({
+      id: 'version_2',
+      documentRequirementId: 'requirement_1',
+      versionSequence: 2,
+      signerRoles: ['guardian'],
+    }));
+    expect(prismaMock.templateDocuments.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'version_1' },
+      data: expect.objectContaining({ frozenAt: expect.any(Date) }),
+    }));
+    expect(prismaMock.templateDocuments.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        id: 'version_2',
+        documentRequirementId: 'requirement_1',
+        versionSequence: 2,
+      }),
+    }));
   });
 });

@@ -20,6 +20,12 @@ import {
   acquireEventLockAndLoadStructure,
 } from '@/server/events/eventRegistrations';
 import { sendEventRegistrationHostNotification } from '@/server/registrationHostNotifications';
+import {
+  ensureDocumentSubject,
+  signedDocumentEvidenceFields,
+  createDocumentRequirementSatisfaction,
+  DOCUMENT_EVIDENCE_PROVENANCE,
+} from '@/server/documentEvidence';
 
 export const dynamic = 'force-dynamic';
 
@@ -356,6 +362,9 @@ export async function POST(req: NextRequest, context: RouteContext) {
   })) {
     return NextResponse.json({ error: 'Template is not available for this signer context.' }, { status: 400 });
   }
+  if (signerContext === 'child' && !childUserId) {
+    return NextResponse.json({ error: 'Child signer identity is required.' }, { status: 400 });
+  }
 
   if (childUserId) {
     const linked = await (prisma as any).parentChildLinks.findFirst({
@@ -372,20 +381,21 @@ export async function POST(req: NextRequest, context: RouteContext) {
   }
 
   const signerUserId = signerContext === 'child'
-    ? childUserId
+    ? (childUserId as string)
     : signerContext === 'parent_guardian'
       ? token.parentUserId
       : registrationType === 'SELF'
         ? String(registration.registrantId)
         : token.parentUserId;
-  if (!signerUserId) {
-    return NextResponse.json({ error: 'Signer user id is required.' }, { status: 400 });
-  }
-
   const now = new Date();
   const signedAt = now.toISOString();
   const scopedChildUserId = childUserId ?? null;
   const scopedEventId = template.signOnce ? null : event.id;
+  await ensureDocumentSubject({
+    organizationId: organization.id,
+    userId: signerUserId,
+    hostId: scopedChildUserId,
+  });
   const existing = await (prisma as any).signedDocuments.findFirst({
     where: {
       templateId: template.id,
@@ -410,6 +420,15 @@ export async function POST(req: NextRequest, context: RouteContext) {
     hostId: scopedChildUserId,
     organizationId: organization.id,
     eventId: event.id,
+    ...signedDocumentEvidenceFields({
+      organizationId: organization.id,
+      userId: signerUserId,
+      hostId: scopedChildUserId,
+      eventId: event.id,
+      teamId: null,
+      signOnce: template.signOnce,
+      provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
+    }),
     status: 'SIGNED',
     signedAt,
     signerEmail,
@@ -419,7 +438,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
     requestId: req.headers.get('x-request-id') ?? null,
     updatedAt: now,
   };
-
+  const evidenceId = existing?.id ?? crypto.randomUUID();
   if (existing) {
     const existingIsSigned = isSignedStatus(existing.status);
     await (prisma as any).signedDocuments.update({
@@ -434,7 +453,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
   } else {
     await (prisma as any).signedDocuments.create({
       data: {
-        id: crypto.randomUUID(),
+        id: evidenceId,
         templateId: template.id,
         documentName: template.title ?? 'Text Waiver',
         teamId: null,
@@ -443,6 +462,17 @@ export async function POST(req: NextRequest, context: RouteContext) {
       },
     });
   }
+  await createDocumentRequirementSatisfaction({
+    evidenceId,
+    templateDocumentId: template.id,
+    documentRequirementId: template.documentRequirementId,
+    organizationId: organization.id,
+    documentSubjectId: baseData.documentSubjectId,
+    scopeType: baseData.scopeType,
+    scopeId: baseData.scopeId,
+    requiredSignerRoles: template.signerRoles,
+    signerRole: signerContext,
+  });
 
   try {
     if (scopedChildUserId) {

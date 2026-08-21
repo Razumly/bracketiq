@@ -118,9 +118,22 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params;
   const templates = await prisma.templateDocuments.findMany({
     where: { organizationId: id },
-    orderBy: { createdAt: 'desc' },
+    include: {
+      documentRequirement: {
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          status: true,
+        },
+      },
+    },
+    orderBy: [
+      { documentRequirementId: 'asc' },
+      { versionSequence: 'desc' },
+    ],
   });
-  return NextResponse.json({ templates: templates }, { status: 200 });
+  return NextResponse.json({ templates }, { status: 200 });
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

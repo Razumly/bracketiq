@@ -159,6 +159,9 @@ export const ModelName = {
   DocumentRequirements: 'DocumentRequirements',
   TemplateDocuments: 'TemplateDocuments',
   SignedDocuments: 'SignedDocuments',
+  DocumentSubjects: 'DocumentSubjects',
+  DocumentRequirementSatisfactions: 'DocumentRequirementSatisfactions',
+  DocumentEvidenceAuditEvents: 'DocumentEvidenceAuditEvents',
   BoldSignWebhookEvents: 'BoldSignWebhookEvents',
   BoldSignSyncOperations: 'BoldSignSyncOperations',
   ParentChildLinks: 'ParentChildLinks',
@@ -2762,13 +2765,27 @@ export const SignedDocumentsScalarFieldEnum = {
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
   signedDocumentId: 'signedDocumentId',
+  providerDocumentId: 'providerDocumentId',
+  provenance: 'provenance',
   templateId: 'templateId',
   userId: 'userId',
+  signerUserId: 'signerUserId',
+  documentSubjectId: 'documentSubjectId',
   documentName: 'documentName',
   hostId: 'hostId',
   organizationId: 'organizationId',
   eventId: 'eventId',
   teamId: 'teamId',
+  scopeType: 'scopeType',
+  scopeId: 'scopeId',
+  importedFileId: 'importedFileId',
+  contentHash: 'contentHash',
+  historicalSigningDate: 'historicalSigningDate',
+  sourceNote: 'sourceNote',
+  importedAt: 'importedAt',
+  uploaderId: 'uploaderId',
+  attestationText: 'attestationText',
+  attestationVersion: 'attestationVersion',
   status: 'status',
   signedAt: 'signedAt',
   signerEmail: 'signerEmail',
@@ -2779,6 +2796,53 @@ export const SignedDocumentsScalarFieldEnum = {
 } as const
 
 export type SignedDocumentsScalarFieldEnum = (typeof SignedDocumentsScalarFieldEnum)[keyof typeof SignedDocumentsScalarFieldEnum]
+
+
+export const DocumentSubjectsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  organizationId: 'organizationId',
+  userId: 'userId'
+} as const
+
+export type DocumentSubjectsScalarFieldEnum = (typeof DocumentSubjectsScalarFieldEnum)[keyof typeof DocumentSubjectsScalarFieldEnum]
+
+
+export const DocumentRequirementSatisfactionsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  organizationId: 'organizationId',
+  documentRequirementId: 'documentRequirementId',
+  templateDocumentId: 'templateDocumentId',
+  documentSubjectId: 'documentSubjectId',
+  scopeType: 'scopeType',
+  scopeId: 'scopeId',
+  sourceEvidenceId: 'sourceEvidenceId',
+  status: 'status',
+  isComplete: 'isComplete',
+  requiredSignerRoles: 'requiredSignerRoles',
+  completedSignerRoles: 'completedSignerRoles',
+  invalidatedAt: 'invalidatedAt'
+} as const
+
+export type DocumentRequirementSatisfactionsScalarFieldEnum = (typeof DocumentRequirementSatisfactionsScalarFieldEnum)[keyof typeof DocumentRequirementSatisfactionsScalarFieldEnum]
+
+
+export const DocumentEvidenceAuditEventsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  organizationId: 'organizationId',
+  signedDocumentId: 'signedDocumentId',
+  eventType: 'eventType',
+  actorUserId: 'actorUserId',
+  reason: 'reason',
+  note: 'note',
+  payload: 'payload'
+} as const
+
+export type DocumentEvidenceAuditEventsScalarFieldEnum = (typeof DocumentEvidenceAuditEventsScalarFieldEnum)[keyof typeof DocumentEvidenceAuditEventsScalarFieldEnum]
 
 
 export const BoldSignWebhookEventsScalarFieldEnum = {

@@ -1144,6 +1144,11 @@ export interface TemplateDocument {
   $id: string;
   templateId?: string;
   organizationId: string;
+  documentRequirementId?: string;
+  versionSequence?: number;
+  frozenAt?: string;
+  requirementTitle?: string;
+  requirementDescription?: string;
   title: string;
   description?: string;
   signOnce: boolean;

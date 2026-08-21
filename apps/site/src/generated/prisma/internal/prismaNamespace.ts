@@ -492,6 +492,9 @@ export const ModelName = {
   DocumentRequirements: 'DocumentRequirements',
   TemplateDocuments: 'TemplateDocuments',
   SignedDocuments: 'SignedDocuments',
+  DocumentSubjects: 'DocumentSubjects',
+  DocumentRequirementSatisfactions: 'DocumentRequirementSatisfactions',
+  DocumentEvidenceAuditEvents: 'DocumentEvidenceAuditEvents',
   BoldSignWebhookEvents: 'BoldSignWebhookEvents',
   BoldSignSyncOperations: 'BoldSignSyncOperations',
   ParentChildLinks: 'ParentChildLinks',
@@ -514,7 +517,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "appReleases" | "fields" | "facilities" | "matches" | "matchSegments" | "broadcastOverlays" | "broadcastOverlayStates" | "broadcastOverlayActions" | "broadcastOverlayAccessTokens" | "matchIncidents" | "matchOperationReceipts" | "eventEditorCreateOperations" | "divisions" | "eventDivisionPhaseSources" | "eventDivisionPhaseParticipants" | "userData" | "sensitiveUserData" | "authMfaChallenges" | "invites" | "teamInviteEventSyncs" | "staffMembers" | "organizationRoles" | "organizationRolePermissions" | "organizationRoleCompensationRates" | "staffCompensationRates" | "eventStaffAssignments" | "staffScheduleAssignments" | "teamStaffLaborEntries" | "financialLineItems" | "staffPayRun" | "staffPayRunItem" | "eventOfficials" | "teamCheckIns" | "matchRosterEntries" | "teams" | "canonicalTeams" | "teamRegistrations" | "registrationQuestions" | "registrationQuestionResponses" | "teamJoinRequests" | "teamStaffAssignments" | "eventTeamStaffAssignments" | "messages" | "chatGroup" | "moderationReport" | "aiConversationPointer" | "aiPendingConfirmation" | "pushDeviceTarget" | "lockFiles" | "paymentIntents" | "bills" | "billPayments" | "billPaymentProofs" | "rentalBookings" | "rentalBookingItems" | "affiliateScrapeSources" | "affiliateScrapeMappings" | "affiliateScrapeRuns" | "affiliateSourceIntakes" | "affiliateSourceIntakePages" | "affiliateSourceIntakeRuns" | "affiliateSourceIntakeArtifacts" | "affiliateSourceDiscoveryCampaigns" | "affiliateCoverageAgentJobs" | "affiliateCoverageCities" | "affiliateCoverageCells" | "affiliateCoverageCellAssessments" | "affiliateSourceDiscoveryQueryExecutions" | "affiliateSourceDiscoveryRuns" | "affiliateSourceDiscoveryResults" | "affiliateSourceDomainPolicies" | "affiliateSourceMappingJobs" | "affiliateApprovalJobs" | "affiliateImportCandidates" | "eventTags" | "eventTagAssignments" | "organizationTags" | "organizationTagAssignments" | "refundRequests" | "discounts" | "discountCodes" | "discountCodeRedemptions" | "discountCodeReservations" | "organizationAccountingConnections" | "accountingSyncRecords" | "organizationFinanceCategoryAccountingMappings" | "stripeAccounts" | "events" | "organizations" | "organizationReviews" | "organizationDomains" | "organizationClaims" | "organizationClaimEvidence" | "organizationClaimEvents" | "organizationReviewResponses" | "products" | "subscriptions" | "timeSlots" | "leagueScoringConfigs" | "eventTemplates" | "eventTemplateResources" | "eventTemplateTimeSlots" | "eventTemplateRentalResourceHints" | "eventTemplateLeagueScoringConfigs" | "sports" | "documentRequirements" | "templateDocuments" | "signedDocuments" | "boldSignWebhookEvents" | "boldSignSyncOperations" | "parentChildLinks" | "eventRegistrations" | "authUser" | "feedbackSubmissions" | "file"
+    modelProps: "appReleases" | "fields" | "facilities" | "matches" | "matchSegments" | "broadcastOverlays" | "broadcastOverlayStates" | "broadcastOverlayActions" | "broadcastOverlayAccessTokens" | "matchIncidents" | "matchOperationReceipts" | "eventEditorCreateOperations" | "divisions" | "eventDivisionPhaseSources" | "eventDivisionPhaseParticipants" | "userData" | "sensitiveUserData" | "authMfaChallenges" | "invites" | "teamInviteEventSyncs" | "staffMembers" | "organizationRoles" | "organizationRolePermissions" | "organizationRoleCompensationRates" | "staffCompensationRates" | "eventStaffAssignments" | "staffScheduleAssignments" | "teamStaffLaborEntries" | "financialLineItems" | "staffPayRun" | "staffPayRunItem" | "eventOfficials" | "teamCheckIns" | "matchRosterEntries" | "teams" | "canonicalTeams" | "teamRegistrations" | "registrationQuestions" | "registrationQuestionResponses" | "teamJoinRequests" | "teamStaffAssignments" | "eventTeamStaffAssignments" | "messages" | "chatGroup" | "moderationReport" | "aiConversationPointer" | "aiPendingConfirmation" | "pushDeviceTarget" | "lockFiles" | "paymentIntents" | "bills" | "billPayments" | "billPaymentProofs" | "rentalBookings" | "rentalBookingItems" | "affiliateScrapeSources" | "affiliateScrapeMappings" | "affiliateScrapeRuns" | "affiliateSourceIntakes" | "affiliateSourceIntakePages" | "affiliateSourceIntakeRuns" | "affiliateSourceIntakeArtifacts" | "affiliateSourceDiscoveryCampaigns" | "affiliateCoverageAgentJobs" | "affiliateCoverageCities" | "affiliateCoverageCells" | "affiliateCoverageCellAssessments" | "affiliateSourceDiscoveryQueryExecutions" | "affiliateSourceDiscoveryRuns" | "affiliateSourceDiscoveryResults" | "affiliateSourceDomainPolicies" | "affiliateSourceMappingJobs" | "affiliateApprovalJobs" | "affiliateImportCandidates" | "eventTags" | "eventTagAssignments" | "organizationTags" | "organizationTagAssignments" | "refundRequests" | "discounts" | "discountCodes" | "discountCodeRedemptions" | "discountCodeReservations" | "organizationAccountingConnections" | "accountingSyncRecords" | "organizationFinanceCategoryAccountingMappings" | "stripeAccounts" | "events" | "organizations" | "organizationReviews" | "organizationDomains" | "organizationClaims" | "organizationClaimEvidence" | "organizationClaimEvents" | "organizationReviewResponses" | "products" | "subscriptions" | "timeSlots" | "leagueScoringConfigs" | "eventTemplates" | "eventTemplateResources" | "eventTemplateTimeSlots" | "eventTemplateRentalResourceHints" | "eventTemplateLeagueScoringConfigs" | "sports" | "documentRequirements" | "templateDocuments" | "signedDocuments" | "documentSubjects" | "documentRequirementSatisfactions" | "documentEvidenceAuditEvents" | "boldSignWebhookEvents" | "boldSignSyncOperations" | "parentChildLinks" | "eventRegistrations" | "authUser" | "feedbackSubmissions" | "file"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -8510,6 +8513,228 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    DocumentSubjects: {
+      payload: Prisma.$DocumentSubjectsPayload<ExtArgs>
+      fields: Prisma.DocumentSubjectsFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.DocumentSubjectsFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.DocumentSubjectsFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>
+        }
+        findFirst: {
+          args: Prisma.DocumentSubjectsFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.DocumentSubjectsFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>
+        }
+        findMany: {
+          args: Prisma.DocumentSubjectsFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>[]
+        }
+        create: {
+          args: Prisma.DocumentSubjectsCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>
+        }
+        createMany: {
+          args: Prisma.DocumentSubjectsCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.DocumentSubjectsCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>[]
+        }
+        delete: {
+          args: Prisma.DocumentSubjectsDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>
+        }
+        update: {
+          args: Prisma.DocumentSubjectsUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>
+        }
+        deleteMany: {
+          args: Prisma.DocumentSubjectsDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.DocumentSubjectsUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.DocumentSubjectsUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>[]
+        }
+        upsert: {
+          args: Prisma.DocumentSubjectsUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentSubjectsPayload>
+        }
+        aggregate: {
+          args: Prisma.DocumentSubjectsAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateDocumentSubjects>
+        }
+        groupBy: {
+          args: Prisma.DocumentSubjectsGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.DocumentSubjectsGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.DocumentSubjectsCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.DocumentSubjectsCountAggregateOutputType> | number
+        }
+      }
+    }
+    DocumentRequirementSatisfactions: {
+      payload: Prisma.$DocumentRequirementSatisfactionsPayload<ExtArgs>
+      fields: Prisma.DocumentRequirementSatisfactionsFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.DocumentRequirementSatisfactionsFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.DocumentRequirementSatisfactionsFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>
+        }
+        findFirst: {
+          args: Prisma.DocumentRequirementSatisfactionsFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.DocumentRequirementSatisfactionsFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>
+        }
+        findMany: {
+          args: Prisma.DocumentRequirementSatisfactionsFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>[]
+        }
+        create: {
+          args: Prisma.DocumentRequirementSatisfactionsCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>
+        }
+        createMany: {
+          args: Prisma.DocumentRequirementSatisfactionsCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.DocumentRequirementSatisfactionsCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>[]
+        }
+        delete: {
+          args: Prisma.DocumentRequirementSatisfactionsDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>
+        }
+        update: {
+          args: Prisma.DocumentRequirementSatisfactionsUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>
+        }
+        deleteMany: {
+          args: Prisma.DocumentRequirementSatisfactionsDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.DocumentRequirementSatisfactionsUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.DocumentRequirementSatisfactionsUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>[]
+        }
+        upsert: {
+          args: Prisma.DocumentRequirementSatisfactionsUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionsPayload>
+        }
+        aggregate: {
+          args: Prisma.DocumentRequirementSatisfactionsAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateDocumentRequirementSatisfactions>
+        }
+        groupBy: {
+          args: Prisma.DocumentRequirementSatisfactionsGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.DocumentRequirementSatisfactionsGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.DocumentRequirementSatisfactionsCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.DocumentRequirementSatisfactionsCountAggregateOutputType> | number
+        }
+      }
+    }
+    DocumentEvidenceAuditEvents: {
+      payload: Prisma.$DocumentEvidenceAuditEventsPayload<ExtArgs>
+      fields: Prisma.DocumentEvidenceAuditEventsFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.DocumentEvidenceAuditEventsFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.DocumentEvidenceAuditEventsFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>
+        }
+        findFirst: {
+          args: Prisma.DocumentEvidenceAuditEventsFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.DocumentEvidenceAuditEventsFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>
+        }
+        findMany: {
+          args: Prisma.DocumentEvidenceAuditEventsFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>[]
+        }
+        create: {
+          args: Prisma.DocumentEvidenceAuditEventsCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>
+        }
+        createMany: {
+          args: Prisma.DocumentEvidenceAuditEventsCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.DocumentEvidenceAuditEventsCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>[]
+        }
+        delete: {
+          args: Prisma.DocumentEvidenceAuditEventsDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>
+        }
+        update: {
+          args: Prisma.DocumentEvidenceAuditEventsUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>
+        }
+        deleteMany: {
+          args: Prisma.DocumentEvidenceAuditEventsDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.DocumentEvidenceAuditEventsUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.DocumentEvidenceAuditEventsUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>[]
+        }
+        upsert: {
+          args: Prisma.DocumentEvidenceAuditEventsUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentEvidenceAuditEventsPayload>
+        }
+        aggregate: {
+          args: Prisma.DocumentEvidenceAuditEventsAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateDocumentEvidenceAuditEvents>
+        }
+        groupBy: {
+          args: Prisma.DocumentEvidenceAuditEventsGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.DocumentEvidenceAuditEventsGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.DocumentEvidenceAuditEventsCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.DocumentEvidenceAuditEventsCountAggregateOutputType> | number
+        }
+      }
+    }
     BoldSignWebhookEvents: {
       payload: Prisma.$BoldSignWebhookEventsPayload<ExtArgs>
       fields: Prisma.BoldSignWebhookEventsFieldRefs
@@ -11645,13 +11870,27 @@ export const SignedDocumentsScalarFieldEnum = {
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
   signedDocumentId: 'signedDocumentId',
+  providerDocumentId: 'providerDocumentId',
+  provenance: 'provenance',
   templateId: 'templateId',
   userId: 'userId',
+  signerUserId: 'signerUserId',
+  documentSubjectId: 'documentSubjectId',
   documentName: 'documentName',
   hostId: 'hostId',
   organizationId: 'organizationId',
   eventId: 'eventId',
   teamId: 'teamId',
+  scopeType: 'scopeType',
+  scopeId: 'scopeId',
+  importedFileId: 'importedFileId',
+  contentHash: 'contentHash',
+  historicalSigningDate: 'historicalSigningDate',
+  sourceNote: 'sourceNote',
+  importedAt: 'importedAt',
+  uploaderId: 'uploaderId',
+  attestationText: 'attestationText',
+  attestationVersion: 'attestationVersion',
   status: 'status',
   signedAt: 'signedAt',
   signerEmail: 'signerEmail',
@@ -11662,6 +11901,53 @@ export const SignedDocumentsScalarFieldEnum = {
 } as const
 
 export type SignedDocumentsScalarFieldEnum = (typeof SignedDocumentsScalarFieldEnum)[keyof typeof SignedDocumentsScalarFieldEnum]
+
+
+export const DocumentSubjectsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  organizationId: 'organizationId',
+  userId: 'userId'
+} as const
+
+export type DocumentSubjectsScalarFieldEnum = (typeof DocumentSubjectsScalarFieldEnum)[keyof typeof DocumentSubjectsScalarFieldEnum]
+
+
+export const DocumentRequirementSatisfactionsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  organizationId: 'organizationId',
+  documentRequirementId: 'documentRequirementId',
+  templateDocumentId: 'templateDocumentId',
+  documentSubjectId: 'documentSubjectId',
+  scopeType: 'scopeType',
+  scopeId: 'scopeId',
+  sourceEvidenceId: 'sourceEvidenceId',
+  status: 'status',
+  isComplete: 'isComplete',
+  requiredSignerRoles: 'requiredSignerRoles',
+  completedSignerRoles: 'completedSignerRoles',
+  invalidatedAt: 'invalidatedAt'
+} as const
+
+export type DocumentRequirementSatisfactionsScalarFieldEnum = (typeof DocumentRequirementSatisfactionsScalarFieldEnum)[keyof typeof DocumentRequirementSatisfactionsScalarFieldEnum]
+
+
+export const DocumentEvidenceAuditEventsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  organizationId: 'organizationId',
+  signedDocumentId: 'signedDocumentId',
+  eventType: 'eventType',
+  actorUserId: 'actorUserId',
+  reason: 'reason',
+  note: 'note',
+  payload: 'payload'
+} as const
+
+export type DocumentEvidenceAuditEventsScalarFieldEnum = (typeof DocumentEvidenceAuditEventsScalarFieldEnum)[keyof typeof DocumentEvidenceAuditEventsScalarFieldEnum]
 
 
 export const BoldSignWebhookEventsScalarFieldEnum = {
@@ -12957,6 +13243,62 @@ export type ListEnumTemplateDocumentsTypeEnumFieldRefInput<$PrismaModel> = Field
 
 
 /**
+ * Reference to a field of type 'SignedDocumentProvenanceEnum'
+ */
+export type EnumSignedDocumentProvenanceEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'SignedDocumentProvenanceEnum'>
+
+
+
+/**
+ * Reference to a field of type 'SignedDocumentProvenanceEnum[]'
+ */
+export type ListEnumSignedDocumentProvenanceEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'SignedDocumentProvenanceEnum[]'>
+
+
+
+/**
+ * Reference to a field of type 'DocumentRequirementSatisfactionScopeTypeEnum'
+ */
+export type EnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DocumentRequirementSatisfactionScopeTypeEnum'>
+
+
+
+/**
+ * Reference to a field of type 'DocumentRequirementSatisfactionScopeTypeEnum[]'
+ */
+export type ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DocumentRequirementSatisfactionScopeTypeEnum[]'>
+
+
+
+/**
+ * Reference to a field of type 'DocumentRequirementSatisfactionStatusEnum'
+ */
+export type EnumDocumentRequirementSatisfactionStatusEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DocumentRequirementSatisfactionStatusEnum'>
+
+
+
+/**
+ * Reference to a field of type 'DocumentRequirementSatisfactionStatusEnum[]'
+ */
+export type ListEnumDocumentRequirementSatisfactionStatusEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DocumentRequirementSatisfactionStatusEnum[]'>
+
+
+
+/**
+ * Reference to a field of type 'DocumentEvidenceAuditEventTypeEnum'
+ */
+export type EnumDocumentEvidenceAuditEventTypeEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DocumentEvidenceAuditEventTypeEnum'>
+
+
+
+/**
+ * Reference to a field of type 'DocumentEvidenceAuditEventTypeEnum[]'
+ */
+export type ListEnumDocumentEvidenceAuditEventTypeEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DocumentEvidenceAuditEventTypeEnum[]'>
+
+
+
+/**
  * Reference to a field of type 'BoldSignSyncOperationTypeEnum'
  */
 export type EnumBoldSignSyncOperationTypeEnumFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'BoldSignSyncOperationTypeEnum'>
@@ -13257,6 +13599,9 @@ export type GlobalOmitConfig = {
   documentRequirements?: Prisma.DocumentRequirementsOmit
   templateDocuments?: Prisma.TemplateDocumentsOmit
   signedDocuments?: Prisma.SignedDocumentsOmit
+  documentSubjects?: Prisma.DocumentSubjectsOmit
+  documentRequirementSatisfactions?: Prisma.DocumentRequirementSatisfactionsOmit
+  documentEvidenceAuditEvents?: Prisma.DocumentEvidenceAuditEventsOmit
   boldSignWebhookEvents?: Prisma.BoldSignWebhookEventsOmit
   boldSignSyncOperations?: Prisma.BoldSignSyncOperationsOmit
   parentChildLinks?: Prisma.ParentChildLinksOmit

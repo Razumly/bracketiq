@@ -13,7 +13,12 @@ import {
   findLatestBoldSignOperation,
   updateBoldSignOperationById,
 } from '@/lib/boldsignSyncOperations';
-
+import {
+  ensureDocumentSubject,
+  signedDocumentEvidenceFields,
+  createDocumentRequirementSatisfaction,
+  DOCUMENT_EVIDENCE_PROVENANCE,
+} from '@/server/documentEvidence';
 const schema = z.object({
   templateId: z.string(),
   documentId: z.string(),
@@ -198,7 +203,12 @@ export async function POST(request: NextRequest) {
   }
   const signedTemplate = await prisma.templateDocuments.findUnique({
     where: { id: parsed.data.templateId },
-    select: { signOnce: true, type: true },
+    select: {
+      signOnce: true,
+      type: true,
+      documentRequirementId: true,
+      signerRoles: true,
+    },
   });
   if (!signedTemplate) {
     return NextResponse.json({ error: 'Template not found.' }, { status: 404 });
@@ -260,6 +270,7 @@ export async function POST(request: NextRequest) {
     orderBy: { updatedAt: 'desc' },
     select: {
       id: true,
+      organizationId: true,
       status: true,
       signedAt: true,
     },
@@ -271,14 +282,29 @@ export async function POST(request: NextRequest) {
       { status: 403 },
     );
   }
-
   const existingIsSigned = isSignedStatus(existing.status);
+  const organizationId = existing.organizationId ?? event?.organizationId ?? team?.organizationId ?? null;
+  const evidenceFields = signedDocumentEvidenceFields({
+    organizationId,
+    userId,
+    hostId: scopedChildUserId,
+    eventId,
+    teamId,
+    signOnce: signedTemplate.signOnce,
+    provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
+  });
+  await ensureDocumentSubject({
+    organizationId,
+    userId,
+    hostId: scopedChildUserId,
+  });
   if (!existingIsSigned) {
     const now = new Date();
     await prisma.signedDocuments.update({
       where: { id: existing.id },
       data: {
         updatedAt: now,
+        ...evidenceFields,
         status: 'SIGNED',
         signedAt: new Date().toISOString(),
         ipAddress: resolveIpAddress(request),
@@ -286,6 +312,17 @@ export async function POST(request: NextRequest) {
       },
     });
   }
+  await createDocumentRequirementSatisfaction({
+    evidenceId: existing.id,
+    templateDocumentId: parsed.data.templateId,
+    documentRequirementId: signedTemplate.documentRequirementId,
+    organizationId,
+    documentSubjectId: evidenceFields.documentSubjectId,
+    scopeType: evidenceFields.scopeType,
+    scopeId: evidenceFields.scopeId,
+    requiredSignerRoles: signedTemplate.signerRoles,
+    signerRole: signerContext,
+  });
 
   if (scopedChildUserId && signedTemplate?.signOnce) {
     const registrations = await prisma.eventRegistrations.findMany({

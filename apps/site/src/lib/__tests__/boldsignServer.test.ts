@@ -1,6 +1,7 @@
 /** @jest-environment node */
 
 import {
+  cloneEmbeddedTemplate,
   createEmbeddedTemplateFromPdf,
   getEmbeddedSignLink,
   getEmbeddedTemplateEditUrl,
@@ -86,6 +87,29 @@ describe('boldsignServer', () => {
       { Name: 'Parent/Guardian', Index: 1 },
       { Name: 'Child', Index: 2 },
     ]);
+  });
+
+  it('clones a provider template with editable embedded fields', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          templateId: 'tmpl_clone',
+          embedUrl: 'https://app.boldsign.com/document/embed/?templateId=tmpl_clone',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const result = await cloneEmbeddedTemplate({ templateId: 'tmpl_original' });
+
+    expect(result).toEqual({
+      templateId: 'tmpl_clone',
+      editUrl: 'https://app.boldsign.com/document/embed/?templateId=tmpl_clone',
+    });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/v1/template/cloneTemplate?templateId=tmpl_original');
+    expect((init as RequestInit).method).toBe('POST');
+    expect((init as RequestInit).body).toBeInstanceOf(FormData);
   });
 
   it('falls back to default role when template properties response has no roles', async () => {
@@ -246,5 +270,27 @@ describe('boldsignServer', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url] = fetchMock.mock.calls[0];
     expect(String(url)).toContain('/v1/template/getEmbeddedTemplateEditUrl');
+  });
+
+  it('clones a template and returns the embedded edit URL', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        templateId: 'tmpl_clone',
+        embedUrl: 'https://app.boldsign.com/document/embed/tmpl_clone',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const result = await cloneEmbeddedTemplate({ templateId: 'tmpl_source' });
+
+    expect(result).toEqual({
+      templateId: 'tmpl_clone',
+      editUrl: 'https://app.boldsign.com/document/embed/tmpl_clone',
+    });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/v1/template/cloneTemplate?templateId=tmpl_source');
+    expect((init as RequestInit).method).toBe('POST');
   });
 });

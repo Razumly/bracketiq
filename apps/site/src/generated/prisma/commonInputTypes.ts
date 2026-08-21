@@ -1612,6 +1612,91 @@ export type EnumTemplateDocumentsTypeEnumNullableWithAggregatesFilter<$PrismaMod
   _max?: Prisma.NestedEnumTemplateDocumentsTypeEnumNullableFilter<$PrismaModel>
 }
 
+export type EnumSignedDocumentProvenanceEnumFilter<$PrismaModel = never> = {
+  equals?: $Enums.SignedDocumentProvenanceEnum | Prisma.EnumSignedDocumentProvenanceEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.SignedDocumentProvenanceEnum[] | Prisma.ListEnumSignedDocumentProvenanceEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.SignedDocumentProvenanceEnum[] | Prisma.ListEnumSignedDocumentProvenanceEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumSignedDocumentProvenanceEnumFilter<$PrismaModel> | $Enums.SignedDocumentProvenanceEnum
+}
+
+export type EnumDocumentRequirementSatisfactionScopeTypeEnumNullableFilter<$PrismaModel = never> = {
+  equals?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum | Prisma.EnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel> | null
+  in?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel> | null
+  notIn?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel> | null
+  not?: Prisma.NestedEnumDocumentRequirementSatisfactionScopeTypeEnumNullableFilter<$PrismaModel> | $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+}
+
+export type EnumSignedDocumentProvenanceEnumWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.SignedDocumentProvenanceEnum | Prisma.EnumSignedDocumentProvenanceEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.SignedDocumentProvenanceEnum[] | Prisma.ListEnumSignedDocumentProvenanceEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.SignedDocumentProvenanceEnum[] | Prisma.ListEnumSignedDocumentProvenanceEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumSignedDocumentProvenanceEnumWithAggregatesFilter<$PrismaModel> | $Enums.SignedDocumentProvenanceEnum
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumSignedDocumentProvenanceEnumFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumSignedDocumentProvenanceEnumFilter<$PrismaModel>
+}
+
+export type EnumDocumentRequirementSatisfactionScopeTypeEnumNullableWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum | Prisma.EnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel> | null
+  in?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel> | null
+  notIn?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel> | null
+  not?: Prisma.NestedEnumDocumentRequirementSatisfactionScopeTypeEnumNullableWithAggregatesFilter<$PrismaModel> | $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+  _count?: Prisma.NestedIntNullableFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumDocumentRequirementSatisfactionScopeTypeEnumNullableFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumDocumentRequirementSatisfactionScopeTypeEnumNullableFilter<$PrismaModel>
+}
+
+export type EnumDocumentRequirementSatisfactionScopeTypeEnumFilter<$PrismaModel = never> = {
+  equals?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum | Prisma.EnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDocumentRequirementSatisfactionScopeTypeEnumFilter<$PrismaModel> | $Enums.DocumentRequirementSatisfactionScopeTypeEnum
+}
+
+export type EnumDocumentRequirementSatisfactionStatusEnumFilter<$PrismaModel = never> = {
+  equals?: $Enums.DocumentRequirementSatisfactionStatusEnum | Prisma.EnumDocumentRequirementSatisfactionStatusEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DocumentRequirementSatisfactionStatusEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionStatusEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DocumentRequirementSatisfactionStatusEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionStatusEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDocumentRequirementSatisfactionStatusEnumFilter<$PrismaModel> | $Enums.DocumentRequirementSatisfactionStatusEnum
+}
+
+export type EnumDocumentRequirementSatisfactionScopeTypeEnumWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum | Prisma.EnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDocumentRequirementSatisfactionScopeTypeEnumWithAggregatesFilter<$PrismaModel> | $Enums.DocumentRequirementSatisfactionScopeTypeEnum
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumDocumentRequirementSatisfactionScopeTypeEnumFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumDocumentRequirementSatisfactionScopeTypeEnumFilter<$PrismaModel>
+}
+
+export type EnumDocumentRequirementSatisfactionStatusEnumWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.DocumentRequirementSatisfactionStatusEnum | Prisma.EnumDocumentRequirementSatisfactionStatusEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DocumentRequirementSatisfactionStatusEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionStatusEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DocumentRequirementSatisfactionStatusEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionStatusEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDocumentRequirementSatisfactionStatusEnumWithAggregatesFilter<$PrismaModel> | $Enums.DocumentRequirementSatisfactionStatusEnum
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumDocumentRequirementSatisfactionStatusEnumFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumDocumentRequirementSatisfactionStatusEnumFilter<$PrismaModel>
+}
+
+export type EnumDocumentEvidenceAuditEventTypeEnumFilter<$PrismaModel = never> = {
+  equals?: $Enums.DocumentEvidenceAuditEventTypeEnum | Prisma.EnumDocumentEvidenceAuditEventTypeEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DocumentEvidenceAuditEventTypeEnum[] | Prisma.ListEnumDocumentEvidenceAuditEventTypeEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DocumentEvidenceAuditEventTypeEnum[] | Prisma.ListEnumDocumentEvidenceAuditEventTypeEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDocumentEvidenceAuditEventTypeEnumFilter<$PrismaModel> | $Enums.DocumentEvidenceAuditEventTypeEnum
+}
+
+export type EnumDocumentEvidenceAuditEventTypeEnumWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.DocumentEvidenceAuditEventTypeEnum | Prisma.EnumDocumentEvidenceAuditEventTypeEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DocumentEvidenceAuditEventTypeEnum[] | Prisma.ListEnumDocumentEvidenceAuditEventTypeEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DocumentEvidenceAuditEventTypeEnum[] | Prisma.ListEnumDocumentEvidenceAuditEventTypeEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDocumentEvidenceAuditEventTypeEnumWithAggregatesFilter<$PrismaModel> | $Enums.DocumentEvidenceAuditEventTypeEnum
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumDocumentEvidenceAuditEventTypeEnumFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumDocumentEvidenceAuditEventTypeEnumFilter<$PrismaModel>
+}
+
 export type EnumBoldSignSyncOperationTypeEnumFilter<$PrismaModel = never> = {
   equals?: $Enums.BoldSignSyncOperationTypeEnum | Prisma.EnumBoldSignSyncOperationTypeEnumFieldRefInput<$PrismaModel>
   in?: $Enums.BoldSignSyncOperationTypeEnum[] | Prisma.ListEnumBoldSignSyncOperationTypeEnumFieldRefInput<$PrismaModel>
@@ -3247,6 +3332,91 @@ export type NestedEnumTemplateDocumentsTypeEnumNullableWithAggregatesFilter<$Pri
   _count?: Prisma.NestedIntNullableFilter<$PrismaModel>
   _min?: Prisma.NestedEnumTemplateDocumentsTypeEnumNullableFilter<$PrismaModel>
   _max?: Prisma.NestedEnumTemplateDocumentsTypeEnumNullableFilter<$PrismaModel>
+}
+
+export type NestedEnumSignedDocumentProvenanceEnumFilter<$PrismaModel = never> = {
+  equals?: $Enums.SignedDocumentProvenanceEnum | Prisma.EnumSignedDocumentProvenanceEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.SignedDocumentProvenanceEnum[] | Prisma.ListEnumSignedDocumentProvenanceEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.SignedDocumentProvenanceEnum[] | Prisma.ListEnumSignedDocumentProvenanceEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumSignedDocumentProvenanceEnumFilter<$PrismaModel> | $Enums.SignedDocumentProvenanceEnum
+}
+
+export type NestedEnumDocumentRequirementSatisfactionScopeTypeEnumNullableFilter<$PrismaModel = never> = {
+  equals?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum | Prisma.EnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel> | null
+  in?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel> | null
+  notIn?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel> | null
+  not?: Prisma.NestedEnumDocumentRequirementSatisfactionScopeTypeEnumNullableFilter<$PrismaModel> | $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+}
+
+export type NestedEnumSignedDocumentProvenanceEnumWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.SignedDocumentProvenanceEnum | Prisma.EnumSignedDocumentProvenanceEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.SignedDocumentProvenanceEnum[] | Prisma.ListEnumSignedDocumentProvenanceEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.SignedDocumentProvenanceEnum[] | Prisma.ListEnumSignedDocumentProvenanceEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumSignedDocumentProvenanceEnumWithAggregatesFilter<$PrismaModel> | $Enums.SignedDocumentProvenanceEnum
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumSignedDocumentProvenanceEnumFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumSignedDocumentProvenanceEnumFilter<$PrismaModel>
+}
+
+export type NestedEnumDocumentRequirementSatisfactionScopeTypeEnumNullableWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum | Prisma.EnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel> | null
+  in?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel> | null
+  notIn?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel> | null
+  not?: Prisma.NestedEnumDocumentRequirementSatisfactionScopeTypeEnumNullableWithAggregatesFilter<$PrismaModel> | $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+  _count?: Prisma.NestedIntNullableFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumDocumentRequirementSatisfactionScopeTypeEnumNullableFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumDocumentRequirementSatisfactionScopeTypeEnumNullableFilter<$PrismaModel>
+}
+
+export type NestedEnumDocumentRequirementSatisfactionScopeTypeEnumFilter<$PrismaModel = never> = {
+  equals?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum | Prisma.EnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDocumentRequirementSatisfactionScopeTypeEnumFilter<$PrismaModel> | $Enums.DocumentRequirementSatisfactionScopeTypeEnum
+}
+
+export type NestedEnumDocumentRequirementSatisfactionStatusEnumFilter<$PrismaModel = never> = {
+  equals?: $Enums.DocumentRequirementSatisfactionStatusEnum | Prisma.EnumDocumentRequirementSatisfactionStatusEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DocumentRequirementSatisfactionStatusEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionStatusEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DocumentRequirementSatisfactionStatusEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionStatusEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDocumentRequirementSatisfactionStatusEnumFilter<$PrismaModel> | $Enums.DocumentRequirementSatisfactionStatusEnum
+}
+
+export type NestedEnumDocumentRequirementSatisfactionScopeTypeEnumWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum | Prisma.EnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionScopeTypeEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDocumentRequirementSatisfactionScopeTypeEnumWithAggregatesFilter<$PrismaModel> | $Enums.DocumentRequirementSatisfactionScopeTypeEnum
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumDocumentRequirementSatisfactionScopeTypeEnumFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumDocumentRequirementSatisfactionScopeTypeEnumFilter<$PrismaModel>
+}
+
+export type NestedEnumDocumentRequirementSatisfactionStatusEnumWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.DocumentRequirementSatisfactionStatusEnum | Prisma.EnumDocumentRequirementSatisfactionStatusEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DocumentRequirementSatisfactionStatusEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionStatusEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DocumentRequirementSatisfactionStatusEnum[] | Prisma.ListEnumDocumentRequirementSatisfactionStatusEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDocumentRequirementSatisfactionStatusEnumWithAggregatesFilter<$PrismaModel> | $Enums.DocumentRequirementSatisfactionStatusEnum
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumDocumentRequirementSatisfactionStatusEnumFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumDocumentRequirementSatisfactionStatusEnumFilter<$PrismaModel>
+}
+
+export type NestedEnumDocumentEvidenceAuditEventTypeEnumFilter<$PrismaModel = never> = {
+  equals?: $Enums.DocumentEvidenceAuditEventTypeEnum | Prisma.EnumDocumentEvidenceAuditEventTypeEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DocumentEvidenceAuditEventTypeEnum[] | Prisma.ListEnumDocumentEvidenceAuditEventTypeEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DocumentEvidenceAuditEventTypeEnum[] | Prisma.ListEnumDocumentEvidenceAuditEventTypeEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDocumentEvidenceAuditEventTypeEnumFilter<$PrismaModel> | $Enums.DocumentEvidenceAuditEventTypeEnum
+}
+
+export type NestedEnumDocumentEvidenceAuditEventTypeEnumWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.DocumentEvidenceAuditEventTypeEnum | Prisma.EnumDocumentEvidenceAuditEventTypeEnumFieldRefInput<$PrismaModel>
+  in?: $Enums.DocumentEvidenceAuditEventTypeEnum[] | Prisma.ListEnumDocumentEvidenceAuditEventTypeEnumFieldRefInput<$PrismaModel>
+  notIn?: $Enums.DocumentEvidenceAuditEventTypeEnum[] | Prisma.ListEnumDocumentEvidenceAuditEventTypeEnumFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumDocumentEvidenceAuditEventTypeEnumWithAggregatesFilter<$PrismaModel> | $Enums.DocumentEvidenceAuditEventTypeEnum
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumDocumentEvidenceAuditEventTypeEnumFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumDocumentEvidenceAuditEventTypeEnumFilter<$PrismaModel>
 }
 
 export type NestedEnumBoldSignSyncOperationTypeEnumFilter<$PrismaModel = never> = {

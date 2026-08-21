@@ -474,6 +474,45 @@ export const getEmbeddedSignLink = async (params: {
   return { signLink };
 };
 
+export const cloneEmbeddedTemplate = async (params: {
+  templateId: string;
+}) => {
+  const form = new FormData();
+  form.set('ViewOption', 'PreparePage');
+  form.set('WithFormFieldValues', 'true');
+  form.set('ShowTooltip', 'false');
+  form.set('ShowSaveButton', 'true');
+  form.set('ShowCreateButton', 'true');
+  form.set('ShowPreviewButton', 'true');
+  form.set('ShowNavigationButtons', 'true');
+  form.set('ShowToolbar', 'true');
+
+  const payload = await boldSignFormRequest<JsonRecord>({
+    path: '/v1/template/cloneTemplate',
+    query: { templateId: params.templateId },
+    form,
+  });
+  const templateId = pickString(
+    payload.templateId,
+    payload.TemplateId,
+    payload.id,
+    payload.templateID,
+  );
+  const editUrl = pickString(
+    payload.embedUrl,
+    payload.EmbedUrl,
+    payload.editUrl,
+    payload.EditUrl,
+    payload.url,
+    payload.Url,
+  );
+  if (!templateId || !editUrl) {
+    throw new Error('BoldSign cloned template response is missing templateId or embedUrl.');
+  }
+
+  return { templateId, editUrl };
+};
+
 export const getEmbeddedTemplateEditUrl = async (params: {
   templateId: string;
 }) => {

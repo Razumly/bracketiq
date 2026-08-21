@@ -8,6 +8,12 @@ import { canManageOrganization, hasOrgPermission } from '@/server/accessControl'
 import { dispatchRequiredEventDocuments } from '@/lib/eventConsentDispatch';
 import { normalizeRequiredSignerType } from '@/lib/templateSignerTypes';
 import { listOrganizationUsersScopeEvents } from '@/server/organizationUsersAccess';
+import {
+  ensureDocumentSubject,
+  signedDocumentEvidenceFields,
+  DOCUMENT_EVIDENCE_PROVENANCE,
+} from '@/server/documentEvidence';
+
 
 export const dynamic = 'force-dynamic';
 
@@ -74,6 +80,7 @@ export async function POST(
       title: true,
       type: true,
       requiredSignerType: true,
+      signOnce: true,
     },
   });
   const event = parsed.data.eventId
@@ -152,6 +159,11 @@ export async function POST(
     }
 
     const now = new Date();
+    await ensureDocumentSubject({
+      organizationId,
+      userId: parsed.data.userId,
+      hostId: null,
+    });
     const signedDocumentData: Prisma.SignedDocumentsUncheckedCreateInput = {
       id: crypto.randomUUID(),
       createdAt: now,
@@ -164,6 +176,15 @@ export async function POST(
       organizationId,
       eventId: event?.id ?? null,
       teamId: null,
+      ...signedDocumentEvidenceFields({
+        organizationId,
+        userId: parsed.data.userId,
+        hostId: null,
+        eventId: event?.id ?? null,
+        teamId: null,
+        signOnce: template.signOnce,
+        provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
+      }),
       status: 'UNSIGNED',
       signedAt: null,
       signerEmail: null,
