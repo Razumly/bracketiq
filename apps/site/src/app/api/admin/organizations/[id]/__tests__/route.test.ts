@@ -30,6 +30,9 @@ const prismaMock = {
   templateDocuments: {
     deleteMany: jest.fn(),
   },
+  documentRequirements: {
+    deleteMany: jest.fn(),
+  },
   signedDocuments: {
     updateMany: jest.fn(),
   },
@@ -93,6 +96,9 @@ describe('DELETE /api/admin/organizations/[id]', () => {
 
     expect(res.status).toBe(200);
     expect(prismaMock.fields.deleteMany).toHaveBeenCalledWith({ where: { organizationId: 'org_1' } });
+    expect(prismaMock.documentRequirements.deleteMany).toHaveBeenCalledWith({
+      where: { organizationId: 'org_1' },
+    });
     expect(prismaMock.organizations.delete).toHaveBeenCalledWith({ where: { id: 'org_1' } });
   });
 });

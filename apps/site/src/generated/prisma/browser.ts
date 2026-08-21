@@ -543,6 +543,11 @@ export type EventTemplateLeagueScoringConfigs = Prisma.EventTemplateLeagueScorin
  */
 export type Sports = Prisma.SportsModel
 /**
+ * Model DocumentRequirements
+ *
+ */
+export type DocumentRequirements = Prisma.DocumentRequirementsModel
+/**
  * Model TemplateDocuments
  *
  */

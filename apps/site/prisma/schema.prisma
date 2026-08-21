@@ -3277,23 +3277,42 @@ model Sports {
   matchRulesTemplate                Json?
 }
 
+model DocumentRequirements {
+  id             String   @id
+  createdAt      DateTime?
+  updatedAt      DateTime?
+  organizationId String
+  title          String
+  description    String?
+  createdBy      String?
+  status         String?
+
+  @@index([organizationId])
+}
+
 model TemplateDocuments {
-  id                 String                     @id
-  createdAt          DateTime?
-  updatedAt          DateTime?
-  templateId         String?
-  type               TemplateDocumentsTypeEnum?
-  organizationId     String
-  title              String
-  description        String?
-  signOnce           Boolean?
-  requiredSignerType String                     @default("PARTICIPANT")
-  status             String?
-  createdBy          String?
-  roleIndex          Int?
-  roleIndexes        Int[]
-  signerRoles        String[]
-  content            String?
+  id                   String                     @id
+  createdAt            DateTime?
+  updatedAt            DateTime?
+  templateId           String?
+  documentRequirementId String
+  versionSequence      Int                        @default(1)
+  frozenAt             DateTime?
+  type                 TemplateDocumentsTypeEnum?
+  organizationId       String
+  title                String
+  description          String?
+  signOnce             Boolean?
+  requiredSignerType   String                     @default("PARTICIPANT")
+  status               String?
+  createdBy            String?
+  roleIndex            Int?
+  roleIndexes          Int[]
+  signerRoles          String[]
+  content              String?
+
+  @@unique([documentRequirementId, versionSequence])
+  @@index([documentRequirementId])
 }
 
 model SignedDocuments {

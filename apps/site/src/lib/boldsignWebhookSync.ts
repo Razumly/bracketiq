@@ -886,13 +886,57 @@ const createOrUpdateTemplateProjectionFromOperation = async (params: {
   );
 
   const now = new Date();
+  const documentRequirementId = existing?.documentRequirementId
+    ?? pickString(operationPayload.documentRequirementId)
+    ?? `document-requirement:boldsign:${params.event.templateId}`;
+  const projectedTemplate = await prisma.$transaction(async (tx) => {
+    await tx.documentRequirements.upsert({
+      where: { id: documentRequirementId },
+      create: {
+        id: documentRequirementId,
+        createdAt: now,
+        updatedAt: now,
+        organizationId,
+        title,
+        description,
+        createdBy: pickString(params.operation?.userId, operationPayload.createdBy) ?? null,
+        status: 'ACTIVE',
+      },
+      update: {
+        updatedAt: now,
+      },
+    });
 
-  if (existing) {
-    const updated = await prisma.templateDocuments.update({
-      where: { id: existing.id },
+    if (existing) {
+      return tx.templateDocuments.update({
+        where: { id: existing.id },
+        data: {
+          updatedAt: now,
+          templateId: params.event.templateId,
+          type: 'PDF',
+          organizationId,
+          title,
+          description,
+          signOnce,
+          requiredSignerType,
+          status: params.status,
+          createdBy: pickString(params.operation?.userId, operationPayload.createdBy, existing.createdBy) ?? null,
+          roleIndex: payloadRoles[0]?.roleIndex ?? existing.roleIndex ?? null,
+          roleIndexes: payloadRoles.map((entry) => entry.roleIndex),
+          signerRoles: payloadRoles.map((entry) => entry.signerRole),
+          content: null,
+        },
+      });
+    }
+
+    return tx.templateDocuments.create({
       data: {
+        id: pickString(params.operation?.templateDocumentId, operationPayload.templateDocumentId) ?? crypto.randomUUID(),
+        createdAt: now,
         updatedAt: now,
         templateId: params.event.templateId,
+        documentRequirementId,
+        versionSequence: 1,
         type: 'PDF',
         organizationId,
         title,
@@ -900,38 +944,16 @@ const createOrUpdateTemplateProjectionFromOperation = async (params: {
         signOnce,
         requiredSignerType,
         status: params.status,
-        createdBy: pickString(params.operation?.userId, operationPayload.createdBy, existing.createdBy) ?? null,
-        roleIndex: payloadRoles[0]?.roleIndex ?? existing.roleIndex ?? null,
+        createdBy: pickString(params.operation?.userId, operationPayload.createdBy) ?? null,
+        roleIndex: payloadRoles[0]?.roleIndex ?? null,
         roleIndexes: payloadRoles.map((entry) => entry.roleIndex),
         signerRoles: payloadRoles.map((entry) => entry.signerRole),
         content: null,
       },
     });
-    return updated;
-  }
-
-  const created = await prisma.templateDocuments.create({
-    data: {
-      id: pickString(params.operation?.templateDocumentId, operationPayload.templateDocumentId) ?? crypto.randomUUID(),
-      createdAt: now,
-      updatedAt: now,
-      templateId: params.event.templateId,
-      type: 'PDF',
-      organizationId,
-      title,
-      description,
-      signOnce,
-      requiredSignerType,
-      status: params.status,
-      createdBy: pickString(params.operation?.userId, operationPayload.createdBy) ?? null,
-      roleIndex: payloadRoles[0]?.roleIndex ?? null,
-      roleIndexes: payloadRoles.map((entry) => entry.roleIndex),
-      signerRoles: payloadRoles.map((entry) => entry.signerRole),
-      content: null,
-    },
   });
 
-  return created;
+  return projectedTemplate;
 };
 
 const projectTemplateEvent = async (event: ParsedBoldSignWebhookEvent): Promise<void> => {

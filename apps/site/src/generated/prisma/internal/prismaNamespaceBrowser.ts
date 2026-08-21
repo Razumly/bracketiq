@@ -156,6 +156,7 @@ export const ModelName = {
   EventTemplateRentalResourceHints: 'EventTemplateRentalResourceHints',
   EventTemplateLeagueScoringConfigs: 'EventTemplateLeagueScoringConfigs',
   Sports: 'Sports',
+  DocumentRequirements: 'DocumentRequirements',
   TemplateDocuments: 'TemplateDocuments',
   SignedDocuments: 'SignedDocuments',
   BoldSignWebhookEvents: 'BoldSignWebhookEvents',
@@ -2717,11 +2718,28 @@ export const SportsScalarFieldEnum = {
 export type SportsScalarFieldEnum = (typeof SportsScalarFieldEnum)[keyof typeof SportsScalarFieldEnum]
 
 
+export const DocumentRequirementsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  organizationId: 'organizationId',
+  title: 'title',
+  description: 'description',
+  createdBy: 'createdBy',
+  status: 'status'
+} as const
+
+export type DocumentRequirementsScalarFieldEnum = (typeof DocumentRequirementsScalarFieldEnum)[keyof typeof DocumentRequirementsScalarFieldEnum]
+
+
 export const TemplateDocumentsScalarFieldEnum = {
   id: 'id',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
   templateId: 'templateId',
+  documentRequirementId: 'documentRequirementId',
+  versionSequence: 'versionSequence',
+  frozenAt: 'frozenAt',
   type: 'type',
   organizationId: 'organizationId',
   title: 'title',

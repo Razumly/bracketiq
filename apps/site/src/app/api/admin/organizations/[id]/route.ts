@@ -63,6 +63,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         tx.templateDocuments?.deleteMany?.({
           where: { organizationId },
         }),
+        tx.documentRequirements?.deleteMany?.({
+          where: { organizationId },
+        }),
         tx.signedDocuments?.updateMany?.({
           where: { organizationId },
           data: {

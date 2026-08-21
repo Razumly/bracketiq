@@ -11,6 +11,11 @@ const prismaMock = {
   },
   templateDocuments: {
     findFirst: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+  },
+  documentRequirements: {
+    upsert: jest.fn(),
   },
   eventRegistrations: {
     findFirst: jest.fn(),
@@ -354,6 +359,66 @@ describe('boldsignWebhookSync operation status projection', () => {
           eventId: 'event_2',
         },
         data: expect.objectContaining({ status: 'ACTIVE' }),
+      }),
+    );
+  });
+
+  it('projects the operation Requirement ID onto a PDF Version', async () => {
+    findLatestBoldSignOperationMock.mockResolvedValue({
+      id: 'op_template_1',
+      operationType: 'TEMPLATE_CREATE',
+      status: 'PENDING_WEBHOOK',
+      organizationId: 'org_1',
+      templateDocumentId: 'version_1',
+      templateId: 'bold_template_1',
+      userId: 'staff_1',
+      payload: {
+        documentRequirementId: 'requirement_1',
+        organizationId: 'org_1',
+        title: 'Photo waiver',
+        description: 'Event photography consent',
+        type: 'PDF',
+        roles: [{ roleIndex: 1, signerRole: 'participant' }],
+      },
+    });
+    prismaMock.templateDocuments.findFirst.mockResolvedValue(null);
+    prismaMock.documentRequirements.upsert.mockResolvedValue({ id: 'requirement_1' });
+    prismaMock.templateDocuments.create.mockResolvedValue({ id: 'version_1' });
+
+    const event = parseBoldSignWebhookEvent({
+      payload: {
+        eventType: 'TemplateCreated',
+        data: {
+          object: {
+            templateId: 'bold_template_1',
+            status: 'Active',
+          },
+        },
+      },
+      rawBody: JSON.stringify({ eventType: 'TemplateCreated', templateId: 'bold_template_1' }),
+      headerEventType: 'TemplateCreated',
+    });
+
+    await processBoldSignWebhookEvent(event);
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+
+    expect(prismaMock.documentRequirements.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'requirement_1' },
+        create: expect.objectContaining({
+          id: 'requirement_1',
+          organizationId: 'org_1',
+          title: 'Photo waiver',
+        }),
+      }),
+    );
+    expect(prismaMock.templateDocuments.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          id: 'version_1',
+          documentRequirementId: 'requirement_1',
+          versionSequence: 1,
+        }),
       }),
     );
   });
