@@ -159,41 +159,43 @@ export async function POST(
     }
 
     const now = new Date();
-    await ensureDocumentSubject({
-      organizationId,
-      userId: parsed.data.userId,
-      hostId: null,
-    });
-    const signedDocumentData: Prisma.SignedDocumentsUncheckedCreateInput = {
-      id: crypto.randomUUID(),
-      createdAt: now,
-      updatedAt: now,
-      signedDocumentId: `text-${crypto.randomUUID()}`,
-      templateId: template.id,
-      userId: parsed.data.userId,
-      documentName: template.title ?? 'Document',
-      hostId: null,
-      organizationId,
-      eventId: event?.id ?? null,
-      teamId: null,
-      ...signedDocumentEvidenceFields({
+    const created = await prisma.$transaction(async (tx) => {
+      await ensureDocumentSubject({
         organizationId,
         userId: parsed.data.userId,
         hostId: null,
+      }, tx);
+      const signedDocumentData: Prisma.SignedDocumentsUncheckedCreateInput = {
+        id: crypto.randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+        signedDocumentId: `text-${crypto.randomUUID()}`,
+        templateId: template.id,
+        userId: parsed.data.userId,
+        documentName: template.title ?? 'Document',
+        hostId: null,
+        organizationId,
         eventId: event?.id ?? null,
         teamId: null,
-        signOnce: template.signOnce,
-        provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
-      }),
-      status: 'UNSIGNED',
-      signedAt: null,
-      signerEmail: null,
-      roleIndex: null,
-      signerRole: 'participant',
-      ipAddress: null,
-      requestId: null,
-    };
-    const created = await prisma.signedDocuments.create({ data: signedDocumentData });
+        ...signedDocumentEvidenceFields({
+          organizationId,
+          userId: parsed.data.userId,
+          hostId: null,
+          eventId: event?.id ?? null,
+          teamId: null,
+          signOnce: template.signOnce,
+          provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
+        }),
+        status: 'UNSIGNED',
+        signedAt: null,
+        signerEmail: null,
+        roleIndex: null,
+        signerRole: 'participant',
+        ipAddress: null,
+        requestId: null,
+      };
+      return tx.signedDocuments.create({ data: signedDocumentData });
+    });
     return NextResponse.json({ documentId: created.signedDocumentId, type: 'TEXT' }, { status: 201 });
   }
 

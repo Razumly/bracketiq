@@ -20,6 +20,16 @@ const prismaMock = {
     findUnique: jest.fn(),
     update: jest.fn(),
   },
+  documentSubjects: {
+    upsert: jest.fn(),
+  },
+  documentRequirementSatisfactions: {
+    findFirst: jest.fn(),
+    upsert: jest.fn(),
+  },
+  documentEvidenceAuditEvents: {
+    create: jest.fn(),
+  },
   eventRegistrations: {
     findFirst: jest.fn(),
     findMany: jest.fn(),
@@ -97,7 +107,9 @@ describe('boldsignWebhookSync operation status projection', () => {
       operationType: 'DOCUMENT_SEND',
       status: 'PENDING_WEBHOOK',
       documentId: 'doc_1',
+      templateId: 'bold_template_1',
       templateDocumentId: 'template_1',
+      organizationId: 'org_1',
       userId: 'parent_1',
       childUserId: 'child_1',
       signerRole: 'parent_guardian',
@@ -108,6 +120,18 @@ describe('boldsignWebhookSync operation status projection', () => {
     prismaMock.signedDocuments.findFirst.mockResolvedValue(null);
     prismaMock.signedDocuments.findMany.mockResolvedValue([]);
     prismaMock.signedDocuments.create.mockResolvedValue({ id: 'signed_row_1' });
+    prismaMock.documentSubjects.upsert.mockResolvedValue({ id: 'subject_1' });
+    prismaMock.documentRequirementSatisfactions.findFirst.mockResolvedValue(null);
+    prismaMock.documentRequirementSatisfactions.upsert.mockResolvedValue({ id: 'satisfaction_1' });
+    prismaMock.documentEvidenceAuditEvents.create.mockResolvedValue({ id: 'audit_1' });
+    prismaMock.templateDocuments.findFirst.mockResolvedValue({
+      id: 'template_1',
+      organizationId: 'org_1',
+      title: 'Child Consent',
+      type: 'TEXT',
+      documentRequirementId: 'requirement_1',
+      signerRoles: ['parent_guardian'],
+    });
     prismaMock.events.findMany.mockResolvedValue([]);
     prismaMock.eventRegistrations.findFirst.mockResolvedValue(null);
     prismaMock.eventRegistrations.findMany.mockResolvedValue([]);
@@ -192,7 +216,9 @@ describe('boldsignWebhookSync operation status projection', () => {
       operationType: 'DOCUMENT_SEND',
       status: 'CONFIRMED',
       documentId: 'doc_1',
+      templateId: 'bold_template_1',
       templateDocumentId: 'template_1',
+      organizationId: 'org_1',
       userId: 'parent_1',
       childUserId: 'child_1',
       signerRole: 'parent_guardian',
@@ -200,7 +226,6 @@ describe('boldsignWebhookSync operation status projection', () => {
       payload: {},
       signedDocumentRecordId: 'signed_row_1',
     });
-
     const event = parseBoldSignWebhookEvent({
       payload: {
         eventType: 'Sent',
@@ -212,6 +237,7 @@ describe('boldsignWebhookSync operation status projection', () => {
     });
 
     await processBoldSignWebhookEvent(event);
+
 
     expect(updateBoldSignOperationByIdMock).toHaveBeenCalledWith(
       'op_1',
@@ -326,8 +352,8 @@ describe('boldsignWebhookSync operation status projection', () => {
 
   it('locks each event before applying signature-driven registration activation', async () => {
     prismaMock.eventRegistrations.findMany.mockResolvedValue([
-      { id: 'registration_2', eventId: 'event_2' },
       { id: 'registration_1', eventId: 'event_1' },
+      { id: 'registration_2', eventId: 'event_2' },
       { id: 'registration_3', eventId: 'event_2' },
     ]);
 
@@ -343,7 +369,7 @@ describe('boldsignWebhookSync operation status projection', () => {
 
     await processBoldSignWebhookEvent(event);
 
-    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(2);
     expect(acquireEventLockAndLoadStructureMock).toHaveBeenNthCalledWith(1, prismaMock, 'event_1');
     expect(acquireEventLockAndLoadStructureMock).toHaveBeenNthCalledWith(2, prismaMock, 'event_2');
     expect(prismaMock.eventRegistrations.updateMany).toHaveBeenNthCalledWith(

@@ -264,6 +264,7 @@ export type DocumentRequirementSatisfactionScopeTypeEnum = (typeof DocumentRequi
 
 
 export const DocumentRequirementSatisfactionStatusEnum = {
+  PENDING: 'PENDING',
   SATISFIED: 'SATISFIED',
   INVALIDATED: 'INVALIDATED'
 } as const

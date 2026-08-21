@@ -11,6 +11,16 @@ const prismaMock = {
     create: jest.fn(),
     update: jest.fn(),
   },
+  documentSubjects: {
+    upsert: jest.fn(),
+  },
+  documentRequirementSatisfactions: {
+    findFirst: jest.fn(),
+    upsert: jest.fn(),
+  },
+  documentEvidenceAuditEvents: {
+    create: jest.fn(),
+  },
   userData: {
     findUnique: jest.fn(),
   },
@@ -23,6 +33,7 @@ const prismaMock = {
   boldSignSyncOperations: {
     findFirst: jest.fn(),
   },
+  $transaction: jest.fn(),
 };
 
 const requireSessionMock = jest.fn();
@@ -75,7 +86,12 @@ describe('POST /api/rentals/sign', () => {
     prismaMock.signedDocuments.findMany.mockResolvedValue([]);
     prismaMock.signedDocuments.create.mockResolvedValue({ id: 'signed_1' });
     prismaMock.signedDocuments.update.mockResolvedValue({ id: 'signed_1' });
+    prismaMock.documentSubjects.upsert.mockResolvedValue({ id: 'subject_1' });
+    prismaMock.documentRequirementSatisfactions.findFirst.mockResolvedValue(null);
+    prismaMock.documentRequirementSatisfactions.upsert.mockResolvedValue({ id: 'satisfaction_1' });
+    prismaMock.documentEvidenceAuditEvents.create.mockResolvedValue({ id: 'audit_1' });
     prismaMock.boldSignSyncOperations.findFirst.mockResolvedValue(null);
+    prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock));
     createDocumentSendOperationMock.mockResolvedValue({ id: 'op_1', status: 'PENDING_WEBHOOK' });
     findLatestBoldSignOperationMock.mockResolvedValue(null);
   });

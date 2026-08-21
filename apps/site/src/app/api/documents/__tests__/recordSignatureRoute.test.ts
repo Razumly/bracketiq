@@ -15,6 +15,13 @@ const prismaMock = {
   events: {
     findUnique: jest.fn(),
   },
+  documentSubjects: {
+    upsert: jest.fn(),
+  },
+  documentRequirementSatisfactions: {
+    findFirst: jest.fn(),
+    upsert: jest.fn(),
+  },
   signedDocuments: {
     findFirst: jest.fn(),
     create: jest.fn(),
@@ -26,6 +33,7 @@ const prismaMock = {
   eventRegistrations: {
     findMany: jest.fn(),
   },
+  $transaction: jest.fn(),
 };
 
 const requireSessionMock = jest.fn();
@@ -63,6 +71,7 @@ const jsonPost = (url: string, body: unknown) =>
 describe('POST /api/documents/record-signature', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
     requireSessionMock.mockResolvedValue({ userId: 'parent_1', isAdmin: false });
     prismaMock.events.findUnique.mockResolvedValue({ organizationId: 'org_1' });
     prismaMock.parentChildLinks.findFirst.mockResolvedValue({ id: 'link_1' });
@@ -72,7 +81,12 @@ describe('POST /api/documents/record-signature', () => {
       signedAt: null,
     });
     prismaMock.signedDocuments.create.mockResolvedValue({ id: 'signed_1' });
-    prismaMock.templateDocuments.findUnique.mockResolvedValue({ signOnce: false, type: 'TEXT' });
+    prismaMock.templateDocuments.findUnique.mockResolvedValue({
+      signOnce: false,
+      type: 'TEXT',
+      documentRequirementId: 'requirement_1',
+      signerRoles: ['parent_guardian'],
+    });
     prismaMock.eventRegistrations.findMany.mockResolvedValue([]);
     syncChildRegistrationConsentStatusMock.mockResolvedValue(undefined);
     findLatestBoldSignOperationMock.mockResolvedValue({
@@ -171,7 +185,12 @@ describe('POST /api/documents/record-signature', () => {
   });
 
   it('syncs all pending/active child registrations when a sign-once text template is signed', async () => {
-    prismaMock.templateDocuments.findUnique.mockResolvedValue({ signOnce: true, type: 'TEXT' });
+    prismaMock.templateDocuments.findUnique.mockResolvedValue({
+      signOnce: true,
+      type: 'TEXT',
+      documentRequirementId: 'requirement_1',
+      signerRoles: ['parent_guardian'],
+    });
     prismaMock.eventRegistrations.findMany.mockResolvedValue([
       { eventId: 'event_1', parentId: 'parent_1' },
       { eventId: 'event_2', parentId: 'parent_1' },

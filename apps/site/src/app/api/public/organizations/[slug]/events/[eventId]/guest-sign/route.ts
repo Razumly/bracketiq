@@ -276,11 +276,6 @@ export async function POST(req: NextRequest, context: RouteContext) {
       if (templateType === 'TEXT') {
         const documentId = normalizeGuestText(existingSignedRows[0]?.signedDocumentId) ?? `text-${crypto.randomUUID()}`;
         const now = new Date();
-        await ensureDocumentSubject({
-          organizationId: organization.id,
-          userId: signerUserId,
-          hostId: childUserId ?? null,
-        });
         const evidenceFields = signedDocumentEvidenceFields({
           organizationId: organization.id,
           userId: signerUserId,
@@ -290,46 +285,53 @@ export async function POST(req: NextRequest, context: RouteContext) {
           signOnce: template.signOnce,
           provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
         });
-        if (existingSignedRows[0]?.id) {
-          await (prisma as any).signedDocuments.update({
-            where: { id: existingSignedRows[0].id },
-            data: {
-              updatedAt: now,
-              signedDocumentId: documentId,
-              status: 'UNSIGNED',
-              userId: signerUserId,
-              hostId: childUserId ?? null,
-              organizationId: organization.id,
-              eventId: event.id,
-              ...evidenceFields,
-              signerEmail: signerIdentity.email ?? null,
-              signerRole: signerContext,
-            },
-          });
-        } else {
-          await (prisma as any).signedDocuments.create({
-            data: {
-              id: crypto.randomUUID(),
-              createdAt: now,
-              updatedAt: now,
-              signedDocumentId: documentId,
-              templateId: template.id,
-              userId: signerUserId,
-              documentName: template.title ?? 'Text Waiver',
-              hostId: childUserId ?? null,
-              organizationId: organization.id,
-              eventId: event.id,
-              ...evidenceFields,
-              status: 'UNSIGNED',
-              signedAt: null,
-              signerEmail: signerIdentity.email ?? null,
-              roleIndex: null,
-              signerRole: signerContext,
-              ipAddress: null,
-              requestId: null,
-            },
-          });
-        }
+        await prisma.$transaction(async (tx) => {
+          await ensureDocumentSubject({
+            organizationId: organization.id,
+            userId: signerUserId,
+            hostId: childUserId ?? null,
+          }, tx);
+          if (existingSignedRows[0]?.id) {
+            await tx.signedDocuments.update({
+              where: { id: existingSignedRows[0].id },
+              data: {
+                updatedAt: now,
+                signedDocumentId: documentId,
+                status: 'UNSIGNED',
+                userId: signerUserId,
+                hostId: childUserId ?? null,
+                organizationId: organization.id,
+                eventId: event.id,
+                ...evidenceFields,
+                signerEmail: signerIdentity.email ?? null,
+                signerRole: signerContext,
+              },
+            });
+          } else {
+            await tx.signedDocuments.create({
+              data: {
+                id: crypto.randomUUID(),
+                createdAt: now,
+                updatedAt: now,
+                signedDocumentId: documentId,
+                templateId: template.id,
+                userId: signerUserId,
+                documentName: template.title ?? 'Text Waiver',
+                hostId: childUserId ?? null,
+                organizationId: organization.id,
+                eventId: event.id,
+                ...evidenceFields,
+                status: 'UNSIGNED',
+                signedAt: null,
+                signerEmail: signerIdentity.email ?? null,
+                roleIndex: null,
+                signerRole: signerContext,
+                ipAddress: null,
+                requestId: null,
+              },
+            });
+          }
+        });
         signLinks.push({
           templateId: template.id,
           type: 'TEXT',

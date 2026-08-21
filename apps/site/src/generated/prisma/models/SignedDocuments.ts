@@ -349,7 +349,7 @@ export type SignedDocumentsGroupByOutputType = {
   providerDocumentId: string | null
   provenance: $Enums.SignedDocumentProvenanceEnum
   templateId: string
-  userId: string
+  userId: string | null
   signerUserId: string | null
   documentSubjectId: string | null
   documentName: string
@@ -407,7 +407,7 @@ export type SignedDocumentsWhereInput = {
   providerDocumentId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   provenance?: Prisma.EnumSignedDocumentProvenanceEnumFilter<"SignedDocuments"> | $Enums.SignedDocumentProvenanceEnum
   templateId?: Prisma.StringFilter<"SignedDocuments"> | string
-  userId?: Prisma.StringFilter<"SignedDocuments"> | string
+  userId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   signerUserId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   documentSubjectId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   documentName?: Prisma.StringFilter<"SignedDocuments"> | string
@@ -442,7 +442,7 @@ export type SignedDocumentsOrderByWithRelationInput = {
   providerDocumentId?: Prisma.SortOrderInput | Prisma.SortOrder
   provenance?: Prisma.SortOrder
   templateId?: Prisma.SortOrder
-  userId?: Prisma.SortOrder
+  userId?: Prisma.SortOrderInput | Prisma.SortOrder
   signerUserId?: Prisma.SortOrderInput | Prisma.SortOrder
   documentSubjectId?: Prisma.SortOrderInput | Prisma.SortOrder
   documentName?: Prisma.SortOrder
@@ -481,7 +481,7 @@ export type SignedDocumentsWhereUniqueInput = Prisma.AtLeast<{
   providerDocumentId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   provenance?: Prisma.EnumSignedDocumentProvenanceEnumFilter<"SignedDocuments"> | $Enums.SignedDocumentProvenanceEnum
   templateId?: Prisma.StringFilter<"SignedDocuments"> | string
-  userId?: Prisma.StringFilter<"SignedDocuments"> | string
+  userId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   signerUserId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   documentSubjectId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   documentName?: Prisma.StringFilter<"SignedDocuments"> | string
@@ -516,7 +516,7 @@ export type SignedDocumentsOrderByWithAggregationInput = {
   providerDocumentId?: Prisma.SortOrderInput | Prisma.SortOrder
   provenance?: Prisma.SortOrder
   templateId?: Prisma.SortOrder
-  userId?: Prisma.SortOrder
+  userId?: Prisma.SortOrderInput | Prisma.SortOrder
   signerUserId?: Prisma.SortOrderInput | Prisma.SortOrder
   documentSubjectId?: Prisma.SortOrderInput | Prisma.SortOrder
   documentName?: Prisma.SortOrder
@@ -559,7 +559,7 @@ export type SignedDocumentsScalarWhereWithAggregatesInput = {
   providerDocumentId?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
   provenance?: Prisma.EnumSignedDocumentProvenanceEnumWithAggregatesFilter<"SignedDocuments"> | $Enums.SignedDocumentProvenanceEnum
   templateId?: Prisma.StringWithAggregatesFilter<"SignedDocuments"> | string
-  userId?: Prisma.StringWithAggregatesFilter<"SignedDocuments"> | string
+  userId?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
   signerUserId?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
   documentSubjectId?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
   documentName?: Prisma.StringWithAggregatesFilter<"SignedDocuments"> | string
@@ -594,7 +594,7 @@ export type SignedDocumentsCreateInput = {
   providerDocumentId?: string | null
   provenance?: $Enums.SignedDocumentProvenanceEnum
   templateId: string
-  userId: string
+  userId?: string | null
   signerUserId?: string | null
   documentSubjectId?: string | null
   documentName: string
@@ -629,7 +629,7 @@ export type SignedDocumentsUncheckedCreateInput = {
   providerDocumentId?: string | null
   provenance?: $Enums.SignedDocumentProvenanceEnum
   templateId: string
-  userId: string
+  userId?: string | null
   signerUserId?: string | null
   documentSubjectId?: string | null
   documentName: string
@@ -664,7 +664,7 @@ export type SignedDocumentsUpdateInput = {
   providerDocumentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   provenance?: Prisma.EnumSignedDocumentProvenanceEnumFieldUpdateOperationsInput | $Enums.SignedDocumentProvenanceEnum
   templateId?: Prisma.StringFieldUpdateOperationsInput | string
-  userId?: Prisma.StringFieldUpdateOperationsInput | string
+  userId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   signerUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   documentSubjectId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   documentName?: Prisma.StringFieldUpdateOperationsInput | string
@@ -699,7 +699,7 @@ export type SignedDocumentsUncheckedUpdateInput = {
   providerDocumentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   provenance?: Prisma.EnumSignedDocumentProvenanceEnumFieldUpdateOperationsInput | $Enums.SignedDocumentProvenanceEnum
   templateId?: Prisma.StringFieldUpdateOperationsInput | string
-  userId?: Prisma.StringFieldUpdateOperationsInput | string
+  userId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   signerUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   documentSubjectId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   documentName?: Prisma.StringFieldUpdateOperationsInput | string
@@ -734,7 +734,7 @@ export type SignedDocumentsCreateManyInput = {
   providerDocumentId?: string | null
   provenance?: $Enums.SignedDocumentProvenanceEnum
   templateId: string
-  userId: string
+  userId?: string | null
   signerUserId?: string | null
   documentSubjectId?: string | null
   documentName: string
@@ -769,7 +769,7 @@ export type SignedDocumentsUpdateManyMutationInput = {
   providerDocumentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   provenance?: Prisma.EnumSignedDocumentProvenanceEnumFieldUpdateOperationsInput | $Enums.SignedDocumentProvenanceEnum
   templateId?: Prisma.StringFieldUpdateOperationsInput | string
-  userId?: Prisma.StringFieldUpdateOperationsInput | string
+  userId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   signerUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   documentSubjectId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   documentName?: Prisma.StringFieldUpdateOperationsInput | string
@@ -804,7 +804,7 @@ export type SignedDocumentsUncheckedUpdateManyInput = {
   providerDocumentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   provenance?: Prisma.EnumSignedDocumentProvenanceEnumFieldUpdateOperationsInput | $Enums.SignedDocumentProvenanceEnum
   templateId?: Prisma.StringFieldUpdateOperationsInput | string
-  userId?: Prisma.StringFieldUpdateOperationsInput | string
+  userId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   signerUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   documentSubjectId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   documentName?: Prisma.StringFieldUpdateOperationsInput | string
@@ -1116,7 +1116,7 @@ export type $SignedDocumentsPayload<ExtArgs extends runtime.Types.Extensions.Int
     providerDocumentId: string | null
     provenance: $Enums.SignedDocumentProvenanceEnum
     templateId: string
-    userId: string
+    userId: string | null
     signerUserId: string | null
     documentSubjectId: string | null
     documentName: string

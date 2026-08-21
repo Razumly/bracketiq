@@ -1410,6 +1410,10 @@ const createOrUpdateSignedDocumentProjection = async (params: {
     const nextSignedAt = nextStatus === 'SIGNED'
       ? (normalizeText(existing?.signedAt) ?? defaultSignedAt)
       : null;
+    const providerDocumentId = pickString(event.documentId);
+    if (!userId || !templateDocumentId || !providerDocumentId) {
+      continue;
+    }
     const evidenceFields = signedDocumentEvidenceFields({
       organizationId: inferredContext.organizationId,
       userId,
@@ -1418,22 +1422,62 @@ const createOrUpdateSignedDocumentProjection = async (params: {
       teamId: inferredContext.teamId,
       signOnce: templateRow?.signOnce,
       provenance: DOCUMENT_EVIDENCE_PROVENANCE.BOLDSIGN,
-      providerDocumentId: event.documentId,
+      providerDocumentId,
     });
-    await ensureDocumentSubject({
-      organizationId: inferredContext.organizationId,
-      userId,
-      hostId,
-    });
+    let projectedRowId = existing?.id ?? null;
+    await prisma.$transaction(async (tx) => {
+      await ensureDocumentSubject({
+        organizationId: inferredContext.organizationId,
+        userId,
+        hostId,
+      }, tx);
 
-    if (existing) {
-      await prisma.signedDocuments.update({
-        where: { id: existing.id },
+      if (existing) {
+        await tx.signedDocuments.update({
+          where: { id: existing.id },
+          data: {
+            updatedAt: new Date(),
+            signedDocumentId: providerDocumentId,
+            templateId: templateDocumentId,
+            userId,
+            documentName,
+            hostId,
+            organizationId: inferredContext.organizationId,
+            eventId: inferredContext.eventId,
+            teamId: inferredContext.teamId,
+            ...evidenceFields,
+            status: nextStatus,
+            signedAt: nextSignedAt ?? undefined,
+            signerEmail,
+            roleIndex,
+            signerRole,
+          },
+        });
+        if (nextStatus === 'SIGNED') {
+          await createDocumentRequirementSatisfaction({
+            evidenceId: existing.id,
+            templateDocumentId,
+            documentRequirementId: templateRow?.documentRequirementId,
+            organizationId: inferredContext.organizationId,
+            documentSubjectId: evidenceFields.documentSubjectId,
+            scopeType: evidenceFields.scopeType,
+            scopeId: evidenceFields.scopeId,
+            requiredSignerRoles: templateRow?.signerRoles,
+            signerRole,
+          }, tx);
+        }
+        return;
+      }
+
+      const createdAt = new Date();
+      const created = await tx.signedDocuments.create({
         data: {
-          updatedAt: new Date(),
-          signedDocumentId: event.documentId,
-          templateId: templateDocumentId ?? undefined,
-          userId: userId ?? undefined,
+          id: crypto.randomUUID(),
+          createdAt,
+          updatedAt: createdAt,
+          signedDocumentId: providerDocumentId,
+          templateId: templateDocumentId,
+          userId,
           documentName,
           hostId,
           organizationId: inferredContext.organizationId,
@@ -1441,81 +1485,36 @@ const createOrUpdateSignedDocumentProjection = async (params: {
           teamId: inferredContext.teamId,
           ...evidenceFields,
           status: nextStatus,
-          signedAt: nextSignedAt ?? undefined,
+          signedAt: nextSignedAt,
           signerEmail,
           roleIndex,
           signerRole,
+          ipAddress: null,
+          requestId: null,
         },
+        select: { id: true },
       });
+      projectedRowId = created.id;
       if (nextStatus === 'SIGNED') {
         await createDocumentRequirementSatisfaction({
-          evidenceId: existing.id,
-          templateDocumentId: templateDocumentId ?? '',
+          evidenceId: created.id,
+          templateDocumentId,
           documentRequirementId: templateRow?.documentRequirementId,
           organizationId: inferredContext.organizationId,
           documentSubjectId: evidenceFields.documentSubjectId,
           scopeType: evidenceFields.scopeType,
-          scopeId: evidenceFields.scopeId,
           requiredSignerRoles: templateRow?.signerRoles,
+          scopeId: evidenceFields.scopeId,
           signerRole,
-        });
+        }, tx);
       }
-      updatedRows += 1;
-      projectedRows.push({
-        id: existing.id,
-        userId: userId ?? null,
-        signerRole,
-        signerEmail,
-        roleIndex,
-      });
-      continue;
-    }
-
-    if (!userId || !templateDocumentId) {
-      continue;
-    }
-
-    const createdAt = new Date();
-    const created = await prisma.signedDocuments.create({
-      data: {
-        id: crypto.randomUUID(),
-        createdAt,
-        updatedAt: createdAt,
-        signedDocumentId: event.documentId,
-        templateId: templateDocumentId,
-        userId,
-        documentName,
-        hostId,
-        organizationId: inferredContext.organizationId,
-        eventId: inferredContext.eventId,
-        teamId: inferredContext.teamId,
-        ...evidenceFields,
-        status: nextStatus,
-        signedAt: nextSignedAt,
-        signerEmail,
-        roleIndex,
-        signerRole,
-        ipAddress: null,
-        requestId: null,
-      },
-      select: { id: true },
     });
-    if (nextStatus === 'SIGNED') {
-      await createDocumentRequirementSatisfaction({
-        evidenceId: created.id,
-        templateDocumentId,
-        documentRequirementId: templateRow?.documentRequirementId,
-        organizationId: inferredContext.organizationId,
-        documentSubjectId: evidenceFields.documentSubjectId,
-        scopeType: evidenceFields.scopeType,
-        requiredSignerRoles: templateRow?.signerRoles,
-        scopeId: evidenceFields.scopeId,
-        signerRole,
-      });
+    if (!projectedRowId) {
+      continue;
     }
     updatedRows += 1;
     projectedRows.push({
-      id: created.id,
+      id: projectedRowId,
       userId,
       signerRole,
       signerEmail,

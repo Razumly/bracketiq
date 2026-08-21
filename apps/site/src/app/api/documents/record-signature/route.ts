@@ -293,35 +293,37 @@ export async function POST(request: NextRequest) {
     signOnce: signedTemplate.signOnce,
     provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
   });
-  await ensureDocumentSubject({
-    organizationId,
-    userId,
-    hostId: scopedChildUserId,
-  });
-  if (!existingIsSigned) {
-    const now = new Date();
-    await prisma.signedDocuments.update({
-      where: { id: existing.id },
-      data: {
-        updatedAt: now,
-        ...evidenceFields,
-        status: 'SIGNED',
-        signedAt: new Date().toISOString(),
-        ipAddress: resolveIpAddress(request),
-        requestId: request.headers.get('x-request-id') ?? null,
-      },
-    });
-  }
-  await createDocumentRequirementSatisfaction({
-    evidenceId: existing.id,
-    templateDocumentId: parsed.data.templateId,
-    documentRequirementId: signedTemplate.documentRequirementId,
-    organizationId,
-    documentSubjectId: evidenceFields.documentSubjectId,
-    scopeType: evidenceFields.scopeType,
-    scopeId: evidenceFields.scopeId,
-    requiredSignerRoles: signedTemplate.signerRoles,
-    signerRole: signerContext,
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    await ensureDocumentSubject({
+      organizationId,
+      userId,
+      hostId: scopedChildUserId,
+    }, tx);
+    if (!existingIsSigned) {
+      await tx.signedDocuments.update({
+        where: { id: existing.id },
+        data: {
+          updatedAt: now,
+          ...evidenceFields,
+          status: 'SIGNED',
+          signedAt: now.toISOString(),
+          ipAddress: resolveIpAddress(request),
+          requestId: request.headers.get('x-request-id') ?? null,
+        },
+      });
+    }
+    await createDocumentRequirementSatisfaction({
+      evidenceId: existing.id,
+      templateDocumentId: parsed.data.templateId,
+      documentRequirementId: signedTemplate.documentRequirementId,
+      organizationId,
+      documentSubjectId: evidenceFields.documentSubjectId,
+      scopeType: evidenceFields.scopeType,
+      scopeId: evidenceFields.scopeId,
+      requiredSignerRoles: signedTemplate.signerRoles,
+      signerRole: signerContext,
+    }, tx);
   });
 
   if (scopedChildUserId && signedTemplate?.signOnce) {

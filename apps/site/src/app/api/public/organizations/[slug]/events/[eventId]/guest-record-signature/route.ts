@@ -391,11 +391,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
   const signedAt = now.toISOString();
   const scopedChildUserId = childUserId ?? null;
   const scopedEventId = template.signOnce ? null : event.id;
-  await ensureDocumentSubject({
-    organizationId: organization.id,
-    userId: signerUserId,
-    hostId: scopedChildUserId,
-  });
+  const signerEmail = await resolveSignerEmail(signerUserId);
   const existing = await (prisma as any).signedDocuments.findFirst({
     where: {
       templateId: template.id,
@@ -413,7 +409,6 @@ export async function POST(req: NextRequest, context: RouteContext) {
       signedAt: true,
     },
   });
-  const signerEmail = await resolveSignerEmail(signerUserId);
   const baseData = {
     signedDocumentId: parsed.data.documentId,
     userId: signerUserId,
@@ -439,39 +434,46 @@ export async function POST(req: NextRequest, context: RouteContext) {
     updatedAt: now,
   };
   const evidenceId = existing?.id ?? crypto.randomUUID();
-  if (existing) {
-    const existingIsSigned = isSignedStatus(existing.status);
-    await (prisma as any).signedDocuments.update({
-      where: { id: existing.id },
-      data: {
-        ...baseData,
-        organizationId: existing.organizationId ?? organization.id,
-        teamId: existing.teamId ?? null,
-        signedAt: existingIsSigned ? (normalizeGuestText(existing.signedAt) ?? signedAt) : signedAt,
-      },
-    });
-  } else {
-    await (prisma as any).signedDocuments.create({
-      data: {
-        id: evidenceId,
-        templateId: template.id,
-        documentName: template.title ?? 'Text Waiver',
-        teamId: null,
-        ...baseData,
-        createdAt: now,
-      },
-    });
-  }
-  await createDocumentRequirementSatisfaction({
-    evidenceId,
-    templateDocumentId: template.id,
-    documentRequirementId: template.documentRequirementId,
-    organizationId: organization.id,
-    documentSubjectId: baseData.documentSubjectId,
-    scopeType: baseData.scopeType,
-    scopeId: baseData.scopeId,
-    requiredSignerRoles: template.signerRoles,
-    signerRole: signerContext,
+  await prisma.$transaction(async (tx) => {
+    await ensureDocumentSubject({
+      organizationId: organization.id,
+      userId: signerUserId,
+      hostId: scopedChildUserId,
+    }, tx);
+    if (existing) {
+      const existingIsSigned = isSignedStatus(existing.status);
+      await tx.signedDocuments.update({
+        where: { id: existing.id },
+        data: {
+          ...baseData,
+          organizationId: existing.organizationId ?? organization.id,
+          teamId: existing.teamId ?? null,
+          signedAt: existingIsSigned ? (normalizeGuestText(existing.signedAt) ?? signedAt) : signedAt,
+        },
+      });
+    } else {
+      await tx.signedDocuments.create({
+        data: {
+          id: evidenceId,
+          templateId: template.id,
+          documentName: template.title ?? 'Text Waiver',
+          teamId: null,
+          ...baseData,
+          createdAt: now,
+        },
+      });
+    }
+    await createDocumentRequirementSatisfaction({
+      evidenceId,
+      templateDocumentId: template.id,
+      documentRequirementId: template.documentRequirementId,
+      organizationId: organization.id,
+      documentSubjectId: baseData.documentSubjectId,
+      scopeType: baseData.scopeType,
+      scopeId: baseData.scopeId,
+      requiredSignerRoles: template.signerRoles,
+      signerRole: signerContext,
+    }, tx);
   });
 
   try {

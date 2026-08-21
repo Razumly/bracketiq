@@ -1,7 +1,15 @@
 import crypto from 'crypto';
+import { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 
-export type DocumentEvidenceDatabase = typeof prisma;
+type DocumentEvidenceDelegateNames =
+  | 'documentSubjects'
+  | 'documentRequirementSatisfactions'
+  | 'documentEvidenceAuditEvents';
+
+export type DocumentEvidenceDatabase = Partial<
+  Pick<Prisma.TransactionClient, DocumentEvidenceDelegateNames>
+>;
 
 export const DOCUMENT_EVIDENCE_PROVENANCE = {
   BOLDSIGN: 'BOLDSIGN',
@@ -22,6 +30,7 @@ type EvidenceContext = {
   organizationId?: string | null;
   userId?: string | null;
   hostId?: string | null;
+  documentSubjectUserId?: string | null;
   eventId?: string | null;
   teamId?: string | null;
   signOnce?: boolean | null;
@@ -31,9 +40,36 @@ const present = (value: string | null | undefined): string | null => {
   const normalized = typeof value === 'string' ? value.trim() : '';
   return normalized.length > 0 ? normalized : null;
 };
+const requireDelegate = <K extends DocumentEvidenceDelegateNames>(
+  database: DocumentEvidenceDatabase,
+  delegateName: K,
+): NonNullable<DocumentEvidenceDatabase[K]> => {
+  const delegate = database[delegateName];
+  if (!delegate) {
+    throw new Error(`Document evidence storage delegate "${delegateName}" is required.`);
+  }
+  return delegate as NonNullable<DocumentEvidenceDatabase[K]>;
+};
 
-export const documentSubjectUserId = (context: Pick<EvidenceContext, 'userId' | 'hostId'>): string | null => {
-  return present(context.hostId) ?? present(context.userId);
+const normalizeSignerRole = (value: string): string => value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+const mergeSignerRoles = (existing: string[], incoming: string[]): string[] => {
+  const merged = [...existing];
+  const seen = new Set(existing.map(normalizeSignerRole).filter(Boolean));
+  for (const role of incoming) {
+    const normalized = present(role);
+    const roleKey = normalized ? normalizeSignerRole(normalized) : '';
+    if (!normalized || !roleKey || seen.has(roleKey)) {
+      continue;
+    }
+    seen.add(roleKey);
+    merged.push(normalized);
+  }
+  return merged;
+};
+
+export const documentSubjectUserId = (context: Pick<EvidenceContext, 'userId' | 'hostId' | 'documentSubjectUserId'>): string | null => {
+  return present(context.documentSubjectUserId) ?? present(context.hostId) ?? present(context.userId);
 };
 
 export const documentSubjectIdFor = (organizationId: string | null | undefined, subjectUserId: string | null | undefined): string | null => {
@@ -84,20 +120,17 @@ export const signedDocumentEvidenceFields = (params: EvidenceContext & {
 };
 
 export const ensureDocumentSubject = async (
-  context: Pick<EvidenceContext, 'organizationId' | 'userId' | 'hostId'>,
-  database: DocumentEvidenceDatabase | Record<string, any> = prisma,
-): Promise<string | null> => {
+  context: Pick<EvidenceContext, 'organizationId' | 'userId' | 'hostId' | 'documentSubjectUserId'>,
+  database: DocumentEvidenceDatabase = prisma,
+): Promise<string> => {
   const subjectUserId = documentSubjectUserId(context);
   const organizationId = present(context.organizationId);
   const documentSubjectId = documentSubjectIdFor(organizationId, subjectUserId);
   if (!organizationId || !subjectUserId || !documentSubjectId) {
-    return null;
+    throw new Error('Organization and Document Subject identity are required.');
   }
 
-  const delegate = (database as Record<string, any>).documentSubjects;
-  if (!delegate?.upsert) {
-    return documentSubjectId;
-  }
+  const delegate = requireDelegate(database, 'documentSubjects');
 
   await delegate.upsert({
     where: {
@@ -132,7 +165,7 @@ export const createDocumentRequirementSatisfaction = async (params: {
   completedSignerRoles?: string[] | null;
   signerRole?: string | null;
   createdAt?: Date;
-}, database: DocumentEvidenceDatabase | Record<string, any> = prisma): Promise<void> => {
+}, database: DocumentEvidenceDatabase = prisma): Promise<void> => {
   const organizationId = present(params.organizationId);
   const documentSubjectId = present(params.documentSubjectId);
   const scopeType = params.scopeType ?? null;
@@ -141,21 +174,52 @@ export const createDocumentRequirementSatisfaction = async (params: {
   const templateDocumentId = present(params.templateDocumentId);
   const evidenceId = present(params.evidenceId);
   if (!organizationId || !documentSubjectId || !scopeType || !scopeId || !documentRequirementId || !templateDocumentId || !evidenceId) {
-    return;
+    throw new Error('Complete Document Requirement Satisfaction identity is required.');
   }
 
-  const delegate = (database as Record<string, any>).documentRequirementSatisfactions;
-  if (!delegate?.upsert) {
-    return;
-  }
-
-  const completedSignerRoles = params.completedSignerRoles
-    ?? (present(params.signerRole) ? [present(params.signerRole) as string] : []);
+  const delegate = requireDelegate(database, 'documentRequirementSatisfactions');
+  const existing = await delegate.findFirst({
+    where: {
+      organizationId,
+      documentRequirementId,
+      templateDocumentId,
+      documentSubjectId,
+      scopeType,
+      scopeId,
+      status: { not: 'INVALIDATED' },
+    },
+    orderBy: { updatedAt: 'desc' },
+    select: {
+      id: true,
+      sourceEvidenceId: true,
+      requiredSignerRoles: true,
+      completedSignerRoles: true,
+    },
+  });
+  const incomingSignerRoles = [
+    ...(params.completedSignerRoles ?? []),
+    ...(present(params.signerRole) ? [present(params.signerRole) as string] : []),
+  ];
+  const completedSignerRoles = mergeSignerRoles(existing?.completedSignerRoles ?? [], incomingSignerRoles);
+  const requiredSignerRoles = mergeSignerRoles(
+    existing?.requiredSignerRoles ?? [],
+    params.requiredSignerRoles ?? [],
+  );
+  const effectiveRequiredSignerRoles = requiredSignerRoles.length > 0
+    ? requiredSignerRoles
+    : incomingSignerRoles.length > 0
+      ? mergeSignerRoles([], incomingSignerRoles)
+      : [];
+  const isComplete = effectiveRequiredSignerRoles.length === 0
+    || effectiveRequiredSignerRoles.every((requiredRole) => completedSignerRoles.some(
+      (completedRole) => normalizeSignerRole(completedRole) === normalizeSignerRole(requiredRole),
+    ));
   const createdAt = params.createdAt ?? new Date();
+  const satisfactionId = existing?.id ?? `document-satisfaction:${evidenceId}`;
   await delegate.upsert({
-    where: { id: `document-satisfaction:${evidenceId}` },
+    where: { id: satisfactionId },
     create: {
-      id: `document-satisfaction:${evidenceId}`,
+      id: satisfactionId,
       createdAt,
       updatedAt: createdAt,
       organizationId,
@@ -164,23 +228,23 @@ export const createDocumentRequirementSatisfaction = async (params: {
       documentSubjectId,
       scopeType,
       scopeId,
-      sourceEvidenceId: evidenceId,
-      status: 'SATISFIED',
-      isComplete: true,
-      requiredSignerRoles: params.requiredSignerRoles ?? [],
+      sourceEvidenceId: existing?.sourceEvidenceId ?? evidenceId,
+      status: isComplete ? 'SATISFIED' : 'PENDING',
+      isComplete,
+      requiredSignerRoles,
       completedSignerRoles,
       invalidatedAt: null,
     },
     update: {
       updatedAt: new Date(),
-      status: 'SATISFIED',
-      isComplete: true,
+      status: isComplete ? 'SATISFIED' : 'PENDING',
+      isComplete,
+      requiredSignerRoles,
       completedSignerRoles,
       invalidatedAt: null,
     },
   });
 };
-
 export const appendDocumentEvidenceAuditEvent = async (params: {
   evidenceId: string;
   organizationId: string;
@@ -188,42 +252,45 @@ export const appendDocumentEvidenceAuditEvent = async (params: {
   actorUserId?: string | null;
   reason?: string | null;
   note?: string | null;
-  payload?: Record<string, unknown> | null;
+  payload?: Prisma.InputJsonValue | null;
   createdAt?: Date;
-}, database: DocumentEvidenceDatabase | Record<string, any> = prisma): Promise<void> => {
-  const delegate = (database as Record<string, any>).documentEvidenceAuditEvents;
-  if (!delegate?.create) {
-    return;
+}, database: DocumentEvidenceDatabase = prisma): Promise<void> => {
+  const evidenceId = present(params.evidenceId);
+  const organizationId = present(params.organizationId);
+  const delegate = requireDelegate(database, 'documentEvidenceAuditEvents');
+  if (!evidenceId || !organizationId) {
+    throw new Error('Document Evidence Audit Event identity is required.');
   }
   const createdAt = params.createdAt ?? new Date();
   await delegate.create({
     data: {
       id: crypto.randomUUID(),
       createdAt,
-      organizationId: params.organizationId,
-      signedDocumentId: params.evidenceId,
+      organizationId,
+      signedDocumentId: evidenceId,
       eventType: params.eventType,
       actorUserId: params.actorUserId ?? null,
       reason: params.reason ?? null,
       note: params.note ?? null,
-      payload: params.payload ?? null,
+      payload: params.payload ?? Prisma.JsonNull,
     },
   });
 };
- 
+
 export const invalidateDocumentRequirementSatisfaction = async (params: {
   evidenceId: string;
   invalidatedAt?: Date;
-}, database: DocumentEvidenceDatabase | Record<string, any> = prisma): Promise<void> => {
-  const delegate = (database as Record<string, any>).documentRequirementSatisfactions;
-  if (!delegate?.updateMany) {
-    return;
+}, database: DocumentEvidenceDatabase = prisma): Promise<void> => {
+  const evidenceId = present(params.evidenceId);
+  const delegate = requireDelegate(database, 'documentRequirementSatisfactions');
+  if (!evidenceId) {
+    throw new Error('Document Requirement Satisfaction identity is required.');
   }
   const invalidatedAt = params.invalidatedAt ?? new Date();
   await delegate.updateMany({
     where: {
-      sourceEvidenceId: params.evidenceId,
-      status: 'SATISFIED',
+      sourceEvidenceId: evidenceId,
+      status: { in: ['PENDING', 'SATISFIED'] },
     },
     data: {
       updatedAt: invalidatedAt,

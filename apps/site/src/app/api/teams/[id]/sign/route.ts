@@ -392,69 +392,65 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             : normalizeText(payload.userEmail),
         );
         const existingRow = existingSignerRows[0];
-        await ensureDocumentSubject({
+        const now = new Date();
+        const evidenceContext = {
           organizationId: team.organizationId ?? null,
           userId: signerUserId,
           hostId: scopedChildUserId,
+          eventId: null,
+          teamId,
+          signOnce: template.signOnce,
+          provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
+        } as const;
+        await prisma.$transaction(async (tx) => {
+          await ensureDocumentSubject({
+            organizationId: evidenceContext.organizationId,
+            userId: evidenceContext.userId,
+            hostId: evidenceContext.hostId,
+          }, tx);
+          if (existingRow) {
+            await tx.signedDocuments.update({
+              where: { id: existingRow.id },
+              data: {
+                updatedAt: now,
+                signedDocumentId: documentId,
+                status: 'UNSIGNED',
+                userId: signerUserId,
+                hostId: scopedChildUserId,
+                organizationId: team.organizationId ?? null,
+                eventId: null,
+                teamId,
+                ...signedDocumentEvidenceFields(evidenceContext),
+                signerEmail: signerEmail ?? null,
+                signerRole: signerContext,
+              },
+            });
+          } else {
+            await tx.signedDocuments.create({
+              data: {
+                id: crypto.randomUUID(),
+                createdAt: now,
+                updatedAt: now,
+                signedDocumentId: documentId,
+                templateId: template.id,
+                userId: signerUserId,
+                documentName: template.title ?? 'Text Waiver',
+                hostId: scopedChildUserId,
+                organizationId: team.organizationId ?? null,
+                eventId: null,
+                teamId,
+                ...signedDocumentEvidenceFields(evidenceContext),
+                status: 'UNSIGNED',
+                signedAt: null,
+                signerEmail: signerEmail ?? null,
+                roleIndex: null,
+                signerRole: signerContext,
+                ipAddress: null,
+                requestId: null,
+              },
+            });
+          }
         });
-        if (existingRow) {
-          await prisma.signedDocuments.update({
-            where: { id: existingRow.id },
-            data: {
-              updatedAt: new Date(),
-              signedDocumentId: documentId,
-              status: 'UNSIGNED',
-              userId: signerUserId,
-              hostId: scopedChildUserId,
-              organizationId: team.organizationId ?? null,
-              eventId: null,
-              teamId,
-              ...signedDocumentEvidenceFields({
-                organizationId: team.organizationId ?? null,
-                userId: signerUserId,
-                hostId: scopedChildUserId,
-                eventId: null,
-                teamId,
-                signOnce: template.signOnce,
-                provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
-              }),
-              signerEmail: signerEmail ?? null,
-              signerRole: signerContext,
-            },
-          });
-        } else {
-          await prisma.signedDocuments.create({
-            data: {
-              id: crypto.randomUUID(),
-              createdAt: new Date(),
-              updatedAt: new Date(),
-              signedDocumentId: documentId,
-              templateId: template.id,
-              userId: signerUserId,
-              documentName: template.title ?? 'Text Waiver',
-              hostId: scopedChildUserId,
-              organizationId: team.organizationId ?? null,
-              eventId: null,
-              teamId,
-              ...signedDocumentEvidenceFields({
-                organizationId: team.organizationId ?? null,
-                userId: signerUserId,
-                hostId: scopedChildUserId,
-                eventId: null,
-                teamId,
-                signOnce: template.signOnce,
-                provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
-              }),
-              status: 'UNSIGNED',
-              signedAt: null,
-              signerEmail: signerEmail ?? null,
-              roleIndex: null,
-              signerRole: signerContext,
-              ipAddress: null,
-              requestId: null,
-            },
-          });
-        }
 
         signLinks.push({
           templateId: template.id,

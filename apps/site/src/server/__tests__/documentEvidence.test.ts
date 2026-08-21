@@ -47,7 +47,10 @@ describe('document evidence storage seam', () => {
 
   it('upserts one stable Document Subject and Satisfaction identity', async () => {
     const documentSubjects = { upsert: jest.fn().mockResolvedValue({}) };
-    const documentRequirementSatisfactions = { upsert: jest.fn().mockResolvedValue({}) };
+    const documentRequirementSatisfactions = {
+      findFirst: jest.fn().mockResolvedValue(null),
+      upsert: jest.fn().mockResolvedValue({}),
+    };
     const database = { documentSubjects, documentRequirementSatisfactions };
 
     await expect(ensureDocumentSubject({
@@ -78,12 +81,66 @@ describe('document evidence storage seam', () => {
         sourceEvidenceId: 'evidence_1',
         scopeType: DOCUMENT_SATISFACTION_SCOPE.EVENT_PARTICIPATION,
         scopeId: 'event_1',
+        status: 'SATISFIED',
         isComplete: true,
         requiredSignerRoles: [],
         completedSignerRoles: ['parent_guardian'],
       }),
     }));
   });
+  it('keeps Satisfaction pending until all required signer roles complete', async () => {
+    const documentRequirementSatisfactions = {
+      findFirst: jest.fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          id: 'document-satisfaction:evidence_1',
+          sourceEvidenceId: 'evidence_1',
+          requiredSignerRoles: ['parent_guardian', 'participant'],
+          completedSignerRoles: ['parent_guardian'],
+        }),
+      upsert: jest.fn().mockResolvedValue({}),
+    };
+    const database = { documentRequirementSatisfactions };
+
+    await createDocumentRequirementSatisfaction({
+      evidenceId: 'evidence_1',
+      templateDocumentId: 'version_1',
+      documentRequirementId: 'requirement_1',
+      organizationId: 'org_1',
+      documentSubjectId: 'document-subject:org_1:child_1',
+      scopeType: DOCUMENT_SATISFACTION_SCOPE.EVENT_PARTICIPATION,
+      scopeId: 'event_1',
+      requiredSignerRoles: ['parent_guardian', 'participant'],
+      signerRole: 'parent_guardian',
+    }, database);
+    await createDocumentRequirementSatisfaction({
+      evidenceId: 'evidence_2',
+      templateDocumentId: 'version_1',
+      documentRequirementId: 'requirement_1',
+      organizationId: 'org_1',
+      documentSubjectId: 'document-subject:org_1:child_1',
+      scopeType: DOCUMENT_SATISFACTION_SCOPE.EVENT_PARTICIPATION,
+      scopeId: 'event_1',
+      requiredSignerRoles: ['parent_guardian', 'participant'],
+      signerRole: 'participant',
+    }, database);
+
+    expect(documentRequirementSatisfactions.upsert).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      create: expect.objectContaining({
+        status: 'PENDING',
+        isComplete: false,
+        completedSignerRoles: ['parent_guardian'],
+      }),
+    }));
+    expect(documentRequirementSatisfactions.upsert).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      update: expect.objectContaining({
+        status: 'SATISFIED',
+        isComplete: true,
+        completedSignerRoles: ['parent_guardian', 'participant'],
+      }),
+    }));
+  });
+
 
   it('records import and void audit events and invalidates Satisfaction', async () => {
     const documentEvidenceAuditEvents = { create: jest.fn().mockResolvedValue({}) };
@@ -121,7 +178,10 @@ describe('document evidence storage seam', () => {
       }),
     }));
     expect(documentRequirementSatisfactions.updateMany).toHaveBeenCalledWith({
-      where: { sourceEvidenceId: 'evidence_1', status: 'SATISFIED' },
+      where: {
+        sourceEvidenceId: 'evidence_1',
+        status: { in: ['PENDING', 'SATISFIED'] },
+      },
       data: expect.objectContaining({
         status: 'INVALIDATED',
         isComplete: false,
