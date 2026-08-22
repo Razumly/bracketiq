@@ -29,6 +29,7 @@ import {
 } from '@/server/teams/teamOpenRegistration';
 import { claimOrCreateEventTeamSnapshot } from '@/server/teams/teamMembership';
 import { sendEventRegistrationHostNotification } from '@/server/registrationHostNotifications';
+import { resolveEventRegistrationPaymentFailure } from '@/server/billing/eventRegistrationPaymentResolution';
 
 export const dynamic = 'force-dynamic';
 
@@ -691,7 +692,7 @@ const setEventRegistrationPaymentStatusFromPurchase = async ({
   now,
   targetStatus = 'PAYMENT_FAILED',
   paymentResolutionReason = null,
-  allowSchedulableTeamEvent = false,
+  isSchedulableTeamEventAllowed = false,
 }: {
   purchaseType: string | null;
   eventId: string | null;
@@ -704,7 +705,7 @@ const setEventRegistrationPaymentStatusFromPurchase = async ({
   now: Date;
   targetStatus?: 'PAYMENT_FAILED' | 'CANCELLED';
   paymentResolutionReason?: string | null;
-  allowSchedulableTeamEvent?: boolean;
+  isSchedulableTeamEventAllowed?: boolean;
 }): Promise<{ applied: boolean; reason?: string }> => {
   const normalizedPurchaseType = (purchaseType ?? '').trim().toLowerCase();
   if (normalizedPurchaseType !== 'event') {
@@ -749,7 +750,7 @@ const setEventRegistrationPaymentStatusFromPurchase = async ({
         }
         const normalizedEventType = String(event.eventType ?? '').toUpperCase();
         if (
-          !allowSchedulableTeamEvent
+          !isSchedulableTeamEventAllowed
           && (normalizedEventType === 'LEAGUE' || normalizedEventType === 'TOURNAMENT')
         ) {
           return { applied: false, reason: 'schedulable_team_event_requires_participant_route' };
@@ -801,9 +802,6 @@ const setEventRegistrationPaymentStatusFromPurchase = async ({
   }
 };
 
-const isPermanentEventRegistrationFailure = (reason?: string): boolean => (
-  reason === 'capacity_exceeded' || reason === 'invalid_registration_unit'
-);
 
 const cancelTeamRegistrationFromFailedPayment = async ({
   purchaseType,
@@ -2331,6 +2329,37 @@ export async function POST(req: NextRequest) {
               reason: registrationResult.reason,
             });
           }
+          const billPaymentResolution = resolveEventRegistrationPaymentFailure(registrationResult.reason);
+          if (!registrationResult.applied && billPaymentResolution) {
+            const billPaymentResolutionResult = await setEventRegistrationPaymentStatusFromPurchase({
+              purchaseType: billPurchaseType,
+              eventId: billEventId,
+              teamId: billTeamId,
+              userId: billUserId,
+              registrantType: billRegistrantType,
+              registrationId: billRegistrationId,
+              occurrenceSlotId: billOccurrenceSlotId,
+              occurrenceDate: billOccurrenceDate,
+              now,
+              ...billPaymentResolution,
+              isSchedulableTeamEventAllowed: true,
+            });
+            if (
+              !billPaymentResolutionResult.applied
+              && billPaymentResolutionResult.reason !== 'reservation_not_pending'
+            ) {
+              console.warn('Stripe webhook could not persist paid bill event registration resolution state.', {
+                paymentIntentId,
+                purchaseType: billPurchaseType,
+                userId: billUserId,
+                teamId: billTeamId,
+                eventId: billEventId,
+                registrationId: billRegistrationId,
+                reason: billPaymentResolutionResult.reason,
+                registrationFailureReason: registrationResult.reason,
+              });
+            }
+          }
           if (registrationResult.activated && billEventId && registrationResult.registrationId) {
             await sendEventRegistrationHostNotification({
               eventId: billEventId,
@@ -2433,10 +2462,8 @@ export async function POST(req: NextRequest) {
         reason: registrationResult.reason,
       });
     }
-    if (
-      !registrationResult.applied
-      && isPermanentEventRegistrationFailure(registrationResult.reason)
-    ) {
+    const paymentResolution = resolveEventRegistrationPaymentFailure(registrationResult.reason);
+    if (!registrationResult.applied && paymentResolution) {
       const paymentResolutionResult = await setEventRegistrationPaymentStatusFromPurchase({
         purchaseType,
         eventId,
@@ -2447,9 +2474,8 @@ export async function POST(req: NextRequest) {
         occurrenceSlotId,
         occurrenceDate,
         now,
-        targetStatus: 'CANCELLED',
-        paymentResolutionReason: registrationResult.reason,
-        allowSchedulableTeamEvent: true,
+        ...paymentResolution,
+        isSchedulableTeamEventAllowed: true,
       });
       if (
         !paymentResolutionResult.applied

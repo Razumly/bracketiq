@@ -31,7 +31,7 @@ class RoomDatabaseBehaviorTest {
 
 
     @Test
-    fun fieldDao_roundTripsCanonicalFacilityId() = runBlocking {
+    fun given_canonicalFacilityId_when_fieldDaoRoundTrips_then_returnsSameFacilityId() = runBlocking {
         val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(
             InstrumentationRegistry.getInstrumentation().targetContext,
         ).allowMainThreadQueries().build()
@@ -56,7 +56,7 @@ class RoomDatabaseBehaviorTest {
 
 
     @Test
-    fun membershipDaos_reconstructMissingProfilesAndRollbackRejectedReplacements() = runBlocking {
+    fun given_missingProfilesAndRejectedReplacements_when_membershipDaosRun_then_reconstructAndRollback() = runBlocking {
         val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(
             InstrumentationRegistry.getInstrumentation().targetContext,
         ).allowMainThreadQueries().build()
@@ -209,7 +209,7 @@ class RoomDatabaseBehaviorTest {
     }
 
     @Test
-    fun matchOperationOutboxDao_prunes_old_acknowledgements_but_retains_the_sequence_sentinel() = runBlocking {
+    fun given_oldAcknowledgements_when_outboxDaoPrunes_then_retainsSequenceSentinel() = runBlocking {
         val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(
             InstrumentationRegistry.getInstrumentation().targetContext,
         ).allowMainThreadQueries().build()
@@ -247,7 +247,7 @@ class RoomDatabaseBehaviorTest {
     }
 
     @Test
-    fun messageDao_orders_cached_messages_by_time_then_id() = runBlocking {
+    fun given_sameTimestampCachedMessages_when_messageDaoOrders_then_sortsById() = runBlocking {
         val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(
             InstrumentationRegistry.getInstrumentation().targetContext,
         ).allowMainThreadQueries().build()
