@@ -24,7 +24,7 @@ This plan starts with the data expansion required for that behavior. The first m
 - [x] (2026-08-22T00:34Z) Implement immutable Version enforcement, evidence provenance, Satisfaction persistence, owner repair, atomic imports, and cross-cutting fixes from the review handoff.
 - [x] (2026-08-22T00:34Z) Add contributor role snapshots, roleless completion handling, batch invalidation reads, imported-role migration repair, and frozen-provider operation quarantine.
 - [x] (2026-08-22T02:29Z) Run focused document, template, import, signature, provider, and role tests; pass the site type check, Prisma schema validation, migration fixture JavaScript syntax check, and the complete site suite. The disposable migration fixture remains blocked because no loopback PostgreSQL test database is available.
-- [ ] Commit the completed document work and keep the billing authorization correction in a separate commit.
+- [x] (2026-08-22T02:43Z) Commit the completed document work as `b3be28cc7` and the separate billing authorization correction as `cf8802b87`.
 
 ## Surprises & Discoveries
 
