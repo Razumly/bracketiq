@@ -24,6 +24,15 @@ A human can observe the result through the event editor and its HTTP contract. F
 - [x] (2026-08-21) Run the two-axis code review against the pre-work branch point.
 - [x] (2026-08-21) Address review findings and rerun affected checks.
 - [x] (2026-08-21) Commit the completed work on the current branch.
+- [x] (2026-08-21) Run the follow-up two-axis review from `7adb96ba9eeae3f20cd667e9e37691d924980a6d` through `HEAD`.
+- [ ] Preserve event-registration identity when participant bills create or update installment payments.
+- [ ] Route paid bill success and failure through the event-registration lifecycle.
+- [ ] Replace the delegation-only bill payment capacity test with a provider-independent observable regression.
+- [ ] Type the participant registration response mapper from its Prisma select.
+- [ ] Extract the shared paid-registration payment-resolution persistence path.
+- [ ] Move the finite payment-resolution reason type to the shared response contract.
+- [ ] Split `RoomDatabaseBehaviorTest` by DAO capability.
+
 ## Surprises & Discoveries
 
 - Observation: The Event Editor already uses `snapshot.immutable.fieldNames` to disable `eventType` and `teamSignup` in the site and mobile editors.
@@ -68,7 +77,7 @@ A human can observe the result through the event editor and its HTTP contract. F
 
 ## Outcomes & Retrospective
 
-The implementation is complete for issues #30, #31, and #33. The server now enforces accepted-registration capacity and structural locks. The web editor supports scheduled and intentionally unscheduled League and Tournament Create. The mobile editor receives the shared lock, capacity, and scheduling state through the Event Editor contract and stores fetched results in Room. Room cache authority now defaults to preservation, with authority enabled only for Event Editor snapshots. Detail bootstrap merges an outer capability-bearing event ahead of a partial nested participant event. The complete site suite passed with 869 suites and 5,167 tests passing, the route coverage check passed for 330 API routes, the site type check passed, the focused Room and repository regression tests passed, the Android unit suite passed, and the iOS simulator shared test passed. The two-axis review is complete. The reviewed work is committed on the current branch.
+The implementation is complete for the main acceptance paths in issues #30, #31, and #33. The server enforces accepted-registration capacity and structural locks. The web editor supports scheduled and intentionally unscheduled League and Tournament Create. The mobile editor receives the shared lock, capacity, and scheduling state through the Event Editor contract and stores fetched results in Room. Room cache authority now defaults to preservation for non-authoritative writes, with authority enabled only for Event Editor snapshots. Detail bootstrap merges an outer capability-bearing event ahead of a partial nested participant event. The complete site suite passed with 869 suites and 5,167 tests passing, the route coverage check passed for 330 API routes, the site type check passed, the focused Room and repository regression tests passed, the Android unit suite passed, and the iOS simulator shared test passed. A follow-up two-axis review found an open paid-bill metadata gap and implementation-quality follow-ups. The work remains committed on the current branch while the follow-up items remain open.
 
 ## Context and Orientation
 
@@ -157,8 +166,32 @@ The stable server seam is `createEventEditor(actor, command, options)` in `apps/
 
 The stable mobile seam is the generated Event Editor DTO and repository path under `apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/core/data`. The mobile client must send the site command shape and write accepted results to Room before UI observation. Do not import site TypeScript or Prisma types into mobile.
 
+## Review Findings for Next Agent
+
+The follow-up review covers `7adb96ba9eeae3f20cd667e9e37691d924980a6d...HEAD` and the commits `e738b6453` and `60c5ae9ce`. Complete the items below before treating the workstream as fully complete.
+
+### Paid bill registration identity
+
+The paid bill branch in `apps/site/src/app/api/billing/webhook/route.ts` cannot resolve participant registration identity for bills created by `apps/site/src/app/api/events/[eventId]/participants/route.ts`. The bill intent in `apps/site/src/app/api/billing/create_billing_intent/route.ts` sends `purchase_type: 'bill'` with bill, event, and user identifiers, but it does not send `registration_id`. Participant bill line items contain only line-item, type, label, and amount fields. The webhook loader does not select `Bills.sourceType` or `Bills.sourceId`, and it only recognizes a line item that contains `purchaseType`.
+
+As a result, `billPurchaseType` falls back to `bill`, `billRegistrationId` remains null, and `ensureEventRegistrationFromPurchase` returns `not_event_purchase`. The new paid-bill activation and permanent-failure cancellation paths do not run. The payment-intent failure path also does not load bill purchase metadata.
+
+Preserve or derive the event-registration identity from bill source fields or complete line-item metadata. Use the same identity path for paid and failed installments. Add a provider-independent regression at the application boundary.
+
+### Standards follow-up
+
+- Replace the delegation-only capacity test in `apps/site/src/server/billing/__tests__/billPaymentActions.test.ts`. Assert the resulting registration status or capacity failure at a provider-independent boundary.
+- Replace `row: any` and `status: 'CANCELLED' as any` in the participant response mapper with the typed Prisma select result and generated registration status type.
+- Extract the repeated payment-resolution persistence branch in `apps/site/src/app/api/billing/webhook/route.ts`.
+- Define the finite payment-resolution reason type at the shared site response contract. Use it in `apps/site/src/lib/eventService.ts`.
+- Split `apps/mobile/core/database/src/androidInstrumentedTest/kotlin/com/razumly/mvp/core/data/RoomDatabaseBehaviorTest.kt` by DAO capability.
+
+The destructive Room migration policy is not a follow-up finding. The explicit product instruction treats Room as disposable cache data, and `apps/site/CODING_STANDARDS.md` now requires destructive migration for schema changes. Issue #30 requires lock persistence across an app restart, not preservation across a schema upgrade.
+
 ## Revision Note
 
 2026-08-21: Updated the living plan with completed implementation milestones, full site and mobile verification evidence, review findings and fixes, the Room authority regressions, nested detail-event precedence, and the completed commit state. This revision records the completed workstream.
 
 2026-08-21: Split compound Concrete Steps instructions. Record this update so future contributors can follow one action per instruction.
+
+2026-08-21: Added the follow-up review findings for the next agent. The paid-bill identity gap remains open. The standards follow-ups remain open. The destructive Room cache policy is intentional and is not a finding.
