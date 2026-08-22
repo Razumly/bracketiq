@@ -1,7 +1,10 @@
 /** @jest-environment node */
 import { spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createInterface } from "node:readline";
-
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import type { PrismaClient } from "@/generated/prisma/client";
 
 import {
@@ -17,6 +20,7 @@ import {
   type AffiliateAgentClaimOperation,
   type AffiliateAgentClaimRequest,
   type AffiliateAgentGateway,
+  type AffiliateAgentInvocationFailureCode,
 } from "../agentGateway";
 import {
   createProductionAffiliateAgentGatewayDependencies,
@@ -176,6 +180,7 @@ type SupervisorHarnessOptions = Readonly<{
   nextProcessEvent?: () => Promise<AffiliateAgentProcessEvent>;
   processStarted?: Promise<void>;
   perform?: (operation: AffiliateAgentClaimOperation) => Promise<unknown>;
+  workspacePath?: string;
   launch?: AffiliateAgentProcessLauncher["launch"];
   send?: () => Promise<void>;
   terminate?: () => Promise<void>;
@@ -186,10 +191,7 @@ type SupervisorHarnessOptions = Readonly<{
   ) => Promise<AffiliateAgentInvocationReconciliationResult>;
   now?: () => Date;
 }>;
-
-const createSupervisorHarness = (
-  options: SupervisorHarnessOptions = {},
-): Readonly<{
+type SupervisorHarness = Readonly<{
   dependencies: AffiliateAgentSupervisorDependencies;
   gatewayClaim: jest.Mock;
   gatewayPerform: jest.Mock;
@@ -201,7 +203,11 @@ const createSupervisorHarness = (
   reconcileInvocation: jest.Mock;
   createWorkspace: jest.Mock;
   destroyWorkspace: jest.Mock;
-}> => {
+}>;
+
+const createSupervisorHarness = (
+  options: SupervisorHarnessOptions = {},
+): SupervisorHarness => {
   let identifierSequence = 0;
   let workspaceSequence = 0;
   const events = [
@@ -252,7 +258,7 @@ const createSupervisorHarness = (
       recoveredReceipts: 0,
       completedReceipts: 0,
       unresolvedReceipts: 0,
-      admissionHalted: false,
+      isAdmissionHalted: false,
     }),
   };
   const reconcileInvocation = jest.fn(
@@ -264,10 +270,10 @@ const createSupervisorHarness = (
       }
       return {
         kind: "INVOCATION_FAILED",
-        failureCode: input.failureCode,
+        failureCode: input.failure.code,
         invocationFailureCount: 1,
         nextAttemptAt: "2026-08-20T18:05:00.000Z",
-        pipelineBlocked: false,
+        isPipelineBlocked: false,
       };
     },
   );
@@ -302,7 +308,9 @@ const createSupervisorHarness = (
     ) => {
       workspaceSequence += 1;
       return {
-        path: `/isolated/affiliate-agent-workspace-${workspaceSequence}`,
+        path:
+          options.workspacePath ??
+          `/isolated/affiliate-agent-workspace-${workspaceSequence}`,
         attestation: {
           schemaVersion: 1 as const,
           workspaceId: `workspace-${workspaceSequence}`,
@@ -343,6 +351,22 @@ const createSupervisorHarness = (
     createWorkspace,
     destroyWorkspace,
   };
+};
+const expectFailureReconciliation = (
+  harness: ReturnType<typeof createSupervisorHarness>,
+  code: AffiliateAgentInvocationFailureCode,
+  identifiers: Readonly<Record<string, unknown>> = {},
+): void => {
+  expect(harness.reconcileInvocation).toHaveBeenCalledWith(
+    expect.objectContaining({
+      kind: "RECORD_FAILURE",
+      authorization: expect.objectContaining(identifiers),
+      failure: expect.objectContaining({
+        ...identifiers,
+        code,
+      }),
+    }),
+  );
 };
 
 const supervisorInput = (
@@ -407,7 +431,7 @@ describe("affiliate agent one-claim supervisor", () => {
             if (failureKind === "retryable") {
               throw new AffiliateAgentGatewayError({
                 code: "INTERNAL_ERROR",
-                retryable: true,
+                isRetryable: true,
                 safeMessage: "The first claim response was unavailable.",
               });
             }
@@ -654,14 +678,10 @@ describe("affiliate agent one-claim supervisor", () => {
       const request = harness.gatewayClaim.mock
         .calls[0][0] as AffiliateAgentClaimRequest;
       const grant = claimGrantFor(request);
-      expect(harness.reconcileInvocation).toHaveBeenCalledWith({
-        claim: {
-          jobId: grant.envelope.jobId,
-          claimId: grant.envelope.claimId,
-          claimGeneration: grant.envelope.claimGeneration,
-          claimEnvelopeHash: expect.any(String),
-        },
-        failureCode: "TIMEOUT",
+      expectFailureReconciliation(harness, "TIMEOUT", {
+        jobId: grant.envelope.jobId,
+        claimId: grant.envelope.claimId,
+        claimGeneration: grant.envelope.claimGeneration,
       });
       expect(harness.terminate).toHaveBeenCalledTimes(1);
       expect(harness.terminate.mock.invocationCallOrder[0]).toBeLessThan(
@@ -683,19 +703,15 @@ describe("affiliate agent one-claim supervisor", () => {
     ).resolves.toBe("INVOCATION_FAILED");
 
     expect(harness.gatewayPerform).not.toHaveBeenCalled();
-    expect(harness.reconcileInvocation).toHaveBeenCalledWith({
-      claim: expect.objectContaining({
-        jobId: "job-coverage_planner",
-        claimId: "claim-coverage_planner",
-        claimGeneration: 1,
-      }),
-      failureCode: "PROCESS_CRASH",
+    expectFailureReconciliation(harness, "PROCESS_CRASH", {
+      jobId: "job-coverage_planner",
+      claimId: "claim-coverage_planner",
+      claimGeneration: 1,
     });
     expect(harness.launch).toHaveBeenCalledTimes(1);
     expect(harness.terminate).toHaveBeenCalledTimes(1);
     expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
   });
-
   it("returns bounded schema feedback through the same process session", async () => {
     let resultSubmission = 0;
     const harness = createSupervisorHarness({
@@ -790,7 +806,7 @@ describe("affiliate agent one-claim supervisor", () => {
           failureCode: "SCHEMA_CORRECTIONS_EXHAUSTED" as const,
           invocationFailureCount: 1 as const,
           nextAttemptAt: "2026-08-20T18:05:00.000Z",
-          pipelineBlocked: false,
+          isPipelineBlocked: false,
         };
       },
     });
@@ -898,7 +914,7 @@ describe("affiliate agent one-claim supervisor", () => {
         }
         throw new AffiliateAgentGatewayError({
           code: "RESULT_SCHEMA_INVALID",
-          retryable: false,
+          isRetryable: false,
           safeMessage: "The terminal input cannot enter schema correction.",
         });
       },
@@ -909,10 +925,7 @@ describe("affiliate agent one-claim supervisor", () => {
     ).resolves.toBe("INVOCATION_FAILED");
 
     expect(harness.gatewayPerform).toHaveBeenCalledTimes(1);
-    expect(harness.reconcileInvocation).toHaveBeenCalledWith({
-      claim: expect.any(Object),
-      failureCode: "MALFORMED_OUTPUT",
-    });
+    expectFailureReconciliation(harness, "MALFORMED_OUTPUT");
     expect(harness.terminate.mock.invocationCallOrder[0]).toBeLessThan(
       harness.reconcileInvocation.mock.invocationCallOrder[0],
     );
@@ -951,10 +964,10 @@ describe("affiliate agent one-claim supervisor", () => {
       processEvents: [{ kind: "EXIT", exitCode: 9 }],
       reconcileInvocation: async (request) => ({
         kind: "INVOCATION_FAILED",
-        failureCode: request.failureCode,
+        failureCode: request.failure.code,
         invocationFailureCount: 3,
         nextAttemptAt: null,
-        pipelineBlocked: true,
+        isPipelineBlocked: true,
       }),
     });
 
@@ -964,10 +977,7 @@ describe("affiliate agent one-claim supervisor", () => {
 
     expect(harness.gatewayClaim).toHaveBeenCalledTimes(1);
     expect(harness.gatewayPerform).not.toHaveBeenCalled();
-    expect(harness.reconcileInvocation).toHaveBeenCalledWith({
-      claim: expect.any(Object),
-      failureCode: "PROCESS_CRASH",
-    });
+    expectFailureReconciliation(harness, "PROCESS_CRASH");
     expect(harness.launch).toHaveBeenCalledTimes(1);
     expect(harness.terminate).toHaveBeenCalledTimes(1);
     expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
@@ -992,7 +1002,7 @@ describe("affiliate agent one-claim supervisor", () => {
             }
             throw new AffiliateAgentGatewayError({
               code: gatewayCode,
-              retryable: false,
+              isRetryable: false,
               safeMessage: "The token-authenticated claim scope is invalid.",
             });
           },
@@ -1010,14 +1020,10 @@ describe("affiliate agent one-claim supervisor", () => {
             ([operation]) => operation.kind,
           ),
         ).toEqual(["HEARTBEAT"]);
-        expect(harness.reconcileInvocation).toHaveBeenCalledWith({
-          claim: {
-            jobId: "job-coverage_planner",
-            claimId: "claim-coverage_planner",
-            claimGeneration: 1,
-            claimEnvelopeHash: expect.any(String),
-          },
-          failureCode,
+        expectFailureReconciliation(harness, failureCode, {
+          jobId: "job-coverage_planner",
+          claimId: "claim-coverage_planner",
+          claimGeneration: 1,
         });
         expect(harness.terminate.mock.invocationCallOrder[0]).toBeLessThan(
           harness.reconcileInvocation.mock.invocationCallOrder[0],
@@ -1054,10 +1060,7 @@ describe("affiliate agent one-claim supervisor", () => {
       expect(harness.launch).toHaveBeenCalledTimes(1);
       expect(harness.nextEvent).not.toHaveBeenCalled();
       expect(harness.terminate).toHaveBeenCalledTimes(1);
-      expect(harness.reconcileInvocation).toHaveBeenCalledWith({
-        claim: expect.any(Object),
-        failureCode: "TIMEOUT",
-      });
+      expectFailureReconciliation(harness, "TIMEOUT");
       expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
     } finally {
       jest.useRealTimers();
@@ -1111,10 +1114,7 @@ describe("affiliate agent one-claim supervisor", () => {
       expect(harness.send).toHaveBeenCalledTimes(1);
       expect(harness.launch).toHaveBeenCalledTimes(1);
       expect(harness.terminate).toHaveBeenCalledTimes(1);
-      expect(harness.reconcileInvocation).toHaveBeenCalledWith({
-        claim: expect.any(Object),
-        failureCode: "TIMEOUT",
-      });
+      expectFailureReconciliation(harness, "TIMEOUT");
       expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
     } finally {
       jest.useRealTimers();
@@ -1166,10 +1166,7 @@ describe("affiliate agent one-claim supervisor", () => {
       ).toHaveLength(1);
       expect(harness.launch).toHaveBeenCalledTimes(1);
       expect(harness.terminate).toHaveBeenCalledTimes(1);
-      expect(harness.reconcileInvocation).toHaveBeenCalledWith({
-        claim: expect.any(Object),
-        failureCode: "TIMEOUT",
-      });
+      expectFailureReconciliation(harness, "TIMEOUT");
       expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
     } finally {
       jest.useRealTimers();
@@ -1201,10 +1198,7 @@ describe("affiliate agent one-claim supervisor", () => {
 
       expect(harness.launch).toHaveBeenCalledTimes(1);
       expect(harness.terminate).toHaveBeenCalledTimes(1);
-      expect(harness.reconcileInvocation).toHaveBeenCalledWith({
-        claim: expect.any(Object),
-        failureCode: "TIMEOUT",
-      });
+      expectFailureReconciliation(harness, "TIMEOUT");
       expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
     } finally {
       jest.useRealTimers();
@@ -1282,7 +1276,13 @@ describe("affiliate agent one-claim supervisor", () => {
       "MVP_SITE_DIR",
       "AFFILIATE_AGENT_LIFECYCLE_WRITE_TOKEN",
     ];
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), "affiliate-agent-workspace-"),
+    );
     const restrictedChildScript = `
+      const { existsSync } = require("node:fs");
+      const path = require("node:path");
+      const expectedWorkspacePath = ${JSON.stringify(realpathSync(workspacePath))};
       const forbiddenNames = ${JSON.stringify(forbiddenNames)};
       const directAccess = Object.fromEntries(
         forbiddenNames.map((name) => [
@@ -1298,14 +1298,17 @@ describe("affiliate agent one-claim supervisor", () => {
             (name) => process.env[name] === undefined,
           ),
           directAccess,
+          workspacePathMatches: process.cwd() === expectedWorkspacePath,
+          gitPathAvailable: existsSync(path.join(process.cwd(), ".git")),
         }) + "\\n",
       );
     `;
     const restrictedChildLauncher: AffiliateAgentProcessLauncher["launch"] = ({
       environment,
+      workspacePath: launchWorkspacePath,
     }) => {
       const child = spawn(process.execPath, ["-e", restrictedChildScript], {
-        cwd: process.cwd(),
+        cwd: launchWorkspacePath,
         env: environment,
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -1328,35 +1331,35 @@ describe("affiliate agent one-claim supervisor", () => {
       const closed = new Promise<void>((resolve) => {
         resolveClosed = resolve;
       });
-      let ready = false;
-      let exited = false;
+      let isReady = false;
+      let hasExited = false;
       reader.on("line", (line) => {
-        if (!ready) {
+        if (!isReady) {
           if (line !== "READY") {
             rejectStarted?.(
               new Error("Restricted child did not become ready."),
             );
             return;
           }
-          ready = true;
+          isReady = true;
           resolveStarted?.();
           return;
         }
         pushEvent({ kind: "RESULT", value: JSON.parse(line) });
       });
       child.once("error", (error) => {
-        if (!ready) rejectStarted?.(error);
+        if (!isReady) rejectStarted?.(error);
       });
       child.once("close", (exitCode) => {
-        exited = true;
-        if (!ready) {
+        hasExited = true;
+        if (!isReady) {
           rejectStarted?.(new Error("Restricted child exited before ready."));
         }
         pushEvent({ kind: "EXIT", exitCode: exitCode ?? -1 });
         resolveClosed?.();
       });
       const stop = async (signal: "SIGTERM" | "SIGKILL"): Promise<void> => {
-        if (!exited) child.kill(signal);
+        if (!hasExited) child.kill(signal);
         await closed;
         reader.close();
       };
@@ -1377,6 +1380,7 @@ describe("affiliate agent one-claim supervisor", () => {
     try {
       const harness = createSupervisorHarness({
         launch: restrictedChildLauncher,
+        workspacePath,
       });
       await expect(
         runAffiliateAgentInvocation(harness.dependencies, supervisorInput()),
@@ -1401,11 +1405,14 @@ describe("affiliate agent one-claim supervisor", () => {
         directAccess: Object.fromEntries(
           forbiddenNames.map((name) => [name, "DENIED"]),
         ),
+        workspacePathMatches: true,
+        gitPathAvailable: false,
       });
       expect(harness.launch).toHaveBeenCalledTimes(1);
       expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
     } finally {
       parentEnvironment.restore();
+      await rm(workspacePath, { recursive: true, force: true });
     }
   });
 

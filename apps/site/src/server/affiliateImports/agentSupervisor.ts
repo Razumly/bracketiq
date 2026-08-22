@@ -5,6 +5,7 @@ import {
   AffiliateAgentGatewayError,
   type AffiliateAgentClaimAuthorization,
   type AffiliateAgentClaimGrant,
+  type AffiliateAgentInvocationFailureEnvelope,
   type AffiliateAgentInvocationFailureCode,
   type AffiliateAgentSubmitResultOutcome,
 } from "./agentGateway";
@@ -17,7 +18,6 @@ import {
   AFFILIATE_AGENT_MAX_CLAIM_ENVELOPE_CANONICAL_BYTES,
   AFFILIATE_AGENT_MAX_ENVIRONMENT_VALUE_BYTES,
   canonicalizeAffiliateAgentValue,
-  hashAffiliateAgentValue,
   type AffiliateAgentRole,
 } from "./agentGatewayContracts";
 
@@ -30,7 +30,7 @@ const boundedEnvironmentValue = (name: string, value: string): string => {
   ) {
     throw new AffiliateAgentGatewayError({
       code: "INTERNAL_ERROR",
-      retryable: false,
+      isRetryable: false,
       safeMessage: `The ${name} environment value is too large.`,
     });
   }
@@ -45,7 +45,7 @@ const boundedClaimEnvelope = (envelope: unknown): string => {
   ) {
     throw new AffiliateAgentGatewayError({
       code: "INTERNAL_ERROR",
-      retryable: false,
+      isRetryable: false,
       safeMessage: "The claim envelope is too large.",
     });
   }
@@ -124,9 +124,9 @@ const authorizationFor = (
 });
 
 const outcomeForInvocationFailure = (
-  pipelineBlocked: boolean,
+  isPipelineBlocked: boolean,
 ): AffiliateAgentSupervisorOutcome =>
-  pipelineBlocked ? "PIPELINE_BLOCKED" : "INVOCATION_FAILED";
+  isPipelineBlocked ? "PIPELINE_BLOCKED" : "INVOCATION_FAILED";
 
 const failureCodeForGatewayError = (
   error: unknown,
@@ -154,6 +154,25 @@ const failureCodeForGatewayError = (
   }
   if (error.code === "RESULT_SCHEMA_INVALID") return "MALFORMED_OUTPUT";
   return fallback;
+};
+const failureSummaryFor = (
+  code: Exclude<
+    AffiliateAgentInvocationFailureCode,
+    "SCHEMA_CORRECTIONS_EXHAUSTED"
+  >,
+): string => {
+  switch (code) {
+    case "MALFORMED_OUTPUT":
+      return "The invocation output was malformed.";
+    case "STALE_GENERATION":
+      return "The invocation claim generation became stale.";
+    case "PROCESS_CRASH":
+      return "The invocation process ended before completion.";
+    case "TIMEOUT":
+      return "The invocation exceeded its hard deadline.";
+    case "TERMINAL_SUBMISSION_FAILURE":
+      return "The terminal result could not be confirmed.";
+  }
 };
 
 export const runAffiliateAgentInvocation = async (
@@ -187,21 +206,21 @@ export const runAffiliateAgentInvocation = async (
       // Try force termination after a graceful failure.
     }
 
-    let forceTerminated = false;
+    let isForceTerminated = false;
     try {
-      forceTerminated = await terminateWithinGrace(() =>
+      isForceTerminated = await terminateWithinGrace(() =>
         activeSession.forceTerminate(),
       );
     } catch {
-      forceTerminated = false;
+      isForceTerminated = false;
     }
-    if (forceTerminated) {
+    if (isForceTerminated) {
       processSession = null;
       return;
     }
     throw new AffiliateAgentGatewayError({
       code: "INTERNAL_ERROR",
-      retryable: false,
+      isRetryable: false,
       safeMessage: "The agent process could not be terminated.",
     });
   };
@@ -234,7 +253,7 @@ export const runAffiliateAgentInvocation = async (
         if (claimAttempt >= AFFILIATE_AGENT_GATEWAY_RETRY_ATTEMPTS) {
           throw error;
         }
-        if (error instanceof AffiliateAgentGatewayError && !error.retryable) {
+        if (error instanceof AffiliateAgentGatewayError && !error.isRetryable) {
           throw error;
         }
       }
@@ -243,6 +262,7 @@ export const runAffiliateAgentInvocation = async (
     if (grant === null) return "NO_WORK";
 
     const authorization = authorizationFor(grant);
+    const failureIdempotencyKey = `supervisor-failure-${grant.envelope.claimId}`;
     const claimedHardDeadline = Date.parse(grant.hardDeadlineAt);
     const now = dependencies.clock.now().getTime();
     const hardDeadlineAt = Math.min(
@@ -268,20 +288,32 @@ export const runAffiliateAgentInvocation = async (
       } catch {
         // Reconcile the claim even when child termination fails.
       }
+      const failure: AffiliateAgentInvocationFailureEnvelope = {
+        schemaVersion: 1,
+        jobId: grant.envelope.jobId,
+        claimId: grant.envelope.claimId,
+        claimGeneration: grant.envelope.claimGeneration,
+        lifecycleGeneration: grant.envelope.lifecycleGeneration,
+        role: grant.envelope.role,
+        workerId: grant.envelope.workerId,
+        invocationId: grant.envelope.invocationId,
+        supplyContractHash: grant.envelope.supplyContractHash,
+        code: failureCode,
+        occurredAt: dependencies.clock.now().toISOString(),
+        evidenceRefs: [],
+        safeSummary: failureSummaryFor(failureCode),
+      };
       const authoritative =
         await dependencies.invocationReconciler.reconcileInvocation({
-          claim: {
-            jobId: grant.envelope.jobId,
-            claimId: grant.envelope.claimId,
-            claimGeneration: grant.envelope.claimGeneration,
-            claimEnvelopeHash: hashAffiliateAgentValue(grant.envelope),
-          },
-          failureCode,
+          kind: "RECORD_FAILURE",
+          idempotencyKey: failureIdempotencyKey,
+          authorization,
+          failure,
         });
       if (authoritative.kind === "TERMINAL_ACCEPTED") {
         return "TERMINAL_ACCEPTED";
       }
-      return outcomeForInvocationFailure(authoritative.pipelineBlocked);
+      return outcomeForInvocationFailure(authoritative.isPipelineBlocked);
     };
 
     const waitHeartbeatAware = async <T>(
@@ -297,7 +329,7 @@ export const runAffiliateAgentInvocation = async (
             kind: "ERROR",
             error: new AffiliateAgentGatewayError({
               code: "INTERNAL_ERROR",
-              retryable: false,
+              isRetryable: false,
               safeMessage: "The supervisor wait timers are not available.",
             }),
           };
@@ -337,7 +369,7 @@ export const runAffiliateAgentInvocation = async (
           }
           if (
             heartbeat.error instanceof AffiliateAgentGatewayError &&
-            !heartbeat.error.retryable
+            !heartbeat.error.isRetryable
           ) {
             return heartbeat;
           }
@@ -383,7 +415,7 @@ export const runAffiliateAgentInvocation = async (
 
     let processWake: Promise<AffiliateAgentProcessEvent | void> =
       processSession.started;
-    let processReady = false;
+    let isProcessReady = false;
     let resultSubmissionCount = 0;
     while (true) {
       const wake = await waitHeartbeatAware(processWake);
@@ -397,11 +429,11 @@ export const runAffiliateAgentInvocation = async (
 
       const event = wake.value;
 
-      if (!processReady) {
+      if (!isProcessReady) {
         if (event !== undefined) {
           return await reconcileFailure("MALFORMED_OUTPUT");
         }
-        processReady = true;
+        isProcessReady = true;
         processWake = processSession.nextEvent();
         continue;
       }
@@ -460,13 +492,13 @@ export const runAffiliateAgentInvocation = async (
 
       if (result.kind === "TERMINAL_ACCEPTED") return "TERMINAL_ACCEPTED";
       if (result.kind === "INVOCATION_FAILED") {
-        return outcomeForInvocationFailure(result.pipelineBlocked);
+        return outcomeForInvocationFailure(result.isPipelineBlocked);
       }
       if (resultSubmissionCount >= AFFILIATE_AGENT_MAX_SCHEMA_CORRECTIONS) {
         await terminateProcess();
         throw new AffiliateAgentGatewayError({
           code: "INTERNAL_ERROR",
-          retryable: false,
+          isRetryable: false,
           safeMessage:
             "The gateway returned schema correction after the correction limit.",
         });
@@ -492,26 +524,26 @@ export const runAffiliateAgentInvocation = async (
     heartbeatTimer?.cancel();
     deadlineTimer?.cancel();
 
-    let terminationFailed = false;
+    let isTerminationFailed = false;
     let terminationFailure: unknown;
     try {
       await terminateProcess();
     } catch (error) {
-      terminationFailed = true;
+      isTerminationFailed = true;
       terminationFailure = error;
     }
-    let workspaceFailed = false;
+    let isWorkspaceFailed = false;
     try {
       await dependencies.workspaces.destroy(workspace.path);
     } catch {
-      workspaceFailed = true;
+      isWorkspaceFailed = true;
     }
 
-    if (terminationFailed) throw terminationFailure;
-    if (workspaceFailed) {
+    if (isTerminationFailed) throw terminationFailure;
+    if (isWorkspaceFailed) {
       throw new AffiliateAgentGatewayError({
         code: "INTERNAL_ERROR",
-        retryable: false,
+        isRetryable: false,
         safeMessage: "The agent workspace could not be destroyed.",
       });
     }

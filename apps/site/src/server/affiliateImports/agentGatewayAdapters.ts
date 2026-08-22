@@ -12,14 +12,13 @@ import type {
   AffiliateAgentDeclarativePackageValidationOutput,
   AffiliateAgentClaimEnvelope,
   AffiliateAgentCommand,
-  AffiliateAgentContractBundle,
   AffiliateAgentExecutionClass,
   AffiliateAgentRole,
   AffiliateAgentTerminalResultEnvelope,
 } from "./agentGatewayContracts";
 import { canonicalizeAffiliateAgentValue } from "./agentGatewayContracts";
 import type {
-  AffiliateAgentClaimRequest,
+  AffiliateAgentClaimOperation,
   AffiliateAgentGateway,
   AffiliateAgentInvocationFailureCode,
   AffiliateAgentWorkspaceAttestation,
@@ -231,19 +230,10 @@ export type AffiliateAgentLifecycleAuthority =
         receiptId: string,
       ): Promise<Readonly<Record<string, unknown>> | null>;
     }>;
-
-export type AffiliateAgentInvocationReconciliationRequest = Readonly<{
-  claim: Readonly<{
-    jobId: string;
-    claimId: string;
-    claimGeneration: number;
-    claimEnvelopeHash: string;
-  }>;
-  failureCode: Exclude<
-    AffiliateAgentInvocationFailureCode,
-    "SCHEMA_CORRECTIONS_EXHAUSTED"
-  >;
-}>;
+export type AffiliateAgentInvocationReconciliationRequest = Extract<
+  AffiliateAgentClaimOperation,
+  { kind: "RECORD_FAILURE" }
+>;
 
 export type AffiliateAgentInvocationReconciliationResult =
   | Readonly<{ kind: "TERMINAL_ACCEPTED" }>
@@ -252,7 +242,7 @@ export type AffiliateAgentInvocationReconciliationResult =
       failureCode: AffiliateAgentInvocationFailureCode;
       invocationFailureCount: 1 | 2 | 3;
       nextAttemptAt: string | null;
-      pipelineBlocked: boolean;
+      isPipelineBlocked: boolean;
     }>;
 
 export interface AffiliateAgentInvocationReconciler {
@@ -417,9 +407,3 @@ export const createProductionAffiliateAgentGatewayDependencies = (
   terminalEffects: input.terminalEffects,
   lifecycle: input.lifecycle ?? { kind: "UNAVAILABLE" },
 });
-
-export type AffiliateAgentClaimRequestVerifier = Pick<
-  AffiliateAgentClaimRequest,
-  "role" | "workerId" | "invocationId"
->;
-export type AffiliateAgentParsedContractBundle = AffiliateAgentContractBundle;

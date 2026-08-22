@@ -118,6 +118,12 @@ export type AffiliateAgentClaimOperation =
       idempotencyKey: string;
       authorization: AffiliateAgentClaimAuthorization;
       result: unknown;
+    }>
+  | Readonly<{
+      kind: "RECORD_FAILURE";
+      idempotencyKey: string;
+      authorization: AffiliateAgentClaimAuthorization;
+      failure: AffiliateAgentInvocationFailureEnvelope;
     }>;
 
 export type AffiliateAgentHeartbeatResult = Readonly<{
@@ -168,7 +174,7 @@ export type AffiliateAgentInvocationFailedResult = Readonly<{
   failureCode: AffiliateAgentInvocationFailureCode;
   invocationFailureCount: 1 | 2 | 3;
   nextAttemptAt: string | null;
-  pipelineBlocked: boolean;
+  isPipelineBlocked: boolean;
 }>;
 
 export type AffiliateAgentSubmitResultOutcome =
@@ -187,7 +193,9 @@ export type AffiliateAgentClaimOperationResult<
         ? AffiliateAgentCommandResult
         : T extends Readonly<{ kind: "SUBMIT_RESULT" }>
           ? AffiliateAgentSubmitResultOutcome
-          : never;
+          : T extends Readonly<{ kind: "RECORD_FAILURE" }>
+            ? AffiliateAgentInvocationFailedResult
+            : never;
 
 export type AffiliateAgentReconcileRequest = Readonly<{
   limit?: number;
@@ -201,7 +209,7 @@ export type AffiliateAgentReconcileReport = Readonly<{
   recoveredReceipts: number;
   completedReceipts: number;
   unresolvedReceipts: number;
-  admissionHalted: boolean;
+  isAdmissionHalted: boolean;
 }>;
 
 export type AffiliateAgentGatewayErrorCode =
@@ -242,14 +250,14 @@ export type AffiliateAgentGatewayErrorCode =
 
 export class AffiliateAgentGatewayError extends Error {
   readonly code: AffiliateAgentGatewayErrorCode;
-  readonly retryable: boolean;
+  readonly isRetryable: boolean;
   readonly safeMessage: string;
   readonly receiptId?: string;
 
   constructor(
     input: Readonly<{
       code: AffiliateAgentGatewayErrorCode;
-      retryable: boolean;
+      isRetryable: boolean;
       safeMessage: string;
       receiptId?: string;
     }>,
@@ -257,7 +265,7 @@ export class AffiliateAgentGatewayError extends Error {
     super(input.safeMessage);
     this.name = "AffiliateAgentGatewayError";
     this.code = input.code;
-    this.retryable = input.retryable;
+    this.isRetryable = input.isRetryable;
     this.safeMessage = input.safeMessage;
     this.receiptId = input.receiptId;
   }

@@ -304,7 +304,7 @@ const mappingEvidenceComponentSchema = z
             "SOURCE_POLICY",
           ]),
         ),
-        requiresDeterministicValidation: z.literal(true),
+        hasDeterministicValidation: z.literal(true),
       })
       .strict(),
   })
@@ -323,7 +323,7 @@ const lifecycleEvidenceComponentSchema = z
             "VALIDATION_OUTPUT",
           ]),
         ),
-        requiresIndependentReview: z.literal(true),
+        hasIndependentReview: z.literal(true),
       })
       .strict(),
   })
@@ -745,15 +745,15 @@ export const affiliateAgentDeploymentContractSchema = z
     expectedTopology: z
       .object({
         claimsPerInvocation: z.literal(1),
-        freshWorkspacePerClaim: z.literal(true),
+        hasFreshWorkspacePerClaim: z.literal(true),
         processCommand: z.tuple([
           z.literal("codex"),
           z.literal("exec"),
           z.literal("--ephemeral"),
         ]),
-        nestedGoal: z.literal(false),
-        claimLoop: z.literal(false),
-        contextReuse: z.literal(false),
+        hasNestedGoal: z.literal(false),
+        hasClaimLoop: z.literal(false),
+        hasContextReuse: z.literal(false),
         executionClass: z.literal("PRODUCTION_CODEX"),
         databaseRoles: z
           .object({
@@ -1276,10 +1276,7 @@ export const affiliateAgentCommandSchema = z.discriminatedUnion("type", [
 ]);
 
 export const affiliateAgentDeclarativePackageValidationOutputSchema = z
-  .object({
-    valid: z.literal(true),
-    validatedPackageHash: sha256Schema,
-  })
+  .object({ isValid: z.literal(true), validatedPackageHash: sha256Schema })
   .strict();
 
 export type AffiliateAgentDeclarativePackageValidationOutput = z.infer<

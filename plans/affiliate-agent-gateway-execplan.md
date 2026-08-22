@@ -42,7 +42,16 @@ A developer can see the change work in three ways. Pure contract tests show stab
 - [x] (2026-08-20) Ran the two-axis review against `main...b92a9eb06`. The Standards review found one P2 gate issue: the required contract suites were not recorded as run before review. The Spec review found eight findings, listed in `Review Status` below.
 - [x] (2026-08-21) Reconciled all eight findings from the committed-tip review. The follow-up implementation now covers the one-claim supervisor and child-environment allowlist, Mapping Producer Supply Source binding, typed successful validation and commit receipts, bounded repair commit evidence, Coverage Planner no-action evidence, scoped receipt-backed reviewer effects, post-generation Human-directed Executor completion, and injected-time reconciliation boundaries.
 - [x] (2026-08-21) Re-ran the focused gateway and supervisor suites: 97 tests pass. The isolated PostgreSQL suite passes 18 tests. TypeScript, Prisma validation and generated-client checks, the production build, focused Prettier checks, the full site suite (850 suites and 5,053 tests), and `npm run test:ci` with route coverage pass.
-- [ ] Commit the current working-tree follow-up implementation and rerun both review axes against that new tip. Do not close issue #67 until the committed tip has no review findings.
+- [x] (2026-08-21) Re-ran the Standards and Spec reviews against the complete current worktree with `git diff main`. The patch was 139 files (`+33,200 / -24,321`) and `git diff --check` passed. The current review found seven Standards findings and two P1 Spec findings; both P1 findings were fixed in the follow-up below.
+- [x] (2026-08-21) Restored the unrelated mainline document, billing, team-invite, scheduler, migration, ADR, and plan files from `main`. Issue #67 now changes only its gateway implementation, focused tests, and ExecPlan.
+- [x] (2026-08-21) Added trusted `RECORD_FAILURE` authorization for exact supervisor reconciliation. It bypasses expired lease, token, hard-deadline, and Supply Source lifecycle-generation checks while retaining claim identity, contract, evidence, and idempotency checks. Focused regressions cover lease expiry, hard-deadline/token expiry, and stale lifecycle generation.
+- [x] (2026-08-21) Aligned this ExecPlan with the current `RECORD_FAILURE` operation, `AffiliateAgentInvocationFailedResult`, `is*` boolean names, current identifiers, and the removed unused adapter aliases.
+- [x] (2026-08-21) Extracted the shared invocation-failure transition and expiry reconciliation into internal Prisma implementation modules. Preserved the pending-effect guard, failure retry policy, expiry CAS race handling, and existing gateway facade. Added SQL selection that excludes pending artifact reads and external or lifecycle effects before the bounded expiry limit. Gateway unit tests pass 74 tests, supervisor tests pass 29 tests, the PostgreSQL integration suite passes 20 tests, and TypeScript passes.
+- [x] (2026-08-21) Added a PostgreSQL limit-one regression that leaves an artifact read pending on the first expired claim and proves reconciliation expires the next eligible claim instead.
+
+- [x] (2026-08-21) Moved the duplicate Mapping Producer package-commit guard into the same serializable transaction as adapter execution. Returned the durable `PIPELINE_BLOCKED` sentinel after commit so the block event and claim/job state do not roll back. Added a PostgreSQL assertion for the blocked state.
+- [x] (2026-08-21) Reused post-effect claim authorization for recovered Supply Reviewer terminal results. Recovery now checks active contracts, lifecycle generation, exact effect receipt identity, and pending effects before terminal completion.
+- [ ] Commit the scoped follow-up implementation and rerun both review axes against that exact tip. Do not close issue #67 until both axes pass.
 
 ## Surprises & Discoveries
 
@@ -104,25 +113,46 @@ A developer can see the change work in three ways. Pure contract tests show stab
 
 - Observation: The review result depends on the committed comparison point.
 - Evidence: The eight findings applied to the committed tip, while the supervisor, containment, reviewer-effect, lifecycle, and contract-validation follow-ups were still uncommitted.
+- Observation: The initial complete-worktree review exposed unrelated inverse diffs.
+  Evidence: `git diff main` reported 139 files with `+33,200 / -24,321` changes and deleted billing, document, migration, scheduler, ADR, and plan files. Those exact mainline files were restored before the follow-up review.
+- Observation: Trusted timeout and stale-generation reconciliation must use a narrower authorization exception than normal claim operations.
+  Evidence: `reconcileExactInvocation` now delegates an exact `RECORD_FAILURE` operation with `trustedFailureRecording`. The exception bypasses expired lease, token, hard-deadline, and lifecycle-generation checks only; claim identity, contract, evidence, and idempotency checks remain active.
+- Observation: A committed-tip review can become stale when follow-up changes remain in the worktree.
+  Evidence: The pre-follow-up review compared `git diff main`; the final review must compare the committed exact tip with `main` after the follow-up commit.
+- Observation: A transaction callback must return the duplicate-commit block sentinel before the gateway raises its public unresolved error.
+- Evidence: Raising inside the serializable callback rolled back the claim, job, and `COMMIT_REPLAY_BLOCKED` event. The PostgreSQL regression now observes those rows after the public error.
+- Observation: Reviewer effect recovery needs the same contract and lifecycle checks as an online post-effect terminal submission.
+- Evidence: Recovery now uses a trusted effect receipt option in `authorizeClaimOperation` and rejects pending claim effects before it closes the claim.
+- Observation: The complete site Jest suite had one unrelated `EventForm` dirty-state failure caused by a generated Cash App value (`$camka14`) in the existing test.
+- Evidence: The failed full run reported 863 passed suites and 1 failed suite. The exact `EventForm.test.tsx` file passed all 130 tests when rerun alone. Gateway unit, supervisor, and PostgreSQL gateway suites passed after the follow-up changes.
 
 ## Review Status
 
-The latest completed two-axis review compared `main...b92a9eb06`. It did not include the working-tree follow-up implementation. The Standards review found one P2 evidence gate. The Spec review found eight findings.
+The historical two-axis review compared `main...b92a9eb06`. It did not include the working-tree follow-up implementation. Its findings remain historical evidence only.
 
-The follow-up implementation addresses every listed Spec finding:
+The current two-axis review ran on 2026-08-21 against the complete worktree with `git diff main`. It included seven uncommitted gateway files and unrelated inverse diffs. The patch was 139 files with `+33,200 / -24,321` changes. `git diff --check` passed. No application test suite ran as part of that review; the following entries record its pre-follow-up findings.
 
-- P1: one-claim supervisor, heartbeat, teardown, crash and timeout recording, and child-environment containment.
-- P1: Mapping Producer validation bound to the claimed Supply Source ID.
-- P1: successful typed deterministic validation required before package commit.
-- P1: bounded repair packages validated with a commit receipt before completion.
-- P2: Coverage Planner no-action results require evidence.
-- P1: reviewer approval, activation, producer repair, regression, exclusion, and target rejection use scoped receipt-backed handlers.
-- P1: Human-directed Executor completion survives the authorized lifecycle generation advance.
-- P2: public reconciliation rejects a boundary later than the injected current time.
+### Pre-follow-up Standards findings
 
-The Standards evidence gate is now covered by the focused suites, the isolated PostgreSQL suite, the full site suite, TypeScript, Prisma checks, the production build, and `npm run test:ci`. The review gate remains open until this follow-up is committed and both review axes inspect that exact commit with no findings.
+- **P1 — Unrelated main reversions:** Resolved by restoring the exact deleted mainline files listed by the review.
+- **P2 — Living review status:** Resolved by recording the pre-follow-up review and current follow-up state in this plan.
+- **P2 — Gateway interface mismatch:** Resolved by naming `AffiliateAgentInvocationFailedResult` as the `RECORD_FAILURE` result in this plan.
+- **P2 — Recovery identifiers:** Resolved by using the dedicated worktree and `bracketiq_e2e_67_gateway` identifiers in the plan.
+- **P3 — Public boolean names:** Resolved with `isPipelineBlocked`, `isAdmissionHalted`, and `isRetryable`.
+- **P3 — Contract boolean names:** Resolved with `hasFreshWorkspacePerClaim`, `hasNestedGoal`, `hasClaimLoop`, `hasContextReuse`, and `isValid`.
+- **P3 — Misleading unused aliases:** Resolved by removing the unused adapter aliases.
 
-Review status is separate from implementation status. The working tree has the supervisor, containment, reviewer-effect, lifecycle, and contract-validation follow-ups. The reviewed commit `b92a9eb06` does not. A clean implementation result must be promoted to a commit and reviewed again before issue #67 can move to resolved.
+### Pre-follow-up Spec findings
+
+- **P1 — Trusted post-boundary failure recording:** Resolved with the trusted exact `RECORD_FAILURE` path and lease, hard-deadline/token, and lifecycle-generation regressions.
+- **P1 — Unrelated billing API deletion:** Resolved by restoring the billing route from `main`.
+
+The pre-follow-up findings are resolved in the current worktree. Issue #67 remains open until the scoped implementation is committed and both review axes pass against that exact tip. The complete historical finding record is in issue comment https://github.com/Razumly/bracketiq/issues/67#issuecomment-5377897733.
+
+### Current follow-up findings
+
+- **P1 — Duplicate commit block rollback:** Resolved by returning the block sentinel from the transaction and translating it to `PARTIAL_COMMAND_UNRESOLVED` after commit. The PostgreSQL suite asserts durable claim, job, and event state.
+- **P1 — Recovered reviewer stale authority:** Resolved by trusted post-effect authorization with active contract, lifecycle, effect identity, and pending-effect checks.
 
 ## Decision Log
 
@@ -210,6 +240,10 @@ Review status is separate from implementation status. The working tree has the s
   Rationale: Expiry is one infrastructure failure. The shared CAS path gives failure one +5 retry, failure two +15, and failure three immediate `PIPELINE_BLOCKED`.
   Date/Author: 2026-08-20 / Codex Milestones 7-11 implementer
 
+- Decision: Keep failure accounting and expiry reconciliation in focused internal Prisma modules behind the public gateway facade.
+  Rationale: Both paths must share one claim, job, receipt, event, and retry transition. The expiry path must retain its compare-and-set race result as a retryable reconciliation conflict, while normal invocation failure keeps its public claim error. Focused modules make that invariant visible without expanding the public interface.
+  Date/Author: 2026-08-21 / Codex
+
 - Decision: Recover lifecycle response loss only through `AffiliateAgentLifecycleAuthority.recover(receiptId)`.
   Rationale: The gateway owns receipt safety. Issue #68 owns lifecycle derivation and the actual transition rules.
   Date/Author: 2026-08-20 / Codex Milestones 7-11 implementer
@@ -217,9 +251,9 @@ Review status is separate from implementation status. The working tree has the s
   Rationale: The external reviewer effect may finish after the lease while its reserved receipt proves that work began within the claim. The gateway must complete that exact result once, without reopening a new claim or repeating the effect. The completion path accepts only the matching successful receipt, claim, generation, active status, and pre-expiry start time.
   Date/Author: 2026-08-21 / Codex post-review fix
 
-- Decision: Keep issue #67 open until the current implementation is committed and passes a repeat two-axis review.
-  Rationale: The latest review inspected `main...b92a9eb06`, while the current working tree contains later uncommitted changes. A review of the committed tip is the required evidence for resolution.
-  Date/Author: 2026-08-20 / Codex
+- Decision: Keep issue #67 open until the scoped implementation is committed and passes a repeat two-axis review against that exact tip.
+  Rationale: The unrelated mainline files and two P1 findings from the pre-follow-up review are resolved. The final review must cover the committed implementation, not only an earlier tip or uncommitted worktree.
+  Date/Author: 2026-08-21 / Codex
 
 ## Outcomes & Retrospective
 
@@ -230,6 +264,8 @@ The Milestone 1 self-review fixes are complete. The registry can now parse one c
 Milestones 2 through 6 are complete for the user-confirmed Coverage Planner slice. The gateway now owns one serializable claim, heartbeats, manifest-only artifact reads, one closed command, and one atomic terminal result. The database stores only the token hash, nonce, and key version; every claim operation rechecks the scoped capability and active contract bundle. A real PostgreSQL test proves the claim race, CAS generations, partial unique live-claim constraint, durable idempotency, atomic terminal completion, exact terminal replay, token invalidation, and immutable events. Failure admission and Milestones 7 through 12 remain intentionally outside this slice.
 
 Milestones 7 through 12 are complete in the current working tree. The gateway implements schema correction exhaustion, the exact three-attempt invocation policy, public external capture, lost-response recovery, bounded receipt and expiry reconciliation, hard-deadline expiry, impossible-state containment, lifecycle receipt recovery, reviewer isolation, declarative mapping validation and commit, all four role contracts, and the one-claim supervisor. The supervisor starts one ephemeral process, passes only five bounded environment values, sends heartbeats, handles bounded schema corrections, reconciles failures, and destroys the workspace. A reviewer effect expiry regression proves that a finalized effect started before lease expiry can complete its exact terminal result without repeating the effect. A real child probe verifies the launch boundary receives no protected database, storage, provider, repository, or lifecycle-write credential. Focused gateway, supervisor, PostgreSQL integration, typecheck, Prisma, formatting, build, and full-site evidence is recorded below. Issue #68 lifecycle derivation and issue #70 fleet cutover remain outside this change. The committed review tip still needs the follow-up changes and a clean repeat review.
+
+The pre-follow-up findings are resolved in the current worktree. Focused verification is current for the gateway and supervisor changes. Final acceptance remains pending the full verification pass, commit, and repeat Standards and Spec reviews against that exact tip.
 
 ## Context and Orientation
 
@@ -390,7 +426,10 @@ Hand-edit only the following implementation files unless a discovery requires a 
 - `apps/site/src/server/affiliateImports/agentGatewayContracts.ts` is new. It is the pure contract seam.
 - `apps/site/src/server/affiliateImports/agentGateway.ts` is new. It is the public transactional gateway seam.
 - `apps/site/src/server/affiliateImports/agentGatewayAdapters.ts` is new. It contains internal dependency adapter types and production dependency assembly. Do not re-export these types from `agentGateway.ts`.
-- `apps/site/src/server/affiliateImports/prismaAgentGateway.ts` is new. It implements all Prisma CAS, transaction ordering, tokens, receipts, retry admission, and reconciliation.
+- `apps/site/src/server/affiliateImports/prismaAgentGatewayFailureTransitions.ts` is an internal implementation seam for claim failure accounting, retry scheduling, failure receipts, and failure events. It is not a public gateway export.
+- `apps/site/src/server/affiliateImports/prismaAgentGatewayExpiry.ts` is an internal implementation seam for bounded expired-claim selection, expiry CAS, impossible-state containment, and trusted timeout failure recording. It is not a public gateway export.
+
+- `apps/site/src/server/affiliateImports/prismaAgentGateway.ts` is new. It is the public Prisma facade that coordinates CAS, transaction ordering, tokens, receipts, retry admission, and reconciliation.
 - `apps/site/src/server/affiliateImports/agentSupervisor.ts` is new. It runs one claim and one fresh ephemeral Codex invocation.
 - `apps/site/src/server/affiliateImports/__tests__/agentGateway.test.ts` is new. It contains pure contract, interface, supervisor, capability, and role-matrix behavior tests with internal fakes.
 - `apps/site/src/server/affiliateImports/__tests__/agentGateway.database.integration.test.ts` is new. It contains real PostgreSQL claim-race, CAS, receipt, restart, grant, and lifecycle-receipt tests. Guard it with `RUN_DATABASE_INTEGRATION === '1'` like current database integration tests.
@@ -554,7 +593,6 @@ Do not export `AffiliateAgentInvocationFailureEnvelope`, invocation retry consta
     AffiliateAgentTerminalAcceptedResult
     AffiliateAgentInvocationFailedResult
     AffiliateAgentSubmitResultOutcome
-    AffiliateAgentRecordFailureResult
     AffiliateAgentClaimOperationResult
     AffiliateAgentReconcileRequest
     AffiliateAgentReconcileReport
@@ -654,7 +692,7 @@ The main shapes are:
     GATEWAY_ADMISSION_HALTED
     INTERNAL_ERROR
 
-`AffiliateAgentGatewayError` exposes `code`, `retryable`, `safeMessage`, and optional `receiptId`. `RESULT_SCHEMA_INVALID` is for input that cannot enter the correction contract. Normal role-output validation returns `AffiliateAgentSchemaCorrectionResult`. The third distinct correction returns `SCHEMA_CORRECTIONS_EXHAUSTED` and records one invocation failure.
+`AffiliateAgentGatewayError` exposes `code`, `isRetryable`, `safeMessage`, and optional `receiptId`. `RESULT_SCHEMA_INVALID` is for input that cannot enter the correction contract. Normal role-output validation returns `AffiliateAgentSchemaCorrectionResult`. The third distinct correction returns `SCHEMA_CORRECTIONS_EXHAUSTED` and records one invocation failure.
 
 ### Adapter and implementation modules
 
@@ -681,15 +719,24 @@ The main shapes are:
 
 Transactional command handlers receive the active Prisma transaction. External handlers implement `start(externalOperationKey, command)` and `recover(externalOperationKey)`. The artifact store addresses existing content by `fileId`, not by an agent path. The token codec owns the versioned HMAC key and constant-time token comparison.
 
-`apps/site/src/server/affiliateImports/prismaAgentGateway.ts` must export only:
+`apps/site/src/server/affiliateImports/prismaAgentGatewayFailureTransitions.ts` and `apps/site/src/server/affiliateImports/prismaAgentGatewayExpiry.ts` are internal implementation seams. The failure module exports `recordInvocationFailureTransition` and its serializable claim-race error for the Prisma facade and expiry reconciler. The expiry module exports `reconcileExpiredClaims`. Neither module is a public gateway entry point. The gateway module also exports the explicitly internal `createPrismaAffiliateAgentInvocationReconciler` assembly for the supervisor. The trusted reconciler is not attached to the public gateway factory result. The failure transition accepts a `claimCasFailure` mode so expiry reconciliation retries a concurrent claim change instead of halting the reconciliation batch.
+
+`apps/site/src/server/affiliateImports/prismaAgentGateway.ts` must export:
 
     createPrismaAffiliateAgentGateway
+    createPrismaAffiliateAgentInvocationReconciler
 
-Its signature is:
+The public factory signature is:
 
     export function createPrismaAffiliateAgentGateway(
       dependencies: AffiliateAgentGatewayDependencies,
     ): AffiliateAgentGateway;
+
+The internal supervisor assembly signature is:
+
+    export function createPrismaAffiliateAgentInvocationReconciler(
+      dependencies: AffiliateAgentGatewayDependencies,
+    ): AffiliateAgentInvocationReconciler;
 
 `apps/site/src/server/affiliateImports/agentSupervisor.ts` must export:
 
@@ -715,6 +762,8 @@ The opaque token format is `agw1.<claimLookupId>.<capability>`. Generate a rando
 
 Every operation checks token hash, expiry, invalidation, exact scope, lease, hard deadline, active deployment, active Supply Contract, and generations. For a Supply Source claim, ask the lifecycle adapter for current generation. A mismatch returns `LIFECYCLE_GENERATION_STALE`. It does not derive a lifecycle state.
 
+Trusted exact `RECORD_FAILURE` reconciliation may run after the lease, token, hard-deadline, or Supply Source lifecycle-generation boundary. It still requires the exact claim authorization identities, active deployment and Supply Contract hashes, failure envelope, evidence manifest, and operation idempotency key.
+
 ## Idempotence and Recovery
 
 All hashes use `canonicalizeAffiliateAgentValue` and `hashAffiliateAgentValue`. Do not use insertion-order `JSON.stringify` as a durable hash input.
@@ -727,24 +776,24 @@ An exact terminal replay returns the original terminal response even though the 
 
 A lifecycle command passes its receipt ID to #68 authority. On response loss, read that lifecycle receipt before any retry. A provider command passes its external operation key to `recover`. If recovery cannot prove success or failure, mark the receipt, claim, and job `RECONCILIATION_REQUIRED`. Do not guess and do not repeat the effect.
 
-Expired claims use CAS before failure accounting. Restart reconciliation can run more than once. A completed receipt, completed claim, terminal job, or already-counted expiry remains unchanged. A partial unique index prevents two live claims even if application CAS has a defect.
+Expired claims use CAS before failure accounting. Restart reconciliation can run more than once. The bounded selector excludes claims with pending artifact reads or pending external/lifecycle effects before applying its shared limit. The transaction repeats the pending-effect guard. A completed receipt, completed claim, terminal job, or already-counted expiry remains unchanged. A partial unique index prevents two live claims even if application CAS has a defect.
 
 Retain authoritative results, lifecycle receipts, human decisions, evidence, and event hashes indefinitely. Retain bounded failed-invocation diagnostics for 14 days. Destroy the child workspace after terminal completion or failure. A retention cleanup job is not part of this issue. Store retention timestamps now so later cleanup can be safe.
 
-If a migration replay fails, destroy and recreate only `bracketiq_issue67_gateway_test`. Reapply all migrations. If a smoke claim stops after an external effect, do not delete its pending receipt. Restart the gateway and run reconciliation. If reconciliation returns unknown, preserve the rows and investigate the adapter by `externalOperationKey`.
+If a migration replay fails, destroy and recreate only `bracketiq_e2e_67_gateway`. Reapply all migrations. If a smoke claim stops after an external effect, do not delete its pending receipt. Restart the gateway and run reconciliation. If reconciliation returns unknown, preserve the rows and investigate the adapter by `externalOperationKey`.
 
 ## Concrete Steps
 
 Use the dedicated worktree:
 
-    cd /Users/elesesy/StudioProjects/bracketiq-issue-67/apps/site
+    cd /Users/elesesy/StudioProjects/bracketiq-affiliate-collection/apps/site
 
 Confirm the working branch and fixed base before edits:
 
     git branch --show-current
     git cat-file -e 5aa180b721eff7e42eef86583a9f226caa2bb20f^{commit}
 
-Expected branch output is `issue/67-agent-gateway`. Do not replace the review base with a merge base.
+Expected branch output is `workstream/affiliate-collection`. Do not replace the review base with a merge base.
 
 Implement each milestone test first. Run only the focused unit file after each non-database slice:
 
@@ -788,6 +837,13 @@ Review the complete implementation against the fixed base:
     git diff --check 5aa180b721eff7e42eef86583a9f226caa2bb20f
 
 Use two fresh reviewers. The Standards reviewer reads `AGENTS.md`, `apps/site/AGENTS.md`, and `apps/site/CODING_STANDARDS.md`, then reviews only the fixed-base diff. The Spec reviewer reads issue #67 with comments and this ExecPlan, then reviews the same fixed-base diff. Do not give either reviewer the other review. Resolve both reports. Re-run every focused or full command affected by a fix.
+
+For a review that includes current uncommitted worktree changes, also run:
+
+    git diff main
+    git diff --check
+
+Do not review only `main...HEAD` when the current follow-up implementation is uncommitted. After the follow-up is committed, rerun both axes against `main...HEAD` for that exact tip.
 
 ## Validation and Acceptance
 
@@ -1033,6 +1089,17 @@ Latest follow-up evidence (2026-08-21):
     Prisma migration status: 195 migrations found, no pending migrations.
     Focused Prettier check: passed after formatting `agentGatewayAdapters.ts`.
 
+Current candidate evidence (2026-08-21):
+
+    Focused gateway suite: 1 passed, 74 tests passed.
+    Focused supervisor suite: 1 passed, 29 tests passed.
+    Isolated PostgreSQL gateway suite: 1 passed, 21 tests passed.
+    Full site suite: 864 suites passed, 5,172 tests passed, 3 suites skipped, 24 tests skipped.
+    `npx tsc --noEmit --pretty false`: passed with no output.
+    Focused Prettier check and `git diff --check`: passed.
+
+The first full-suite run had one unrelated EventForm dirty-state failure with a generated Cash App value. The isolated EventForm suite passed on rerun. The second full-suite run passed 864 suites and 5,172 tests.
+
 The first integration command used host port 5432 and failed because the local Compose mapping uses 5433. No runtime state changed. The repeated commands used the dedicated `bracketiq_e2e_67_gateway` database at `127.0.0.1:5433` and passed.
 
 Plan revision note (2026-08-20 17:39Z): Created the initial self-contained execution plan for issue #67. It records the confirmed pure-contract and transactional-gateway seams, keeps invocation failure and retries in `agentGateway.ts`, fixes three attempts at initial, +5, and +15 minutes with immediate block after failure three, defines vertical TDD slices and exact files, isolates database proof, includes containment and reviewer checks, fixes the review base, and keeps #68 lifecycle derivation and #70 cutover outside this issue.
@@ -1051,3 +1118,9 @@ Plan revision note (2026-08-21): Fixed the spec-review reviewer-effect expiry ra
 
 Plan revision note (2026-08-20): Added the latest two-axis review status. The review compared committed tip `b92a9eb06` with `main` and excluded current uncommitted follow-ups. Recorded the one Standards gate finding and all eight Spec findings. Marked the committed-tip review as open until the current worktree is committed and both review axes pass again.
 Plan revision note (2026-08-21): Reconciled all eight findings from the committed-tip review, recorded complete verification evidence, corrected the isolated database instructions to use the current Compose host port 5433, and kept the exact-tip review gate open until the follow-up implementation is committed.
+Plan revision note (2026-08-21): Recorded the complete current-worktree two-axis review in issue #67 and this plan. The review used `git diff main`, found seven Standards findings and two P1 Spec findings, corrected the plan's current worktree and database identifiers, and kept issue #67 open until the scope, trusted reconciliation, interface, naming, and unrelated-diff findings are resolved and a committed exact-tip review passes.
+
+Plan revision note (2026-08-21): Split the shared invocation-failure transition and expired-claim reconciliation into internal Prisma implementation modules. Documented the new target files and internal symbols. Preserved the pending-effect guard, exact failure retry fields, expiry compare-and-set race retry, and public Prisma gateway facade. Focused gateway, supervisor, and PostgreSQL integration results are 73, 29, and 19 passing tests.
+Plan revision note (2026-08-21): Closed the expiry-selection starvation finding. The PostgreSQL selector now excludes pending artifact reads and pending external or lifecycle effects before applying the bounded batch limit. Added a limit-one integration regression. Gateway unit tests pass 74 tests, supervisor tests pass 29 tests, and the PostgreSQL integration suite passes 20 tests.
+Plan revision note (2026-08-21): Closed the duplicate package-commit rollback and recovered reviewer stale-authority findings. The guard now commits its block state before returning the public unresolved error. Recovered reviewer completion reuses trusted post-effect authorization and rejects pending claim effects. The focused gateway suite passes 74 tests, the supervisor suite passes 29 tests, the PostgreSQL integration suite passes 21 tests, and TypeScript passes.
+Plan revision note (2026-08-21): Recorded the full-suite result accurately. The complete site Jest run had one unrelated generated-value failure in `EventForm.test.tsx`; the exact file passed all 130 tests when rerun alone. No gateway or supervisor test failed.

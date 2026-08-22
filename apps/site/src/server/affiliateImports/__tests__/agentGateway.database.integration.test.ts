@@ -16,6 +16,7 @@ import type {
   AffiliateAgentClaimGrant,
   AffiliateAgentClaimRequest,
   AffiliateAgentGateway,
+  AffiliateAgentInvocationFailureCode,
 } from "../agentGateway";
 import {
   createProductionAffiliateAgentGatewayDependencies,
@@ -31,7 +32,10 @@ import {
   runAffiliateAgentInvocation,
   type AffiliateAgentSupervisorInput,
 } from "../agentSupervisor";
-import { createPrismaAffiliateAgentGateway } from "../prismaAgentGateway";
+import {
+  createPrismaAffiliateAgentGateway,
+  createPrismaAffiliateAgentInvocationReconciler,
+} from "../prismaAgentGateway";
 const describeDatabase =
   process.env.RUN_DATABASE_INTEGRATION === "1" ? describe : describe.skip;
 const DATABASE_NAME = "bracketiq_e2e_67_gateway";
@@ -109,24 +113,24 @@ const supplyContractFixture = {
       schemaVersion: 1,
       name: "MAPPING_EVIDENCE",
       version: 1,
-      hash: "277dd86e998a419d93a1b4fe7045b90754979a73202e0e39f3600f71edd56d76",
+      hash: "fe19bca864dbc9c0b1aa8b3a5db6e6bbca76134f6ff2a62be58bb6cc6d6c1bd0",
       payload: {
         requiredEvidenceKinds: ["EXPECTED_CANDIDATE", "PAGE_MARKDOWN"],
-        requiresDeterministicValidation: true,
+        hasDeterministicValidation: true,
       },
     },
     {
       schemaVersion: 1,
       name: "LIFECYCLE_EVIDENCE",
       version: 1,
-      hash: "db8e8c028ef8876ad00d5a7dea9ddbf89fc014c1991a7c690b2b21745db26d29",
+      hash: "487050f64d9d5a0d00afff034aa8b2c129da68bdfb537774ec6db263e08b740f",
       payload: {
         requiredEvidenceKinds: ["DURABLE_SOURCE_EVIDENCE", "VALIDATION_OUTPUT"],
-        requiresIndependentReview: true,
+        hasIndependentReview: true,
       },
     },
   ],
-  hash: "fb7d336037f5dafbe4bfd37d4b21e369b12da6b328051744fe3fe28d8c9608c0",
+  hash: "b12139b403f6f2ad946a7d416731ea7eed5aa6cb2bd149e1264c1e9b5304c554",
 } as const;
 
 const contractBundleFixture = (() => {
@@ -146,11 +150,11 @@ const contractBundleFixture = (() => {
     ),
     expectedTopology: {
       claimsPerInvocation: 1,
-      freshWorkspacePerClaim: true,
+      hasFreshWorkspacePerClaim: true,
       processCommand: ["codex", "exec", "--ephemeral"],
-      nestedGoal: false,
-      claimLoop: false,
-      contextReuse: false,
+      hasNestedGoal: false,
+      hasClaimLoop: false,
+      hasContextReuse: false,
       executionClass: "PRODUCTION_CODEX",
       databaseRoles: {
         gateway: "bracketiq_affiliate_gateway",
@@ -752,6 +756,34 @@ const authorizationFor = (
   invocationId: grant.envelope.invocationId,
   supplyContractHash: grant.envelope.supplyContractHash,
 });
+const failureOperationFor = (
+  grant: AffiliateAgentClaimGrant,
+  idempotencyKey: string,
+  code: Exclude<
+    AffiliateAgentInvocationFailureCode,
+    "SCHEMA_CORRECTIONS_EXHAUSTED"
+  >,
+  occurredAt: string,
+) => ({
+  kind: "RECORD_FAILURE" as const,
+  idempotencyKey,
+  authorization: authorizationFor(grant),
+  failure: {
+    schemaVersion: 1 as const,
+    jobId: grant.envelope.jobId,
+    claimId: grant.envelope.claimId,
+    claimGeneration: grant.envelope.claimGeneration,
+    lifecycleGeneration: grant.envelope.lifecycleGeneration,
+    role: grant.envelope.role,
+    workerId: grant.envelope.workerId,
+    invocationId: grant.envelope.invocationId,
+    supplyContractHash: grant.envelope.supplyContractHash,
+    code,
+    occurredAt,
+    evidenceRefs: [] as readonly string[],
+    safeSummary: `The invocation failed with ${code}.`,
+  },
+});
 
 const authorizationForTokenAndEnvelope = (
   token: string,
@@ -873,9 +905,13 @@ const createGatewayHarness = (
     terminalEffects: options.terminalEffects,
     lifecycle: options.lifecycle ?? { kind: "UNAVAILABLE" },
   });
+  const gateway = createPrismaAffiliateAgentGateway(dependencies);
+  const reconciler =
+    createPrismaAffiliateAgentInvocationReconciler(dependencies);
   return {
     dependencies,
-    gateway: createPrismaAffiliateAgentGateway(dependencies),
+    gateway,
+    reconciler,
     recreateGateway: (): AffiliateAgentGateway =>
       createPrismaAffiliateAgentGateway(dependencies),
     setNow: (value: string) => {
@@ -937,7 +973,7 @@ const zeroTransitionReport = {
   recoveredReceipts: 0,
   completedReceipts: 0,
   unresolvedReceipts: 0,
-  admissionHalted: false,
+  isAdmissionHalted: false,
 } as const;
 
 describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
@@ -1356,18 +1392,17 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
     const harness = createGatewayHarness("invocation-retries");
     const fail = async (
       grant: AffiliateAgentClaimGrant,
-      _label: string,
-      _occurredAt: string,
+      label: string,
+      occurredAt: string,
     ) =>
-      harness.gateway.reconcileInvocation({
-        claim: {
-          jobId: grant.envelope.jobId,
-          claimId: grant.envelope.claimId,
-          claimGeneration: grant.envelope.claimGeneration,
-          claimEnvelopeHash: hashAffiliateAgentValue(grant.envelope),
-        },
-        failureCode: "PROCESS_CRASH",
-      });
+      harness.reconciler.reconcileInvocation(
+        failureOperationFor(
+          grant,
+          `${RUN_PREFIX}-${label}-failure`,
+          "PROCESS_CRASH",
+          occurredAt,
+        ),
+      );
 
     const first = await claimOrThrow(
       harness.gateway,
@@ -1378,20 +1413,21 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
     ).toMatchObject({
       invocationFailureCount: 1,
       nextAttemptAt: "2026-08-20T18:05:00.000Z",
-      pipelineBlocked: false,
+      isPipelineBlocked: false,
     });
     const firstFailureEvent =
       await prisma.affiliateAgentGatewayEvents.findFirstOrThrow({
         where: { jobId, eventType: "CLAIM_INVOCATION_FAILED" },
       });
     expect(firstFailureEvent).toMatchObject({
+      claimId: first.envelope.claimId,
       reasonCodes: ["PROCESS_CRASH"],
       retentionClass: "INDEFINITE",
       payload: {
         evidenceRefs: [],
         invocationFailureCount: 1,
         nextAttemptAt: "2026-08-20T18:05:00.000Z",
-        pipelineBlocked: false,
+        isPipelineBlocked: false,
       },
     });
 
@@ -1410,7 +1446,7 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
     ).toMatchObject({
       invocationFailureCount: 2,
       nextAttemptAt: "2026-08-20T18:21:00.000Z",
-      pipelineBlocked: false,
+      isPipelineBlocked: false,
     });
 
     harness.setNow("2026-08-20T18:21:00.000Z");
@@ -1428,7 +1464,7 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
     ).toMatchObject({
       invocationFailureCount: 3,
       nextAttemptAt: null,
-      pipelineBlocked: true,
+      isPipelineBlocked: true,
     });
     expect(
       await prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({
@@ -1471,6 +1507,66 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
       lastInvocationFailedAt: new Date("2026-08-20T18:20:00.000Z"),
       nextAttemptAt: new Date("2026-08-20T18:25:00.000Z"),
     });
+  });
+  it("skips pending artifact reads before filling an expiry batch", async () => {
+    await seedCoverageJob("expiry-pending-artifact");
+    await seedCoverageJob("expiry-ready");
+    const harness = createGatewayHarness("expiry-batch-selection");
+    const pendingGrant = await claimOrThrow(
+      harness.gateway,
+      requestFor("expiry-pending-artifact", "COVERAGE_PLANNER", INITIAL_TIME),
+    );
+    const readyGrant = await claimOrThrow(
+      harness.gateway,
+      requestFor("expiry-ready", "COVERAGE_PLANNER", INITIAL_TIME),
+    );
+    await prisma.affiliateAgentGatewayClaims.update({
+      where: { id: pendingGrant.envelope.claimId },
+      data: {
+        leaseExpiresAt: new Date("2026-08-20T18:05:00.000Z"),
+        hardDeadlineAt: new Date("2026-08-20T18:20:00.000Z"),
+        tokenExpiresAt: new Date("2026-08-20T18:20:00.000Z"),
+      },
+    });
+    await prisma.affiliateAgentGatewayClaims.update({
+      where: { id: readyGrant.envelope.claimId },
+      data: {
+        leaseExpiresAt: new Date("2026-08-20T18:05:00.000Z"),
+        hardDeadlineAt: new Date("2026-08-20T18:21:00.000Z"),
+        tokenExpiresAt: new Date("2026-08-20T18:21:00.000Z"),
+      },
+    });
+    await prisma.affiliateAgentGatewayOperationReceipts.create({
+      data: {
+        id: `${RUN_PREFIX}-pending-artifact-read`,
+        claimId: pendingGrant.envelope.claimId,
+        jobId: pendingGrant.envelope.jobId,
+        claimGeneration: pendingGrant.envelope.claimGeneration,
+        idempotencyKey: `${RUN_PREFIX}-pending-artifact-read`,
+        operationKind: "READ_ARTIFACT",
+        commandName: null,
+        requestHash: INPUT_HASH,
+        startedAt: new Date("2026-08-20T18:04:59.000Z"),
+      },
+    });
+
+    harness.setNow("2026-08-20T18:05:00.000Z");
+    await expect(
+      harness.recreateGateway().reconcile({ limit: 1 }),
+    ).resolves.toMatchObject({
+      examinedClaims: 1,
+      expiredClaims: 1,
+    });
+    const [pendingClaim, readyClaim] = await Promise.all([
+      prisma.affiliateAgentGatewayClaims.findUniqueOrThrow({
+        where: { id: pendingGrant.envelope.claimId },
+      }),
+      prisma.affiliateAgentGatewayClaims.findUniqueOrThrow({
+        where: { id: readyGrant.envelope.claimId },
+      }),
+    ]);
+    expect(pendingClaim.status).toBe("ACTIVE");
+    expect(readyClaim.status).toBe("EXPIRED");
   });
 
   it("counts three invalid submissions as one invocation failure", async () => {
@@ -1679,6 +1775,101 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
     expect(await harness.recreateGateway().reconcile({ limit: 10 })).toEqual(
       zeroTransitionReport,
     );
+  });
+  it("scopes malformed provider recovery to its lane", async () => {
+    const jobId = await seedCoverageJob("provider-lane-failure");
+    const captureOutput = {
+      evidenceRef: "provider-lane-failure-evidence",
+      artifactId: `${RUN_PREFIX}-provider-lane-failure-artifact`,
+      sha256: INPUT_HASH,
+      mimeType: "application/json",
+      byteSize: INPUT_BYTES.byteLength,
+    };
+    const commands: AffiliateAgentCommandAdapters = {
+      transactional: {},
+      external: {
+        CAPTURE_CLAIM_URL: {
+          start: async () => {
+            throw new Error("simulated provider response loss");
+          },
+          recover: async () => captureOutput,
+        },
+      },
+    };
+    const harness = createGatewayHarness("provider-lane-failure", {
+      commands,
+      lifecycle: {
+        kind: "AVAILABLE",
+        currentGeneration: async () => 7,
+        resolveRecordedCommand: async () => null,
+        execute: async () => ({}),
+        recover: async () => null,
+      },
+      readImmutable: async () => ({
+        bytes: new Uint8Array(INPUT_BYTES),
+        mimeType: "text/markdown",
+        byteSize: INPUT_BYTES.byteLength,
+        sourceUrl: "https://evidence.example.test/provider-lane-failure",
+      }),
+    });
+    const grant = await claimOrThrow(
+      harness.gateway,
+      requestFor("provider-lane-failure", "COVERAGE_PLANNER", INITIAL_TIME),
+    );
+    await expect(
+      harness.gateway.perform({
+        kind: "EXECUTE_COMMAND",
+        idempotencyKey: `${RUN_PREFIX}-provider-lane-failure-operation`,
+        authorization: authorizationFor(grant),
+        command: {
+          type: "CAPTURE_CLAIM_URL",
+          data: {
+            urlRef: "input-evidence",
+            captureProfileRef: "input-evidence",
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ code: "PARTIAL_COMMAND_UNRESOLVED" });
+    harness.setNow("2026-08-20T18:01:00.000Z");
+
+    expect(
+      await harness.recreateGateway().reconcile({ limit: 10 }),
+    ).toMatchObject({
+      examinedReceipts: 1,
+      recoveredReceipts: 1,
+      completedReceipts: 0,
+      unresolvedReceipts: 1,
+      isAdmissionHalted: false,
+    });
+    const [receipt, claim, job] = await Promise.all([
+      prisma.affiliateAgentGatewayOperationReceipts.findFirstOrThrow({
+        where: { jobId },
+      }),
+      prisma.affiliateAgentGatewayClaims.findUniqueOrThrow({
+        where: { id: grant.envelope.claimId },
+      }),
+      prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({
+        where: { id: jobId },
+      }),
+    ]);
+    expect(receipt).toMatchObject({
+      status: "UNKNOWN",
+      safeErrorCode: "PARTIAL_COMMAND_UNRESOLVED",
+      reconcileAfter: null,
+    });
+    expect(claim).toMatchObject({ status: "RECONCILIATION_REQUIRED" });
+    expect(job).toMatchObject({ status: "RECONCILIATION_REQUIRED" });
+
+    const nextJobId = await seedMappingJob("after-provider-lane-failure");
+    const nextGrant = await claimOrThrow(
+      harness.recreateGateway(),
+      requestFor(
+        "after-provider-lane-failure",
+        "MAPPING_PRODUCER",
+        new Date("2026-08-20T18:01:00.000Z"),
+      ),
+    );
+    expect(nextGrant.envelope.jobId).toBe(nextJobId);
   });
 
   it("returns operation in progress for an early exact external replay without recovery", async () => {
@@ -2078,7 +2269,7 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
       examinedReceipts: 1,
       recoveredReceipts: 1,
       unresolvedReceipts: 1,
-      admissionHalted: true,
+      isAdmissionHalted: true,
     });
     expect(
       await prisma.affiliateAgentGatewayOperationReceipts.findFirstOrThrow({
@@ -2108,7 +2299,132 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
       recoveredReceipts: 0,
       completedReceipts: 0,
       unresolvedReceipts: 0,
-      admissionHalted: true,
+      isAdmissionHalted: true,
+    });
+  });
+  it("persists a duplicate package commit block atomically", async () => {
+    const label = "commit-replay-block";
+    const supplySourceId = `${RUN_PREFIX}-${label}-supply-source`;
+    await seedMappingJob(label);
+    const candidatePackage = {
+      schemaVersion: 1 as const,
+      supplySourceId,
+      listingKind: "EVENT" as const,
+      listUrlRef: "input-evidence",
+      itemSelector: ".event",
+      fields: [],
+      evidenceRefs: ["input-evidence"] as const,
+    };
+    const packageHash = hashAffiliateAgentValue(candidatePackage);
+    let commitCalls = 0;
+    const harness = createGatewayHarness(label, {
+      lifecycle: {
+        kind: "AVAILABLE",
+        currentGeneration: async () => 7,
+        resolveRecordedCommand: async (identity) => identity,
+        execute: async ({ receiptId }) => ({
+          transitionReceipt: receiptId,
+          lifecycleGeneration: 8,
+        }),
+        recover: async () => null,
+      },
+      commands: {
+        transactional: {
+          VALIDATE_DECLARATIVE_PACKAGE: {
+            execute: async () => ({
+              isValid: true as const,
+              validatedPackageHash: packageHash,
+            }),
+          },
+          COMMIT_DECLARATIVE_PACKAGE: {
+            execute: async () => {
+              commitCalls += 1;
+              return { packageHash };
+            },
+          },
+        },
+        external: {},
+      },
+    });
+    const grant = await claimOrThrow(
+      harness.gateway,
+      requestFor(label, "MAPPING_PRODUCER", INITIAL_TIME),
+    );
+    const authorization = authorizationFor(grant);
+    const validation = await harness.gateway.perform({
+      kind: "EXECUTE_COMMAND",
+      idempotencyKey: `${RUN_PREFIX}-${label}-validation`,
+      authorization,
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: {
+          candidatePackage,
+          evidenceManifestHash: grant.envelope.evidenceManifest.hash,
+        },
+      },
+    });
+    if (validation.kind !== "COMMAND_SUCCEEDED") {
+      throw new Error("Expected package validation to succeed.");
+    }
+    const firstCommit = await harness.gateway.perform({
+      kind: "EXECUTE_COMMAND",
+      idempotencyKey: `${RUN_PREFIX}-${label}-commit-one`,
+      authorization,
+      command: {
+        type: "COMMIT_DECLARATIVE_PACKAGE",
+        data: {
+          validationReceiptId: validation.receiptId,
+          validatedPackageHash: packageHash,
+        },
+      },
+    });
+    expect(firstCommit).toMatchObject({
+      kind: "COMMAND_SUCCEEDED",
+      safeOutput: { packageHash },
+    });
+    await expect(
+      harness.gateway.perform({
+        kind: "EXECUTE_COMMAND",
+        idempotencyKey: `${RUN_PREFIX}-${label}-commit-two`,
+        authorization,
+        command: {
+          type: "COMMIT_DECLARATIVE_PACKAGE",
+          data: {
+            validationReceiptId: validation.receiptId,
+            validatedPackageHash: "f".repeat(64),
+          },
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "PARTIAL_COMMAND_UNRESOLVED",
+    });
+    expect(commitCalls).toBe(1);
+    const [claim, job, blockedEvent] = await Promise.all([
+      prisma.affiliateAgentGatewayClaims.findUniqueOrThrow({
+        where: { id: grant.envelope.claimId },
+      }),
+      prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({
+        where: { id: grant.envelope.jobId },
+      }),
+      prisma.affiliateAgentGatewayEvents.findFirstOrThrow({
+        where: {
+          jobId: grant.envelope.jobId,
+          eventType: "COMMIT_REPLAY_BLOCKED",
+        },
+      }),
+    ]);
+    expect(claim).toMatchObject({
+      status: "RECONCILIATION_REQUIRED",
+      safeFailureCode: "COMMIT_REPLAY_BLOCKED",
+    });
+    expect(job).toMatchObject({
+      status: "PIPELINE_BLOCKED",
+      activeClaimId: null,
+      nextAttemptAt: null,
+    });
+    expect(blockedEvent).toMatchObject({
+      eventType: "COMMIT_REPLAY_BLOCKED",
+      receiptId: firstCommit.receiptId,
     });
   });
   it("executes one fresh supervised claim for every production role", async () => {
@@ -2146,7 +2462,7 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
       transactional: {
         VALIDATE_DECLARATIVE_PACKAGE: {
           execute: async () => ({
-            valid: true as const,
+            isValid: true as const,
             validatedPackageHash: mappingPackageHash,
           }),
         },
@@ -2366,7 +2682,7 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
     };
     const supervisorDependencies: AffiliateAgentSupervisorDependencies = {
       gateway: harness.gateway,
-      invocationReconciler: harness.gateway,
+      invocationReconciler: harness.reconciler,
       clock: harness.dependencies.clock,
       identifiers: harness.dependencies.identifiers,
       processLauncher,
@@ -2481,7 +2797,7 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
     }
     const agentRole = "bracketiq_affiliate_agent";
     const client = new Client({ connectionString: databaseUrl });
-    let createdRole = false;
+    let isRoleCreated = false;
     const targets = [
       "AffiliateAgentGatewayJobs",
       "AffiliateAgentGatewayClaims",
@@ -2510,7 +2826,7 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
         await client.query(
           `CREATE ROLE "${agentRole}" NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`,
         );
-        createdRole = true;
+        isRoleCreated = true;
       }
 
       const privileges = await client.query<{
@@ -2570,13 +2886,13 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
           },
         ] as const;
         for (const statement of statements) {
-          let denied = false;
+          let isDenied = false;
           await client.query("BEGIN");
           try {
             await client.query(`SET LOCAL ROLE "${agentRole}"`);
             await client.query(statement.sql);
           } catch (error) {
-            denied =
+            isDenied =
               error !== null &&
               typeof error === "object" &&
               "code" in error &&
@@ -2584,13 +2900,13 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
           } finally {
             await client.query("ROLLBACK");
           }
-          expect(denied).toBe(true);
+          expect(isDenied).toBe(true);
           facts.push(`${table} ${statement.operation.toLowerCase()}`);
         }
       }
     } finally {
       await client.end().catch(() => undefined);
-      if (createdRole) {
+      if (isRoleCreated) {
         await prisma.$executeRawUnsafe(`DROP ROLE IF EXISTS "${agentRole}"`);
       }
     }
