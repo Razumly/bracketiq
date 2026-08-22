@@ -25,13 +25,13 @@ A human can observe the result through the event editor and its HTTP contract. F
 - [x] (2026-08-21) Address review findings and rerun affected checks.
 - [x] (2026-08-21) Commit the completed work on the current branch.
 - [x] (2026-08-21) Run the follow-up two-axis review from `7adb96ba9eeae3f20cd667e9e37691d924980a6d` through `HEAD`.
-- [ ] Preserve event-registration identity when participant bills create or update installment payments.
-- [ ] Route paid bill success and failure through the event-registration lifecycle.
-- [ ] Replace the delegation-only bill payment capacity test with a provider-independent observable regression.
-- [ ] Type the participant registration response mapper from its Prisma select.
-- [ ] Extract the shared paid-registration payment-resolution persistence path.
-- [ ] Move the finite payment-resolution reason type to the shared response contract.
-- [ ] Split `RoomDatabaseBehaviorTest` by DAO capability.
+- [x] (2026-08-22) Preserve event-registration identity when participant bills create or update installment payments.
+- [x] (2026-08-22) Route paid bill success and failure through the event-registration lifecycle.
+- [x] (2026-08-22) Replace the delegation-only bill payment capacity test with a provider-independent observable regression.
+- [x] (2026-08-22) Type the participant registration response mapper from its Prisma select.
+- [x] (2026-08-22) Extract the shared paid-registration payment-resolution persistence path.
+- [x] (2026-08-22) Move the finite payment-resolution reason type to the shared response contract.
+- [x] (2026-08-22) Split `RoomDatabaseBehaviorTest` by DAO capability.
 
 ## Surprises & Discoveries
 
@@ -77,7 +77,7 @@ A human can observe the result through the event editor and its HTTP contract. F
 
 ## Outcomes & Retrospective
 
-The implementation is complete for the main acceptance paths in issues #30, #31, and #33. The server enforces accepted-registration capacity and structural locks. The web editor supports scheduled and intentionally unscheduled League and Tournament Create. The mobile editor receives the shared lock, capacity, and scheduling state through the Event Editor contract and stores fetched results in Room. Room cache authority now defaults to preservation for non-authoritative writes, with authority enabled only for Event Editor snapshots. Detail bootstrap merges an outer capability-bearing event ahead of a partial nested participant event. The complete site suite passed with 869 suites and 5,167 tests passing, the route coverage check passed for 330 API routes, the site type check passed, the focused Room and repository regression tests passed, the Android unit suite passed, and the iOS simulator shared test passed. A follow-up two-axis review found an open paid-bill metadata gap and implementation-quality follow-ups. The work remains committed on the current branch while the follow-up items remain open.
+The implementation is complete for issues #30, #31, and #33 and for the follow-up review findings. The server enforces accepted-registration capacity and structural locks. Participant bills preserve event-registration identity through bill creation, split bills, paid installments, and failed installments. Paid and failed webhook outcomes use the shared event-registration payment application path. The web editor supports scheduled and intentionally unscheduled League and Tournament Create. The mobile editor receives the shared lock, capacity, and scheduling state through the Event Editor contract and stores fetched results in Room. Room cache authority defaults to preservation for non-authoritative writes, with authority enabled only for Event Editor snapshots. Detail bootstrap merges an outer capability-bearing event ahead of a partial nested participant event. Provider-independent billing and capacity regressions cover the application boundary. The complete site suite, route coverage check, site type check, focused tests, and Android unit suite passed. The final two-axis review found no Standards or Spec findings. Commit `5ea790033` contains the completed work on `workstream/repeating-time-slots`.
 
 ## Context and Orientation
 
@@ -97,7 +97,7 @@ The second milestone implemented issue #31 for League creation. It connected Aut
 
 The third milestone implemented issue #33 for Tournament creation. It preserved pool, bracket, advancement, timing, Resource, Time Slot, scoring, and officiating values through scheduled and intentionally unscheduled Create. Focused save and form tests proved atomic failure and unchanged retry behavior.
 
-The final milestone runs complete site, Android, and iOS shared tests, then reviews the full diff against the captured branch point. The expected result is a clean standards and specification review, passing suites, an updated plan, and one traceable commit.
+The final milestone completed the site, Android, and shared mobile verification, reviewed the complete diff against the captured branch point, resolved the follow-up findings, updated this plan, and committed the work as `5ea790033`.
 ## Plan of Work
 
 First, implement issue #30 at the server registration seam. Derive accepted-registration history from durable participant rows and keep the existing event lock transaction. Expose the immutable `eventType` and `teamSignup` controls in the snapshot after accepted history or protected Match history. Enforce the same rule inside the save transaction so a forged client cannot change the fields. Ensure event-type and Registration Unit defaults obey the five Event Type rules. Count one accepted Participant Registration per Registration Division capacity. Do not count Team roster members, Phase Division entrants, waitlist rows, checkout holds, failed payments, staff invitations, or unaccepted imports. Add the required persistence, route, and mobile Room or DTO changes only when the existing contract cannot carry the result.
@@ -166,32 +166,30 @@ The stable server seam is `createEventEditor(actor, command, options)` in `apps/
 
 The stable mobile seam is the generated Event Editor DTO and repository path under `apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/core/data`. The mobile client must send the site command shape and write accepted results to Room before UI observation. Do not import site TypeScript or Prisma types into mobile.
 
-## Review Findings for Next Agent
+## Follow-up Findings Resolved
 
-The follow-up review covers `7adb96ba9eeae3f20cd667e9e37691d924980a6d...HEAD` and the commits `e738b6453` and `60c5ae9ce`. Complete the items below before treating the workstream as fully complete.
+The follow-up review covered `7adb96ba9eeae3f20cd667e9e37691d924980a6d...HEAD` and the commits `e738b6453` and `60c5ae9ce`. All listed findings are resolved in commit `5ea790033`.
 
 ### Paid bill registration identity
 
-The paid bill branch in `apps/site/src/app/api/billing/webhook/route.ts` cannot resolve participant registration identity for bills created by `apps/site/src/app/api/events/[eventId]/participants/route.ts`. The bill intent in `apps/site/src/app/api/billing/create_billing_intent/route.ts` sends `purchase_type: 'bill'` with bill, event, and user identifiers, but it does not send `registration_id`. Participant bill line items contain only line-item, type, label, and amount fields. The webhook loader does not select `Bills.sourceType` or `Bills.sourceId`, and it only recognizes a line item that contains `purchaseType`.
-
-As a result, `billPurchaseType` falls back to `bill`, `billRegistrationId` remains null, and `ensureEventRegistrationFromPurchase` returns `not_event_purchase`. The new paid-bill activation and permanent-failure cancellation paths do not run. The payment-intent failure path also does not load bill purchase metadata.
-
-Preserve or derive the event-registration identity from bill source fields or complete line-item metadata. Use the same identity path for paid and failed installments. Add a provider-independent regression at the application boundary.
+Participant bill creation now stores event-registration source identity. Split bill creation copies that identity to child bills. Bill payment context loads the bill source fields and the source registration. Paid and failed installment outcomes call the shared event-registration payment application and persistence paths. The application-boundary tests exercise successful and failed bill outcomes without a Stripe provider.
 
 ### Standards follow-up
 
-- Replace the delegation-only capacity test in `apps/site/src/server/billing/__tests__/billPaymentActions.test.ts`. Assert the resulting registration status or capacity failure at a provider-independent boundary.
-- Replace `row: any` and `status: 'CANCELLED' as any` in the participant response mapper with the typed Prisma select result and generated registration status type.
-- Extract the repeated payment-resolution persistence branch in `apps/site/src/app/api/billing/webhook/route.ts`.
-- Define the finite payment-resolution reason type at the shared site response contract. Use it in `apps/site/src/lib/eventService.ts`.
-- Split `apps/mobile/core/database/src/androidInstrumentedTest/kotlin/com/razumly/mvp/core/data/RoomDatabaseBehaviorTest.kt` by DAO capability.
+- [x] The bill payment capacity test now asserts observable registration or capacity behavior at a provider-independent boundary.
+- [x] The participant response mapper derives its row type from the Prisma select and uses the generated registration status type.
+- [x] The repeated payment-resolution persistence path is extracted in `apps/site/src/server/billing/eventRegistrationPaymentApplication.ts`.
+- [x] The finite payment-resolution reason type is defined in `apps/site/src/contracts/eventParticipants.ts` and used by `apps/site/src/lib/eventService.ts`.
+- [x] `RoomDatabaseBehaviorTest.kt` is split into DAO-focused behavior tests and a migration behavior test.
 
-The destructive Room migration policy is not a follow-up finding. The explicit product instruction treats Room as disposable cache data, and `apps/site/CODING_STANDARDS.md` now requires destructive migration for schema changes. Issue #30 requires lock persistence across an app restart, not preservation across a schema upgrade.
+The destructive Room migration policy remains intentional. Room is disposable cache data, and `apps/site/CODING_STANDARDS.md` requires destructive migration for schema changes. Issue #30 requires lock persistence across an app restart, not preservation across a schema upgrade.
 
 ## Revision Note
 
-2026-08-21: Updated the living plan with completed implementation milestones, full site and mobile verification evidence, review findings and fixes, the Room authority regressions, nested detail-event precedence, and the completed commit state. This revision records the completed workstream.
+2026-08-21: Updated the living plan with completed implementation milestones, full site and mobile verification evidence, review findings and fixes, the Room authority regressions, nested detail-event precedence, and the completed commit state.
 
 2026-08-21: Split compound Concrete Steps instructions. Record this update so future contributors can follow one action per instruction.
 
-2026-08-21: Added the follow-up review findings for the next agent. The paid-bill identity gap remains open. The standards follow-ups remain open. The destructive Room cache policy is intentional and is not a finding.
+2026-08-21: Added the follow-up review findings. The paid-bill identity gap and standards follow-ups were resolved on 2026-08-22. The destructive Room cache policy remained intentional and was not a finding.
+
+2026-08-22: Updated Progress, Outcomes & Retrospective, Milestones, and the review section to record the follow-up implementation, verification, clean two-axis review, and commit `5ea790033`.
