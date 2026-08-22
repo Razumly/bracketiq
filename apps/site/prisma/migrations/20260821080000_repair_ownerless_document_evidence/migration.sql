@@ -108,8 +108,16 @@ GROUP BY
   COALESCE(sd."hostId", sd."userId")
 ON CONFLICT ("id") DO UPDATE
 SET
-  "createdAt" = EXCLUDED."createdAt",
-  "updatedAt" = EXCLUDED."updatedAt";
+  "createdAt" = CASE
+    WHEN "DocumentSubjects"."createdAt" IS NULL THEN EXCLUDED."createdAt"
+    WHEN EXCLUDED."createdAt" IS NULL THEN "DocumentSubjects"."createdAt"
+    ELSE LEAST("DocumentSubjects"."createdAt", EXCLUDED."createdAt")
+  END,
+  "updatedAt" = CASE
+    WHEN "DocumentSubjects"."updatedAt" IS NULL THEN EXCLUDED."updatedAt"
+    WHEN EXCLUDED."updatedAt" IS NULL THEN "DocumentSubjects"."updatedAt"
+    ELSE GREATEST("DocumentSubjects"."updatedAt", EXCLUDED."updatedAt")
+  END;
 
 -- Backfill newly eligible owner-repaired evidence without duplicating an active
 -- Satisfaction identity. Completion still requires every normalized signer role.

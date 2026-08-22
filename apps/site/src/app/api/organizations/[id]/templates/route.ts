@@ -133,18 +133,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       { versionSequence: 'desc' },
     ],
   });
-  const isVersionHistoryRequested = request.nextUrl.searchParams.get('includeVersions') === 'true';
-  const responseTemplates = isVersionHistoryRequested
-    ? templates
-    : Array.from(
-      templates.reduce((latest, template) => {
-        if (!latest.has(template.documentRequirementId)) {
-          latest.set(template.documentRequirementId, template);
-        }
-        return latest;
-      }, new Map<string, (typeof templates)[number]>()).values(),
-    );
-  return NextResponse.json({ templates: responseTemplates }, { status: 200 });
+  return NextResponse.json({ templates }, { status: 200 });
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

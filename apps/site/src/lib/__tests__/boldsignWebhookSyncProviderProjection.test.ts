@@ -299,6 +299,57 @@ describe('BoldSign provider document projection integrity', () => {
     expect(state.documentSubjects).toEqual([]);
     expect(state.satisfactions).toEqual([]);
   });
+  it('retains completion time when a roleless completion updates existing evidence', async () => {
+    state.signedDocuments.push({
+      id: 'evidence-1',
+      signedDocumentId: 'provider-document-1',
+      organizationId: 'organization-1',
+      status: 'UNSIGNED',
+      signedAt: null,
+    });
+
+    await projectSignedDocumentEvidence({
+      command: projectionCommand([]),
+    });
+
+    expect(state.signedDocuments[0]).toEqual(expect.objectContaining({
+      status: 'SIGNED',
+      signedAt: '2026-08-21T00:00:00.000Z',
+    }));
+
+    await projectSignedDocumentEvidence({
+      command: projectionCommand([], {
+        signedAt: '2026-08-22T00:00:00.000Z',
+      }),
+    });
+
+    expect(state.signedDocuments[0]).toEqual(expect.objectContaining({
+      status: 'SIGNED',
+      signedAt: '2026-08-21T00:00:00.000Z',
+    }));
+  });
+  it('does not assign signed time for a roleless non-completion fallback', async () => {
+    state.signedDocuments.push({
+      id: 'evidence-1',
+      signedDocumentId: 'provider-document-1',
+      organizationId: 'organization-1',
+      status: 'UNSIGNED',
+      signedAt: null,
+    });
+
+    await projectSignedDocumentEvidence({
+      command: projectionCommand([], {
+        eventToken: 'sent',
+        status: 'Sent',
+        signedAt: '2026-08-22T00:00:00.000Z',
+      }),
+    });
+
+    expect(state.signedDocuments[0]).toEqual(expect.objectContaining({
+      status: 'UNSIGNED',
+      signedAt: null,
+    }));
+  });
 
   it('retains an unknown structured signer without signer or subject identity', async () => {
     await projectSignedDocumentEvidence({
@@ -404,6 +455,7 @@ describe('BoldSign provider document projection integrity', () => {
     }], {
       eventToken: 'revoked',
       status: 'Revoked',
+      signedAt: '2026-08-22T00:00:00.000Z',
     });
     await projectSignedDocumentEvidence({ command: terminalCommand });
     await projectSignedDocumentEvidence({ command: terminalCommand });
@@ -411,6 +463,9 @@ describe('BoldSign provider document projection integrity', () => {
     expect(state.signedDocuments).toHaveLength(1);
     expect(state.signedDocuments[0]).toEqual(expect.objectContaining({
       status: 'REVOKED',
+    }));
+    expect(state.signedDocuments[0]).toEqual(expect.objectContaining({
+      signedAt: '2026-08-21T00:00:00.000Z',
     }));
     expect(state.satisfactions[0]).toEqual(expect.objectContaining({
       status: 'INVALIDATED',

@@ -18,6 +18,9 @@ const transactionPrisma = {
     create: jest.fn(),
     update: jest.fn(),
   },
+  templateProviderQuarantines: {
+    findUnique: jest.fn(),
+  },
   $queryRaw: jest.fn(),
   events: {
     findMany: jest.fn(),
@@ -96,6 +99,7 @@ beforeEach(() => {
   mockHasOrgPermission.mockResolvedValue(true);
   mockPrisma.organizations.findUnique.mockResolvedValue({ id: 'org_1' });
   transactionPrisma.$queryRaw.mockResolvedValue([baseTemplate]);
+  transactionPrisma.templateProviderQuarantines.findUnique.mockResolvedValue(null);
   mockPrisma.$transaction.mockImplementation(
     async (callback: (tx: typeof transactionPrisma) => unknown) => callback(transactionPrisma),
   );

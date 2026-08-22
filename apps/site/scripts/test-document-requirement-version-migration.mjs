@@ -45,6 +45,16 @@ const immutabilityMigrationPath = path.join(
   "20260821030000_enforce_immutable_document_template_versions",
   "migration.sql",
 );
+const providerQuarantineMigrationPath = path.join(
+  migrationRoot,
+  "20260822000000_add_template_provider_quarantine",
+  "migration.sql",
+);
+const providerQuarantineRegistryMigrationPath = path.join(
+  migrationRoot,
+  "20260822010000_add_template_provider_quarantine_registry",
+  "migration.sql",
+);
 
 const client = new Client({ connectionString });
 const reloadClient = new Client({ connectionString });
@@ -241,9 +251,25 @@ try {
     immutabilityMigrationPath,
     "utf8",
   );
+  const providerQuarantineMigration = await readFile(
+    providerQuarantineMigrationPath,
+    "utf8",
+  );
   await client.query(expansionMigration);
   await client.query(ownershipMigration);
   await client.query(immutabilityMigration);
+  await client.query(providerQuarantineMigration);
+  await client.query(`
+    UPDATE "TemplateDocuments"
+    SET "providerQuarantinedAt" = '2026-08-22 00:00:00',
+        "providerQuarantineReason" = 'Provider edit was quarantined.'
+    WHERE "id" = 'version_pdf_1'
+  `);
+  const providerQuarantineRegistryMigration = await readFile(
+    providerQuarantineRegistryMigrationPath,
+    "utf8",
+  );
+  await client.query(providerQuarantineRegistryMigration);
   await reloadClient.connect();
   reloadConnected = true;
   await reloadClient.query(`SET search_path TO ${quotedFixtureSchema}`);
@@ -318,6 +344,41 @@ try {
   assert.deepEqual(frozenVersions.rows, [
     { id: "version_pdf_1", isFrozen: true },
     { id: "version_text_1", isFrozen: true },
+  ]);
+  await client.query(`
+    UPDATE "TemplateDocuments"
+    SET "providerQuarantinedAt" = '2026-08-22 00:00:00',
+        "providerQuarantineReason" = 'Provider edit was quarantined.'
+    WHERE "id" = 'version_pdf_1'
+  `);
+  const reloadedProviderQuarantine = await reloadClient.query(`
+    SELECT
+      "id",
+      "providerQuarantinedAt",
+      "providerQuarantineReason"
+    FROM "TemplateDocuments"
+    WHERE "id" = 'version_pdf_1'
+  `);
+  assert.deepEqual(reloadedProviderQuarantine.rows, [
+    {
+      id: "version_pdf_1",
+      providerQuarantinedAt: new Date("2026-08-22T00:00:00.000Z"),
+      providerQuarantineReason: "Provider edit was quarantined.",
+    },
+  ]);
+  const providerQuarantineRegistry = await reloadClient.query(`
+    SELECT
+      "providerTemplateId",
+      "quarantinedAt",
+      "reason"
+    FROM "TemplateProviderQuarantines"
+  `);
+  assert.deepEqual(providerQuarantineRegistry.rows, [
+    {
+      providerTemplateId: "boldsign_template_1",
+      quarantinedAt: new Date("2026-08-22T00:00:00.000Z"),
+      reason: "Provider edit was quarantined.",
+    },
   ]);
 
   const requirements = await reloadClient.query(`

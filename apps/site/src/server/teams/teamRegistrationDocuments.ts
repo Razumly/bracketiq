@@ -11,7 +11,10 @@ import {
   findLatestBoldSignOperation,
 } from '@/lib/boldsignSyncOperations';
 import { normalizeRequiredSignerType, type SignerContext } from '@/lib/templateSignerTypes';
-
+import {
+  DocumentTemplateVersionProviderQuarantinedError,
+  findQuarantinedProviderTemplateIds,
+} from '@/server/documents/documentTemplateVersions';
 type PrismaLike = any;
 
 export type TeamRegistrationRegistrantType = 'SELF' | 'CHILD';
@@ -28,6 +31,7 @@ type TeamTemplateRecord = {
   roleIndex?: number | null;
   roleIndexes?: number[] | null;
   signerRoles?: string[] | null;
+  providerQuarantinedAt?: Date | null;
   content?: string | null;
 };
 
@@ -595,6 +599,7 @@ export const dispatchRequiredTeamDocuments = async (
     select: {
       id: true,
       templateId: true,
+      providerQuarantinedAt: true,
       title: true,
       description: true,
       type: true,
@@ -605,15 +610,28 @@ export const dispatchRequiredTeamDocuments = async (
     },
   });
   const templateById = new Map(templates.map((template) => [template.id, template]));
+  const quarantinedProviderTemplateIds = await findQuarantinedProviderTemplateIds(
+    prisma,
+    templates.map((template) => template.templateId),
+  );
 
   for (const templateId of requiredTemplateIds) {
     const template = templateById.get(templateId);
     if (!template) {
       continue;
     }
-
     const templateType = normalizeText(template.type)?.toUpperCase();
-    if (templateType !== 'PDF') {
+    if (templateType === 'TEXT') {
+      continue;
+    }
+    if (
+      template.providerQuarantinedAt
+      || (
+        normalizeText(template.templateId)
+        && quarantinedProviderTemplateIds.has(normalizeText(template.templateId)!)
+      )
+    ) {
+      errors.push(new DocumentTemplateVersionProviderQuarantinedError(template.id).message);
       continue;
     }
 

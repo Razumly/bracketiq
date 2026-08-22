@@ -20,6 +20,10 @@ import {
 import { listOrganizationUsersScopeEvents } from "@/server/organizationUsersAccess";
 
 export const dynamic = "force-dynamic";
+export const DOCUMENT_IMPORT_ATTESTATION_TEXT =
+  "I confirm that this file is a complete signed document for the shown customer, Document Template Version, and scope. I confirm that it contains all required signatures. I understand that BracketIQ did not verify the signatures.";
+export const DOCUMENT_IMPORT_ATTESTATION_VERSION = "1";
+
 
 const importSchema = z
   .object({
@@ -32,8 +36,7 @@ const importSchema = z
     importedFileId: z.string().trim().min(1),
     historicalSigningDate: z.string().trim().min(1).nullable().optional(),
     sourceNote: z.string().trim().max(4000).nullable().optional(),
-    attestationText: z.string().trim().max(4000).nullable().optional(),
-    attestationVersion: z.string().trim().max(160).nullable().optional(),
+    attestationAccepted: z.boolean().optional(),
     signerEmail: z.string().trim().email().nullable().optional(),
     signerRole: z.string().trim().max(160).nullable().optional(),
     roleIndex: z.number().int().nullable().optional(),
@@ -167,7 +170,7 @@ export async function POST(
       ),
     ),
   ];
-  const [users, scopedEntity, importedFile, scopeEvents, organizationTeams] =
+  const [users, scopedEntity, importedFile, scopeEvents, eventScopeRegistrations, organizationTeams] =
     await Promise.all([
       prisma.userData.findMany({
         where: { id: { in: userIds } },
@@ -189,6 +192,23 @@ export async function POST(
         select: { id: true, organizationId: true },
       }),
       listOrganizationUsersScopeEvents(organizationId),
+      parsed.data.scopeType === "EVENT_PARTICIPATION"
+        ? prisma.eventRegistrations.findMany({
+            where: {
+              eventId: parsed.data.scopeId,
+              registrantType: "TEAM",
+              rosterRole: "PARTICIPANT",
+              status: { in: ["STARTED", "PENDING", "ACTIVE", "BLOCKED", "CONSENTFAILED"] },
+              slotId: null,
+              occurrenceDate: null,
+            },
+            select: {
+              registrantId: true,
+              parentId: true,
+              eventTeamId: true,
+            },
+          })
+        : Promise.resolve([]),
       prisma.canonicalTeams.findMany({
         where: { organizationId },
         select: { id: true },
@@ -217,9 +237,21 @@ export async function POST(
     ? scopeEvents.find((event) => event.id === parsed.data.scopeId)
     : undefined;
   const eventTeamIds = scopeEvent?.teamIds ?? [];
+  const eventCanonicalTeamIds = new Set(
+    [
+      ...eventTeamIds,
+      ...eventScopeRegistrations.flatMap((registration) => [
+        registration.parentId,
+        registration.registrantId,
+        registration.eventTeamId,
+      ]),
+    ].filter(
+      (teamId): teamId is string => typeof teamId === "string",
+    ),
+  );
   const membershipTeamIds = Array.from(new Set([
     ...organizationTeamIds,
-    ...eventTeamIds,
+    ...eventCanonicalTeamIds,
     ...(parsed.data.scopeType === "TEAM_MEMBERSHIP" ? [parsed.data.scopeId] : []),
   ]));
   const teamRegistrations = membershipTeamIds.length > 0
@@ -267,6 +299,12 @@ export async function POST(
       { status: 400 },
     );
   }
+  if (!template.signOnce && parsed.data.scopeType !== "EVENT_PARTICIPATION") {
+    return NextResponse.json(
+      { error: "Non-sign-once Document Template Versions require Event Participation scope." },
+      { status: 400 },
+    );
+  }
   if (
     parsed.data.scopeType !== "ORGANIZATION"
     && (!scopedEntity || scopedEntity.organizationId !== organizationId)
@@ -283,7 +321,7 @@ export async function POST(
     const hasTeamEventMembership = teamRegistrations.some(
       (registration) =>
         registration.userId === parsed.data.subjectUserId
-        && eventTeamIds.includes(registration.teamId),
+        && eventCanonicalTeamIds.has(registration.teamId),
     );
     if (!isDirectEventCustomer && !hasTeamEventMembership) {
       return NextResponse.json(
@@ -311,6 +349,13 @@ export async function POST(
       { status: 400 },
     );
   }
+  if (parsed.data.attestationAccepted !== true) {
+    return NextResponse.json(
+      { error: "Document Import Attestation must be accepted." },
+      { status: 400 },
+    );
+  }
+
   const evidenceScope = {
     scopeType: parsed.data.scopeType,
     scopeId: parsed.data.scopeId,
@@ -366,8 +411,8 @@ export async function POST(
           sourceNote: parsed.data.sourceNote ?? null,
           importedAt: now,
           uploaderId: session.userId,
-          attestationText: parsed.data.attestationText ?? null,
-          attestationVersion: parsed.data.attestationVersion ?? null,
+          attestationText: DOCUMENT_IMPORT_ATTESTATION_TEXT,
+          attestationVersion: DOCUMENT_IMPORT_ATTESTATION_VERSION,
           status: "SIGNED",
           signedAt,
           signerEmail: parsed.data.signerEmail ?? null,

@@ -11,6 +11,10 @@ import {
   findLatestBoldSignOperation,
 } from '@/lib/boldsignSyncOperations';
 import { normalizeRequiredSignerType } from '@/lib/templateSignerTypes';
+import {
+  DocumentTemplateVersionProviderQuarantinedError,
+  findQuarantinedProviderTemplateIds,
+} from '@/server/documents/documentTemplateVersions';
 
 type SignerContext = 'participant' | 'parent_guardian' | 'child';
 
@@ -258,6 +262,7 @@ export const dispatchRequiredEventDocuments = async (
     where: { id: { in: requiredTemplateIds } },
     select: {
       id: true,
+      providerQuarantinedAt: true,
       templateId: true,
       title: true,
       description: true,
@@ -268,6 +273,10 @@ export const dispatchRequiredEventDocuments = async (
       signerRoles: true,
     },
   });
+  const quarantinedProviderTemplateIds = await findQuarantinedProviderTemplateIds(
+    prisma,
+    templates.map((template) => template.templateId),
+  );
   const templateById = new Map(templates.map((template) => [template.id, template]));
 
   for (const templateId of requiredTemplateIds) {
@@ -275,9 +284,18 @@ export const dispatchRequiredEventDocuments = async (
     if (!template) {
       continue;
     }
-
     const templateType = normalizeText(template.type)?.toUpperCase();
-    if (templateType !== 'PDF') {
+    if (templateType === 'TEXT') {
+      continue;
+    }
+    if (
+      template.providerQuarantinedAt
+      || (
+        normalizeText(template.templateId)
+        && quarantinedProviderTemplateIds.has(normalizeText(template.templateId)!)
+      )
+    ) {
+      errors.push(new DocumentTemplateVersionProviderQuarantinedError(template.id).message);
       continue;
     }
 

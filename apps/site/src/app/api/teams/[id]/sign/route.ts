@@ -23,6 +23,10 @@ import {
   signedDocumentEvidenceFields,
   DOCUMENT_EVIDENCE_PROVENANCE,
 } from '@/server/documentEvidence';
+import {
+  DocumentTemplateVersionProviderQuarantinedError,
+  findQuarantinedProviderTemplateIds,
+} from '@/server/documents/documentTemplateVersions';
 import { dispatchRequiredTeamDocuments } from '@/server/teams/teamRegistrationDocuments';
 
 export const dynamic = 'force-dynamic';
@@ -278,7 +282,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       where: { id: { in: requiredTemplateIds } },
       select: {
         id: true,
+        templateId: true,
         title: true,
+        providerQuarantinedAt: true,
         description: true,
         type: true,
         signOnce: true,
@@ -306,6 +312,59 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const templateIdsToSign = requestedTemplateId
       ? eligibleTemplateIds.filter((templateId) => templateId === requestedTemplateId)
       : eligibleTemplateIds;
+    const signedTemplateRows = templateIdsToSign.length > 0
+      ? await prisma.signedDocuments.findMany({
+        where: {
+          userId: signerUserId,
+          signerRole: signerContext,
+          OR: templateIdsToSign.map((templateId) => {
+            const template = templateById.get(templateId);
+            return {
+              templateId,
+              hostId: isChildRegistration ? (childUserId ?? null) : null,
+              ...(template?.signOnce ? {} : { teamId }),
+            };
+          }),
+        },
+        select: { templateId: true, status: true },
+      })
+      : [];
+    const signedTemplateIds = new Set(
+      signedTemplateRows
+        .filter((row) => isSignedStatus(row.status))
+        .map((row) => row.templateId),
+    );
+    const providerTemplateIds = templateIdsToSign
+      .map((templateId) => templateById.get(templateId))
+      .filter((template): template is NonNullable<typeof template> => (
+        template !== undefined
+        && normalizeText(template.type)?.toUpperCase() !== 'TEXT'
+      ))
+      .map((template) => template.templateId);
+    const quarantinedProviderTemplateIds = await findQuarantinedProviderTemplateIds(
+      prisma,
+      providerTemplateIds,
+    );
+    const quarantinedTemplate = templateIdsToSign
+      .map((templateId) => templateById.get(templateId))
+      .find((template) => (
+        template
+        && !signedTemplateIds.has(template.id)
+        && normalizeText(template.type)?.toUpperCase() !== 'TEXT'
+        && (
+          Boolean(template.providerQuarantinedAt)
+          || Boolean(
+            normalizeText(template.templateId)
+            && quarantinedProviderTemplateIds.has(normalizeText(template.templateId)!),
+          )
+        )
+      ));
+    if (quarantinedTemplate) {
+      return NextResponse.json(
+        { error: new DocumentTemplateVersionProviderQuarantinedError(quarantinedTemplate.id).message },
+        { status: 409 },
+      );
+    }
     if (requestedTemplateId && !templateIdsToSign.length) {
       return NextResponse.json({ error: 'Template is not available for this signer context.' }, { status: 400 });
     }

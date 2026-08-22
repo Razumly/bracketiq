@@ -14,6 +14,11 @@ const prismaMock = {
     findUnique: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
+  },
+  templateProviderQuarantines: {
+    findUnique: jest.fn(),
+    upsert: jest.fn(),
   },
   documentRequirements: {
     upsert: jest.fn(),

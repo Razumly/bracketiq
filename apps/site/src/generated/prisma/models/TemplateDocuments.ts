@@ -46,6 +46,8 @@ export type TemplateDocumentsMinAggregateOutputType = {
   documentRequirementId: string | null
   versionSequence: number | null
   frozenAt: Date | null
+  providerQuarantinedAt: Date | null
+  providerQuarantineReason: string | null
   type: $Enums.TemplateDocumentsTypeEnum | null
   organizationId: string | null
   title: string | null
@@ -66,6 +68,8 @@ export type TemplateDocumentsMaxAggregateOutputType = {
   documentRequirementId: string | null
   versionSequence: number | null
   frozenAt: Date | null
+  providerQuarantinedAt: Date | null
+  providerQuarantineReason: string | null
   type: $Enums.TemplateDocumentsTypeEnum | null
   organizationId: string | null
   title: string | null
@@ -86,6 +90,8 @@ export type TemplateDocumentsCountAggregateOutputType = {
   documentRequirementId: number
   versionSequence: number
   frozenAt: number
+  providerQuarantinedAt: number
+  providerQuarantineReason: number
   type: number
   organizationId: number
   title: number
@@ -122,6 +128,8 @@ export type TemplateDocumentsMinAggregateInputType = {
   documentRequirementId?: true
   versionSequence?: true
   frozenAt?: true
+  providerQuarantinedAt?: true
+  providerQuarantineReason?: true
   type?: true
   organizationId?: true
   title?: true
@@ -142,6 +150,8 @@ export type TemplateDocumentsMaxAggregateInputType = {
   documentRequirementId?: true
   versionSequence?: true
   frozenAt?: true
+  providerQuarantinedAt?: true
+  providerQuarantineReason?: true
   type?: true
   organizationId?: true
   title?: true
@@ -162,6 +172,8 @@ export type TemplateDocumentsCountAggregateInputType = {
   documentRequirementId?: true
   versionSequence?: true
   frozenAt?: true
+  providerQuarantinedAt?: true
+  providerQuarantineReason?: true
   type?: true
   organizationId?: true
   title?: true
@@ -271,6 +283,8 @@ export type TemplateDocumentsGroupByOutputType = {
   documentRequirementId: string
   versionSequence: number
   frozenAt: Date | null
+  providerQuarantinedAt: Date | null
+  providerQuarantineReason: string | null
   type: $Enums.TemplateDocumentsTypeEnum | null
   organizationId: string
   title: string
@@ -316,6 +330,8 @@ export type TemplateDocumentsWhereInput = {
   documentRequirementId?: Prisma.StringFilter<"TemplateDocuments"> | string
   versionSequence?: Prisma.IntFilter<"TemplateDocuments"> | number
   frozenAt?: Prisma.DateTimeNullableFilter<"TemplateDocuments"> | Date | string | null
+  providerQuarantinedAt?: Prisma.DateTimeNullableFilter<"TemplateDocuments"> | Date | string | null
+  providerQuarantineReason?: Prisma.StringNullableFilter<"TemplateDocuments"> | string | null
   type?: Prisma.EnumTemplateDocumentsTypeEnumNullableFilter<"TemplateDocuments"> | $Enums.TemplateDocumentsTypeEnum | null
   organizationId?: Prisma.StringFilter<"TemplateDocuments"> | string
   title?: Prisma.StringFilter<"TemplateDocuments"> | string
@@ -340,6 +356,8 @@ export type TemplateDocumentsOrderByWithRelationInput = {
   documentRequirementId?: Prisma.SortOrder
   versionSequence?: Prisma.SortOrder
   frozenAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  providerQuarantinedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  providerQuarantineReason?: Prisma.SortOrderInput | Prisma.SortOrder
   type?: Prisma.SortOrderInput | Prisma.SortOrder
   organizationId?: Prisma.SortOrder
   title?: Prisma.SortOrder
@@ -368,6 +386,8 @@ export type TemplateDocumentsWhereUniqueInput = Prisma.AtLeast<{
   documentRequirementId?: Prisma.StringFilter<"TemplateDocuments"> | string
   versionSequence?: Prisma.IntFilter<"TemplateDocuments"> | number
   frozenAt?: Prisma.DateTimeNullableFilter<"TemplateDocuments"> | Date | string | null
+  providerQuarantinedAt?: Prisma.DateTimeNullableFilter<"TemplateDocuments"> | Date | string | null
+  providerQuarantineReason?: Prisma.StringNullableFilter<"TemplateDocuments"> | string | null
   type?: Prisma.EnumTemplateDocumentsTypeEnumNullableFilter<"TemplateDocuments"> | $Enums.TemplateDocumentsTypeEnum | null
   organizationId?: Prisma.StringFilter<"TemplateDocuments"> | string
   title?: Prisma.StringFilter<"TemplateDocuments"> | string
@@ -392,6 +412,8 @@ export type TemplateDocumentsOrderByWithAggregationInput = {
   documentRequirementId?: Prisma.SortOrder
   versionSequence?: Prisma.SortOrder
   frozenAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  providerQuarantinedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  providerQuarantineReason?: Prisma.SortOrderInput | Prisma.SortOrder
   type?: Prisma.SortOrderInput | Prisma.SortOrder
   organizationId?: Prisma.SortOrder
   title?: Prisma.SortOrder
@@ -422,6 +444,8 @@ export type TemplateDocumentsScalarWhereWithAggregatesInput = {
   documentRequirementId?: Prisma.StringWithAggregatesFilter<"TemplateDocuments"> | string
   versionSequence?: Prisma.IntWithAggregatesFilter<"TemplateDocuments"> | number
   frozenAt?: Prisma.DateTimeNullableWithAggregatesFilter<"TemplateDocuments"> | Date | string | null
+  providerQuarantinedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"TemplateDocuments"> | Date | string | null
+  providerQuarantineReason?: Prisma.StringNullableWithAggregatesFilter<"TemplateDocuments"> | string | null
   type?: Prisma.EnumTemplateDocumentsTypeEnumNullableWithAggregatesFilter<"TemplateDocuments"> | $Enums.TemplateDocumentsTypeEnum | null
   organizationId?: Prisma.StringWithAggregatesFilter<"TemplateDocuments"> | string
   title?: Prisma.StringWithAggregatesFilter<"TemplateDocuments"> | string
@@ -443,6 +467,8 @@ export type TemplateDocumentsCreateInput = {
   templateId?: string | null
   versionSequence: number
   frozenAt?: Date | string | null
+  providerQuarantinedAt?: Date | string | null
+  providerQuarantineReason?: string | null
   type?: $Enums.TemplateDocumentsTypeEnum | null
   title: string
   description?: string | null
@@ -466,6 +492,8 @@ export type TemplateDocumentsUncheckedCreateInput = {
   documentRequirementId: string
   versionSequence: number
   frozenAt?: Date | string | null
+  providerQuarantinedAt?: Date | string | null
+  providerQuarantineReason?: string | null
   type?: $Enums.TemplateDocumentsTypeEnum | null
   organizationId: string
   title: string
@@ -487,6 +515,8 @@ export type TemplateDocumentsUpdateInput = {
   templateId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
   frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantinedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantineReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
   title?: Prisma.StringFieldUpdateOperationsInput | string
   description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -510,6 +540,8 @@ export type TemplateDocumentsUncheckedUpdateInput = {
   documentRequirementId?: Prisma.StringFieldUpdateOperationsInput | string
   versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
   frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantinedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantineReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
   organizationId?: Prisma.StringFieldUpdateOperationsInput | string
   title?: Prisma.StringFieldUpdateOperationsInput | string
@@ -532,6 +564,8 @@ export type TemplateDocumentsCreateManyInput = {
   documentRequirementId: string
   versionSequence: number
   frozenAt?: Date | string | null
+  providerQuarantinedAt?: Date | string | null
+  providerQuarantineReason?: string | null
   type?: $Enums.TemplateDocumentsTypeEnum | null
   organizationId: string
   title: string
@@ -553,6 +587,8 @@ export type TemplateDocumentsUpdateManyMutationInput = {
   templateId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
   frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantinedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantineReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
   title?: Prisma.StringFieldUpdateOperationsInput | string
   description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -574,6 +610,8 @@ export type TemplateDocumentsUncheckedUpdateManyInput = {
   documentRequirementId?: Prisma.StringFieldUpdateOperationsInput | string
   versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
   frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantinedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantineReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
   organizationId?: Prisma.StringFieldUpdateOperationsInput | string
   title?: Prisma.StringFieldUpdateOperationsInput | string
@@ -611,6 +649,8 @@ export type TemplateDocumentsCountOrderByAggregateInput = {
   documentRequirementId?: Prisma.SortOrder
   versionSequence?: Prisma.SortOrder
   frozenAt?: Prisma.SortOrder
+  providerQuarantinedAt?: Prisma.SortOrder
+  providerQuarantineReason?: Prisma.SortOrder
   type?: Prisma.SortOrder
   organizationId?: Prisma.SortOrder
   title?: Prisma.SortOrder
@@ -639,6 +679,8 @@ export type TemplateDocumentsMaxOrderByAggregateInput = {
   documentRequirementId?: Prisma.SortOrder
   versionSequence?: Prisma.SortOrder
   frozenAt?: Prisma.SortOrder
+  providerQuarantinedAt?: Prisma.SortOrder
+  providerQuarantineReason?: Prisma.SortOrder
   type?: Prisma.SortOrder
   organizationId?: Prisma.SortOrder
   title?: Prisma.SortOrder
@@ -659,6 +701,8 @@ export type TemplateDocumentsMinOrderByAggregateInput = {
   documentRequirementId?: Prisma.SortOrder
   versionSequence?: Prisma.SortOrder
   frozenAt?: Prisma.SortOrder
+  providerQuarantinedAt?: Prisma.SortOrder
+  providerQuarantineReason?: Prisma.SortOrder
   type?: Prisma.SortOrder
   organizationId?: Prisma.SortOrder
   title?: Prisma.SortOrder
@@ -790,6 +834,8 @@ export type TemplateDocumentsCreateWithoutOrganizationInput = {
   templateId?: string | null
   versionSequence: number
   frozenAt?: Date | string | null
+  providerQuarantinedAt?: Date | string | null
+  providerQuarantineReason?: string | null
   type?: $Enums.TemplateDocumentsTypeEnum | null
   title: string
   description?: string | null
@@ -812,6 +858,8 @@ export type TemplateDocumentsUncheckedCreateWithoutOrganizationInput = {
   documentRequirementId: string
   versionSequence: number
   frozenAt?: Date | string | null
+  providerQuarantinedAt?: Date | string | null
+  providerQuarantineReason?: string | null
   type?: $Enums.TemplateDocumentsTypeEnum | null
   title: string
   description?: string | null
@@ -862,6 +910,8 @@ export type TemplateDocumentsScalarWhereInput = {
   documentRequirementId?: Prisma.StringFilter<"TemplateDocuments"> | string
   versionSequence?: Prisma.IntFilter<"TemplateDocuments"> | number
   frozenAt?: Prisma.DateTimeNullableFilter<"TemplateDocuments"> | Date | string | null
+  providerQuarantinedAt?: Prisma.DateTimeNullableFilter<"TemplateDocuments"> | Date | string | null
+  providerQuarantineReason?: Prisma.StringNullableFilter<"TemplateDocuments"> | string | null
   type?: Prisma.EnumTemplateDocumentsTypeEnumNullableFilter<"TemplateDocuments"> | $Enums.TemplateDocumentsTypeEnum | null
   organizationId?: Prisma.StringFilter<"TemplateDocuments"> | string
   title?: Prisma.StringFilter<"TemplateDocuments"> | string
@@ -883,6 +933,8 @@ export type TemplateDocumentsCreateWithoutDocumentRequirementInput = {
   templateId?: string | null
   versionSequence: number
   frozenAt?: Date | string | null
+  providerQuarantinedAt?: Date | string | null
+  providerQuarantineReason?: string | null
   type?: $Enums.TemplateDocumentsTypeEnum | null
   title: string
   description?: string | null
@@ -904,6 +956,8 @@ export type TemplateDocumentsUncheckedCreateWithoutDocumentRequirementInput = {
   templateId?: string | null
   versionSequence: number
   frozenAt?: Date | string | null
+  providerQuarantinedAt?: Date | string | null
+  providerQuarantineReason?: string | null
   type?: $Enums.TemplateDocumentsTypeEnum | null
   title: string
   description?: string | null
@@ -951,6 +1005,8 @@ export type TemplateDocumentsCreateManyOrganizationInput = {
   documentRequirementId: string
   versionSequence: number
   frozenAt?: Date | string | null
+  providerQuarantinedAt?: Date | string | null
+  providerQuarantineReason?: string | null
   type?: $Enums.TemplateDocumentsTypeEnum | null
   title: string
   description?: string | null
@@ -971,6 +1027,8 @@ export type TemplateDocumentsUpdateWithoutOrganizationInput = {
   templateId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
   frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantinedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantineReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
   title?: Prisma.StringFieldUpdateOperationsInput | string
   description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -993,6 +1051,8 @@ export type TemplateDocumentsUncheckedUpdateWithoutOrganizationInput = {
   documentRequirementId?: Prisma.StringFieldUpdateOperationsInput | string
   versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
   frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantinedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantineReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
   title?: Prisma.StringFieldUpdateOperationsInput | string
   description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1014,6 +1074,8 @@ export type TemplateDocumentsUncheckedUpdateManyWithoutOrganizationInput = {
   documentRequirementId?: Prisma.StringFieldUpdateOperationsInput | string
   versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
   frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantinedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantineReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
   title?: Prisma.StringFieldUpdateOperationsInput | string
   description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1034,6 +1096,8 @@ export type TemplateDocumentsCreateManyDocumentRequirementInput = {
   templateId?: string | null
   versionSequence: number
   frozenAt?: Date | string | null
+  providerQuarantinedAt?: Date | string | null
+  providerQuarantineReason?: string | null
   type?: $Enums.TemplateDocumentsTypeEnum | null
   title: string
   description?: string | null
@@ -1054,6 +1118,8 @@ export type TemplateDocumentsUpdateWithoutDocumentRequirementInput = {
   templateId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
   frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantinedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantineReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
   title?: Prisma.StringFieldUpdateOperationsInput | string
   description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1075,6 +1141,8 @@ export type TemplateDocumentsUncheckedUpdateWithoutDocumentRequirementInput = {
   templateId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
   frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantinedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantineReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
   title?: Prisma.StringFieldUpdateOperationsInput | string
   description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1095,6 +1163,8 @@ export type TemplateDocumentsUncheckedUpdateManyWithoutDocumentRequirementInput 
   templateId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   versionSequence?: Prisma.IntFieldUpdateOperationsInput | number
   frozenAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantinedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  providerQuarantineReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   type?: Prisma.NullableEnumTemplateDocumentsTypeEnumFieldUpdateOperationsInput | $Enums.TemplateDocumentsTypeEnum | null
   title?: Prisma.StringFieldUpdateOperationsInput | string
   description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1118,6 +1188,8 @@ export type TemplateDocumentsSelect<ExtArgs extends runtime.Types.Extensions.Int
   documentRequirementId?: boolean
   versionSequence?: boolean
   frozenAt?: boolean
+  providerQuarantinedAt?: boolean
+  providerQuarantineReason?: boolean
   type?: boolean
   organizationId?: boolean
   title?: boolean
@@ -1142,6 +1214,8 @@ export type TemplateDocumentsSelectCreateManyAndReturn<ExtArgs extends runtime.T
   documentRequirementId?: boolean
   versionSequence?: boolean
   frozenAt?: boolean
+  providerQuarantinedAt?: boolean
+  providerQuarantineReason?: boolean
   type?: boolean
   organizationId?: boolean
   title?: boolean
@@ -1166,6 +1240,8 @@ export type TemplateDocumentsSelectUpdateManyAndReturn<ExtArgs extends runtime.T
   documentRequirementId?: boolean
   versionSequence?: boolean
   frozenAt?: boolean
+  providerQuarantinedAt?: boolean
+  providerQuarantineReason?: boolean
   type?: boolean
   organizationId?: boolean
   title?: boolean
@@ -1190,6 +1266,8 @@ export type TemplateDocumentsSelectScalar = {
   documentRequirementId?: boolean
   versionSequence?: boolean
   frozenAt?: boolean
+  providerQuarantinedAt?: boolean
+  providerQuarantineReason?: boolean
   type?: boolean
   organizationId?: boolean
   title?: boolean
@@ -1204,7 +1282,7 @@ export type TemplateDocumentsSelectScalar = {
   content?: boolean
 }
 
-export type TemplateDocumentsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "templateId" | "documentRequirementId" | "versionSequence" | "frozenAt" | "type" | "organizationId" | "title" | "description" | "signOnce" | "requiredSignerType" | "status" | "createdBy" | "roleIndex" | "roleIndexes" | "signerRoles" | "content", ExtArgs["result"]["templateDocuments"]>
+export type TemplateDocumentsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "templateId" | "documentRequirementId" | "versionSequence" | "frozenAt" | "providerQuarantinedAt" | "providerQuarantineReason" | "type" | "organizationId" | "title" | "description" | "signOnce" | "requiredSignerType" | "status" | "createdBy" | "roleIndex" | "roleIndexes" | "signerRoles" | "content", ExtArgs["result"]["templateDocuments"]>
 export type TemplateDocumentsInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   organization?: boolean | Prisma.OrganizationsDefaultArgs<ExtArgs>
   documentRequirement?: boolean | Prisma.DocumentRequirementsDefaultArgs<ExtArgs>
@@ -1232,6 +1310,8 @@ export type $TemplateDocumentsPayload<ExtArgs extends runtime.Types.Extensions.I
     documentRequirementId: string
     versionSequence: number
     frozenAt: Date | null
+    providerQuarantinedAt: Date | null
+    providerQuarantineReason: string | null
     type: $Enums.TemplateDocumentsTypeEnum | null
     organizationId: string
     title: string
@@ -1676,6 +1756,8 @@ export interface TemplateDocumentsFieldRefs {
   readonly documentRequirementId: Prisma.FieldRef<"TemplateDocuments", 'String'>
   readonly versionSequence: Prisma.FieldRef<"TemplateDocuments", 'Int'>
   readonly frozenAt: Prisma.FieldRef<"TemplateDocuments", 'DateTime'>
+  readonly providerQuarantinedAt: Prisma.FieldRef<"TemplateDocuments", 'DateTime'>
+  readonly providerQuarantineReason: Prisma.FieldRef<"TemplateDocuments", 'String'>
   readonly type: Prisma.FieldRef<"TemplateDocuments", 'TemplateDocumentsTypeEnum'>
   readonly organizationId: Prisma.FieldRef<"TemplateDocuments", 'String'>
   readonly title: Prisma.FieldRef<"TemplateDocuments", 'String'>

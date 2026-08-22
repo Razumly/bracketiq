@@ -17,7 +17,10 @@ import {
   signedDocumentEvidenceFields,
   DOCUMENT_EVIDENCE_PROVENANCE,
 } from '@/server/documentEvidence';
-
+import {
+  DocumentTemplateVersionProviderQuarantinedError,
+  findQuarantinedProviderTemplateIds,
+} from '@/server/documents/documentTemplateVersions';
 export const dynamic = 'force-dynamic';
 
 
@@ -228,6 +231,76 @@ export async function POST(req: NextRequest) {
     userId: signerUserId,
     profile,
   });
+  for (const templateId of requestedTemplateIds) {
+    const template = templateById.get(templateId);
+    if (!template) {
+      continue;
+    }
+    const requiredSignerType = normalizeRequiredSignerType(template.requiredSignerType);
+    if (requiredSignerType !== 'PARTICIPANT') {
+      return NextResponse.json({
+        error: `Rental template "${template.title}" requires ${getRequiredSignerTypeLabel(requiredSignerType)} signatures. Rental checkout templates must use Participant signer type.`,
+      }, { status: 400 });
+    }
+    if (!template.signOnce && !normalizedEventId) {
+      return NextResponse.json({
+        error: `eventId is required for event-scoped rental template "${template.title}".`,
+      }, { status: 400 });
+    }
+  }
+
+  const signedTemplateRows = await prisma.signedDocuments.findMany({
+    where: {
+      userId: signerUserId,
+      signerRole: 'participant',
+      OR: requestedTemplateIds.map((templateId) => {
+        const template = templateById.get(templateId);
+        return {
+          templateId,
+          hostId: null,
+          ...(template?.signOnce ? {} : { eventId: normalizedEventId }),
+        };
+      }),
+    },
+    select: { templateId: true, status: true },
+  });
+  const signedTemplateIds = new Set(
+    signedTemplateRows
+      .filter((row) => isSignedDocumentStatus(row.status))
+      .map((row) => row.templateId),
+  );
+  const providerTemplateIds = requestedTemplateIds
+    .map((templateId) => templateById.get(templateId))
+    .filter((template): template is NonNullable<typeof template> => (
+      template !== undefined
+      && (template.type ?? 'PDF').toUpperCase() !== 'TEXT'
+    ))
+    .map((template) => template.templateId);
+  const quarantinedProviderTemplateIds = await findQuarantinedProviderTemplateIds(
+    prisma,
+    providerTemplateIds,
+  );
+  const quarantinedTemplate = requestedTemplateIds
+    .map((templateId) => templateById.get(templateId))
+    .find((template) => (
+      template
+      && !signedTemplateIds.has(template.id)
+      && (template.type ?? 'PDF').toUpperCase() !== 'TEXT'
+      && (
+        Boolean(template.providerQuarantinedAt)
+        || Boolean(
+          pickString(template.templateId)
+          && quarantinedProviderTemplateIds.has(pickString(template.templateId)!),
+        )
+      )
+    ));
+  if (quarantinedTemplate) {
+    return NextResponse.json(
+      { error: new DocumentTemplateVersionProviderQuarantinedError(quarantinedTemplate.id).message },
+      { status: 409 },
+    );
+  }
+
 
   const signLinks: Array<{
     templateId: string;
@@ -252,17 +325,6 @@ export async function POST(req: NextRequest) {
       }
 
       const requiredSignerType = normalizeRequiredSignerType(template.requiredSignerType);
-      if (requiredSignerType !== 'PARTICIPANT') {
-        return NextResponse.json({
-          error: `Rental template "${template.title}" requires ${getRequiredSignerTypeLabel(requiredSignerType)} signatures. Rental checkout templates must use Participant signer type.`,
-        }, { status: 400 });
-      }
-
-      if (!template.signOnce && !normalizedEventId) {
-        return NextResponse.json({
-          error: `eventId is required for event-scoped rental template "${template.title}".`,
-        }, { status: 400 });
-      }
 
       const requiredSignerLabel = getRequiredSignerTypeLabel(requiredSignerType);
       const sharedScopeWhere = {
@@ -400,6 +462,15 @@ export async function POST(req: NextRequest) {
           signerContext: 'participant',
         });
         continue;
+      }
+      if (
+        template.providerQuarantinedAt
+        || (
+          pickString(template.templateId)
+          && quarantinedProviderTemplateIds.has(pickString(template.templateId)!)
+        )
+      ) {
+        throw new DocumentTemplateVersionProviderQuarantinedError(template.id);
       }
 
       if (!isBoldSignConfigured()) {
@@ -539,7 +610,9 @@ export async function POST(req: NextRequest) {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create rental signing links.';
-    const status = message.includes('not configured') ? 503 : 400;
+    const status = error instanceof DocumentTemplateVersionProviderQuarantinedError
+      ? 409
+      : message.includes('not configured') ? 503 : 400;
     return NextResponse.json({ error: message }, { status });
   }
 

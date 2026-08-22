@@ -3,7 +3,7 @@ import { Prisma, type TemplateDocuments } from '@/generated/prisma/client';
 
 type DocumentTemplateVersionClient = Pick<
   Prisma.TransactionClient,
-  '$queryRaw' | 'documentRequirements' | 'templateDocuments'
+  '$queryRaw' | 'documentRequirements' | 'templateDocuments' | 'templateProviderQuarantines'
 >;
 
 type DocumentRequirementRef = Pick<
@@ -20,6 +20,8 @@ type LockedTemplateDocument = Pick<
   | 'documentRequirementId'
   | 'versionSequence'
   | 'frozenAt'
+  | 'providerQuarantinedAt'
+  | 'providerQuarantineReason'
   | 'type'
   | 'organizationId'
   | 'title'
@@ -90,6 +92,33 @@ export class DocumentTemplateVersionFrozenError extends Error {
     this.versionId = versionId;
   }
 }
+export class DocumentTemplateVersionProviderQuarantinedError extends Error {
+  readonly versionId: string;
+
+  constructor(versionId: string) {
+    super('This Document Template Version has a quarantined provider and cannot be used for signing.');
+    this.name = 'DocumentTemplateVersionProviderQuarantinedError';
+    this.versionId = versionId;
+  }
+}
+export const findQuarantinedProviderTemplateIds = async (
+  client: Pick<Prisma.TransactionClient, 'templateProviderQuarantines'>,
+  providerTemplateIds: Iterable<string | null | undefined>,
+): Promise<Set<string>> => {
+  const ids = Array.from(new Set(
+    Array.from(providerTemplateIds)
+      .map((value) => value?.trim())
+      .filter((value): value is string => Boolean(value)),
+  ));
+  if (ids.length === 0) {
+    return new Set();
+  }
+  const rows = await client.templateProviderQuarantines.findMany({
+    where: { providerTemplateId: { in: ids } },
+    select: { providerTemplateId: true },
+  });
+  return new Set(rows.map((row) => row.providerTemplateId));
+};
 
 const DOCUMENT_REQUIREMENT_OWNERSHIP_ERROR =
   'Document Requirement and Document Template Version must belong to the same Organization.';
@@ -281,12 +310,27 @@ export const createDocumentTemplateVersion = async (
     orderBy: { versionSequence: 'desc' },
     select: { versionSequence: true },
   });
+  const providerQuarantine = params.version.templateId
+    ? await tx.templateProviderQuarantines.findUnique({
+      where: { providerTemplateId: params.version.templateId },
+      select: {
+        quarantinedAt: true,
+        reason: true,
+      },
+    })
+    : null;
   const versionSequence = (latestVersion?.versionSequence ?? 0) + 1;
   const { organizationId: _versionOrganizationId, ...versionData } = params.version;
 
   return tx.templateDocuments.create({
     data: {
       ...versionData,
+      ...(providerQuarantine
+        ? {
+          providerQuarantinedAt: providerQuarantine.quarantinedAt,
+          providerQuarantineReason: providerQuarantine.reason,
+        }
+        : {}),
       documentRequirementId: params.requirement.id,
       organizationId: params.requirement.organizationId,
       versionSequence,
@@ -354,6 +398,23 @@ export const editDocumentTemplateVersion = async (
 
   const material = params.material ?? {};
   const changed = hasMaterialChanges(current, material);
+  const nextTemplateId = material.templateId !== undefined ? material.templateId : current.templateId;
+  const isProviderChanged = material.templateId !== undefined && material.templateId !== current.templateId;
+  const quarantinedProvider = isProviderChanged && nextTemplateId
+    ? await tx.templateProviderQuarantines.findUnique({
+      where: { providerTemplateId: nextTemplateId },
+      select: {
+        quarantinedAt: true,
+        reason: true,
+      },
+    })
+    : null;
+  const providerQuarantinePatch = isProviderChanged
+    ? {
+      providerQuarantinedAt: quarantinedProvider?.quarantinedAt ?? null,
+      providerQuarantineReason: quarantinedProvider?.reason ?? null,
+    }
+    : {};
   const lifecyclePatch = material.status !== undefined
     ? { status: material.status }
     : {};
@@ -408,6 +469,7 @@ export const editDocumentTemplateVersion = async (
       where: { id: current.id },
       data: {
         ...materialPatchFrom(material),
+        ...providerQuarantinePatch,
         ...lifecyclePatch,
         updatedAt: new Date(),
       },
@@ -438,7 +500,11 @@ export const editDocumentTemplateVersion = async (
       id: params.newVersionId ?? randomUUID(),
       createdAt: nextVersionAt,
       updatedAt: nextVersionAt,
-      templateId: current.templateId,
+      templateId: nextTemplateId,
+      providerQuarantinedAt: quarantinedProvider?.quarantinedAt
+        ?? (isProviderChanged ? null : current.providerQuarantinedAt ?? null),
+      providerQuarantineReason: quarantinedProvider?.reason
+        ?? (isProviderChanged ? null : current.providerQuarantineReason ?? null),
       type: current.type,
       title: current.title,
       description: current.description,

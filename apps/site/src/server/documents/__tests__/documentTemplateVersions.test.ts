@@ -20,6 +20,9 @@ const createClient = () => ({
     create: jest.fn(),
     update: jest.fn(),
   },
+  templateProviderQuarantines: {
+    findUnique: jest.fn(),
+  },
   $queryRaw: jest.fn(),
 });
 
@@ -120,6 +123,66 @@ describe('Document Template Version storage', () => {
     expect(client.templateDocuments.create).not.toHaveBeenCalled();
 
   });
+  it('inherits provider quarantine when an unfrozen Version switches provider ids', async () => {
+    const client = createClient();
+    const current = {
+      id: 'version_draft',
+      documentRequirementId: requirement.id,
+      versionSequence: 2,
+      frozenAt: null,
+      providerQuarantinedAt: new Date('2026-01-02T00:00:00.000Z'),
+      providerQuarantineReason: 'Provider edit was quarantined.',
+      organizationId: requirement.organizationId,
+      templateId: 'bold_template_old',
+      type: 'PDF' as const,
+      title: requirement.title,
+      description: null,
+      signOnce: false,
+      requiredSignerType: 'PARTICIPANT',
+      status: 'ACTIVE',
+      createdBy: 'staff_1',
+      roleIndex: 1,
+      roleIndexes: [1],
+      signerRoles: ['participant'],
+      content: null,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+    client.$queryRaw
+      .mockResolvedValueOnce([current])
+      .mockResolvedValueOnce([]);
+    client.documentRequirements.findUnique.mockResolvedValue({
+      id: requirement.id,
+      organizationId: requirement.organizationId,
+      title: requirement.title,
+      description: null,
+    });
+    client.templateDocuments.update.mockImplementation(async ({ data }) => ({ ...current, ...data }));
+    client.templateProviderQuarantines.findUnique.mockResolvedValue({
+      quarantinedAt: new Date('2026-01-03T00:00:00.000Z'),
+      reason: 'The target provider template is quarantined.',
+    });
+
+    const result = await editDocumentTemplateVersion(client as never, {
+      versionId: current.id,
+      organizationId: requirement.organizationId,
+      material: { templateId: 'bold_template_new' },
+    });
+    expect(result.isNewVersionCreated).toBe(false);
+    expect(result.template).toEqual(expect.objectContaining({
+      templateId: 'bold_template_new',
+      providerQuarantinedAt: new Date('2026-01-03T00:00:00.000Z'),
+      providerQuarantineReason: 'The target provider template is quarantined.',
+    }));
+    expect(client.templateDocuments.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: current.id },
+      data: expect.objectContaining({
+        templateId: 'bold_template_new',
+        providerQuarantinedAt: new Date('2026-01-03T00:00:00.000Z'),
+        providerQuarantineReason: 'The target provider template is quarantined.',
+      }),
+    }));
+  });
   it('updates frozen Version display metadata without changing material fields', async () => {
     const client = createClient();
     const current = {
@@ -193,6 +256,8 @@ describe('Document Template Version storage', () => {
       documentRequirementId: requirement.id,
       versionSequence: 1,
       frozenAt: null,
+      providerQuarantinedAt: new Date('2026-01-02T00:00:00.000Z'),
+      providerQuarantineReason: 'Provider edit was quarantined.',
       organizationId: requirement.organizationId,
       templateId: 'bold_template_1',
       type: 'PDF' as const,
@@ -242,6 +307,8 @@ describe('Document Template Version storage', () => {
       templateId: current.templateId,
       signerRoles: ['participant', 'guardian'],
       roleIndexes: [1, 2],
+      providerQuarantinedAt: current.providerQuarantinedAt,
+      providerQuarantineReason: current.providerQuarantineReason,
     }));
     expect(client.templateDocuments.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: current.id },
@@ -303,6 +370,7 @@ describe('Document Template Version storage', () => {
       versionSequence: 2,
       content: 'New text',
       templateId: null,
+      type: 'TEXT',
       signerRoles: [],
     }));
     expect(client.templateDocuments.update).not.toHaveBeenCalledWith(expect.objectContaining({
@@ -317,6 +385,8 @@ describe('Document Template Version storage', () => {
       documentRequirementId: requirement.id,
       versionSequence: 1,
       frozenAt: null,
+      providerQuarantinedAt: new Date('2026-01-02T00:00:00.000Z'),
+      providerQuarantineReason: 'Provider edit was quarantined.',
       organizationId: requirement.organizationId,
       templateId: 'bold_template_1',
       type: 'PDF' as const,
@@ -367,6 +437,8 @@ describe('Document Template Version storage', () => {
       signerRoles: ['participant', 'guardian'],
       roleIndexes: [1, 2],
       versionSequence: 2,
+      providerQuarantinedAt: null,
+      providerQuarantineReason: null,
     }));
     expect(client.templateDocuments.update).not.toHaveBeenCalledWith(expect.objectContaining({
       where: { id: current.id },

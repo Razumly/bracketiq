@@ -65,7 +65,7 @@ describe('/api/organizations/[id]/templates', () => {
     );
   });
 
-  it('returns only the latest Version per Requirement for installed mobile clients', async () => {
+  it('returns every pinned Version in the legacy response for installed mobile clients', async () => {
     mockPrisma.templateDocuments.findMany.mockResolvedValue([
       { id: 'version_2', documentRequirementId: 'requirement_1', versionSequence: 2 },
       { id: 'version_1', documentRequirementId: 'requirement_1', versionSequence: 1 },
@@ -80,6 +80,7 @@ describe('/api/organizations/[id]/templates', () => {
     expect(response.status).toBe(200);
     expect((await response.json()).templates).toEqual([
       expect.objectContaining({ id: 'version_2' }),
+      expect.objectContaining({ id: 'version_1' }),
       expect.objectContaining({ id: 'version_3' }),
     ]);
   });

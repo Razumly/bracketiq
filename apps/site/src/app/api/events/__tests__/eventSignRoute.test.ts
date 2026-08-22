@@ -13,6 +13,9 @@ const prismaMock = {
   templateDocuments: {
     findMany: jest.fn(),
   },
+  templateProviderQuarantines: {
+    findMany: jest.fn(),
+  },
   signedDocuments: {
     findMany: jest.fn(),
     create: jest.fn(),
@@ -91,6 +94,7 @@ describe('POST /api/events/[eventId]/sign', () => {
       name: 'Weekend Open',
     });
     prismaMock.signedDocuments.findMany.mockResolvedValue([]);
+    prismaMock.templateProviderQuarantines.findMany.mockResolvedValue([]);
     prismaMock.signedDocuments.create.mockResolvedValue({
       id: 'signed_doc_1',
       signedDocumentId: 'doc_1',
@@ -195,6 +199,40 @@ describe('POST /api/events/[eventId]/sign', () => {
         redirectUrl: 'https://mvp-dev.ngrok-free.app/discover',
       }),
     );
+  });
+  it('rejects a PDF Version whose provider is quarantined', async () => {
+    prismaMock.templateDocuments.findMany.mockResolvedValue([
+      {
+        id: 'tmpl_1',
+        templateId: 'bold_tmpl_1',
+        type: 'PDF',
+        title: 'PDF Waiver',
+        description: 'Please sign this waiver.',
+        signOnce: false,
+        providerQuarantinedAt: null,
+        providerQuarantineReason: null,
+        roleIndex: 1,
+        roleIndexes: [1],
+        signerRoles: ['Participant'],
+      },
+    ]);
+    prismaMock.templateProviderQuarantines.findMany.mockResolvedValue([
+      { providerTemplateId: 'bold_tmpl_1' },
+    ]);
+    isBoldSignConfiguredMock.mockReturnValue(true);
+
+    const res = await POST(
+      jsonPost('http://localhost/api/events/event_1/sign', {
+        userId: 'user_1',
+      }),
+      { params: Promise.resolve({ eventId: 'event_1' }) },
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.error).toContain('quarantined provider');
+    expect(sendDocumentFromTemplateMock).not.toHaveBeenCalled();
+    expect(getEmbeddedSignLinkMock).not.toHaveBeenCalled();
   });
 
   it('does not force a redirect URL when the client did not request one', async () => {
@@ -565,6 +603,7 @@ describe('POST /api/events/[eventId]/sign', () => {
       return { email: 'parent@example.com' };
     });
     prismaMock.signedDocuments.findMany
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {

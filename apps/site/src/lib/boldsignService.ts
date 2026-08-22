@@ -211,7 +211,7 @@ export type BoldSignOperationStatus = {
 };
 
 class BoldSignService {
-  async listTemplates(params: {
+  async getTemplates(params: {
     organizationId: string;
     isVersionHistoryIncluded?: boolean;
   }): Promise<TemplateDocument[]> {

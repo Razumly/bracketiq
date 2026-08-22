@@ -3326,7 +3326,9 @@ model TemplateDocuments {
   templateId           String?
   documentRequirementId String
   versionSequence      Int
-  frozenAt              DateTime?
+  frozenAt             DateTime?
+  providerQuarantinedAt DateTime?
+  providerQuarantineReason String?
   type                 TemplateDocumentsTypeEnum?
   organizationId       String
   title                String
@@ -3341,9 +3343,17 @@ model TemplateDocuments {
   content              String?
   organization         Organizations       @relation("OrganizationTemplateDocuments", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "TemplateDocuments_organizationId_fkey")
   documentRequirement  DocumentRequirements @relation("DocumentRequirementVersions", fields: [documentRequirementId, organizationId], references: [id, organizationId], onDelete: Restrict, onUpdate: Cascade, map: "TemplateDocuments_documentRequirement_organization_fkey")
-
   @@unique([documentRequirementId, versionSequence])
   @@index([documentRequirementId])
+  @@index([templateId, providerQuarantinedAt])
+}
+
+model TemplateProviderQuarantines {
+  providerTemplateId String   @id
+  quarantinedAt      DateTime
+  reason             String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 }
 
 model SignedDocuments {

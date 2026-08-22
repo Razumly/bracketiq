@@ -12,6 +12,7 @@ import {
   listBoldSignOperationsForReconcile,
   type BoldSignSyncOperation,
   type BoldSignOperationStatus,
+  type BoldSignOperationDatabase,
   updateBoldSignOperationById,
 } from '@/lib/boldsignSyncOperations';
 import {
@@ -921,16 +922,78 @@ const getOperationPayload = (operation: BoldSignSyncOperation | null): JsonRecor
   }
   return operation.payload;
 };
+type ProviderQuarantineDatabase = Pick<
+  typeof prisma,
+  'templateDocuments' | 'templateProviderQuarantines'
+> & BoldSignOperationDatabase;
+
 
 const updateOperationState = async (
   operationId: string | null | undefined,
   patch: Partial<Parameters<typeof updateBoldSignOperationById>[1]>,
+  database?: BoldSignOperationDatabase,
 ) => {
   const normalizedId = normalizeText(operationId);
   if (!normalizedId) {
     return;
   }
+  if (database) {
+    await updateBoldSignOperationById(normalizedId, patch, database);
+    return;
+  }
   await updateBoldSignOperationById(normalizedId, patch);
+};
+const BOLDSIGN_PROVIDER_QUARANTINE_REASON =
+  'BoldSign provider edit was quarantined because the Document Template Version is frozen.';
+
+const quarantineBoldSignProviderVersions = async (params: {
+  providerTemplateId: string | null | undefined;
+  database?: ProviderQuarantineDatabase;
+}) => {
+  const providerTemplateId = normalizeText(params.providerTemplateId);
+  if (!providerTemplateId) {
+    return;
+  }
+  const now = new Date();
+  const database = params.database ?? prisma;
+  await database.templateProviderQuarantines.upsert({
+    where: { providerTemplateId },
+    create: {
+      providerTemplateId,
+      quarantinedAt: now,
+      reason: BOLDSIGN_PROVIDER_QUARANTINE_REASON,
+      createdAt: now,
+      updatedAt: now,
+    },
+    update: { updatedAt: now },
+  });
+  await database.templateDocuments.updateMany({
+    where: {
+      templateId: providerTemplateId,
+      providerQuarantinedAt: null,
+    },
+    data: {
+      providerQuarantinedAt: now,
+      providerQuarantineReason: BOLDSIGN_PROVIDER_QUARANTINE_REASON,
+      updatedAt: now,
+    },
+  });
+};
+const quarantineProviderAndFailOperation = async (params: {
+  providerTemplateId: string | null | undefined;
+  operationId: string | null | undefined;
+}) => {
+  await prisma.$transaction(async (tx) => {
+    await quarantineBoldSignProviderVersions({
+      providerTemplateId: params.providerTemplateId,
+      database: tx,
+    });
+    await updateOperationState(params.operationId, {
+      status: BOLDSIGN_OPERATION_STATUSES.FAILED,
+      lastError: BOLDSIGN_PROVIDER_QUARANTINE_REASON,
+      completedAt: new Date(),
+    }, tx);
+  });
 };
 
 export const projectTemplateProjectionFromOperation = async (params: {
@@ -977,7 +1040,8 @@ export const projectTemplateProjectionFromOperation = async (params: {
   const baseTemplate = existing ?? source;
   const isDetachedTemplateEdit = isDeferredTemplateEdit
     && Boolean(sourceTemplateDocumentId)
-    && (!existing || existing.id !== sourceTemplateDocumentId);
+    && !existing
+    && (!source?.templateId || source.templateId !== params.templateId);
   const isTemplateEdit = params.eventToken === 'templateedited';
   const frozenProviderVersion = isTemplateEdit && params.templateId
     ? await prisma.templateDocuments.findFirst({
@@ -988,16 +1052,17 @@ export const projectTemplateProjectionFromOperation = async (params: {
       select: { id: true },
     })
     : null;
+  const isFrozenReferencedVersion =
+    Boolean(existing?.frozenAt) || Boolean(source?.frozenAt) || Boolean(frozenProviderVersion);
   const isFrozenProviderEditQuarantined = isTemplateEdit
-    && Boolean(frozenProviderVersion)
+    && isFrozenReferencedVersion
     && !isDetachedTemplateEdit;
-  if (isFrozenProviderEditQuarantined && existing) {
-    await updateOperationState(params.operation?.id, {
-      status: BOLDSIGN_OPERATION_STATUSES.FAILED,
-      lastError: 'BoldSign provider edit was quarantined because the Document Template Version is frozen.',
-      completedAt: new Date(),
+  if (isFrozenProviderEditQuarantined) {
+    await quarantineProviderAndFailOperation({
+      providerTemplateId: params.templateId,
+      operationId: params.operation?.id,
     });
-    throw new Error('BoldSign provider edit was quarantined because the Document Template Version is frozen.');
+    throw new Error(BOLDSIGN_PROVIDER_QUARANTINE_REASON);
   }
   if (isDeferredTemplateEdit && existing && (!targetVersionId || existing.id === targetVersionId)) {
     return existing;
@@ -1069,7 +1134,8 @@ export const projectTemplateProjectionFromOperation = async (params: {
     status: 'ACTIVE',
   };
 
-  return prisma.$transaction(async (tx) => {
+  try {
+    return await prisma.$transaction(async (tx) => {
     const requirement = await ensureDocumentRequirement(tx, requirementData);
     const projectionVersionId = existing?.id ?? source?.id;
     if (projectionVersionId) {
@@ -1120,6 +1186,21 @@ export const projectTemplateProjectionFromOperation = async (params: {
       },
     });
   });
+  } catch (error) {
+    if (
+      error instanceof Error
+      && error.name === 'DocumentTemplateVersionFrozenError'
+      && isTemplateEdit
+      && !isDetachedTemplateEdit
+    ) {
+      await quarantineProviderAndFailOperation({
+        providerTemplateId: params.templateId,
+        operationId: params.operation?.id,
+      });
+      throw new Error(BOLDSIGN_PROVIDER_QUARANTINE_REASON);
+    }
+    throw error;
+  }
 };
 
 const projectTemplateEvent = async (event: ParsedBoldSignWebhookEvent): Promise<void> => {
@@ -1720,7 +1801,7 @@ const createOrUpdateSignedDocumentProjection = async (params: {
             teamId: inferredContext.teamId,
             ...evidenceFields,
             status: nextStatus,
-            signedAt: nextSignedAt ?? undefined,
+            ...(nextSignedAt !== null ? { signedAt: nextSignedAt } : {}),
             signerEmail,
             roleIndex,
             signerRole,
@@ -1844,9 +1925,18 @@ const createOrUpdateSignedDocumentProjection = async (params: {
             provenance: DOCUMENT_EVIDENCE_PROVENANCE.BOLDSIGN,
             providerDocumentId: providerDocumentId,
             status: fallbackStatus,
-            signedAt: eventSignedAt ?? undefined,
           },
         });
+        if (!isTerminalFailure && fallbackStatus === 'SIGNED' && eventSignedAt !== null) {
+          await tx.signedDocuments.updateMany({
+            where: {
+              id: { in: ids },
+              organizationId: inferredContext.organizationId,
+              signedAt: null,
+            },
+            data: { signedAt: eventSignedAt },
+          });
+        }
         if (isTerminalFailure) {
           await invalidateDocumentRequirementSatisfactions({
             evidenceIds: ids,

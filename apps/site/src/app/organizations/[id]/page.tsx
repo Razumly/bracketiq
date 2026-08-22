@@ -1612,7 +1612,7 @@ function OrganizationDetailContent() {
       if (!user?.$id) {
         return [];
       }
-      const mappedRows = await boldsignService.listTemplates({
+      const mappedRows = await boldsignService.getTemplates({
         organizationId: orgId,
         isVersionHistoryIncluded: true,
       });

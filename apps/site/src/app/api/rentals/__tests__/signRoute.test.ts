@@ -6,6 +6,9 @@ const prismaMock = {
   templateDocuments: {
     findMany: jest.fn(),
   },
+  templateProviderQuarantines: {
+    findMany: jest.fn(),
+  },
   signedDocuments: {
     findMany: jest.fn(),
     create: jest.fn(),
@@ -83,6 +86,7 @@ describe('POST /api/rentals/sign', () => {
     });
     prismaMock.sensitiveUserData.findFirst.mockResolvedValue({ email: 'player@example.com' });
     prismaMock.authUser.findUnique.mockResolvedValue(null);
+    prismaMock.templateProviderQuarantines.findMany.mockResolvedValue([]);
     prismaMock.signedDocuments.findMany.mockResolvedValue([]);
     prismaMock.signedDocuments.create.mockResolvedValue({ id: 'signed_1' });
     prismaMock.signedDocuments.update.mockResolvedValue({ id: 'signed_1' });

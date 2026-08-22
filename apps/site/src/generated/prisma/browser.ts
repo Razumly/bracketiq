@@ -553,6 +553,11 @@ export type DocumentRequirements = Prisma.DocumentRequirementsModel
  */
 export type TemplateDocuments = Prisma.TemplateDocumentsModel
 /**
+ * Model TemplateProviderQuarantines
+ *
+ */
+export type TemplateProviderQuarantines = Prisma.TemplateProviderQuarantinesModel
+/**
  * Model SignedDocuments
  *
  */

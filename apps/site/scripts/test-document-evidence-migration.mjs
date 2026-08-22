@@ -725,7 +725,7 @@ try {
     WHERE "id" = 'document-subject:org_1:player_1'
   `);
   assert.deepEqual(repairedSubjectTimestamps.rows, [{
-    createdAt: new Date("2026-08-04T10:00:00.000Z"),
+    createdAt: new Date("2026-08-02T10:00:00.000Z"),
     updatedAt: new Date("2026-08-04T11:00:00.000Z"),
   }]);
 
@@ -740,7 +740,7 @@ try {
   assert.deepEqual(contributorRoles.rows, [
     {
       signedDocumentId: "evidence_boldsign",
-      completedSignerRoles: ["parent_guardian", "child"],
+      completedSignerRoles: ["Parent/Guardian", "Child"],
     },
     {
       signedDocumentId: "evidence_boldsign_child",
@@ -802,7 +802,7 @@ try {
       templateDocumentId: "version_pdf",
       status: "INVALIDATED",
       isComplete: false,
-      requiredSignerRoles: ["parent_guardian", "child"],
+      requiredSignerRoles: ["Parent/Guardian", "Child"],
       completedSignerRoles: [],
     },
     {
@@ -811,8 +811,8 @@ try {
       templateDocumentId: "version_pdf",
       status: "SATISFIED",
       isComplete: true,
-      requiredSignerRoles: ["parent_guardian", "child"],
-      completedSignerRoles: ["child", "parent_guardian"],
+      requiredSignerRoles: ["Parent/Guardian", "Child"],
+      completedSignerRoles: ["Child", "Parent/Guardian", "child"],
     },
     {
       sourceEvidenceId: "evidence_incomplete_team",
@@ -820,7 +820,7 @@ try {
       templateDocumentId: "version_pdf",
       status: "PENDING",
       isComplete: false,
-      requiredSignerRoles: ["parent_guardian", "child"],
+      requiredSignerRoles: ["Parent/Guardian", "Child"],
       completedSignerRoles: ["Parent-Guardian"],
     },
     {

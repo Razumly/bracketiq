@@ -237,6 +237,14 @@ describe('document evidence storage seam', () => {
     expect(contributorQueries[1][0].where.signedDocumentId.in).toHaveLength(1);
     expect(contributorQueries[2][0].where.satisfactionId.in).toHaveLength(1);
     expect(signedDocuments.findMany.mock.calls[0][0].where.id.in).toHaveLength(1);
+    expect(documentRequirementSatisfactions.update).toHaveBeenCalledWith({
+      where: { id: 'document-satisfaction:evidence_0' },
+      data: expect.objectContaining({
+        status: 'SATISFIED',
+        isComplete: true,
+        completedSignerRoles: ['participant'],
+      }),
+    });
   });
 
 

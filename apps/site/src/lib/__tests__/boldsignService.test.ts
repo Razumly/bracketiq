@@ -104,7 +104,7 @@ describe('boldsignService', () => {
       }],
     });
 
-    const templates = await boldsignService.listTemplates({
+    const templates = await boldsignService.getTemplates({
       organizationId: 'org_1',
       isVersionHistoryIncluded: true,
     });

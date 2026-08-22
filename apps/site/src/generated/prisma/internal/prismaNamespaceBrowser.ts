@@ -158,6 +158,7 @@ export const ModelName = {
   Sports: 'Sports',
   DocumentRequirements: 'DocumentRequirements',
   TemplateDocuments: 'TemplateDocuments',
+  TemplateProviderQuarantines: 'TemplateProviderQuarantines',
   SignedDocuments: 'SignedDocuments',
   DocumentSubjects: 'DocumentSubjects',
   DocumentRequirementSatisfactions: 'DocumentRequirementSatisfactions',
@@ -2744,6 +2745,8 @@ export const TemplateDocumentsScalarFieldEnum = {
   documentRequirementId: 'documentRequirementId',
   versionSequence: 'versionSequence',
   frozenAt: 'frozenAt',
+  providerQuarantinedAt: 'providerQuarantinedAt',
+  providerQuarantineReason: 'providerQuarantineReason',
   type: 'type',
   organizationId: 'organizationId',
   title: 'title',
@@ -2759,6 +2762,17 @@ export const TemplateDocumentsScalarFieldEnum = {
 } as const
 
 export type TemplateDocumentsScalarFieldEnum = (typeof TemplateDocumentsScalarFieldEnum)[keyof typeof TemplateDocumentsScalarFieldEnum]
+
+
+export const TemplateProviderQuarantinesScalarFieldEnum = {
+  providerTemplateId: 'providerTemplateId',
+  quarantinedAt: 'quarantinedAt',
+  reason: 'reason',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type TemplateProviderQuarantinesScalarFieldEnum = (typeof TemplateProviderQuarantinesScalarFieldEnum)[keyof typeof TemplateProviderQuarantinesScalarFieldEnum]
 
 
 export const SignedDocumentsScalarFieldEnum = {

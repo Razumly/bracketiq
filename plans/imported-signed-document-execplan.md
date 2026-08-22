@@ -23,7 +23,7 @@ This plan starts with the data expansion required for that behavior. The first m
 - [x] Commit the issue #98 implementation and publish the issue outcome.
 - [x] (2026-08-22T00:34Z) Implement immutable Version enforcement, evidence provenance, Satisfaction persistence, owner repair, atomic imports, and cross-cutting fixes from the review handoff.
 - [x] (2026-08-22T00:34Z) Add contributor role snapshots, roleless completion handling, batch invalidation reads, imported-role migration repair, and frozen-provider operation quarantine.
-- [x] (2026-08-22T02:29Z) Run focused document, template, import, signature, provider, and role tests; pass the site type check, Prisma schema validation, migration fixture JavaScript syntax check, and the complete site suite. The disposable migration fixture remains blocked because no loopback PostgreSQL test database is available.
+- [x] (2026-08-22) Run focused document, template, import, signature, provider, and role tests; pass the site type check, Prisma schema validation, migration fixture JavaScript syntax check, and the complete site suite. The document-evidence and Document Requirement/Version migration fixtures passed against loopback PostgreSQL. The durable provider quarantine registry and generated client artifacts are included in the workstream.
 - [x] (2026-08-22T02:43Z) Commit the completed document work as `b3be28cc7` and the separate billing authorization correction as `cf8802b87`.
 
 ## Surprises & Discoveries
@@ -85,10 +85,18 @@ This plan starts with the data expansion required for that behavior. The first m
   Rationale: The database trigger protects frozen provider IDs. A failed operation prevents the webhook from confirming a remote edit while preserving the immutable local Version and its audit trail.
   Date/Author: 2026-08-22 / Codex
 
+- Decision: Require an explicit `attestationAccepted === true` input for every import, then derive and store the canonical attestation text and version on the server.
+  Rationale: Client text must not define the legal assertion stored with imported evidence. An explicit acceptance flag blocks incomplete imports while the server-owned constants provide a stable audit record.
+  Date/Author: 2026-08-22 / Codex
+
+- Decision: Store provider quarantine by global provider template ID in `TemplateProviderQuarantines`.
+  Rationale: A mutable or deleted Version row must not make a previously edited provider template usable again. A registry preserves the block across Version replacement and deletion.
+  Date/Author: 2026-08-22 / Codex
+
 ## Outcomes & Retrospective
 
 Issue #98 delivered the additive Requirement and immutable Version storage contract. Existing template IDs, assignment arrays, signing behavior, and provider identifiers remain unchanged. Schema validation, generated-client validation, migration fixture coverage, focused route tests, and the site checks passed. Later issues now consume this lineage for Version enforcement and document evidence.
-The review remediation extends the original storage milestone. It now repairs ownerless evidence before Satisfaction backfill, preserves historical evidence timestamps, records every contributing evidence row, handles roleless and imported completion, centralizes required-role derivation, batches invalidation reads, quarantines reused frozen provider operations, and invalidates active Satisfaction after terminal provider failures. Focused tests and typechecking pass; the disposable migration fixture remains blocked by the absent loopback PostgreSQL service.
+The completed remediation now repairs ownerless evidence before Satisfaction backfill, preserves historical evidence timestamps, records every contributing evidence row, handles roleless and imported completion, centralizes required-role derivation, batches invalidation reads, and invalidates active Satisfaction after terminal provider failures. It also requires explicit import attestation acceptance, stores server-derived attestation text and version, persists provider quarantine by global provider ID, and blocks every signing and dispatch path before provider use. Prisma checks, typechecking, focused tests, both migration fixtures, and the full site suite passed.
 
 
 ## Context and Orientation
@@ -203,6 +211,16 @@ The storage contract after this milestone is:
       ...existing template fields...
     }
 
+    TemplateProviderQuarantines {
+      providerTemplateId: String
+      quarantinedAt: DateTime
+      reason: String
+      createdAt: DateTime
+      updatedAt: DateTime
+    }
+
+The import request must include `attestationAccepted: true`. The server stores the canonical attestation text and version constants and does not accept client text or version fields. Every signing and dispatch route checks `TemplateProviderQuarantines` before provider use.
+
 `TemplateDocuments.id` remains the value stored in current assignment arrays. `templateId` remains the optional BoldSign provider ID. The compound uniqueness rule is `(documentRequirementId, versionSequence)`. The current route response remains backward compatible; it may include the new persisted fields because Prisma serializes the created row.
 
 The next immutable-Version issue will read `frozenAt` and the assignment/evidence references before material updates. The evidence expansion will reference `TemplateDocuments.id` as the Version ID and `DocumentRequirements.id` as the lineage ID. Later routes must validate that both records share the same Organization before accepting a document, assignment, or Satisfaction.
@@ -228,6 +246,7 @@ Each later milestone must keep the backend HTTP interface compatible with instal
 
 2026-08-21: Updated the progress and outcome records after completing issue #98 and carrying the lineage into the later immutable-Version and evidence work. The current workstream also records the service-seam and review corrections made after the two-axis review.
 2026-08-22T00:34Z: Updated the living plan after review remediation. The plan now records batch invalidation reads, imported role snapshots, timestamp-preserving owner repair, centralized role derivation, failed-operation quarantine, and terminal-failure Satisfaction invalidation. The database trigger prevents mutating a frozen provider ID, so quarantine marks the operation failed and leaves the Version unchanged.
+2026-08-22: Completed the durable provider quarantine amendment. The registry migration and generated model are part of the patch. Import now requires explicit attestation acceptance and stores server-derived text/version. The template collection service uses the repository `getX` naming form. The complete focused and site suites passed.
 
 
 ## Downstream review handoff
@@ -236,7 +255,7 @@ Review scope: `main...workstream/document-versions` through `0e0d3b097`, coverin
 
 ### Issue #99: immutable Version enforcement
 
-The Version enforcement work is implemented in `src/server/documents/documentTemplateVersions.ts`, the template routes, the edit-url route, and the BoldSign projection. Unit and route tests cover frozen material rejection, separate Requirement metadata edits, pinned Version identity, and provider-edit quarantine. Persistence-backed trigger proof remains dependent on the disposable loopback PostgreSQL fixture.
+The Version enforcement work is implemented in `src/server/documents/documentTemplateVersions.ts`, the template routes, the edit-url route, and the BoldSign projection. Unit and route tests cover frozen material rejection, separate Requirement metadata edits, pinned Version identity, and provider-edit quarantine. The document-evidence migration fixture passed; persistence-backed immutable-Version trigger proof remains a separate unverified fixture.
 
 ### Issue #100: evidence provenance and Satisfaction
 
@@ -274,3 +293,105 @@ The issue comments for #97, #99, #100, and #101 record the review scope. The Pro
 - `prisma/migrations/20260821040000_add_document_evidence_satisfaction/migration.sql`, the evidence migration fixture, and `src/server/__tests__/documentEvidence.test.ts` cover no-loss migration, subject identity, and multi-signer Satisfaction.
 - `src/app/api/organizations/[id]/documents/import/route.ts` and its route test cover User, Event, Team, and File ownership plus atomic import writes.
 - Signature and void route tests cover atomic evidence, Subject, Satisfaction, and audit transitions.
+
+
+### 2026-08-22 follow-up two-axis review findings
+
+Review target: local `main` at `445b9d3dc0e6690bca6075f3891bb5816a9b4f78`, compared with `HEAD` at `e8d32689f` plus current unstaged remediation. Historical diff command: `git diff 445b9d3dc0e6690bca6075f3891bb5816a9b4f78...HEAD`. Authoritative worktree-inclusive diff: `git diff 445b9d3dc0e6690bca6075f3891bb5816a9b4f78` (single base revision).
+
+The follow-up review found residual findings after the earlier remediation. The related comments are recorded on issues #97, #99, #100, and #101. This section records findings only. It does not claim acceptance or closure.
+
+#### Standards findings
+
+- **Hard:** `src/server/__tests__/documentEvidence.test.ts:234-239` checks mock-call nesting, query count, and fixed chunk sizes. It does not assert Satisfaction results. This conflicts with `apps/site/CODING_STANDARDS.md`, which requires tests to prove observable behavior.
+- **Hard:** `src/lib/boldsignService.ts:213-227` adds `listTemplates`. `apps/site/AGENTS.md:135-137` requires service methods to use `createX/getX/updateX/deleteX`. Rename this method and update its callers.
+- **Hard:** `src/app/organizations/[id]/page.tsx:3231-3237` sends customer-bill HTTP requests directly through `apiRequest`. `apps/site/AGENTS.md:135-136` requires UI code to call service modules in `src/lib/*Service.ts`.
+- **Hard:** `src/app/organizations/[id]/page.tsx:1213-1215` uses `customerBillModalOpen` and `creatingCustomerBill`. `apps/site/AGENTS.md:136` requires Boolean names to use the `is*` or `has*` convention.
+- **Judgement call — Middle Man:** `src/server/documentEvidence.ts:468-477` adds a singular invalidation wrapper around the plural function. Call the plural function directly if no separate seam is required.
+- **Judgement call — Duplicated Code / Shotgun Surgery:** `canManageCustomerBilling` is duplicated in both billing routes. A shared server helper would centralize this decision.
+- **Fixed in this amendment:** Earlier plan text said that the migration fixture was blocked while later text recorded a passed document-evidence fixture. The plan now distinguishes that passed fixture from the separate unverified immutable-Version trigger fixture.
+
+#### Specification findings
+
+- **#97 P1:** `src/app/api/organizations/[id]/documents/import/route.ts:261-266` rejects invalid scope only for sign-once Versions. Non-sign-once imports must require Event Participation scope.
+- **#99 P1:** `src/lib/boldsignWebhookSync.ts:978-982` can treat a later provider edit for a detached Version as safe after the first detached edit creates V2. A later edit can mutate content referenced by a frozen Version.
+- **#99 P1:** `src/app/api/organizations/[id]/templates/route.ts:136-145` returns only the newest Version. Pinned Versions must remain addressable to installed mobile clients.
+- **#100 P1:** `prisma/migrations/20260821080000_repair_ownerless_document_evidence/migration.sql:109-112` can replace an existing Subject timestamp with a repaired-row timestamp. Merge existing and repaired values with the earliest `createdAt` and latest `updatedAt`.
+- **#101 P1:** `src/lib/boldsignWebhookSync.ts:1837-1848` writes `signedAt` during terminal bulk updates. `resolveDocumentSignedAtIso` at lines 488-506 can use the terminal webhook time. Omit `signedAt` from this update so the historical signing time remains unchanged.
+
+### 2026-08-21 follow-up remediation
+
+The four specification findings are fixed.
+
+- #97 now requires Event Participation scope for non-sign-once imports. The route tests cover rejection and acceptance.
+- #99 now quarantines later provider edits when the source or an existing Version is frozen. The guard reads the source Version directly, so a cloned provider template ID does not hide the frozen source. The templates response keeps all pinned Versions addressable.
+- #100 now merges repaired Subject timestamps with the earliest `createdAt` and latest `updatedAt`. The migration fixture covers the merge.
+- #101 now omits `signedAt` from terminal bulk updates. The provider projection test proves that a later terminal event does not replace the original signing time.
+
+Verification completed:
+
+- `DATABASE_URL=postgresql://localhost:5432/bracketiq npm run prisma:validate`
+- `npx tsc --noEmit`
+- Focused document and provider tests: 57 tests passed.
+- Full site suite: 863 suites passed, 2 skipped; 5,095 tests passed, 4 skipped.
+- ESLint passed for all changed TypeScript and migration-fixture files.
+- `node --check scripts/test-document-evidence-migration.mjs` passed.
+- `DOCUMENT_EVIDENCE_MIGRATION_TEST_DATABASE_URL=postgresql://mvp:mvp_password@127.0.0.1:5433/mvp npm run test:document-evidence-migration` passed.
+
+The unrelated standards findings remain outside this document behavior remediation.
+
+### 2026-08-22 amended two-axis review remediation
+
+The two amended specification findings are fixed.
+
+- #97 now resolves Event Participation imports through the canonical team ID from an EventTeam snapshot. The route test covers the snapshot case.
+- #99 now quarantines provider edits that reuse a frozen provider ID. Event, public guest, rental, and team dispatch signing paths reject quarantined Versions.
+- The P2 customer billing scope finding remains intentionally separate from this document behavior work.
+
+Verification completed for this remediation:
+
+- `npx tsc --noEmit` passed.
+- The import route regression passed with 23 tests.
+- The provider projection regression passed with 11 tests.
+- The team signing route regressions passed with 29 tests.
+- The rental signing regression passed with 3 tests.
+- The immutable-Version migration fixture passed.
+
+The issue comments record the affected issue-specific findings.
+
+### 2026-08-22 final review remediation
+
+The final specification review found no remaining requirement gaps.
+
+- Provider quarantine now covers every Version that uses a global provider template ID.
+- A Version repointed to an already-quarantined provider keeps the quarantine state.
+- Roleless SIGNED fallback updates fill `signedAt` only when it is null.
+- Replayed completion events keep the first signing time.
+- Non-SIGNED fallback events do not fill `signedAt`.
+
+Final verification:
+
+- `DATABASE_URL=postgresql://localhost:5432/bracketiq npm run prisma:check` passed.
+- `npx tsc --noEmit` passed.
+- Focused provider and Version tests passed: 32 tests.
+- Full site suite passed: 864 suites and 5,103 tests; 2 suites and 4 tests skipped.
+- The document evidence migration fixture passed.
+- The Document Requirement and Document Template Version migration fixture passed.
+
+### 2026-08-22 durable provider quarantine remediation
+
+The provider quarantine state is now durable by provider template ID.
+
+- `TemplateProviderQuarantines` stores quarantine state that survives Version replacement.
+- New Versions inherit quarantine state when they use a quarantined provider template.
+- Event, public guest, rental, team, and both collection dispatch paths check the registry before provider calls.
+- Signed rows are checked before the quarantine response so completed evidence stays reusable.
+- The migration fixture now verifies registry backfill from quarantined Version data.
+
+Verification in this pass:
+
+- `npm run prisma:check` passed.
+- `npx tsc --noEmit` passed.
+- Focused signing, provider, Version, import, and template route tests passed.
+- Document evidence and Document Requirement migration fixtures passed on the loopback PostgreSQL test database.
+- The full site suite passed: 864 suites and 5,103 tests; 2 suites and 4 tests skipped.

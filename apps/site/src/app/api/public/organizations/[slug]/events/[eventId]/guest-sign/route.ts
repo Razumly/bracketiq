@@ -26,7 +26,10 @@ import {
   signedDocumentEvidenceFields,
   DOCUMENT_EVIDENCE_PROVENANCE,
 } from '@/server/documentEvidence';
-
+import {
+  DocumentTemplateVersionProviderQuarantinedError,
+  findQuarantinedProviderTemplateIds,
+} from '@/server/documents/documentTemplateVersions';
 import {
   assertPublicWidgetEvent,
   normalizeGuestText,
@@ -244,6 +247,60 @@ export async function POST(req: NextRequest, context: RouteContext) {
   const redirectUrl = resolveBoldSignRedirectUrl(normalizeGuestText(parsed.data.redirectUrl) ?? undefined);
   const signLinks: Array<Record<string, unknown>> = [];
 
+  const signedTemplateRows = templateIdsToSign.length > 0
+    ? await prisma.signedDocuments.findMany({
+      where: {
+        userId: signerUserId,
+        signerRole: signerContext,
+        OR: templateIdsToSign.map((templateId) => {
+          const template = templatesById.get(templateId);
+          return {
+            templateId,
+            hostId: childUserId ?? null,
+            ...(template?.signOnce ? {} : { eventId: event.id }),
+          };
+        }),
+      },
+      select: { templateId: true, status: true },
+    })
+    : [];
+  const signedTemplateIds = new Set(
+    signedTemplateRows
+      .filter((row) => signedStatus(row.status))
+      .map((row) => row.templateId),
+  );
+  const providerTemplateIds = templateIdsToSign
+    .map((templateId) => templatesById.get(templateId))
+    .filter((template): template is NonNullable<typeof template> => (
+      template !== undefined
+      && normalizeGuestText(template.type)?.toUpperCase() !== 'TEXT'
+    ))
+    .map((template) => template.templateId);
+  const quarantinedProviderTemplateIds = await findQuarantinedProviderTemplateIds(
+    prisma,
+    providerTemplateIds,
+  );
+  const quarantinedTemplate = templateIdsToSign
+    .map((templateId) => templatesById.get(templateId))
+    .find((template) => (
+      template
+      && !signedTemplateIds.has(template.id)
+      && normalizeGuestText(template.type)?.toUpperCase() !== 'TEXT'
+      && (
+        Boolean(template.providerQuarantinedAt)
+        || Boolean(
+          normalizeGuestText(template.templateId)
+          && quarantinedProviderTemplateIds.has(normalizeGuestText(template.templateId)!),
+        )
+      )
+    ));
+  if (quarantinedTemplate) {
+    return NextResponse.json(
+      { error: new DocumentTemplateVersionProviderQuarantinedError(quarantinedTemplate.id).message },
+      { status: 409 },
+    );
+  }
+
   try {
     for (const templateId of templateIdsToSign) {
       const template = templatesById.get(templateId);
@@ -344,6 +401,15 @@ export async function POST(req: NextRequest, context: RouteContext) {
           signerContext,
         });
         continue;
+      }
+      if (
+        template.providerQuarantinedAt
+        || (
+          normalizeGuestText(template.templateId)
+          && quarantinedProviderTemplateIds.has(normalizeGuestText(template.templateId)!)
+        )
+      ) {
+        throw new DocumentTemplateVersionProviderQuarantinedError(template.id);
       }
 
       if (!isBoldSignConfigured()) {
@@ -487,7 +553,10 @@ export async function POST(req: NextRequest, context: RouteContext) {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create signing links.';
-    return NextResponse.json({ error: message }, { status: message.includes('not configured') ? 503 : 400 });
+    const status = error instanceof DocumentTemplateVersionProviderQuarantinedError
+      ? 409
+      : message.includes('not configured') ? 503 : 400;
+    return NextResponse.json({ error: message }, { status });
   }
 
   return NextResponse.json({ signLinks }, { status: 200 });

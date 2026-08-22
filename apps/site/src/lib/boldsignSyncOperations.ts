@@ -65,6 +65,7 @@ type PrismaAny = typeof prisma & {
     update: (args: any) => Promise<any>;
   };
 };
+export type BoldSignOperationDatabase = Pick<PrismaAny, 'boldSignSyncOperations'>;
 
 const prismaAny = prisma as PrismaAny;
 
@@ -159,20 +160,21 @@ export const createOrUpdateBoldSignOperation = async (params: {
 export const updateBoldSignOperationById = async (
   operationId: string,
   patch: Partial<Omit<BoldSignSyncOperation, 'id' | 'createdAt'>>,
+  database: BoldSignOperationDatabase = prismaAny,
 ): Promise<BoldSignSyncOperation | null> => {
   const normalizedId = normalizeText(operationId);
   if (!normalizedId) {
     return null;
   }
 
-  const existing = await prismaAny.boldSignSyncOperations.findUnique({
+  const existing = await database.boldSignSyncOperations.findUnique({
     where: { id: normalizedId },
   });
   if (!existing) {
     return null;
   }
 
-  const updated = await prismaAny.boldSignSyncOperations.update({
+  const updated = await database.boldSignSyncOperations.update({
     where: { id: normalizedId },
     data: {
       ...(patch.operationType ? { operationType: patch.operationType } : {}),
