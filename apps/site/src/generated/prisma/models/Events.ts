@@ -120,6 +120,7 @@ export type EventsMinAggregateOutputType = {
   maxAge: number | null
   hostId: string | null
   noFixedEndDateTime: boolean | null
+  automatedScheduling: boolean | null
   price: number | null
   registrationPaymentMode: $Enums.RegistrationPaymentModeEnum | null
   manualPaymentInstructions: string | null
@@ -199,6 +200,7 @@ export type EventsMaxAggregateOutputType = {
   maxAge: number | null
   hostId: string | null
   noFixedEndDateTime: boolean | null
+  automatedScheduling: boolean | null
   price: number | null
   registrationPaymentMode: $Enums.RegistrationPaymentModeEnum | null
   manualPaymentInstructions: string | null
@@ -279,6 +281,7 @@ export type EventsCountAggregateOutputType = {
   hostId: number
   assistantHostIds: number
   noFixedEndDateTime: number
+  automatedScheduling: number
   price: number
   registrationPaymentMode: number
   manualPaymentLinks: number
@@ -432,6 +435,7 @@ export type EventsMinAggregateInputType = {
   maxAge?: true
   hostId?: true
   noFixedEndDateTime?: true
+  automatedScheduling?: true
   price?: true
   registrationPaymentMode?: true
   manualPaymentInstructions?: true
@@ -511,6 +515,7 @@ export type EventsMaxAggregateInputType = {
   maxAge?: true
   hostId?: true
   noFixedEndDateTime?: true
+  automatedScheduling?: true
   price?: true
   registrationPaymentMode?: true
   manualPaymentInstructions?: true
@@ -591,6 +596,7 @@ export type EventsCountAggregateInputType = {
   hostId?: true
   assistantHostIds?: true
   noFixedEndDateTime?: true
+  automatedScheduling?: true
   price?: true
   registrationPaymentMode?: true
   manualPaymentLinks?: true
@@ -772,6 +778,7 @@ export type EventsGroupByOutputType = {
   hostId: string | null
   assistantHostIds: string[]
   noFixedEndDateTime: boolean
+  automatedScheduling: boolean
   price: number
   registrationPaymentMode: $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks: runtime.JsonValue
@@ -889,6 +896,7 @@ export type EventsWhereInput = {
   hostId?: Prisma.StringNullableFilter<"Events"> | string | null
   assistantHostIds?: Prisma.StringNullableListFilter<"Events">
   noFixedEndDateTime?: Prisma.BoolFilter<"Events"> | boolean
+  automatedScheduling?: Prisma.BoolFilter<"Events"> | boolean
   price?: Prisma.IntFilter<"Events"> | number
   registrationPaymentMode?: Prisma.EnumRegistrationPaymentModeEnumFilter<"Events"> | $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonFilter<"Events">
@@ -983,6 +991,7 @@ export type EventsOrderByWithRelationInput = {
   hostId?: Prisma.SortOrderInput | Prisma.SortOrder
   assistantHostIds?: Prisma.SortOrder
   noFixedEndDateTime?: Prisma.SortOrder
+  automatedScheduling?: Prisma.SortOrder
   price?: Prisma.SortOrder
   registrationPaymentMode?: Prisma.SortOrder
   manualPaymentLinks?: Prisma.SortOrder
@@ -1080,6 +1089,7 @@ export type EventsWhereUniqueInput = Prisma.AtLeast<{
   hostId?: Prisma.StringNullableFilter<"Events"> | string | null
   assistantHostIds?: Prisma.StringNullableListFilter<"Events">
   noFixedEndDateTime?: Prisma.BoolFilter<"Events"> | boolean
+  automatedScheduling?: Prisma.BoolFilter<"Events"> | boolean
   price?: Prisma.IntFilter<"Events"> | number
   registrationPaymentMode?: Prisma.EnumRegistrationPaymentModeEnumFilter<"Events"> | $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonFilter<"Events">
@@ -1174,6 +1184,7 @@ export type EventsOrderByWithAggregationInput = {
   hostId?: Prisma.SortOrderInput | Prisma.SortOrder
   assistantHostIds?: Prisma.SortOrder
   noFixedEndDateTime?: Prisma.SortOrder
+  automatedScheduling?: Prisma.SortOrder
   price?: Prisma.SortOrder
   registrationPaymentMode?: Prisma.SortOrder
   manualPaymentLinks?: Prisma.SortOrder
@@ -1276,6 +1287,7 @@ export type EventsScalarWhereWithAggregatesInput = {
   hostId?: Prisma.StringNullableWithAggregatesFilter<"Events"> | string | null
   assistantHostIds?: Prisma.StringNullableListFilter<"Events">
   noFixedEndDateTime?: Prisma.BoolWithAggregatesFilter<"Events"> | boolean
+  automatedScheduling?: Prisma.BoolWithAggregatesFilter<"Events"> | boolean
   price?: Prisma.IntWithAggregatesFilter<"Events"> | number
   registrationPaymentMode?: Prisma.EnumRegistrationPaymentModeEnumWithAggregatesFilter<"Events"> | $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonWithAggregatesFilter<"Events">
@@ -1370,6 +1382,7 @@ export type EventsCreateInput = {
   hostId?: string | null
   assistantHostIds?: Prisma.EventsCreateassistantHostIdsInput | string[]
   noFixedEndDateTime?: boolean
+  automatedScheduling?: boolean
   price: number
   registrationPaymentMode?: $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -1464,6 +1477,7 @@ export type EventsUncheckedCreateInput = {
   hostId?: string | null
   assistantHostIds?: Prisma.EventsCreateassistantHostIdsInput | string[]
   noFixedEndDateTime?: boolean
+  automatedScheduling?: boolean
   price: number
   registrationPaymentMode?: $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -1558,6 +1572,7 @@ export type EventsUpdateInput = {
   hostId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   assistantHostIds?: Prisma.EventsUpdateassistantHostIdsInput | string[]
   noFixedEndDateTime?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  automatedScheduling?: Prisma.BoolFieldUpdateOperationsInput | boolean
   price?: Prisma.IntFieldUpdateOperationsInput | number
   registrationPaymentMode?: Prisma.EnumRegistrationPaymentModeEnumFieldUpdateOperationsInput | $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -1652,6 +1667,7 @@ export type EventsUncheckedUpdateInput = {
   hostId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   assistantHostIds?: Prisma.EventsUpdateassistantHostIdsInput | string[]
   noFixedEndDateTime?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  automatedScheduling?: Prisma.BoolFieldUpdateOperationsInput | boolean
   price?: Prisma.IntFieldUpdateOperationsInput | number
   registrationPaymentMode?: Prisma.EnumRegistrationPaymentModeEnumFieldUpdateOperationsInput | $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -1746,6 +1762,7 @@ export type EventsCreateManyInput = {
   hostId?: string | null
   assistantHostIds?: Prisma.EventsCreateassistantHostIdsInput | string[]
   noFixedEndDateTime?: boolean
+  automatedScheduling?: boolean
   price: number
   registrationPaymentMode?: $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -1840,6 +1857,7 @@ export type EventsUpdateManyMutationInput = {
   hostId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   assistantHostIds?: Prisma.EventsUpdateassistantHostIdsInput | string[]
   noFixedEndDateTime?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  automatedScheduling?: Prisma.BoolFieldUpdateOperationsInput | boolean
   price?: Prisma.IntFieldUpdateOperationsInput | number
   registrationPaymentMode?: Prisma.EnumRegistrationPaymentModeEnumFieldUpdateOperationsInput | $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -1934,6 +1952,7 @@ export type EventsUncheckedUpdateManyInput = {
   hostId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   assistantHostIds?: Prisma.EventsUpdateassistantHostIdsInput | string[]
   noFixedEndDateTime?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  automatedScheduling?: Prisma.BoolFieldUpdateOperationsInput | boolean
   price?: Prisma.IntFieldUpdateOperationsInput | number
   registrationPaymentMode?: Prisma.EnumRegistrationPaymentModeEnumFieldUpdateOperationsInput | $Enums.RegistrationPaymentModeEnum
   manualPaymentLinks?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -2028,6 +2047,7 @@ export type EventsCountOrderByAggregateInput = {
   hostId?: Prisma.SortOrder
   assistantHostIds?: Prisma.SortOrder
   noFixedEndDateTime?: Prisma.SortOrder
+  automatedScheduling?: Prisma.SortOrder
   price?: Prisma.SortOrder
   registrationPaymentMode?: Prisma.SortOrder
   manualPaymentLinks?: Prisma.SortOrder
@@ -2150,6 +2170,7 @@ export type EventsMaxOrderByAggregateInput = {
   maxAge?: Prisma.SortOrder
   hostId?: Prisma.SortOrder
   noFixedEndDateTime?: Prisma.SortOrder
+  automatedScheduling?: Prisma.SortOrder
   price?: Prisma.SortOrder
   registrationPaymentMode?: Prisma.SortOrder
   manualPaymentInstructions?: Prisma.SortOrder
@@ -2229,6 +2250,7 @@ export type EventsMinOrderByAggregateInput = {
   maxAge?: Prisma.SortOrder
   hostId?: Prisma.SortOrder
   noFixedEndDateTime?: Prisma.SortOrder
+  automatedScheduling?: Prisma.SortOrder
   price?: Prisma.SortOrder
   registrationPaymentMode?: Prisma.SortOrder
   manualPaymentInstructions?: Prisma.SortOrder
@@ -2459,6 +2481,7 @@ export type EventsSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   hostId?: boolean
   assistantHostIds?: boolean
   noFixedEndDateTime?: boolean
+  automatedScheduling?: boolean
   price?: boolean
   registrationPaymentMode?: boolean
   manualPaymentLinks?: boolean
@@ -2553,6 +2576,7 @@ export type EventsSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extens
   hostId?: boolean
   assistantHostIds?: boolean
   noFixedEndDateTime?: boolean
+  automatedScheduling?: boolean
   price?: boolean
   registrationPaymentMode?: boolean
   manualPaymentLinks?: boolean
@@ -2647,6 +2671,7 @@ export type EventsSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extens
   hostId?: boolean
   assistantHostIds?: boolean
   noFixedEndDateTime?: boolean
+  automatedScheduling?: boolean
   price?: boolean
   registrationPaymentMode?: boolean
   manualPaymentLinks?: boolean
@@ -2741,6 +2766,7 @@ export type EventsSelectScalar = {
   hostId?: boolean
   assistantHostIds?: boolean
   noFixedEndDateTime?: boolean
+  automatedScheduling?: boolean
   price?: boolean
   registrationPaymentMode?: boolean
   manualPaymentLinks?: boolean
@@ -2798,7 +2824,7 @@ export type EventsSelectScalar = {
   requiredTemplateIds?: boolean
 }
 
-export type EventsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "archivedAt" | "archivedByUserId" | "archiveReason" | "name" | "start" | "end" | "scheduleEndConstraint" | "generatedScheduleEnd" | "timeZone" | "description" | "affiliateUrl" | "sourceType" | "sourceId" | "sourceUrl" | "organizerName" | "scheduleText" | "dateDisplayMode" | "dateDisplayText" | "priceText" | "statusText" | "winnerSetCount" | "loserSetCount" | "doubleElimination" | "location" | "address" | "rating" | "teamSizeLimit" | "maxParticipants" | "minAge" | "maxAge" | "hostId" | "assistantHostIds" | "noFixedEndDateTime" | "price" | "registrationPaymentMode" | "manualPaymentLinks" | "manualPaymentInstructions" | "taxHandling" | "organizerManualTaxRateBps" | "singleDivision" | "registrationByDivisionType" | "cancellationRefundHours" | "teamSignup" | "prize" | "registrationCutoffHours" | "seedColor" | "imageId" | "fieldCount" | "winnerBracketPointsToVictory" | "loserBracketPointsToVictory" | "coordinates" | "gamesPerOpponent" | "includePlayoffs" | "playoffTeamCount" | "usesSets" | "matchDurationMinutes" | "setDurationMinutes" | "setsPerMatch" | "restTimeMinutes" | "state" | "pointsToVictory" | "sportIds" | "timeSlotIds" | "fieldIds" | "leagueScoringConfigId" | "organizationId" | "parentEvent" | "autoCancellation" | "eventType" | "officialSchedulingMode" | "staffingPriority" | "doTeamsOfficiate" | "teamOfficialsMaySwap" | "teamCheckInMode" | "teamCheckInOpenMinutesBefore" | "allowMatchRosterEdits" | "allowTemporaryMatchPlayers" | "officialPositions" | "matchRulesOverride" | "autoCreatePointMatchIncidents" | "allowPaymentPlans" | "installmentCount" | "installmentDueDates" | "installmentDueRelativeDays" | "installmentAmounts" | "allowTeamSplitDefault" | "splitLeaguePlayoffDivisions" | "requiredTemplateIds", ExtArgs["result"]["events"]>
+export type EventsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "archivedAt" | "archivedByUserId" | "archiveReason" | "name" | "start" | "end" | "scheduleEndConstraint" | "generatedScheduleEnd" | "timeZone" | "description" | "affiliateUrl" | "sourceType" | "sourceId" | "sourceUrl" | "organizerName" | "scheduleText" | "dateDisplayMode" | "dateDisplayText" | "priceText" | "statusText" | "winnerSetCount" | "loserSetCount" | "doubleElimination" | "location" | "address" | "rating" | "teamSizeLimit" | "maxParticipants" | "minAge" | "maxAge" | "hostId" | "assistantHostIds" | "noFixedEndDateTime" | "automatedScheduling" | "price" | "registrationPaymentMode" | "manualPaymentLinks" | "manualPaymentInstructions" | "taxHandling" | "organizerManualTaxRateBps" | "singleDivision" | "registrationByDivisionType" | "cancellationRefundHours" | "teamSignup" | "prize" | "registrationCutoffHours" | "seedColor" | "imageId" | "fieldCount" | "winnerBracketPointsToVictory" | "loserBracketPointsToVictory" | "coordinates" | "gamesPerOpponent" | "includePlayoffs" | "playoffTeamCount" | "usesSets" | "matchDurationMinutes" | "setDurationMinutes" | "setsPerMatch" | "restTimeMinutes" | "state" | "pointsToVictory" | "sportIds" | "timeSlotIds" | "fieldIds" | "leagueScoringConfigId" | "organizationId" | "parentEvent" | "autoCancellation" | "eventType" | "officialSchedulingMode" | "staffingPriority" | "doTeamsOfficiate" | "teamOfficialsMaySwap" | "teamCheckInMode" | "teamCheckInOpenMinutesBefore" | "allowMatchRosterEdits" | "allowTemporaryMatchPlayers" | "officialPositions" | "matchRulesOverride" | "autoCreatePointMatchIncidents" | "allowPaymentPlans" | "installmentCount" | "installmentDueDates" | "installmentDueRelativeDays" | "installmentAmounts" | "allowTeamSplitDefault" | "splitLeaguePlayoffDivisions" | "requiredTemplateIds", ExtArgs["result"]["events"]>
 
 export type $EventsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "Events"
@@ -2840,6 +2866,7 @@ export type $EventsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs
     hostId: string | null
     assistantHostIds: string[]
     noFixedEndDateTime: boolean
+    automatedScheduling: boolean
     price: number
     registrationPaymentMode: $Enums.RegistrationPaymentModeEnum
     manualPaymentLinks: runtime.JsonValue
@@ -3354,6 +3381,7 @@ export interface EventsFieldRefs {
   readonly hostId: Prisma.FieldRef<"Events", 'String'>
   readonly assistantHostIds: Prisma.FieldRef<"Events", 'String[]'>
   readonly noFixedEndDateTime: Prisma.FieldRef<"Events", 'Boolean'>
+  readonly automatedScheduling: Prisma.FieldRef<"Events", 'Boolean'>
   readonly price: Prisma.FieldRef<"Events", 'Int'>
   readonly registrationPaymentMode: Prisma.FieldRef<"Events", 'RegistrationPaymentModeEnum'>
   readonly manualPaymentLinks: Prisma.FieldRef<"Events", 'Json'>

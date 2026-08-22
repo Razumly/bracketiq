@@ -43,6 +43,10 @@ export const useEventFormSectionsController = ({
         eventData.eventType,
         eventData.parentEvent,
     );
+    const automatedSchedulingDisabled = (
+        eventData.eventType === 'LEAGUE'
+        || eventData.eventType === 'TOURNAMENT'
+    ) && eventData.automatedScheduling === false;
     const isWeeklyChildEvent = eventData.eventType === 'WEEKLY_EVENT'
         && hasParentEventRef(eventData.parentEvent);
     const supportsEditableTeamSignup = !isAffiliateEvent
@@ -50,6 +54,7 @@ export const useEventFormSectionsController = ({
     const showsFixedTeamEventToggle = !isAffiliateEvent
         && (eventData.eventType === 'LEAGUE' || eventData.eventType === 'TOURNAMENT');
     const showScheduleConfig = !isAffiliateEvent
+        && !automatedSchedulingDisabled
         && (isSchedulableEventType || usesRentalSlots || isWeeklyChildEvent);
     const showMatchRulesSection = !isAffiliateEvent
         && eventData.eventType !== 'EVENT'

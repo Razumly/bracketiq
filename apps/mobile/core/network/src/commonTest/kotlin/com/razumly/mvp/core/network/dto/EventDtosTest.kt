@@ -25,7 +25,47 @@ import kotlin.test.assertTrue
 
 class EventDtosTest {
     @Test
-    fun event_page_conversion_reports_the_malformed_row_instead_of_dropping_it() {
+    fun given_event_type_when_automated_scheduling_is_missing_then_dto_uses_event_type_default() {
+        fun event(type: EventType, automatedScheduling: Boolean? = null) =
+            EventApiDto(
+                id = "event-${type.name}",
+                name = type.name,
+                hostId = "host-1",
+                eventType = type.name,
+                start = "2026-07-13T12:00:00Z",
+                end = "2026-07-13T13:00:00Z",
+                automatedScheduling = automatedScheduling,
+            ).toEventOrNull()
+
+        assertEquals(true, event(EventType.LEAGUE)?.automatedScheduling)
+        assertEquals(true, event(EventType.TOURNAMENT)?.automatedScheduling)
+        assertEquals(true, event(EventType.WEEKLY_EVENT)?.automatedScheduling)
+        assertEquals(false, event(EventType.EVENT)?.automatedScheduling)
+        assertEquals(false, event(EventType.TRYOUT)?.automatedScheduling)
+        assertEquals(false, event(EventType.LEAGUE, automatedScheduling = false)?.automatedScheduling)
+    }
+
+    @Test
+    fun given_editor_lock_fields_when_dto_is_converted_then_event_preserves_lock_state() {
+        val event = EventApiDto(
+            id = "event-locks",
+            name = "Locked Event",
+            hostId = "host-1",
+            eventType = EventType.EVENT.name,
+            start = "2026-07-13T12:00:00Z",
+            end = "2026-07-13T13:00:00Z",
+            registrationUnitLocked = true,
+            eventTypeHasProtectedHistory = true,
+        ).toEventOrNull()
+
+        val nonNullEvent = assertNotNull(event)
+        assertTrue(nonNullEvent.eventTypeLocked)
+        assertTrue(nonNullEvent.registrationUnitLocked)
+        assertTrue(nonNullEvent.eventTypeHasProtectedHistory)
+    }
+
+    @Test
+    fun given_malformed_event_page_when_converted_then_the_row_is_reported_instead_of_dropped() {
         val failure = assertFailsWith<IllegalArgumentException> {
             listOf(
                 EventApiDto(
@@ -51,7 +91,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_page_continuation_refuses_to_turn_incomplete_metadata_into_a_terminal_page() {
+    fun given_incomplete_event_page_metadata_when_continuation_is_requested_then_the_page_stays_non_terminal() {
         val response = EventsResponseDto(
             events = listOf(
                 EventApiDto(id = "event-201"),
@@ -74,7 +114,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_search_pagination_uses_server_or_raw_page_size_not_rendered_count() {
+    fun given_event_search_page_when_pagination_is_calculated_then_server_or_raw_page_size_is_used() {
         val fullRawPage = EventsResponseDto(
             events = listOf(EventApiDto(id = "visible"), EventApiDto(id = "hidden")),
         )
@@ -88,7 +128,7 @@ class EventDtosTest {
 
 
     @Test
-    fun event_api_dto_preserves_divisions_with_duplicate_type_ids() {
+    fun given_duplicate_division_type_ids_when_event_api_dto_is_converted_then_divisions_are_preserved() {
         val firstDivisionId = "event-dup__division__m_skill_open_age_18plus"
         val secondDivisionId = "event-dup_2__division__m_skill_open_age_18plus"
 
@@ -135,7 +175,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_api_dto_recovers_division_ids_from_relational_details_when_projection_is_empty() {
+    fun given_empty_division_projection_when_event_api_dto_is_converted_then_relational_division_ids_are_recovered() {
         val divisionId = "event-relational__division__c_skill_open_age_adult"
         val event = EventApiDto(
             id = "event-relational",
@@ -166,7 +206,7 @@ class EventDtosTest {
 
 
     @Test
-    fun event_sport_ids_round_trip_without_a_scalar_sport() {
+    fun given_multiple_sport_ids_without_scalar_sport_when_event_api_dto_round_trips_then_ids_are_preserved() {
         val event = EventApiDto(
             id = "multi-sport-event",
             name = "Multi Sport Event",
@@ -185,7 +225,7 @@ class EventDtosTest {
 
 
     @Test
-    fun event_api_dto_hydrates_tags_with_event_type_lock() {
+    fun given_event_tags_when_event_api_dto_is_converted_then_event_type_lock_is_hydrated() {
         val event = EventApiDto(
             id = "event-tags-1",
             name = "Tournament Event",
@@ -218,7 +258,7 @@ class EventDtosTest {
 
 
     @Test
-    fun event_api_dto_maps_division_details_without_dropping_ids() {
+    fun given_division_details_when_event_api_dto_is_converted_then_ids_are_preserved() {
         val dto = EventApiDto(
             id = "event-11",
             name = "API Event",
@@ -309,7 +349,7 @@ class EventDtosTest {
 
 
     @Test
-    fun event_api_dto_maps_weekly_relative_installment_due_days() {
+    fun given_weekly_relative_installment_due_days_when_event_api_dto_is_converted_then_days_are_mapped() {
         val dto = EventApiDto(
             id = "weekly-event-2",
             name = "Weekly API Event",
@@ -405,7 +445,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_api_dto_round_trips_division_owned_schedule_configs() {
+    fun given_division_owned_schedule_configs_when_event_api_dto_round_trips_then_configs_are_preserved() {
         val dto = EventApiDto(
             id = "event-25",
             name = "Configured League",
@@ -457,7 +497,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_api_dto_maps_assistant_hosts_with_backward_compatible_default() {
+    fun given_assistant_hosts_when_event_api_dto_is_converted_then_backward_compatible_defaults_are_applied() {
         val missingAssistantHosts = EventApiDto(
             id = "event-17",
             name = "API Event",
@@ -480,7 +520,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_api_dto_maps_team_official_swap_setting() {
+    fun given_team_official_swap_setting_when_event_api_dto_is_converted_then_setting_is_mapped() {
         val dto = EventApiDto(
             id = "event-20",
             name = "API Event",
@@ -498,7 +538,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_api_dto_maps_split_league_playoff_division_setting() {
+    fun given_split_league_playoff_setting_when_event_api_dto_is_converted_then_setting_is_mapped() {
         val dto = EventApiDto(
             id = "event-20-split",
             name = "API Event",
@@ -517,7 +557,7 @@ class EventDtosTest {
 
 
     @Test
-    fun event_api_dto_maps_official_staffing_fields() {
+    fun given_official_staffing_fields_when_event_api_dto_is_converted_then_fields_are_mapped() {
         val dto = EventApiDto(
             id = "event-22",
             name = "API Event",
@@ -553,7 +593,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_api_dto_prefers_canonical_staffing_priority_over_legacy_mode() {
+    fun given_canonical_staffing_priority_when_event_api_dto_is_converted_then_it_overrides_legacy_mode() {
         val dto = EventApiDto(
             id = "event-canonical-staffing",
             name = "API Event",
@@ -571,7 +611,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_api_dto_maps_team_staffing_and_enables_team_officials() {
+    fun given_team_staffing_when_event_api_dto_is_converted_then_team_officials_are_enabled() {
         val dto = EventApiDto(
             id = "event-team-staffing",
             name = "API Event",
@@ -592,7 +632,7 @@ class EventDtosTest {
 
 
     @Test
-    fun event_api_dto_defaults_official_scheduling_mode_to_schedule_when_missing() {
+    fun given_missing_official_scheduling_mode_when_event_api_dto_is_converted_then_schedule_is_used() {
         val dto = EventApiDto(
             id = "event-23",
             name = "API Event",
@@ -682,7 +722,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_api_dto_does_not_add_playoff_details_to_event_divisions() {
+    fun given_playoff_details_when_event_api_dto_is_converted_then_event_divisions_are_not_extended() {
         val leagueDivisionId = "event-25__division__m_skill_open_age_18plus"
         val playoffDivisionId = "event-25__division__playoff_1"
         val dto = EventApiDto(
@@ -723,7 +763,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_api_dto_does_not_infer_no_fixed_end_datetime_from_matching_start_and_end() {
+    fun given_matching_start_and_end_when_event_api_dto_is_converted_then_no_fixed_end_is_not_inferred() {
         val dto = EventApiDto(
             id = "event-24",
             name = "Legacy-looking League",
@@ -739,7 +779,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_api_dto_allows_hostless_affiliate_events() {
+    fun given_hostless_affiliate_event_when_event_api_dto_is_converted_then_event_is_allowed() {
         val dto = EventApiDto(
             id = "event-affiliate-1",
             name = "Partner League",
@@ -761,7 +801,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_api_dto_preserves_evergreen_date_display_fields() {
+    fun given_evergreen_date_fields_when_event_api_dto_is_converted_then_fields_are_preserved() {
         val dto = EventApiDto(
             id = "event-affiliate-evergreen-1",
             name = "Partner Program",
@@ -786,7 +826,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_api_dto_maps_manual_registration_payment_fields() {
+    fun given_manual_registration_payment_fields_when_event_api_dto_is_converted_then_fields_are_mapped() {
         val dto = EventApiDto(
             id = "event-manual-1",
             name = "Manual Payment Tournament",

@@ -23,6 +23,7 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TimeSlotDTO
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.normalizeAutomatedSchedulingForEventType
 import com.razumly.mvp.core.network.dto.EVENT_EDITOR_CONTRACT_VERSION
 import com.razumly.mvp.core.network.dto.EventEditorBasicsDto
 import com.razumly.mvp.core.network.dto.EventEditorCompetitionDto
@@ -329,6 +330,10 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
         start,
     )
     val eventType = runCatching { EventType.valueOf(basics.eventType.trim().uppercase()) }.getOrDefault(EventType.EVENT)
+    val resolvedAutomatedScheduling = normalizeAutomatedSchedulingForEventType(
+        eventType,
+        schedule.automatedScheduling,
+    )
     val resolvedStaffingPriority = resolveStaffingPriority(
         staffingPriority = staff.staffingPriority,
         legacyOfficialSchedulingMode = null,
@@ -397,11 +402,11 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
         end = end,
         timeZone = basics.timeZone,
         priceCents = payment.priceCents,
-        imageId = basics.imageId.orEmpty(),
         coordinates = basics.coordinates,
         hostId = basics.hostId.orEmpty(),
         assistantHostIds = staff.assistantHostIds,
         noFixedEndDateTime = schedule.mode == "GENERATED_END",
+        automatedScheduling = resolvedAutomatedScheduling,
         teamSignup = participation.teamSignup,
         singleDivision = participation.singleDivision,
         freeAgentIds = participation.freeAgentIds,
@@ -466,7 +471,16 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
 
 private fun EventEditorSnapshotDto.toCanonicalState(operationId: String?): EventEditorCanonicalState {
     val eventId = eventId.normalizedIdOrNull() ?: "editor-create-${operationId ?: "session"}"
-    val event = draft.toEvent(eventId)
+    val protectedHistory = scheduleState.hasProtectedHistory
+    val immutableFields = immutable.fieldNames
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .toSet()
+    val event = draft.toEvent(eventId).copy(
+        eventTypeLocked = protectedHistory || immutableFields.contains("eventType"),
+        registrationUnitLocked = immutableFields.contains("teamSignup"),
+        eventTypeHasProtectedHistory = protectedHistory,
+    )
     val fallbackStart = draft.basics.start
     val divisionFieldIds = draft.competition.divisionFieldIds
     return EventEditorCanonicalState(
@@ -608,17 +622,25 @@ private fun Event.toScheduleDto(
     existing: EventEditorScheduleDto,
     baseline: Event,
 ): EventEditorScheduleDto {
+    val normalizedAutomatedScheduling = normalizeAutomatedSchedulingForEventType(
+        eventType,
+        automatedScheduling,
+    )
     val modeChanged = noFixedEndDateTime != baseline.noFixedEndDateTime
     val endChanged = end != baseline.end
-    if (!modeChanged && !endChanged) return existing
+    val schedulingChanged = normalizedAutomatedScheduling != existing.automatedScheduling
+    if (!modeChanged && !endChanged && !schedulingChanged) return existing
 
+    val withAutomatedScheduling = existing.copy(
+        automatedScheduling = normalizedAutomatedScheduling,
+    )
     return when {
-        noFixedEndDateTime -> existing.copy(
+        noFixedEndDateTime -> withAutomatedScheduling.copy(
             mode = "GENERATED_END",
             endConstraint = null,
             generatedScheduleEnd = end.toString(),
         )
-        else -> existing.copy(
+        else -> withAutomatedScheduling.copy(
             mode = "FIXED_END",
             endConstraint = end.toString(),
             generatedScheduleEnd = null,
@@ -1119,8 +1141,38 @@ object EventEditorSessionMapper {
             ?: error("Create editor session did not include an operation ID.")
         require(session.snapshot.mode == "CREATE") { "Create command requires a create editor session." }
         val draft = session.snapshot.draft.withMutation(session.baseline, mutation.canonicalState)
-        val eventType = draft.basics.eventType.trim().uppercase()
-        val completionMode = if (eventType == "LEAGUE" || eventType == "TOURNAMENT") {
+        val eventType = runCatching { EventType.valueOf(draft.basics.eventType.trim().uppercase()) }
+            .getOrDefault(EventType.EVENT)
+        val automatedScheduling = normalizeAutomatedSchedulingForEventType(
+            eventType,
+            draft.schedule.automatedScheduling,
+        )
+        if (
+            (eventType == EventType.LEAGUE || eventType == EventType.TOURNAMENT) &&
+            !automatedScheduling
+        ) {
+            val start = parseEditorInstant(
+                draft.basics.start,
+                draft.basics.timeZone,
+                Instant.DISTANT_PAST,
+            )
+            val plannedEnd = draft.schedule.endConstraint
+                ?.takeIf(String::isNotBlank)
+                ?.let { end ->
+                    parseEditorInstant(end, draft.basics.timeZone, Instant.DISTANT_PAST)
+                }
+            require(
+                draft.schedule.mode.trim().uppercase() == "FIXED_END" &&
+                    plannedEnd != null &&
+                    plannedEnd > start,
+            ) {
+                "Unscheduled League/Tournament creation requires a planned fixed end."
+            }
+        }
+        val completionMode = if (
+            (eventType == EventType.LEAGUE || eventType == EventType.TOURNAMENT) &&
+            automatedScheduling
+        ) {
             EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE
         } else {
             EventEditorCreateCompletionMode.CREATE_ONLY

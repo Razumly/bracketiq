@@ -4362,9 +4362,12 @@ describe("persistScheduledRosterTeams", () => {
     } as any;
 
     const client = {
+      $executeRaw: jest.fn().mockResolvedValue(1),
       events: {
         update: jest.fn().mockResolvedValue(undefined),
         findUnique: jest.fn().mockResolvedValue({
+          eventType: "LEAGUE",
+          teamSignup: true,
           teamSizeLimit: 2,
           singleDivision: true,
         }),
@@ -4378,7 +4381,15 @@ describe("persistScheduledRosterTeams", () => {
         deleteMany: jest.fn().mockResolvedValue({ count: 2 }),
       },
       divisions: {
-        findMany: jest.fn().mockResolvedValue([]),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: divisionA,
+            key: "a",
+            kind: "LEAGUE",
+            role: "ENTRY",
+            status: "ACTIVE",
+          },
+        ]),
         update: jest.fn().mockResolvedValue(undefined),
       },
       eventRegistrations: {

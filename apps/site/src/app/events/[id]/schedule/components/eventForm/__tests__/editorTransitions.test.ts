@@ -36,14 +36,23 @@ describe('editor transitions', () => {
   it('requires an explicit end before entering fixed-end mode', () => {
     const generated = {
       ...draft,
-      schedule: { mode: 'GENERATED_END' as const, endConstraint: null, generatedScheduleEnd: null },
+      schedule: {
+        mode: 'GENERATED_END' as const,
+        endConstraint: null,
+        generatedScheduleEnd: null,
+        automatedScheduling: draft.schedule.automatedScheduling,
+      },
     };
     const blocked = changeScheduleMode(generated, 'FIXED_END');
     expect(blocked.draft).toBe(generated);
     expect(blocked.confirmationFields).toEqual(['schedule.endConstraint']);
 
     const fixed = changeScheduleMode(generated, 'FIXED_END', '2026-09-10T20:00:00.000Z');
-    expect(fixed.draft.schedule).toEqual({ mode: 'FIXED_END', endConstraint: '2026-09-10T20:00:00.000Z' });
+    expect(fixed.draft.schedule).toEqual({
+      mode: 'FIXED_END',
+      endConstraint: '2026-09-10T20:00:00.000Z',
+      automatedScheduling: draft.schedule.automatedScheduling,
+    });
   });
 
   it('changes pool rules on the selected league phase only', () => {

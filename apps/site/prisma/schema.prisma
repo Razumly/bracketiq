@@ -2745,6 +2745,7 @@ model Events {
   hostId                        String?
   assistantHostIds              String[]                         @default([])
   noFixedEndDateTime            Boolean                          @default(true)
+  automatedScheduling           Boolean                          @default(true)
   price                         Int
   registrationPaymentMode       RegistrationPaymentModeEnum      @default(ONLINE)
   manualPaymentLinks            Json                             @default("[]")
@@ -3549,6 +3550,7 @@ model EventRegistrations {
   registrantType           EventRegistrationsRegistrantTypeEnum
   rosterRole               EventRegistrationsRosterRoleEnum     @default(PARTICIPANT)
   status                   EventRegistrationsStatusEnum
+  acceptedAt               DateTime?
   eventTeamId              String?
   sourceTeamRegistrationId String?
   slotId                   String?

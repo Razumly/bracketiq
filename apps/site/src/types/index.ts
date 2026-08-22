@@ -920,6 +920,7 @@ export interface Event {
   imageId: string | null;
   hostId: string | null;
   noFixedEndDateTime?: boolean;
+  automatedScheduling?: boolean;
   state: EventState;
   maxParticipants: number;
   teamSizeLimit: number;

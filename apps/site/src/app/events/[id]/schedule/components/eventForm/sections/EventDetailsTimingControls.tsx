@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { Controller, type Control } from "react-hook-form";
+import { Controller, useWatch, type Control } from "react-hook-form";
 import { Checkbox, NumberInput, Stack } from "@mantine/core";
 import { DateTimePicker } from "@mantine/dates";
 
@@ -54,10 +54,43 @@ export const EventDetailsTimingControls = ({
 }: EventDetailsTimingControlsProps) => {
   const generatedEndDateDisabled =
     eventType === "WEEKLY_EVENT" || isImmutableField("noFixedEndDateTime");
-
+  const automatedScheduling = useWatch({
+    control,
+    name: "automatedScheduling",
+  });
+  const showAutomatedSchedulingControl =
+    showScheduleControls && (eventType === "LEAGUE" || eventType === "TOURNAMENT");
+  const automatedSchedulingDisablesScheduleConstruction =
+    eventType === "LEAGUE" || eventType === "TOURNAMENT";
+  const showScheduleConstructionControls =
+    showScheduleControls &&
+    (!automatedSchedulingDisablesScheduleConstruction ||
+      automatedScheduling !== false);
   return (
     <>
-      {showScheduleControls ? (
+      {showAutomatedSchedulingControl ? (
+        <div className="md:col-span-2">
+          <Controller
+            name="automatedScheduling"
+            control={control}
+            render={({ field }) => (
+              <Checkbox
+                label="Automated Scheduling"
+                description="Build the match schedule from the event setup when you create it."
+                checked={Boolean(field.value)}
+                disabled={isImmutableField("automatedScheduling")}
+                onChange={(event) => {
+                  if (isImmutableField("automatedScheduling")) return;
+                  const checked = event.currentTarget.checked;
+                  field.onChange(checked);
+                  if (!checked) onNoFixedEndDateTimeChange(false);
+                }}
+              />
+            )}
+          />
+        </div>
+      ) : null}
+      {showScheduleConstructionControls ? (
         <div className="md:col-span-2">
           <Controller
             name="start"
@@ -124,7 +157,9 @@ export const EventDetailsTimingControls = ({
                     error={fieldState.error?.message as string | undefined}
                   />
                 ) : null}
-                {supportsNoFixedEndDateTime && showGeneratedEndDateControl ? (
+                {supportsNoFixedEndDateTime
+                  && showScheduleConstructionControls
+                  && showGeneratedEndDateControl ? (
                   <div className="space-y-1">
                     <Checkbox
                       size="xs"

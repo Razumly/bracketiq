@@ -421,6 +421,29 @@ describe('event editor contracts', () => {
 
     expect(parsed.slotIds).toEqual(['slot_1', 'slot_2']);
   });
+  it('accepts registration capacity and division diagnostics', () => {
+    const capacity = eventEditorErrorSchema.parse({
+      error: 'This event has reached its registration capacity of 8.',
+      code: 'EVENT_REGISTRATION_CAPACITY_EXCEEDED',
+      capacity: 8,
+      participantCount: 8,
+    });
+    const division = eventEditorErrorSchema.parse({
+      error: 'Select exactly one Entry Division for this participant.',
+      code: 'INVALID_EVENT_REGISTRATION_DIVISION',
+      divisionId: null,
+      matchCount: 0,
+    });
+
+    expect(capacity).toEqual(expect.objectContaining({
+      capacity: 8,
+      participantCount: 8,
+    }));
+    expect(division).toEqual(expect.objectContaining({
+      divisionId: null,
+      matchCount: 0,
+    }));
+  });
   it('accepts a diagnostic save failure with a request reference', () => {
     const parsed = eventEditorErrorSchema.parse({
       error: 'Unable to save event editor configuration. Database write failed. Reference: request-1.',

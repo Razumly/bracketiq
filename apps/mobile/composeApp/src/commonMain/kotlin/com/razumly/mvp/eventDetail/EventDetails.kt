@@ -2527,6 +2527,23 @@ fun EventDetails(
                                     multipleDivisions,
                                 )
                             },
+                            onAutomatedSchedulingChange = { enabled ->
+                                if (
+                                    editEvent.eventType == EventType.LEAGUE ||
+                                    editEvent.eventType == EventType.TOURNAMENT
+                                ) {
+                                    onEditEvent {
+                                        copy(
+                                            automatedScheduling = enabled,
+                                            noFixedEndDateTime = if (enabled) {
+                                                noFixedEndDateTime
+                                            } else {
+                                                false
+                                            },
+                                        )
+                                    }
+                                }
+                            },
                             onNoFixedEndDateChange = { enabled ->
                                 if (editEvent.eventType != EventType.WEEKLY_EVENT) {
                                     onEditEvent { copy(noFixedEndDateTime = enabled) }

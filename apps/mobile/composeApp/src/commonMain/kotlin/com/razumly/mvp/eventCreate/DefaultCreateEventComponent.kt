@@ -13,6 +13,7 @@ import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.enums.defaultAutomatedSchedulingForEventType
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
@@ -937,11 +938,19 @@ class DefaultCreateEventComponent(
 
     override fun onTypeSelected(type: EventType) {
         val previousType = _newEventState.value.eventType
+        val previousScheduling = _newEventState.value.automatedScheduling
+        val preserveLeagueTournamentChoice =
+            previousType == EventType.LEAGUE || previousType == EventType.TOURNAMENT
         _currentEventType.value = type
         updateEventField {
             when (type) {
                 EventType.LEAGUE, EventType.TOURNAMENT -> copy(
                     eventType = type,
+                    automatedScheduling = if (preserveLeagueTournamentChoice) {
+                        previousScheduling
+                    } else {
+                        defaultAutomatedSchedulingForEventType(type)
+                    },
                     teamSignup = true,
                     noFixedEndDateTime = false,
                     end = end.takeIf { it > start } ?: defaultEventEnd(start),
@@ -949,12 +958,14 @@ class DefaultCreateEventComponent(
 
                 EventType.WEEKLY_EVENT -> copy(
                     eventType = type,
+                    automatedScheduling = defaultAutomatedSchedulingForEventType(type),
                     noFixedEndDateTime = false,
                     end = end.takeIf { it > start } ?: defaultEventEnd(start),
                 )
 
                 EventType.TRYOUT -> copy(
                     eventType = type,
+                    automatedScheduling = defaultAutomatedSchedulingForEventType(type),
                     teamSignup = false,
                     singleDivision = false,
                     noFixedEndDateTime = false,
@@ -963,6 +974,7 @@ class DefaultCreateEventComponent(
 
                 EventType.EVENT -> copy(
                     eventType = type,
+                    automatedScheduling = defaultAutomatedSchedulingForEventType(type),
                     noFixedEndDateTime = false,
                     end = end.takeIf { it > start } ?: defaultEventEnd(start),
                 )
@@ -1683,6 +1695,17 @@ class DefaultCreateEventComponent(
     }
 
     private fun validateCreateEventDraft(submission: CreateEventSubmissionSnapshot): String? {
+        if (
+            (submission.event.eventType == EventType.LEAGUE ||
+                submission.event.eventType == EventType.TOURNAMENT) &&
+            !submission.event.automatedScheduling &&
+            (
+                submission.event.noFixedEndDateTime ||
+                    submission.event.end <= submission.event.start
+                )
+        ) {
+            return "Unscheduled League/Tournament events require a planned end date and time."
+        }
         validateConfiguredLeagueSlots(
             event = submission.event,
             leagueSlots = submission.leagueSlots,
@@ -2526,6 +2549,7 @@ class DefaultCreateEventComponent(
             end = defaultEventEnd(start),
             timeZone = TimeZone.currentSystemDefault().id,
             hostId = initialHostId.trim(),
+            automatedScheduling = false,
             singleDivision = false,
         )
     }

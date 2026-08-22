@@ -2237,9 +2237,6 @@ describe('League schedule page', () => {
       expect(await screen.findByRole('button', { name: /^manage$/i })).toBeInTheDocument();
       await clickMoreAction(/delete event/i);
 
-      await waitFor(() => {
-        expect(leagueService.deleteMatchesByEvent).toHaveBeenCalledWith('event_1');
-      });
       expect(confirmSpy).toHaveBeenCalledWith('Delete this event? If it has registrations, billing, or schedule history, it will be archived instead.');
       expect(leagueService.deleteWeeklySchedulesForEvent).toHaveBeenCalledWith('event_1');
       expect(eventService.deleteEventResult).toHaveBeenCalledWith(

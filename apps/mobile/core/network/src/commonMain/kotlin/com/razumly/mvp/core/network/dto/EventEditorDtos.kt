@@ -354,6 +354,7 @@ data class EventEditorScheduleDto(
     val mode: String,
     val endConstraint: String? = null,
     val generatedScheduleEnd: String? = null,
+    val automatedScheduling: Boolean = true,
 )
 
 @Serializable
@@ -526,6 +527,14 @@ data class EventEditorErrorDto(
     val field: String? = null,
     val editorRevision: String? = null,
     val staffRevision: String? = null,
+    val scheduleRevision: String? = null,
+    val slotIds: List<String>? = null,
+    val occurrenceDate: String? = null,
+    val createOperationId: String? = null,
+    val divisionId: String? = null,
+    val matchCount: Int? = null,
+    val capacity: Int? = null,
+    val participantCount: Int? = null,
     val requestId: String? = null,
     val details: JsonElement? = null,
 )

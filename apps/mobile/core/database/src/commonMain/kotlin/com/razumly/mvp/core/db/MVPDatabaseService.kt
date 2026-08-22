@@ -59,9 +59,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.ProfileDocumentDao
 import com.razumly.mvp.core.data.dataTypes.daos.RefundRequestDao
 import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
-const val MVP_DATABASE_VERSION = 102
-
-
+const val MVP_DATABASE_VERSION = 103
 
 @Database(
     entities = [

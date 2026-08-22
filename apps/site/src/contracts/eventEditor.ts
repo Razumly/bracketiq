@@ -1,10 +1,12 @@
 import { z } from "zod";
 import {
+  normalizeAutomatedSchedulingForEventType,
+} from "@/lib/automatedScheduling";
+import {
   normalizeOfficialSchedulingMode,
   normalizeStaffingPriority,
   STAFFING_PRIORITIES,
 } from "@/server/officials/config";
-
 export const EVENT_EDITOR_CONTRACT_VERSION = 3 as const;
 
 const id = z.string().trim().min(1);
@@ -481,6 +483,7 @@ const scheduleFixedSchema = z
   .object({
     mode: z.literal("FIXED_END"),
     endConstraint: isoDateTime,
+    automatedScheduling: z.boolean().default(true),
   })
   .strict();
 
@@ -489,6 +492,7 @@ const scheduleGeneratedSchema = z
     mode: z.literal("GENERATED_END"),
     endConstraint: z.null(),
     generatedScheduleEnd: optionalDateLike,
+    automatedScheduling: z.boolean().default(true),
   })
   .strict();
 
@@ -938,10 +942,14 @@ export const eventEditorErrorSchema = z
       "EDITOR_REVISION_CONFLICT",
       "STAFF_REVISION_CONFLICT",
       "INVALID_EDITOR_INPUT",
+      "INVALID_EVENT_REGISTRATION_UNIT",
+      "INVALID_EVENT_REGISTRATION_DIVISION",
+      "EVENT_REGISTRATION_CAPACITY_EXCEEDED",
+      "EVENT_REGISTRATION_STRUCTURE_LOCKED",
       "EDITOR_PERMISSION_DENIED",
       "EDITOR_IMMUTABLE_FIELD",
-      "EDITOR_CAPABILITY_REQUIRED",
       "EDITOR_NOT_FOUND",
+      "EDITOR_CAPABILITY_REQUIRED",
       "EDITOR_SAVE_FAILED",
       "CREATE_OPERATION_PAYLOAD_MISMATCH",
       "CREATE_OPERATION_CONFLICT",
@@ -958,7 +966,12 @@ export const eventEditorErrorSchema = z
     staffRevision: z.string().nullable().optional(),
     scheduleRevision: z.string().nullable().optional(),
     slotIds: z.array(id).optional(),
+    occurrenceDate: z.string().nullable().optional(),
     createOperationId: id.optional(),
+    divisionId: z.string().nullable().optional(),
+    matchCount: z.number().optional(),
+    capacity: z.number().optional(),
+    participantCount: z.number().optional(),
     requestId: id.optional(),
     details: z.unknown().optional(),
   })
@@ -990,8 +1003,30 @@ export type RegistrationQuestionInput = z.infer<
   typeof registrationQuestionInputSchema
 >;
 
-export const parseEventEditorSnapshot = (input: unknown): EventEditorSnapshot =>
-  eventEditorSnapshotSchema.parse(input);
+const normalizeEditorDraftScheduling = (
+  draft: EventEditorDraft,
+): EventEditorDraft => ({
+  ...draft,
+  schedule: {
+    ...draft.schedule,
+    automatedScheduling: normalizeAutomatedSchedulingForEventType(
+      draft.basics.eventType,
+      draft.schedule.automatedScheduling,
+    ),
+  },
+});
+
+const normalizeEditorSnapshotScheduling = (
+  snapshot: EventEditorSnapshot,
+): EventEditorSnapshot => ({
+  ...snapshot,
+  draft: normalizeEditorDraftScheduling(snapshot.draft),
+});
+
+export const parseEventEditorSnapshot = (
+  input: unknown,
+): EventEditorSnapshot =>
+  normalizeEditorSnapshotScheduling(eventEditorSnapshotSchema.parse(input));
 export const parseSaveEventEditorCommand = (
   input: unknown,
 ): SaveEventEditorCommand => {
@@ -1007,14 +1042,31 @@ export const parseSaveEventEditorCommand = (
     const legacyCommand = legacySaveEventEditorCommandSchema.parse(input);
     return saveEventEditorCommandSchema.parse({
       ...legacyCommand,
+      draft: normalizeEditorDraftScheduling(legacyCommand.draft),
       scheduleTransition: { mode: "PRESERVE" },
     });
   }
-  return saveEventEditorCommandSchema.parse(input);
+  const command = saveEventEditorCommandSchema.parse(input);
+  return {
+    ...command,
+    draft: normalizeEditorDraftScheduling(command.draft),
+  };
 };
 export const parseCreateEventEditorCommand = (
   input: unknown,
-): CreateEventEditorCommand => createEventEditorCommandSchema.parse(input);
+): CreateEventEditorCommand => {
+  const command = createEventEditorCommandSchema.parse(input);
+  return {
+    ...command,
+    draft: normalizeEditorDraftScheduling(command.draft),
+  };
+};
 export const parseEventEditorCreateResult = (
   input: unknown,
-): EventEditorCreateResult => eventEditorCreateResultSchema.parse(input);
+): EventEditorCreateResult => {
+  const result = eventEditorCreateResultSchema.parse(input);
+  return {
+    ...result,
+    snapshot: normalizeEditorSnapshotScheduling(result.snapshot),
+  };
+};

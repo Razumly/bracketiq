@@ -18,6 +18,23 @@ fun EventType.displayLabel(): String = when (this) {
     EventType.TRYOUT -> "Tryout"
 }
 
+fun defaultAutomatedSchedulingForEventType(eventType: EventType): Boolean = when (eventType) {
+    EventType.LEAGUE,
+    EventType.TOURNAMENT,
+    EventType.WEEKLY_EVENT -> true
+    EventType.EVENT,
+    EventType.TRYOUT -> false
+}
+
+fun normalizeAutomatedSchedulingForEventType(
+    eventType: EventType,
+    value: Boolean?,
+): Boolean = if (defaultAutomatedSchedulingForEventType(eventType)) {
+    value ?: true
+} else {
+    false
+}
+
 fun EventType.minimumParticipantCount(): Int = when (this) {
     EventType.TOURNAMENT -> MIN_BRACKET_TEAM_COUNT
     else -> 2

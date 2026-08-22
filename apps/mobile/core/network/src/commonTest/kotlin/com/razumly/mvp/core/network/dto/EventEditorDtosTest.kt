@@ -14,7 +14,7 @@ import kotlin.test.assertTrue
 
 class EventEditorDtosTest {
     @Test
-    fun create_command_decodes_with_operation_identity_and_nested_state() {
+    fun given_editor_command_json_when_decoded_then_operation_identity_and_nested_state_round_trip() {
         val command = jsonMVP.decodeFromString<EventEditorCreateCommandDto>(
             """
                 {
@@ -122,6 +122,7 @@ class EventEditorDtosTest {
             EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE,
             command.completion.mode,
         )
+        assertEquals(true, command.draft.schedule.automatedScheduling)
         assertEquals("question-client-1", command.draft.registration.questions.first().clientId)
         assertEquals("tag-1", command.draft.basics.tags.single().legacyId)
         val wire = encodeEventEditorCreateCommand(command)
@@ -130,6 +131,7 @@ class EventEditorDtosTest {
         val wireRegistration = wireDraft.getValue("registration").jsonObject
         val wireCompetition = wireDraft.getValue("competition").jsonObject
         val wireSchedule = wireDraft.getValue("schedule").jsonObject
+        assertEquals(true, wireSchedule.getValue("automatedScheduling").toString().toBoolean())
         val wireResources = wireDraft.getValue("resources").jsonObject
 
         assertEquals(JsonNull, wireBasics.getValue("parentEvent"))
@@ -150,7 +152,7 @@ class EventEditorDtosTest {
     }
 
     @Test
-    fun bootstrap_query_and_error_round_trip_preserve_wire_fields() {
+    fun given_bootstrap_query_and_error_json_when_round_tripped_then_wire_fields_are_preserved() {
         val query = EventEditorBootstrapQueryDto(
             organizationId = "org-1",
             eventType = "LEAGUE",
@@ -171,6 +173,13 @@ class EventEditorDtosTest {
                   "field":"createOperationId",
                   "editorRevision":"revision-1",
                   "staffRevision":"staff-revision-1",
+                  "scheduleRevision":"schedule-revision-1",
+                  "slotIds":["slot-1"],
+                  "occurrenceDate":"2026-09-01",
+                  "divisionId":"division-1",
+                  "matchCount":2,
+                  "capacity":8,
+                  "participantCount":8,
                   "requestId":"request-1",
                   "details":{"operationId":"create-operation-1"}
                 }
@@ -180,6 +189,13 @@ class EventEditorDtosTest {
         assertEquals(query, queryRoundTrip)
         assertEquals("CREATE_OPERATION_CONFLICT", error.code)
         assertEquals("createOperationId", error.field)
+        assertEquals("schedule-revision-1", error.scheduleRevision)
+        assertEquals(listOf("slot-1"), error.slotIds)
+        assertEquals("2026-09-01", error.occurrenceDate)
+        assertEquals("division-1", error.divisionId)
+        assertEquals(2, error.matchCount)
+        assertEquals(8, error.capacity)
+        assertEquals(8, error.participantCount)
         assertNotNull(error.details)
         assertEquals("request-1", error.requestId)
     }

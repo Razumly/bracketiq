@@ -19,6 +19,7 @@ import {
   acquireEventLockAndLoadStructure,
   buildEventRegistrationId,
   syncDivisionTeamMembershipFromRegistrations,
+  transitionEventRegistrationStatus,
 } from '@/server/events/eventRegistrations';
 import {
   activateFailedTeamRegistration,
@@ -389,40 +390,65 @@ const ensureEventRegistrationFromPurchase = async ({
             });
           }
         }
-
         let activated = false;
         if (!existingRegistration) {
-          await tx.eventRegistrations.create({
-            data: {
-              id: effectiveRegistrationId,
+          await transitionEventRegistrationStatus({
+            registrationId: effectiveRegistrationId,
+            eventId,
+            event,
+            status: targetStatus,
+            create: {
               eventId,
-              registrantId: teamId,
               registrantType: 'TEAM',
+              registrantId: teamId,
               rosterRole: 'PARTICIPANT',
-              status: targetStatus,
-              slotId: occurrenceSlotId,
-              occurrenceDate,
-              ageAtEvent: null,
-              divisionId: null,
-              divisionTypeId: null,
-              divisionTypeKey: null,
               createdBy: userId ?? 'system:webhook',
-              createdAt: now,
-              updatedAt: now,
+              eventTeamId: teamId,
+              divisionId: divisionId ?? null,
+              divisionTypeId: divisionTypeId ?? null,
+              divisionTypeKey: divisionTypeKey ?? null,
+              occurrence: occurrenceSlotId && occurrenceDate
+                ? { slotId: occurrenceSlotId, occurrenceDate }
+                : null,
             },
-          });
+          }, tx);
           activated = targetStatus === 'ACTIVE';
         } else if (
           existingRegistration.status !== targetStatus
           && !(targetStatus === 'PENDING' && existingRegistration.status === 'ACTIVE')
         ) {
-          await tx.eventRegistrations.update({
-            where: { id: effectiveRegistrationId },
-            data: {
-              status: targetStatus,
-              updatedAt: now,
-            },
-          });
+          await transitionEventRegistrationStatus({
+            registrationId: effectiveRegistrationId,
+            eventId,
+            event,
+            status: targetStatus,
+            fallbackCurrent: {
+              id: effectiveRegistrationId,
+              eventId,
+              registrantId: teamId,
+              parentId: null,
+              registrantType: 'TEAM',
+              rosterRole: 'PARTICIPANT',
+              status: existingRegistration.status,
+              acceptedAt: null,
+              eventTeamId: teamId,
+              sourceTeamRegistrationId: null,
+              ageAtEvent: null,
+              divisionId: toStringOrNull(existingRegistration.divisionId),
+              divisionTypeId: toStringOrNull(existingRegistration.divisionTypeId),
+              divisionTypeKey: toStringOrNull(existingRegistration.divisionTypeKey),
+              jerseyNumber: null,
+              position: null,
+              isCaptain: false,
+              consentDocumentId: null,
+              consentStatus: null,
+              createdBy: userId ?? 'system:webhook',
+              slotId: occurrenceSlotId,
+              occurrenceDate,
+              createdAt: null,
+              updatedAt: null,
+            } as any,
+          }, tx);
           activated = targetStatus === 'ACTIVE';
         }
         await tx.eventRegistrations.updateMany({
@@ -476,38 +502,63 @@ const ensureEventRegistrationFromPurchase = async ({
       }
       let activated = false;
       if (!existingRegistration) {
-        await tx.eventRegistrations.create({
-          data: {
-            id: effectiveRegistrationId,
+        await transitionEventRegistrationStatus({
+          registrationId: effectiveRegistrationId,
+          eventId,
+          event,
+          status: targetStatus,
+          create: {
             eventId,
+            registrantType: normalizedRegistrantType,
             registrantId: participantUserId,
             parentId: normalizedRegistrantType === 'CHILD' ? parentId : null,
-            registrantType: normalizedRegistrantType,
             rosterRole: 'PARTICIPANT',
-            status: targetStatus,
-            slotId: occurrenceSlotId,
-            occurrenceDate,
-            ageAtEvent: null,
-            divisionId: null,
-            divisionTypeId: null,
-            divisionTypeKey: null,
             createdBy: userId ?? 'system:webhook',
-            createdAt: now,
-            updatedAt: now,
+            divisionId: divisionId ?? null,
+            divisionTypeId: divisionTypeId ?? null,
+            divisionTypeKey: divisionTypeKey ?? null,
+            occurrence: occurrenceSlotId && occurrenceDate
+              ? { slotId: occurrenceSlotId, occurrenceDate }
+              : null,
           },
-        });
+        }, tx);
         activated = targetStatus === 'ACTIVE';
       } else if (
         existingRegistration.status !== targetStatus
         && !(targetStatus === 'PENDING' && existingRegistration.status === 'ACTIVE')
       ) {
-        await tx.eventRegistrations.update({
-          where: { id: effectiveRegistrationId },
-          data: {
-            status: targetStatus,
-            updatedAt: now,
-          },
-        });
+        await transitionEventRegistrationStatus({
+          registrationId: effectiveRegistrationId,
+          eventId,
+          status: targetStatus,
+          fallbackCurrent: {
+            id: effectiveRegistrationId,
+            eventId,
+            registrantId: participantUserId,
+            parentId: normalizedRegistrantType === 'CHILD' ? parentId ?? null : null,
+            registrantType: normalizedRegistrantType,
+            rosterRole: 'PARTICIPANT',
+            status: existingRegistration.status,
+            acceptedAt: null,
+            eventTeamId: null,
+            sourceTeamRegistrationId: null,
+            ageAtEvent: null,
+            divisionId: divisionId ?? null,
+            divisionTypeId: divisionTypeId ?? null,
+            divisionTypeKey: divisionTypeKey ?? null,
+            jerseyNumber: null,
+            position: null,
+            isCaptain: false,
+            consentDocumentId: null,
+            consentStatus: null,
+            createdBy: userId ?? 'system:webhook',
+            slotId: occurrenceSlotId,
+            occurrenceDate,
+            createdAt: null,
+            updatedAt: null,
+          } as any,
+          event,
+        }, tx);
         activated = targetStatus === 'ACTIVE';
       }
       await tx.eventRegistrations.updateMany({
@@ -534,6 +585,15 @@ const ensureEventRegistrationFromPurchase = async ({
       : null;
     if (typeof status === 'number' && status === 404) {
       return { applied: false, reason: 'event_not_found' };
+    }
+    const errorCode = error && typeof error === 'object' && 'code' in error
+      ? error.code
+      : null;
+    if (errorCode === 'EVENT_REGISTRATION_CAPACITY_EXCEEDED') {
+      return { applied: false, reason: 'capacity_exceeded' };
+    }
+    if (errorCode === 'INVALID_EVENT_REGISTRATION_UNIT') {
+      return { applied: false, reason: 'invalid_registration_unit' };
     }
     console.error('Failed to apply webhook event registration', {
       purchaseType,

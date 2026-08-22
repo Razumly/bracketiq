@@ -2327,12 +2327,48 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun updateLocalEvent_preserves_protected_history_without_authoritative_snapshot() = runTest {
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val cachedEvent = makeEvent(id = "e1", hostId = "h1").copy(
+            eventTypeLocked = true,
+            eventTypeHasProtectedHistory = true,
+        )
+        eventDao.upsertEvent(cachedEvent)
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val api = MvpApiClient(
+            HttpClient(MockEngine { error("unused") }) { configureMvpHttpClient() },
+            "http://example.test",
+            tokenStore,
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, EventRepositoryHttp_FakeUserRepository(makeUser("u1")))
+
+        val result = repo.updateLocalEvent(
+            cachedEvent.copy(
+                eventTypeLocked = false,
+                eventTypeHasProtectedHistory = false,
+            ),
+        )
+
+        assertTrue(result.isSuccess)
+        val persistedEvent = eventDao.getEventById("e1")
+        assertTrue(persistedEvent?.eventTypeLocked == true)
+        assertTrue(persistedEvent?.eventTypeHasProtectedHistory == true)
+    }
+
+    @Test
     fun getEventDetailBootstrap_persists_detail_payload_and_management_cache() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()
         val cachedEvent = makeEvent(id = "e1", hostId = "h1").copy(
             teamSignup = true,
             teamIds = listOf("cached_team"),
+            eventTypeLocked = true,
+            eventTypeHasProtectedHistory = true,
         )
         eventDao.upsertEvent(cachedEvent)
         val matchDao = EventRepositoryHttp_FakeMatchDao()
@@ -2367,6 +2403,8 @@ class EventRepositoryHttpTest {
                         "hostId": "h1",
                         "coordinates": [-80.0, 25.0],
                         "start": "2026-02-10T00:00:00Z",
+                        "eventTypeLocked": true,
+                        "eventTypeHasProtectedHistory": true,
                         "end": "2026-02-10T01:00:00Z",
                         "teamSignup": true,
                         "teamIds": ["partial_team"],
@@ -2375,6 +2413,14 @@ class EventRepositoryHttpTest {
                         "leagueScoringConfigId": "config_1"
                       },
                       "participantSnapshot": {
+                        "event": {
+                          "id": "e1",
+                          "name": "Participant Event",
+                          "hostId": "h1",
+                          "start": "2026-02-10T00:00:00Z",
+                          "end": "2026-02-10T01:00:00Z",
+                          "teamSignup": true
+                        },
                         "participants": {
                           "teamIds": ["team_1", "team_2"],
                           "userIds": [],
@@ -2509,6 +2555,8 @@ class EventRepositoryHttpTest {
         assertEquals(listOf("team_1", "team_2"), detail.event.teamIds)
         assertEquals(2, detail.participants.participantCount)
         assertEquals(listOf("team_1", "team_2"), cachedAfterRefresh?.teamIds)
+        assertTrue(cachedAfterRefresh?.eventTypeLocked == true)
+        assertTrue(cachedAfterRefresh?.eventTypeHasProtectedHistory == true)
         assertEquals(listOf("match_1"), matchDao.matches.keys.toList())
         assertEquals(listOf(listOf("stale_match")), matchDao.deletedMatchIds)
         assertEquals(listOf("field_1"), fieldDao.fields.keys.toList())

@@ -1443,6 +1443,29 @@ async function updateParticipants(
             { status: 409 },
           );
         }
+        const errorCode = error && typeof error === 'object' && 'code' in error
+          ? error.code
+          : null;
+        if (errorCode === 'EVENT_REGISTRATION_CAPACITY_EXCEEDED') {
+          return NextResponse.json(
+            {
+              error: error instanceof Error ? error.message : 'Event registration capacity has been reached.',
+              code: 'EVENT_REGISTRATION_CAPACITY_EXCEEDED',
+              capacity: (error as { capacity?: number })?.capacity,
+              participantCount: (error as { participantCount?: number })?.participantCount,
+            },
+            { status: 409 },
+          );
+        }
+        if (errorCode === 'INVALID_EVENT_REGISTRATION_UNIT') {
+          return NextResponse.json(
+            {
+              error: error instanceof Error ? error.message : 'The registration unit does not match this event.',
+              code: 'INVALID_EVENT_REGISTRATION_UNIT',
+            },
+            { status: 400 },
+          );
+        }
         throw error;
       }
 
@@ -1725,12 +1748,37 @@ async function updateParticipants(
               status: 409,
             };
           }
+          if (errorCode === 'EVENT_REGISTRATION_CAPACITY_EXCEEDED') {
+            return {
+              error: error instanceof Error ? error.message : 'Event registration capacity has been reached.',
+              code: 'EVENT_REGISTRATION_CAPACITY_EXCEEDED',
+              capacity: (error as { capacity?: number })?.capacity,
+              participantCount: (error as { participantCount?: number })?.participantCount,
+              status: 409,
+            };
+          }
+          if (errorCode === 'INVALID_EVENT_REGISTRATION_UNIT') {
+            return {
+              error: error instanceof Error ? error.message : 'The registration unit does not match this event.',
+              code: 'INVALID_EVENT_REGISTRATION_UNIT',
+              status: 400,
+            };
+          }
           throw error;
         }
       })();
       if ('error' in result) {
         return NextResponse.json(
-          { error: result.error, code: result.code },
+          {
+            error: result.error,
+            code: result.code,
+            ...('capacity' in result
+              ? {
+                  capacity: result.capacity,
+                  participantCount: result.participantCount,
+                }
+              : {}),
+          },
           { status: result.status ?? 409 },
         );
       }
@@ -2130,6 +2178,29 @@ async function updateParticipants(
             code: 'EVENT_CONFIGURATION_CHANGED',
           },
           { status: 409 },
+        );
+      }
+      const errorCode = error && typeof error === 'object' && 'code' in error
+        ? error.code
+        : null;
+      if (errorCode === 'EVENT_REGISTRATION_CAPACITY_EXCEEDED') {
+        return NextResponse.json(
+          {
+            error: error instanceof Error ? error.message : 'Event registration capacity has been reached.',
+            code: 'EVENT_REGISTRATION_CAPACITY_EXCEEDED',
+            capacity: (error as { capacity?: number })?.capacity,
+            participantCount: (error as { participantCount?: number })?.participantCount,
+          },
+          { status: 409 },
+        );
+      }
+      if (errorCode === 'INVALID_EVENT_REGISTRATION_UNIT') {
+        return NextResponse.json(
+          {
+            error: error instanceof Error ? error.message : 'The registration unit does not match this event.',
+            code: 'INVALID_EVENT_REGISTRATION_UNIT',
+          },
+          { status: 400 },
         );
       }
       throw error;

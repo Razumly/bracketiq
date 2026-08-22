@@ -326,7 +326,26 @@ private val MIGRATION_100_101_PROFILE_DOCUMENT_CACHE = migration(
         "CREATE INDEX `index_profile_document_cache_viewerKey_status` ON `profile_document_cache` (`viewerKey`, `status`)",
     ),
 )
-internal val IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V102: Array<Migration> = arrayOf(
+
+private val MIGRATION_102_103_EVENT_SCHEDULING_AND_EDITOR_LOCKS = migration(
+    102,
+    103,
+    listOf(
+        "ALTER TABLE `Event` ADD COLUMN `automatedScheduling` INTEGER NOT NULL DEFAULT 0",
+        """
+            UPDATE `Event`
+            SET `automatedScheduling` = CASE
+                WHEN UPPER(TRIM(`eventType`)) IN ('LEAGUE', 'TOURNAMENT', 'WEEKLY_EVENT') THEN 1
+                ELSE 0
+            END
+        """.trimIndent(),
+        "ALTER TABLE `Event` ADD COLUMN `eventTypeLocked` INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE `Event` ADD COLUMN `registrationUnitLocked` INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE `Event` ADD COLUMN `eventTypeHasProtectedHistory` INTEGER NOT NULL DEFAULT 0",
+    ),
+)
+
+internal val IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V103: Array<Migration> = arrayOf(
     MIGRATION_32_33_REFUND_SCOPE,
     MIGRATION_33_34_PENDING_RENTAL_ORDERS,
     MIGRATION_34_35_PENDING_RENTAL_PAYER_SCOPE,
@@ -343,4 +362,5 @@ internal val IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V102: Array<Migration> = arrayOf
     MIGRATION_99_100_MATCH_GRAPH_PHASE_OWNER,
     MIGRATION_100_101_PROFILE_DOCUMENT_CACHE,
     MIGRATION_101_102_EVENT_TIME_SLOTS,
+    MIGRATION_102_103_EVENT_SCHEDULING_AND_EDITOR_LOCKS,
 )

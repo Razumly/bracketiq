@@ -5,7 +5,11 @@ import { requireSession } from '@/lib/permissions';
 import { calculateAgeOnDate } from '@/lib/age';
 import {
   EventConfigurationChangedError,
+  EventRegistrationCapacityError,
+  EventRegistrationDivisionError,
+  EventRegistrationUnitError,
   acquireEventLockAndLoadStructure,
+  transitionEventRegistrationStatus,
 } from '@/server/events/eventRegistrations';
 import { dispatchRequiredEventDocuments } from '@/lib/eventConsentDispatch';
 import {
@@ -161,21 +165,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ re
 
   let approved;
   try {
-    const applyApproval = async (client: typeof prisma) => {
-      await acquireEventLockAndLoadStructure(client, event.id, {
+    const applyApproval = async (client: any) => {
+      const lockedEvent = await acquireEventLockAndLoadStructure(client, event.id, {
         eventType: event.eventType,
         teamSignup: event.teamSignup,
       });
-      const updatedRegistration = await (client as any).eventRegistrations.update({
-        where: { id: registration.id },
-        data: {
-          status: approvedStatus,
-          consentDocumentId: consentDispatch?.firstDocumentId ?? registration.consentDocumentId ?? null,
-          consentStatus: approvedConsentStatus,
-          updatedAt: new Date(),
-        },
-      });
-      await (client as any).events.update({
+      const updatedRegistration = await transitionEventRegistrationStatus({
+        registrationId: registration.id,
+        status: approvedStatus,
+        current: registration as any,
+        event: lockedEvent,
+        consentDocumentId: consentDispatch?.firstDocumentId ?? registration.consentDocumentId ?? null,
+        consentStatus: approvedConsentStatus,
+      }, client);
+      await client.events.update({
         where: { id: event.id },
         data: { updatedAt: new Date() },
       });
@@ -186,6 +189,42 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ re
     if (error instanceof EventConfigurationChangedError) {
       return NextResponse.json(
         { error: error.message, code: error.code },
+        { status: error.status },
+      );
+    }
+    if (error instanceof EventRegistrationCapacityError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: error.code,
+          capacity: error.capacity,
+          participantCount: error.participantCount,
+        },
+        { status: error.status },
+      );
+    }
+    if (error instanceof EventRegistrationDivisionError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: error.code,
+          divisionId: error.divisionId,
+          matchCount: error.matchCount,
+        },
+        { status: error.status },
+      );
+    }
+    if (error instanceof EventRegistrationUnitError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: error.code,
+          field: 'teamSignup',
+          details: {
+            eventType: error.eventType,
+            teamSignup: error.teamSignup,
+          },
+        },
         { status: error.status },
       );
     }

@@ -21,6 +21,7 @@ import com.razumly.mvp.core.network.dto.EventEditorPaymentDto
 import com.razumly.mvp.core.network.dto.EventEditorQuestionDto
 import com.razumly.mvp.core.network.dto.EventEditorRegistrationDto
 import com.razumly.mvp.core.network.dto.EventEditorResourcesDto
+import com.razumly.mvp.core.network.dto.EventEditorErrorDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveResultDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus
@@ -49,12 +50,13 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 
 class EventEditorRemoteGatewayTest {
     @Test
-    fun create_sends_editor_wire_tree_with_required_nulls_and_strict_nested_rows() = runTest {
+    fun given_create_command_when_sent_then_wire_tree_contains_required_rows() = runTest {
         val command = editorCreateCommand()
         var requestBody: String? = null
         val engine = MockEngine { request ->
@@ -104,6 +106,39 @@ class EventEditorRemoteGatewayTest {
         assertEquals("question-client-1", question.getValue("clientId").jsonPrimitive.content)
         assertFalse(question.containsKey("id"))
         assertNotNull(body.getValue("draft"))
+    }
+
+    @Test
+    fun given_invalid_registration_unit_when_api_fails_then_code_field_and_details_are_preserved() = runTest {
+        val errorPayload = EventEditorErrorDto(
+            error = "Team registration is not allowed for this event type.",
+            code = "INVALID_EVENT_REGISTRATION_UNIT",
+            field = "teamSignup",
+            editorRevision = "revision-1",
+            details = jsonMVP.parseToJsonElement(
+                """{"allowed":["individual"],"eventType":"TRYOUT"}""",
+            ),
+        )
+        val engine = MockEngine {
+            respond(
+                content = jsonMVP.encodeToString(errorPayload),
+                status = HttpStatusCode.UnprocessableEntity,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            http = HttpClient(engine) { configureMvpHttpClient() },
+            baseUrl = "http://example.test",
+            tokenStore = GatewayTestTokenStore,
+        )
+
+        val exception = assertFailsWith<EventEditorApiException> {
+            EventEditorRemoteGateway(api).openEdit("event-1")
+        }
+
+        assertEquals("INVALID_EVENT_REGISTRATION_UNIT", exception.payload?.code)
+        assertEquals("teamSignup", exception.payload?.field)
+        assertEquals(errorPayload.details, exception.payload?.details)
     }
 }
 

@@ -33,7 +33,11 @@ import {
 import { normalizeEventStaffingResponse } from '@/server/events/eventResponse';
 
 import type { LeagueDivisionConfig } from '@/server/scheduler/types';
-import { getEventParticipantIdsForEvent } from '@/server/events/eventRegistrations';
+import {
+  getEventParticipantIdsForEvent,
+  hasJoinedEventParticipant,
+} from '@/server/events/eventRegistrations';
+import { hasProtectedEventHistory } from '@/server/events/eventProtectedHistory';
 import { generatedPoolsForBracket } from '@/server/events/tournamentPools';
 import { getEventTagsForEventIds } from '@/server/eventTags';
 import { deleteOrArchiveEvent, toDeleteOrArchiveResponse } from '@/server/deletion/archivePolicy';
@@ -1099,9 +1103,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ eve
   }
   const optionalSession = await getOptionalSession(_req);
   const capabilities = await projectEventAuthorityCapabilities(optionalSession, event);
-  const [divisionKeys, playoffDivisionKeys] = await Promise.all([
+  const [
+    divisionKeys,
+    playoffDivisionKeys,
+    hasAcceptedParticipant,
+    hasProtectedHistory,
+  ] = await Promise.all([
     getVisibleDivisionKeysForEventResponse(eventId, event),
     getDivisionKeysForEventKind(eventId, 'PLAYOFF', 'PHASE'),
+    capabilities.canEdit ? hasJoinedEventParticipant(eventId) : Promise.resolve(false),
+    capabilities.canEdit ? hasProtectedEventHistory(eventId, prisma) : Promise.resolve(false),
   ]);
   const [
     divisionFieldIds,
@@ -1174,6 +1185,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ eve
         }
       : undefined,
     includePlayoffsOrPools: Boolean(event.includePlayoffs),
+    eventTypeLocked: hasAcceptedParticipant || hasProtectedHistory,
+    registrationUnitLocked: hasAcceptedParticipant,
+    eventTypeHasProtectedHistory: hasProtectedHistory,
     ...participantIds,
     ...officialResponse,
     divisionFieldIds,

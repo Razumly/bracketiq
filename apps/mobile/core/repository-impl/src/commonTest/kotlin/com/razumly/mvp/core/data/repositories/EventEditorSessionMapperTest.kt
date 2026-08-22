@@ -7,6 +7,7 @@ import com.razumly.mvp.core.network.dto.EventEditorCapabilitiesDto
 import com.razumly.mvp.core.network.dto.EventEditorCompetitionDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateBootstrapDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode
 import com.razumly.mvp.core.network.dto.EventEditorDivisionDetailDto
 import com.razumly.mvp.core.network.dto.EventEditorDraftDto
 import com.razumly.mvp.core.network.dto.EventEditorFieldDto
@@ -37,8 +38,10 @@ import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 private const val TEST_OPERATION_ID = "create-operation-1"
 private const val TEST_START = "2026-09-01T10:00:00Z"
@@ -48,6 +51,7 @@ internal fun editorProtocolSnapshot(
     mode: String = "CREATE",
     editorRevision: String = "new",
     generatedEnd: Boolean = false,
+    automatedScheduling: Boolean = true,
     preserveNullableValues: Boolean = false,
 ): EventEditorSnapshotDto {
     val division = EventEditorDivisionDetailDto(
@@ -171,12 +175,14 @@ internal fun editorProtocolSnapshot(
                     mode = "GENERATED_END",
                     endConstraint = null,
                     generatedScheduleEnd = "2026-09-30",
+                    automatedScheduling = automatedScheduling,
                 )
             } else {
                 EventEditorScheduleDto(
                     mode = "FIXED_END",
                     endConstraint = TEST_END,
                     generatedScheduleEnd = null,
+                    automatedScheduling = automatedScheduling,
                 )
             },
             resources = EventEditorResourcesDto(
@@ -291,7 +297,7 @@ internal fun editorProtocolBootstrap(
 
 class EventEditorSessionMapperTest {
     @Test
-    fun decodes_and_projects_complete_editor_bootstrap() {
+    fun given_editor_bootstrap_wire_when_decoded_then_complete_session_is_projected() {
         val wire = jsonMVP.encodeToString(editorProtocolBootstrap())
         val bootstrap = jsonMVP.decodeFromString<EventEditorCreateBootstrapDto>(wire)
         val session = EventEditorSessionMapper.fromCreateBootstrap(bootstrap)
@@ -315,7 +321,113 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
-    fun builds_stable_create_command_without_erasing_open_snapshot_records() {
+    fun given_accepted_registration_when_cancellation_or_refund_is_projected_then_lock_survives() {
+        val snapshot = editorProtocolSnapshot(mode = "EDIT").copy(
+            immutable = EventEditorImmutableDto(
+                fieldNames = listOf("eventType", "teamSignup"),
+            ),
+        )
+
+        val canonical = EventEditorSessionMapper
+            .fromEditSnapshot(snapshot)
+            .canonicalState
+            .event
+
+        assertTrue(canonical.eventTypeLocked)
+        assertTrue(canonical.registrationUnitLocked)
+        assertFalse(canonical.eventTypeHasProtectedHistory)
+    }
+
+    @Test
+    fun given_protected_match_history_when_snapshot_field_names_are_empty_then_event_type_is_locked() {
+        val snapshot = editorProtocolSnapshot(mode = "EDIT").copy(
+            immutable = EventEditorImmutableDto(),
+            scheduleState = EventEditorScheduleStateDto(
+                sourceType = "MATCH",
+                matchCount = 1,
+                revision = "schedule-revision-2",
+                hasProtectedHistory = true,
+            ),
+        )
+
+        val canonical = EventEditorSessionMapper
+            .fromEditSnapshot(snapshot)
+            .canonicalState
+            .event
+
+        assertTrue(canonical.eventTypeLocked)
+        assertFalse(canonical.registrationUnitLocked)
+        assertTrue(canonical.eventTypeHasProtectedHistory)
+    }
+
+    @Test
+    fun given_waitlist_failed_payment_staff_invite_or_import_when_projected_then_no_lock_is_created() {
+        val snapshot = editorProtocolSnapshot(mode = "EDIT").copy(
+            immutable = EventEditorImmutableDto(),
+            scheduleState = EventEditorScheduleStateDto(
+                sourceType = null,
+                matchCount = 0,
+                revision = "schedule-revision-3",
+                hasProtectedHistory = false,
+            ),
+        )
+
+        val canonical = EventEditorSessionMapper
+            .fromEditSnapshot(snapshot)
+            .canonicalState
+            .event
+
+        assertFalse(canonical.eventTypeLocked)
+        assertFalse(canonical.registrationUnitLocked)
+        assertFalse(canonical.eventTypeHasProtectedHistory)
+    }
+
+    @Test
+    fun given_automated_scheduling_when_event_and_command_are_mapped_then_value_round_trips() {
+        val session = EventEditorSessionMapper.fromCreateBootstrap(
+            editorProtocolBootstrap(editorProtocolSnapshot(automatedScheduling = false)),
+        )
+
+        assertEquals(false, session.canonicalState.event.automatedScheduling)
+        val command = EventEditorSessionMapper.toCreateCommand(
+            session = session,
+            mutation = EventEditorMutation(session.canonicalState),
+        ).command
+
+        assertEquals(false, command.draft.schedule.automatedScheduling)
+        assertEquals(EventEditorCreateCompletionMode.CREATE_ONLY, command.completion.mode)
+        val decoded = jsonMVP.decodeFromString<EventEditorCreateCommandDto>(
+            jsonMVP.encodeToString(command),
+        )
+        assertEquals(false, decoded.draft.schedule.automatedScheduling)
+    }
+
+    @Test
+    fun given_unscheduled_league_when_create_command_is_built_then_fixed_end_is_required() {
+        val session = EventEditorSessionMapper.fromCreateBootstrap(
+            editorProtocolBootstrap(
+                editorProtocolSnapshot(
+                    generatedEnd = true,
+                    automatedScheduling = false,
+                ),
+            ),
+        )
+
+        val failure = assertFailsWith<IllegalArgumentException> {
+            EventEditorSessionMapper.toCreateCommand(
+                session = session,
+                mutation = EventEditorMutation(session.canonicalState),
+            )
+        }
+
+        assertEquals(
+            "Unscheduled League/Tournament creation requires a planned fixed end.",
+            failure.message,
+        )
+    }
+
+    @Test
+    fun given_unchanged_snapshot_when_create_command_is_built_then_open_records_are_preserved() {
         val session = EventEditorSessionMapper.fromCreateBootstrap(editorProtocolBootstrap())
         val mutation = EventEditorMutation(
             canonicalState = session.canonicalState.copy(
@@ -355,6 +467,7 @@ class EventEditorSessionMapperTest {
                     teamSignup = false,
                     singleDivision = true,
                 ),
+                schedule = baseSnapshot.draft.schedule.copy(automatedScheduling = false),
                 competition = baseSnapshot.draft.competition.copy(
                     divisionDetails = baseSnapshot.draft.competition.divisionDetails.map { detail ->
                         detail.copy(
@@ -439,6 +552,7 @@ class EventEditorSessionMapperTest {
                     teamSignup = false,
                     singleDivision = true,
                 ),
+                schedule = baseSnapshot.draft.schedule.copy(automatedScheduling = false),
                 competition = baseSnapshot.draft.competition.copy(
                     divisionDetails = baseSnapshot.draft.competition.divisionDetails.map { detail ->
                         detail.copy(kind = "EVENT", playoffTeamCount = null)
@@ -556,7 +670,7 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
-    fun create_command_routes_playoff_rows_from_event_details() {
+    fun given_playoff_rows_when_create_command_is_built_then_rows_are_routed_to_event_details() {
         val session = EventEditorSessionMapper.fromCreateBootstrap(editorProtocolBootstrap())
         val playoffDetail = session.canonicalState.event.divisionDetails
             .first { detail -> detail.id == "division-1" }
@@ -586,7 +700,7 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
-    fun save_command_routes_canonical_bracket_edits_to_playoff_details() {
+    fun given_playoff_edits_when_save_command_is_built_then_rows_are_routed_to_playoff_details() {
         val snapshot = editorProtocolSnapshot(mode = "EDIT")
         val session = EventEditorSessionMapper.fromEditSnapshot(snapshot)
         val baselinePlayoff = session.canonicalState.playoffDivisionDetails.single()
@@ -698,7 +812,7 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
-    fun create_command_normalizes_manual_payment_usernames_to_backend_urls() {
+    fun given_manual_payment_usernames_when_create_command_is_built_then_urls_are_normalized() {
         val session = EventEditorSessionMapper.fromCreateBootstrap(editorProtocolBootstrap())
         val mutation = EventEditorMutation(
             canonicalState = session.canonicalState.copy(
@@ -724,7 +838,7 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
-    fun create_command_rejects_invalid_manual_payment_urls_before_network_request() {
+    fun given_invalid_manual_payment_urls_when_create_command_is_built_then_request_is_rejected() {
         val session = EventEditorSessionMapper.fromCreateBootstrap(editorProtocolBootstrap())
         val mutation = EventEditorMutation(
             canonicalState = session.canonicalState.copy(
@@ -749,7 +863,7 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
-    fun field_division_edits_update_the_canonical_division_field_map() {
+    fun given_field_division_edits_when_mutated_then_canonical_field_map_is_updated() {
         val session = EventEditorSessionMapper.fromCreateBootstrap(editorProtocolBootstrap())
         val mutation = EventEditorMutation(
             canonicalState = session.canonicalState.copy(
@@ -763,7 +877,7 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
-    fun replacing_a_field_drops_removed_field_ids_from_division_assignments() {
+    fun given_removed_field_ids_when_field_is_replaced_then_division_assignments_are_dropped() {
         val session = EventEditorSessionMapper.fromCreateBootstrap(editorProtocolBootstrap())
         val mutation = EventEditorMutation(
             canonicalState = session.canonicalState.copy(
@@ -783,7 +897,7 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
-    fun partial_field_mutation_preserves_assignments_for_active_baseline_fields() {
+    fun given_active_baseline_fields_when_field_mutation_is_partial_then_assignments_are_preserved() {
         val snapshot = editorProtocolSnapshot()
         val secondField = snapshot.draft.resources.fields.single().copy(
             id = "field-2",
@@ -820,7 +934,7 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
-    fun state_only_mutation_preserves_nullable_defaults_and_generated_schedule_text() {
+    fun given_state_only_mutation_when_command_is_built_then_nullable_defaults_and_schedule_text_are_preserved() {
         val session = EventEditorSessionMapper.fromCreateBootstrap(
             editorProtocolBootstrap(
                 editorProtocolSnapshot(generatedEnd = true, preserveNullableValues = true),
@@ -843,7 +957,7 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
-    fun builds_edit_command_with_revisions_and_applies_returned_canonical_state() {
+    fun given_edit_snapshot_when_command_is_built_then_revisions_and_canonical_state_are_applied() {
         val editSession = EventEditorSessionMapper.fromEditSnapshot(
             editorProtocolSnapshot(mode = "EDIT", editorRevision = "revision-1"),
         )

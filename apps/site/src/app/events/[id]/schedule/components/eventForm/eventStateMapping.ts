@@ -7,6 +7,7 @@ import {
     isBracketTeamCountEnabled,
     normalizeBracketTeamCount,
 } from '@/lib/divisionTypes';
+import { normalizeAutomatedSchedulingForEventType } from '@/lib/automatedScheduling';
 import { getSystemTimeZone, normalizeTimeZone } from '@/lib/dateUtils';
 import { normalizePriceCents } from '@/lib/priceUtils';
 import {
@@ -480,11 +481,15 @@ export const mapEventToFormState = (event: Event): EventFormState => {
         : null,
     registrationCutoffHours: event.registrationCutoffHours != null && Number.isFinite(Number(event.registrationCutoffHours))
         ? Number(event.registrationCutoffHours)
-        : 2,
+        : 0,
     hostId: event.hostId || undefined,
     noFixedEndDateTime: isSchedulableType && event.eventType !== 'WEEKLY_EVENT'
         ? derivedNoFixedEndDateTime
         : false,
+    automatedScheduling: normalizeAutomatedSchedulingForEventType(
+        normalizedEventType,
+        (event as Event & { automatedScheduling?: unknown }).automatedScheduling,
+    ),
     requiredTemplateIds: Array.isArray(event.requiredTemplateIds)
         ? event.requiredTemplateIds
         : [],

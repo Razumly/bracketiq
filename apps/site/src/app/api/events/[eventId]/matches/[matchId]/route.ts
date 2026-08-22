@@ -50,6 +50,10 @@ import {
 import { claimMatchOperationReceipts } from '@/server/matches/clientOperationReplay';
 import { assertMatchParticipantsReady } from '@/server/matches/participantReadiness';
 import type { MatchIncident, MatchSegment } from '@/types';
+import {
+  loadEventProtectedHistory,
+  PROTECTED_MATCH_HISTORY_DELETE_CONFIRMATION,
+} from '@/server/events/eventProtectedHistory';
 
 export const dynamic = 'force-dynamic';
 
@@ -1694,6 +1698,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ eventId: string; matchId: string }> }) {
   try {
     const session = await requireSession(req);
+    const body = await req.json().catch(() => null);
+    const confirmation = body && typeof body === 'object' && 'confirmation' in body
+      ? (body as { confirmation?: unknown }).confirmation
+      : undefined;
     const { eventId, matchId } = await params;
     const event = await prisma.events.findUnique({ where: { id: eventId } });
     if (!event) {
@@ -1703,7 +1711,31 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ e
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    await prisma.matches.delete({ where: { id: matchId } });
+    await prisma.$transaction(async (tx) => {
+      await acquireEventLock(tx, eventId);
+      const match = await tx.matches.findUnique({
+        where: { id: matchId },
+        select: { id: true, eventId: true },
+      });
+      if (!match || match.eventId !== eventId) {
+        throw new Response('Match not found', { status: 404 });
+      }
+
+      const protectedMatchIds = (await loadEventProtectedHistory(eventId, tx)).protectedMatchIds;
+      if (
+        protectedMatchIds.has(matchId)
+        && confirmation !== PROTECTED_MATCH_HISTORY_DELETE_CONFIRMATION
+      ) {
+        throw NextResponse.json({
+          error: 'Deleting this match permanently erases started or result-bearing match history.',
+          code: 'PROTECTED_MATCH_HISTORY',
+          confirmation: PROTECTED_MATCH_HISTORY_DELETE_CONFIRMATION,
+          matchIds: [matchId],
+        }, { status: 409 });
+      }
+
+      await tx.matches.delete({ where: { id: matchId } });
+    });
     publishEventMatchChanges({
       eventId,
       deleted: [matchId],

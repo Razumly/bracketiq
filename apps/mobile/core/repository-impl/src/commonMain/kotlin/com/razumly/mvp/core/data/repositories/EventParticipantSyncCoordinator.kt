@@ -296,17 +296,22 @@ internal class EventParticipantSyncCoordinator(
     suspend fun mergeParticipantsSnapshot(
         baseEvent: Event,
         snapshot: EventParticipantsSnapshotResponseDto,
+        protectedHistoryAuthoritative: Boolean = false,
     ): EventParticipantsSyncResult {
         snapshot.error?.takeIf(String::isNotBlank)?.let { error(it) }
         val divisionWarnings = snapshot.divisionWarnings
             .mapNotNull(EventParticipantDivisionWarningDto::toDomainWarningOrNull)
 
         if (snapshot.weeklySelectionRequired == true) {
-            val clearedEvent = baseEvent.copy(
-                teamIds = emptyList(),
-                userIds = emptyList(),
-                waitListIds = emptyList(),
-                freeAgentIds = emptyList(),
+            val clearedEvent = mergePersistedEventEditorLocks(
+                incoming = baseEvent.copy(
+                    teamIds = emptyList(),
+                    userIds = emptyList(),
+                    waitListIds = emptyList(),
+                    freeAgentIds = emptyList(),
+                ),
+                cached = roomStore.getEvent(baseEvent.id),
+                protectedHistoryAuthoritative = protectedHistoryAuthoritative,
             )
             databaseService.getEventDao.upsertEvent(clearedEvent)
             persistEventRelations(
@@ -329,11 +334,15 @@ internal class EventParticipantSyncCoordinator(
         val snapshotEvent = snapshot.event
             ?.toEventOrNull()
             ?.withCachedDivisionStateForPartialSnapshot(participantBaseEvent)
-        val mergedEvent = (snapshotEvent ?: participantBaseEvent).copy(
-            teamIds = normalizedParticipantIds(participantIds.teamIds),
-            userIds = normalizedParticipantIds(participantIds.userIds),
-            waitListIds = normalizedParticipantIds(participantIds.waitListIds),
-            freeAgentIds = normalizedParticipantIds(participantIds.freeAgentIds),
+        val mergedEvent = mergePersistedEventEditorLocks(
+            incoming = (snapshotEvent ?: participantBaseEvent).copy(
+                teamIds = normalizedParticipantIds(participantIds.teamIds),
+                userIds = normalizedParticipantIds(participantIds.userIds),
+                waitListIds = normalizedParticipantIds(participantIds.waitListIds),
+                freeAgentIds = normalizedParticipantIds(participantIds.freeAgentIds),
+            ),
+            cached = latestCachedEvent,
+            protectedHistoryAuthoritative = protectedHistoryAuthoritative,
         )
         val teams = snapshot.teams.mapNotNull { dto -> dto.toTeamOrNull() }
         val users = snapshot.users.mapNotNull { dto -> dto.toUserDataOrNull() }

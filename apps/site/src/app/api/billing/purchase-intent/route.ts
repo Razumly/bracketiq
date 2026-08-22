@@ -47,7 +47,12 @@ import {
   resolveCanonicalRentalCheckout,
   type CanonicalRentalCheckout,
 } from '@/server/rentalCheckoutAccess';
-import { buildEventRegistrationId } from '@/server/events/eventRegistrations';
+import {
+  assertEventRegistrationUnit,
+  buildEventRegistrationId,
+  registrationUnitIdentityKey,
+  type RegistrationRegistrantType,
+} from '@/server/events/eventRegistrations';
 import { acquireEventLock } from '@/server/repositories/locks';
 import {
   findTeamRegistration,
@@ -417,6 +422,32 @@ const reserveEventRegistrationSlot = async ({
     if (!event) {
       return { ok: false, status: 404, error: 'Event not found.' };
     }
+    const dedupeHeldRegistrations = <
+      T extends {
+        id: string;
+        registrantId: string;
+        parentId?: string | null;
+        registrantType: RegistrationRegistrantType;
+        eventTeamId?: string | null;
+        sourceTeamRegistrationId?: string | null;
+      }
+    >(rows: T[]): T[] => {
+      const seen = new Set<string>();
+      return rows.filter((row) => {
+        const identity = registrationUnitIdentityKey(event, {
+          registrantId: row.registrantId,
+          parentId: row.parentId ?? null,
+          registrantType: row.registrantType,
+          eventTeamId: row.eventTeamId ?? null,
+          sourceTeamRegistrationId: row.sourceTeamRegistrationId ?? null,
+        }) ?? `ROW:${row.id}`;
+        if (seen.has(identity)) {
+          return false;
+        }
+        seen.add(identity);
+        return true;
+      });
+    };
     const eventDivisionRows = typeof (tx as any).divisions?.findMany === 'function'
       ? await (tx as any).divisions.findMany({
           where: {
@@ -762,6 +793,12 @@ const reserveEventRegistrationSlot = async ({
     const participantId = participantTeamId ?? (userId as string);
     const participantRegistrantType = participantTeamId ? 'TEAM' : eventRegistrantType;
     const participantParentId = participantTeamId ? parentTeamId : eventParentId;
+    assertEventRegistrationUnit(event, {
+      registrantType: participantRegistrantType,
+      rosterRole: 'PARTICIPANT',
+      eventTeamId: participantTeamId,
+      sourceTeamRegistrationId: null,
+    });
     const registrationId = buildEventRegistrationId({
       eventId,
       registrantType: participantRegistrantType,
@@ -945,9 +982,19 @@ const reserveEventRegistrationSlot = async ({
             }),
           divisionId: divisionIdForCapacity,
         },
-        select: { id: true, createdAt: true },
+        select: {
+          id: true,
+          createdAt: true,
+          registrantId: true,
+          parentId: true,
+          registrantType: true,
+          eventTeamId: true,
+          sourceTeamRegistrationId: true,
+        },
       });
-      const orderedDivision = sortRegistrationsByCreatedAt(divisionRegistrations);
+      const orderedDivision = sortRegistrationsByCreatedAt(
+        dedupeHeldRegistrations(divisionRegistrations),
+      );
       if (orderedDivision.length > divisionMaxParticipants) {
         const divisionPosition = orderedDivision.findIndex((entry) => entry.id === registrationId);
         if (divisionPosition < 0 || divisionPosition >= divisionMaxParticipants) {
@@ -975,9 +1022,19 @@ const reserveEventRegistrationSlot = async ({
               occurrenceDate: null,
             }),
         },
-        select: { id: true, createdAt: true },
+        select: {
+          id: true,
+          createdAt: true,
+          registrantId: true,
+          parentId: true,
+          registrantType: true,
+          eventTeamId: true,
+          sourceTeamRegistrationId: true,
+        },
       });
-      const ordered = sortRegistrationsByCreatedAt(cappedRegistrations);
+      const ordered = sortRegistrationsByCreatedAt(
+        dedupeHeldRegistrations(cappedRegistrations),
+      );
       if (ordered.length > maxParticipants) {
         const position = ordered.findIndex((entry) => entry.id === registrationId);
         if (position < 0 || position >= maxParticipants) {

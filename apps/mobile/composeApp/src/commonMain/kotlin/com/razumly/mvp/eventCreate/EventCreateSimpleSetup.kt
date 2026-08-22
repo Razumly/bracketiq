@@ -178,7 +178,10 @@ fun isSimpleSetupPageComplete(
             event.location.isNotBlank() &&
             event.lat != 0.0 &&
             event.long != 0.0 &&
-            (event.noFixedEndDateTime || event.end > event.start)
+            (
+                (!event.noFixedEndDateTime && event.end > event.start) ||
+                    (event.automatedScheduling && event.noFixedEndDateTime)
+            )
     }
     EventCreateSetupPageId.EVENT_DETAILS -> {
         val ageRangeErrors = eventAgeRangeErrors(event)
@@ -218,7 +221,10 @@ fun isSimpleSetupPageComplete(
         event.location.isNotBlank() &&
             event.lat != 0.0 &&
             event.long != 0.0 &&
-            (event.noFixedEndDateTime || event.end > event.start)
+            (
+                (!event.noFixedEndDateTime && event.end > event.start) ||
+                    (event.automatedScheduling && event.noFixedEndDateTime)
+            )
     }
     else -> true
 }

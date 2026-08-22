@@ -70,6 +70,15 @@ describe('useEventFormSectionsController', () => {
             'Schedule',
         ]));
     });
+    it.each([false, true])('hides schedule construction when automated scheduling is disabled (rental slots: %s)', (usesRentalSlots) => {
+        const { result } = renderController({
+            eventData: buildEventData({ automatedScheduling: false }),
+            usesRentalSlots,
+        });
+
+        expect(result.current.showScheduleConfig).toBe(false);
+        expect(result.current.visibleSectionNavItems.map((item) => item.label)).not.toContain('Schedule');
+    });
 
     it('hides operational sections for affiliate listings', () => {
         const { result } = renderController({ isAffiliateEvent: true });

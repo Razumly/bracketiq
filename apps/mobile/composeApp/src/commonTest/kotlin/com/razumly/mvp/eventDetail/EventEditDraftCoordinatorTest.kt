@@ -11,7 +11,7 @@ import kotlin.time.Instant
 
 class EventEditDraftCoordinatorTest {
     @Test
-    fun seed_and_refresh_readonly_draft_populates_event_fields_and_scoring() {
+    fun given_readonly_draft_when_seeded_and_refreshed_then_event_fields_and_scoring_are_populated() {
         val coordinator = EventEditDraftCoordinator(
             initialEvent = leagueEvent(fieldIds = emptyList()),
             canEditInitial = false,
@@ -34,7 +34,7 @@ class EventEditDraftCoordinatorTest {
     }
 
     @Test
-    fun editing_seed_preserves_canonical_field_values_and_slot_order() {
+    fun given_editing_seed_when_applied_then_canonical_field_values_and_slot_order_are_preserved() {
         val coordinator = EventEditDraftCoordinator(
             initialEvent = leagueEvent(fieldIds = listOf("field-1")),
             canEditInitial = true,
@@ -69,7 +69,7 @@ class EventEditDraftCoordinatorTest {
     }
 
     @Test
-    fun select_field_count_resizes_fields_and_prunes_slots_to_remaining_fields() {
+    fun given_field_count_when_selected_then_fields_resize_and_slots_are_pruned() {
         val coordinator = EventEditDraftCoordinator(
             initialEvent = leagueEvent(),
             canEditInitial = true,
@@ -97,7 +97,7 @@ class EventEditDraftCoordinatorTest {
     }
 
     @Test
-    fun update_edited_event_syncs_field_defaults_and_slot_boundaries() {
+    fun given_edited_event_when_updated_then_field_defaults_and_slot_boundaries_are_synced() {
         val coordinator = EventEditDraftCoordinator(
             initialEvent = leagueEvent(location = "Old Park"),
             canEditInitial = true,
@@ -134,7 +134,7 @@ class EventEditDraftCoordinatorTest {
     }
 
     @Test
-    fun local_field_names_league_slots_and_prepared_fields_update_draft_state() {
+    fun given_local_field_names_and_league_slots_when_updated_then_draft_state_is_updated() {
         val coordinator = EventEditDraftCoordinator(
             initialEvent = leagueEvent(fieldIds = listOf("field-1")),
             canEditInitial = true,
@@ -163,7 +163,7 @@ class EventEditDraftCoordinatorTest {
     }
 
     @Test
-    fun participant_immutable_fields_block_event_type_and_registration_mode_changes() {
+    fun given_participant_immutable_fields_when_changes_are_requested_then_event_type_and_registration_mode_stay_locked() {
         val coordinator = EventEditDraftCoordinator(
             initialEvent = leagueEvent().copy(teamSignup = false),
             canEditInitial = true,
@@ -182,6 +182,63 @@ class EventEditDraftCoordinatorTest {
         assertEquals("Renamed League", coordinator.editedEvent.value.name)
         assertEquals(EventType.LEAGUE, coordinator.editedEvent.value.eventType)
         assertEquals(false, coordinator.editedEvent.value.teamSignup)
+    }
+
+    @Test
+    fun given_each_event_type_when_registration_unit_changes_then_contract_policy_is_enforced() {
+        val requestedStates = listOf(
+            EventType.EVENT to true,
+            EventType.WEEKLY_EVENT to false,
+            EventType.LEAGUE to false,
+            EventType.TOURNAMENT to false,
+            EventType.TRYOUT to true,
+        )
+
+        requestedStates.forEach { (eventType, requestedTeamSignup) ->
+            val coordinator = EventEditDraftCoordinator(
+                initialEvent = Event(eventType = EventType.EVENT, teamSignup = false),
+                canEditInitial = true,
+            )
+
+            coordinator.updateEditedEvent { current ->
+                current.copy(
+                    eventType = eventType,
+                    teamSignup = requestedTeamSignup,
+                )
+            }
+
+            val expectedTeamSignup = when (eventType) {
+                EventType.LEAGUE, EventType.TOURNAMENT -> true
+                EventType.TRYOUT -> false
+                EventType.EVENT, EventType.WEEKLY_EVENT -> requestedTeamSignup
+            }
+            assertEquals(expectedTeamSignup, coordinator.editedEvent.value.teamSignup)
+        }
+    }
+
+    @Test
+    fun given_room_lock_metadata_when_editor_starts_after_restart_then_controls_are_locked() {
+        val persistedEvent = Event(
+            eventType = EventType.EVENT,
+            eventTypeLocked = true,
+            registrationUnitLocked = true,
+            eventTypeHasProtectedHistory = true,
+        )
+        val coordinator = EventEditDraftCoordinator(
+            initialEvent = persistedEvent,
+            canEditInitial = true,
+        )
+
+        coordinator.setControlLocks(emptySet())
+
+        assertEquals(
+            EventEditorControlLocks(
+                eventType = true,
+                teamSignup = true,
+                eventTypeHasProtectedHistory = true,
+            ),
+            coordinator.controlLocks.value,
+        )
     }
 
     private fun leagueEvent(

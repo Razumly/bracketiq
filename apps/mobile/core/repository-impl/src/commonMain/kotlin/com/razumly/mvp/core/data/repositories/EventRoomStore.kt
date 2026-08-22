@@ -7,6 +7,39 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.toEventTimeSlotCacheEntry
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Accepted registrations are monotonic server facts. Protected match history is authoritative
+ * when the response includes the editor capability projection, such as after match deletion.
+ */
+internal fun mergePersistedEventEditorLocks(
+    incoming: Event,
+    cached: Event?,
+    protectedHistoryAuthoritative: Boolean = false,
+): Event {
+    val registrationUnitLocked = incoming.registrationUnitLocked ||
+        cached?.registrationUnitLocked == true
+    val eventTypeHasProtectedHistory = if (protectedHistoryAuthoritative) {
+        incoming.eventTypeHasProtectedHistory
+    } else {
+        incoming.eventTypeHasProtectedHistory ||
+            cached?.eventTypeHasProtectedHistory == true
+    }
+    val eventTypeLocked = if (protectedHistoryAuthoritative) {
+        incoming.eventTypeLocked ||
+            registrationUnitLocked ||
+            eventTypeHasProtectedHistory
+    } else {
+        incoming.eventTypeLocked ||
+            cached?.eventTypeLocked == true ||
+            eventTypeHasProtectedHistory
+    }
+    return incoming.copy(
+        eventTypeLocked = eventTypeLocked,
+        registrationUnitLocked = registrationUnitLocked,
+        eventTypeHasProtectedHistory = eventTypeHasProtectedHistory,
+    )
+}
+
 /** Owns canonical Room reads and writes for the event-detail facade boundary. */
 internal class EventRoomStore(
     private val databaseService: DatabaseService,
@@ -20,8 +53,18 @@ internal class EventRoomStore(
     suspend fun getEventWithRelations(eventId: String): EventWithRelations =
         databaseService.getEventDao.getEventWithRelationsById(eventId)
 
-    suspend fun cacheEvent(event: Event) {
-        databaseService.getEventDao.upsertEvent(event)
+    suspend fun cacheEvent(
+        event: Event,
+        protectedHistoryAuthoritative: Boolean = false,
+    ) {
+        val cachedEvent = databaseService.getEventDao.getEventById(event.id)
+        databaseService.getEventDao.upsertEvent(
+            mergePersistedEventEditorLocks(
+                incoming = event,
+                cached = cachedEvent,
+                protectedHistoryAuthoritative = protectedHistoryAuthoritative,
+            ),
+        )
     }
 
     suspend fun cacheEventTimeSlots(
@@ -46,8 +89,16 @@ internal class EventRoomStore(
     suspend fun cacheAndReadEvent(
         event: Event,
         expectedEventId: String,
+        protectedHistoryAuthoritative: Boolean = false,
     ): Event {
-        databaseService.getEventDao.upsertEvent(event)
+        val cachedEvent = databaseService.getEventDao.getEventById(event.id)
+        databaseService.getEventDao.upsertEvent(
+            mergePersistedEventEditorLocks(
+                incoming = event,
+                cached = cachedEvent,
+                protectedHistoryAuthoritative = protectedHistoryAuthoritative,
+            ),
+        )
         return databaseService.getEventDao.getEventById(expectedEventId)
             ?: throw IllegalStateException("Event $expectedEventId not cached")
     }

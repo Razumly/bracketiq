@@ -6,6 +6,7 @@ jest.mock("../eventStaffReconciliation", () => ({
   loadEventStaffSnapshot: jest.fn(),
 }));
 
+import type { Prisma } from "@/generated/prisma/client";
 import {
   buildEventEditorSnapshot,
   loadCreateEventEditorSnapshot,
@@ -203,6 +204,33 @@ describe("loadEventScheduleState", () => {
       unplaced: 3,
     });
   });
+  it("locks event type when a Match has started or has a result", async () => {
+    const client = {
+      matches: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: "match_1",
+            status: "IN_PROGRESS",
+            placementState: "PLACED",
+          },
+          {
+            id: "match_2",
+            status: "NOT_STARTED",
+            resultStatus: "FINAL",
+            placementState: "PLACED",
+          },
+        ]),
+      },
+      divisions: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    } as unknown as Prisma.TransactionClient;
+
+    const state = await loadEventScheduleState({}, "event_1", client);
+
+    expect(state.hasProtectedHistory).toBe(true);
+  });
+
 });
 it("hydrates rental booking slots as immutable create resources", async () => {
   const rentalItem = {

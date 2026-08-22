@@ -1,5 +1,6 @@
 import { calculateTimedMatchDurationMinutes } from '@/lib/divisionPhaseSettings';
 import { normalizeBracketTeamCount } from '@/lib/divisionTypes';
+import { normalizeAutomatedSchedulingForEventType } from '@/lib/automatedScheduling';
 import { GENERIC_RESOURCE_LABELS, getSportResourceLabels } from '@/lib/sportResourceLabels';
 import type { Event, EventOfficial, EventOfficialPosition, Field, TimeSlot } from '@/types';
 import {
@@ -97,12 +98,16 @@ const paymentMode = (event: Record<string, unknown>): 'FREE' | 'ONLINE' | 'MANUA
   if (explicit === 'FREE') return 'FREE';
   return Number(event.price ?? 0) > 0 ? 'ONLINE' : 'FREE';
 };
-
 const draftFromRecord = (
   event: Record<string, unknown>,
   questions: unknown = event.registrationQuestions,
   isPersistedBracketCountNormalizationEnabled = false,
 ): EventEditorDraft => {
+  const normalizedEventType = stringValue(event.eventType, 'EVENT').trim().toUpperCase();
+  const automatedScheduling = normalizeAutomatedSchedulingForEventType(
+    normalizedEventType,
+    event.automatedScheduling,
+  );
   const start = asIsoDateTime(event.start, new Date(0).toISOString());
   const explicitScheduleEndConstraint = nullableString(event.scheduleEndConstraint);
   const explicitGeneratedScheduleEnd = nullableString(event.generatedScheduleEnd);
@@ -137,7 +142,6 @@ const draftFromRecord = (
     (detail) => stringValue(detail.kind).trim().toUpperCase() !== 'PLAYOFF',
   );
   const includePlayoffs = booleanValue(event.includePlayoffs);
-  const normalizedEventType = stringValue(event.eventType, 'EVENT').trim().toUpperCase();
   const rawEventPlayoffTeamCount = numberOrNull(event.playoffTeamCount);
   const normalizedEventPlayoffTeamCount =
     isPersistedBracketCountNormalizationEnabled &&
@@ -275,10 +279,12 @@ const draftFromRecord = (
         mode: 'GENERATED_END',
         endConstraint: null,
         generatedScheduleEnd: explicitGeneratedScheduleEnd ?? nullableString(event.end),
+        automatedScheduling,
       }
       : {
         mode: 'FIXED_END',
         endConstraint: explicitScheduleEndConstraint ?? asIsoDateTime(event.end, start),
+        automatedScheduling,
       },
     resources: {
       fieldIds: rawFieldIds.length > 0 ? rawFieldIds : fields.map((field) => String(field.$id ?? '')).filter(Boolean),
@@ -346,6 +352,7 @@ export const editorSnapshotToFormValues = (
       ? schedule.endConstraint
       : schedule.generatedScheduleEnd ?? (base.end as string | null | undefined) ?? null,
     noFixedEndDateTime: schedule.mode === 'GENERATED_END',
+    automatedScheduling: schedule.automatedScheduling,
     divisions: competition.divisionIds,
     ...competition,
     ...resources,
@@ -401,6 +408,7 @@ export const editorDraftToLegacyEvent = (draft: EventEditorDraft, eventId?: stri
     scheduleEndConstraint: schedule.mode === 'FIXED_END' ? schedule.endConstraint : null,
     generatedScheduleEnd: schedule.mode === 'GENERATED_END' ? schedule.generatedScheduleEnd : null,
     noFixedEndDateTime: schedule.mode === 'GENERATED_END',
+    automatedScheduling: schedule.automatedScheduling,
     fieldIds: resources.fieldIds,
     fields: resources.fields,
     timeSlotIds: resources.timeSlotIds,

@@ -376,17 +376,19 @@ export const markBillPaymentProcessingForAction = async ({
     bill.sourceType === 'EVENT_REGISTRATION'
     && registrationId
     && registrationEventId
-    && typeof (prisma as any).eventRegistrations?.updateMany === 'function'
+    && typeof prisma.eventRegistrations.updateMany === 'function'
   ) {
+    const nextRegistrationStatus = reconciledBill?.status === 'PAID' ? 'ACTIVE' : 'PENDING';
     await prisma.$transaction(async (tx) => {
       await acquireEventLockAndLoadStructure(tx, registrationEventId);
       await tx.eventRegistrations.updateMany({
         where: {
           id: registrationId,
-          status: { in: ['PENDING', 'STARTED'] as any[] },
+          status: { in: ['PENDING', 'STARTED'] },
         },
         data: {
-          status: reconciledBill?.status === 'PAID' ? 'ACTIVE' as any : 'PENDING' as any,
+          status: nextRegistrationStatus,
+          ...(nextRegistrationStatus === 'ACTIVE' ? { acceptedAt: now } : {}),
           updatedAt: now,
         },
       });

@@ -611,7 +611,7 @@ describe("saveEventEditor", () => {
       }),
     );
   });
-  it("persists an unplaced Match Graph for create-only League commands", async () => {
+  it("persists an unplaced Match Graph when Automated Scheduling is off", async () => {
     const { tx } = createEventEditorTxFor();
     (loadCreateEventEditorSnapshot as jest.Mock).mockReset();
     (loadCreateEventEditorSnapshot as jest.Mock).mockResolvedValue(
@@ -647,12 +647,22 @@ describe("saveEventEditor", () => {
         unplaced: 6,
       },
     });
+    const unscheduledLeagueDraft = {
+      ...leagueCreateDraft,
+      schedule: {
+        ...leagueCreateDraft.schedule,
+        automatedScheduling: false,
+        mode: "FIXED_END" as const,
+        endConstraint: "2026-09-01T18:00:00.000Z",
+      },
+    };
+
 
     const result = await createEventEditor({ userId: "user_fixture_host" }, {
       contractVersion: 3,
       createOperationId: "create-only-league-operation",
       expectedRevisions: expectedCreateRevisions,
-      draft: leagueCreateDraft,
+      draft: unscheduledLeagueDraft,
       completion: { mode: "CREATE_ONLY" },
     } satisfies CreateEventEditorCommand);
 
@@ -676,6 +686,7 @@ describe("saveEventEditor", () => {
       ]),
       warnings: [],
     }));
+    expect(mockedReconcileEventSchedule).not.toHaveBeenCalled();
   });
   it("rolls back the create receipt with a failed domain transaction", async () => {
     const { rows, tx } = createEventEditorTxFor();
@@ -943,6 +954,27 @@ describe("createEventEditor", () => {
     (reconcileEventStaffDesiredState as jest.Mock).mockResolvedValue({
       emailCandidates: [],
     });
+  });
+  it("rejects schedule construction when Automated Scheduling is off", async () => {
+    const invalidCommand = {
+      ...command(),
+      createOperationId: "create-only-required-operation",
+      draft: {
+        ...leagueCreateDraft,
+        schedule: {
+          ...leagueCreateDraft.schedule,
+          automatedScheduling: false,
+          mode: "FIXED_END",
+          endConstraint: "2026-09-01T18:00:00.000Z",
+        },
+      },
+      completion: { mode: "CREATE_AND_BUILD_SCHEDULE" as const },
+    } satisfies CreateEventEditorCommand;
+
+    await expect(createEventEditor(createActor, invalidCommand)).rejects.toThrow(
+      "Automated Scheduling must be enabled when Create builds a schedule.",
+    );
+    expect(prismaTransactionMock.$transaction).not.toHaveBeenCalled();
   });
 
   it("returns the operation identity and every canonical revision", async () => {

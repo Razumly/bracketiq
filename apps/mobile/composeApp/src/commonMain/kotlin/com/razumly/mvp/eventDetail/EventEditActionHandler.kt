@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.resolveEventResourceLabels
+import com.razumly.mvp.core.data.dataTypes.enums.defaultAutomatedSchedulingForEventType
 import com.razumly.mvp.core.data.dataTypes.withDefaultPlayoffTeamCounts
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventEditorCanonicalState
@@ -141,6 +142,7 @@ internal class EventEditActionHandler(
                 immutableFieldNames = editorSession?.snapshot?.immutable?.fieldNames?.toSet().orEmpty(),
                 eventTypeHasProtectedHistory =
                     editorSession?.snapshot?.scheduleState?.hasProtectedHistory == true,
+                fallbackEvent = seededEvent,
             )
             val changedRentalSelection = rentalResourcesCoordinator.setAttachedResourceSelection(
                 slots = editDraftCoordinator.editableLeagueTimeSlots.value,
@@ -410,10 +412,27 @@ internal class EventEditActionHandler(
     }
 
     fun onTypeSelected(type: EventType) {
+        val previous = editDraftCoordinator.editedEvent.value
+        val preserveLeagueTournamentChoice =
+            previous.eventType == EventType.LEAGUE || previous.eventType == EventType.TOURNAMENT
+        val automatedScheduling = when (type) {
+            EventType.LEAGUE, EventType.TOURNAMENT ->
+                if (preserveLeagueTournamentChoice) {
+                    previous.automatedScheduling
+                } else {
+                    defaultAutomatedSchedulingForEventType(type)
+                }
+            else -> defaultAutomatedSchedulingForEventType(type)
+        }
         editEventField {
             copy(
                 eventType = type,
-                noFixedEndDateTime = if (type == EventType.WEEKLY_EVENT) false else noFixedEndDateTime,
+                automatedScheduling = automatedScheduling,
+                noFixedEndDateTime = if (automatedScheduling && type != EventType.WEEKLY_EVENT) {
+                    noFixedEndDateTime
+                } else {
+                    false
+                },
             )
         }
     }

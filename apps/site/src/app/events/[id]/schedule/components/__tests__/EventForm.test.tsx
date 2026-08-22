@@ -1168,7 +1168,7 @@ describe('EventForm dirty state', () => {
       initialSetupMode: 'SIMPLE',
     });
 
-    expect(screen.getByRole('radiogroup', { name: 'Schedule style' })).toBeInTheDocument();
+    expect(await screen.findByRole('radiogroup', { name: 'Schedule style' })).toBeInTheDocument();
     expect(screen.getByText('Use one non-repeating timeslot that always matches the event start and end.')).toBeInTheDocument();
     expect(screen.getByText('Use the same selected weekdays and times each week during the event.')).toBeInTheDocument();
     expect(screen.getByText('Add individual dates and times that do not repeat.')).toBeInTheDocument();
@@ -1680,7 +1680,7 @@ describe('EventForm dirty state', () => {
 
     await waitForStableDirtyState(onDirtyStateChange, false);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start Date & Time' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start Date & Time' }));
 
     await waitForStableDirtyState(onDirtyStateChange, true);
   });
@@ -2981,8 +2981,8 @@ describe('EventForm dirty state', () => {
     });
 
     const eventDetailsGrid = document.getElementById('section-event-details-content');
-    const startControl = screen.getByRole('button', { name: 'Start Date & Time' }).closest('.md\\:col-span-2');
-    const endControl = screen.getByRole('button', { name: 'End Date & Time' }).closest('.md\\:col-span-2');
+    const startControl = (await screen.findByRole('button', { name: 'Start Date & Time' })).closest('.md\\:col-span-2');
+    const endControl = (await screen.findByRole('button', { name: 'End Date & Time' })).closest('.md\\:col-span-2');
     const registrationCutoffControl = screen.getByLabelText('Registration Cutoff (Hours)').closest('.md\\:col-span-2');
     const refundCutoffControl = screen.getByLabelText('Refund Cutoff (Hours)').closest('.md\\:col-span-2');
 
@@ -4391,8 +4391,8 @@ describe('EventForm dirty state', () => {
 
     expect(screen.getByText('Rented')).toBeInTheDocument();
     expect(screen.getByLabelText('Rental Court')).toBeChecked();
-    expect(screen.getByRole('button', { name: 'Start Date & Time' })).not.toBeDisabled();
-    expect(screen.getByRole('button', { name: 'End Date & Time' })).not.toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Start Date & Time' })).not.toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'End Date & Time' })).not.toBeDisabled();
 
     await userEvent.click(screen.getByRole('button', { name: /Home Facility/i }));
     await userEvent.click(screen.getByLabelText('Main Court'));
@@ -4603,8 +4603,8 @@ describe('EventForm dirty state', () => {
 
     const selectedRentalResource = await screen.findByLabelText(/Rental Court - Mar 12, 2026/i);
     expect(selectedRentalResource).toBeChecked();
-    expect(screen.getByRole('button', { name: 'Start Date & Time' })).not.toBeDisabled();
-    expect(screen.getByRole('button', { name: 'End Date & Time' })).not.toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Start Date & Time' })).not.toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'End Date & Time' })).not.toBeDisabled();
   });
 
   it('allows selected rental resources to use no fixed end datetime scheduling for leagues', async () => {

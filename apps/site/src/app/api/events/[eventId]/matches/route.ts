@@ -28,6 +28,10 @@ import {
   type MatchPolicyOverrideInput,
 } from '@/server/matches/matchPolicy';
 import { findDollarPrefixedFields } from '@/server/requestParsing';
+import {
+  loadEventProtectedHistory,
+  PROTECTED_MATCH_HISTORY_DELETE_CONFIRMATION,
+} from '@/server/events/eventProtectedHistory';
 
 export const dynamic = 'force-dynamic';
 
@@ -133,6 +137,7 @@ const bulkUpdateSchema = z.object({
   matches: z.array(bulkMatchUpdateSchema).optional(),
   creates: z.array(bulkMatchCreateSchema).optional(),
   deletes: z.array(z.string().min(1)).optional(),
+  confirmation: z.string().optional(),
 }).superRefine((value, ctx) => {
   const updates = value.matches ?? [];
   const creates = value.creates ?? [];
@@ -523,6 +528,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
         }
         deletedMatchIdSet.add(matchId);
       }
+      if (deletedMatchIdSet.size > 0) {
+        const protectedMatchIds = (await loadEventProtectedHistory(eventId, tx)).protectedMatchIds;
+        const protectedDeleteIds = Array.from(deletedMatchIdSet).filter((matchId) => protectedMatchIds.has(matchId));
+        if (
+          protectedDeleteIds.length > 0
+          && parsed.data.confirmation !== PROTECTED_MATCH_HISTORY_DELETE_CONFIRMATION
+        ) {
+          throw NextResponse.json({
+            error: 'Deleting these matches permanently erases started or result-bearing match history.',
+            code: 'PROTECTED_MATCH_HISTORY',
+            confirmation: PROTECTED_MATCH_HISTORY_DELETE_CONFIRMATION,
+            matchIds: protectedDeleteIds,
+          }, { status: 409 });
+        }
+      }
+
 
       const canonicalNodes = new Map<string, BracketNode>();
       for (const match of Object.values(event.matches)) {
@@ -1010,6 +1031,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ eventId: string }> }) {
   const session = await requireSession(req);
+  const body = await req.json().catch(() => null);
+  const confirmation = body && typeof body === 'object' && 'confirmation' in body
+    ? (body as { confirmation?: unknown }).confirmation
+    : undefined;
   const { eventId } = await params;
   const event = await prisma.events.findUnique({ where: { id: eventId } });
   if (!event) {
@@ -1019,15 +1044,39 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ e
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  const deletedMatches = await prisma.matches.findMany({
-    where: { eventId },
-    select: { id: true },
-  });
-  await prisma.matches.deleteMany({ where: { eventId } });
-  publishEventMatchChanges({
-    eventId,
-    deleted: deletedMatches.map((match) => match.id),
-  });
-  return NextResponse.json({ deleted: true }, { status: 200 });
+  try {
+    const deletedMatches = await prisma.$transaction(async (tx) => {
+      await acquireEventLock(tx, eventId);
+      const protectedMatchIds = (await loadEventProtectedHistory(eventId, tx)).protectedMatchIds;
+      const protectedDeleteIds = Array.from(protectedMatchIds);
+      if (
+        protectedDeleteIds.length > 0
+        && confirmation !== PROTECTED_MATCH_HISTORY_DELETE_CONFIRMATION
+      ) {
+        throw NextResponse.json({
+          error: 'Deleting these matches permanently erases started or result-bearing match history.',
+          code: 'PROTECTED_MATCH_HISTORY',
+          confirmation: PROTECTED_MATCH_HISTORY_DELETE_CONFIRMATION,
+          matchIds: protectedDeleteIds,
+        }, { status: 409 });
+      }
+
+      const rows = await tx.matches.findMany({
+        where: { eventId },
+        select: { id: true },
+      });
+      await tx.matches.deleteMany({ where: { eventId } });
+      return rows;
+    });
+    publishEventMatchChanges({
+      eventId,
+      deleted: deletedMatches.map((match: { id: string }) => match.id),
+    });
+    return NextResponse.json({ deleted: true }, { status: 200 });
+  } catch (error) {
+    if (error instanceof Response) return error;
+    console.error('Match collection delete failed', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
 }
 

@@ -7,6 +7,7 @@ import {
   hasWeeklyRepeatingTimeSlot,
   WEEKLY_REPEATING_TIME_SLOT_REQUIRED_MESSAGE,
 } from "@/lib/eventScheduling";
+import { normalizeAutomatedSchedulingForEventType } from "@/lib/automatedScheduling";
 import {
   normalizeEventTaxHandling,
   normalizeOrganizerManualTaxRateBps,
@@ -91,9 +92,13 @@ import {
   serializeMatchSegmentRow,
 } from "@/server/matches/matchOperations";
 import {
+  EventRegistrationStructureLockedError,
   buildEventRegistrationId,
   getEventParticipantIdsForEvent,
+  hasJoinedEventParticipant,
+  upsertEventRegistration,
 } from "@/server/events/eventRegistrations";
+import { hasProtectedEventHistory } from "@/server/events/eventProtectedHistory";
 import { getCanonicalTeamIdsByUserIds } from "@/server/teams/teamMembership";
 import {
   buildGeneratedTournamentPools,
@@ -427,6 +432,7 @@ export const syncEventParticipantRegistrationsFromCompatibilityIds = async (
     syncWaitList: boolean;
     syncFreeAgents: boolean;
     placeholderTeamIds?: string[];
+    divisionIdByRegistrantId?: Record<string, string | null | undefined>;
   },
 ): Promise<void> => {
   if (typeof (client as any).eventRegistrations?.upsert !== "function") {
@@ -500,6 +506,95 @@ export const syncEventParticipantRegistrationsFromCompatibilityIds = async (
       .filter((id): id is string => Boolean(id)),
   );
 
+  const entryDivisionRows =
+    typeof (client as any).divisions?.findMany === "function"
+      ? await (client as any).divisions.findMany({
+          where: {
+            eventId: params.eventId,
+            role: "ENTRY",
+            status: "ACTIVE",
+          },
+          select: { id: true, key: true },
+        })
+      : [];
+  const defaultEntryDivisionId =
+    Array.isArray(entryDivisionRows) && entryDivisionRows.length === 1
+      ? normalizeEntityId(entryDivisionRows[0]?.id)
+      : null;
+  const resolveImportedDivisionId = (registrantId: string): string | null =>
+    normalizeEntityId(params.divisionIdByRegistrantId?.[registrantId]) ??
+    defaultEntryDivisionId;
+  const compatibilityRegistrationIds = Array.from(new Set([
+    ...activeTeamIds.map((registrantId) => buildEventRegistrationId({
+      eventId: params.eventId,
+      registrantType: "TEAM",
+      registrantId,
+    })),
+    ...userIds.map((registrantId) => buildEventRegistrationId({
+      eventId: params.eventId,
+      registrantType: "SELF",
+      registrantId,
+    })),
+    ...waitListIds.flatMap((registrantId) => [
+      buildEventRegistrationId({
+        eventId: params.eventId,
+        registrantType: "TEAM",
+        registrantId,
+      }),
+      buildEventRegistrationId({
+        eventId: params.eventId,
+        registrantType: "SELF",
+        registrantId,
+      }),
+    ]),
+    ...freeAgentIds.map((registrantId) => buildEventRegistrationId({
+      eventId: params.eventId,
+      registrantType: "SELF",
+      registrantId,
+    })),
+  ]));
+  const existingCompatibilityRows =
+    compatibilityRegistrationIds.length
+      && typeof (client as any).eventRegistrations?.findMany === "function"
+      ? await (client as any).eventRegistrations.findMany({
+          where: {
+            eventId: params.eventId,
+            id: { in: compatibilityRegistrationIds },
+          },
+          select: {
+            id: true,
+            eventId: true,
+            registrantId: true,
+            parentId: true,
+            registrantType: true,
+            rosterRole: true,
+            status: true,
+            acceptedAt: true,
+            eventTeamId: true,
+            sourceTeamRegistrationId: true,
+            ageAtEvent: true,
+            divisionId: true,
+            divisionTypeId: true,
+            divisionTypeKey: true,
+            jerseyNumber: true,
+            position: true,
+            isCaptain: true,
+            consentDocumentId: true,
+            consentStatus: true,
+            createdBy: true,
+            slotId: true,
+            occurrenceDate: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        })
+      : [];
+  const existingCompatibilityRowsById = new Map<string, any>(
+    (Array.isArray(existingCompatibilityRows) ? existingCompatibilityRows : [])
+      .map((row: { id?: unknown }) => [normalizeEntityId(row.id), row] as const)
+      .filter((entry): entry is readonly [string, any] => Boolean(entry[0])),
+  );
+
   const upsertRegistration = async (entry: {
     registrantType: "TEAM" | "SELF";
     registrantId: string;
@@ -510,32 +605,77 @@ export const syncEventParticipantRegistrationsFromCompatibilityIds = async (
       registrantType: entry.registrantType,
       registrantId: entry.registrantId,
     });
-    await (client as any).eventRegistrations.upsert({
-      where: { id },
-      create: {
-        id,
-        eventId: params.eventId,
-        registrantId: entry.registrantId,
-        parentId: null,
+    const divisionId = entry.rosterRole === "PARTICIPANT"
+      ? resolveImportedDivisionId(entry.registrantId)
+      : null;
+    if (
+      entry.rosterRole === "PARTICIPANT"
+      && entryDivisionRows.length > 0
+      && !divisionId
+    ) {
+      return;
+    }
+
+    const existing = existingCompatibilityRowsById.get(id) ?? null;
+    const existingAccepted = Boolean(
+      existing?.acceptedAt
+      || ["ACTIVE", "BLOCKED"].includes(String(existing?.status ?? "").toUpperCase()),
+    );
+    const status =
+      entry.rosterRole === "PARTICIPANT"
+        ? existingAccepted
+          ? String(existing?.status ?? "ACTIVE").toUpperCase()
+          : "STARTED"
+        : "ACTIVE";
+
+    if (existing) {
+      await upsertEventRegistration({
+        eventId: existing.eventId ?? params.eventId,
+        registrationId: id,
         registrantType: entry.registrantType,
+        registrantId: entry.registrantId,
         rosterRole: entry.rosterRole,
-        status: "ACTIVE",
+        status: status as any,
+        parentId: existing.parentId ?? null,
         eventTeamId:
-          entry.registrantType === "TEAM" ? entry.registrantId : null,
+          entry.registrantType === "TEAM"
+            ? entry.registrantId
+            : null,
         sourceTeamRegistrationId: null,
-        createdBy,
-        createdAt: now,
-        updatedAt: now,
-      },
-      update: {
-        rosterRole: entry.rosterRole,
-        status: "ACTIVE",
-        eventTeamId:
-          entry.registrantType === "TEAM" ? entry.registrantId : null,
-        sourceTeamRegistrationId: null,
-        updatedAt: now,
-      },
-    });
+        ageAtEvent: existing.ageAtEvent ?? null,
+        divisionId: entry.rosterRole === "PARTICIPANT"
+          ? divisionId
+          : existing.divisionId ?? null,
+        divisionTypeId: existing.divisionTypeId ?? null,
+        divisionTypeKey: existing.divisionTypeKey ?? null,
+        jerseyNumber: existing.jerseyNumber ?? null,
+        position: existing.position ?? null,
+        isCaptain: existing.isCaptain ?? false,
+        consentDocumentId: existing.consentDocumentId ?? null,
+        consentStatus: existing.consentStatus ?? null,
+        createdBy: existing.createdBy ?? createdBy,
+        occurrence: existing.slotId && existing.occurrenceDate
+          ? {
+              slotId: existing.slotId,
+              occurrenceDate: existing.occurrenceDate,
+            }
+          : null,
+      }, client);
+      return;
+    }
+
+    await upsertEventRegistration({
+      eventId: params.eventId,
+      registrantType: entry.registrantType,
+      registrantId: entry.registrantId,
+      rosterRole: entry.rosterRole,
+      status: status as any,
+      parentId: null,
+      eventTeamId:
+        entry.registrantType === "TEAM" ? entry.registrantId : null,
+      divisionId,
+      createdBy,
+    }, client);
   };
 
   const deletePlaceholderRegistrations = async () => {
@@ -4892,6 +5032,12 @@ export const persistScheduledRosterTeams = async (
     syncUsers: false,
     syncWaitList: false,
     syncFreeAgents: false,
+    divisionIdByRegistrantId: Object.fromEntries(
+      rosterTeamIds.map((teamId) => [
+        teamId,
+        resolveScheduledTeamDivisionId(params.scheduled.teams?.[teamId]),
+      ]),
+    ),
     placeholderTeamIds: placeholderRosterTeamIds,
   });
 
@@ -6134,11 +6280,13 @@ export const upsertEventFromPayload = async (
       fieldIds: true,
       timeSlotIds: true,
       eventType: true,
+      teamSignup: true,
       includePlayoffs: true,
       end: true,
       scheduleEndConstraint: true,
       generatedScheduleEnd: true,
       noFixedEndDateTime: true,
+      automatedScheduling: true,
       hostId: true,
       assistantHostIds: true,
       organizationId: true,
@@ -6155,6 +6303,33 @@ export const upsertEventFromPayload = async (
       timeZone: true,
     },
   });
+  if (existingEvent) {
+    const existingEventType = typeof existingEvent.eventType === "string"
+      ? existingEvent.eventType.trim().toUpperCase()
+      : existingEvent.eventType ?? null;
+    const incomingEventType = typeof (payload.eventType ?? existingEvent.eventType) === "string"
+      ? String(payload.eventType ?? existingEvent.eventType).trim().toUpperCase()
+      : payload.eventType ?? existingEvent.eventType ?? null;
+    const existingTeamSignup = Boolean(existingEvent.teamSignup);
+    const incomingTeamSignup = Boolean(
+      Object.prototype.hasOwnProperty.call(payload, "teamSignup")
+        ? payload.teamSignup
+        : existingEvent.teamSignup,
+    );
+    const eventRegistrationsDelegate = (client as any).eventRegistrations;
+    const hasAcceptedParticipant = typeof eventRegistrationsDelegate?.findFirst === "function"
+      ? await hasJoinedEventParticipant(id, client)
+      : false;
+    const hasProtectedHistory = await hasProtectedEventHistory(id, client);
+    if (hasAcceptedParticipant || hasProtectedHistory) {
+      if (incomingEventType !== existingEventType) {
+        throw new EventRegistrationStructureLockedError("eventType");
+      }
+    }
+    if (hasAcceptedParticipant && incomingTeamSignup !== existingTeamSignup) {
+      throw new EventRegistrationStructureLockedError("teamSignup");
+    }
+  }
   const divisionNameEventType = payload.eventType ?? existingEvent?.eventType;
   const divisionNamePoolPlayEnabled = isTournamentPoolPlayEnabled({
     eventType: divisionNameEventType,
@@ -6418,6 +6593,18 @@ export const upsertEventFromPayload = async (
     : resolveTimeZone(payload.timeZone, coordinateTimeZone);
   const defaultFieldLocation = normalizeOptionalText(eventLocation);
   const teams = Array.isArray(payload.teams) ? payload.teams : [];
+  const compatibilityDivisionIdByRegistrantId = Object.fromEntries(
+    teams
+      .map((team: any) => {
+        const registrantId = normalizeEntityId(team?.id);
+        const divisionId = normalizeEntityId(
+          team?.divisionId
+            ?? (typeof team?.division === "object" ? team.division?.id : team?.division),
+        );
+        return registrantId ? [registrantId, divisionId] : null;
+      })
+      .filter((entry: [string, string | null] | null): entry is [string, string | null] => Boolean(entry)),
+  );
   const timeSlots = Array.isArray(payload.timeSlots) ? payload.timeSlots : [];
   const payloadFieldById = new Map<string, Record<string, unknown>>();
   for (const field of fields) {
@@ -6777,6 +6964,12 @@ export const upsertEventFromPayload = async (
       throw new Error("One or more selected club divisions are unavailable.");
     }
   }
+  const automatedScheduling = normalizeAutomatedSchedulingForEventType(
+    nextEventType,
+    Object.prototype.hasOwnProperty.call(payload, "automatedScheduling")
+      ? payload.automatedScheduling
+      : existingEvent?.automatedScheduling,
+  );
   const normalizedParentEvent =
     normalizeEntityId(payload.parentEvent) ??
     normalizeEntityId((existingEvent as any)?.parentEvent);
@@ -7130,6 +7323,7 @@ export const upsertEventFromPayload = async (
     address: payload.address ?? null,
     rating: payload.rating ?? null,
     teamSizeLimit: payload.teamSizeLimit ?? 0,
+    automatedScheduling,
     maxParticipants: normalizedEventMaxParticipants,
     minAge: payload.minAge ?? null,
     maxAge: payload.maxAge ?? null,
@@ -7358,6 +7552,7 @@ export const upsertEventFromPayload = async (
       payload,
       "freeAgentIds",
     ),
+    divisionIdByRegistrantId: compatibilityDivisionIdByRegistrantId,
     placeholderTeamIds,
   });
   if (

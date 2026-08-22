@@ -4494,7 +4494,9 @@ function EventScheduleContent() {
       const completion = {
         mode: createCompletionMode ?? (
           ['LEAGUE', 'TOURNAMENT'].includes(scheduleType)
-            ? 'CREATE_AND_BUILD_SCHEDULE'
+            ? contractDraft.schedule.automatedScheduling === false
+              ? 'CREATE_ONLY'
+              : 'CREATE_AND_BUILD_SCHEDULE'
             : 'CREATE_ONLY'
         ),
       } as const;
@@ -5349,7 +5351,6 @@ function EventScheduleContent() {
     setActionError(null);
 
     try {
-      await leagueService.deleteMatchesByEvent(templateEvent.$id);
       await leagueService.deleteWeeklySchedulesForEvent(templateEvent.$id);
       await eventService.deleteEventResult(templateEvent);
       router.push(homePath);
@@ -5383,7 +5384,6 @@ function EventScheduleContent() {
     setActionError(null);
 
     try {
-      await leagueService.deleteMatchesByEvent(eventToDelete.$id);
       await leagueService.deleteWeeklySchedulesForEvent(eventToDelete.$id);
       await eventService.deleteEventResult(eventToDelete);
       router.push(homePath);
@@ -5476,7 +5476,6 @@ function EventScheduleContent() {
     setCancelling(true);
     setError(null);
     try {
-      await leagueService.deleteMatchesByEvent(event.$id);
       await leagueService.deleteWeeklySchedulesForEvent(event.$id);
       await eventService.deleteEventResult(event);
       router.push(homePath);

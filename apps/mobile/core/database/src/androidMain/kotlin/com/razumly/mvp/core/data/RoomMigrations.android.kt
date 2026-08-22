@@ -1291,6 +1291,24 @@ val MIGRATION_101_102_EVENT_TIME_SLOTS = migration(
     EVENT_TIME_SLOT_CACHE_MIGRATION_STATEMENTS,
 )
 
+val MIGRATION_102_103_EVENT_SCHEDULING_AND_EDITOR_LOCKS = migration(
+    102,
+    103,
+    listOf(
+        "ALTER TABLE `Event` ADD COLUMN `automatedScheduling` INTEGER NOT NULL DEFAULT 0",
+        """
+            UPDATE `Event`
+            SET `automatedScheduling` = CASE
+                WHEN UPPER(TRIM(`eventType`)) IN ('LEAGUE', 'TOURNAMENT', 'WEEKLY_EVENT') THEN 1
+                ELSE 0
+            END
+        """.trimIndent(),
+        "ALTER TABLE `Event` ADD COLUMN `eventTypeLocked` INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE `Event` ADD COLUMN `registrationUnitLocked` INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE `Event` ADD COLUMN `eventTypeHasProtectedHistory` INTEGER NOT NULL DEFAULT 0",
+    ),
+)
+
 
 val MIGRATION_100_101_PROFILE_DOCUMENT_CACHE = migration(
     100,
@@ -1327,4 +1345,5 @@ val MVP_DATABASE_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_99_100_MATCH_GRAPH_PHASE_OWNER,
     MIGRATION_100_101_PROFILE_DOCUMENT_CACHE,
     MIGRATION_101_102_EVENT_TIME_SLOTS,
+    MIGRATION_102_103_EVENT_SCHEDULING_AND_EDITOR_LOCKS,
 )

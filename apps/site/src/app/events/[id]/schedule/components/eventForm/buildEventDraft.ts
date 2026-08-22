@@ -1,5 +1,6 @@
 import type { LeagueSlotForm } from '@/app/discover/components/LeagueFields';
 import { getSystemTimeZone, formatLocalDateTime, normalizeTimeZone, parseLocalDateTime } from '@/lib/dateUtils';
+import { normalizeAutomatedSchedulingForEventType } from '@/lib/automatedScheduling';
 import {
     buildDivisionName,
     buildDivisionToken,
@@ -92,6 +93,7 @@ type BuildEventDraftInput = {
     sportsById: Map<string, Sport>;
 };
 export type BuiltEventDraft = Partial<Event> & {
+    automatedScheduling?: boolean;
     pendingStaffInvites: PendingStaffInvite[];
 };
 
@@ -588,6 +590,10 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
                 && supportsScheduleSlotsForEvent(source.eventType, source.parentEvent)
                 ? Boolean(source.noFixedEndDateTime)
                 : false,
+            automatedScheduling: normalizeAutomatedSchedulingForEventType(
+                source.eventType,
+                source.automatedScheduling,
+            ),
             state: isEditMode ? activeEditingEvent?.state ?? 'PUBLISHED' : 'UNPUBLISHED',
             sportIds,
             price: eventPriceCents,

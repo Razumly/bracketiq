@@ -1195,6 +1195,23 @@ export async function POST(req: NextRequest, context: RouteContext) {
         { status: 409 },
       );
     }
+    if (errorCode === 'EVENT_REGISTRATION_CAPACITY_EXCEEDED') {
+      return NextResponse.json(
+        {
+          error: message,
+          code: errorCode,
+          capacity: (error as { capacity?: number })?.capacity,
+          participantCount: (error as { participantCount?: number })?.participantCount,
+        },
+        { status: 409 },
+      );
+    }
+    if (errorCode === 'INVALID_EVENT_REGISTRATION_UNIT') {
+      return NextResponse.json(
+        { error: message, code: errorCode },
+        { status: 400 },
+      );
+    }
     const status = typeof (error as { status?: unknown })?.status === 'number'
       ? Number((error as { status: number }).status)
       : 500;

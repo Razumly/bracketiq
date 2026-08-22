@@ -10,10 +10,12 @@ import { acquireEventLock } from "@/server/repositories/locks";
 import { upsertEventFromPayload } from "@/server/repositories/events";
 import { hasOrgPermission, canManageEvent } from "@/server/accessControl";
 import { ORG_PERMISSIONS } from "@/lib/organizationPermissions";
+import { assertEventTypeRegistrationUnit } from "./eventRegistrations";
 import {
   collectOrganizationHostIds,
   normalizeEntityId,
 } from "@/lib/organizationEventAccess";
+
 import {
   EVENT_STAFF_CONTRACT_VERSION,
   EventStaffInputError,
@@ -41,6 +43,7 @@ import {
   type EventCreateOperationClaim,
 } from "./eventCreateOperationReplay";
 import { resolveMatchTimingPolicy } from "@/server/scheduler/matchTimingPolicy";
+import { normalizeAutomatedSchedulingForEventType } from "@/lib/automatedScheduling";
 import {
   editorMatchProjectionsFor,
   EventScheduleMutationError,
@@ -163,6 +166,7 @@ const assertMinimumBracketTeamCounts = (draft: EventEditorDraft): void => {
     }
   }
 };
+
 
 
 export class EditorScheduleIntentError extends Error {
@@ -548,6 +552,14 @@ export const saveEventEditor = async (
       currentEvent as unknown as Record<string, unknown>,
       { client: tx, actor, mode: "EDIT" },
     );
+    const nextEventTypeForRegistration = command.draft.basics.eventType.trim().toUpperCase();
+    const draftTeamSignup = typeof command.draft.participation?.teamSignup === "boolean"
+      ? command.draft.participation.teamSignup
+      : nextEventTypeForRegistration === "LEAGUE" || nextEventTypeForRegistration === "TOURNAMENT";
+    assertEventTypeRegistrationUnit(
+      command.draft.basics.eventType,
+      draftTeamSignup,
+    );
     assertImmutableFields(command.draft, eventId, currentSnapshot);
     if (
       currentSnapshot.editorRevision !== command.editorRevision ||
@@ -662,12 +674,51 @@ export const saveEventEditor = async (
 
 const draftOrganizationId = (draft: EventEditorDraft): string | null =>
   draft.basics.organizationId?.trim() || null;
+
+const assertCreateSchedulingIntent = (
+  command: CreateEventEditorCommand,
+): void => {
+  const eventType = command.draft.basics.eventType.trim().toUpperCase();
+  if (!["LEAGUE", "TOURNAMENT"].includes(eventType)) {
+    return;
+  }
+  const automatedScheduling = normalizeAutomatedSchedulingForEventType(
+    eventType,
+    command.draft.schedule.automatedScheduling,
+  );
+  if (
+    command.completion.mode === "CREATE_AND_BUILD_SCHEDULE"
+    && automatedScheduling !== true
+  ) {
+    throw new EditorScheduleIntentError(
+      "Automated Scheduling must be enabled when Create builds a schedule.",
+    );
+  }
+  if (
+    command.completion.mode !== "CREATE_ONLY"
+    || automatedScheduling !== false
+  ) {
+    return;
+  }
+  if (command.draft.schedule.mode !== "FIXED_END") {
+    throw new EditorInputError(
+      "A finite Planned End is required when Automated Scheduling is off.",
+    );
+  }
+  const plannedEnd = new Date(command.draft.schedule.endConstraint);
+  if (!Number.isFinite(plannedEnd.getTime())) {
+    throw new EditorInputError(
+      "A finite Planned End is required when Automated Scheduling is off.",
+    );
+  }
+};
 export const createEventEditor = async (
   actor: EditorActor,
   command: CreateEventEditorCommand,
   options: EditorSaveOptions = {},
 ): Promise<EventEditorCreateResult> => {
   const client = options.client ?? prisma;
+  assertCreateSchedulingIntent(command);
   const requestHash = eventEditorCreateRequestHash(command);
   let claim: EventCreateOperationClaim | null = null;
   let firstClaimResult: EventEditorCreateResult | null = null;
@@ -798,6 +849,14 @@ export const createEventEditor = async (
         createSnapshot.scheduleState.revision,
       );
     }
+    const nextEventTypeForRegistration = command.draft.basics.eventType.trim().toUpperCase();
+    const draftTeamSignup = typeof command.draft.participation?.teamSignup === "boolean"
+      ? command.draft.participation.teamSignup
+      : nextEventTypeForRegistration === "LEAGUE" || nextEventTypeForRegistration === "TOURNAMENT";
+    assertEventTypeRegistrationUnit(
+      command.draft.basics.eventType,
+      draftTeamSignup,
+    );
     assertImmutableFields(command.draft, claimed.eventId, createSnapshot);
     await assertPaymentCapability(command.draft, createSnapshot);
 

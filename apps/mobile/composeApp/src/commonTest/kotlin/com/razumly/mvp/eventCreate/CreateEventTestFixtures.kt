@@ -365,6 +365,7 @@ internal fun createEventEditorSession(
             mode = if (event.noFixedEndDateTime) "GENERATED_END" else "FIXED_END",
             endConstraint = event.end.toString().takeUnless { event.noFixedEndDateTime },
             generatedScheduleEnd = event.end.toString().takeIf { event.noFixedEndDateTime },
+            automatedScheduling = event.automatedScheduling,
         ),
         resources = EventEditorResourcesDto(
             fieldIds = fields.map(Field::id),

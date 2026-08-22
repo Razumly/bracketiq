@@ -57,7 +57,11 @@ export const changeScheduleMode = (
     }
     return result({
       ...draft,
-      schedule: { mode, endConstraint: nextEnd },
+      schedule: {
+        mode,
+        endConstraint: nextEnd,
+        automatedScheduling: draft.schedule.automatedScheduling,
+      },
     });
   }
 
@@ -69,6 +73,7 @@ export const changeScheduleMode = (
       generatedScheduleEnd: draft.schedule.mode === 'GENERATED_END'
         ? draft.schedule.generatedScheduleEnd
         : null,
+      automatedScheduling: draft.schedule.automatedScheduling,
     },
   });
 };

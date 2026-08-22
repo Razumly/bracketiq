@@ -21,10 +21,7 @@ import {
   EditorRevisionConflictError,
   EditorScheduleIntentError,
 } from "@/server/events/eventEditorSave";
-import {
-  EventScheduleMutationError,
-  EventScheduleRevisionConflictError,
-} from "@/server/scheduler/eventScheduleMutation";
+import { EventRegistrationUnitError } from "@/server/events/eventRegistrations";
 import { ScheduleError } from "@/server/scheduler/scheduleEvent";
 import { isEventFieldConfigurationError } from "@/server/repositories/events";
 import { deliverEventStaffInvitesAfterCommit } from "@/server/events/eventStaffDelivery";
@@ -35,6 +32,10 @@ import {
   EventCreateOperationPayloadMismatchError,
 } from "@/server/events/eventCreateOperationReplay";
 import { notifySocialAudienceOfEventCreation } from "@/server/eventCreationNotifications";
+import {
+  EventScheduleMutationError,
+  EventScheduleRevisionConflictError,
+} from "@/server/scheduler/eventScheduleMutation";
 import { sendAdminEventCreatedNotification } from "@/server/adminNotifications";
 
 export const dynamic = "force-dynamic";
@@ -95,6 +96,20 @@ const errorResponse = (error: unknown) => {
     return NextResponse.json(
       { error: error.message, code: "INVALID_EDITOR_INPUT" },
       { status: 400 },
+    );
+  }
+  if (error instanceof EventRegistrationUnitError) {
+    return NextResponse.json(
+      {
+        error: error.message,
+        code: error.code,
+        field: "teamSignup",
+        details: {
+          eventType: error.eventType,
+          teamSignup: error.teamSignup,
+        },
+      },
+      { status: error.status },
     );
   }
   if (error instanceof EditorRevisionConflictError) {

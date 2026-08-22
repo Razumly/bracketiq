@@ -26,6 +26,7 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TimeSlotDTO
 import com.razumly.mvp.core.data.dataTypes.buildEventOfficialRecordId
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.normalizeAutomatedSchedulingForEventType
 import com.razumly.mvp.core.data.dataTypes.isManualRegistrationPaymentMode
 import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentInstructions
 import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentLinks
@@ -98,6 +99,7 @@ data class EventApiDto(
     val hostId: String? = null,
     val assistantHostIds: List<String>? = null,
     val noFixedEndDateTime: Boolean? = null,
+    val automatedScheduling: Boolean? = null,
     val teamSignup: Boolean? = null,
     val singleDivision: Boolean? = null,
     val registrationByDivisionType: Boolean? = null,
@@ -134,6 +136,9 @@ data class EventApiDto(
     val teamSizeLimit: Int? = null,
 
     val eventType: String? = null,
+    val eventTypeLocked: Boolean? = null,
+    val registrationUnitLocked: Boolean? = null,
+    val eventTypeHasProtectedHistory: Boolean? = null,
     val fieldCount: Int? = null,
     val gamesPerOpponent: Int? = null,
     val includePlayoffs: Boolean? = null,
@@ -204,6 +209,10 @@ data class EventApiDto(
         val resolvedEventType = runCatching { EventType.valueOf(normalizedEventType ?: EventType.EVENT.name) }
             .getOrDefault(EventType.EVENT)
         val resolvedNoFixedEndDateTime = noFixedEndDateTime ?: false
+        val resolvedAutomatedScheduling = normalizeAutomatedSchedulingForEventType(
+            resolvedEventType,
+            automatedScheduling,
+        )
         val parsedEnd = when {
             !resolvedEnd.isNullOrBlank() -> parseApiInstant(resolvedEnd, resolvedTimeZone)
             resolvedNoFixedEndDateTime -> parsedStart
@@ -439,6 +448,7 @@ data class EventApiDto(
             hostId = resolvedHostId.orEmpty(),
             assistantHostIds = assistantHostIds ?: emptyList(),
             noFixedEndDateTime = resolvedNoFixedEndDateTime,
+            automatedScheduling = resolvedAutomatedScheduling,
             teamSignup = teamSignup ?: true,
             singleDivision = singleDivision ?: true,
             freeAgentIds = freeAgentIds ?: emptyList(),
@@ -479,6 +489,9 @@ data class EventApiDto(
             teamSizeLimit = (teamSizeLimit ?: 0).takeIf { it > 0 } ?: 2,
             registrationByDivisionType = registrationByDivisionType ?: false,
             eventType = resolvedEventType,
+            eventTypeLocked = eventTypeLocked == true || eventTypeHasProtectedHistory == true,
+            registrationUnitLocked = registrationUnitLocked ?: false,
+            eventTypeHasProtectedHistory = eventTypeHasProtectedHistory ?: false,
             fieldCount = resolvedFieldCount,
             gamesPerOpponent = gamesPerOpponent,
             includePlayoffs = resolvedIncludePlayoffsOrPools,

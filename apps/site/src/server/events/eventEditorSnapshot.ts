@@ -15,6 +15,7 @@ import { loadEventStaffSnapshot } from "./eventStaffReconciliation";
 import { listRegistrationQuestions } from "@/server/registrationQuestions";
 import { buildSeedEventFromTemplate } from "@/server/eventTemplates";
 import { hasJoinedEventParticipant } from "./eventRegistrations";
+import { loadEventProtectedHistory } from "./eventProtectedHistory";
 import { projectEventAuthorityCapabilities } from "@/server/accessControl";
 import {
   matchDemandFromPersistedGraph,
@@ -130,53 +131,10 @@ export const loadEventScheduleState = async (
   revision: string;
   hasProtectedHistory: boolean;
 }> => {
-  const [matches, divisionRows] = await Promise.all([
-    callFindMany(client, "matches", {
-      where: { eventId },
-      select: {
-        id: true,
-        matchId: true,
-        start: true,
-        end: true,
-        locked: true,
-        placementState: true,
-        division: true,
-        fieldId: true,
-        team1Id: true,
-        team2Id: true,
-        team1Seed: true,
-        team2Seed: true,
-        status: true,
-        resultStatus: true,
-        resultType: true,
-        actualStart: true,
-        actualEnd: true,
-        statusReason: true,
-        winnerEventTeamId: true,
-        winnerNextMatchId: true,
-        loserNextMatchId: true,
-        previousLeftId: true,
-        previousRightId: true,
-        side: true,
-        team1Points: true,
-        team2Points: true,
-        updatedAt: true,
-      },
-    }),
-    callFindMany(client, "divisions", {
-      where: { eventId, scope: "EVENT", status: "ACTIVE" },
-      select: { id: true, phase: true },
-    }),
-  ]);
-  const matchIds = matches
-    .filter(
-      (row): row is Record<string, unknown> =>
-        Boolean(row) && typeof row === "object",
-    )
-    .map((row) => row.id)
-    .filter((id): id is string => typeof id === "string" && id.length > 0);
-  const matchWhere = { matchId: { in: matchIds } };
-  const [
+  const protectedHistory = await loadEventProtectedHistory(eventId, client);
+  const {
+    matches,
+    divisionRows,
     segments,
     incidents,
     receipts,
@@ -184,98 +142,21 @@ export const loadEventScheduleState = async (
     rosters,
     broadcastActions,
     broadcastStates,
-  ] = await Promise.all([
-    callFindMany(client, "matchSegments", {
-      where: matchWhere,
-      select: {
-        id: true,
-        matchId: true,
-        sequence: true,
-        status: true,
-        scores: true,
-        winnerEventTeamId: true,
-        startedAt: true,
-        endedAt: true,
-        resultType: true,
-        statusReason: true,
-        updatedAt: true,
-      },
-    }),
-    callFindMany(client, "matchIncidents", {
-      where: matchWhere,
-      select: {
-        id: true,
-        matchId: true,
-        incidentType: true,
-        sequence: true,
-        updatedAt: true,
-      },
-    }),
-    callFindMany(client, "matchOperationReceipts", {
-      where: matchWhere,
-      select: {
-        clientOperationId: true,
-        matchId: true,
-        operationKind: true,
-        requestHash: true,
-        createdAt: true,
-      },
-    }),
-    callFindMany(client, "teamCheckIns", {
-      where: matchWhere,
-      select: {
-        id: true,
-        matchId: true,
-        eventTeamId: true,
-        scope: true,
-        status: true,
-        checkedInAt: true,
-        updatedAt: true,
-      },
-    }),
-    callFindMany(client, "matchRosterEntries", {
-      where: matchWhere,
-      select: {
-        id: true,
-        matchId: true,
-        eventTeamId: true,
-        userId: true,
-        source: true,
-        status: true,
-        removedAt: true,
-        updatedAt: true,
-      },
-    }),
-    callFindMany(client, "broadcastOverlayActions", {
-      where: { eventId, matchId: { not: null } },
-      select: {
-        id: true,
-        matchId: true,
-        actionType: true,
-        requestId: true,
-        presentationRevision: true,
-        createdAt: true,
-      },
-    }),
-    callFindMany(client, "broadcastOverlayStates", {
-      where: { eventId },
-      select: {
-        id: true,
-        activeMatchId: true,
-        revision: true,
-        updatedAt: true,
-      },
-    }),
-  ]);
+    protectedMatchIds,
+  } = protectedHistory;
 
   const matchRows = matches.filter(
     (row): row is Record<string, unknown> =>
       Boolean(row) && typeof row === "object",
   );
-  const segmentRows = segments.filter(
-    (row): row is Record<string, unknown> =>
-      Boolean(row) && typeof row === "object",
-  );
+  const segmentRows = segments;
+  const dependentRows = [
+    ...incidents,
+    ...receipts,
+    ...checkIns,
+    ...rosters,
+    ...broadcastActions,
+  ];
   const demandDivisions = divisionRows
     .filter(
       (row): row is Record<string, unknown> =>
@@ -300,70 +181,6 @@ export const loadEventScheduleState = async (
     })),
     demandDivisions,
   );
-  const matchIdSet = new Set(matchIds);
-  const hasNonZeroScores = (value: unknown): boolean =>
-    Array.isArray(value) &&
-    value.some(
-      (score) =>
-        typeof score === "number" && Number.isFinite(score) && score !== 0,
-    );
-  const protectedMatchIds = new Set<string>();
-  for (const row of matchRows) {
-    const status =
-      typeof row.status === "string" ? row.status.trim().toUpperCase() : null;
-    if (
-      row.locked === true ||
-      (status !== null && status !== "" && status !== "NOT_STARTED") ||
-      row.actualStart != null ||
-      row.actualEnd != null ||
-      row.resultStatus != null ||
-      row.resultType != null ||
-      row.statusReason != null ||
-      row.winnerEventTeamId != null ||
-      hasNonZeroScores(row.team1Points) ||
-      hasNonZeroScores(row.team2Points)
-    ) {
-      if (typeof row.id === "string") protectedMatchIds.add(row.id);
-    }
-  }
-  for (const row of segmentRows) {
-    const status =
-      typeof row.status === "string" ? row.status.trim().toUpperCase() : null;
-    if (
-      (status !== null && status !== "" && status !== "NOT_STARTED") ||
-      row.startedAt != null ||
-      row.endedAt != null ||
-      row.resultType != null ||
-      row.winnerEventTeamId != null ||
-      hasNonZeroScores(row.scores)
-    ) {
-      if (typeof row.matchId === "string") protectedMatchIds.add(row.matchId);
-    }
-  }
-  const dependentRows = [
-    incidents,
-    receipts,
-    checkIns,
-    rosters,
-    broadcastActions,
-  ]
-    .flat()
-    .filter(
-      (row): row is Record<string, unknown> =>
-        Boolean(row) && typeof row === "object",
-    );
-  for (const row of dependentRows) {
-    if (typeof row.matchId === "string" && matchIdSet.has(row.matchId)) {
-      protectedMatchIds.add(row.matchId);
-    }
-  }
-  for (const row of broadcastStates) {
-    if (!row || typeof row !== "object") continue;
-    const activeMatchId = (row as Record<string, unknown>).activeMatchId;
-    if (typeof activeMatchId === "string" && matchIdSet.has(activeMatchId)) {
-      protectedMatchIds.add(activeMatchId);
-    }
-  }
   const normalizedSourceType =
     typeof event.sourceType === "string" && event.sourceType.trim()
       ? event.sourceType.trim()
@@ -378,6 +195,7 @@ export const loadEventScheduleState = async (
       "scheduleEndConstraint",
       "generatedScheduleEnd",
       "noFixedEndDateTime",
+      "automatedScheduling",
       "fieldIds",
       "timeSlotIds",
       "updatedAt",
@@ -1318,6 +1136,7 @@ const emptyEvent = (
     scheduleEndConstraint: null,
     generatedScheduleEnd: null,
     noFixedEndDateTime: !isOneTimeEvent,
+    automatedScheduling: eventType === "LEAGUE" || eventType === "TOURNAMENT" || eventType === "WEEKLY_EVENT",
     location: "",
     address: "",
     coordinates: [0, 0],

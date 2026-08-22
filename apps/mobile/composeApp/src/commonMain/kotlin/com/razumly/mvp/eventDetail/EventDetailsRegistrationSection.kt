@@ -275,29 +275,25 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
                     playoffsOrPoolsInput()
                 }
                 Box(modifier = Modifier.weight(1f)) {
+                    val teamRegistrationRequired = state.editEvent.eventType == EventType.LEAGUE ||
+                        state.editEvent.eventType == EventType.TOURNAMENT
+                    val teamRegistrationMutable = state.editEvent.eventType == EventType.EVENT ||
+                        state.editEvent.eventType == EventType.WEEKLY_EVENT
+                    val teamRegistrationChecked = when {
+                        teamRegistrationRequired -> true
+                        state.editEvent.eventType == EventType.TRYOUT -> false
+                        else -> state.editEvent.teamSignup
+                    }
                     LabeledCheckboxRow(
-                        checked = if (
-                            state.editEvent.eventType == EventType.EVENT ||
-                            state.editEvent.eventType == EventType.WEEKLY_EVENT
-                        ) {
-                            state.editEvent.teamSignup
-                        } else {
-                            true
-                        },
+                        checked = teamRegistrationChecked,
                         label = if (state.teamSignupLocked) {
                             "Team Event (locked: participants joined)"
                         } else {
                             "Team Event"
                         },
-                        enabled = (
-                            state.editEvent.eventType == EventType.EVENT ||
-                                state.editEvent.eventType == EventType.WEEKLY_EVENT
-                            ) && !state.teamSignupLocked,
+                        enabled = teamRegistrationMutable && !state.teamSignupLocked,
                         onCheckedChange = { checked ->
-                            if (
-                                state.editEvent.eventType == EventType.EVENT ||
-                                state.editEvent.eventType == EventType.WEEKLY_EVENT
-                            ) {
+                            if (teamRegistrationMutable) {
                                 actions.onEditEvent { copy(teamSignup = checked) }
                             }
                         },

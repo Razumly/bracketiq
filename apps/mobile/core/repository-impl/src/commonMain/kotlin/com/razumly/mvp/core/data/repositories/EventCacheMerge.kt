@@ -51,7 +51,10 @@ internal suspend fun DatabaseService.cachePartialEventsPreservingDivisionState(
         .getEventsByIds(events.map(Event::id))
         .associateBy(Event::id)
     val mergedEvents = events.map { event ->
-        event.withCachedDivisionStateForPartialSnapshot(cachedById[event.id])
+        mergePersistedEventEditorLocks(
+            incoming = event.withCachedDivisionStateForPartialSnapshot(cachedById[event.id]),
+            cached = cachedById[event.id],
+        )
     }
     getEventDao.upsertEvents(mergedEvents)
     return mergedEvents

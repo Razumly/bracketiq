@@ -5,6 +5,7 @@ import { NextRequest } from 'next/server';
 const prismaMock = {
   $transaction: jest.fn(),
   matches: {
+    findMany: jest.fn(),
     deleteMany: jest.fn(),
     upsert: jest.fn(),
   },
@@ -344,6 +345,7 @@ describe('schedule routes', () => {
     );
     prismaMock.userData.findUnique.mockResolvedValue({ firstName: 'Host', lastName: 'User', userName: 'host_user' });
     prismaMock.sensitiveUserData.findFirst.mockResolvedValue({ email: 'host@example.test' });
+    prismaMock.matches.findMany.mockResolvedValue([]);
     prismaMock.eventRegistrations.findMany.mockResolvedValue([]);
     prismaMock.eventRegistrations.deleteMany.mockResolvedValue({ count: 0 });
     prismaMock.eventRegistrations.upsert.mockResolvedValue({});
@@ -3144,6 +3146,93 @@ describe('schedule routes', () => {
     expect(saveMatchesMock.mock.calls[0]?.[1]).toHaveLength(1);
     expect(json.deleted).toEqual(['match_1']);
   });
+  it('rejects bulk deletion of started or result-bearing matches without confirmation', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
+    prismaMock.events.findUnique.mockResolvedValue({
+      id: 'event_1',
+      hostId: 'host_1',
+      assistantHostIds: [],
+      organizationId: null,
+    });
+    prismaMock.matches.findMany.mockResolvedValue([{
+      id: 'match_started',
+      status: 'COMPLETE',
+      resultStatus: 'FINAL',
+      resultType: 'WIN',
+      actualStart: new Date('2026-08-21T18:00:00.000Z'),
+      actualEnd: new Date('2026-08-21T18:30:00.000Z'),
+      winnerEventTeamId: 'team_1',
+      team1Points: [21],
+      team2Points: [18],
+    }]);
+    loadEventWithRelationsMock.mockResolvedValue({
+      id: 'event_1',
+      eventType: 'TOURNAMENT',
+      hostId: 'host_1',
+      matches: { match_started: { id: 'match_started' } },
+      teams: {},
+      fields: {},
+    });
+
+    const res = await matchesPatch(
+      patchRequest('http://localhost/api/events/event_1/matches', {
+        deletes: ['match_started'],
+      }),
+      { params: Promise.resolve({ eventId: 'event_1' }) },
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json).toEqual(expect.objectContaining({
+      code: 'PROTECTED_MATCH_HISTORY',
+      confirmation: 'DELETE_PROTECTED_MATCH_HISTORY',
+    }));
+    expect(json.error).toContain('permanently erases');
+    expect(prismaMock.matches.deleteMany).not.toHaveBeenCalled();
+    expect(saveMatchesMock).not.toHaveBeenCalled();
+  });
+
+  it('allows protected bulk deletion only with the explicit history confirmation', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
+    prismaMock.events.findUnique.mockResolvedValue({
+      id: 'event_1',
+      hostId: 'host_1',
+      assistantHostIds: [],
+      organizationId: null,
+    });
+    prismaMock.matches.findMany.mockResolvedValue([{
+      id: 'match_started',
+      status: 'COMPLETE',
+      resultStatus: 'FINAL',
+      actualStart: new Date('2026-08-21T18:00:00.000Z'),
+      actualEnd: new Date('2026-08-21T18:30:00.000Z'),
+      team1Points: [21],
+      team2Points: [18],
+    }]);
+    loadEventWithRelationsMock.mockResolvedValue({
+      id: 'event_1',
+      eventType: 'TOURNAMENT',
+      hostId: 'host_1',
+      matches: { match_started: { id: 'match_started' } },
+      teams: {},
+      fields: {},
+      divisions: [],
+    });
+    serializeMatchesMock.mockReturnValue([]);
+
+    const res = await matchesPatch(
+      patchRequest('http://localhost/api/events/event_1/matches', {
+        deletes: ['match_started'],
+        confirmation: 'DELETE_PROTECTED_MATCH_HISTORY',
+      }),
+      { params: Promise.resolve({ eventId: 'event_1' }) },
+    );
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.matches.deleteMany).toHaveBeenCalled();
+    expect(saveMatchesMock).toHaveBeenCalled();
+  });
+
 
   it('bulk creates tournament bracket match with placeholder team and maxParticipants increment', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });

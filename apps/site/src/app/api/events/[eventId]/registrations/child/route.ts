@@ -14,6 +14,9 @@ import {
 } from '@/server/registrationQuestions';
 import {
   EventConfigurationChangedError,
+  EventRegistrationCapacityError,
+  EventRegistrationDivisionError,
+  EventRegistrationUnitError,
   acquireEventLockAndLoadStructure,
   findEventRegistration,
   upsertEventRegistration,
@@ -267,6 +270,42 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
     if (error instanceof EventConfigurationChangedError) {
       return NextResponse.json(
         { error: error.message, code: error.code },
+        { status: error.status },
+      );
+    }
+    if (error instanceof EventRegistrationCapacityError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: error.code,
+          capacity: error.capacity,
+          participantCount: error.participantCount,
+        },
+        { status: error.status },
+      );
+    }
+    if (error instanceof EventRegistrationDivisionError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: error.code,
+          divisionId: error.divisionId,
+          matchCount: error.matchCount,
+        },
+        { status: error.status },
+      );
+    }
+    if (error instanceof EventRegistrationUnitError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: error.code,
+          field: 'teamSignup',
+          details: {
+            eventType: error.eventType,
+            teamSignup: error.teamSignup,
+          },
+        },
         { status: error.status },
       );
     }

@@ -25,7 +25,7 @@ import kotlin.test.assertTrue
 class EventCreateSimpleSetupTest {
 
     @Test
-    fun simple_setup_starts_with_options_then_uses_independent_section_copies() {
+    fun given_simple_setup_when_sections_are_read_then_independent_copies_are_used() {
         assertEquals(
             listOf(
                 "Options",
@@ -42,7 +42,7 @@ class EventCreateSimpleSetupTest {
     }
 
     @Test
-    fun standard_events_skip_only_advanced_sections_that_do_not_render() {
+    fun given_standard_events_when_setup_pages_are_resolved_then_only_non_rendering_advanced_sections_are_skipped() {
         val pages = resolveEventCreateSetupPages(
             event = Event(eventType = EventType.EVENT),
             currentPageId = EventCreateSetupPageId.BASIC_INFORMATION,
@@ -58,7 +58,7 @@ class EventCreateSimpleSetupTest {
     }
 
     @Test
-    fun league_setup_moves_match_rules_into_divisions() {
+    fun given_league_setup_when_pages_are_resolved_then_match_rules_are_in_divisions() {
         val pages = resolveEventCreateSetupPages(
             event = Event(eventType = EventType.LEAGUE),
             currentPageId = EventCreateSetupPageId.BASIC_INFORMATION,
@@ -78,7 +78,7 @@ class EventCreateSimpleSetupTest {
     }
 
     @Test
-    fun tournament_setup_uses_division_rules_but_not_league_scoring() {
+    fun given_tournament_setup_when_pages_are_resolved_then_division_rules_are_used_without_league_scoring() {
         val pages = resolveEventCreateSetupPages(
             event = Event(eventType = EventType.TOURNAMENT),
             currentPageId = EventCreateSetupPageId.BASIC_INFORMATION,
@@ -91,7 +91,7 @@ class EventCreateSimpleSetupTest {
     }
 
     @Test
-    fun navigation_skips_sections_advanced_does_not_render() {
+    fun given_simple_setup_when_navigation_is_resolved_then_non_rendering_advanced_sections_are_skipped() {
         val pages = resolveEventCreateSetupPages(
             event = Event(eventType = EventType.EVENT),
             currentPageId = EventCreateSetupPageId.EVENT_DETAILS,
@@ -110,7 +110,7 @@ class EventCreateSimpleSetupTest {
     }
 
     @Test
-    fun each_simple_page_exposes_only_its_advanced_section_content() {
+    fun given_simple_setup_page_when_visibility_is_resolved_then_only_its_advanced_content_is_exposed() {
         assertEquals(
             EventDetailsSectionVisibility.None.copy(options = true),
             simpleSetupSectionVisibility(EventCreateSetupPageId.OPTIONS),
@@ -146,8 +146,10 @@ class EventCreateSimpleSetupTest {
     }
 
     @Test
-    fun basic_division_and_schedule_pages_keep_their_minimum_continue_checks() {
+    fun given_basic_division_and_schedule_pages_when_continue_is_checked_then_minimum_requirements_are_enforced() {
         val event = Event(
+            eventType = EventType.LEAGUE,
+            automatedScheduling = true,
             name = "Summer League",
             imageId = "image-1",
             sportIds = listOf("basketball"),
@@ -182,8 +184,10 @@ class EventCreateSimpleSetupTest {
     }
 
     @Test
-    fun basic_information_requires_an_uploaded_event_image_before_continue() {
+    fun given_basic_information_when_continue_is_checked_then_an_uploaded_event_image_is_required() {
         val event = Event(
+            eventType = EventType.LEAGUE,
+            automatedScheduling = true,
             name = "Summer League",
             imageId = "",
             sportIds = listOf("basketball"),
@@ -202,7 +206,7 @@ class EventCreateSimpleSetupTest {
     }
 
     @Test
-    fun league_scoring_requires_each_enabled_sport_value_before_continue() {
+    fun given_league_scoring_when_continue_is_checked_then_each_enabled_sport_value_is_required() {
         val sport = SportDTO(
             name = "Soccer",
             usePointsForWin = true,
@@ -235,7 +239,7 @@ class EventCreateSimpleSetupTest {
 
     @OptIn(ExperimentalTime::class)
     @Test
-    fun default_competition_timeslot_uses_the_event_window_and_all_resources_and_divisions() {
+    fun given_default_competition_timeslot_when_built_then_event_window_resources_and_divisions_are_used() {
         val start = Instant.parse("2026-07-20T18:00:00Z")
         val end = Instant.parse("2026-07-20T20:00:00Z")
         val slot = createSimpleSetupEventRangeSlot(
@@ -262,7 +266,7 @@ class EventCreateSimpleSetupTest {
     }
 
     @Test
-    fun turning_off_paid_registration_clears_all_hidden_payment_state() {
+    fun given_paid_registration_when_disabled_then_hidden_payment_state_is_cleared() {
         val updated = Event(
             priceCents = 2500,
             registrationPaymentMode = REGISTRATION_PAYMENT_MODE_MANUAL,
@@ -291,7 +295,7 @@ class EventCreateSimpleSetupTest {
     }
 
     @Test
-    fun turning_off_team_registration_clears_team_only_children() {
+    fun given_team_registration_when_disabled_then_team_only_children_are_cleared() {
         val updated = Event(
             eventType = EventType.EVENT,
             teamSignup = true,
@@ -311,7 +315,7 @@ class EventCreateSimpleSetupTest {
     }
 
     @Test
-    fun manual_payments_clear_online_refund_and_installment_children() {
+    fun given_manual_payments_when_enabled_then_online_refund_and_installment_children_are_cleared() {
         val updated = Event(
             priceCents = 2500,
             cancellationRefundHours = 24,
@@ -389,7 +393,7 @@ class EventCreateSimpleSetupTest {
     }
 
     @Test
-    fun disabling_double_elimination_normalizes_event_and_division_brackets() {
+    fun given_double_elimination_when_disabled_then_event_and_division_brackets_are_normalized() {
         val updated = Event(
             eventType = EventType.TOURNAMENT,
             doubleElimination = true,

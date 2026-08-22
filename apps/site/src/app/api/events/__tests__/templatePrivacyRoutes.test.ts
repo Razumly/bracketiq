@@ -19,6 +19,7 @@ const prismaMock = {
   },
   eventRegistrations: {
     findMany: jest.fn(),
+    findFirst: jest.fn(),
   },
   matches: {
     findMany: jest.fn(),
@@ -101,6 +102,7 @@ describe("event template privacy routes", () => {
     prismaMock.userData.findUnique.mockReset();
     prismaMock.teams.findMany.mockReset();
     prismaMock.eventRegistrations.findMany.mockReset();
+    prismaMock.eventRegistrations.findFirst.mockReset();
     prismaMock.matches.findMany.mockReset();
     prismaMock.timeSlots.findMany.mockReset();
     prismaMock.fields.findFirst.mockReset();
@@ -120,6 +122,7 @@ describe("event template privacy routes", () => {
     prismaMock.userData.findUnique.mockResolvedValue({ hiddenEventIds: [] });
     prismaMock.divisions.findMany.mockResolvedValue([]);
     prismaMock.teams.findMany.mockResolvedValue([]);
+    prismaMock.eventRegistrations.findFirst.mockResolvedValue(null);
     prismaMock.eventRegistrations.findMany.mockResolvedValue([]);
     prismaMock.staffMembers.findUnique.mockResolvedValue(null);
     prismaMock.organizationRoles.findFirst.mockResolvedValue(null);
@@ -392,6 +395,51 @@ describe("event template privacy routes", () => {
     expect(payload.staffInvites).toEqual([
       expect.objectContaining({ id: "invite_1", email: "staff@example.com" }),
     ]);
+  });
+  it("projects structural lock state for an editor and omits it for a public viewer", async () => {
+    const event = {
+      id: "event_1",
+      name: "Locked Event",
+      state: "PUBLISHED",
+      hostId: "host_1",
+      eventType: "LEAGUE",
+      teamSignup: true,
+      assistantHostIds: [],
+      organizationId: null,
+    };
+    getOptionalSessionMock.mockResolvedValueOnce({
+      userId: "host_1",
+      isAdmin: false,
+    });
+    prismaMock.events.findUnique.mockResolvedValue(event);
+    prismaMock.eventRegistrations.findFirst.mockResolvedValue({ id: "registration_1" });
+    prismaMock.matches.findMany.mockResolvedValue([
+      { id: "match_1", status: "STARTED" },
+    ]);
+
+    const managedResponse = await eventGet(
+      new NextRequest("http://localhost/api/events/event_1"),
+      { params: Promise.resolve({ eventId: "event_1" }) },
+    );
+    const managedPayload = await managedResponse.json();
+
+    expect(managedResponse.status).toBe(200);
+    expect(managedPayload).toEqual(expect.objectContaining({
+      eventTypeLocked: true,
+      registrationUnitLocked: true,
+      eventTypeHasProtectedHistory: true,
+    }));
+
+    const publicResponse = await eventGet(
+      new NextRequest("http://localhost/api/events/event_1"),
+      { params: Promise.resolve({ eventId: "event_1" }) },
+    );
+    const publicPayload = await publicResponse.json();
+
+    expect(publicResponse.status).toBe(200);
+    expect(publicPayload).not.toHaveProperty("eventTypeLocked");
+    expect(publicPayload).not.toHaveProperty("registrationUnitLocked");
+    expect(publicPayload).not.toHaveProperty("eventTypeHasProtectedHistory");
   });
 
   it("allows reading a private event when requester is host", async () => {
@@ -931,17 +979,23 @@ describe("event template privacy routes", () => {
     prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([
       {
         eventId: "event_1",
+        registrantId: "team_1",
         registrantType: "TEAM",
         rosterRole: "PARTICIPANT",
         slotId: null,
+        status: "ACTIVE",
+        acceptedAt: new Date("2026-06-01T00:00:00.000Z"),
         occurrenceDate: null,
       },
       {
         eventId: "event_1",
+        registrantId: "team_2",
         registrantType: "TEAM",
         rosterRole: "PARTICIPANT",
         slotId: null,
         occurrenceDate: null,
+        status: "ACTIVE",
+        acceptedAt: new Date("2026-06-01T00:00:00.000Z"),
       },
     ]);
 
@@ -1077,17 +1131,23 @@ describe("event template privacy routes", () => {
     prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([
       {
         eventId: "event_2",
+        registrantId: "team_1",
         registrantType: "TEAM",
         rosterRole: "PARTICIPANT",
         slotId: null,
+        status: "ACTIVE",
+        acceptedAt: new Date("2026-06-01T00:00:00.000Z"),
         occurrenceDate: null,
       },
       {
         eventId: "event_2",
+        registrantId: "team_2",
         registrantType: "TEAM",
         rosterRole: "PARTICIPANT",
         slotId: null,
         occurrenceDate: null,
+        status: "ACTIVE",
+        acceptedAt: new Date("2026-06-01T00:00:00.000Z"),
       },
     ]);
 

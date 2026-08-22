@@ -135,6 +135,7 @@ describe('useEventFormConfigurationActions', () => {
 
         await waitFor(() => {
             expect(result.current.eventData.eventType).toBe('LEAGUE');
+            expect(result.current.eventData.automatedScheduling).toBe(true);
             expect(result.current.eventData.teamSignup).toBe(true);
             expect(result.current.eventData.singleDivision).toBe(true);
             expect(result.current.eventData.noFixedEndDateTime).toBe(true);

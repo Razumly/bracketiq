@@ -319,6 +319,7 @@ class EventRepository(
             val persistedEvent = roomStore.cacheAndReadEvent(
                 event = canonical.event,
                 expectedEventId = canonical.event.id,
+                protectedHistoryAuthoritative = true,
             )
             roomStore.cacheEventTimeSlots(
                 eventId = persistedEvent.id,
@@ -335,11 +336,12 @@ class EventRepository(
                 eventId = persistedEvent.id,
                 matches = response.scheduleOutcome.matches.map { dto -> dto.toMatchOrThrow() },
             )
+            val persistedCanonical = canonical.copy(event = persistedEvent)
             EventEditorSaveOutcome(
                 session = EventEditorSession(
                     snapshot = response.snapshot,
-                    canonicalState = canonical,
-                    baseline = canonical,
+                    canonicalState = persistedCanonical,
+                    baseline = persistedCanonical,
                     createOperationId = command.createOperationId,
                 ),
                 questionIdMap = response.questionIdMap,
@@ -348,9 +350,20 @@ class EventRepository(
             )
         }
     }
-
     override suspend fun getEventEditor(eventId: String): Result<EventEditorSession> = runCatching {
-        EventEditorSessionMapper.fromEditSnapshot(editorRemoteGateway.openEdit(eventId))
+        val session = EventEditorSessionMapper.fromEditSnapshot(editorRemoteGateway.openEdit(eventId))
+        val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
+            ?: error("Event id is required.")
+        val persistedEvent = roomStore.cacheAndReadEvent(
+            event = session.canonicalState.event,
+            expectedEventId = normalizedEventId,
+            protectedHistoryAuthoritative = true,
+        )
+        val persistedCanonical = session.canonicalState.copy(event = persistedEvent)
+        session.copy(
+            canonicalState = persistedCanonical,
+            baseline = persistedCanonical,
+        )
     }
 
     override suspend fun saveEventEditor(
@@ -365,16 +378,18 @@ class EventRepository(
             val persistedEvent = roomStore.cacheAndReadEvent(
                 event = canonical.event,
                 expectedEventId = normalizedEventId,
+                protectedHistoryAuthoritative = true,
             )
             roomStore.cacheEventTimeSlots(
                 eventId = persistedEvent.id,
                 timeSlots = canonical.timeSlots,
             )
+            val persistedCanonical = canonical.copy(event = persistedEvent)
             EventEditorSaveOutcome(
                 session = EventEditorSession(
                     snapshot = response.snapshot,
-                    canonicalState = canonical,
-                    baseline = canonical,
+                    canonicalState = persistedCanonical,
+                    baseline = persistedCanonical,
                 ),
                 questionIdMap = response.questionIdMap,
                 staffEmailDelivery = response.staffEmailDelivery,
@@ -394,7 +409,10 @@ class EventRepository(
         val matches = mergeScheduleMatchProjections(
             response.matches.mapNotNull { match -> match.toMatchOrNull() },
         )
-        val persistedEvent = roomStore.cacheAndReadEvent(event, expectedEventId = normalizedEventId)
+        val persistedEvent = roomStore.cacheAndReadEvent(
+            event = event,
+            expectedEventId = normalizedEventId,
+        )
         persistBootstrapMatches(normalizedEventId, matches)
         EventScheduleOutcome(
             event = persistedEvent,
@@ -426,13 +444,22 @@ class EventRepository(
         val bootstrapEvent = bootstrap.event
             ?.toEventOrNull()
         val baseEvent = bootstrapEvent ?: cachedEvent ?: event
+        val protectedHistoryAuthoritative = bootstrap.event?.eventTypeHasProtectedHistory != null
         val participantSnapshot = bootstrap.participantSnapshot
+            ?.let { snapshot ->
+                if (protectedHistoryAuthoritative) {
+                    snapshot.copy(event = bootstrap.event)
+                } else {
+                    snapshot
+                }
+            }
             ?: EventParticipantsSnapshotResponseDto(event = bootstrap.event)
 
         databaseService.withTransaction {
             val participantResult = participantSyncCoordinator.mergeParticipantsSnapshot(
                 baseEvent = baseEvent,
                 snapshot = participantSnapshot,
+                protectedHistoryAuthoritative = protectedHistoryAuthoritative,
             )
             participantSyncCoordinator.persistDetailCaches(
                 eventId = normalizedEventId,
@@ -579,9 +606,11 @@ class EventRepository(
         response.template?.toEventTemplateSummaryOrNull() ?: error("Create template response missing template")
     }
 
-    override suspend fun updateLocalEvent(newEvent: Event): Result<Event> {
-        databaseService.getEventDao.upsertEvent(newEvent)
-        return Result.success(newEvent)
+    override suspend fun updateLocalEvent(newEvent: Event): Result<Event> = runCatching {
+        roomStore.cacheAndReadEvent(
+            event = newEvent,
+            expectedEventId = newEvent.id,
+        )
     }
 
     override fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<Event>>> =

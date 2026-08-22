@@ -33,7 +33,7 @@ import kotlin.time.Instant
 
 class DefaultCreateEventComponentTest : MainDispatcherTest() {
     @Test
-    fun failed_event_image_delete_keeps_the_selection_and_retries_the_same_delete() = runTest(testDispatcher) {
+    fun given_failed_image_delete_when_retrying_then_selection_is_preserved() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         harness.imageRepository.deleteFailure = IllegalStateException("offline")
         var deletedSelections = 0
@@ -59,7 +59,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun create_screen_initializes_from_canonical_create_bootstrap() = runTest(testDispatcher) {
+    fun given_canonical_create_bootstrap_when_screen_loads_then_event_is_initialized() = runTest(testDispatcher) {
         val seededEvent = com.razumly.mvp.core.data.dataTypes.Event(
             id = "seeded-event",
             name = "Seeded League",
@@ -112,7 +112,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun template_bootstrap_preserves_start_resources_questions_and_staff_in_one_create_command() = runTest(testDispatcher) {
+    fun given_template_bootstrap_when_create_command_is_built_then_start_resources_questions_and_staff_are_preserved() = runTest(testDispatcher) {
         val templateQuery = EventEditorBootstrapQueryDto(
             organizationId = "org-1",
             templateId = "template-1",
@@ -197,7 +197,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun create_screen_terms_loading_mirrors_repository_state() = runTest(testDispatcher) {
+    fun given_terms_loading_when_screen_loads_then_repository_state_is_mirrored() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
 
         assertFalse(harness.component.termsConsentLoading.value)
@@ -208,7 +208,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun create_screen_uses_shared_terms_consent_state_without_refetching() = runTest(testDispatcher) {
+    fun given_unaccepted_terms_when_screen_loads_then_shared_consent_state_is_used() = runTest(testDispatcher) {
         val harness = CreateEventHarness().apply {
             userRepository.chatTermsConsent = userRepository.chatTermsConsent.copy(
                 accepted = false,
@@ -223,7 +223,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun accepting_terms_updates_create_screen_consent_state() = runTest(testDispatcher) {
+    fun given_unaccepted_terms_when_terms_are_accepted_then_consent_state_is_updated() = runTest(testDispatcher) {
         val harness = CreateEventHarness().apply {
             userRepository.chatTermsConsent = userRepository.chatTermsConsent.copy(
                 accepted = false,
@@ -240,7 +240,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun searching_staff_exposes_matching_people_to_simple_setup() = runTest(testDispatcher) {
+    fun given_staff_search_query_when_results_match_then_people_are_exposed_to_simple_setup() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         harness.userRepository.searchResults = listOf(createUser(id = "staff-1"))
 
@@ -257,7 +257,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun updating_host_and_assistant_hosts_normalizes_ids_and_prevents_host_duplication() = runTest(testDispatcher) {
+    fun given_host_and_assistant_updates_when_ids_overlap_then_host_duplication_is_prevented() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
@@ -279,7 +279,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun updating_official_state_supports_toggle_and_add_remove_operations() = runTest(testDispatcher) {
+    fun given_official_state_when_toggle_and_add_remove_operations_run_then_state_is_updated() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
@@ -300,7 +300,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun selecting_sport_seeds_event_official_positions_from_sport_templates() = runTest(testDispatcher) {
+    fun given_sport_templates_when_sport_is_selected_then_official_positions_are_seeded() = runTest(testDispatcher) {
         val sport = createSport(id = "sport-officials", usePointsPerSetWin = true).copy(
             officialPositionTemplates = listOf(
                 SportOfficialPositionTemplate(name = "R1", count = 1),
@@ -319,7 +319,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun adding_official_after_sport_selection_assigns_all_event_positions_to_official() = runTest(testDispatcher) {
+    fun given_selected_sport_when_official_is_added_then_all_event_positions_are_assigned() = runTest(testDispatcher) {
         val sport = createSport(id = "sport-lines", usePointsPerSetWin = true).copy(
             officialPositionTemplates = listOf(
                 SportOfficialPositionTemplate(name = "Referee", count = 1),
@@ -344,7 +344,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun removing_last_position_does_not_auto_restore_defaults_until_requested() = runTest(testDispatcher) {
+    fun given_last_position_when_removed_then_defaults_are_not_restored_automatically() = runTest(testDispatcher) {
         val sport = createSport(id = "sport-clearable", usePointsPerSetWin = true).copy(
             officialPositionTemplates = listOf(
                 SportOfficialPositionTemplate(name = "Referee", count = 1),
@@ -383,7 +383,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun switching_sports_does_not_overwrite_custom_event_official_positions() = runTest(testDispatcher) {
+    fun given_custom_official_positions_when_sports_switch_then_positions_are_preserved() = runTest(testDispatcher) {
         val originalSport = createSport(id = "sport-original", usePointsPerSetWin = true).copy(
             officialPositionTemplates = listOf(
                 SportOfficialPositionTemplate(name = "Referee", count = 1),
@@ -423,7 +423,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun pending_staff_invites_merge_roles_by_email_and_reject_duplicate_role_staging() = runTest(testDispatcher) {
+    fun given_duplicate_staff_roles_when_invites_merge_then_staging_is_rejected() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
@@ -458,7 +458,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun pending_staff_invites_reject_email_that_already_belongs_to_assigned_host_side_user() = runTest(testDispatcher) {
+    fun given_assigned_host_user_when_staff_invite_matches_then_email_is_rejected() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
@@ -483,7 +483,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun create_event_sends_staff_in_the_atomic_editor_command() = runTest(testDispatcher) {
+    fun given_staff_invites_when_event_is_created_then_atomic_command_contains_staff() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
@@ -503,7 +503,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun create_event_sends_registration_questions_in_the_atomic_editor_command() = runTest(testDispatcher) {
+    fun given_registration_questions_when_event_is_created_then_atomic_command_contains_questions() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
         harness.component.updateEventField { copy(divisions = listOf("Open")) }
@@ -537,7 +537,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun create_event_retries_current_command_with_same_question_client_id() = runTest(testDispatcher) {
+    fun given_retried_create_when_question_is_reused_then_client_id_is_stable() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
         harness.component.updateEventField { copy(divisions = listOf("Open")) }
@@ -577,7 +577,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun create_event_rejects_invalid_pending_staff_before_the_event_post() = runTest(testDispatcher) {
+    fun given_invalid_pending_staff_when_event_is_created_then_post_is_rejected() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
         harness.component.updateEventField { copy(divisions = listOf("Open")) }
@@ -601,7 +601,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun create_event_reports_repository_failure_after_the_loading_overlay_closes() = runTest(testDispatcher) {
+    fun given_repository_failure_when_event_create_finishes_then_loading_overlay_closes() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         harness.eventRepository.createEditorFailure = IllegalStateException(
             "Add more slot availability, extend slot windows, or reduce teams.",
@@ -621,7 +621,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(0, harness.onEventCreatedCount)
     }
     @Test
-    fun create_event_surfaces_editor_api_failure_message() = runTest(testDispatcher) {
+    fun given_editor_api_failure_when_event_create_fails_then_message_is_reported() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         harness.eventRepository.createEditorFailure = ApiException(
             statusCode = 500,
@@ -644,7 +644,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun create_event_reports_staff_delivery_failure_as_a_warning_after_atomic_create() = runTest(testDispatcher) {
+    fun given_staff_delivery_failure_when_event_create_succeeds_then_warning_is_reported() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
         harness.component.updateEventField { copy(divisions = listOf("Open")) }
@@ -673,7 +673,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun disabling_team_officials_clears_team_official_swap_permission() = runTest(testDispatcher) {
+    fun given_team_officials_disabled_when_state_updates_then_swap_permission_is_cleared() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
@@ -690,7 +690,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun disabling_team_officials_preserves_staffing_priority() = runTest(testDispatcher) {
+    fun given_team_officials_disabled_when_state_updates_then_staffing_priority_is_preserved() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
@@ -711,7 +711,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun payment_plan_mutations_keep_installment_state_in_sync() = runTest(testDispatcher) {
+    fun given_payment_plan_mutations_when_state_changes_then_installments_stay_in_sync() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
@@ -754,7 +754,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun switching_sports_with_different_scoring_modes_resets_league_scoring_config() = runTest(testDispatcher) {
+    fun given_different_scoring_modes_when_sports_switch_then_league_config_resets() = runTest(testDispatcher) {
         val setBasedSport = createSport(
             id = "sport-sets",
             usePointsPerSetWin = true,
@@ -788,7 +788,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun clearing_seeded_set_duration_does_not_restore_the_sport_default() = runTest(testDispatcher) {
+    fun given_seeded_set_duration_when_cleared_then_sport_default_is_not_restored() = runTest(testDispatcher) {
         val setBasedSport = createSport(
             id = "sport-clear-duration",
             usePointsPerSetWin = true,
@@ -808,7 +808,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun selecting_result_points_sport_applies_conventional_standings_defaults() = runTest(testDispatcher) {
+    fun given_result_points_sport_when_selected_then_standings_defaults_are_applied() = runTest(testDispatcher) {
         val soccer = createSport(
             id = "Indoor Soccer",
             usePointsPerSetWin = false,
@@ -829,7 +829,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun entering_league_with_a_preselected_result_points_sport_initializes_standings_defaults_once() =
+    fun given_preselected_result_points_sport_when_league_is_entered_then_standings_defaults_are_initialized_once() =
         runTest(testDispatcher) {
             val soccer = createSport(
                 id = "Indoor Soccer",
@@ -867,7 +867,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         }
 
     @Test
-    fun updating_fields_without_sport_change_keeps_league_scoring_config() = runTest(testDispatcher) {
+    fun given_event_fields_when_sport_is_unchanged_then_league_scoring_config_is_preserved() = runTest(testDispatcher) {
         val timedSport = createSport(
             id = "sport-timed",
             usePointsPerSetWin = false,
@@ -899,30 +899,47 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun selecting_competition_types_uses_finite_end_by_default() = runTest(testDispatcher) {
+    fun given_competition_type_when_selected_then_finite_end_and_scheduling_defaults_are_used() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
         harness.component.onTypeSelected(EventType.LEAGUE)
         advance()
         assertFalse(harness.component.newEventState.value.noFixedEndDateTime)
+        assertTrue(harness.component.newEventState.value.automatedScheduling)
         assertFalse(harness.component.useManualTimeSlots.value)
 
+        harness.component.updateEventField { copy(automatedScheduling = false) }
+        advance()
         harness.component.onTypeSelected(EventType.TOURNAMENT)
         advance()
         assertFalse(harness.component.newEventState.value.noFixedEndDateTime)
+        assertFalse(harness.component.newEventState.value.automatedScheduling)
         assertFalse(harness.component.useManualTimeSlots.value)
 
         harness.component.onTypeSelected(EventType.EVENT)
         advance()
         assertFalse(harness.component.newEventState.value.noFixedEndDateTime)
+        assertFalse(harness.component.newEventState.value.automatedScheduling)
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        advance()
+        assertTrue(harness.component.newEventState.value.automatedScheduling)
 
         harness.component.onTypeSelected(EventType.WEEKLY_EVENT)
         advance()
+        assertTrue(harness.component.newEventState.value.automatedScheduling)
+        assertTrue(harness.component.useManualTimeSlots.value)
+
+        harness.component.onTypeSelected(EventType.TRYOUT)
+        advance()
+        assertFalse(harness.component.newEventState.value.automatedScheduling)
         assertTrue(harness.component.useManualTimeSlots.value)
 
         harness.component.onTypeSelected(EventType.EVENT)
         advance()
+        assertFalse(harness.component.newEventState.value.noFixedEndDateTime)
+        assertFalse(harness.component.newEventState.value.automatedScheduling)
         assertFalse(harness.component.useManualTimeSlots.value)
     }
 
@@ -945,7 +962,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun selecting_weekly_event_keeps_existing_team_signup_choice() = runTest(testDispatcher) {
+    fun given_team_signup_choice_when_weekly_event_is_selected_then_choice_is_preserved() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
@@ -962,7 +979,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun weekly_event_creation_persists_resource_count_and_repeating_timeslot() = runTest(testDispatcher) {
+    fun given_weekly_event_when_created_then_resource_count_and_repeating_slot_are_persisted() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         harness.component.setLoadingHandler(harness.loadingHandler)
         advance()
@@ -1996,7 +2013,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun failed_league_create_preserves_current_slot_state_for_retry() = runTest(testDispatcher) {
+    fun given_failed_league_create_when_retrying_then_current_slot_state_is_preserved() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         harness.component.setLoadingHandler(harness.loadingHandler)
         advance()
@@ -2127,7 +2144,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun switching_to_fixed_end_tournament_retains_event_end_for_repeating_slots() = runTest(testDispatcher) {
+    fun given_fixed_end_tournament_when_selected_then_repeating_slots_retain_event_end() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 

@@ -76,6 +76,7 @@ import {
   EventCreateOperationConflictError,
   EventCreateOperationPayloadMismatchError,
 } from '@/server/events/eventCreateOperationReplay';
+import { EventRegistrationUnitError } from '@/server/events/eventRegistrations';
 import { EventFieldReferenceError } from '@/server/repositories/events';
 import { TimeSlotValidationError } from '@/lib/timeSlotAvailability';
 import {
@@ -164,6 +165,29 @@ describe('canonical editor routes', () => {
     expect(await response.json()).toEqual({
       error: 'The selected field resources were not found: field_missing.',
       code: 'INVALID_EDITOR_INPUT',
+    });
+  });
+  it('returns typed registration-unit errors from create', async () => {
+    const command = {
+      contractVersion: 3,
+      createOperationId: 'create-operation-invalid-unit',
+      draft: { basics: { name: 'League' } },
+    };
+    parseCreateMock.mockReturnValue(command);
+    createEventEditorMock.mockRejectedValue(
+      new EventRegistrationUnitError('LEAGUE', false),
+    );
+
+    const response = await createPost(
+      request('http://localhost/api/events/editor', 'POST', command),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'LEAGUE events require team registration.',
+      code: 'INVALID_EVENT_REGISTRATION_UNIT',
+      field: 'teamSignup',
+      details: { eventType: 'LEAGUE', teamSignup: false },
     });
   });
   it('returns typed Time Slot evidence for a create input failure', async () => {

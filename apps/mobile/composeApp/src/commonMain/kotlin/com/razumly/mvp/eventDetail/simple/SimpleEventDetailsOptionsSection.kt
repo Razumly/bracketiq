@@ -42,6 +42,7 @@ internal data class SimpleEventDetailsOptionsActions(
     val onEventTypeSelected: (EventType) -> Unit,
     val onTeamRegistrationChange: (Boolean) -> Unit,
     val onMultipleDivisionsChange: (Boolean) -> Unit,
+    val onAutomatedSchedulingChange: (Boolean) -> Unit,
     val onNoFixedEndDateChange: (Boolean) -> Unit,
     val onPlayoffsOrPoolPlayChange: (Boolean) -> Unit,
     val onDoubleEliminationChange: (Boolean) -> Unit,
@@ -114,8 +115,22 @@ internal fun LazyListScope.simpleEventDetailsOptionsSection(
             }
 
             OptionsCategory(title = "Schedule & competition") {
-                val supportsGeneratedEndDate = state.editEvent.eventType == EventType.LEAGUE ||
+                val supportsAutomatedScheduling = state.editEvent.eventType == EventType.LEAGUE ||
                     state.editEvent.eventType == EventType.TOURNAMENT
+                if (supportsAutomatedScheduling) {
+                    OptionCheckboxRow(
+                        checked = state.editEvent.automatedScheduling,
+                        label = "Automated Scheduling",
+                        description = "Build the match schedule when the event is created.",
+                        onCheckedChange = actions.onAutomatedSchedulingChange,
+                    )
+                }
+                val supportsGeneratedEndDate =
+                    state.editEvent.automatedScheduling &&
+                        (
+                            state.editEvent.eventType == EventType.LEAGUE ||
+                                state.editEvent.eventType == EventType.TOURNAMENT
+                            )
                 val showsGeneratedEndDate = supportsGeneratedEndDate ||
                     state.editEvent.eventType == EventType.WEEKLY_EVENT
                 if (showsGeneratedEndDate) {

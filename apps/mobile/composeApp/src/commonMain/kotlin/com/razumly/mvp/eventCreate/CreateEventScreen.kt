@@ -57,11 +57,12 @@ import dev.icerock.moko.geo.LatLng
 internal fun createEventPrimaryActionLabel(
     isEventInfoStep: Boolean,
     eventType: EventType,
+    automatedScheduling: Boolean = true,
     setupMode: EventCreateSetupMode,
     nextSimplePageId: EventCreateSetupPageId?,
 ): String = when {
     !isEventInfoStep && eventType == EventType.EVENT -> "Create"
-    !isEventInfoStep && (
+    !isEventInfoStep && automatedScheduling && (
         eventType == EventType.LEAGUE ||
             eventType == EventType.TOURNAMENT
         ) -> "Create event & build schedule"
@@ -382,6 +383,7 @@ fun CreateEventScreen(
     val actionPrimaryLabel = createEventPrimaryActionLabel(
         isEventInfoStep = isEventInfoStep,
         eventType = newEventState.eventType,
+        automatedScheduling = newEventState.automatedScheduling,
         setupMode = setupMode,
         nextSimplePageId = nextSimplePageId,
     )

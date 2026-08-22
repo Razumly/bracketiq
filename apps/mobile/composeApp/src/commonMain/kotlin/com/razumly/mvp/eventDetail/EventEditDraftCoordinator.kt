@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.util.newId
@@ -53,11 +54,22 @@ internal class EventEditDraftCoordinator(
     fun setControlLocks(
         immutableFieldNames: Set<String>,
         eventTypeHasProtectedHistory: Boolean = false,
+        fallbackEvent: Event? = null,
     ) {
+        val persistedEvent = fallbackEvent ?: _editedEvent.value
+        val protectedHistory = eventTypeHasProtectedHistory ||
+            persistedEvent.eventTypeHasProtectedHistory
+        val normalizedImmutableFieldNames = immutableFieldNames
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .toSet()
         _controlLocks.value = EventEditorControlLocks(
-            eventType = immutableFieldNames.contains("eventType"),
-            teamSignup = immutableFieldNames.contains("teamSignup"),
-            eventTypeHasProtectedHistory = eventTypeHasProtectedHistory,
+            eventType = persistedEvent.eventTypeLocked ||
+                protectedHistory ||
+                normalizedImmutableFieldNames.contains("eventType"),
+            teamSignup = persistedEvent.registrationUnitLocked ||
+                normalizedImmutableFieldNames.contains("teamSignup"),
+            eventTypeHasProtectedHistory = protectedHistory,
         )
     }
 
@@ -119,9 +131,19 @@ internal class EventEditDraftCoordinator(
         val previous = _editedEvent.value
         val candidate = update(previous)
         val locks = _controlLocks.value
+        val eventTypeChangedWhileLocked = locks.eventType &&
+            candidate.eventType != previous.eventType
+        val nextEventType = if (locks.eventType) previous.eventType else candidate.eventType
+        val nextTeamSignup = when {
+            locks.teamSignup || eventTypeChangedWhileLocked -> previous.teamSignup
+            nextEventType == EventType.LEAGUE ||
+                nextEventType == EventType.TOURNAMENT -> true
+            nextEventType == EventType.TRYOUT -> false
+            else -> candidate.teamSignup
+        }
         val updated = candidate.copy(
-            eventType = if (locks.eventType) previous.eventType else candidate.eventType,
-            teamSignup = if (locks.teamSignup) previous.teamSignup else candidate.teamSignup,
+            eventType = nextEventType,
+            teamSignup = nextTeamSignup,
         )
         _editedEvent.value = updated
         _editableFields.value = syncEditableFieldsForEvent(previous, updated, _editableFields.value)

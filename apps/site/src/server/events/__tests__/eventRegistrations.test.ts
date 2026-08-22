@@ -2,12 +2,25 @@
 
 jest.mock('@/lib/prisma', () => ({ prisma: {} }));
 
+import type { Prisma } from '@/generated/prisma/client';
 import { buildEventDivisionId } from '@/lib/divisionTypes';
 import {
+  assertEventRegistrationUnit,
+  assertEventTypeRegistrationUnit,
   buildEventParticipantSnapshot,
+  dedupeRegistrationCapacityRows,
+  EventRegistrationDivisionError,
+  EventRegistrationUnitError,
+  getEventParticipantAggregates,
   getEventParticipantIdsForEvent,
+  hasJoinedEventParticipant,
+  isAcceptedParticipantRegistration,
+  isRegistrationCapacityEntry,
+  registrationUnitIdentityKey,
   syncDivisionTeamMembershipFromRegistrations,
+  upsertEventRegistration,
 } from '@/server/events/eventRegistrations';
+import { syncEventParticipantRegistrationsFromCompatibilityIds } from '@/server/repositories/events';
 import { resolveWeeklyOccurrence } from '@/server/events/weeklyOccurrences';
 
 describe('resolveWeeklyOccurrence', () => {
@@ -702,6 +715,8 @@ describe('getEventParticipantIdsForEvent', () => {
             eventTeamId: 'team_1',
             registrantType: 'TEAM',
             rosterRole: 'PARTICIPANT',
+            status: 'ACTIVE',
+            acceptedAt: new Date('2026-04-01T00:00:00.000Z'),
             createdAt: new Date('2026-04-01T00:00:00.000Z'),
             id: 'event_1__team__team_1',
           },
@@ -711,6 +726,8 @@ describe('getEventParticipantIdsForEvent', () => {
             eventTeamId: 'slot_1',
             registrantType: 'TEAM',
             rosterRole: 'PARTICIPANT',
+            status: 'ACTIVE',
+            acceptedAt: new Date('2026-04-01T00:00:00.000Z'),
             createdAt: new Date('2026-04-01T00:00:00.000Z'),
             id: 'event_1__team__slot_1',
           },
@@ -745,6 +762,8 @@ describe('getEventParticipantIdsForEvent', () => {
         eventTeamId: null,
         registrantType: 'SELF',
         rosterRole: 'PARTICIPANT',
+        status: 'ACTIVE',
+        acceptedAt: new Date('2026-04-01T00:00:00.000Z'),
         createdAt: new Date('2026-04-01T00:00:00.000Z'),
         id: 'weekly_parent__self__user_1__slot_1__2026-08-05',
       },
@@ -969,6 +988,684 @@ describe('syncDivisionTeamMembershipFromRegistrations', () => {
       where: { id: secondDivisionId },
       data: expect.objectContaining({
         teamIds: ['slot_3'],
+      }),
+    }));
+  });
+});
+describe('accepted registration history and capacity', () => {
+  it('keeps accepted history after cancellation while excluding non-accepted rows', async () => {
+    const findFirst = jest.fn().mockResolvedValue({ id: 'registration_1' });
+    // The helper only reads eventRegistrations.findFirst in this seam.
+    const client = { eventRegistrations: { findFirst } } as unknown as Prisma.TransactionClient;
+
+    await expect(hasJoinedEventParticipant('event_1', client)).resolves.toBe(true);
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        eventId: 'event_1',
+        rosterRole: 'PARTICIPANT',
+      }),
+    }));
+    expect(isAcceptedParticipantRegistration({
+      rosterRole: 'PARTICIPANT',
+      status: 'CANCELLED',
+      acceptedAt: new Date('2026-08-20T10:00:00.000Z'),
+      registrantType: 'SELF',
+      eventTeamId: null,
+      sourceTeamRegistrationId: null,
+    } satisfies Parameters<typeof isAcceptedParticipantRegistration>[0])).toBe(true);
+    expect(isRegistrationCapacityEntry({
+      rosterRole: 'PARTICIPANT',
+      status: 'CANCELLED',
+      acceptedAt: new Date('2026-08-20T10:00:00.000Z'),
+      registrantType: 'SELF',
+      eventTeamId: null,
+      sourceTeamRegistrationId: null,
+    } satisfies Parameters<typeof isRegistrationCapacityEntry>[0])).toBe(false);
+    expect(isRegistrationCapacityEntry({
+      rosterRole: 'PARTICIPANT',
+      status: 'STARTED',
+      acceptedAt: null,
+      registrantType: 'SELF',
+      eventTeamId: null,
+      sourceTeamRegistrationId: null,
+    } satisfies Parameters<typeof isRegistrationCapacityEntry>[0])).toBe(false);
+  });
+
+  it('counts one accepted team registration but not team roster members', () => {
+    const acceptedTeam = {
+      rosterRole: 'PARTICIPANT',
+      status: 'ACTIVE',
+      acceptedAt: new Date('2026-08-20T10:00:00.000Z'),
+      registrantType: 'TEAM',
+      eventTeamId: 'event_team_1',
+      sourceTeamRegistrationId: null,
+    } satisfies Parameters<typeof isRegistrationCapacityEntry>[0];
+    const acceptedRosterMember = {
+      ...acceptedTeam,
+      registrantType: 'SELF',
+      sourceTeamRegistrationId: 'team_registration_1',
+    } satisfies Parameters<typeof isRegistrationCapacityEntry>[0];
+    expect(isRegistrationCapacityEntry(acceptedTeam)).toBe(true);
+    expect(isRegistrationCapacityEntry(acceptedRosterMember)).toBe(false);
+  });
+  it('dedupes individual capacity rows by registrant identity', () => {
+    const rows = [
+      {
+        id: 'registration_1',
+        registrantId: 'user_1',
+        parentId: null,
+        registrantType: 'SELF',
+        rosterRole: 'PARTICIPANT',
+        status: 'ACTIVE',
+        acceptedAt: new Date('2026-08-20T10:00:00.000Z'),
+        eventTeamId: null,
+        sourceTeamRegistrationId: null,
+      },
+      {
+        id: 'registration_1_duplicate',
+        registrantId: 'user_1',
+        parentId: null,
+        registrantType: 'SELF',
+        rosterRole: 'PARTICIPANT',
+        status: 'ACTIVE',
+        acceptedAt: new Date('2026-08-20T10:01:00.000Z'),
+        eventTeamId: null,
+        sourceTeamRegistrationId: null,
+      },
+      {
+        id: 'registration_2',
+        registrantId: 'user_2',
+        parentId: null,
+        registrantType: 'CHILD',
+        rosterRole: 'PARTICIPANT',
+        status: 'ACTIVE',
+        acceptedAt: new Date('2026-08-20T10:02:00.000Z'),
+        eventTeamId: null,
+        sourceTeamRegistrationId: null,
+      },
+    ] as any;
+
+    expect(dedupeRegistrationCapacityRows({ teamSignup: false }, rows)).toHaveLength(2);
+    expect(registrationUnitIdentityKey({ teamSignup: false }, rows[0])).toBe('USER:user_1');
+  });
+
+  it('dedupes team capacity rows by canonical team identity', () => {
+    const rows = [
+      {
+        id: 'registration_1',
+        registrantId: 'event_team_1',
+        parentId: 'canonical_team_1',
+        registrantType: 'TEAM',
+        rosterRole: 'PARTICIPANT',
+        status: 'ACTIVE',
+        acceptedAt: new Date('2026-08-20T10:00:00.000Z'),
+        eventTeamId: 'event_team_1',
+        sourceTeamRegistrationId: null,
+      },
+      {
+        id: 'registration_2',
+        registrantId: 'event_team_2',
+        parentId: 'canonical_team_1',
+        registrantType: 'TEAM',
+        rosterRole: 'PARTICIPANT',
+        status: 'ACTIVE',
+        acceptedAt: new Date('2026-08-20T10:01:00.000Z'),
+        eventTeamId: 'event_team_2',
+        sourceTeamRegistrationId: null,
+      },
+      {
+        id: 'registration_roster',
+        registrantId: 'player_1',
+        parentId: 'guardian_1',
+        registrantType: 'SELF',
+        rosterRole: 'PARTICIPANT',
+        status: 'ACTIVE',
+        acceptedAt: new Date('2026-08-20T10:02:00.000Z'),
+        eventTeamId: 'event_team_1',
+        sourceTeamRegistrationId: 'team_registration_1',
+      },
+    ] as any;
+
+    expect(dedupeRegistrationCapacityRows({ teamSignup: true }, rows)).toHaveLength(1);
+    expect(registrationUnitIdentityKey({ teamSignup: true }, rows[0])).toBe('TEAM:canonical_team_1');
+    expect(registrationUnitIdentityKey({ teamSignup: true }, rows[2])).toBeNull();
+  });
+
+  it('aggregates one capacity unit per accepted participant identity', async () => {
+    const aggregates = await getEventParticipantAggregates([{
+      id: 'event_1',
+      eventType: 'EVENT',
+      teamSignup: false,
+      maxParticipants: 2,
+    }], {
+      eventRegistrations: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'registration_1',
+            eventId: 'event_1',
+            registrantId: 'user_1',
+            parentId: null,
+            registrantType: 'SELF',
+            rosterRole: 'PARTICIPANT',
+            status: 'ACTIVE',
+            acceptedAt: new Date('2026-08-20T10:00:00.000Z'),
+            eventTeamId: null,
+            sourceTeamRegistrationId: null,
+            slotId: null,
+            occurrenceDate: null,
+          },
+          {
+            id: 'registration_1_duplicate',
+            eventId: 'event_1',
+            registrantId: 'user_1',
+            parentId: null,
+            registrantType: 'SELF',
+            rosterRole: 'PARTICIPANT',
+            status: 'ACTIVE',
+            acceptedAt: new Date('2026-08-20T10:01:00.000Z'),
+            eventTeamId: null,
+            sourceTeamRegistrationId: null,
+            slotId: null,
+            occurrenceDate: null,
+          },
+        ]),
+      },
+      divisions: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    } as any);
+
+    expect(aggregates.get('event_1')).toEqual({
+      participantCount: 1,
+      participantCapacity: 2,
+    });
+  });
+  it('loads capacities for a collection of events with one division query', async () => {
+    const divisionsFindMany = jest.fn().mockResolvedValue([
+      {
+        eventId: 'event_1',
+        id: 'event_1__division__a',
+        key: 'a',
+        kind: 'LEAGUE',
+        maxParticipants: 2,
+      },
+      {
+        eventId: 'event_1',
+        id: 'event_1__division__b',
+        key: 'b',
+        kind: 'LEAGUE',
+        maxParticipants: 3,
+      },
+      {
+        eventId: 'event_2',
+        id: 'event_2__division__open',
+        key: 'open',
+        kind: 'LEAGUE',
+        maxParticipants: 4,
+      },
+    ]);
+    const aggregates = await getEventParticipantAggregates([
+      {
+        id: 'event_1',
+        eventType: 'EVENT',
+        teamSignup: false,
+        singleDivision: false,
+        maxParticipants: 10,
+      },
+      {
+        id: 'event_2',
+        eventType: 'EVENT',
+        teamSignup: false,
+        singleDivision: true,
+        maxParticipants: 10,
+      },
+    ], {
+      eventRegistrations: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      divisions: {
+        findMany: divisionsFindMany,
+      },
+    } as any);
+
+    expect(divisionsFindMany).toHaveBeenCalledTimes(1);
+    expect(divisionsFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        eventId: { in: ['event_1', 'event_2'] },
+      }),
+    }));
+    expect(aggregates.get('event_1')?.participantCapacity).toBe(5);
+    expect(aggregates.get('event_2')?.participantCapacity).toBe(4);
+  });
+
+});
+describe('event registration unit validation', () => {
+  it.each([
+    ['LEAGUE', false],
+    ['TOURNAMENT', false],
+    ['TRYOUT', true],
+  ] as const)('rejects %s with the wrong registration unit', (eventType, teamSignup) => {
+    expect(() => assertEventTypeRegistrationUnit(eventType, teamSignup)).toThrow(
+      expect.objectContaining({
+        code: 'INVALID_EVENT_REGISTRATION_UNIT',
+        status: 400,
+      }),
+    );
+    try {
+      assertEventTypeRegistrationUnit(eventType, teamSignup);
+    } catch (error) {
+      expect(error).toBeInstanceOf(EventRegistrationUnitError);
+    }
+  });
+
+  it.each([
+    ['EVENT', false],
+    ['EVENT', true],
+    ['WEEKLY_EVENT', false],
+    ['WEEKLY_EVENT', true],
+    ['LEAGUE', true],
+    ['TOURNAMENT', true],
+    ['TRYOUT', false],
+  ] as const)('allows %s with registration unit %s', (eventType, teamSignup) => {
+    expect(() => assertEventTypeRegistrationUnit(eventType, teamSignup)).not.toThrow();
+  });
+  it('rejects a participant row that does not match the event unit', () => {
+    expect(() => assertEventRegistrationUnit({
+      id: 'league_1',
+      eventType: 'LEAGUE',
+      teamSignup: true,
+    }, {
+      registrantType: 'SELF',
+      rosterRole: 'PARTICIPANT',
+      eventTeamId: null,
+      sourceTeamRegistrationId: null,
+    })).toThrow(expect.objectContaining({
+      code: 'INVALID_EVENT_REGISTRATION_UNIT',
+    }));
+
+    expect(() => assertEventRegistrationUnit({
+      id: 'tryout_1',
+      eventType: 'TRYOUT',
+      teamSignup: false,
+    }, {
+      registrantType: 'TEAM',
+      rosterRole: 'PARTICIPANT',
+      eventTeamId: null,
+      sourceTeamRegistrationId: null,
+    })).toThrow(expect.objectContaining({
+      code: 'INVALID_EVENT_REGISTRATION_UNIT',
+    }));
+  });
+});
+
+describe('registration capacity enforcement', () => {
+  it('dedupes existing identities before enforcing event capacity', async () => {
+    const upsert = jest.fn().mockResolvedValue({ id: 'event_1__self__user_2' });
+    const existingRows = [
+      {
+        id: 'event_1__self__user_1',
+        eventId: 'event_1',
+        registrantId: 'user_1',
+        parentId: null,
+        registrantType: 'SELF',
+        rosterRole: 'PARTICIPANT',
+        status: 'ACTIVE',
+        acceptedAt: new Date('2026-08-20T10:00:00.000Z'),
+        eventTeamId: null,
+        sourceTeamRegistrationId: null,
+        slotId: null,
+        occurrenceDate: null,
+        divisionId: 'div_a',
+      },
+      {
+        id: 'event_1__self__user_1_duplicate',
+        eventId: 'event_1',
+        registrantId: 'user_1',
+        parentId: null,
+        registrantType: 'SELF',
+        rosterRole: 'PARTICIPANT',
+        status: 'ACTIVE',
+        acceptedAt: new Date('2026-08-20T10:01:00.000Z'),
+        eventTeamId: null,
+        sourceTeamRegistrationId: null,
+        slotId: null,
+        occurrenceDate: null,
+        divisionId: 'div_a',
+      },
+    ];
+    const client = {
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      events: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'event_1',
+          eventType: 'EVENT',
+          teamSignup: false,
+          maxParticipants: 2,
+          singleDivision: true,
+        }),
+      },
+      divisions: {
+        findMany: jest.fn().mockResolvedValue([{
+          id: 'div_a',
+          key: 'div_a',
+          kind: 'LEAGUE',
+          maxParticipants: null,
+          divisionTypeId: null,
+        }]),
+      },
+      eventRegistrations: {
+        findMany: jest.fn().mockResolvedValue(existingRows),
+        upsert,
+      },
+    } as any;
+
+    await upsertEventRegistration({
+      eventId: 'event_1',
+      registrantType: 'SELF',
+      registrantId: 'user_2',
+      rosterRole: 'PARTICIPANT',
+      status: 'ACTIVE',
+      createdBy: 'user_2',
+      divisionId: 'div_a',
+    }, client);
+
+    expect(upsert).toHaveBeenCalled();
+  });
+});
+
+describe('participant registration division canonicalization', () => {
+  const event = {
+    id: 'event_1',
+    eventType: 'EVENT',
+    teamSignup: false,
+    maxParticipants: null,
+    singleDivision: true,
+  };
+  const entryDivision = {
+    id: 'event_1__division__open',
+    key: 'open',
+    divisionTypeId: 'skill_open',
+    maxParticipants: null,
+  };
+
+  it('canonicalizes an Entry Division alias and its type metadata before persistence', async () => {
+    const upsert = jest.fn().mockResolvedValue({ id: 'registration_1' });
+    const client = {
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      events: {
+        findUnique: jest.fn().mockResolvedValue(event),
+      },
+      divisions: {
+        findMany: jest.fn().mockResolvedValue([entryDivision]),
+      },
+      eventRegistrations: {
+        findMany: jest.fn().mockResolvedValue([]),
+        upsert,
+      },
+    } as any;
+
+    await upsertEventRegistration({
+      eventId: 'event_1',
+      registrantType: 'SELF',
+      registrantId: 'user_1',
+      rosterRole: 'PARTICIPANT',
+      status: 'ACTIVE',
+      createdBy: 'user_1',
+      divisionId: 'open',
+      divisionTypeId: 'stale_type',
+      divisionTypeKey: 'stale_key',
+    }, client);
+
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        divisionId: entryDivision.id,
+        divisionTypeId: entryDivision.divisionTypeId,
+        divisionTypeKey: entryDivision.key,
+      }),
+      update: expect.objectContaining({
+        divisionId: entryDivision.id,
+        divisionTypeId: entryDivision.divisionTypeId,
+        divisionTypeKey: entryDivision.key,
+      }),
+    }));
+  });
+  it('uses an active legacy Entry Division before persisting a participant', async () => {
+    const legacyDivisionId = buildEventDivisionId('event_1', 'legacy_division');
+    const registrationUpsert = jest.fn().mockResolvedValue({ id: 'registration_1' });
+    const divisionUpsert = jest.fn().mockResolvedValue({ id: legacyDivisionId });
+    const client = {
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      events: {
+        findUnique: jest.fn().mockResolvedValue(event),
+      },
+      divisions: {
+        findMany: jest.fn().mockResolvedValue([{
+          id: legacyDivisionId,
+          key: 'legacy_division',
+          kind: 'LEAGUE',
+          role: 'ENTRY',
+          status: 'ACTIVE',
+          maxParticipants: null,
+          divisionTypeId: null,
+        }]),
+        upsert: divisionUpsert,
+      },
+      eventRegistrations: {
+        findMany: jest.fn().mockResolvedValue([]),
+        upsert: registrationUpsert,
+      },
+    } as any;
+
+    await upsertEventRegistration({
+      eventId: 'event_1',
+      registrantType: 'SELF',
+      registrantId: 'user_1',
+      rosterRole: 'PARTICIPANT',
+      status: 'ACTIVE',
+      createdBy: 'user_1',
+    }, client);
+
+    expect(divisionUpsert).not.toHaveBeenCalled();
+    expect(registrationUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        divisionId: legacyDivisionId,
+        divisionTypeKey: 'legacy_division',
+      }),
+    }));
+  });
+  it('creates an Open Entry Division when a legacy event has no division rows', async () => {
+    const registrationUpsert = jest.fn().mockResolvedValue({ id: 'registration_1' });
+    const divisionUpsert = jest.fn().mockResolvedValue({
+      id: buildEventDivisionId('event_1', 'open'),
+    });
+    const client = {
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      events: {
+        findUnique: jest.fn().mockResolvedValue(event),
+      },
+      divisions: {
+        findMany: jest.fn().mockResolvedValue([]),
+        upsert: divisionUpsert,
+      },
+      eventRegistrations: {
+        findMany: jest.fn().mockResolvedValue([]),
+        upsert: registrationUpsert,
+      },
+    } as any;
+
+    await upsertEventRegistration({
+      eventId: 'event_1',
+      registrantType: 'SELF',
+      registrantId: 'user_1',
+      rosterRole: 'PARTICIPANT',
+      status: 'ACTIVE',
+      createdBy: 'user_1',
+    }, client);
+
+    const openDivisionId = buildEventDivisionId('event_1', 'open');
+    expect(divisionUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: openDivisionId },
+      create: expect.objectContaining({
+        id: openDivisionId,
+        key: 'open',
+        role: 'ENTRY',
+        status: 'ACTIVE',
+      }),
+    }));
+    expect(registrationUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        divisionId: openDivisionId,
+        divisionTypeKey: 'open',
+      }),
+    }));
+  });
+  it('backfills an Open Entry Division during compatibility participant sync', async () => {
+    const registrationUpsert = jest.fn().mockResolvedValue({ id: 'registration_1' });
+    const divisionUpsert = jest.fn().mockResolvedValue({
+      id: buildEventDivisionId('event_1', 'open'),
+    });
+    const client = {
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      events: {
+        findUnique: jest.fn().mockResolvedValue(event),
+      },
+      divisions: {
+        findMany: jest.fn().mockResolvedValue([]),
+        upsert: divisionUpsert,
+      },
+      eventRegistrations: {
+        findMany: jest.fn().mockResolvedValue([]),
+        upsert: registrationUpsert,
+      },
+    } as any;
+
+    await syncEventParticipantRegistrationsFromCompatibilityIds(client, {
+      eventId: 'event_1',
+      createdBy: 'user_1',
+      teamIds: [],
+      userIds: ['user_1'],
+      waitListIds: [],
+      freeAgentIds: [],
+      syncTeams: false,
+      syncUsers: true,
+      syncWaitList: false,
+      syncFreeAgents: false,
+    });
+
+    const openDivisionId = buildEventDivisionId('event_1', 'open');
+    expect(divisionUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: openDivisionId },
+    }));
+    expect(registrationUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        divisionId: openDivisionId,
+        divisionTypeKey: 'open',
+      }),
+    }));
+  });
+
+
+
+  it('rejects a participant division that does not resolve to one Entry Division', async () => {
+    const client = {
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      events: {
+        findUnique: jest.fn().mockResolvedValue(event),
+      },
+      divisions: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      eventRegistrations: {
+        findMany: jest.fn().mockResolvedValue([]),
+        upsert: jest.fn(),
+      },
+    } as any;
+
+    await expect(upsertEventRegistration({
+      eventId: 'event_1',
+      registrantType: 'SELF',
+      registrantId: 'user_1',
+      rosterRole: 'PARTICIPANT',
+      status: 'ACTIVE',
+      createdBy: 'user_1',
+      divisionId: 'missing',
+    }, client)).rejects.toBeInstanceOf(EventRegistrationDivisionError);
+    expect(client.eventRegistrations.upsert).not.toHaveBeenCalled();
+  });
+
+  it('clears legacy team references when compatibility sync promotes a SELF participant', async () => {
+    const existing = {
+      id: 'event_1__self__user_1',
+      eventId: 'event_1',
+      registrantId: 'user_1',
+      parentId: null,
+      registrantType: 'SELF',
+      rosterRole: 'PARTICIPANT',
+      status: 'ACTIVE',
+      acceptedAt: new Date('2026-08-20T10:00:00.000Z'),
+      eventTeamId: 'legacy_event_team',
+      sourceTeamRegistrationId: 'legacy_team_registration',
+      ageAtEvent: null,
+      divisionId: 'legacy_division',
+      divisionTypeId: 'legacy_type',
+      divisionTypeKey: 'legacy_key',
+      jerseyNumber: '42',
+      position: 'setter',
+      isCaptain: true,
+      consentDocumentId: null,
+      consentStatus: null,
+      createdBy: 'user_1',
+      slotId: null,
+      occurrenceDate: null,
+      createdAt: new Date('2026-08-01T10:00:00.000Z'),
+      updatedAt: new Date('2026-08-01T10:00:00.000Z'),
+    };
+    const upsert = jest.fn().mockResolvedValue(existing);
+    const client = {
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      events: {
+        findUnique: jest.fn().mockResolvedValue(event),
+      },
+      divisions: {
+        findMany: jest.fn().mockResolvedValue([entryDivision]),
+      },
+      eventRegistrations: {
+        findUnique: jest.fn().mockResolvedValue(existing),
+        findMany: jest.fn().mockResolvedValue([existing]),
+        upsert,
+      },
+    } as any;
+
+    await syncEventParticipantRegistrationsFromCompatibilityIds(client, {
+      eventId: 'event_1',
+      createdBy: 'user_1',
+      teamIds: [],
+      userIds: ['user_1'],
+      waitListIds: [],
+      freeAgentIds: [],
+      syncTeams: false,
+      syncUsers: true,
+      syncWaitList: false,
+      syncFreeAgents: false,
+      divisionIdByRegistrantId: { user_1: 'open' },
+    });
+
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        eventTeamId: null,
+        sourceTeamRegistrationId: null,
+        divisionId: entryDivision.id,
+        divisionTypeId: entryDivision.divisionTypeId,
+        divisionTypeKey: entryDivision.key,
+        jerseyNumber: existing.jerseyNumber,
+      }),
+      update: expect.objectContaining({
+        eventTeamId: null,
+        sourceTeamRegistrationId: null,
+        divisionId: entryDivision.id,
+        divisionTypeId: entryDivision.divisionTypeId,
+        divisionTypeKey: entryDivision.key,
+        jerseyNumber: existing.jerseyNumber,
       }),
     }));
   });
