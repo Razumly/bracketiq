@@ -51,7 +51,7 @@ A developer can see the change work in three ways. Pure contract tests show stab
 
 - [x] (2026-08-21) Moved the duplicate Mapping Producer package-commit guard into the same serializable transaction as adapter execution. Returned the durable `PIPELINE_BLOCKED` sentinel after commit so the block event and claim/job state do not roll back. Added a PostgreSQL assertion for the blocked state.
 - [x] (2026-08-21) Reused post-effect claim authorization for recovered Supply Reviewer terminal results. Recovery now checks active contracts, lifecycle generation, exact effect receipt identity, and pending effects before terminal completion.
-- [ ] Commit the scoped follow-up implementation and rerun both review axes against that exact tip. Do not close issue #67 until both axes pass.
+- [x] (2026-08-21) Committed the scoped follow-up implementation at `96bef7b54` and reran both review axes against `main..96bef7b54`. Standards and Spec returned no findings. Issue #67 remains open pending operator closure.
 
 ## Surprises & Discoveries
 
@@ -147,12 +147,16 @@ The current two-axis review ran on 2026-08-21 against the complete worktree with
 - **P1 — Trusted post-boundary failure recording:** Resolved with the trusted exact `RECORD_FAILURE` path and lease, hard-deadline/token, and lifecycle-generation regressions.
 - **P1 — Unrelated billing API deletion:** Resolved by restoring the billing route from `main`.
 
-The pre-follow-up findings are resolved in the current worktree. Issue #67 remains open until the scoped implementation is committed and both review axes pass against that exact tip. The complete historical finding record is in issue comment https://github.com/Razumly/bracketiq/issues/67#issuecomment-5377897733.
+The pre-follow-up findings are resolved. The committed exact-tip review now passes both axes. Issue #67 remains open pending operator closure. The complete historical finding record is in issue comment https://github.com/Razumly/bracketiq/issues/67#issuecomment-5377897733.
 
 ### Current follow-up findings
 
 - **P1 — Duplicate commit block rollback:** Resolved by returning the block sentinel from the transaction and translating it to `PARTIAL_COMMAND_UNRESOLVED` after commit. The PostgreSQL suite asserts durable claim, job, and event state.
 - **P1 — Recovered reviewer stale authority:** Resolved by trusted post-effect authorization with active contract, lifecycle, effect identity, and pending-effect checks.
+
+### Committed exact-tip review
+
+The final two-axis review ran on 2026-08-21 against `main..96bef7b54`. The Standards axis returned no findings. The Spec axis returned no findings. The review included the tracked expiry and failure-transition modules.
 
 ## Decision Log
 
@@ -1094,11 +1098,17 @@ Current candidate evidence (2026-08-21):
     Focused gateway suite: 1 passed, 74 tests passed.
     Focused supervisor suite: 1 passed, 29 tests passed.
     Isolated PostgreSQL gateway suite: 1 passed, 21 tests passed.
-    Full site suite: 864 suites passed, 5,172 tests passed, 3 suites skipped, 24 tests skipped.
+    Latest full site suite rerun: 863 suites passed, 1 suite failed, 3 suites skipped; 5,171 tests passed, 1 test failed, 25 tests skipped.
     `npx tsc --noEmit --pretty false`: passed with no output.
     Focused Prettier check and `git diff --check`: passed.
 
-The first full-suite run had one unrelated EventForm dirty-state failure with a generated Cash App value. The isolated EventForm suite passed on rerun. The second full-suite run passed 864 suites and 5,172 tests.
+Final acceptance gates (2026-08-21):
+
+    `npm run test:ci`: passed. Route coverage passed for 329 files.
+    `DATABASE_URL=... DIRECT_URL=... npm run prisma:check`: passed. Prisma schema, generated client, and version surface verified.
+    `DATABASE_URL=... DIRECT_URL=... npm run build`: passed. Prisma validation, generation, generated-client verification, and the Next.js production build completed.
+
+Earlier full-suite runs recorded one unrelated EventForm dirty-state failure with a generated Cash App value and a subsequent full-suite pass. The isolated EventForm suite passed all 130 tests on rerun. The latest full-suite rerun reproduced the same unrelated failure.
 
 The first integration command used host port 5432 and failed because the local Compose mapping uses 5433. No runtime state changed. The repeated commands used the dedicated `bracketiq_e2e_67_gateway` database at `127.0.0.1:5433` and passed.
 
@@ -1124,3 +1134,5 @@ Plan revision note (2026-08-21): Split the shared invocation-failure transition 
 Plan revision note (2026-08-21): Closed the expiry-selection starvation finding. The PostgreSQL selector now excludes pending artifact reads and pending external or lifecycle effects before applying the bounded batch limit. Added a limit-one integration regression. Gateway unit tests pass 74 tests, supervisor tests pass 29 tests, and the PostgreSQL integration suite passes 20 tests.
 Plan revision note (2026-08-21): Closed the duplicate package-commit rollback and recovered reviewer stale-authority findings. The guard now commits its block state before returning the public unresolved error. Recovered reviewer completion reuses trusted post-effect authorization and rejects pending claim effects. The focused gateway suite passes 74 tests, the supervisor suite passes 29 tests, the PostgreSQL integration suite passes 21 tests, and TypeScript passes.
 Plan revision note (2026-08-21): Recorded the full-suite result accurately. The complete site Jest run had one unrelated generated-value failure in `EventForm.test.tsx`; the exact file passed all 130 tests when rerun alone. No gateway or supervisor test failed.
+Plan revision note (2026-08-21): Committed the follow-up at `96bef7b54` and completed the final exact-tip two-axis review against `main`. Standards and Spec returned no findings. The required Prisma gateway modules are tracked in the commit. Issue #67 remains open pending operator closure.
+Plan revision note (2026-08-21): Ran the remaining explicit ExecPlan gates on the committed implementation. `npm run test:ci`, the local-URL Prisma check, and the local-URL production build all passed. The latest full Jest rerun still has one unrelated generated-value EventForm failure, while the isolated EventForm suite passes 130 tests.
