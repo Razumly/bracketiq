@@ -21,6 +21,8 @@ import {
   normalizePayloadIdentifiers,
 } from "@/types";
 import type { RegistrationQuestionAnswerInput, TeamPlayerRegistration } from "@/types";
+import type { EventRegistrationPaymentResolutionReason } from "@/contracts/eventParticipants";
+
 import { ensureLocalDateTimeString } from "@/lib/dateUtils";
 import type {
   FieldSchedulingConflictBatchRequest,
@@ -98,7 +100,7 @@ export type EventParticipantRegistrationEntry = {
   registrantType: "SELF" | "CHILD" | "TEAM";
   rosterRole: "PARTICIPANT" | "WAITLIST" | "FREE_AGENT";
   status: "STARTED" | "PENDING" | "PAYMENT_FAILED" | "ACTIVE" | "BLOCKED" | "CONSENTFAILED" | "CANCELLED";
-  paymentResolutionReason: string | null;
+  paymentResolutionReason: EventRegistrationPaymentResolutionReason | null;
   parentId: string | null;
   divisionId: string | null;
   divisionTypeId: string | null;

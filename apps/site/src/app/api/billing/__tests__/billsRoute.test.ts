@@ -30,6 +30,9 @@ const prismaMock = {
   events: {
     findUnique: jest.fn(),
   },
+  eventRegistrations: {
+    findUnique: jest.fn(),
+  },
   timeSlots: {
     findUnique: jest.fn(),
   },
@@ -97,6 +100,64 @@ describe('POST /api/billing/bills', () => {
     prismaMock.timeSlots.findUnique.mockResolvedValue(null);
     prismaMock.divisions.findMany.mockResolvedValue([]);
     prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof txMock) => unknown) => callback(txMock));
+  });
+
+  it('rejects an event registration source owned by a different team', async () => {
+    prismaMock.eventRegistrations.findUnique.mockResolvedValueOnce({
+      eventId: 'event_1',
+      registrantId: 'event_team_other',
+      parentId: 'team_other',
+      registrantType: 'TEAM',
+      eventTeamId: 'event_team_other',
+      slotId: null,
+      occurrenceDate: null,
+    });
+
+    const response = await POST(
+      jsonPost('http://localhost/api/billing/bills', {
+        ownerType: 'TEAM',
+        ownerId: 'team_1',
+        totalAmountCents: 5000,
+        eventId: 'event_1',
+        sourceType: 'event_registration',
+        sourceId: 'registration_other',
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(txMock.bills.create).not.toHaveBeenCalled();
+    expect(txMock.billPayments.create).not.toHaveBeenCalled();
+  });
+
+  it('stores an event registration source owned by the bill team', async () => {
+    prismaMock.eventRegistrations.findUnique.mockResolvedValueOnce({
+      eventId: 'event_1',
+      registrantId: 'event_team_1',
+      parentId: 'team_1',
+      registrantType: 'TEAM',
+      eventTeamId: 'event_team_1',
+      slotId: null,
+      occurrenceDate: null,
+    });
+
+    const response = await POST(
+      jsonPost('http://localhost/api/billing/bills', {
+        ownerType: 'TEAM',
+        ownerId: 'team_1',
+        totalAmountCents: 5000,
+        eventId: 'event_1',
+        sourceType: 'EVENT_REGISTRATION',
+        sourceId: 'registration_1',
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(txMock.bills.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        sourceType: 'EVENT_REGISTRATION',
+        sourceId: 'registration_1',
+      }),
+    }));
   });
 
   it('creates a payment-plan bill and installments', async () => {

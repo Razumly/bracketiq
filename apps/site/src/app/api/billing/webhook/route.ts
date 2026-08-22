@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
+import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 import {
   calculatePlatformApplicationFeeAmount,
@@ -16,20 +17,20 @@ import {
 } from '@/server/discounts/discountCodeResolver';
 import { upsertStripeSubscriptionMirror } from '@/lib/stripeSubscriptions';
 import {
-  acquireEventLockAndLoadStructure,
-  buildEventRegistrationId,
-  syncDivisionTeamMembershipFromRegistrations,
-  transitionEventRegistrationStatus,
-} from '@/server/events/eventRegistrations';
-import {
   activateFailedTeamRegistration,
   activateStartedTeamRegistration,
   cancelPendingTeamRegistration,
   markTeamRegistrationPaymentPending,
 } from '@/server/teams/teamOpenRegistration';
-import { claimOrCreateEventTeamSnapshot } from '@/server/teams/teamMembership';
 import { sendEventRegistrationHostNotification } from '@/server/registrationHostNotifications';
-import { resolveEventRegistrationPaymentFailure } from '@/server/billing/eventRegistrationPaymentResolution';
+import {
+  applyBillPaymentOutcome,
+  ensureEventRegistrationFromPurchase,
+  persistEventRegistrationPaymentResolution,
+  type ReconciledBillStatus,
+} from '@/server/billing/eventRegistrationPaymentApplication';
+
+type WebhookPrismaClient = PrismaClient | Prisma.TransactionClient;
 
 export const dynamic = 'force-dynamic';
 
@@ -249,363 +250,6 @@ const applySubscriptionInvoiceConnectConfiguration = async ({
   });
 };
 
-const ensureEventRegistrationFromPurchase = async ({
-  purchaseType,
-  eventId,
-  teamId,
-  userId,
-  registrantType,
-  parentId,
-  registrationId,
-  occurrenceSlotId,
-  occurrenceDate,
-  now,
-  divisionId,
-  divisionTypeId,
-  divisionTypeKey,
-  targetStatus = 'ACTIVE',
-}: {
-  purchaseType: string | null;
-  eventId: string | null;
-  teamId: string | null;
-  userId: string | null;
-  registrantType?: string | null;
-  parentId?: string | null;
-  registrationId: string | null;
-  occurrenceSlotId: string | null;
-  occurrenceDate: string | null;
-  divisionId?: string | null;
-  divisionTypeId?: string | null;
-  divisionTypeKey?: string | null;
-  now: Date;
-  targetStatus?: 'ACTIVE' | 'PENDING';
-}): Promise<{ applied: boolean; reason?: string; registrationId?: string; activated?: boolean }> => {
-  const normalizedPurchaseType = (purchaseType ?? '').trim().toLowerCase();
-  if (normalizedPurchaseType !== 'event') {
-    return { applied: false, reason: 'not_event_purchase' };
-  }
-  if (!eventId) {
-    return { applied: false, reason: 'missing_event_id' };
-  }
-  if (!teamId && !userId) {
-    return { applied: false, reason: 'missing_participant' };
-  }
-
-  try {
-    return await prisma.$transaction(async (tx) => {
-      const event = await acquireEventLockAndLoadStructure(tx, eventId);
-      if (!event) {
-        return { applied: false, reason: 'event_not_found' };
-      }
-
-      if (teamId) {
-        if (!event.teamSignup) {
-          return { applied: false, reason: 'team_signup_disabled' };
-        }
-        const normalizedEventType = String(event.eventType ?? '').toUpperCase();
-        const expectedRegistrationId = buildEventRegistrationId({
-          eventId,
-          registrantType: 'TEAM',
-          registrantId: teamId,
-          slotId: occurrenceSlotId,
-          occurrenceDate,
-        });
-        const normalizedRegistrationId = toStringOrNull(registrationId);
-        if (normalizedRegistrationId && normalizedRegistrationId !== expectedRegistrationId) {
-          return { applied: false, reason: 'registration_id_mismatch' };
-        }
-        const effectiveRegistrationId = normalizedRegistrationId ?? expectedRegistrationId;
-        const schedulableTeamEventRequiresReservation =
-          normalizedEventType === 'LEAGUE' || normalizedEventType === 'TOURNAMENT';
-        if (schedulableTeamEventRequiresReservation && !normalizedRegistrationId) {
-          return { applied: false, reason: 'schedulable_team_event_requires_participant_route' };
-        }
-        const existingRegistration = await tx.eventRegistrations.findUnique({
-          where: { id: effectiveRegistrationId },
-          select: {
-            id: true,
-            eventId: true,
-            registrantId: true,
-            parentId: true,
-            eventTeamId: true,
-            registrantType: true,
-            rosterRole: true,
-            status: true,
-            slotId: true,
-            occurrenceDate: true,
-            divisionId: true,
-            divisionTypeId: true,
-            divisionTypeKey: true,
-            createdBy: true,
-          },
-        });
-        if (!existingRegistration && (normalizedRegistrationId || schedulableTeamEventRequiresReservation)) {
-          return { applied: false, reason: 'reservation_missing' };
-        }
-
-        if (schedulableTeamEventRequiresReservation && existingRegistration) {
-          const reservedEventTeamId = toStringOrNull(existingRegistration.eventTeamId);
-          const reservedRegistrantId = toStringOrNull(existingRegistration.registrantId);
-          const canonicalTeamId = toStringOrNull(existingRegistration.parentId);
-          const metadataParentId = toStringOrNull(parentId);
-          const metadataDivisionId = toStringOrNull(divisionId);
-          const metadataDivisionTypeId = toStringOrNull(divisionTypeId);
-          const metadataDivisionTypeKey = toStringOrNull(divisionTypeKey);
-          const reservationMatchesMetadata = (
-            existingRegistration.id === effectiveRegistrationId
-            && (!existingRegistration.eventId || existingRegistration.eventId === eventId)
-            && (!existingRegistration.registrantType
-              || String(existingRegistration.registrantType).toUpperCase() === 'TEAM')
-            && (!existingRegistration.rosterRole
-              || String(existingRegistration.rosterRole).toUpperCase() === 'PARTICIPANT')
-            && reservedRegistrantId === teamId
-            && reservedEventTeamId === teamId
-            && Boolean(canonicalTeamId)
-            && (!metadataParentId || metadataParentId === canonicalTeamId)
-            && toStringOrNull(existingRegistration.slotId) === occurrenceSlotId
-            && toStringOrNull(existingRegistration.occurrenceDate) === occurrenceDate
-            && (!metadataDivisionId || metadataDivisionId === toStringOrNull(existingRegistration.divisionId))
-            && (!metadataDivisionTypeId
-              || metadataDivisionTypeId === toStringOrNull(existingRegistration.divisionTypeId))
-            && (!metadataDivisionTypeKey
-              || metadataDivisionTypeKey === toStringOrNull(existingRegistration.divisionTypeKey))
-          );
-          if (!reservationMatchesMetadata || !reservedEventTeamId || !canonicalTeamId) {
-            return { applied: false, reason: 'reservation_metadata_mismatch' };
-          }
-
-          if (targetStatus === 'ACTIVE' && existingRegistration.status !== 'ACTIVE') {
-            await claimOrCreateEventTeamSnapshot({
-              tx,
-              eventId,
-              eventTeamId: reservedEventTeamId,
-              canonicalTeamId,
-              createdBy: toStringOrNull(existingRegistration.createdBy) ?? userId ?? 'system:webhook',
-              divisionId: toStringOrNull(existingRegistration.divisionId),
-              divisionTypeId: toStringOrNull(existingRegistration.divisionTypeId),
-              divisionTypeKey: toStringOrNull(existingRegistration.divisionTypeKey),
-              occurrence: occurrenceSlotId && occurrenceDate
-                ? { slotId: occurrenceSlotId, occurrenceDate }
-                : null,
-              upsertRegistration: false,
-            });
-          }
-        }
-        let activated = false;
-        if (!existingRegistration) {
-          await transitionEventRegistrationStatus({
-            registrationId: effectiveRegistrationId,
-            eventId,
-            event,
-            status: targetStatus,
-            create: {
-              eventId,
-              registrantType: 'TEAM',
-              registrantId: teamId,
-              rosterRole: 'PARTICIPANT',
-              createdBy: userId ?? 'system:webhook',
-              eventTeamId: teamId,
-              divisionId: divisionId ?? null,
-              divisionTypeId: divisionTypeId ?? null,
-              divisionTypeKey: divisionTypeKey ?? null,
-              occurrence: occurrenceSlotId && occurrenceDate
-                ? { slotId: occurrenceSlotId, occurrenceDate }
-                : null,
-            },
-          }, tx);
-          activated = targetStatus === 'ACTIVE';
-        } else if (
-          existingRegistration.status !== targetStatus
-          && !(targetStatus === 'PENDING' && existingRegistration.status === 'ACTIVE')
-        ) {
-          await transitionEventRegistrationStatus({
-            registrationId: effectiveRegistrationId,
-            eventId,
-            event,
-            status: targetStatus,
-            fallbackCurrent: {
-              id: effectiveRegistrationId,
-              eventId,
-              registrantId: teamId,
-              parentId: null,
-              registrantType: 'TEAM',
-              rosterRole: 'PARTICIPANT',
-              status: existingRegistration.status,
-              acceptedAt: null,
-              eventTeamId: teamId,
-              sourceTeamRegistrationId: null,
-              ageAtEvent: null,
-              divisionId: toStringOrNull(existingRegistration.divisionId),
-              divisionTypeId: toStringOrNull(existingRegistration.divisionTypeId),
-              divisionTypeKey: toStringOrNull(existingRegistration.divisionTypeKey),
-              jerseyNumber: null,
-              position: null,
-              isCaptain: false,
-              consentDocumentId: null,
-              consentStatus: null,
-              createdBy: userId ?? 'system:webhook',
-              slotId: occurrenceSlotId,
-              occurrenceDate,
-              createdAt: null,
-              updatedAt: null,
-            } as any,
-          }, tx);
-          activated = targetStatus === 'ACTIVE';
-        }
-        await tx.eventRegistrations.updateMany({
-          where: {
-            eventId,
-            registrantId: teamId,
-            registrantType: 'TEAM',
-            rosterRole: 'WAITLIST',
-            status: { in: ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'] },
-            slotId: occurrenceSlotId,
-            occurrenceDate,
-          },
-          data: {
-            status: 'CANCELLED',
-            updatedAt: now,
-          },
-        });
-        if (schedulableTeamEventRequiresReservation && activated) {
-          await syncDivisionTeamMembershipFromRegistrations(event, tx);
-        }
-
-        return { applied: true, registrationId: effectiveRegistrationId, activated };
-      }
-
-      if (event.teamSignup) {
-        return { applied: false, reason: 'team_signup_event_requires_team' };
-      }
-
-      const normalizedRegistrantType = String(registrantType ?? '').trim().toUpperCase() === 'CHILD'
-        ? 'CHILD'
-        : 'SELF';
-      const participantUserId = userId as string;
-      const expectedRegistrationId = buildEventRegistrationId({
-        eventId,
-        registrantType: normalizedRegistrantType,
-        registrantId: participantUserId,
-        slotId: occurrenceSlotId,
-        occurrenceDate,
-      });
-      const normalizedRegistrationId = toStringOrNull(registrationId);
-      if (normalizedRegistrationId && normalizedRegistrationId !== expectedRegistrationId) {
-        return { applied: false, reason: 'registration_id_mismatch' };
-      }
-      const effectiveRegistrationId = normalizedRegistrationId ?? expectedRegistrationId;
-      const existingRegistration = await tx.eventRegistrations.findUnique({
-        where: { id: effectiveRegistrationId },
-        select: { status: true },
-      });
-      if (!existingRegistration && normalizedRegistrationId) {
-        return { applied: false, reason: 'reservation_missing' };
-      }
-      let activated = false;
-      if (!existingRegistration) {
-        await transitionEventRegistrationStatus({
-          registrationId: effectiveRegistrationId,
-          eventId,
-          event,
-          status: targetStatus,
-          create: {
-            eventId,
-            registrantType: normalizedRegistrantType,
-            registrantId: participantUserId,
-            parentId: normalizedRegistrantType === 'CHILD' ? parentId : null,
-            rosterRole: 'PARTICIPANT',
-            createdBy: userId ?? 'system:webhook',
-            divisionId: divisionId ?? null,
-            divisionTypeId: divisionTypeId ?? null,
-            divisionTypeKey: divisionTypeKey ?? null,
-            occurrence: occurrenceSlotId && occurrenceDate
-              ? { slotId: occurrenceSlotId, occurrenceDate }
-              : null,
-          },
-        }, tx);
-        activated = targetStatus === 'ACTIVE';
-      } else if (
-        existingRegistration.status !== targetStatus
-        && !(targetStatus === 'PENDING' && existingRegistration.status === 'ACTIVE')
-      ) {
-        await transitionEventRegistrationStatus({
-          registrationId: effectiveRegistrationId,
-          eventId,
-          status: targetStatus,
-          fallbackCurrent: {
-            id: effectiveRegistrationId,
-            eventId,
-            registrantId: participantUserId,
-            parentId: normalizedRegistrantType === 'CHILD' ? parentId ?? null : null,
-            registrantType: normalizedRegistrantType,
-            rosterRole: 'PARTICIPANT',
-            status: existingRegistration.status,
-            acceptedAt: null,
-            eventTeamId: null,
-            sourceTeamRegistrationId: null,
-            ageAtEvent: null,
-            divisionId: divisionId ?? null,
-            divisionTypeId: divisionTypeId ?? null,
-            divisionTypeKey: divisionTypeKey ?? null,
-            jerseyNumber: null,
-            position: null,
-            isCaptain: false,
-            consentDocumentId: null,
-            consentStatus: null,
-            createdBy: userId ?? 'system:webhook',
-            slotId: occurrenceSlotId,
-            occurrenceDate,
-            createdAt: null,
-            updatedAt: null,
-          } as any,
-          event,
-        }, tx);
-        activated = targetStatus === 'ACTIVE';
-      }
-      await tx.eventRegistrations.updateMany({
-        where: {
-          eventId,
-          registrantId: participantUserId,
-          registrantType: normalizedRegistrantType,
-          rosterRole: { in: ['WAITLIST', 'FREE_AGENT'] },
-          status: { in: ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'] },
-          slotId: occurrenceSlotId,
-          occurrenceDate,
-        },
-        data: {
-          status: 'CANCELLED',
-          updatedAt: now,
-        },
-      });
-
-      return { applied: true, registrationId: effectiveRegistrationId, activated };
-    });
-  } catch (error) {
-    const status = error && typeof error === 'object' && 'status' in error
-      ? error.status
-      : null;
-    if (typeof status === 'number' && status === 404) {
-      return { applied: false, reason: 'event_not_found' };
-    }
-    const errorCode = error && typeof error === 'object' && 'code' in error
-      ? error.code
-      : null;
-    if (errorCode === 'EVENT_REGISTRATION_CAPACITY_EXCEEDED') {
-      return { applied: false, reason: 'capacity_exceeded' };
-    }
-    if (errorCode === 'INVALID_EVENT_REGISTRATION_UNIT') {
-      return { applied: false, reason: 'invalid_registration_unit' };
-    }
-    console.error('Failed to apply webhook event registration', {
-      purchaseType,
-      eventId,
-      teamId,
-      userId,
-      error,
-    });
-    return { applied: false, reason: 'retryable_error' };
-  }
-};
 
 const ensureTeamRegistrationFromPurchase = async ({
   purchaseType,
@@ -680,127 +324,6 @@ const markTeamRegistrationPaymentPendingFromPurchase = async ({
   });
 };
 
-const setEventRegistrationPaymentStatusFromPurchase = async ({
-  purchaseType,
-  eventId,
-  teamId,
-  userId,
-  registrantType: purchaseRegistrantType,
-  registrationId,
-  occurrenceSlotId,
-  occurrenceDate,
-  now,
-  targetStatus = 'PAYMENT_FAILED',
-  paymentResolutionReason = null,
-  isSchedulableTeamEventAllowed = false,
-}: {
-  purchaseType: string | null;
-  eventId: string | null;
-  teamId: string | null;
-  userId: string | null;
-  registrantType?: string | null;
-  registrationId: string | null;
-  occurrenceSlotId: string | null;
-  occurrenceDate: string | null;
-  now: Date;
-  targetStatus?: 'PAYMENT_FAILED' | 'CANCELLED';
-  paymentResolutionReason?: string | null;
-  isSchedulableTeamEventAllowed?: boolean;
-}): Promise<{ applied: boolean; reason?: string }> => {
-  const normalizedPurchaseType = (purchaseType ?? '').trim().toLowerCase();
-  if (normalizedPurchaseType !== 'event') {
-    return { applied: false, reason: 'not_event_purchase' };
-  }
-  if (!eventId) {
-    return { applied: false, reason: 'missing_event_id' };
-  }
-  if (!teamId && !userId) {
-    return { applied: false, reason: 'missing_participant' };
-  }
-
-  try {
-    return await prisma.$transaction(async (tx) => {
-      const lockedEvents = await tx.$queryRaw<Array<{
-        id: string;
-        eventType: string | null;
-        teamSignup: boolean | null;
-      }>>`
-        SELECT
-          "id",
-          "eventType",
-          "teamSignup"
-        FROM "Events"
-        WHERE "id" = ${eventId}
-        FOR UPDATE
-      `;
-      const event = lockedEvents[0] ?? null;
-      if (!event) {
-        return { applied: false, reason: 'event_not_found' };
-      }
-
-      const registrantType = teamId
-        ? 'TEAM'
-        : String(purchaseRegistrantType ?? '').trim().toUpperCase() === 'CHILD'
-          ? 'CHILD'
-          : 'SELF';
-      const registrantId = teamId ?? userId as string;
-      if (registrantType === 'TEAM') {
-        if (!event.teamSignup) {
-          return { applied: false, reason: 'team_signup_disabled' };
-        }
-        const normalizedEventType = String(event.eventType ?? '').toUpperCase();
-        if (
-          !isSchedulableTeamEventAllowed
-          && (normalizedEventType === 'LEAGUE' || normalizedEventType === 'TOURNAMENT')
-        ) {
-          return { applied: false, reason: 'schedulable_team_event_requires_participant_route' };
-        }
-      } else if (event.teamSignup) {
-        return { applied: false, reason: 'team_signup_event_requires_team' };
-      }
-
-      const expectedRegistrationId = buildEventRegistrationId({
-        eventId,
-        registrantType,
-        registrantId,
-        slotId: occurrenceSlotId,
-        occurrenceDate,
-      });
-      const normalizedRegistrationId = toStringOrNull(registrationId);
-      if (normalizedRegistrationId && normalizedRegistrationId !== expectedRegistrationId) {
-        return { applied: false, reason: 'registration_id_mismatch' };
-      }
-
-      const result = await tx.eventRegistrations.updateMany({
-        where: {
-          id: normalizedRegistrationId ?? expectedRegistrationId,
-          status: {
-            in: targetStatus === 'CANCELLED'
-              ? ['STARTED', 'PENDING', 'PAYMENT_FAILED']
-              : ['STARTED', 'PENDING'],
-          },
-        },
-        data: {
-          status: targetStatus,
-          paymentResolutionReason,
-          updatedAt: now,
-        },
-      });
-      return result.count > 0
-        ? { applied: true }
-        : { applied: false, reason: 'reservation_not_pending' };
-    });
-  } catch (error) {
-    console.error('Failed to update webhook event registration payment status', {
-      purchaseType,
-      eventId,
-      teamId,
-      userId,
-      error,
-    });
-    return { applied: false, reason: 'error' };
-  }
-};
 
 
 const cancelTeamRegistrationFromFailedPayment = async ({
@@ -835,19 +358,26 @@ const isUpdatablePaymentIntentStatus = (status: Stripe.PaymentIntent.Status): bo
 
 const isCancellablePaymentIntentStatus = (status: Stripe.PaymentIntent.Status): boolean =>
   isUpdatablePaymentIntentStatus(status) || status === 'requires_capture';
+type ReconciledBill = {
+  parentBillId: string | null;
+  status: ReconciledBillStatus;
+};
 
 const resolveBillStatus = (
   currentStatus: string | null,
   paidAmountCents: number,
   totalAmountCents: number,
   hasProcessingPayment = false,
-): 'OPEN' | 'PENDING' | 'PAID' | 'OVERDUE' | 'CANCELLED' => {
+): ReconciledBillStatus => {
   if (paidAmountCents >= totalAmountCents) return 'PAID';
   if (currentStatus === 'CANCELLED') return 'CANCELLED';
   if (hasProcessingPayment) return 'PENDING';
   if (currentStatus === 'OVERDUE') return 'OVERDUE';
   return 'OPEN';
 };
+
+
+
 
 const syncPendingPaymentIntent = async ({
   stripe,
@@ -896,12 +426,17 @@ const reconcileBill = async ({
   billId,
   now,
   stripe,
+  client = prisma,
 }: {
   billId: string;
   now: Date;
   stripe: Stripe | null;
-}): Promise<{ parentBillId: string | null } | null> => {
-  const bill = await prisma.bills.findUnique({
+  client?: WebhookPrismaClient;
+}): Promise<ReconciledBill | null> => {
+  if (client !== prisma) {
+    await client.$queryRaw`SELECT "id" FROM "Bills" WHERE "id" = ${billId} FOR UPDATE`;
+  }
+  const bill = await client.bills.findUnique({
     where: { id: billId },
     select: {
       id: true,
@@ -913,7 +448,7 @@ const reconcileBill = async ({
   if (!bill) return null;
 
   const [payments, childBills] = await Promise.all([
-    prisma.billPayments.findMany({
+    client.billPayments.findMany({
       where: { billId: bill.id },
       orderBy: { sequence: 'asc' },
       select: {
@@ -924,7 +459,7 @@ const reconcileBill = async ({
         paymentIntentId: true,
       },
     }),
-    prisma.bills.findMany({
+    client.bills.findMany({
       where: { parentBillId: bill.id },
       select: { paidAmountCents: true },
     }),
@@ -957,7 +492,7 @@ const reconcileBill = async ({
         paymentIntentId: pendingPayment.paymentIntentId ?? null,
         targetAmountCents: 0,
       });
-      await prisma.billPayments.update({
+      await client.billPayments.update({
         where: { id: pendingPayment.id },
         data: {
           amountCents: 0,
@@ -988,7 +523,7 @@ const reconcileBill = async ({
         paymentUpdate.paymentIntentId = syncedIntentId;
       }
       if (Object.keys(paymentUpdate).length > 1) {
-        await prisma.billPayments.update({
+        await client.billPayments.update({
           where: { id: pendingPayment.id },
           data: paymentUpdate,
         });
@@ -1005,7 +540,7 @@ const reconcileBill = async ({
     bill.totalAmountCents,
     Boolean(processingPayment),
   );
-  await prisma.bills.update({
+  await client.bills.update({
     where: { id: bill.id },
     data: {
       paidAmountCents,
@@ -1016,7 +551,7 @@ const reconcileBill = async ({
     },
   });
 
-  return { parentBillId: bill.parentBillId ?? null };
+  return { parentBillId: bill.parentBillId ?? null, status };
 };
 
 const resolveWebhookSecrets = (): string[] => {
@@ -1687,51 +1222,6 @@ const createInstantBillAndPayment = async ({
   });
 };
 
-const loadBillPurchaseMetadata = async (billId: string | null): Promise<Record<string, unknown> | null> => {
-  if (!billId) return null;
-  const bill = await prisma.bills.findUnique({
-    where: { id: billId },
-    select: {
-      ownerType: true,
-      ownerId: true,
-      eventId: true,
-      organizationId: true,
-      slotId: true,
-      occurrenceDate: true,
-      lineItems: true,
-    },
-  });
-  if (!bill || !Array.isArray(bill.lineItems)) {
-    return bill
-      ? {
-          eventId: bill.eventId,
-          organizationId: bill.organizationId,
-          occurrenceSlotId: bill.slotId,
-          occurrenceDate: bill.occurrenceDate,
-          userId: bill.ownerType === 'USER' ? bill.ownerId : null,
-          teamId: bill.ownerType === 'TEAM' ? bill.ownerId : null,
-        }
-      : null;
-  }
-
-  const purchaseLineItem = bill.lineItems.find((item) => (
-    item &&
-    typeof item === 'object' &&
-    !Array.isArray(item) &&
-    typeof (item as Record<string, unknown>).purchaseType === 'string'
-  )) as Record<string, unknown> | undefined;
-
-  return {
-    ...(purchaseLineItem ?? {}),
-    eventId: toStringOrNull(purchaseLineItem?.eventId) ?? bill.eventId,
-    organizationId: toStringOrNull(purchaseLineItem?.organizationId) ?? bill.organizationId,
-    occurrenceSlotId: toStringOrNull(purchaseLineItem?.occurrenceSlotId) ?? bill.slotId,
-    occurrenceDate: toStringOrNull(purchaseLineItem?.occurrenceDate) ?? bill.occurrenceDate,
-    userId: toStringOrNull(purchaseLineItem?.userId) ?? (bill.ownerType === 'USER' ? bill.ownerId : null),
-    teamId: toStringOrNull(purchaseLineItem?.teamId) ?? (bill.ownerType === 'TEAM' ? bill.ownerId : null),
-  };
-};
-
 export async function POST(req: NextRequest) {
   const secretKey = process.env.STRIPE_SECRET_KEY;
   const stripeForPaymentIntentSync = secretKey ? new Stripe(secretKey) : null;
@@ -2010,6 +1500,10 @@ export async function POST(req: NextRequest) {
     let resolvedBillPaymentId = billPaymentId;
     let shouldSendReceipt = false;
     let retryableEventRegistrationFailure = false;
+    let paidBillActivatedRegistration: {
+      eventId: string;
+      registrationId: string;
+    } | null = null;
 
     if (eventType === 'payment_intent.processing') {
       if (billId || billPaymentId) {
@@ -2143,17 +1637,27 @@ export async function POST(req: NextRequest) {
         resolvedBillId = failedBill.billId ?? resolvedBillId;
         resolvedBillPaymentId = failedBill.billPaymentId ?? resolvedBillPaymentId;
       }
-
-      const registrationResult = await setEventRegistrationPaymentStatusFromPurchase({
-        purchaseType,
-        eventId,
-        teamId,
-        userId,
-        registrationId,
-        occurrenceSlotId,
-        occurrenceDate,
+      const failedBillPaymentOutcome = await applyBillPaymentOutcome({
+        billId: resolvedBillId,
+        outcome: 'FAILED',
+        fallback: {
+          purchaseType,
+          eventId,
+          teamId,
+          userId,
+          registrantType: eventRegistrationRegistrantType,
+          parentId: eventRegistrationParentId,
+          registrationId,
+          occurrenceSlotId,
+          occurrenceDate,
+          divisionId: eventRegistrationDivisionId,
+          divisionTypeId: eventRegistrationDivisionTypeId,
+          divisionTypeKey: eventRegistrationDivisionTypeKey,
+        },
         now,
       });
+      const failedBillPurchaseContext = failedBillPaymentOutcome.context;
+      const registrationResult = failedBillPaymentOutcome.registrationResult;
       if (
         !registrationResult.applied &&
         registrationResult.reason &&
@@ -2164,22 +1668,24 @@ export async function POST(req: NextRequest) {
       ) {
         console.warn('Stripe webhook skipped failed event registration cleanup.', {
           paymentIntentId,
-          purchaseType,
-          userId,
-          teamId,
-          eventId,
-          registrationId,
+          purchaseType: failedBillPurchaseContext.purchaseType,
+          userId: failedBillPurchaseContext.userId,
+          teamId: failedBillPurchaseContext.teamId,
+          eventId: failedBillPurchaseContext.eventId,
+          registrationId: failedBillPurchaseContext.registrationId,
           reason: registrationResult.reason,
         });
+
       }
 
       const teamRegistrationResult = await cancelTeamRegistrationFromFailedPayment({
-        purchaseType,
-        teamId,
-        userId,
-        registrationId,
+        purchaseType: failedBillPurchaseContext.purchaseType,
+        teamId: failedBillPurchaseContext.teamId,
+        userId: failedBillPurchaseContext.userId,
+        registrationId: failedBillPurchaseContext.registrationId,
         now,
       });
+
       if (
         !teamRegistrationResult.applied &&
         teamRegistrationResult.reason &&
@@ -2188,20 +1694,21 @@ export async function POST(req: NextRequest) {
       ) {
         console.warn('Stripe webhook skipped failed team registration cleanup.', {
           paymentIntentId,
-          purchaseType,
-          userId,
-          teamId,
-          registrationId,
+          purchaseType: failedBillPurchaseContext.purchaseType,
+          userId: failedBillPurchaseContext.userId,
+          teamId: failedBillPurchaseContext.teamId,
+          registrationId: failedBillPurchaseContext.registrationId,
           reason: teamRegistrationResult.reason,
         });
+
       }
 
       void sendPaymentFailureEmail({
-        purchaseType,
+        purchaseType: failedBillPurchaseContext.purchaseType,
         paymentIntentId,
-        userId,
-        teamId,
-        eventId,
+        userId: failedBillPurchaseContext.userId,
+        teamId: failedBillPurchaseContext.teamId,
+        eventId: failedBillPurchaseContext.eventId,
         productId,
         organizationId,
         billId: resolvedBillId,
@@ -2242,82 +1749,81 @@ export async function POST(req: NextRequest) {
             `Stripe webhook ignored a succeeded payment for voided bill installment ${billPaymentId}.`,
           );
         } else {
-          if (payment.status !== 'PAID') {
-            await prisma.billPayments.update({
-              where: { id: billPaymentId },
-              data: {
-                status: 'PAID',
-                paidAt: now,
-                payerUserId: userId ?? undefined,
-                taxCalculationId: toStringOrNull(metadata.tax_calculation_id ?? metadata.taxCalculationId ?? null),
-                taxAmountCents: toIntOrNull(metadata.tax_cents ?? metadata.taxCents) ?? 0,
-                stripeProcessingFeeCents: toIntOrNull(
-                  metadata.stripe_processing_fee_cents ?? metadata.stripeProcessingFeeCents ?? null,
-                ) ?? 0,
-                stripeTaxServiceFeeCents: toIntOrNull(
-                  metadata.stripe_tax_service_fee_cents ?? metadata.stripeTaxServiceFeeCents ?? null,
-                ) ?? 0,
-                updatedAt: now,
-              },
-            });
-            shouldSendReceipt = true;
-          }
+          await prisma.$transaction(async (tx) => {
+            if (payment.status !== 'PAID') {
+              await tx.billPayments.update({
+                where: { id: billPaymentId },
+                data: {
+                  status: 'PAID',
+                  paidAt: now,
+                  payerUserId: userId ?? undefined,
+                  taxCalculationId: toStringOrNull(metadata.tax_calculation_id ?? metadata.taxCalculationId ?? null),
+                  taxAmountCents: toIntOrNull(metadata.tax_cents ?? metadata.taxCents) ?? 0,
+                  stripeProcessingFeeCents: toIntOrNull(
+                    metadata.stripe_processing_fee_cents ?? metadata.stripeProcessingFeeCents ?? null,
+                  ) ?? 0,
+                  stripeTaxServiceFeeCents: toIntOrNull(
+                    metadata.stripe_tax_service_fee_cents ?? metadata.stripeTaxServiceFeeCents ?? null,
+                  ) ?? 0,
+                  updatedAt: now,
+                },
+              });
+              shouldSendReceipt = true;
+            }
 
           const reconciledBill = await reconcileBill({
             billId,
             now,
             stripe: stripeForPaymentIntentSync,
+            client: tx,
           });
+          let registrationBillStatus = reconciledBill?.status ?? null;
           if (reconciledBill?.parentBillId) {
-            await reconcileBill({
+            const reconciledParentBill = await reconcileBill({
               billId: reconciledBill.parentBillId,
               now,
               stripe: stripeForPaymentIntentSync,
+              client: tx,
             });
+            registrationBillStatus = reconciledParentBill?.status ?? registrationBillStatus;
           }
 
-          const billPurchaseMetadata = await loadBillPurchaseMetadata(billId);
-          const billPurchaseType = toStringOrNull(billPurchaseMetadata?.purchaseType) ?? purchaseType;
-          const billEventId = toStringOrNull(billPurchaseMetadata?.eventId) ?? eventId;
-          const billTeamId = toStringOrNull(billPurchaseMetadata?.teamId) ?? teamId;
-          const billUserId = toStringOrNull(billPurchaseMetadata?.userId) ?? userId;
-          const billRegistrantType = toStringOrNull(billPurchaseMetadata?.eventRegistrationRegistrantType)
-            ?? eventRegistrationRegistrantType;
-          const billParentId = toStringOrNull(billPurchaseMetadata?.eventRegistrationParentId)
-            ?? eventRegistrationParentId;
-          const billRegistrationId = toStringOrNull(billPurchaseMetadata?.registrationId) ?? registrationId;
-          const billOccurrenceSlotId = toStringOrNull(billPurchaseMetadata?.occurrenceSlotId) ?? occurrenceSlotId;
-          const billOccurrenceDate = toStringOrNull(billPurchaseMetadata?.occurrenceDate) ?? occurrenceDate;
-          const billDivisionId = toStringOrNull(billPurchaseMetadata?.eventRegistrationDivisionId)
-            ?? eventRegistrationDivisionId;
-          const billDivisionTypeId = toStringOrNull(billPurchaseMetadata?.eventRegistrationDivisionTypeId)
-            ?? eventRegistrationDivisionTypeId;
-          const billDivisionTypeKey = toStringOrNull(billPurchaseMetadata?.eventRegistrationDivisionTypeKey)
-            ?? eventRegistrationDivisionTypeKey;
-
-          const registrationResult = await ensureEventRegistrationFromPurchase({
-            purchaseType: billPurchaseType,
-            eventId: billEventId,
-            teamId: billTeamId,
-            userId: billUserId,
-            registrantType: billRegistrantType,
-            parentId: billParentId,
-            registrationId: billRegistrationId,
-            occurrenceSlotId: billOccurrenceSlotId,
-            occurrenceDate: billOccurrenceDate,
-            divisionId: billDivisionId,
-            divisionTypeId: billDivisionTypeId,
-            divisionTypeKey: billDivisionTypeKey,
+          const billPaymentOutcome = await applyBillPaymentOutcome({
+            billId,
+            outcome: 'PAID',
+            fallback: {
+              purchaseType,
+              eventId,
+              teamId,
+              userId,
+              registrantType: eventRegistrationRegistrantType,
+              parentId: eventRegistrationParentId,
+              registrationId,
+              occurrenceSlotId,
+              occurrenceDate,
+              divisionId: eventRegistrationDivisionId,
+              divisionTypeId: eventRegistrationDivisionTypeId,
+              divisionTypeKey: eventRegistrationDivisionTypeKey,
+            },
             now,
-            targetStatus: 'ACTIVE',
+            parentBillId: reconciledBill?.parentBillId,
+            billStatus: registrationBillStatus ?? 'OPEN',
+            tx,
           });
+          const billPurchaseContext = billPaymentOutcome.context;
+          const billPurchaseType = billPurchaseContext.purchaseType;
+          const billEventId = billPurchaseContext.eventId;
+          const billTeamId = billPurchaseContext.teamId;
+          const billUserId = billPurchaseContext.userId;
+          const billRegistrationId = billPurchaseContext.registrationId;
+          const registrationResult = billPaymentOutcome.registrationResult;
           retryableEventRegistrationFailure = registrationResult.reason === 'retryable_error';
           if (
-            !registrationResult.applied &&
-            registrationResult.reason &&
-            registrationResult.reason !== 'not_event_purchase' &&
-            registrationResult.reason !== 'missing_event_id' &&
-            registrationResult.reason !== 'missing_participant'
+            !registrationResult.applied
+            && registrationResult.reason
+            && registrationResult.reason !== 'not_event_purchase'
+            && registrationResult.reason !== 'missing_event_id'
+            && registrationResult.reason !== 'missing_participant'
           ) {
             console.warn('Stripe webhook skipped paid bill event registration sync.', {
               paymentIntentId,
@@ -2329,42 +1835,28 @@ export async function POST(req: NextRequest) {
               reason: registrationResult.reason,
             });
           }
-          const billPaymentResolution = resolveEventRegistrationPaymentFailure(registrationResult.reason);
-          if (!registrationResult.applied && billPaymentResolution) {
-            const billPaymentResolutionResult = await setEventRegistrationPaymentStatusFromPurchase({
+          const billPaymentResolutionResult = billPaymentOutcome.paymentResolutionResult;
+          if (
+            billPaymentResolutionResult
+            && !billPaymentResolutionResult.applied
+            && billPaymentResolutionResult.reason !== 'reservation_not_pending'
+          ) {
+            console.warn('Stripe webhook could not persist paid bill event registration resolution state.', {
+              paymentIntentId,
               purchaseType: billPurchaseType,
-              eventId: billEventId,
-              teamId: billTeamId,
               userId: billUserId,
-              registrantType: billRegistrantType,
+              teamId: billTeamId,
+              eventId: billEventId,
               registrationId: billRegistrationId,
-              occurrenceSlotId: billOccurrenceSlotId,
-              occurrenceDate: billOccurrenceDate,
-              now,
-              ...billPaymentResolution,
-              isSchedulableTeamEventAllowed: true,
+              reason: billPaymentResolutionResult.reason,
+              registrationFailureReason: registrationResult.reason,
             });
-            if (
-              !billPaymentResolutionResult.applied
-              && billPaymentResolutionResult.reason !== 'reservation_not_pending'
-            ) {
-              console.warn('Stripe webhook could not persist paid bill event registration resolution state.', {
-                paymentIntentId,
-                purchaseType: billPurchaseType,
-                userId: billUserId,
-                teamId: billTeamId,
-                eventId: billEventId,
-                registrationId: billRegistrationId,
-                reason: billPaymentResolutionResult.reason,
-                registrationFailureReason: registrationResult.reason,
-              });
-            }
           }
           if (registrationResult.activated && billEventId && registrationResult.registrationId) {
-            await sendEventRegistrationHostNotification({
+            paidBillActivatedRegistration = {
               eventId: billEventId,
               registrationId: registrationResult.registrationId,
-            });
+            };
           }
 
           const teamRegistrationResult = billPurchaseType === 'team_registration'
@@ -2388,6 +1880,10 @@ export async function POST(req: NextRequest) {
               registrationId: billRegistrationId,
               reason: teamRegistrationResult.reason,
             });
+          }
+          });
+          if (paidBillActivatedRegistration) {
+            await sendEventRegistrationHostNotification(paidBillActivatedRegistration);
           }
         }
       }
@@ -2462,31 +1958,30 @@ export async function POST(req: NextRequest) {
         reason: registrationResult.reason,
       });
     }
-    const paymentResolution = resolveEventRegistrationPaymentFailure(registrationResult.reason);
-    if (!registrationResult.applied && paymentResolution) {
-      const paymentResolutionResult = await setEventRegistrationPaymentStatusFromPurchase({
-        purchaseType,
-        eventId,
-        teamId,
-        userId,
-        registrantType: eventRegistrationRegistrantType,
-        registrationId,
-        occurrenceSlotId,
-        occurrenceDate,
-        now,
-        ...paymentResolution,
-        isSchedulableTeamEventAllowed: true,
+    const paymentResolutionResult = await persistEventRegistrationPaymentResolution({
+      registrationApplied: registrationResult.applied,
+      failureReason: registrationResult.reason,
+      purchaseType,
+      eventId,
+      teamId,
+      userId,
+      registrantType: eventRegistrationRegistrantType,
+      registrationId,
+      occurrenceSlotId,
+      occurrenceDate,
+      now,
+      isSchedulableTeamEventAllowed: true,
+    });
+    if (
+      paymentResolutionResult
+      && !paymentResolutionResult.applied
+      && paymentResolutionResult.reason !== 'reservation_not_pending'
+    ) {
+      console.warn('Stripe webhook could not persist paid event registration resolution state.', {
+        ...receiptLogContext,
+        reason: paymentResolutionResult.reason,
+        registrationFailureReason: registrationResult.reason,
       });
-      if (
-        !paymentResolutionResult.applied
-        && paymentResolutionResult.reason !== 'reservation_not_pending'
-      ) {
-        console.warn('Stripe webhook could not persist paid event registration resolution state.', {
-          ...receiptLogContext,
-          reason: paymentResolutionResult.reason,
-          registrationFailureReason: registrationResult.reason,
-        });
-      }
     }
     if (registrationResult.activated && eventId && registrationResult.registrationId) {
       await sendEventRegistrationHostNotification({

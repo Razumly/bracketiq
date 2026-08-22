@@ -9,6 +9,7 @@ import {
 import { isTournamentPoolPlayEnabled } from '@/server/events/tournamentPools';
 import { withDerivedCanonicalTeamIds } from '@/server/teams/teamMembership';
 import { acquireEventLock } from '@/server/repositories/locks';
+import type { EventRegistrationPaymentResolutionReason } from '@/contracts/eventParticipants';
 
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
@@ -22,6 +23,14 @@ export type RegistrationLifecycleStatus =
   | 'BLOCKED'
   | 'CANCELLED'
   | 'CONSENTFAILED';
+
+export const normalizeEventRegistrationPaymentResolutionReason = (
+  value: unknown,
+): EventRegistrationPaymentResolutionReason | null => (
+  value === 'capacity_exceeded' || value === 'invalid_registration_unit'
+    ? value
+    : null
+);
 
 export const ACCEPTED_EVENT_REGISTRATION_STATUSES = ['ACTIVE', 'BLOCKED'] as const;
 
@@ -62,6 +71,7 @@ export type RegistrationRow = {
   occurrenceDate: string | null;
   createdAt: Date | null;
   updatedAt: Date | null;
+  paymentResolutionReason: EventRegistrationPaymentResolutionReason | null;
 };
 
 export type EventParticipantEntry = {
@@ -80,6 +90,8 @@ export type EventParticipantEntry = {
   occurrenceDate: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+  paymentResolutionReason: EventRegistrationPaymentResolutionReason | null;
+
 };
 
 export type EventParticipantDivisionIds = {
@@ -416,6 +428,9 @@ const toEntry = (row: RegistrationRow): EventParticipantEntry => ({
   registrantType: row.registrantType,
   rosterRole: normalizeRosterRole(row.rosterRole),
   status: normalizeLifecycleStatus(row.status),
+  paymentResolutionReason: normalizeEventRegistrationPaymentResolutionReason(
+    row.paymentResolutionReason,
+  ),
   parentId: normalizeId(row.parentId),
   divisionId: normalizeId(row.divisionId),
   divisionTypeId: normalizeId(row.divisionTypeId),

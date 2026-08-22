@@ -5,6 +5,7 @@ import { requireSession } from '@/lib/permissions';
 import { parseDateInput } from '@/server/requestParsing';
 import { canManageOrganization } from '@/server/accessControl';
 import { loadBillDiscountSummaries, withBillDiscountAmounts } from '@/server/billing/billDiscountSummaries';
+import { validateEventRegistrationBillSource } from '@/server/billing/eventRegistrationPaymentContext';
 import { handleApiRouteError } from '@/server/http/routeErrors';
 import {
   isWeeklyParentEvent,
@@ -279,14 +280,30 @@ export async function POST(req: NextRequest) {
   const lineItemsTotalAmountCents = normalizedLineItems.reduce((sum, item) => sum + item.amountCents, 0);
   const effectiveTotalAmountCents = lineItemsTotalAmountCents > 0 ? lineItemsTotalAmountCents : totalAmountCents;
 
-  const eventId = parsed.data.eventId?.trim() || null;
+  let eventId = parsed.data.eventId?.trim() || null;
   const slotId = parsed.data.slotId?.trim() || null;
   const occurrenceDate = parsed.data.occurrenceDate?.trim() || null;
   const organizationId = parsed.data.organizationId?.trim() || null;
-  const sourceType = parsed.data.sourceType?.trim() || null;
+  const sourceType = parsed.data.sourceType?.trim().toUpperCase() || null;
   const sourceId = parsed.data.sourceId?.trim() || null;
   const paymentPlanEnabled = parsed.data.paymentPlanEnabled ?? false;
   const now = new Date();
+
+  if (sourceType === 'EVENT_REGISTRATION') {
+    const sourceValidation = await validateEventRegistrationBillSource({
+      sourceId,
+      ownerType: parsed.data.ownerType,
+      ownerId,
+      eventId,
+      organizationId,
+      slotId,
+      occurrenceDate,
+    });
+    if (!sourceValidation.valid) {
+      return NextResponse.json({ error: 'Invalid event registration bill source.' }, { status: 400 });
+    }
+    eventId = sourceValidation.registration.eventId;
+  }
 
   const alternateTeamOwnerIds = [ownerId];
   if (parsed.data.ownerType === 'TEAM') {

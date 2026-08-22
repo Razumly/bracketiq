@@ -247,10 +247,16 @@ describe('POST /api/billing/webhook', () => {
     prismaMock.$transaction.mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
       const tx = {
         bills: {
+          findUnique: prismaMock.bills.findUnique,
+          findMany: prismaMock.bills.findMany,
+          update: prismaMock.bills.update,
           create: prismaMock.bills.create,
         },
         billPayments: {
+          findUnique: prismaMock.billPayments.findUnique,
+          findMany: prismaMock.billPayments.findMany,
           findFirst: prismaMock.billPayments.findFirst,
+          update: prismaMock.billPayments.update,
           create: prismaMock.billPayments.create,
         },
         events: {
@@ -262,7 +268,10 @@ describe('POST /api/billing/webhook', () => {
           update: prismaMock.eventRegistrations.update,
           updateMany: prismaMock.eventRegistrations.updateMany,
         },
-        $queryRaw: prismaMock.$queryRaw,
+        $queryRaw: (...args: any[]) => {
+          const query = args[0]?.join?.('') ?? '';
+          return query.includes('"Bills"') ? Promise.resolve([]) : prismaMock.$queryRaw(...args);
+        },
       };
       return callback(tx);
     });
@@ -274,6 +283,7 @@ describe('POST /api/billing/webhook', () => {
     if (originalWebhookBypass == null) delete process.env.STRIPE_WEBHOOK_ALLOW_UNVERIFIED_DEV;
     else process.env.STRIPE_WEBHOOK_ALLOW_UNVERIFIED_DEV = originalWebhookBypass;
   });
+
 
   it('rejects unsigned webhook payloads when verification is not explicitly bypassed', async () => {
     delete process.env.STRIPE_WEBHOOK_ALLOW_UNVERIFIED_DEV;
@@ -925,6 +935,8 @@ describe('POST /api/billing/webhook', () => {
       }),
     );
   });
+
+
 
   it('marks an async event registration payment as pending when the payment intent is processing', async () => {
     prismaMock.$queryRaw.mockResolvedValueOnce([

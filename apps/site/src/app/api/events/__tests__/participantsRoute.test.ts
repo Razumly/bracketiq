@@ -112,6 +112,9 @@ jest.mock('@/server/events/eventRegistrations', () => ({
   deleteEventRegistration: (...args: any[]) => deleteEventRegistrationMock(...args),
   syncDivisionTeamMembershipFromRegistrations: (...args: any[]) => syncDivisionTeamMembershipFromRegistrationsMock(...args),
   acquireEventLockAndLoadStructure: (...args: any[]) => acquireEventLockAndLoadStructureMock(...args),
+  normalizeEventRegistrationPaymentResolutionReason: (value: unknown) => (
+    value === 'capacity_exceeded' || value === 'invalid_registration_unit' ? value : null
+  ),
 }));
 
 import { DELETE, GET, POST } from '@/app/api/events/[eventId]/participants/route';
@@ -876,6 +879,8 @@ describe('POST /api/events/[eventId]/participants', () => {
         ownerType: 'USER',
         ownerId: 'user_1',
         eventId: 'weekly_parent',
+        sourceType: 'EVENT_REGISTRATION',
+        sourceId: 'registration_1',
         slotId: 'slot_1',
         occurrenceDate,
         organizationId: 'org_1',

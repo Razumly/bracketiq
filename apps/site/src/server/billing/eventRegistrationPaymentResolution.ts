@@ -1,15 +1,25 @@
-export type PermanentEventRegistrationFailureReason =
-  | 'capacity_exceeded'
-  | 'invalid_registration_unit';
+import type { EventRegistrationPaymentResolutionReason } from '@/contracts/eventParticipants';
 
 export type EventRegistrationPaymentResolution = {
   targetStatus: 'CANCELLED';
-  paymentResolutionReason: PermanentEventRegistrationFailureReason;
+  paymentResolutionReason: EventRegistrationPaymentResolutionReason;
 };
+export type EventRegistrationPaymentTargetStatus = 'ACTIVE' | 'PENDING';
+
+export const resolveEventRegistrationPaymentTargetStatus = ({
+  parentBillId,
+  billStatus,
+}: {
+  parentBillId: string | null | undefined;
+  billStatus: 'OPEN' | 'PENDING' | 'PAID' | 'OVERDUE' | 'CANCELLED';
+}): EventRegistrationPaymentTargetStatus => (
+  !parentBillId || billStatus === 'PAID' ? 'ACTIVE' : 'PENDING'
+);
+
 
 export const isPermanentEventRegistrationFailure = (
   failureReason: string | undefined,
-): failureReason is PermanentEventRegistrationFailureReason => (
+): failureReason is EventRegistrationPaymentResolutionReason => (
   failureReason === 'capacity_exceeded'
   || failureReason === 'invalid_registration_unit'
 );

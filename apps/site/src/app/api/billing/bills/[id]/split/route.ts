@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import type { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { canManageBillPayment } from '@/server/billing/billPaymentActions';
@@ -163,6 +164,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           ownerId: playerId,
           organizationId: bill.organizationId,
           eventId: bill.eventId,
+          sourceType: bill.sourceType,
+          sourceId: bill.sourceId,
+          lineItems: bill.lineItems === null
+            ? undefined
+            : (bill.lineItems as Prisma.InputJsonValue),
           totalAmountCents: childAmount,
           paidAmountCents: 0,
           nextPaymentDue: nextInstallment?.dueDate ?? null,

@@ -4,6 +4,8 @@ import { prisma } from '@/lib/prisma';
 import { getOptionalSession, requireSession } from '@/lib/permissions';
 import { calculateAgeOnDate } from '@/lib/age';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
+import type { EventRegistrationsStatusEnum } from '@/generated/prisma/enums';
+
 import {
   resolveEventDivisionSelection,
 } from '@/app/api/events/[eventId]/registrationDivisionUtils';
@@ -21,7 +23,9 @@ import {
   syncDivisionTeamMembershipFromRegistrations,
   upsertEventRegistration,
   acquireEventLockAndLoadStructure,
+  normalizeEventRegistrationPaymentResolutionReason,
 } from '@/server/events/eventRegistrations';
+
 import {
   claimOrCreateEventTeamSnapshot,
   findRegisteredEventTeamForCanonical,
@@ -142,14 +146,22 @@ const paymentFailedRegistrationSelect = {
   createdAt: true,
   updatedAt: true,
 } as const;
+type ParticipantRegistrationRow = Prisma.EventRegistrationsGetPayload<{
+  select: typeof paymentFailedRegistrationSelect;
+}> & {
+  status: EventRegistrationsStatusEnum | null;
+};
 
-const toRegistrationEntry = (row: any) => ({
+
+const toRegistrationEntry = (row: ParticipantRegistrationRow) => ({
   registrationId: row.id,
   registrantId: row.registrantId,
   registrantType: row.registrantType,
   rosterRole: row.rosterRole,
   status: row.status,
-  paymentResolutionReason: normalizeId(row.paymentResolutionReason),
+  paymentResolutionReason: normalizeEventRegistrationPaymentResolutionReason(
+    row.paymentResolutionReason,
+  ),
   parentId: normalizeId(row.parentId),
   divisionId: normalizeId(row.divisionId),
   divisionTypeId: normalizeId(row.divisionTypeId),
@@ -217,9 +229,9 @@ const loadViewerPaymentFailedRegistrations = async ({
       AND: [
         {
           OR: [
-            { status: 'PAYMENT_FAILED' as any },
+            { status: 'PAYMENT_FAILED' },
             {
-              status: 'CANCELLED' as any,
+              status: 'CANCELLED',
               paymentResolutionReason: { not: null },
             },
           ],
@@ -351,6 +363,7 @@ const createWeeklyPaymentPlanBillForRegistration = async (
     event: any;
     ownerType: 'USER' | 'TEAM';
     ownerId: string;
+    registrationId: string;
     divisionSelection: {
       divisionId?: string | null;
       divisionTypeId?: string | null;
@@ -368,6 +381,11 @@ const createWeeklyPaymentPlanBillForRegistration = async (
   if (!ownerId) {
     return null;
   }
+  const registrationId = normalizeId(params.registrationId);
+  if (!registrationId) {
+    return null;
+  }
+
 
   const division = await resolveBillingDivision(
     params.tx,
@@ -417,10 +435,20 @@ const createWeeklyPaymentPlanBillForRegistration = async (
       parentBillId: null,
       paymentPlanEnabled: true,
     },
-    select: { id: true },
+    select: { id: true, sourceType: true, sourceId: true },
   } as any);
   if (existing) {
-    return existing;
+    if (existing.sourceType === 'EVENT_REGISTRATION' && existing.sourceId === registrationId) {
+      return existing;
+    }
+    return params.tx.bills.update({
+      where: { id: existing.id },
+      data: {
+        sourceType: 'EVENT_REGISTRATION',
+        sourceId: registrationId,
+        updatedAt: new Date(),
+      },
+    });
   }
 
   const now = new Date();
@@ -432,6 +460,8 @@ const createWeeklyPaymentPlanBillForRegistration = async (
       totalAmountCents,
       paidAmountCents: 0,
       eventId: params.event.id,
+      sourceType: 'EVENT_REGISTRATION',
+      sourceId: registrationId,
       slotId: params.occurrence.slotId,
       occurrenceDate: params.occurrence.occurrenceDate,
       organizationId: normalizeId(params.event.organizationId),
@@ -690,13 +720,13 @@ const cancelFreeAgentRegistrationsForUsers = async ({
     where: {
       eventId,
       ...buildOccurrenceWhere(occurrence),
-      registrantType: { in: ['SELF', 'CHILD'] as any[] },
+      registrantType: { in: ['SELF', 'CHILD'] },
       registrantId: { in: normalizedUserIds },
-      rosterRole: 'FREE_AGENT' as any,
-      status: { in: [...ACTIVE_REGISTRATION_STATUSES] as any[] },
+      rosterRole: 'FREE_AGENT',
+      status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
     },
     data: {
-      status: 'CANCELLED' as any,
+      status: 'CANCELLED',
       updatedAt: new Date(),
     },
   });
