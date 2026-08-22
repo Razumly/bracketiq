@@ -60,20 +60,66 @@ const identifierSchema = z.string().trim().min(1).max(200);
 const positiveIntegerSchema = z.number().int().positive();
 const sourceProfileSchema = z.enum(["CLUB", "EVENT", "RENTAL"]);
 
+export const AFFILIATE_AGENT_MAX_SET_ITEMS = 64 as const;
+export const AFFILIATE_AGENT_MAX_SET_CANONICAL_BYTES = 16_384 as const;
+export const AFFILIATE_AGENT_MAX_MANIFEST_ENTRIES = 64 as const;
+export const AFFILIATE_AGENT_MAX_MANIFEST_CANONICAL_BYTES = 65_536 as const;
+export const AFFILIATE_AGENT_MAX_CLAIM_ENVELOPE_CANONICAL_BYTES =
+  65_536 as const;
+export const AFFILIATE_AGENT_MAX_ENVIRONMENT_VALUE_BYTES = 65_536 as const;
+
+const MAX_DECLARATIVE_PACKAGE_FIELDS = 64 as const;
+const MAX_DECLARATIVE_PACKAGE_CANONICAL_BYTES = 65_536 as const;
+const MAX_TERMINAL_RESULT_CANONICAL_BYTES = 65_536 as const;
+const MAX_MANIFEST_ARTIFACT_BYTES = 8_388_608 as const;
+const MAX_SCHEMA_ISSUE_PATH_ITEMS = 32 as const;
+
+const addCanonicalByteLimitIssue = (
+  value: unknown,
+  maxBytes: number,
+  context: z.RefinementCtx,
+  path: (string | number)[],
+  label: string,
+): boolean => {
+  const exceedsLimit =
+    Buffer.byteLength(canonicalizeAffiliateAgentValue(value), "utf8") >
+    maxBytes;
+  if (exceedsLimit) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `${label} must not exceed ${maxBytes} canonical UTF-8 bytes.`,
+      path,
+    });
+  }
+  return !exceedsLimit;
+};
+
 const sortedUniqueStringsSchema = <T extends z.ZodType<string>>(
   itemSchema: T,
+  minimumItems = 0,
 ) =>
-  z.array(itemSchema).superRefine((values, context) => {
-    for (let index = 1; index < values.length; index += 1) {
-      if (values[index - 1] >= values[index]) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Set-like arrays must be sorted and unique.",
-          path: [index],
-        });
+  z
+    .array(itemSchema)
+    .min(minimumItems)
+    .max(AFFILIATE_AGENT_MAX_SET_ITEMS)
+    .superRefine((values, context) => {
+      for (let index = 1; index < values.length; index += 1) {
+        if (values[index - 1] >= values[index]) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Set-like arrays must be sorted and unique.",
+            path: [index],
+          });
+        }
       }
-    }
-  });
+      addCanonicalByteLimitIssue(
+        values,
+        AFFILIATE_AGENT_MAX_SET_CANONICAL_BYTES,
+        context,
+        [],
+        "Set-like arrays",
+      );
+    });
 
 const assertSortedUniqueObjects = <T>(
   values: T[],
@@ -430,6 +476,7 @@ const affiliateAgentRoleContractObjectSchema = z
     ),
     terminalDispositions: sortedUniqueStringsSchema(
       affiliateAgentTerminalDispositionSchema,
+      1,
     ),
     forbiddenEffects: sortedUniqueStringsSchema(
       affiliateAgentForbiddenEffectSchema,
@@ -708,6 +755,13 @@ export const affiliateAgentDeploymentContractSchema = z
         claimLoop: z.literal(false),
         contextReuse: z.literal(false),
         executionClass: z.literal("PRODUCTION_CODEX"),
+        databaseRoles: z
+          .object({
+            gateway: z.literal("bracketiq_affiliate_gateway"),
+            lifecycleAuthority: z.literal("bracketiq_affiliate_lifecycle"),
+            agent: z.literal("bracketiq_affiliate_agent"),
+          })
+          .strict(),
       })
       .strict(),
     hash: sha256Schema,
@@ -841,7 +895,7 @@ const affiliateAgentEvidenceManifestEntrySchema = z
     artifactId: identifierSchema,
     sha256: sha256Schema,
     mimeType: z.string().trim().min(1).max(200),
-    byteSize: z.number().int().nonnegative(),
+    byteSize: z.number().int().nonnegative().max(MAX_MANIFEST_ARTIFACT_BYTES),
     retention: z.literal("INDEFINITE"),
   })
   .strict();
@@ -855,6 +909,7 @@ export const affiliateAgentEvidenceManifestSchema = z
     schemaVersion: z.literal(1),
     entries: z
       .array(affiliateAgentEvidenceManifestEntrySchema)
+      .max(AFFILIATE_AGENT_MAX_MANIFEST_ENTRIES)
       .superRefine((entries, context) => {
         assertSortedUniqueObjects(
           entries,
@@ -865,7 +920,21 @@ export const affiliateAgentEvidenceManifestSchema = z
     hash: sha256Schema,
   })
   .strict()
-  .superRefine(assertSelfHash);
+  .superRefine((manifest, context) => {
+    const withinCanonicalByteLimit = addCanonicalByteLimitIssue(
+      manifest,
+      AFFILIATE_AGENT_MAX_MANIFEST_CANONICAL_BYTES,
+      context,
+      [],
+      "Evidence manifest",
+    );
+    if (
+      withinCanonicalByteLimit &&
+      manifest.entries.length <= AFFILIATE_AGENT_MAX_MANIFEST_ENTRIES
+    ) {
+      assertSelfHash(manifest, context);
+    }
+  });
 
 export type AffiliateAgentEvidenceManifest = z.infer<
   typeof affiliateAgentEvidenceManifestSchema
@@ -897,6 +966,8 @@ const supplyReviewerSubjectSchema = z
     producerInvocationId: identifierSchema,
     producerWorkspaceId: identifierSchema,
     committedPackageHash: sha256Schema,
+    targetId: identifierSchema,
+    targetType: z.enum(["EVENT", "FACILITY", "ORGANIZATION"]),
     reviewPass: z.number().int().min(1).max(3),
   })
   .strict();
@@ -912,7 +983,7 @@ const humanDirectedExecutorSubjectSchema = z
   })
   .strict();
 
-const affiliateAgentSubjectSchema = z.discriminatedUnion("type", [
+export const affiliateAgentSubjectSchema = z.discriminatedUnion("type", [
   coveragePlannerSubjectSchema,
   mappingProducerSubjectSchema,
   supplyReviewerSubjectSchema,
@@ -986,6 +1057,13 @@ export const affiliateAgentClaimEnvelopeSchema = z
       .strict(),
   ])
   .superRefine((claim, context) => {
+    addCanonicalByteLimitIssue(
+      claim,
+      AFFILIATE_AGENT_MAX_CLAIM_ENVELOPE_CANONICAL_BYTES,
+      context,
+      [],
+      "Claim envelope",
+    );
     const expectedCommands =
       AFFILIATE_AGENT_ROLE_CONTRACTS[claim.role].permittedCommands;
     if (
@@ -1003,6 +1081,21 @@ export const affiliateAgentClaimEnvelopeSchema = z
         code: z.ZodIssueCode.custom,
         message: "Coverage Planner claims cannot identify a Supply Source.",
         path: ["supplySourceId"],
+      });
+    }
+    if (
+      claim.role !== "COVERAGE_PLANNER" &&
+      (claim.supplySourceId === null || claim.lifecycleGeneration === null)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Non-coverage claims require a Supply Source and lifecycle generation.",
+        path: [
+          claim.supplySourceId === null
+            ? "supplySourceId"
+            : "lifecycleGeneration",
+        ],
       });
     }
 
@@ -1101,12 +1194,22 @@ const affiliateAgentDeclarativePackageSchema = z
             }
           }),
       )
+      .max(MAX_DECLARATIVE_PACKAGE_FIELDS)
       .superRefine((fields, context) => {
         assertSortedUniqueObjects(fields, context, (field) => field.field);
       }),
     evidenceRefs: sortedUniqueStringsSchema(identifierSchema),
   })
-  .strict();
+  .strict()
+  .superRefine((candidatePackage, context) => {
+    addCanonicalByteLimitIssue(
+      candidatePackage,
+      MAX_DECLARATIVE_PACKAGE_CANONICAL_BYTES,
+      context,
+      [],
+      "Declarative package",
+    );
+  });
 
 export const affiliateAgentCommandSchema = z.discriminatedUnion("type", [
   z
@@ -1172,6 +1275,27 @@ export const affiliateAgentCommandSchema = z.discriminatedUnion("type", [
     .strict(),
 ]);
 
+export const affiliateAgentDeclarativePackageValidationOutputSchema = z
+  .object({
+    valid: z.literal(true),
+    validatedPackageHash: sha256Schema,
+  })
+  .strict();
+
+export type AffiliateAgentDeclarativePackageValidationOutput = z.infer<
+  typeof affiliateAgentDeclarativePackageValidationOutputSchema
+>;
+
+export const affiliateAgentDeclarativePackageCommitOutputSchema = z
+  .object({
+    packageHash: sha256Schema,
+  })
+  .strict();
+
+export type AffiliateAgentDeclarativePackageCommitOutput = z.infer<
+  typeof affiliateAgentDeclarativePackageCommitOutputSchema
+>;
+
 export type AffiliateAgentCommand = z.infer<typeof affiliateAgentCommandSchema>;
 
 const terminalResultBase = {
@@ -1180,9 +1304,14 @@ const terminalResultBase = {
   claimId: identifierSchema,
   claimGeneration: positiveIntegerSchema,
   lifecycleGeneration: z.number().int().nonnegative().nullable(),
+  deploymentContractVersion: positiveIntegerSchema,
+  deploymentContractHash: sha256Schema,
+  supplyContractVersion: positiveIntegerSchema,
+  supplyContractHash: sha256Schema,
   roleContractVersion: positiveIntegerSchema,
   roleContractHash: sha256Schema,
-  supplyContractHash: sha256Schema,
+  promptTemplateVersion: positiveIntegerSchema,
+  promptTemplateHash: sha256Schema,
   workerId: identifierSchema,
   invocationId: identifierSchema,
   reasonCodes: sortedUniqueStringsSchema(
@@ -1230,7 +1359,16 @@ const terminalResultVariant = <
       disposition: z.literal(disposition),
       payload,
     })
-    .strict();
+    .strict()
+    .superRefine((result, context) => {
+      addCanonicalByteLimitIssue(
+        result,
+        MAX_TERMINAL_RESULT_CANONICAL_BYTES,
+        context,
+        [],
+        "Terminal result",
+      );
+    });
 
 export const affiliateAgentTerminalResultEnvelopeSchema = z.union([
   terminalResultVariant(
@@ -1238,7 +1376,7 @@ export const affiliateAgentTerminalResultEnvelopeSchema = z.union([
     "CAMPAIGN_PROPOSED",
     z
       .object({
-        campaignProposalRefs: sortedUniqueStringsSchema(identifierSchema),
+        campaignProposalRefs: sortedUniqueStringsSchema(identifierSchema, 1),
       })
       .strict(),
   ),
@@ -1257,7 +1395,7 @@ export const affiliateAgentTerminalResultEnvelopeSchema = z.union([
     z
       .object({
         supplySourceId: identifierSchema,
-        policyEvidenceRefs: sortedUniqueStringsSchema(identifierSchema),
+        policyEvidenceRefs: sortedUniqueStringsSchema(identifierSchema, 1),
       })
       .strict(),
   ),
@@ -1278,7 +1416,15 @@ export const affiliateAgentTerminalResultEnvelopeSchema = z.union([
         ]),
       })
       .strict(),
-  ),
+  ).superRefine((result, context) => {
+    if (result.evidenceRefs.length === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A no-action result requires evidence.",
+        path: ["evidenceRefs"],
+      });
+    }
+  }),
   terminalResultVariant(
     "MAPPING_PRODUCER",
     "PACKAGE_COMMITTED",
@@ -1296,6 +1442,7 @@ export const affiliateAgentTerminalResultEnvelopeSchema = z.union([
       .object({
         repairPass: z.number().int().min(1).max(3),
         packageHash: sha256Schema,
+        commitReceiptId: identifierSchema,
       })
       .strict(),
   ),
@@ -1347,6 +1494,7 @@ export const affiliateAgentTerminalResultEnvelopeSchema = z.union([
             "MISSING_REQUIRED_FIELD",
             "VALIDATION_FAILED",
           ]),
+          1,
         ),
       })
       .strict(),
@@ -1389,7 +1537,15 @@ export const affiliateAgentTerminalResultEnvelopeSchema = z.union([
         caseReason: z.string().trim().min(1).max(1_000),
       })
       .strict(),
-  ),
+  ).superRefine((result, context) => {
+    if (result.evidenceRefs.length === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A human-review result requires evidence.",
+        path: ["evidenceRefs"],
+      });
+    }
+  }),
   terminalResultVariant(
     "HUMAN_DIRECTED_EXECUTOR",
     "LIFECYCLE_COMMAND_EXECUTED",
@@ -1414,7 +1570,9 @@ export type AffiliateAgentTerminalResultEnvelope = z.infer<
 
 const affiliateAgentSchemaIssueSchema = z
   .object({
-    path: z.array(z.union([z.string(), z.number().int().nonnegative()])),
+    path: z
+      .array(z.union([z.string().max(200), z.number().int().nonnegative()]))
+      .max(MAX_SCHEMA_ISSUE_PATH_ITEMS),
     code: z.enum([
       "INVALID_TYPE",
       "INVALID_VALUE",

@@ -74,6 +74,11 @@ CREATE UNIQUE INDEX "AffiliateAgentGatewayJobs_terminalReceiptId_key"
   ON "AffiliateAgentGatewayJobs"("terminalReceiptId");
 CREATE INDEX "AffiliateAgentGatewayJobs_role_lane_status_nextAttemptAt_priority_createdAt_idx"
   ON "AffiliateAgentGatewayJobs"("role", "lane", "status", "nextAttemptAt", "priority", "createdAt");
+CREATE INDEX "AffiliateAgentGatewayJobs_live_claimable_role_priority_createdAt_id_idx"
+  ON "AffiliateAgentGatewayJobs"("role", "priority" DESC, "createdAt", "id")
+  WHERE "activeClaimId" IS NULL
+    AND "status" IN ('QUEUED', 'RETRY_WAIT')
+    AND "nextAttemptAt" IS NOT NULL;
 CREATE INDEX "AffiliateAgentGatewayJobs_queue_status_nextAttemptAt_idx"
   ON "AffiliateAgentGatewayJobs"("queue", "status", "nextAttemptAt");
 CREATE INDEX "AffiliateAgentGatewayJobs_supplySourceId_status_idx"
@@ -330,10 +335,22 @@ BEGIN
       "AffiliateApprovalJobs",
       "AffiliateSourceIntakes",
       "AffiliateSourceIntakeArtifacts",
-      "AffiliateImportSources",
-      "AffiliateSourceMappings",
+      "AffiliateSourceDiscoveryCampaigns",
+      "AffiliateScrapeSources",
+      "AffiliateScrapeMappings",
       "File"
     FROM bracketiq_affiliate_agent;
+  IF EXISTS (
+    SELECT 1
+    FROM pg_roles
+    WHERE rolname = 'bracketiq_affiliate_agent'
+  ) AND EXISTS (
+    SELECT 1
+    FROM pg_roles
+    WHERE rolname = 'bracketiq_affiliate_gateway'
+  ) THEN
+    REVOKE bracketiq_affiliate_gateway FROM bracketiq_affiliate_agent;
+  END IF;
   END IF;
 
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'bracketiq_affiliate_gateway') THEN
@@ -344,7 +361,10 @@ BEGIN
     TO bracketiq_affiliate_gateway;
 
     GRANT SELECT, INSERT ON TABLE
-      "AffiliateAgentGatewayArtifacts",
+      "AffiliateAgentGatewayArtifacts"
+    TO bracketiq_affiliate_gateway;
+
+    GRANT SELECT, INSERT ON TABLE
       "AffiliateAgentGatewayEvents"
     TO bracketiq_affiliate_gateway;
   END IF;

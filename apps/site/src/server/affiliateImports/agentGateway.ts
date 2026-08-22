@@ -118,12 +118,6 @@ export type AffiliateAgentClaimOperation =
       idempotencyKey: string;
       authorization: AffiliateAgentClaimAuthorization;
       result: unknown;
-    }>
-  | Readonly<{
-      kind: "RECORD_FAILURE";
-      idempotencyKey: string;
-      authorization: AffiliateAgentClaimAuthorization;
-      failure: AffiliateAgentInvocationFailureEnvelope;
     }>;
 
 export type AffiliateAgentHeartbeatResult = Readonly<{
@@ -182,9 +176,6 @@ export type AffiliateAgentSubmitResultOutcome =
   | AffiliateAgentTerminalAcceptedResult
   | AffiliateAgentInvocationFailedResult;
 
-export type AffiliateAgentRecordFailureResult =
-  AffiliateAgentInvocationFailedResult;
-
 export type AffiliateAgentClaimOperationResult<
   T extends AffiliateAgentClaimOperation,
 > =
@@ -196,9 +187,7 @@ export type AffiliateAgentClaimOperationResult<
         ? AffiliateAgentCommandResult
         : T extends Readonly<{ kind: "SUBMIT_RESULT" }>
           ? AffiliateAgentSubmitResultOutcome
-          : T extends Readonly<{ kind: "RECORD_FAILURE" }>
-            ? AffiliateAgentRecordFailureResult
-            : never;
+          : never;
 
 export type AffiliateAgentReconcileRequest = Readonly<{
   limit?: number;

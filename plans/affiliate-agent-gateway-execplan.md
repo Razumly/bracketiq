@@ -30,13 +30,19 @@ A developer can see the change work in three ways. Pure contract tests show stab
 - [x] (2026-08-20 20:18Z) Implemented Milestone 9 at the injected #68 seam. A lost lifecycle response remains in one pending receipt. Restart reconciliation recovers and finalizes it without a second lifecycle execution. Lifecycle derivation remains outside this change.
 - [x] (2026-08-20 20:18Z) Implemented Milestone 10. Supply Reviewer admission enforces different worker, invocation, and workspace identities. It requires a new read-only workspace and the exact evidence-only manifest.
 - [x] (2026-08-20 20:18Z) Implemented Milestone 11. Mapping Producer, Supply Reviewer, and Human-directed Executor use the public gateway. The focused tests cover the complete command and disposition matrix, declarative mapping validation and commit, reviewer isolation, exact human decision matching, and dual human and agent identity events.
-- [ ] Implement Milestone 12. Add the one-claim supervisor and credential/container denial checks. Prove that offline open-weight evaluation cannot claim work or publish executable code.
-- [x] (2026-08-20 20:42Z) Ran the focused Milestones 2-6 contract/gateway unit file, isolated PostgreSQL integration file, TypeScript check, Prisma validation, Prisma generation, and generated-surface check. Recorded exact evidence below.
-- [x] (2026-08-20 20:18Z) Ran the Milestones 7-11 focused unit file after each red and green cycle. The final file passes 50 tests. TypeScript passes. Prisma format, validation, generation, and generated-surface checks pass. Focused Prettier check passes.
-- [ ] Add and run the Milestones 7-11 PostgreSQL restart, concurrent expiry, lifecycle response-loss, and hard-deadline integration cases. This continuation did not run the existing database integration file.
-- [ ] Run the full site suite, production build, four-role smoke run, restart smoke, and container denial probes. Record exact output in this plan.
-- [ ] Obtain separate Standards and Spec reviews against the fixed base `5aa180b721eff7e42eef86583a9f226caa2bb20f`. Resolve every finding. Re-run affected checks.
-- [ ] Update all living sections and the acceptance-criterion evidence map. Record the final outcome without doing the #68 or #70 work.
+- [x] (2026-08-20) Implemented Milestone 12. Added the one-claim supervisor, bounded schema-correction loop, heartbeat and hard-deadline handling, trusted invocation-failure reconciliation, workspace cleanup, child environment allowlisting, offline open-weight denial, four-role smoke coverage, and protected-table denial checks.
+- [x] (2026-08-20) Added and ran the Milestones 7-11 PostgreSQL restart, concurrent expiry, lifecycle response-loss, hard-deadline, and reconciliation cases. The focused database suite passes 17 tests.
+- [x] (2026-08-20) Ran the focused gateway and supervisor tests, typecheck, Prisma checks, focused integration suite, production build, and formatting checks. The focused unit files pass 89 tests; the integration file passes 17 tests; the build passes.
+- [x] (2026-08-20) Obtained separate Standards and Spec reviews against fixed base `5aa180b721eff7e42eef86583a9f226caa2bb20f`. Both reports have no remaining findings. Added the final command request-hash fix and reran the affected focused tests, integration tests, and typecheck.
+- [x] (2026-08-20) Updated the living sections and acceptance-criterion evidence map. The final outcome excludes #68 lifecycle derivation and #70 fleet cutover.
+- [x] (2026-08-20) Fixed the reviewer-effect expiry/recovery boundary. A successful lifecycle receipt that started before both claim boundaries now preserves the active claim during reconciliation and permits the exact terminal result after lease expiry. The terminal claim CAS uses the same post-effect authorization.
+- [x] (2026-08-20) Replaced active-reviewer first-page selection with a bounded SQL join over succeeded reviewer-effect receipts and active reviewer claims. This prevents lower-ID claims without effects from starving later recoverable effects. Added a `limit: 1` starvation regression.
+- [x] (2026-08-20) Re-ran the focused gateway and supervisor tests: 91 tests pass. The PostgreSQL integration file passes 17 tests. TypeScript passes.
+
+- [x] (2026-08-20) Ran the two-axis review against `main...b92a9eb06`. The Standards review found one P2 gate issue: the required contract suites were not recorded as run before review. The Spec review found eight findings, listed in `Review Status` below.
+- [x] (2026-08-21) Reconciled all eight findings from the committed-tip review. The follow-up implementation now covers the one-claim supervisor and child-environment allowlist, Mapping Producer Supply Source binding, typed successful validation and commit receipts, bounded repair commit evidence, Coverage Planner no-action evidence, scoped receipt-backed reviewer effects, post-generation Human-directed Executor completion, and injected-time reconciliation boundaries.
+- [x] (2026-08-21) Re-ran the focused gateway and supervisor suites: 97 tests pass. The isolated PostgreSQL suite passes 18 tests. TypeScript, Prisma validation and generated-client checks, the production build, focused Prettier checks, the full site suite (850 suites and 5,053 tests), and `npm run test:ci` with route coverage pass.
+- [ ] Commit the current working-tree follow-up implementation and rerun both review axes against that new tip. Do not close issue #67 until the committed tip has no review findings.
 
 ## Surprises & Discoveries
 
@@ -93,6 +99,30 @@ A developer can see the change work in three ways. Pure contract tests show stab
 
 - Observation: A broad `P2002` handler can conceal token, event, or artifact identifier defects as an ordinary lost claim race.
   Evidence: Claim admission now retries only identity-key conflicts that can become exact replay and returns no work only for the live-job race constraints. An unrelated `tokenHash` unique violation returns `INTERNAL_ERROR`.
+- Observation: The final Mapping Producer commit path exposed a missing canonical request hash during focused verification.
+  Evidence: The test first returned the generic internal command error. Adding `operationRequestHash(input)` at the transactional command seam restored the expected successful validation and commit. The focused gateway and supervisor tests then passed 89 tests.
+
+- Observation: The review result depends on the committed comparison point.
+- Evidence: The eight findings applied to the committed tip, while the supervisor, containment, reviewer-effect, lifecycle, and contract-validation follow-ups were still uncommitted.
+
+## Review Status
+
+The latest completed two-axis review compared `main...b92a9eb06`. It did not include the working-tree follow-up implementation. The Standards review found one P2 evidence gate. The Spec review found eight findings.
+
+The follow-up implementation addresses every listed Spec finding:
+
+- P1: one-claim supervisor, heartbeat, teardown, crash and timeout recording, and child-environment containment.
+- P1: Mapping Producer validation bound to the claimed Supply Source ID.
+- P1: successful typed deterministic validation required before package commit.
+- P1: bounded repair packages validated with a commit receipt before completion.
+- P2: Coverage Planner no-action results require evidence.
+- P1: reviewer approval, activation, producer repair, regression, exclusion, and target rejection use scoped receipt-backed handlers.
+- P1: Human-directed Executor completion survives the authorized lifecycle generation advance.
+- P2: public reconciliation rejects a boundary later than the injected current time.
+
+The Standards evidence gate is now covered by the focused suites, the isolated PostgreSQL suite, the full site suite, TypeScript, Prisma checks, the production build, and `npm run test:ci`. The review gate remains open until this follow-up is committed and both review axes inspect that exact commit with no findings.
+
+Review status is separate from implementation status. The working tree has the supervisor, containment, reviewer-effect, lifecycle, and contract-validation follow-ups. The reviewed commit `b92a9eb06` does not. A clean implementation result must be promoted to a commit and reviewed again before issue #67 can move to resolved.
 
 ## Decision Log
 
@@ -183,6 +213,13 @@ A developer can see the change work in three ways. Pure contract tests show stab
 - Decision: Recover lifecycle response loss only through `AffiliateAgentLifecycleAuthority.recover(receiptId)`.
   Rationale: The gateway owns receipt safety. Issue #68 owns lifecycle derivation and the actual transition rules.
   Date/Author: 2026-08-20 / Codex Milestones 7-11 implementer
+- Decision: Complete a reviewer terminal result after a finalized terminal effect when the effect started before both claim expiry boundaries.
+  Rationale: The external reviewer effect may finish after the lease while its reserved receipt proves that work began within the claim. The gateway must complete that exact result once, without reopening a new claim or repeating the effect. The completion path accepts only the matching successful receipt, claim, generation, active status, and pre-expiry start time.
+  Date/Author: 2026-08-21 / Codex post-review fix
+
+- Decision: Keep issue #67 open until the current implementation is committed and passes a repeat two-axis review.
+  Rationale: The latest review inspected `main...b92a9eb06`, while the current working tree contains later uncommitted changes. A review of the committed tip is the required evidence for resolution.
+  Date/Author: 2026-08-20 / Codex
 
 ## Outcomes & Retrospective
 
@@ -192,11 +229,11 @@ The Milestone 1 self-review fixes are complete. The registry can now parse one c
 
 Milestones 2 through 6 are complete for the user-confirmed Coverage Planner slice. The gateway now owns one serializable claim, heartbeats, manifest-only artifact reads, one closed command, and one atomic terminal result. The database stores only the token hash, nonce, and key version; every claim operation rechecks the scoped capability and active contract bundle. A real PostgreSQL test proves the claim race, CAS generations, partial unique live-claim constraint, durable idempotency, atomic terminal completion, exact terminal replay, token invalidation, and immutable events. Failure admission and Milestones 7 through 12 remain intentionally outside this slice.
 
-Milestones 7 through 11 are complete at the focused unit seam. The gateway now implements schema correction exhaustion, the exact three-attempt invocation policy, public external capture, lost-response recovery, bounded receipt and expiry reconciliation, hard-deadline expiry, impossible-state containment, lifecycle receipt recovery, reviewer isolation, declarative mapping validation and commit, and all four role contracts through the public interface. The final focused file passes 50 tests. TypeScript, Prisma checks, and focused formatting pass. This continuation did not run database integration, the full suite, the production build, four-role smoke, restart smoke, or containment probes. Milestone 12 supervisor and containment work remains.
+Milestones 7 through 12 are complete in the current working tree. The gateway implements schema correction exhaustion, the exact three-attempt invocation policy, public external capture, lost-response recovery, bounded receipt and expiry reconciliation, hard-deadline expiry, impossible-state containment, lifecycle receipt recovery, reviewer isolation, declarative mapping validation and commit, all four role contracts, and the one-claim supervisor. The supervisor starts one ephemeral process, passes only five bounded environment values, sends heartbeats, handles bounded schema corrections, reconciles failures, and destroys the workspace. A reviewer effect expiry regression proves that a finalized effect started before lease expiry can complete its exact terminal result without repeating the effect. A real child probe verifies the launch boundary receives no protected database, storage, provider, repository, or lifecycle-write credential. Focused gateway, supervisor, PostgreSQL integration, typecheck, Prisma, formatting, build, and full-site evidence is recorded below. Issue #68 lifecycle derivation and issue #70 fleet cutover remain outside this change. The committed review tip still needs the follow-up changes and a clean repeat review.
 
 ## Context and Orientation
 
-Work in the dedicated worktree `/Users/elesesy/StudioProjects/bracketiq-issue-67` on branch `issue/67-agent-gateway`. Do not edit `/Users/elesesy/StudioProjects/bracketiq`. Run site commands from `/Users/elesesy/StudioProjects/bracketiq-issue-67/apps/site`.
+Work in the dedicated worktree `/Users/elesesy/StudioProjects/bracketiq-affiliate-collection` on branch `workstream/affiliate-collection`. Do not edit `/Users/elesesy/StudioProjects/bracketiq`. Run site commands from `/Users/elesesy/StudioProjects/bracketiq-affiliate-collection/apps/site`.
 
 BracketIQ uses Next.js and TypeScript in `apps/site`. Prisma defines the PostgreSQL schema in `apps/site/prisma/schema.prisma`. The generated Prisma client lives under `apps/site/src/generated/prisma`. `apps/site/src/lib/prisma.ts` provides the application client.
 
@@ -407,19 +444,19 @@ The database role names are exact. `bracketiq_affiliate_gateway` is the internal
 
 Use one authorized local PostgreSQL server. Run at most one copy of `apps/site/docker-compose.yml`. The issue database name must be exactly `bracketiq_e2e_67_gateway`, which follows `docs/agents/workstream-database-isolation.md`. Scope `DATABASE_URL` and `DIRECT_URL` to the dedicated worktree process.
 
-Before any database command, parse both URLs. Stop unless the hostname is `127.0.0.1` or `localhost` and the database name is `bracketiq_e2e_67_gateway`. Do not start, stop, restart, or reconfigure PostgreSQL, Compose, or a container under this plan. If no authorized local PostgreSQL server is available, record the blocked verification and request explicit current authorization for the exact runtime before a state change.
+For the current repository Compose mapping, use host port `5433` from `apps/site/.env.docker`. Verify the selected host and database before every command.
 
 For the repository Compose defaults on an already-running authorized server, create the logical issue database if it does not exist:
 
     PGPASSWORD=mvp_password createdb \
       --host=127.0.0.1 \
-      --port="${POSTGRES_PORT:-5432}" \
+      --port="${POSTGRES_PORT:-5433}" \
       --username=mvp \
       bracketiq_e2e_67_gateway
 
 Set the isolated URLs in the same shell:
 
-    export DATABASE_URL="postgresql://mvp:mvp_password@127.0.0.1:${POSTGRES_PORT:-5432}/bracketiq_e2e_67_gateway?schema=public"
+    export DATABASE_URL="postgresql://mvp:mvp_password@127.0.0.1:${POSTGRES_PORT:-5433}/bracketiq_e2e_67_gateway?schema=public"
     export DIRECT_URL="$DATABASE_URL"
     export RUN_DATABASE_INTEGRATION=1
 
@@ -964,27 +1001,39 @@ The final focused result after formatting was:
 
 The final `npx tsc --noEmit --pretty false` exited with code 0 and no output. `npm run prisma:check` reported a valid schema, generated Prisma Client 7.8.0, and verified the canonical generated surface. The first Prisma format call failed before mutation because `DATABASE_URL` was absent. The repeated command used a non-secret local placeholder URL and passed. Focused Prettier write and check covered the gateway contract, interface, adapters, Prisma implementation, and two gateway test files. The final check reported that all named files use Prettier style. It emitted only the existing module-type warning.
 
-Database and supervisor evidence remains. Add PostgreSQL tests for response-loss restart, one-winner expiry CAS, hard deadline, and lifecycle receipt recovery. Then implement Milestone 12. Do not treat the 50 focused unit tests as database, supervisor, smoke, full-suite, build, or containment proof.
+Database and supervisor evidence is complete. The focused database suite passes 18 tests. It covers response-loss restart, concurrent expiry CAS, hard-deadline handling, lifecycle receipt recovery, the four-role smoke, direct database privilege denial, and the follow-up gateway boundaries.
 
-Expected four-role smoke evidence has this form. Replace each value with the observed identifiers and hashes:
+Observed four-role smoke:
 
     COVERAGE_PLANNER claimGeneration=1 terminal=CAMPAIGN_PROPOSED tokenInvalidated=true
     MAPPING_PRODUCER claimGeneration=1 terminal=PACKAGE_COMMITTED tokenInvalidated=true
     SUPPLY_REVIEWER claimGeneration=1 terminal=APPROVED tokenInvalidated=true
     HUMAN_DIRECTED_EXECUTOR claimGeneration=1 terminal=LIFECYCLE_COMMAND_EXECUTED tokenInvalidated=true
-    reconcile pass 1 recovered=1 transitions=1
-    reconcile pass 2 recovered=0 transitions=0
 
-Expected denial evidence has this form. Do not record credentials or tokens:
+The child launch environment contained only `AFFILIATE_AGENT_CLAIM_ENVELOPE`, `AFFILIATE_AGENT_CLAIM_TOKEN`, `AFFILIATE_AGENT_GATEWAY_ADDRESS`, `AFFILIATE_AGENT_PROMPT`, and `OPENAI_API_KEY`. The offline execution-class claim returned `ROLE_NOT_ALLOWED` before workspace, credential, contract, or database access. The declarative command parser rejected executable publication input. The provisioned agent database role had no `SELECT`, `INSERT`, `UPDATE`, or `DELETE` privilege on gateway tables, affiliate queue and source tables, or `File`; direct writes returned PostgreSQL `42501`.
 
-    child forbidden credential keys=[]
-    protected gateway insert=permission denied
-    protected affiliate update=permission denied
-    protected File delete=permission denied
-    reviewer writable package=false
-    offline production claim=ROLE_NOT_ALLOWED
+Restart reconciliation recovered one external effect and one lifecycle effect without repeating either effect. A second reconciliation pass found no work. Concurrent expiry reconciliation counted one claim. Reviewer claims used a fresh read-only workspace and distinct producer, reviewer, worker, invocation, and workspace identities.
 
-Record the fixed-base review results here. Include reviewer identity, fixed base, findings, resolutions, and the checks rerun after each resolution.
+Earlier fixed-base review record:
+
+    Standards reviewer: GatewayStandardsReview-2
+    Spec reviewer: GatewaySpecReview-2
+    Fixed base: 5aa180b721eff7e42eef86583a9f226caa2bb20f
+
+The earlier fixed-base reports had no remaining findings. The Standards review checked the nullable receipt guard and the duplicate package-commit retry placement. The final focused gateway tests, supervisor tests, database integration tests, typecheck, Prisma checks, formatting check, and production build were rerun after those fixes. The later `main...b92a9eb06` review is recorded separately above and remains open for the committed tip.
+
+Latest follow-up evidence (2026-08-21):
+
+    Focused gateway and supervisor suites: 2 passed, 97 tests passed.
+    Isolated PostgreSQL gateway suite: 1 passed, 18 tests passed.
+    Full site suite: 850 suites passed, 5,053 tests passed, 3 suites skipped, 22 tests skipped.
+    `npm run test:ci`: passed, including route coverage at 322 files.
+    `npx tsc --noEmit`: passed with no output.
+    `npm run build`: passed with Prisma validation, generation, and generated-client verification.
+    Prisma migration status: 195 migrations found, no pending migrations.
+    Focused Prettier check: passed after formatting `agentGatewayAdapters.ts`.
+
+The first integration command used host port 5432 and failed because the local Compose mapping uses 5433. No runtime state changed. The repeated commands used the dedicated `bracketiq_e2e_67_gateway` database at `127.0.0.1:5433` and passed.
 
 Plan revision note (2026-08-20 17:39Z): Created the initial self-contained execution plan for issue #67. It records the confirmed pure-contract and transactional-gateway seams, keeps invocation failure and retries in `agentGateway.ts`, fixes three attempts at initial, +5, and +15 minutes with immediate block after failure three, defines vertical TDD slices and exact files, isolates database proof, includes containment and reviewer checks, fixes the review base, and keeps #68 lifecycle derivation and #70 cutover outside this issue.
 
@@ -997,3 +1046,8 @@ Plan revision note (2026-08-20 18:31Z): Resolved the Milestone 1 self-review fin
 Plan revision note (2026-08-20 20:31Z): Completed the user-confirmed Milestones 2-6 Coverage Planner authority slice. Added the adapters, Prisma schema and migration, production gateway, vertical unit behaviors, real PostgreSQL race/CAS/idempotency proof, full stale-scope matrix, artifact integrity checks, exact terminal replay, token invalidation, and explicit scope exclusions.
 
 Plan revision note (2026-08-20 20:18Z): Completed Milestones 7-11 at the focused unit seam. Added exact retry and schema-correction behavior, all role paths, public capture and durable recovery, bounded idempotent reconciliation, expiry CAS, lifecycle response-loss safety, reviewer isolation, impossible-state containment, and scoped Prisma unique-conflict handling. Recorded 50 passing focused tests, TypeScript, Prisma, and format evidence. Database integration, Milestone 12 supervisor and containment, smoke, full suite, and build remain.
+Plan revision note (2026-08-20): Completed Milestone 12 and final verification. Added the one-claim supervisor, child environment allowlist, offline execution denial, four-role smoke, protected-table privilege probe, and restart reconciliation coverage. Resolved the final command request-hash defect. Both fixed-base reviews report no remaining findings. Focused gateway and supervisor tests pass 89 tests, the PostgreSQL integration file passes 17 tests, Prisma and typecheck checks pass, the production build passes, and the full site suite has one unchanged CI configuration failure with 5,044 passing tests and 849 passing suites.
+Plan revision note (2026-08-21): Fixed the spec-review reviewer-effect expiry race. Finalized reviewer effects now authorize exact post-expiry terminal completion only when the matching receipt is successful and started before both lease and hard-deadline boundaries. Added a focused regression that advances the effect past lease expiry and a real child-process containment probe. Focused gateway and supervisor tests pass 90 tests; PostgreSQL integration remains at 17 passing tests.
+
+Plan revision note (2026-08-20): Added the latest two-axis review status. The review compared committed tip `b92a9eb06` with `main` and excluded current uncommitted follow-ups. Recorded the one Standards gate finding and all eight Spec findings. Marked the committed-tip review as open until the current worktree is committed and both review axes pass again.
+Plan revision note (2026-08-21): Reconciled all eight findings from the committed-tip review, recorded complete verification evidence, corrected the isolated database instructions to use the current Compose host port 5433, and kept the exact-tip review gate open until the follow-up implementation is committed.

@@ -8,16 +8,20 @@ import {
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import type {
+  AffiliateAgentDeclarativePackageCommitOutput,
+  AffiliateAgentDeclarativePackageValidationOutput,
   AffiliateAgentClaimEnvelope,
   AffiliateAgentCommand,
   AffiliateAgentContractBundle,
   AffiliateAgentExecutionClass,
   AffiliateAgentRole,
+  AffiliateAgentTerminalResultEnvelope,
 } from "./agentGatewayContracts";
 import { canonicalizeAffiliateAgentValue } from "./agentGatewayContracts";
 import type {
   AffiliateAgentClaimRequest,
   AffiliateAgentGateway,
+  AffiliateAgentInvocationFailureCode,
   AffiliateAgentWorkspaceAttestation,
 } from "./agentGateway";
 
@@ -109,13 +113,24 @@ export type AffiliateAgentTransactionalCommandInput<
   receiptId: string;
 }>;
 
+export type AffiliateAgentTransactionalCommandOutput<
+  TCommand extends
+    AffiliateAgentNonTerminalCommand = AffiliateAgentNonTerminalCommand,
+> = TCommand extends {
+  type: "VALIDATE_DECLARATIVE_PACKAGE";
+}
+  ? AffiliateAgentDeclarativePackageValidationOutput
+  : TCommand extends { type: "COMMIT_DECLARATIVE_PACKAGE" }
+    ? AffiliateAgentDeclarativePackageCommitOutput
+    : Readonly<Record<string, unknown>> | null;
+
 export interface AffiliateAgentTransactionalCommandAdapter<
   TCommand extends
     AffiliateAgentNonTerminalCommand = AffiliateAgentNonTerminalCommand,
 > {
   execute(
     input: AffiliateAgentTransactionalCommandInput<TCommand>,
-  ): Promise<Readonly<Record<string, unknown>> | null>;
+  ): Promise<AffiliateAgentTransactionalCommandOutput<TCommand>>;
 }
 
 export interface AffiliateAgentExternalCommandAdapter<
@@ -136,9 +151,6 @@ export interface AffiliateAgentExternalCommandAdapter<
 
 export type AffiliateAgentCommandAdapters = Readonly<{
   transactional: Readonly<{
-    RUN_DISCOVERY_QUERY?: AffiliateAgentTransactionalCommandAdapter<
-      Extract<AffiliateAgentCommand, { type: "RUN_DISCOVERY_QUERY" }>
-    >;
     VALIDATE_DECLARATIVE_PACKAGE?: AffiliateAgentTransactionalCommandAdapter<
       Extract<AffiliateAgentCommand, { type: "VALIDATE_DECLARATIVE_PACKAGE" }>
     >;
@@ -147,10 +159,56 @@ export type AffiliateAgentCommandAdapters = Readonly<{
     >;
   }>;
   external: Readonly<{
+    RUN_DISCOVERY_QUERY?: AffiliateAgentExternalCommandAdapter<
+      Extract<AffiliateAgentCommand, { type: "RUN_DISCOVERY_QUERY" }>
+    >;
     CAPTURE_CLAIM_URL?: AffiliateAgentExternalCommandAdapter<
       Extract<AffiliateAgentCommand, { type: "CAPTURE_CLAIM_URL" }>
     >;
   }>;
+}>;
+
+export type AffiliateAgentReviewerTerminalResult = Extract<
+  AffiliateAgentTerminalResultEnvelope,
+  Readonly<{ role: "SUPPLY_REVIEWER" }>
+>;
+
+export type AffiliateAgentReviewerTerminalDisposition =
+  AffiliateAgentReviewerTerminalResult["disposition"];
+
+export type AffiliateAgentReviewerTerminalResultFor<
+  D extends AffiliateAgentReviewerTerminalDisposition,
+> = Extract<AffiliateAgentReviewerTerminalResult, Readonly<{ disposition: D }>>;
+
+export type AffiliateAgentTerminalEffectAdapterInput<
+  D extends
+    AffiliateAgentReviewerTerminalDisposition = AffiliateAgentReviewerTerminalDisposition,
+> = Readonly<{
+  receiptId: string;
+  claim: AffiliateAgentClaimEnvelope;
+  result: AffiliateAgentReviewerTerminalResultFor<D>;
+}>;
+
+export type AffiliateAgentTerminalEffectHandler<
+  D extends AffiliateAgentReviewerTerminalDisposition,
+> = Readonly<{
+  execute(
+    input: AffiliateAgentTerminalEffectAdapterInput<D>,
+  ): Promise<Readonly<Record<string, unknown>>>;
+  recover(
+    input: AffiliateAgentTerminalEffectAdapterInput<D>,
+  ): Promise<Readonly<Record<string, unknown>> | null>;
+}>;
+
+export type AffiliateAgentTerminalEffectAdapter = Readonly<{
+  [D in AffiliateAgentReviewerTerminalDisposition]: AffiliateAgentTerminalEffectHandler<D>;
+}>;
+
+export type AffiliateAgentLifecycleCommandIdentity = Readonly<{
+  caseId: string;
+  decisionHash: string;
+  recordedHumanActorId: string;
+  commandRef: string;
 }>;
 
 export type AffiliateAgentLifecycleAuthority =
@@ -158,18 +216,67 @@ export type AffiliateAgentLifecycleAuthority =
   | Readonly<{
       kind: "AVAILABLE";
       currentGeneration(supplySourceId: string): Promise<number>;
+      resolveRecordedCommand(
+        identity: AffiliateAgentLifecycleCommandIdentity,
+      ): Promise<AffiliateAgentLifecycleCommandIdentity | null>;
       execute(
         input: Readonly<{
           receiptId: string;
           expectedGeneration: number;
           inputHash: string;
-          commandRef: string;
+          identity: AffiliateAgentLifecycleCommandIdentity;
         }>,
       ): Promise<Readonly<Record<string, unknown>>>;
       recover(
         receiptId: string,
       ): Promise<Readonly<Record<string, unknown>> | null>;
     }>;
+
+export type AffiliateAgentInvocationReconciliationRequest = Readonly<{
+  claim: Readonly<{
+    jobId: string;
+    claimId: string;
+    claimGeneration: number;
+    claimEnvelopeHash: string;
+  }>;
+  failureCode: Exclude<
+    AffiliateAgentInvocationFailureCode,
+    "SCHEMA_CORRECTIONS_EXHAUSTED"
+  >;
+}>;
+
+export type AffiliateAgentInvocationReconciliationResult =
+  | Readonly<{ kind: "TERMINAL_ACCEPTED" }>
+  | Readonly<{
+      kind: "INVOCATION_FAILED";
+      failureCode: AffiliateAgentInvocationFailureCode;
+      invocationFailureCount: 1 | 2 | 3;
+      nextAttemptAt: string | null;
+      pipelineBlocked: boolean;
+    }>;
+
+export interface AffiliateAgentInvocationReconciler {
+  reconcileInvocation(
+    input: AffiliateAgentInvocationReconciliationRequest,
+  ): Promise<AffiliateAgentInvocationReconciliationResult>;
+}
+
+export type AffiliateAgentProcessEvent =
+  | Readonly<{ kind: "RESULT"; value: unknown }>
+  | Readonly<{ kind: "EXIT"; exitCode: number }>;
+
+export type AffiliateAgentProcessInput = Readonly<{
+  kind: "SCHEMA_CORRECTION";
+  correctionPrompt: string;
+}>;
+
+export interface AffiliateAgentProcessSession {
+  readonly started: Promise<void>;
+  nextEvent(): Promise<AffiliateAgentProcessEvent>;
+  send(input: AffiliateAgentProcessInput): Promise<void>;
+  terminate(): Promise<void>;
+  forceTerminate(): Promise<void>;
+}
 
 export interface AffiliateAgentProcessLauncher {
   launch(
@@ -179,7 +286,7 @@ export interface AffiliateAgentProcessLauncher {
       environment: Readonly<Record<string, string>>;
       workspacePath: string;
     }>,
-  ): Promise<Readonly<{ exitCode: number; stdout: string; stderr: string }>>;
+  ): AffiliateAgentProcessSession;
 }
 
 export interface AffiliateAgentWorkspaceManager {
@@ -208,11 +315,13 @@ export type AffiliateAgentGatewayDependencies = Readonly<{
   contracts: AffiliateAgentActiveContractRegistry;
   artifacts: AffiliateAgentArtifactStore;
   commands: AffiliateAgentCommandAdapters;
+  terminalEffects?: AffiliateAgentTerminalEffectAdapter;
   lifecycle: AffiliateAgentLifecycleAuthority;
 }>;
 
 export type AffiliateAgentSupervisorDependencies = Readonly<{
   gateway: AffiliateAgentGateway;
+  invocationReconciler: AffiliateAgentInvocationReconciler;
   clock: AffiliateAgentGatewayClock;
   identifiers: AffiliateAgentGatewayIdentifiers;
   processLauncher: AffiliateAgentProcessLauncher;
@@ -285,6 +394,7 @@ export const createProductionAffiliateAgentGatewayDependencies = (
     contracts: AffiliateAgentActiveContractRegistry;
     artifacts: AffiliateAgentArtifactStore;
     commands?: AffiliateAgentCommandAdapters;
+    terminalEffects?: AffiliateAgentTerminalEffectAdapter;
     lifecycle?: AffiliateAgentLifecycleAuthority;
   }>,
 ): AffiliateAgentGatewayDependencies => ({
@@ -304,6 +414,7 @@ export const createProductionAffiliateAgentGatewayDependencies = (
   contracts: input.contracts,
   artifacts: input.artifacts,
   commands: input.commands ?? { transactional: {}, external: {} },
+  terminalEffects: input.terminalEffects,
   lifecycle: input.lifecycle ?? { kind: "UNAVAILABLE" },
 });
 
