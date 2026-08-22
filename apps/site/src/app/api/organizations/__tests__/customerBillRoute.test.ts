@@ -89,6 +89,28 @@ describe('POST /api/organizations/[id]/bills', () => {
       }),
     }));
   });
+  it('rejects a user when both asynchronous billing permissions are false', async () => {
+    hasOrgPermissionMock.mockResolvedValue(false);
+
+    const response = await POST(
+      new NextRequest('http://localhost/api/organizations/org_1/bills', {
+        method: 'POST',
+        body: JSON.stringify({
+          ownerType: 'USER',
+          ownerId: 'player_1',
+          label: 'Registration fee',
+          totalAmountCents: 12500,
+          paidAmountCents: 0,
+          dueDate: '2026-08-30',
+        }),
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      { params: Promise.resolve({ id: 'org_1' }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
 
   it('rejects a paid amount above the bill amount before writing', async () => {
     const response = await POST(

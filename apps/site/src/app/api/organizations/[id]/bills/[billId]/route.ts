@@ -23,8 +23,8 @@ const canManageCustomerBilling = async (
   if (session.isAdmin || await canManageOrganization(session, organization)) {
     return true;
   }
-  return hasOrgPermission(session, organization, ORG_PERMISSIONS.BILLING_MANAGE)
-    || hasOrgPermission(session, organization, ORG_PERMISSIONS.PAYMENTS_MANAGE);
+  return (await hasOrgPermission(session, organization, ORG_PERMISSIONS.BILLING_MANAGE))
+    || (await hasOrgPermission(session, organization, ORG_PERMISSIONS.PAYMENTS_MANAGE));
 };
 
 export async function PATCH(

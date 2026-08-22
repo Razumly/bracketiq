@@ -90,6 +90,27 @@ describe('PATCH /api/organizations/[id]/bills/[billId]', () => {
       data: expect.objectContaining({ totalAmountCents: 15000, paidAmountCents: 5000, status: 'OPEN' }),
     }));
   });
+  it('rejects a user when both asynchronous billing permissions are false', async () => {
+    hasOrgPermissionMock.mockResolvedValue(false);
+
+    const response = await PATCH(
+      new NextRequest('http://localhost/api/organizations/org_1/bills/bill_1', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          label: 'Updated registration fee',
+          totalAmountCents: 15000,
+          paidAmountCents: 5000,
+          dueDate: '2026-09-15',
+        }),
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      { params: Promise.resolve({ id: 'org_1', billId: 'bill_1' }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(prismaMock.billPayments.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
 
   it('rejects a paid amount above the updated bill amount before writing', async () => {
     const response = await PATCH(
