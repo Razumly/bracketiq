@@ -16,6 +16,9 @@ const mockPrisma = {
   organizations: {
     findUnique: jest.fn(),
   },
+  templateDocuments: {
+    findMany: jest.fn(),
+  },
   $transaction: jest.fn(),
 };
 const mockRequireSession = jest.fn();
@@ -38,9 +41,9 @@ jest.mock('@/lib/boldsignSyncOperations', () => ({
   createOrUpdateBoldSignOperation: jest.fn(),
 }));
 
-import { POST } from '@/app/api/organizations/[id]/templates/route';
+import { GET, POST } from '@/app/api/organizations/[id]/templates/route';
 
-describe('POST /api/organizations/[id]/templates', () => {
+describe('/api/organizations/[id]/templates', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockRequireSession.mockResolvedValue({ userId: 'staff_1' });
@@ -60,6 +63,43 @@ describe('POST /api/organizations/[id]/templates', () => {
     mockPrisma.$transaction.mockImplementation(
       async (callback: (tx: typeof transactionPrisma) => unknown) => callback(transactionPrisma),
     );
+  });
+
+  it('returns only the latest Version per Requirement for installed mobile clients', async () => {
+    mockPrisma.templateDocuments.findMany.mockResolvedValue([
+      { id: 'version_2', documentRequirementId: 'requirement_1', versionSequence: 2 },
+      { id: 'version_1', documentRequirementId: 'requirement_1', versionSequence: 1 },
+      { id: 'version_3', documentRequirementId: 'requirement_2', versionSequence: 1 },
+    ]);
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/organizations/org_1/templates'),
+      { params: Promise.resolve({ id: 'org_1' }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).templates).toEqual([
+      expect.objectContaining({ id: 'version_2' }),
+      expect.objectContaining({ id: 'version_3' }),
+    ]);
+  });
+
+  it('returns every Version when the web manager requests version history', async () => {
+    mockPrisma.templateDocuments.findMany.mockResolvedValue([
+      { id: 'version_2', documentRequirementId: 'requirement_1', versionSequence: 2 },
+      { id: 'version_1', documentRequirementId: 'requirement_1', versionSequence: 1 },
+    ]);
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/organizations/org_1/templates?includeVersions=true'),
+      { params: Promise.resolve({ id: 'org_1' }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).templates).toEqual([
+      expect.objectContaining({ id: 'version_2' }),
+      expect.objectContaining({ id: 'version_1' }),
+    ]);
   });
 
   it('creates the first text version with one stable requirement in one transaction', async () => {

@@ -82,15 +82,18 @@ CREATE TABLE "DocumentEvidenceAuditEvents" (
 -- A subject is the customer represented by the evidence. A guardian signer
 -- row points at its child through hostId, while a direct row points at userId.
 INSERT INTO "DocumentSubjects" ("id", "createdAt", "updatedAt", "organizationId", "userId")
-SELECT DISTINCT
+SELECT
   'document-subject:' || sd."organizationId" || ':' || COALESCE(sd."hostId", sd."userId"),
-  CURRENT_TIMESTAMP,
-  CURRENT_TIMESTAMP,
+  COALESCE(MIN(sd."createdAt"), CURRENT_TIMESTAMP),
+  COALESCE(MAX(COALESCE(sd."updatedAt", sd."createdAt")), CURRENT_TIMESTAMP),
   sd."organizationId",
   COALESCE(sd."hostId", sd."userId")
 FROM "SignedDocuments" sd
 WHERE sd."organizationId" IS NOT NULL
   AND COALESCE(sd."hostId", sd."userId") IS NOT NULL
+GROUP BY
+  sd."organizationId",
+  COALESCE(sd."hostId", sd."userId")
 ON CONFLICT ("id") DO NOTHING;
 
 UPDATE "SignedDocuments" sd
@@ -138,11 +141,26 @@ WITH eligible AS (
     sd."signerRole" AS signer_role,
     CASE
       WHEN COALESCE(array_length(td."signerRoles", 1), 0) > 0 THEN td."signerRoles"
-      WHEN UPPER(COALESCE(td."requiredSignerType", 'PARTICIPANT')) = 'PARENT_GUARDIAN_CHILD'
+      WHEN REGEXP_REPLACE(
+        UPPER(COALESCE(td."requiredSignerType", 'PARTICIPANT')),
+        '[[:space:]/-]+',
+        '_',
+        'g'
+      ) IN ('PARENT_GUARDIAN_CHILD', 'PARENT_GUARDING_CHILD', 'PARENT_GUARDIAN_AND_CHILD')
         THEN ARRAY['Parent/Guardian', 'Child']::TEXT[]
-      WHEN UPPER(COALESCE(td."requiredSignerType", 'PARTICIPANT')) = 'PARENT_GUARDIAN'
+      WHEN REGEXP_REPLACE(
+        UPPER(COALESCE(td."requiredSignerType", 'PARTICIPANT')),
+        '[[:space:]/-]+',
+        '_',
+        'g'
+      ) = 'PARENT_GUARDIAN'
         THEN ARRAY['Parent/Guardian']::TEXT[]
-      WHEN UPPER(COALESCE(td."requiredSignerType", 'PARTICIPANT')) = 'CHILD'
+      WHEN REGEXP_REPLACE(
+        UPPER(COALESCE(td."requiredSignerType", 'PARTICIPANT')),
+        '[[:space:]/-]+',
+        '_',
+        'g'
+      ) = 'CHILD'
         THEN ARRAY['Child']::TEXT[]
       ELSE ARRAY['Participant']::TEXT[]
     END AS required_signer_roles

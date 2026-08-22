@@ -29,6 +29,28 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+-- Preserve the source evidence timestamps for repaired Document Subjects.
+WITH subject_timestamps AS (
+  SELECT
+    sd."documentSubjectId" AS document_subject_id,
+    MIN(sd."createdAt") AS created_at,
+    MAX(COALESCE(sd."updatedAt", sd."createdAt")) AS updated_at
+  FROM "SignedDocuments" sd
+  WHERE sd."documentSubjectId" IS NOT NULL
+  GROUP BY sd."documentSubjectId"
+)
+UPDATE "DocumentSubjects" subject
+SET
+  "createdAt" = COALESCE(timestamps.created_at, subject."createdAt", CURRENT_TIMESTAMP),
+  "updatedAt" = COALESCE(
+    timestamps.updated_at,
+    timestamps.created_at,
+    subject."updatedAt",
+    CURRENT_TIMESTAMP
+  )
+FROM subject_timestamps timestamps
+WHERE subject."id" = timestamps.document_subject_id;
+
 
 -- Repair Satisfaction rows created by the initial migration. The old migration
 -- created one row per signer and marked every row complete. Keep one evidence
@@ -48,11 +70,26 @@ WITH eligible AS (
     sd."signerRole" AS signer_role,
     CASE
       WHEN COALESCE(array_length(td."signerRoles", 1), 0) > 0 THEN td."signerRoles"
-      WHEN UPPER(COALESCE(td."requiredSignerType", 'PARTICIPANT')) = 'PARENT_GUARDIAN_CHILD'
+      WHEN REGEXP_REPLACE(
+        UPPER(COALESCE(td."requiredSignerType", 'PARTICIPANT')),
+        '[[:space:]/-]+',
+        '_',
+        'g'
+      ) IN ('PARENT_GUARDIAN_CHILD', 'PARENT_GUARDING_CHILD', 'PARENT_GUARDIAN_AND_CHILD')
         THEN ARRAY['Parent/Guardian', 'Child']::TEXT[]
-      WHEN UPPER(COALESCE(td."requiredSignerType", 'PARTICIPANT')) = 'PARENT_GUARDIAN'
+      WHEN REGEXP_REPLACE(
+        UPPER(COALESCE(td."requiredSignerType", 'PARTICIPANT')),
+        '[[:space:]/-]+',
+        '_',
+        'g'
+      ) = 'PARENT_GUARDIAN'
         THEN ARRAY['Parent/Guardian']::TEXT[]
-      WHEN UPPER(COALESCE(td."requiredSignerType", 'PARTICIPANT')) = 'CHILD'
+      WHEN REGEXP_REPLACE(
+        UPPER(COALESCE(td."requiredSignerType", 'PARTICIPANT')),
+        '[[:space:]/-]+',
+        '_',
+        'g'
+      ) = 'CHILD'
         THEN ARRAY['Child']::TEXT[]
       ELSE ARRAY['Participant']::TEXT[]
     END AS required_signer_roles

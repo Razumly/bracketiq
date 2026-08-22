@@ -299,4 +299,52 @@ describe('public guest record signature route', () => {
       registrationId: 'team_registration_1',
     });
   });
+  it('derives both required signer roles for a combined child waiver', async () => {
+    prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
+      id: 'template_1',
+      title: 'Event Waiver',
+      type: 'TEXT',
+      requiredSignerType: 'PARENT_GUARDIAN_CHILD',
+      documentRequirementId: 'requirement_1',
+      signerRoles: [],
+      signOnce: false,
+    });
+    prismaMock.templateDocuments.findMany.mockResolvedValueOnce([
+      {
+        id: 'template_1',
+        requiredSignerType: 'PARENT_GUARDIAN_CHILD',
+        signerRoles: [],
+        signOnce: false,
+      },
+    ]);
+
+    const response = await POST(
+      requestFor({
+        registrationToken: 'guest.jwt',
+        templateId: 'template_1',
+        documentId: 'text-document-combined',
+        type: 'TEXT',
+        signerContext: 'parent_guardian',
+        childUserId: 'child_1',
+      }),
+      {
+        params: Promise.resolve({
+          slug: 'summit',
+          eventId: 'event_1',
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.documentRequirementSatisfactions.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          requiredSignerRoles: ['Parent/Guardian', 'Child'],
+          completedSignerRoles: ['parent_guardian'],
+          status: 'PENDING',
+          isComplete: false,
+        }),
+      }),
+    );
+  });
 });

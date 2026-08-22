@@ -2,6 +2,7 @@ import {
   appendDocumentEvidenceAuditEvent,
   createDocumentRequirementSatisfaction,
   invalidateDocumentRequirementSatisfaction,
+  invalidateDocumentRequirementSatisfactions,
   documentScopeFor,
   documentSubjectIdFor,
   ensureDocumentSubject,
@@ -88,6 +89,34 @@ describe('document evidence storage seam', () => {
       }),
     }));
   });
+  it('marks a roleless imported completion as satisfied', async () => {
+    const documentRequirementSatisfactions = {
+      findFirst: jest.fn().mockResolvedValue(null),
+      upsert: jest.fn().mockResolvedValue({}),
+    };
+
+    await createDocumentRequirementSatisfaction({
+      evidenceId: 'imported_evidence',
+      templateDocumentId: 'version_1',
+      documentRequirementId: 'requirement_1',
+      organizationId: 'org_1',
+      documentSubjectId: 'document-subject:org_1:player_1',
+      scopeType: DOCUMENT_SATISFACTION_SCOPE.ORGANIZATION,
+      scopeId: 'org_1',
+      requiredSignerRoles: [],
+    }, { documentRequirementSatisfactions });
+
+    expect(documentRequirementSatisfactions.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          status: 'SATISFIED',
+          isComplete: true,
+          requiredSignerRoles: [],
+          completedSignerRoles: [],
+        }),
+      }),
+    );
+  });
   it('keeps Satisfaction pending until all required signer roles complete', async () => {
     const documentRequirementSatisfactions = {
       findFirst: jest.fn()
@@ -169,7 +198,288 @@ describe('document evidence storage seam', () => {
       }),
     }));
   });
+  it('bounds every satisfaction lookup by a fixed evidence ID batch', async () => {
+    const evidenceIds = Array.from({ length: 501 }, (_, index) => `evidence_${index}`);
+    const documentRequirementSatisfactions = {
+      findMany: jest.fn().mockResolvedValue([{
+        id: 'document-satisfaction:evidence_0',
+        requiredSignerRoles: ['participant'],
+      }]),
+      update: jest.fn().mockResolvedValue({}),
+    };
+    const documentRequirementSatisfactionEvidence = {
+      findMany: jest.fn()
+        .mockResolvedValueOnce([{ satisfactionId: 'document-satisfaction:evidence_0' }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{
+          satisfactionId: 'document-satisfaction:evidence_0',
+          signedDocumentId: 'evidence_0',
+          completedSignerRoles: ['participant'],
+        }]),
+    };
+    const signedDocuments = {
+      findMany: jest.fn().mockResolvedValue([
+        { id: 'evidence_0', status: 'SIGNED', signerRole: 'participant' },
+      ]),
+    };
 
+    await invalidateDocumentRequirementSatisfactions({
+      evidenceIds,
+    }, {
+      documentRequirementSatisfactions,
+      documentRequirementSatisfactionEvidence,
+      signedDocuments,
+    });
+
+    const contributorQueries = documentRequirementSatisfactionEvidence.findMany.mock.calls;
+    expect(contributorQueries).toHaveLength(3);
+    expect(contributorQueries[0][0].where.signedDocumentId.in).toHaveLength(500);
+    expect(contributorQueries[1][0].where.signedDocumentId.in).toHaveLength(1);
+    expect(contributorQueries[2][0].where.satisfactionId.in).toHaveLength(1);
+    expect(signedDocuments.findMany.mock.calls[0][0].where.id.in).toHaveLength(1);
+  });
+
+
+  it('recomputes an aggregate from every contributor when a later row is voided', async () => {
+    const documentRequirementSatisfactions = {
+      findFirst: jest.fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          id: 'document-satisfaction:evidence_first',
+          sourceEvidenceId: 'evidence_first',
+          requiredSignerRoles: ['participant'],
+          completedSignerRoles: ['participant'],
+        }),
+      findMany: jest.fn().mockResolvedValue([{
+        id: 'document-satisfaction:evidence_first',
+        requiredSignerRoles: ['participant'],
+      }]),
+      upsert: jest.fn().mockResolvedValue({}),
+      update: jest.fn().mockResolvedValue({}),
+    };
+    const documentRequirementSatisfactionEvidence = {
+      upsert: jest.fn().mockResolvedValue({}),
+      findMany: jest.fn()
+        .mockResolvedValueOnce([{ satisfactionId: 'document-satisfaction:evidence_first' }])
+        .mockResolvedValueOnce([
+          {
+            satisfactionId: 'document-satisfaction:evidence_first',
+            signedDocumentId: 'evidence_first',
+            completedSignerRoles: ['participant'],
+          },
+          {
+            satisfactionId: 'document-satisfaction:evidence_first',
+            signedDocumentId: 'evidence_later',
+            completedSignerRoles: ['participant'],
+          },
+        ]),
+    };
+    const signedDocuments = {
+      findMany: jest.fn().mockResolvedValue([
+        { id: 'evidence_first', status: 'SIGNED', signerRole: null },
+        { id: 'evidence_later', status: 'VOID', signerRole: null },
+      ]),
+    };
+    const database = {
+      documentRequirementSatisfactions,
+      documentRequirementSatisfactionEvidence,
+      signedDocuments,
+    };
+
+    await createDocumentRequirementSatisfaction({
+      evidenceId: 'evidence_first',
+      templateDocumentId: 'version_1',
+      documentRequirementId: 'requirement_1',
+      organizationId: 'org_1',
+      documentSubjectId: 'document-subject:org_1:player_1',
+      scopeType: DOCUMENT_SATISFACTION_SCOPE.ORGANIZATION,
+      scopeId: 'org_1',
+      requiredSignerRoles: ['participant'],
+      signerRole: 'participant',
+    }, database);
+    await createDocumentRequirementSatisfaction({
+      evidenceId: 'evidence_later',
+      templateDocumentId: 'version_1',
+      documentRequirementId: 'requirement_1',
+      organizationId: 'org_1',
+      documentSubjectId: 'document-subject:org_1:player_1',
+      scopeType: DOCUMENT_SATISFACTION_SCOPE.ORGANIZATION,
+      scopeId: 'org_1',
+      requiredSignerRoles: ['participant'],
+      signerRole: 'participant',
+    }, database);
+
+    await invalidateDocumentRequirementSatisfaction({
+      evidenceId: 'evidence_later',
+      invalidatedAt: new Date('2026-08-21T00:00:00.000Z'),
+    }, database);
+
+    expect(documentRequirementSatisfactionEvidence.upsert).toHaveBeenCalledTimes(2);
+    expect(documentRequirementSatisfactionEvidence.upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          satisfactionId: 'document-satisfaction:evidence_first',
+          signedDocumentId: 'evidence_later',
+          completedSignerRoles: ['participant'],
+        }),
+      }),
+    );
+    expect(documentRequirementSatisfactions.update).toHaveBeenCalledWith({
+      where: { id: 'document-satisfaction:evidence_first' },
+      data: expect.objectContaining({
+        status: 'SATISFIED',
+        isComplete: true,
+        invalidatedAt: null,
+      }),
+    });
+    expect(documentRequirementSatisfactionEvidence.findMany).toHaveBeenCalledTimes(2);
+    expect(signedDocuments.findMany).toHaveBeenCalledTimes(1);
+  });
+  it('force-invalidates an aggregate when every contributor from a terminal provider fails', async () => {
+    const documentRequirementSatisfactions = {
+      findMany: jest.fn().mockResolvedValue([{
+        id: 'document-satisfaction:evidence_first',
+        requiredSignerRoles: ['Parent/Guardian', 'Child'],
+      }]),
+      update: jest.fn().mockResolvedValue({}),
+    };
+    const documentRequirementSatisfactionEvidence = {
+      findMany: jest.fn()
+        .mockResolvedValueOnce([
+          {
+            satisfactionId: 'document-satisfaction:evidence_first',
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            satisfactionId: 'document-satisfaction:evidence_first',
+            signedDocumentId: 'evidence_first',
+            completedSignerRoles: ['parent_guardian'],
+          },
+          {
+            satisfactionId: 'document-satisfaction:evidence_first',
+            signedDocumentId: 'evidence_failed',
+            completedSignerRoles: ['child'],
+          },
+        ]),
+    };
+
+    await invalidateDocumentRequirementSatisfactions({
+      evidenceIds: ['evidence_first', 'evidence_failed'],
+      isForceInvalidation: true,
+      invalidatedAt: new Date('2026-08-21T00:00:00.000Z'),
+    }, {
+      documentRequirementSatisfactions,
+      documentRequirementSatisfactionEvidence,
+      signedDocuments: {
+        findMany: jest.fn().mockResolvedValue([
+          { id: 'evidence_first', status: 'REVOKED', signerRole: 'parent_guardian' },
+          { id: 'evidence_failed', status: 'REVOKED', signerRole: 'child' },
+        ]),
+      },
+    });
+
+    expect(documentRequirementSatisfactions.update).toHaveBeenCalledWith({
+      where: { id: 'document-satisfaction:evidence_first' },
+      data: expect.objectContaining({
+        status: 'INVALIDATED',
+        isComplete: false,
+      }),
+    });
+  });
+
+  it('keeps an independent complete contributor after a terminal provider failure', async () => {
+    const documentRequirementSatisfactions = {
+      findMany: jest.fn().mockResolvedValue([{
+        id: 'document-satisfaction:evidence_failed',
+        requiredSignerRoles: ['participant'],
+      }]),
+      update: jest.fn().mockResolvedValue({}),
+    };
+    const documentRequirementSatisfactionEvidence = {
+      findMany: jest.fn()
+        .mockResolvedValueOnce([{ satisfactionId: 'document-satisfaction:evidence_failed' }])
+        .mockResolvedValueOnce([
+          {
+            satisfactionId: 'document-satisfaction:evidence_failed',
+            signedDocumentId: 'evidence_failed',
+            completedSignerRoles: ['participant'],
+          },
+          {
+            satisfactionId: 'document-satisfaction:evidence_failed',
+            signedDocumentId: 'evidence_independent',
+            completedSignerRoles: ['participant'],
+          },
+        ]),
+    };
+
+    await invalidateDocumentRequirementSatisfactions({
+      evidenceIds: ['evidence_failed'],
+      isForceInvalidation: true,
+    }, {
+      documentRequirementSatisfactions,
+      documentRequirementSatisfactionEvidence,
+      signedDocuments: {
+        findMany: jest.fn().mockResolvedValue([
+          { id: 'evidence_failed', status: 'REVOKED', signerRole: 'participant' },
+          { id: 'evidence_independent', status: 'SIGNED', signerRole: 'participant' },
+        ]),
+      },
+    });
+
+    expect(documentRequirementSatisfactions.update).toHaveBeenCalledWith({
+      where: { id: 'document-satisfaction:evidence_failed' },
+      data: expect.objectContaining({
+        status: 'SATISFIED',
+        isComplete: true,
+      }),
+    });
+  });
+
+
+
+  it('keeps a roleless active Satisfaction complete after contributor recomputation', async () => {
+    const documentRequirementSatisfactions = {
+      findMany: jest.fn().mockResolvedValue([{
+        id: 'document-satisfaction:roleless',
+        requiredSignerRoles: [],
+      }]),
+      update: jest.fn().mockResolvedValue({}),
+    };
+    const documentRequirementSatisfactionEvidence = {
+      findMany: jest.fn()
+        .mockResolvedValueOnce([{ satisfactionId: 'document-satisfaction:roleless' }])
+        .mockResolvedValueOnce([{
+          satisfactionId: 'document-satisfaction:roleless',
+          signedDocumentId: 'evidence_roleless',
+          completedSignerRoles: [],
+        }]),
+    };
+    const signedDocuments = {
+      findMany: jest.fn().mockResolvedValue([{
+        id: 'evidence_roleless',
+        status: 'SIGNED',
+        signerRole: null,
+      }]),
+    };
+
+    await invalidateDocumentRequirementSatisfaction({
+      evidenceId: 'evidence_roleless',
+    }, {
+      documentRequirementSatisfactions,
+      documentRequirementSatisfactionEvidence,
+      signedDocuments,
+    });
+
+    expect(documentRequirementSatisfactions.update).toHaveBeenCalledWith({
+      where: { id: 'document-satisfaction:roleless' },
+      data: expect.objectContaining({
+        status: 'SATISFIED',
+        isComplete: true,
+        completedSignerRoles: [],
+      }),
+    });
+  });
   it('creates a replacement Satisfaction after an invalidated source is excluded', async () => {
     const documentRequirementSatisfactions = {
       findFirst: jest.fn().mockResolvedValue(null),
@@ -208,7 +518,7 @@ describe('document evidence storage seam', () => {
 
     expect(documentRequirementSatisfactions.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
-        sourceEvidenceId: 'evidence_invalidated',
+        sourceEvidenceId: { in: ['evidence_invalidated'] },
         status: { in: ['PENDING', 'SATISFIED'] },
       },
     }));
@@ -290,7 +600,7 @@ describe('document evidence storage seam', () => {
     }));
     expect(documentRequirementSatisfactions.updateMany).toHaveBeenCalledWith({
       where: {
-        sourceEvidenceId: 'evidence_1',
+        sourceEvidenceId: { in: ['evidence_1'] },
         status: { in: ['PENDING', 'SATISFIED'] },
       },
       data: expect.objectContaining({

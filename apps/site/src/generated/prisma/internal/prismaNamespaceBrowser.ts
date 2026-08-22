@@ -161,6 +161,7 @@ export const ModelName = {
   SignedDocuments: 'SignedDocuments',
   DocumentSubjects: 'DocumentSubjects',
   DocumentRequirementSatisfactions: 'DocumentRequirementSatisfactions',
+  DocumentRequirementSatisfactionEvidence: 'DocumentRequirementSatisfactionEvidence',
   DocumentEvidenceAuditEvents: 'DocumentEvidenceAuditEvents',
   BoldSignWebhookEvents: 'BoldSignWebhookEvents',
   BoldSignSyncOperations: 'BoldSignSyncOperations',
@@ -2828,6 +2829,18 @@ export const DocumentRequirementSatisfactionsScalarFieldEnum = {
 } as const
 
 export type DocumentRequirementSatisfactionsScalarFieldEnum = (typeof DocumentRequirementSatisfactionsScalarFieldEnum)[keyof typeof DocumentRequirementSatisfactionsScalarFieldEnum]
+
+
+export const DocumentRequirementSatisfactionEvidenceScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  satisfactionId: 'satisfactionId',
+  signedDocumentId: 'signedDocumentId',
+  completedSignerRoles: 'completedSignerRoles'
+} as const
+
+export type DocumentRequirementSatisfactionEvidenceScalarFieldEnum = (typeof DocumentRequirementSatisfactionEvidenceScalarFieldEnum)[keyof typeof DocumentRequirementSatisfactionEvidenceScalarFieldEnum]
 
 
 export const DocumentEvidenceAuditEventsScalarFieldEnum = {

@@ -84,7 +84,7 @@ describe('template edit URL route', () => {
       },
     }));
     mockLockDocumentTemplateVersionForUpdate.mockResolvedValue({
-      frozen: false,
+      isFrozen: false,
       version: template,
     });
     mockCloneEmbeddedTemplate.mockResolvedValue({
@@ -126,7 +126,7 @@ describe('template edit URL route', () => {
 
   it('marks a frozen selected version as creating a new version', async () => {
     mockLockDocumentTemplateVersionForUpdate.mockResolvedValue({
-      frozen: true,
+      isFrozen: true,
       version: { ...template, frozenAt: new Date('2026-08-20T12:00:00.000Z') },
     });
 

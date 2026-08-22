@@ -3,8 +3,8 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import {
-  getBoldSignRolesForRequiredSignerType,
   normalizeSignerContext,
+  resolveRequiredSignerRoles,
   type SignerContext,
 } from '@/lib/templateSignerTypes';
 import { syncChildRegistrationConsentStatus } from '@/lib/childConsentProgress';
@@ -231,13 +231,10 @@ export async function POST(request: NextRequest) {
   ) {
     return NextResponse.json({ error: 'Template Requirement not found.' }, { status: 404 });
   }
-  const configuredSignerRoles = Array.isArray(signedTemplate.signerRoles)
-    ? signedTemplate.signerRoles
-    : [];
-  const requiredSignerRoles = configuredSignerRoles.length > 0
-    ? configuredSignerRoles
-    : getBoldSignRolesForRequiredSignerType(signedTemplate.requiredSignerType)
-      .map((role) => role.signerRole);
+  const requiredSignerRoles = resolveRequiredSignerRoles(
+    signedTemplate.signerRoles,
+    signedTemplate.requiredSignerType,
+  );
   const templateOrganizationId = signedTemplate.organizationId;
   if (
     !templateOrganizationId

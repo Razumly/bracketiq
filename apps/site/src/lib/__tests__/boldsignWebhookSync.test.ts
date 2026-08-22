@@ -11,6 +11,7 @@ const mockPrisma = {
 };
 const mockEnsureDocumentRequirement = jest.fn();
 const mockEditDocumentTemplateVersion = jest.fn();
+const mockUpdateBoldSignOperationById = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: mockPrisma }));
 jest.mock('@/server/documents/documentTemplateVersions', () => ({
@@ -18,6 +19,10 @@ jest.mock('@/server/documents/documentTemplateVersions', () => ({
   editDocumentTemplateVersion: mockEditDocumentTemplateVersion,
   ensureDocumentRequirement: mockEnsureDocumentRequirement,
   isDocumentTemplateVersionFrozen: jest.fn(),
+}));
+jest.mock('@/lib/boldsignSyncOperations', () => ({
+  ...jest.requireActual('@/lib/boldsignSyncOperations'),
+  updateBoldSignOperationById: mockUpdateBoldSignOperationById,
 }));
 
 import {
@@ -40,6 +45,7 @@ describe('boldsignWebhookSync', () => {
     mockPrisma.templateDocuments.findFirst.mockReset();
     mockPrisma.templateDocuments.findUnique.mockReset();
     mockPrisma.$transaction.mockReset();
+    mockUpdateBoldSignOperationById.mockReset();
     mockEnsureDocumentRequirement.mockReset();
     mockEditDocumentTemplateVersion.mockReset();
     mockPrisma.$transaction.mockImplementation(async (callback) => callback({}));
@@ -232,5 +238,115 @@ describe('boldsignWebhookSync', () => {
       templateId: 'bold_template_edited',
     }));
     expect(mockEditDocumentTemplateVersion).toHaveBeenCalledTimes(1);
+  });
+  it('rejects a provider edit against a frozen Version instead of reusing its provider id', async () => {
+    const frozenTemplate = {
+      id: 'version_1',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      frozenAt: new Date('2026-08-21T00:00:00.000Z'),
+      type: 'PDF',
+      templateId: 'bold_template_1',
+      title: 'Original title',
+      description: null,
+      signOnce: false,
+      requiredSignerType: 'PARTICIPANT',
+      roleIndex: 1,
+      roleIndexes: [1],
+      signerRoles: ['participant'],
+      content: null,
+    };
+    mockPrisma.templateDocuments.findFirst.mockResolvedValue(frozenTemplate);
+    mockEnsureDocumentRequirement.mockResolvedValue({ id: 'requirement_1', organizationId: 'org_1' });
+    mockEditDocumentTemplateVersion.mockRejectedValue(new Error('frozen'));
+
+    const operation = {
+      id: 'operation_1',
+      operationType: 'TEMPLATE_CREATE',
+      status: 'PENDING_WEBHOOK',
+      idempotencyKey: 'idempotency_1',
+      organizationId: 'org_1',
+      templateId: 'bold_template_1',
+      payload: {
+        documentRequirementId: 'requirement_1',
+        organizationId: 'org_1',
+        title: 'Provider changed title',
+        type: 'PDF',
+      },
+    } as BoldSignSyncOperation;
+
+    await expect(projectTemplateProjectionFromOperation({
+      templateId: 'bold_template_1',
+      operation,
+      status: 'ACTIVE',
+      eventToken: 'templateedited',
+    })).rejects.toThrow('frozen');
+
+    expect(mockUpdateBoldSignOperationById).toHaveBeenCalledWith(
+      'operation_1',
+      expect.objectContaining({
+        status: 'FAILED',
+        lastError: expect.stringContaining('quarantined'),
+        completedAt: expect.any(Date),
+      }),
+    );
+    expect(mockEditDocumentTemplateVersion).not.toHaveBeenCalled();
+  });
+  it('quarantines a provider ID when any referenced Version is frozen', async () => {
+    const latestTemplate = {
+      id: 'version_2',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      frozenAt: null,
+      type: 'PDF',
+      templateId: 'bold_template_1',
+      title: 'Current title',
+      description: null,
+      signOnce: false,
+      requiredSignerType: 'PARTICIPANT',
+      roleIndex: 1,
+      roleIndexes: [1],
+      signerRoles: ['participant'],
+      content: null,
+    };
+    const frozenTemplate = {
+      ...latestTemplate,
+      id: 'version_1',
+      frozenAt: new Date('2026-08-20T00:00:00.000Z'),
+    };
+    mockPrisma.templateDocuments.findFirst
+      .mockImplementation(async ({ where }: { where?: Record<string, unknown> }) =>
+        where && 'frozenAt' in where ? frozenTemplate : latestTemplate);
+
+    const operation = {
+      id: 'operation_reused_provider_id',
+      operationType: 'TEMPLATE_CREATE',
+      status: 'PENDING_WEBHOOK',
+      idempotencyKey: 'idempotency_reused_provider_id',
+      organizationId: 'org_1',
+      templateId: 'bold_template_1',
+      payload: {
+        documentRequirementId: 'requirement_1',
+        organizationId: 'org_1',
+        title: 'Provider changed title',
+        type: 'PDF',
+      },
+    } as BoldSignSyncOperation;
+
+    await expect(projectTemplateProjectionFromOperation({
+      templateId: 'bold_template_1',
+      operation,
+      status: 'ACTIVE',
+      eventToken: 'templateedited',
+    })).rejects.toThrow(/quarantined/i);
+
+    expect(mockUpdateBoldSignOperationById).toHaveBeenCalledWith(
+      'operation_reused_provider_id',
+      expect.objectContaining({
+        status: 'FAILED',
+        lastError: expect.stringContaining('quarantined'),
+      }),
+    );
+    expect(mockEditDocumentTemplateVersion).not.toHaveBeenCalled();
   });
 });

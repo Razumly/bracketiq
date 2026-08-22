@@ -96,7 +96,7 @@ export async function PATCH(
       template: result.template,
       requirement: result.requirement,
       previousVersionId: result.previousVersionId,
-      newVersionCreated: result.newVersionCreated,
+      newVersionCreated: result.isNewVersionCreated,
       newVersionSequence: result.template.versionSequence,
     }, { status: 200 });
   } catch (error) {
@@ -136,7 +136,7 @@ export async function DELETE(
     const frozenState = await prisma.$transaction((tx) => (
       lockDocumentTemplateVersionForUpdate(tx, templateDocumentId)
     ));
-    if (frozenState.frozen) {
+    if (frozenState.isFrozen) {
       return NextResponse.json({
         error: 'Frozen Document Template Versions cannot be deleted. Create a new Version instead.',
         frozen: true,
@@ -197,8 +197,8 @@ export async function DELETE(
 
   const deletion = await prisma.$transaction(async (tx) => {
     const locked = await lockDocumentTemplateVersionForUpdate(tx, templateDocumentId);
-    if (locked.frozen) {
-      return { frozen: true, versionSequence: locked.version.versionSequence };
+    if (locked.isFrozen) {
+      return { isFrozen: true, versionSequence: locked.version.versionSequence };
     }
 
     const [eventsToUpdate, teamsToUpdate, timeSlotsToUpdate] = await Promise.all([
@@ -249,10 +249,10 @@ export async function DELETE(
     await tx.templateDocuments.delete({
       where: { id: templateDocumentId },
     });
-    return { frozen: false, versionSequence: locked.version.versionSequence };
+    return { isFrozen: false, versionSequence: locked.version.versionSequence };
   });
 
-  if (deletion.frozen) {
+  if (deletion.isFrozen) {
     return NextResponse.json({
       error: 'Frozen Document Template Versions cannot be deleted. Create a new Version instead.',
       frozen: true,

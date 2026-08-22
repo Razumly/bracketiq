@@ -46,6 +46,16 @@ const forwardRepairMigrationPath = path.join(
   "20260821070000_repair_document_evidence_and_version_guards",
   "migration.sql",
 );
+const ownerRepairMigrationPath = path.join(
+  migrationRoot,
+  "20260821080000_repair_ownerless_document_evidence",
+  "migration.sql",
+);
+const contributorRoleMigrationPath = path.join(
+  migrationRoot,
+  "20260821230000_add_satisfaction_evidence_roles",
+  "migration.sql",
+);
 const client = new Client({ connectionString });
 let connected = false;
 
@@ -63,6 +73,18 @@ try {
       "description" TEXT,
       "createdBy" TEXT,
       "status" TEXT
+    );
+    CREATE TABLE "Events" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "organizationId" TEXT
+    );
+    CREATE TABLE "Teams" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "organizationId" TEXT
+    );
+    CREATE TABLE "EventTeams" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "eventId" TEXT
     );
     CREATE TABLE "TemplateDocuments" (
       "id" TEXT NOT NULL PRIMARY KEY,
@@ -102,7 +124,14 @@ try {
       "ipAddress" TEXT,
       "requestId" TEXT
     );
-    INSERT INTO "Organizations" ("id") VALUES ('org_1');
+    INSERT INTO "Organizations" ("id") VALUES ('org_1'), ('org_2');
+    INSERT INTO "Events" ("id", "organizationId") VALUES
+      ('event_missing_org', 'org_1'),
+      ('event_org_2', 'org_2');
+    INSERT INTO "Teams" ("id", "organizationId") VALUES
+      ('team_missing_org', 'org_1');
+    INSERT INTO "EventTeams" ("id", "eventId") VALUES
+      ('team_missing_org', 'event_missing_org');
     INSERT INTO "DocumentRequirements" ("id", "organizationId", "title", "status") VALUES
       ('requirement_pdf', 'org_1', 'Photo waiver', 'ACTIVE'),
       ('requirement_text', 'org_1', 'Code of conduct', 'ACTIVE');
@@ -223,7 +252,7 @@ try {
         '2026-08-04 11:00:00',
         'missing-org-document-1',
         'version_text',
-        NULL,
+        'player_1',
         'Code of conduct',
         NULL,
         NULL,
@@ -233,11 +262,31 @@ try {
         '2026-08-04T10:00:00.000Z',
         NULL,
         NULL,
-        NULL,
+        'participant',
         '203.0.113.13',
         'request_missing_org_1'
-      );
+      ),
 
+      (
+        'evidence_ambiguous_owner',
+        '2026-08-04 12:00:00',
+        '2026-08-04 13:00:00',
+        'ambiguous-document-1',
+        'version_text',
+        'player_1',
+        'Code of conduct',
+        NULL,
+        NULL,
+        'event_org_2',
+        NULL,
+        'SIGNED',
+        '2026-08-04T12:00:00.000Z',
+        NULL,
+        NULL,
+        'participant',
+        '203.0.113.16',
+        'request_ambiguous_owner_1'
+      )
   `);
   const templateRowsBefore = await client.query(`
     SELECT
@@ -280,6 +329,7 @@ try {
   await client.query(await readFile(evidenceMigrationPath, "utf8"));
   await client.query(await readFile(pendingStatusMigrationPath, "utf8"));
   await client.query(await readFile(pendingBackfillMigrationPath, "utf8"));
+  await client.query(await readFile(forwardRepairMigrationPath, "utf8"));
   await client.query(`
     INSERT INTO "DocumentRequirementSatisfactions" (
       "id", "createdAt", "updatedAt", "organizationId", "documentRequirementId",
@@ -305,15 +355,15 @@ try {
     FROM "DocumentRequirementSatisfactions"
     WHERE "sourceEvidenceId" = 'evidence_boldsign'
   `);
-  await client.query(await readFile(forwardRepairMigrationPath, "utf8"));
-  const signerColumn = await client.query(`
-    SELECT "is_nullable"
-    FROM information_schema.columns
-    WHERE table_schema = current_schema()
-      AND table_name = 'SignedDocuments'
-      AND column_name = 'userId'
+  await client.query(`
+    UPDATE "DocumentRequirementSatisfactions"
+    SET
+      "status" = 'INVALIDATED',
+      "isComplete" = FALSE,
+      "invalidatedAt" = '2026-08-05T00:00:00.000Z'
+    WHERE "id" = 'document-satisfaction:evidence_boldsign'
   `);
-  assert.deepEqual(signerColumn.rows, [{ is_nullable: "YES" }]);
+  await client.query(await readFile(ownerRepairMigrationPath, "utf8"));
   const legacyRowsAfter = await client.query(`
     SELECT
       "id",
@@ -337,8 +387,98 @@ try {
     FROM "SignedDocuments"
     ORDER BY "id"
   `);
-  assert.deepEqual(legacyRowsAfter.rows, legacyRowsBefore.rows);
+  assert.deepEqual(
+    legacyRowsAfter.rows.map((row) => row.id),
+    legacyRowsBefore.rows.map((row) => row.id),
+  );
+  assert.deepEqual(
+    legacyRowsAfter.rows.map(({ id, createdAt, updatedAt }) => ({
+      id,
+      createdAt,
+      updatedAt,
+    })),
+    legacyRowsBefore.rows.map(({ id, createdAt, updatedAt }) => ({
+      id,
+      createdAt,
+      updatedAt,
+    })),
+  );
+  assert.deepEqual(
+    legacyRowsAfter.rows,
+    legacyRowsBefore.rows.map((row) =>
+      row.id === "evidence_no_organization"
+        ? { ...row, organizationId: "org_1" }
+        : row,
+    ),
+  );
+  await client.query(`
+    UPDATE "SignedDocuments"
+    SET "provenance" = 'IMPORTED', "signerRole" = NULL
+    WHERE "id" = 'evidence_boldsign'
+  `);
+  await client.query(`
+    UPDATE "DocumentRequirementSatisfactions"
+    SET
+      "requiredSignerRoles" = ARRAY[]::TEXT[],
+      "completedSignerRoles" = ARRAY[]::TEXT[],
+      "status" = 'INVALIDATED',
+      "isComplete" = FALSE,
+      "invalidatedAt" = '2026-08-05T00:00:00.000Z'
+    WHERE "id" = 'document-satisfaction:evidence_boldsign'
+  `);
+  await client.query(`
+    UPDATE "TemplateDocuments"
+    SET
+      "requiredSignerType" = 'PARENT-GUARDIAN-CHILD',
+      "signerRoles" = ARRAY[]::TEXT[]
+    WHERE "id" = 'version_pdf'
+  `);
+  await client.query(await readFile(contributorRoleMigrationPath, "utf8"));
+  await client.query(`
+    UPDATE "TemplateDocuments"
+    SET
+      "requiredSignerType" = 'PARENT_GUARDIAN_CHILD',
+      "signerRoles" = ARRAY['parent_guardian', 'child']::TEXT[]
+    WHERE "id" = 'version_pdf'
+  `);
+  const contributorRoleColumn = await client.query(`
+    SELECT "is_nullable", "column_default"
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'DocumentRequirementSatisfactionEvidence'
+      AND column_name = 'completedSignerRoles'
+  `);
+  assert.equal(contributorRoleColumn.rows.length, 1);
+  assert.equal(contributorRoleColumn.rows[0].is_nullable, "NO");
+  const signerColumn = await client.query(`
+    SELECT "is_nullable"
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'SignedDocuments'
+      AND column_name = 'userId'
+  `);
+  assert.deepEqual(signerColumn.rows, [{ is_nullable: "YES" }]);
   assert.deepEqual(legacyRowsBefore.rows, [
+    {
+      id: "evidence_ambiguous_owner",
+      createdAt: new Date("2026-08-04T12:00:00.000Z"),
+      updatedAt: new Date("2026-08-04T13:00:00.000Z"),
+      signedDocumentId: "ambiguous-document-1",
+      templateId: "version_text",
+      userId: "player_1",
+      documentName: "Code of conduct",
+      hostId: null,
+      organizationId: null,
+      eventId: "event_org_2",
+      teamId: null,
+      status: "SIGNED",
+      signedAt: "2026-08-04T12:00:00.000Z",
+      signerEmail: null,
+      roleIndex: null,
+      signerRole: "participant",
+      ipAddress: "203.0.113.16",
+      requestId: "request_ambiguous_owner_1",
+    },
     {
       id: "evidence_boldsign",
       createdAt: new Date("2026-08-01T10:00:00.000Z"),
@@ -405,7 +545,7 @@ try {
       updatedAt: new Date("2026-08-04T11:00:00.000Z"),
       signedDocumentId: "missing-org-document-1",
       templateId: "version_text",
-      userId: null,
+      userId: "player_1",
       documentName: "Code of conduct",
       hostId: null,
       organizationId: null,
@@ -415,7 +555,7 @@ try {
       signedAt: "2026-08-04T10:00:00.000Z",
       signerEmail: null,
       roleIndex: null,
-      signerRole: null,
+      signerRole: "participant",
       ipAddress: "203.0.113.13",
       requestId: "request_missing_org_1",
     },
@@ -475,12 +615,22 @@ try {
   `);
   assert.deepEqual(rows.rows, [
     {
+      id: "evidence_ambiguous_owner",
+      signedDocumentId: "ambiguous-document-1",
+      provenance: "BRACKETIQ",
+      providerDocumentId: null,
+      signerUserId: "player_1",
+      documentSubjectId: null,
+      scopeType: "ORGANIZATION",
+      scopeId: null,
+    },
+    {
       id: "evidence_boldsign",
       signedDocumentId: "boldsign_document_1",
-      provenance: "BOLDSIGN",
+      provenance: "IMPORTED",
       providerDocumentId: "boldsign_document_1",
-      documentSubjectId: "document-subject:org_1:child_1",
       signerUserId: "parent_1",
+      documentSubjectId: "document-subject:org_1:child_1",
       scopeType: "EVENT_PARTICIPATION",
       scopeId: "event_1",
     },
@@ -509,10 +659,10 @@ try {
       signedDocumentId: "missing-org-document-1",
       provenance: "BRACKETIQ",
       providerDocumentId: null,
-      documentSubjectId: null,
-      signerUserId: null,
+      documentSubjectId: "document-subject:org_1:player_1",
+      signerUserId: "player_1",
       scopeType: "ORGANIZATION",
-      scopeId: null,
+      scopeId: "org_1",
     },
     {
       id: "evidence_text",
@@ -545,23 +695,76 @@ try {
       sd."scopeType",
       sd."scopeId",
       ds."id" AS "subjectRowId",
-      satisfaction."id" AS "satisfactionId"
+      satisfaction."id" AS "satisfactionId",
+      contributor."satisfactionId" AS "contributorSatisfactionId"
     FROM "SignedDocuments" sd
     LEFT JOIN "DocumentSubjects" ds ON ds."id" = sd."documentSubjectId"
     LEFT JOIN "DocumentRequirementSatisfactions" satisfaction
       ON satisfaction."sourceEvidenceId" = sd."id"
+    LEFT JOIN "DocumentRequirementSatisfactionEvidence" contributor
+      ON contributor."signedDocumentId" = sd."id"
     WHERE sd."id" = 'evidence_no_organization'
   `);
   assert.deepEqual(unownedEvidence.rows, [{
-    organizationId: null,
+    organizationId: "org_1",
     eventId: "event_missing_org",
     teamId: "team_missing_org",
-    documentSubjectId: null,
-    signerUserId: null,
+    documentSubjectId: "document-subject:org_1:player_1",
+    signerUserId: "player_1",
     scopeType: "ORGANIZATION",
-    scopeId: null,
-    subjectRowId: null,
+    scopeId: "org_1",
+    subjectRowId: "document-subject:org_1:player_1",
     satisfactionId: null,
+    contributorSatisfactionId: "document-satisfaction:evidence_text",
+  }]);
+  const repairedSubjectTimestamps = await client.query(`
+    SELECT
+      "createdAt",
+      "updatedAt"
+    FROM "DocumentSubjects"
+    WHERE "id" = 'document-subject:org_1:player_1'
+  `);
+  assert.deepEqual(repairedSubjectTimestamps.rows, [{
+    createdAt: new Date("2026-08-04T10:00:00.000Z"),
+    updatedAt: new Date("2026-08-04T11:00:00.000Z"),
+  }]);
+
+  const contributorRoles = await client.query(`
+    SELECT
+      contributor."signedDocumentId",
+      contributor."completedSignerRoles"
+    FROM "DocumentRequirementSatisfactionEvidence" contributor
+    WHERE contributor."satisfactionId" = 'document-satisfaction:evidence_boldsign_child'
+    ORDER BY contributor."signedDocumentId"
+  `);
+  assert.deepEqual(contributorRoles.rows, [
+    {
+      signedDocumentId: "evidence_boldsign",
+      completedSignerRoles: ["parent_guardian", "child"],
+    },
+    {
+      signedDocumentId: "evidence_boldsign_child",
+      completedSignerRoles: ["child"],
+    },
+  ]);
+  const historicalContributors = await client.query(`
+    SELECT "signedDocumentId"
+    FROM "DocumentRequirementSatisfactionEvidence"
+    WHERE "satisfactionId" = 'document-satisfaction:evidence_boldsign'
+  `);
+  assert.deepEqual(historicalContributors.rows, []);
+  const ambiguousEvidence = await client.query(`
+    SELECT
+      "organizationId",
+      "documentSubjectId",
+      "scopeId"
+    FROM "SignedDocuments"
+    WHERE "id" = 'evidence_ambiguous_owner'
+  `);
+  assert.deepEqual(ambiguousEvidence.rows, [{
+    organizationId: null,
+    documentSubjectId: null,
+    scopeId: null,
   }]);
 
   const unknownStructuredSigner = await client.query(`
@@ -595,6 +798,15 @@ try {
   assert.deepEqual(satisfactions.rows, [
     {
       sourceEvidenceId: "evidence_boldsign",
+      documentSubjectId: "document-subject:org_1:child_1",
+      templateDocumentId: "version_pdf",
+      status: "INVALIDATED",
+      isComplete: false,
+      requiredSignerRoles: ["parent_guardian", "child"],
+      completedSignerRoles: [],
+    },
+    {
+      sourceEvidenceId: "evidence_boldsign_child",
       documentSubjectId: "document-subject:org_1:child_1",
       templateDocumentId: "version_pdf",
       status: "SATISFIED",

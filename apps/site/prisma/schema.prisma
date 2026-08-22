@@ -3420,6 +3420,19 @@ model DocumentRequirementSatisfactions {
   @@index([sourceEvidenceId])
 }
 
+model DocumentRequirementSatisfactionEvidence {
+  id                    String   @id
+  createdAt             DateTime?
+  updatedAt             DateTime?
+  satisfactionId        String
+  signedDocumentId      String
+  completedSignerRoles  String[] @default([])
+
+  @@unique([satisfactionId, signedDocumentId])
+  @@index([signedDocumentId])
+  @@index([satisfactionId])
+}
+
 model DocumentEvidenceAuditEvents {
   id               String                              @id
   createdAt        DateTime?

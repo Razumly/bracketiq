@@ -8,6 +8,7 @@ import {
   canManageOrganization,
   hasOrgPermission,
 } from "@/server/accessControl";
+import { resolveRequiredSignerRoles } from "@/lib/templateSignerTypes";
 import {
   appendDocumentEvidenceAuditEvent,
   createDocumentRequirementSatisfaction,
@@ -108,7 +109,9 @@ export async function POST(
       id: true,
       organizationId: true,
       documentRequirementId: true,
+      requiredSignerType: true,
       signerRoles: true,
+      signOnce: true,
     },
   });
   if (!template || template.organizationId !== organizationId) {
@@ -141,13 +144,14 @@ export async function POST(
       { status: 400 },
     );
   }
-  const templateSignerRoles = Array.isArray(template.signerRoles)
-    ? template.signerRoles
-    : [];
+  const requiredSignerRoles = resolveRequiredSignerRoles(
+    template.signerRoles,
+    template.requiredSignerType,
+  );
+  const completedSignerRoles = requiredSignerRoles;
   if (
     parsed.data.signerRole
-    && templateSignerRoles.length > 0
-    && !templateSignerRoles.some(
+    && !requiredSignerRoles.some(
       (role) => normalizeSignerRole(role) === normalizeSignerRole(parsed.data.signerRole!),
     )
   ) {
@@ -257,6 +261,12 @@ export async function POST(
       { status: 400 },
     );
   }
+  if (template.signOnce && parsed.data.scopeType !== "ORGANIZATION") {
+    return NextResponse.json(
+      { error: "Sign-once Document Template Versions require Organization scope." },
+      { status: 400 },
+    );
+  }
   if (
     parsed.data.scopeType !== "ORGANIZATION"
     && (!scopedEntity || scopedEntity.organizationId !== organizationId)
@@ -345,7 +355,7 @@ export async function POST(
             hostId,
             documentSubjectUserId: parsed.data.subjectUserId,
             ...evidenceScope,
-            signOnce: false,
+            signOnce: template.signOnce,
             provenance: DOCUMENT_EVIDENCE_PROVENANCE.IMPORTED,
           }),
           scopeType: evidenceScope.scopeType,
@@ -376,7 +386,8 @@ export async function POST(
           documentSubjectId,
           scopeType: evidenceScope.scopeType,
           scopeId: evidenceScope.scopeId,
-          requiredSignerRoles: templateSignerRoles,
+          requiredSignerRoles,
+          completedSignerRoles,
           signerRole: parsed.data.signerRole,
         },
         tx as unknown as DocumentEvidenceDatabase,

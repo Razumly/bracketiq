@@ -170,50 +170,8 @@ const resolveProductCheckoutLabel = (product: Product, isOwner: boolean): string
 const isProductTypeTaxable = (productType: ProductType | null | undefined): boolean =>
   productType !== 'NON_TAXABLE_ITEM';
 
-const normalizeTemplateType = (value: unknown): TemplateDocument['type'] => {
-  if (typeof value === 'string' && value.toUpperCase() === 'TEXT') {
-    return 'TEXT';
-  }
-  return 'PDF';
-};
-
-interface TemplateDocumentApiRow {
-  $id?: unknown;
-  id?: unknown;
-  templateId?: unknown;
-  organizationId?: unknown;
-  documentRequirementId?: unknown;
-  versionSequence?: unknown;
-  frozenAt?: unknown;
-  documentRequirement?: unknown;
-  requirement?: unknown;
-  title?: unknown;
-  description?: unknown;
-  requirementTitle?: unknown;
-  requirementDescription?: unknown;
-  signOnce?: unknown;
-  status?: unknown;
-  roleIndex?: unknown;
-  roleIndexes?: unknown;
-  signerRoles?: unknown;
-  requiredSignerType?: unknown;
-  type?: unknown;
-  content?: unknown;
-  $createdAt?: unknown;
-  createdAt?: unknown;
-}
 
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null
-);
-
-const toTemplateDocumentApiRow = (value: unknown): TemplateDocumentApiRow => {
-  if (!isRecord(value)) {
-    throw new Error('Template row is not a valid object.');
-  }
-  return value;
-};
 
 type TemplateDocumentWithVersionState = TemplateDocument & {
   documentRequirementId: string;
@@ -238,91 +196,6 @@ const requireTemplateVersionState = (
   };
 };
 
-const mapTemplateRow = (row: TemplateDocumentApiRow): TemplateDocument => {
-  const templateDocumentId = typeof row.$id === 'string' && row.$id.trim()
-    ? row.$id.trim()
-    : typeof row.id === 'string' && row.id.trim()
-      ? row.id.trim()
-      : undefined;
-  if (!templateDocumentId) {
-    throw new Error('Template row is missing a template document id.');
-  }
-
-  const documentRequirementId = typeof row.documentRequirementId === 'string'
-    && row.documentRequirementId.trim()
-    ? row.documentRequirementId.trim()
-    : undefined;
-  if (!documentRequirementId) {
-    throw new Error('Template row is missing documentRequirementId.');
-  }
-
-  const roleIndexRaw = row.roleIndex;
-  const roleIndex = typeof roleIndexRaw === 'number' ? roleIndexRaw : Number(roleIndexRaw);
-  const roleIndexesRaw = Array.isArray(row.roleIndexes) ? row.roleIndexes : undefined;
-  const roleIndexes = roleIndexesRaw
-    ? roleIndexesRaw
-        .map((entry: unknown) => Number(entry))
-        .filter((value: number) => Number.isFinite(value))
-    : undefined;
-  const signerRolesRaw = Array.isArray(row.signerRoles) ? row.signerRoles : undefined;
-  const signerRoles = signerRolesRaw
-    ? signerRolesRaw
-        .filter((entry: unknown): entry is string => typeof entry === 'string' && Boolean(entry.trim()))
-        .map((entry: string) => entry.trim())
-    : undefined;
-  const signOnceRaw = row.signOnce;
-  const versionSequenceRaw = row.versionSequence;
-  const versionSequenceValue = typeof versionSequenceRaw === 'number'
-    ? versionSequenceRaw
-    : typeof versionSequenceRaw === 'string' && versionSequenceRaw.trim()
-      ? Number(versionSequenceRaw)
-      : Number.NaN;
-  if (!Number.isInteger(versionSequenceValue) || versionSequenceValue < 1) {
-    throw new Error('Template row is missing a valid versionSequence.');
-  }
-  const requiredSignerType = normalizeRequiredSignerType(row.requiredSignerType);
-
-  const requirement = isRecord(row.documentRequirement)
-    ? row.documentRequirement
-    : isRecord(row.requirement)
-      ? row.requirement
-      : undefined;
-  const requirementTitle = typeof requirement?.title === 'string'
-    ? requirement.title
-    : typeof row.requirementTitle === 'string'
-      ? row.requirementTitle
-      : undefined;
-  const requirementDescription = typeof requirement?.description === 'string'
-    ? requirement.description
-    : typeof row.requirementDescription === 'string'
-      ? row.requirementDescription
-      : undefined;
-
-  return {
-    $id: templateDocumentId,
-    templateId: typeof row.templateId === 'string' ? row.templateId : undefined,
-    organizationId: typeof row.organizationId === 'string' ? row.organizationId : '',
-    documentRequirementId,
-    versionSequence: versionSequenceValue,
-    frozenAt: row.frozenAt ? String(row.frozenAt) : undefined,
-    requirementTitle,
-    requirementDescription,
-    title: requirementTitle ?? (typeof row.title === 'string' ? row.title : 'Untitled Template'),
-    description: requirementDescription
-      ?? (typeof row.description === 'string' ? row.description : undefined),
-    signOnce: typeof signOnceRaw === 'boolean' ? signOnceRaw : signOnceRaw == null ? true : Boolean(signOnceRaw),
-    status: typeof row.status === 'string' ? row.status : undefined,
-    roleIndex: Number.isFinite(roleIndex) ? roleIndex : undefined,
-    roleIndexes: roleIndexes && roleIndexes.length ? roleIndexes : undefined,
-    signerRoles: signerRoles && signerRoles.length ? signerRoles : undefined,
-    requiredSignerType,
-    type: normalizeTemplateType(row.type),
-    content: typeof row.content === 'string' ? row.content : undefined,
-    $createdAt: typeof row.$createdAt === 'string'
-      ? row.$createdAt
-      : typeof row.createdAt === 'string' ? row.createdAt : undefined,
-  };
-};
 
 type PendingTemplateCreateCard = {
   localId: string;
@@ -1739,19 +1612,10 @@ function OrganizationDetailContent() {
       if (!user?.$id) {
         return [];
       }
-      const response = await fetch(`/api/organizations/${orgId}/templates`, {
-        credentials: 'include',
+      const mappedRows = await boldsignService.listTemplates({
+        organizationId: orgId,
+        isVersionHistoryIncluded: true,
       });
-      const payloadValue: unknown = await response.json().catch(() => ({}));
-      const payload = isRecord(payloadValue) ? payloadValue : {};
-      if (!response.ok) {
-        const errorMessage = typeof payload.error === 'string'
-          ? payload.error
-          : 'Failed to load templates';
-        throw new Error(errorMessage);
-      }
-      const rows = Array.isArray(payload.templates) ? payload.templates : [];
-      const mappedRows = rows.map((row: unknown) => mapTemplateRow(toTemplateDocumentApiRow(row)));
       setTemplateDocuments(mappedRows);
       if (!silent) {
         setTemplatesError(null);
@@ -2459,15 +2323,15 @@ function OrganizationDetailContent() {
         description: textEditDescription.trim() || null,
         content: textEditContent.trim(),
       });
-      const hasNewVersion = Boolean(result.newVersionCreated);
-      if (hasNewVersion && !Number.isInteger(result.newVersionSequence)) {
+      const isNewVersionCreated = Boolean(result.newVersionCreated);
+      if (isNewVersionCreated && !Number.isInteger(result.newVersionSequence)) {
         throw new Error('Template save returned incomplete Version state.');
       }
       setEditingTextTemplate(null);
       await loadTemplates(org.$id, { silent: true });
       notifications.show({
         color: 'green',
-        message: hasNewVersion
+        message: isNewVersionCreated
           ? `Created Version ${result.newVersionSequence}; existing assignments remain pinned to Version ${templateVersionState.versionSequence}.`
           : 'Template Version updated.',
       });

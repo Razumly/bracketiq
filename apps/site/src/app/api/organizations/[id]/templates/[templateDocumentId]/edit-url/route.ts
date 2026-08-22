@@ -74,7 +74,7 @@ export async function GET(
         (latestVersion?.versionSequence ?? template.versionSequence) + 1,
         template.versionSequence + 1,
       );
-      return { frozen: locked.frozen, nextVersionSequence };
+      return { isFrozen: locked.isFrozen, nextVersionSequence };
     });
 
     const cloned = await cloneEmbeddedTemplate({ templateId: template.templateId });
@@ -119,7 +119,7 @@ export async function GET(
     return NextResponse.json({
       editUrl: cloned.editUrl,
       selectedVersion: template.versionSequence,
-      frozen: editState.frozen,
+      frozen: editState.isFrozen,
       willCreateNewVersion: true,
       nextVersionSequence: editState.nextVersionSequence,
       operationId: operation.id,

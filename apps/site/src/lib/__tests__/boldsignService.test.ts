@@ -90,6 +90,40 @@ describe('boldsignService', () => {
       }),
     );
   });
+  it('loads and maps every template Version through the service seam', async () => {
+    apiRequestMock.mockResolvedValue({
+      templates: [{
+        $id: 'version_2',
+        organizationId: 'org_1',
+        documentRequirementId: 'requirement_1',
+        versionSequence: 2,
+        title: 'Current waiver',
+        requiredSignerType: 'PARENT_GUARDIAN_CHILD',
+        type: 'TEXT',
+        content: 'Waiver content',
+      }],
+    });
+
+    const templates = await boldsignService.listTemplates({
+      organizationId: 'org_1',
+      isVersionHistoryIncluded: true,
+    });
+
+    expect(templates).toEqual([
+      expect.objectContaining({
+        $id: 'version_2',
+        documentRequirementId: 'requirement_1',
+        versionSequence: 2,
+        requiredSignerType: 'PARENT_GUARDIAN_CHILD',
+        type: 'TEXT',
+      }),
+    ]);
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      '/api/organizations/org_1/templates?includeVersions=true',
+      { method: 'GET' },
+    );
+  });
+
 
 
   it('updates a text template through the organization template service', async () => {

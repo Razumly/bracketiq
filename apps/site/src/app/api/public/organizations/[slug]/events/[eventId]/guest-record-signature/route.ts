@@ -6,6 +6,7 @@ import {
   getSignerContextsForRequiredSignerType,
   normalizeRequiredSignerType,
   normalizeSignerContext,
+  resolveRequiredSignerRoles,
   templateMatchesSignerContext,
 } from '@/lib/templateSignerTypes';
 import { resolveEventRegistrationPriceCents } from '@/server/paidRegistrationGate';
@@ -387,6 +388,10 @@ export async function POST(req: NextRequest, context: RouteContext) {
       : registrationType === 'SELF'
         ? String(registration.registrantId)
         : token.parentUserId;
+  const requiredSignerRoles = resolveRequiredSignerRoles(
+    template.signerRoles,
+    template.requiredSignerType,
+  );
   const now = new Date();
   const signedAt = now.toISOString();
   const scopedChildUserId = childUserId ?? null;
@@ -471,7 +476,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       documentSubjectId: baseData.documentSubjectId,
       scopeType: baseData.scopeType,
       scopeId: baseData.scopeId,
-      requiredSignerRoles: template.signerRoles,
+      requiredSignerRoles,
       signerRole: signerContext,
     }, tx);
   });

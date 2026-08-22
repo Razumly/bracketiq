@@ -102,7 +102,7 @@ describe('Document Template Version storage', () => {
       display: { title: 'Updated waiver', description: 'Updated description' },
     });
 
-    expect(result.newVersionCreated).toBe(false);
+    expect(result.isNewVersionCreated).toBe(false);
     expect(result.template.id).toBe(current.id);
     expect(result.template.content).toBe('Updated text');
     expect(result.requirement).toEqual(expect.objectContaining({
@@ -166,7 +166,7 @@ describe('Document Template Version storage', () => {
       },
     });
 
-    expect(result.newVersionCreated).toBe(false);
+    expect(result.isNewVersionCreated).toBe(false);
     expect(result.previousVersionId).toBeNull();
     expect(result.template).toEqual(expect.objectContaining({
       id: current.id,
@@ -233,7 +233,7 @@ describe('Document Template Version storage', () => {
       },
     });
 
-    expect(result.newVersionCreated).toBe(true);
+    expect(result.isNewVersionCreated).toBe(true);
     expect(result.previousVersionId).toBe(current.id);
     expect(result.template).toEqual(expect.objectContaining({
       id: 'version_2',
@@ -296,7 +296,7 @@ describe('Document Template Version storage', () => {
       material: { content: 'New text' },
     });
 
-    expect(result.newVersionCreated).toBe(true);
+    expect(result.isNewVersionCreated).toBe(true);
     expect(result.previousVersionId).toBe(current.id);
     expect(result.template).toEqual(expect.objectContaining({
       id: 'version_text_2',
@@ -359,7 +359,7 @@ describe('Document Template Version storage', () => {
       },
     });
 
-    expect(result.newVersionCreated).toBe(true);
+    expect(result.isNewVersionCreated).toBe(true);
     expect(result.previousVersionId).toBe(current.id);
     expect(result.template).toEqual(expect.objectContaining({
       id: 'version_pdf_2',

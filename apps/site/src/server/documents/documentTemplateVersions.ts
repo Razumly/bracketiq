@@ -71,7 +71,7 @@ export type DocumentTemplateVersionEditResult = {
     description: string | null;
   } | null;
   previousVersionId: string | null;
-  newVersionCreated: boolean;
+  isNewVersionCreated: boolean;
 };
 
 export class DocumentTemplateVersionNotFoundError extends Error {
@@ -313,9 +313,9 @@ export const lockDocumentTemplateVersionForUpdate = async (
   versionId: string,
 ) => {
   const version = await lockTemplateDocumentVersion(tx, versionId);
-  const frozen = version.frozenAt !== null
+  const isFrozen = version.frozenAt !== null
     || await hasPersistedVersionReference(tx, versionId);
-  return { version, frozen };
+  return { version, isFrozen };
 };
 
 export const isDocumentTemplateVersionFrozen = async (
@@ -377,7 +377,7 @@ export const editDocumentTemplateVersion = async (
         template: existingNewVersion,
         requirement: await requirementForVersion(tx, current),
         previousVersionId: current.id,
-        newVersionCreated: false,
+        isNewVersionCreated: false,
       };
     }
   }
@@ -396,7 +396,7 @@ export const editDocumentTemplateVersion = async (
       template,
       requirement,
       previousVersionId: null,
-      newVersionCreated: false,
+      isNewVersionCreated: false,
     };
   }
 
@@ -416,7 +416,7 @@ export const editDocumentTemplateVersion = async (
       template,
       requirement,
       previousVersionId: null,
-      newVersionCreated: false,
+      isNewVersionCreated: false,
     };
   }
 
@@ -459,6 +459,6 @@ export const editDocumentTemplateVersion = async (
     template: nextVersion,
     requirement,
     previousVersionId: current.id,
-    newVersionCreated: true,
+    isNewVersionCreated: true,
   };
 };

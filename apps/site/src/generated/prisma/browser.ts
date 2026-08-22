@@ -568,6 +568,11 @@ export type DocumentSubjects = Prisma.DocumentSubjectsModel
  */
 export type DocumentRequirementSatisfactions = Prisma.DocumentRequirementSatisfactionsModel
 /**
+ * Model DocumentRequirementSatisfactionEvidence
+ *
+ */
+export type DocumentRequirementSatisfactionEvidence = Prisma.DocumentRequirementSatisfactionEvidenceModel
+/**
  * Model DocumentEvidenceAuditEvents
  *
  */

@@ -127,6 +127,14 @@ const documentTransactionClient = {
       }
       return row;
     }),
+    updateMany: jest.fn(async ({
+      where = {},
+      data,
+    }: WriteArgs) => {
+      const rows = state.satisfactions.filter((row) => matchesWhere(row, where));
+      rows.forEach((row) => Object.assign(row, data));
+      return { count: rows.length };
+    }),
   },
   eventRegistrations: {
     findMany: jest.fn(async () => []),
@@ -317,6 +325,140 @@ describe('BoldSign provider document projection integrity', () => {
     expect(state.documentSubjects).toHaveLength(0);
     expect(state.satisfactions).toHaveLength(0);
   });
+  it('derives all required roles when a provider version has no explicit role list', async () => {
+    prismaMock.templateDocuments.findFirst.mockResolvedValue({
+      id: 'version-1',
+      organizationId: 'organization-1',
+      title: 'Consent',
+      documentRequirementId: 'requirement-1',
+      requiredSignerType: 'PARENT_GUARDIAN_CHILD',
+      signOnce: false,
+      signerRoles: [],
+    });
+
+    await projectSignedDocumentEvidence({
+      command: projectionCommand([
+        {
+          signerEmail: 'parent@example.test',
+          signerRole: 'parent_guardian',
+          roleIndex: 1,
+          signerStatusToken: 'completed',
+          signedAt: null,
+          userId: 'parent-user',
+        },
+        {
+          signerEmail: 'child@example.test',
+          signerRole: 'child',
+          roleIndex: 2,
+          signerStatusToken: 'completed',
+          signedAt: null,
+          userId: 'child-user',
+        },
+      ]),
+    });
+
+    expect(state.satisfactions).toHaveLength(1);
+    expect(state.satisfactions[0]).toEqual(expect.objectContaining({
+      requiredSignerRoles: ['Parent/Guardian', 'Child'],
+      completedSignerRoles: ['parent_guardian', 'child'],
+      status: 'SATISFIED',
+      isComplete: true,
+    }));
+  });
+
+
+  it('invalidates an active Satisfaction when BoldSign terminates a signed document', async () => {
+    prismaMock.templateDocuments.findFirst.mockResolvedValue({
+      id: 'version-1',
+      organizationId: 'organization-1',
+      title: 'Consent',
+      documentRequirementId: 'requirement-1',
+      signOnce: false,
+      signerRoles: ['participant'],
+    });
+
+    await projectSignedDocumentEvidence({
+      command: projectionCommand([{
+        signerEmail: 'participant@example.test',
+        signerRole: 'participant',
+        roleIndex: 1,
+        signerStatusToken: 'completed',
+        signedAt: null,
+        userId: 'participant-user',
+      }]),
+    });
+
+    expect(state.satisfactions).toHaveLength(1);
+    expect(state.satisfactions[0]).toEqual(expect.objectContaining({
+      status: 'SATISFIED',
+      isComplete: true,
+    }));
+
+    const terminalCommand = projectionCommand([{
+      signerEmail: 'participant@example.test',
+      signerRole: 'participant',
+      roleIndex: 1,
+      signerStatusToken: 'revoked',
+      signedAt: null,
+      userId: 'participant-user',
+    }], {
+      eventToken: 'revoked',
+      status: 'Revoked',
+    });
+    await projectSignedDocumentEvidence({ command: terminalCommand });
+    await projectSignedDocumentEvidence({ command: terminalCommand });
+
+    expect(state.signedDocuments).toHaveLength(1);
+    expect(state.signedDocuments[0]).toEqual(expect.objectContaining({
+      status: 'REVOKED',
+    }));
+    expect(state.satisfactions[0]).toEqual(expect.objectContaining({
+      status: 'INVALIDATED',
+      isComplete: false,
+    }));
+  });
+
+  it('invalidates every existing Satisfaction when a terminal signer is unmatched', async () => {
+    state.signedDocuments.push({
+      id: 'existing-evidence',
+      signedDocumentId: 'provider-document-1',
+      templateId: 'version-1',
+      organizationId: 'organization-1',
+      status: 'SIGNED',
+      signedAt: '2026-08-21T00:00:00.000Z',
+    });
+    state.satisfactions.push({
+      id: 'document-satisfaction:existing-evidence',
+      sourceEvidenceId: 'existing-evidence',
+      status: 'SATISFIED',
+      isComplete: true,
+    });
+
+    const terminalCommand = projectionCommand([{
+      signerEmail: 'unmatched@example.test',
+      signerRole: 'other',
+      roleIndex: 2,
+      signerStatusToken: 'revoked',
+      signedAt: null,
+      userId: null,
+    }], {
+      eventToken: 'revoked',
+      status: 'Revoked',
+    });
+    await projectSignedDocumentEvidence({ command: terminalCommand });
+    await projectSignedDocumentEvidence({ command: terminalCommand });
+
+    expect(state.signedDocuments).toHaveLength(1);
+    expect(state.signedDocuments[0]).toEqual(expect.objectContaining({
+      id: 'existing-evidence',
+      status: 'REVOKED',
+    }));
+    expect(state.satisfactions[0]).toEqual(expect.objectContaining({
+      status: 'INVALIDATED',
+      isComplete: false,
+    }));
+  });
+
 
   it('rejects existing evidence owned by another Organization', async () => {
     state.signedDocuments.push({

@@ -494,6 +494,7 @@ export const ModelName = {
   SignedDocuments: 'SignedDocuments',
   DocumentSubjects: 'DocumentSubjects',
   DocumentRequirementSatisfactions: 'DocumentRequirementSatisfactions',
+  DocumentRequirementSatisfactionEvidence: 'DocumentRequirementSatisfactionEvidence',
   DocumentEvidenceAuditEvents: 'DocumentEvidenceAuditEvents',
   BoldSignWebhookEvents: 'BoldSignWebhookEvents',
   BoldSignSyncOperations: 'BoldSignSyncOperations',
@@ -517,7 +518,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "appReleases" | "fields" | "facilities" | "matches" | "matchSegments" | "broadcastOverlays" | "broadcastOverlayStates" | "broadcastOverlayActions" | "broadcastOverlayAccessTokens" | "matchIncidents" | "matchOperationReceipts" | "eventEditorCreateOperations" | "divisions" | "eventDivisionPhaseSources" | "eventDivisionPhaseParticipants" | "userData" | "sensitiveUserData" | "authMfaChallenges" | "invites" | "teamInviteEventSyncs" | "staffMembers" | "organizationRoles" | "organizationRolePermissions" | "organizationRoleCompensationRates" | "staffCompensationRates" | "eventStaffAssignments" | "staffScheduleAssignments" | "teamStaffLaborEntries" | "financialLineItems" | "staffPayRun" | "staffPayRunItem" | "eventOfficials" | "teamCheckIns" | "matchRosterEntries" | "teams" | "canonicalTeams" | "teamRegistrations" | "registrationQuestions" | "registrationQuestionResponses" | "teamJoinRequests" | "teamStaffAssignments" | "eventTeamStaffAssignments" | "messages" | "chatGroup" | "moderationReport" | "aiConversationPointer" | "aiPendingConfirmation" | "pushDeviceTarget" | "lockFiles" | "paymentIntents" | "bills" | "billPayments" | "billPaymentProofs" | "rentalBookings" | "rentalBookingItems" | "affiliateScrapeSources" | "affiliateScrapeMappings" | "affiliateScrapeRuns" | "affiliateSourceIntakes" | "affiliateSourceIntakePages" | "affiliateSourceIntakeRuns" | "affiliateSourceIntakeArtifacts" | "affiliateSourceDiscoveryCampaigns" | "affiliateCoverageAgentJobs" | "affiliateCoverageCities" | "affiliateCoverageCells" | "affiliateCoverageCellAssessments" | "affiliateSourceDiscoveryQueryExecutions" | "affiliateSourceDiscoveryRuns" | "affiliateSourceDiscoveryResults" | "affiliateSourceDomainPolicies" | "affiliateSourceMappingJobs" | "affiliateApprovalJobs" | "affiliateImportCandidates" | "eventTags" | "eventTagAssignments" | "organizationTags" | "organizationTagAssignments" | "refundRequests" | "discounts" | "discountCodes" | "discountCodeRedemptions" | "discountCodeReservations" | "organizationAccountingConnections" | "accountingSyncRecords" | "organizationFinanceCategoryAccountingMappings" | "stripeAccounts" | "events" | "organizations" | "organizationReviews" | "organizationDomains" | "organizationClaims" | "organizationClaimEvidence" | "organizationClaimEvents" | "organizationReviewResponses" | "products" | "subscriptions" | "timeSlots" | "leagueScoringConfigs" | "eventTemplates" | "eventTemplateResources" | "eventTemplateTimeSlots" | "eventTemplateRentalResourceHints" | "eventTemplateLeagueScoringConfigs" | "sports" | "documentRequirements" | "templateDocuments" | "signedDocuments" | "documentSubjects" | "documentRequirementSatisfactions" | "documentEvidenceAuditEvents" | "boldSignWebhookEvents" | "boldSignSyncOperations" | "parentChildLinks" | "eventRegistrations" | "authUser" | "feedbackSubmissions" | "file"
+    modelProps: "appReleases" | "fields" | "facilities" | "matches" | "matchSegments" | "broadcastOverlays" | "broadcastOverlayStates" | "broadcastOverlayActions" | "broadcastOverlayAccessTokens" | "matchIncidents" | "matchOperationReceipts" | "eventEditorCreateOperations" | "divisions" | "eventDivisionPhaseSources" | "eventDivisionPhaseParticipants" | "userData" | "sensitiveUserData" | "authMfaChallenges" | "invites" | "teamInviteEventSyncs" | "staffMembers" | "organizationRoles" | "organizationRolePermissions" | "organizationRoleCompensationRates" | "staffCompensationRates" | "eventStaffAssignments" | "staffScheduleAssignments" | "teamStaffLaborEntries" | "financialLineItems" | "staffPayRun" | "staffPayRunItem" | "eventOfficials" | "teamCheckIns" | "matchRosterEntries" | "teams" | "canonicalTeams" | "teamRegistrations" | "registrationQuestions" | "registrationQuestionResponses" | "teamJoinRequests" | "teamStaffAssignments" | "eventTeamStaffAssignments" | "messages" | "chatGroup" | "moderationReport" | "aiConversationPointer" | "aiPendingConfirmation" | "pushDeviceTarget" | "lockFiles" | "paymentIntents" | "bills" | "billPayments" | "billPaymentProofs" | "rentalBookings" | "rentalBookingItems" | "affiliateScrapeSources" | "affiliateScrapeMappings" | "affiliateScrapeRuns" | "affiliateSourceIntakes" | "affiliateSourceIntakePages" | "affiliateSourceIntakeRuns" | "affiliateSourceIntakeArtifacts" | "affiliateSourceDiscoveryCampaigns" | "affiliateCoverageAgentJobs" | "affiliateCoverageCities" | "affiliateCoverageCells" | "affiliateCoverageCellAssessments" | "affiliateSourceDiscoveryQueryExecutions" | "affiliateSourceDiscoveryRuns" | "affiliateSourceDiscoveryResults" | "affiliateSourceDomainPolicies" | "affiliateSourceMappingJobs" | "affiliateApprovalJobs" | "affiliateImportCandidates" | "eventTags" | "eventTagAssignments" | "organizationTags" | "organizationTagAssignments" | "refundRequests" | "discounts" | "discountCodes" | "discountCodeRedemptions" | "discountCodeReservations" | "organizationAccountingConnections" | "accountingSyncRecords" | "organizationFinanceCategoryAccountingMappings" | "stripeAccounts" | "events" | "organizations" | "organizationReviews" | "organizationDomains" | "organizationClaims" | "organizationClaimEvidence" | "organizationClaimEvents" | "organizationReviewResponses" | "products" | "subscriptions" | "timeSlots" | "leagueScoringConfigs" | "eventTemplates" | "eventTemplateResources" | "eventTemplateTimeSlots" | "eventTemplateRentalResourceHints" | "eventTemplateLeagueScoringConfigs" | "sports" | "documentRequirements" | "templateDocuments" | "signedDocuments" | "documentSubjects" | "documentRequirementSatisfactions" | "documentRequirementSatisfactionEvidence" | "documentEvidenceAuditEvents" | "boldSignWebhookEvents" | "boldSignSyncOperations" | "parentChildLinks" | "eventRegistrations" | "authUser" | "feedbackSubmissions" | "file"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -8661,6 +8662,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    DocumentRequirementSatisfactionEvidence: {
+      payload: Prisma.$DocumentRequirementSatisfactionEvidencePayload<ExtArgs>
+      fields: Prisma.DocumentRequirementSatisfactionEvidenceFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.DocumentRequirementSatisfactionEvidenceFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.DocumentRequirementSatisfactionEvidenceFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>
+        }
+        findFirst: {
+          args: Prisma.DocumentRequirementSatisfactionEvidenceFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.DocumentRequirementSatisfactionEvidenceFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>
+        }
+        findMany: {
+          args: Prisma.DocumentRequirementSatisfactionEvidenceFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>[]
+        }
+        create: {
+          args: Prisma.DocumentRequirementSatisfactionEvidenceCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>
+        }
+        createMany: {
+          args: Prisma.DocumentRequirementSatisfactionEvidenceCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.DocumentRequirementSatisfactionEvidenceCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>[]
+        }
+        delete: {
+          args: Prisma.DocumentRequirementSatisfactionEvidenceDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>
+        }
+        update: {
+          args: Prisma.DocumentRequirementSatisfactionEvidenceUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>
+        }
+        deleteMany: {
+          args: Prisma.DocumentRequirementSatisfactionEvidenceDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.DocumentRequirementSatisfactionEvidenceUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.DocumentRequirementSatisfactionEvidenceUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>[]
+        }
+        upsert: {
+          args: Prisma.DocumentRequirementSatisfactionEvidenceUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DocumentRequirementSatisfactionEvidencePayload>
+        }
+        aggregate: {
+          args: Prisma.DocumentRequirementSatisfactionEvidenceAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateDocumentRequirementSatisfactionEvidence>
+        }
+        groupBy: {
+          args: Prisma.DocumentRequirementSatisfactionEvidenceGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.DocumentRequirementSatisfactionEvidenceGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.DocumentRequirementSatisfactionEvidenceCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.DocumentRequirementSatisfactionEvidenceCountAggregateOutputType> | number
+        }
+      }
+    }
     DocumentEvidenceAuditEvents: {
       payload: Prisma.$DocumentEvidenceAuditEventsPayload<ExtArgs>
       fields: Prisma.DocumentEvidenceAuditEventsFieldRefs
@@ -11935,6 +12010,18 @@ export const DocumentRequirementSatisfactionsScalarFieldEnum = {
 export type DocumentRequirementSatisfactionsScalarFieldEnum = (typeof DocumentRequirementSatisfactionsScalarFieldEnum)[keyof typeof DocumentRequirementSatisfactionsScalarFieldEnum]
 
 
+export const DocumentRequirementSatisfactionEvidenceScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  satisfactionId: 'satisfactionId',
+  signedDocumentId: 'signedDocumentId',
+  completedSignerRoles: 'completedSignerRoles'
+} as const
+
+export type DocumentRequirementSatisfactionEvidenceScalarFieldEnum = (typeof DocumentRequirementSatisfactionEvidenceScalarFieldEnum)[keyof typeof DocumentRequirementSatisfactionEvidenceScalarFieldEnum]
+
+
 export const DocumentEvidenceAuditEventsScalarFieldEnum = {
   id: 'id',
   createdAt: 'createdAt',
@@ -13601,6 +13688,7 @@ export type GlobalOmitConfig = {
   signedDocuments?: Prisma.SignedDocumentsOmit
   documentSubjects?: Prisma.DocumentSubjectsOmit
   documentRequirementSatisfactions?: Prisma.DocumentRequirementSatisfactionsOmit
+  documentRequirementSatisfactionEvidence?: Prisma.DocumentRequirementSatisfactionEvidenceOmit
   documentEvidenceAuditEvents?: Prisma.DocumentEvidenceAuditEventsOmit
   boldSignWebhookEvents?: Prisma.BoldSignWebhookEventsOmit
   boldSignSyncOperations?: Prisma.BoldSignSyncOperationsOmit

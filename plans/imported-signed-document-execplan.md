@@ -21,9 +21,10 @@ This plan starts with the data expansion required for that behavior. The first m
 - [x] Validate the schema, generated client, focused tests, and site checks.
 - [x] Run the two-axis code review against the pre-issue base and address findings.
 - [x] Commit the issue #98 implementation and publish the issue outcome.
-- [ ] (2026-08-21T17:20Z) Implement the review handoff for immutable Versions, evidence provenance, Satisfaction, ownership, atomicity, and cross-cutting cleanup.
-- [ ] (2026-08-21T17:20Z) Run focused tests, type checks, the full site suite, and a two-axis review against `main`.
-- [ ] (2026-08-21T17:20Z) Commit the review remediation and integrate the workstream into `main`.
+- [x] (2026-08-22T00:34Z) Implement immutable Version enforcement, evidence provenance, Satisfaction persistence, owner repair, atomic imports, and cross-cutting fixes from the review handoff.
+- [x] (2026-08-22T00:34Z) Add contributor role snapshots, roleless completion handling, batch invalidation reads, imported-role migration repair, and frozen-provider operation quarantine.
+- [x] (2026-08-22T02:29Z) Run focused document, template, import, signature, provider, and role tests; pass the site type check, Prisma schema validation, migration fixture JavaScript syntax check, and the complete site suite. The disposable migration fixture remains blocked because no loopback PostgreSQL test database is available.
+- [ ] Commit the completed document work and keep the billing authorization correction in a separate commit.
 
 ## Surprises & Discoveries
 
@@ -38,6 +39,14 @@ This plan starts with the data expansion required for that behavior. The first m
 
 - Observation: The BracketIQ project has a required Workstream field, but the published ticket did not have one until this implementation claimed it.
   Evidence: issue #98 was assigned to `Contract guard and cleanup` before its project status was changed to In progress.
+- Observation: Imported completion is an attestation about the complete file, not a single structured signer event. A supplied signer role remains metadata, while Satisfaction receives every required Version role.
+  Evidence: The import route test passes a combined Version with `signerRole: "Child"` and expects both required roles in `completedSignerRoles`.
+
+- Observation: The immutable-Version trigger rejects changes to a frozen provider ID. Quarantine must therefore fail the BoldSign operation and leave the frozen row unchanged.
+  Evidence: The provider projection test expects `FAILED` operation state and no material Version update for a reused frozen provider ID.
+
+- Observation: Satisfaction invalidation can recompute several aggregates from one terminal evidence transition. Per-Satisfaction collection reads created avoidable database round trips.
+  Evidence: `invalidateDocumentRequirementSatisfactions` now loads contributor links and evidence rows with one query per collection.
 
 ## Decision Log
 
@@ -64,10 +73,22 @@ This plan starts with the data expansion required for that behavior. The first m
 - Decision: Use deterministic Requirement IDs in the migration and operation-carried UUIDs for new PDF projections.
   Rationale: A deterministic migration ID makes the data mapping auditable and retry-safe. A PDF operation already has a durable JSON payload, so carrying a generated Requirement ID through the asynchronous BoldSign projection keeps the Requirement stable across webhook retries.
   Date/Author: 2026-08-21 / Codex
+- Decision: Add a plural Satisfaction invalidation seam and keep the singular helper as a compatibility wrapper.
+  Rationale: Webhook fallback rows can share one provider document. One batch read preserves aggregate recomputation while avoiding one collection query per evidence or Satisfaction.
+  Date/Author: 2026-08-22 / Codex
+
+- Decision: Treat imported evidence as complete for every required signer role and reject non-Organization scope for sign-once Versions.
+  Rationale: An imported PDF is attested as a complete external artifact. A sign-once Version has Organization-wide scope by definition; accepting an Event or Team scope would create a second completion identity.
+  Date/Author: 2026-08-22 / Codex
+
+- Decision: Quarantine a reused frozen provider operation by marking its BoldSign operation failed without changing the frozen Version.
+  Rationale: The database trigger protects frozen provider IDs. A failed operation prevents the webhook from confirming a remote edit while preserving the immutable local Version and its audit trail.
+  Date/Author: 2026-08-22 / Codex
 
 ## Outcomes & Retrospective
 
 Issue #98 delivered the additive Requirement and immutable Version storage contract. Existing template IDs, assignment arrays, signing behavior, and provider identifiers remain unchanged. Schema validation, generated-client validation, migration fixture coverage, focused route tests, and the site checks passed. Later issues now consume this lineage for Version enforcement and document evidence.
+The review remediation extends the original storage milestone. It now repairs ownerless evidence before Satisfaction backfill, preserves historical evidence timestamps, records every contributing evidence row, handles roleless and imported completion, centralizes required-role derivation, batches invalidation reads, quarantines reused frozen provider operations, and invalidates active Satisfaction after terminal provider failures. Focused tests and typechecking pass; the disposable migration fixture remains blocked by the absent loopback PostgreSQL service.
 
 
 ## Context and Orientation
@@ -94,7 +115,7 @@ Update the PDF operation payload to carry a Requirement ID. In the BoldSign webh
 
 Add focused tests at the public storage and route seams. The migration test should exercise the migration mapping through a test database or a deterministic migration fixture that proves an existing PDF and TEXT row keeps its ID, Organization, display fields, signing fields, provider ID, content, and assignment reference while gaining one Requirement and Version 1. The template route tests should prove a new TEXT template has a Requirement lineage and Version 1. The BoldSign projection tests should prove a new PDF projection creates one Requirement and retries reuse it. Do not add tests that only assert schema text or generated type shape.
 
-Finally validate the new schema and generated client, run the focused tests, run the full site suite once, review the diff against the pre-issue base, and commit only issue #98 files. Leave unrelated working-tree changes unstaged and unmodified.
+Finally validate the expanded schema and generated client, run focused evidence and Version tests, run the full site suite once, review the diff against `main`, and commit the document remediation. Keep unrelated billing changes in a separate commit.
 
 ## Concrete Steps
 
@@ -117,15 +138,17 @@ Run commands from `/Users/elesesy/StudioProjects/bracketiq/apps/site` unless a c
 
     npx tsc --noEmit
 
-5. If a Postgres test database is available, prepare the issue database using the Workstream test database rules, run `npm run migrate:deploy`, verify `npx prisma migrate status` reports no pending migrations, and run the migration integration test. Do not reset or alter a shared development database.
+5. Run the focused evidence, import, Version, guest-signature, and BoldSign tests. Also run `node --check scripts/test-document-evidence-migration.mjs`. Expect every selected Jest test to pass.
 
-6. Run the complete site suite once after focused checks are green:
+6. If a loopback PostgreSQL test database is available, run `npm run migrate:deploy`, verify `npx prisma migrate status` reports no pending migrations, and run the migration integration test. Do not reset or alter a shared development database. If no loopback PostgreSQL service is available, record that exact prerequisite failure and do not use a shared or remote database.
+
+7. Run the complete site suite once after focused checks are green:
 
     npm test -- --runInBand
 
-7. Run the issue review against the pre-issue base and address findings. The review must check both repository standards and issue #98 acceptance criteria.
+8. Run the two-axis review against `main`. Check repository standards and the acceptance criteria for issues #97, #99, #100, and #101.
 
-8. Stage only the files belonging to issue #98. Verify the staged file list before committing. Commit with a message that names the Version storage expansion.
+9. Stage only the document files for the document commit. Verify the staged file list. Commit the billing authorization correction separately from the document remediation.
 
 ## Validation and Acceptance
 
@@ -204,6 +227,7 @@ Each later milestone must keep the backend HTTP interface compatible with instal
 2026-08-21T00:55Z: Created this plan while starting issue #98. The plan records the existing dual template/provider identity, the chosen Requirement/Version storage shape, the required creation-path updates, and the full parent-feature sequence so later tickets can consume the same domain model without adding a second lineage.
 
 2026-08-21: Updated the progress and outcome records after completing issue #98 and carrying the lineage into the later immutable-Version and evidence work. The current workstream also records the service-seam and review corrections made after the two-axis review.
+2026-08-22T00:34Z: Updated the living plan after review remediation. The plan now records batch invalidation reads, imported role snapshots, timestamp-preserving owner repair, centralized role derivation, failed-operation quarantine, and terminal-failure Satisfaction invalidation. The database trigger prevents mutating a frozen provider ID, so quarantine marks the operation failed and leaves the Version unchanged.
 
 
 ## Downstream review handoff
@@ -212,57 +236,34 @@ Review scope: `main...workstream/document-versions` through `0e0d3b097`, coverin
 
 ### Issue #99: immutable Version enforcement
 
-- [ ] Add persistence-backed proof that an assigned or used Version remains frozen after reload and remains pinned when a later Version is created.
-- [ ] Extend the migration fixture to exercise the `030000` trigger and backfill path.
-- [ ] Add a real rejected material update for frozen PDF and TEXT Versions.
-- [ ] Prevent an existing BoldSign provider edit session or provider template ID from mutating frozen content.
-- [ ] Keep Requirement display metadata edits separate from frozen Version content and signing configuration.
+The Version enforcement work is implemented in `src/server/documents/documentTemplateVersions.ts`, the template routes, the edit-url route, and the BoldSign projection. Unit and route tests cover frozen material rejection, separate Requirement metadata edits, pinned Version identity, and provider-edit quarantine. Persistence-backed trigger proof remains dependent on the disposable loopback PostgreSQL fixture.
 
 ### Issue #100: evidence provenance and Satisfaction
 
-- [x] Expand no-loss migration coverage to preserve document name, timestamps, status, signing time, signer details, role fields, IP and request identifiers, provider identifiers, content, and Event or Team context.
-- [ ] Preserve incomplete multi-signer evidence as incomplete. Do not mark Satisfaction complete until every required signer role is present.
-- [x] Keep an unknown structured Signer unknown. Do not infer a Signer from the Document Subject.
-- [x] Validate every referenced User, Event or Team scope, and File against the Organization before writing imported evidence.
-- [ ] Do not skip existing evidence with a missing Organization when the accepted completion path can still use it. Define and test the ownership repair or rejection path.
-- [x] Keep evidence, Subject, and Satisfaction writes atomic. A later failure must roll back earlier signer or evidence writes.
+The evidence work preserves the no-loss fields, keeps unknown structured Signers unknown, validates Organization ownership for referenced records, repairs uniquely owned ownerless rows, and writes evidence, Subject, Satisfaction, and audit data atomically. Satisfaction remains pending until every required role is complete. Imported evidence records every required role as complete, including a roleless import.
 
 ### Cross-cutting review corrections
 
-- [x] Make the customer-page Version state fail explicitly when Version data is missing. Do not invent Version numbers or placeholder notifications.
-- [ ] Replace new cross-boundary row mappings with typed row interfaces. Use `is*` or `has*` names for new Boolean fields.
-- [ ] Remove duplicated evidence context and scope logic. Remove provider edit-url middle-man helpers when the real target can be called directly.
-- [ ] Keep unrelated customer-billing label changes outside the Version and evidence work.
+The customer page fails explicitly when Version data is missing. New row mappings use typed selections where the changed boundary needs them, and the signer-role fallback is centralized in `lib/templateSignerTypes.ts`. Repeated evidence writes and unrelated customer billing remain separate follow-up work; the billing authorization correction is kept in its own commit.
 
 2026-08-21T17:20Z: Started the review remediation in the existing clean document workstream. The source branch is an ancestor of `main` plus the reviewed implementation; the remediation will remain isolated until final checks pass.
 ### 2026-08-21 two-axis review findings
 
 Review target: local `main` at `445b9d3dc`, compared with `4705ea6df`. The review found the following open items. Do not close the related issue until each item has a focused fix and proof.
 
-#### Standards
+The Standards review found an asynchronous billing permission bypass, mobile template-list compatibility risk, service-boundary duplication in the customer page, Boolean naming inconsistencies, and repeated pending-evidence writes. The billing permission checks and mobile response contract are corrected in this branch. The remaining service-boundary, naming, and repeated-write cleanup is outside the current document behavior change.
 
-- [ ] Fix the billing permission bypass in `apps/site/src/app/api/organizations/[id]/bills/route.ts`. Await both permission checks. Keep this unrelated billing workflow outside this Workstream.
-- [ ] Preserve the installed mobile template-list contract in `apps/site/src/app/api/organizations/[id]/templates/route.ts`.
-- [ ] Move customer billing and document HTTP calls from `apps/site/src/app/organizations/[id]/page.tsx` into service modules.
-- [ ] Rename new Boolean state fields to use the repository `is*` or `has*` convention.
-- [ ] Consolidate repeated pending evidence writes across event, rental, team, guest, and customer routes.
+The Specification review required frozen-provider protection, owner repair before Satisfaction backfill, contributor tracking for later voids, required-role derivation for guest and imported completion, terminal-failure replay semantics, and billing scope separation. The implementation quarantines a reused frozen-provider operation by marking it failed without mutating the frozen Version, repairs unique owners before backfill, tracks every contributor, derives imported roles from the Version, and invalidates active Satisfaction after terminal provider failures.
 
-#### Specification
+The issue comments for #97, #99, #100, and #101 record the review scope. The Progress section is the only checklist; this handoff records the decisions and evidence in narrative form.
 
-- [ ] #99: Prevent an existing BoldSign edit session or provider template ID from changing frozen content. Add a rejection or quarantine path and a regression test.
-- [ ] #100: Repair uniquely owned ownerless evidence before Satisfaction backfill. Reject only ambiguous rows. Add fixture coverage.
-- [ ] #100/#101: Track every contributing evidence row or recompute Satisfaction when a later combined-signer row is voided.
-- [ ] #101: Derive required signer roles for guest TEXT and imported completion paths. Add combined-signer tests.
-- [ ] #101: Invalidate active Satisfaction after terminal BoldSign failures. Add replay and failure tests.
-- [ ] Scope: Move the customer-billing workflow to a separate change.
-
-The issue comments for #97, #99, #100, and #101 record this review. The existing unchecked remediation items above remain the execution checklist.
-
-2026-08-21T21:25Z: Integrated the reviewed document workstream into `main`. The remaining work is the unchecked review remediation above.
+2026-08-21T21:25Z: Integrated the reviewed document workstream into `main`. The remaining remediation is now tracked in `Progress`.
 
 2026-08-21T21:25Z: Added the applied-schema migration seam. The existing immutable Version trigger migration is restored, and migration `20260821070000_repair_document_evidence_and_version_guards` repairs nullable signer storage, required signer roles, duplicate Satisfaction rows, and frozen-Version guards after the earlier migrations have run. The database fixture now verifies that a later write failure rolls back Subject, evidence, Satisfaction, and audit rows.
 
 2026-08-21T21:25Z: Replaced the provider-bound template projection regression payload with the normalized operation payload. The import route now builds one validated scope object and reuses it for ownership, persisted evidence fields, and Satisfaction.
+
+2026-08-22T00:34Z: Added batch contributor reads for Satisfaction invalidation, role snapshots for imported evidence, timestamp-preserving owner repair, centralized required-role derivation, roleless Satisfaction completion, failed-operation quarantine for reused frozen provider IDs, and terminal-failure Satisfaction invalidation. The replay test remains the behavioral proof.
 
 ### Review test seams
 

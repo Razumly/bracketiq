@@ -449,7 +449,7 @@ describe('boldsignWebhookSync operation status projection', () => {
       }),
     );
   });
-  it('creates a new PDF Version when BoldSign edits a referenced Version', async () => {
+  it('rejects a provider edit that reuses a referenced Version provider id', async () => {
     const current = {
       id: 'version_1',
       documentRequirementId: 'requirement_1',
@@ -480,8 +480,7 @@ describe('boldsignWebhookSync operation status projection', () => {
       payload: {
         documentRequirementId: 'requirement_1',
         organizationId: 'org_1',
-        title: 'Photo waiver',
-        description: 'Updated consent',
+        title: 'Updated consent',
         type: 'PDF',
         roles: [{ roleIndex: 2, signerRole: 'guardian' }],
       },
@@ -490,47 +489,19 @@ describe('boldsignWebhookSync operation status projection', () => {
       id: 'requirement_1',
       organizationId: 'org_1',
     });
-    prismaMock.documentRequirements.findUnique.mockResolvedValue({
-      id: 'requirement_1',
-      organizationId: 'org_1',
-      title: 'Photo waiver',
-      description: 'Updated consent',
-    });
-    prismaMock.templateDocuments.findFirst
-      .mockResolvedValueOnce(current)
-      .mockResolvedValueOnce({ versionSequence: 1 });
+    prismaMock.templateDocuments.findFirst.mockResolvedValue(current);
     prismaMock.$queryRaw
       .mockResolvedValueOnce([current])
-      .mockResolvedValueOnce([{ id: 'event_1' }])
-      .mockResolvedValueOnce([{ id: 'requirement_1' }]);
-    prismaMock.templateDocuments.update.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
-      ...current,
-      ...data,
-    }));
-    prismaMock.templateDocuments.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => data);
+      .mockResolvedValueOnce([{ id: 'event_1' }]);
 
-    const projectedTemplate = await projectTemplateProjectionFromOperation({
+    await expect(projectTemplateProjectionFromOperation({
       templateId: 'bold_template_1',
       operation,
       status: 'ACTIVE',
-    });
+      eventToken: 'templateedited',
+    })).rejects.toThrow(/frozen/i);
 
-    expect(projectedTemplate).toEqual(expect.objectContaining({
-      id: 'version_2',
-      documentRequirementId: 'requirement_1',
-      versionSequence: 2,
-      signerRoles: ['guardian'],
-    }));
-    expect(prismaMock.templateDocuments.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'version_1' },
-      data: expect.objectContaining({ frozenAt: expect.any(Date) }),
-    }));
-    expect(prismaMock.templateDocuments.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        id: 'version_2',
-        documentRequirementId: 'requirement_1',
-        versionSequence: 2,
-      }),
-    }));
+    expect(prismaMock.templateDocuments.create).not.toHaveBeenCalled();
+    expect(prismaMock.templateDocuments.update).not.toHaveBeenCalled();
   });
 });

@@ -84,6 +84,7 @@ describe("POST /api/organizations/[id]/documents/import", () => {
       id: "version_1",
       organizationId: "org_1",
       documentRequirementId: "requirement_1",
+      requiredSignerType: "PARTICIPANT",
       signerRoles: ["participant"],
     });
     prismaMock.documentRequirements.findUnique.mockResolvedValue({
@@ -170,6 +171,7 @@ describe("POST /api/organizations/[id]/documents/import", () => {
       expect.objectContaining({
         evidenceId: "evidence_1",
         templateDocumentId: "version_1",
+        requiredSignerRoles: ["participant"],
       }),
       expect.anything(),
     );
@@ -177,6 +179,132 @@ describe("POST /api/organizations/[id]/documents/import", () => {
       expect.objectContaining({
         eventType: "IMPORT",
         evidenceId: "evidence_1",
+      }),
+      expect.anything(),
+    );
+  });
+  it("projects sign-once imported evidence to Organization scope", async () => {
+    prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
+      id: "version_1",
+      organizationId: "org_1",
+      documentRequirementId: "requirement_1",
+      requiredSignerType: "PARTICIPANT",
+      signerRoles: ["participant"],
+      signOnce: true,
+    });
+
+    const response = await POST(
+      new NextRequest(
+        "http://localhost/api/organizations/org_1/documents/import",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            subjectUserId: "player_1",
+            signerUserId: "player_1",
+            templateId: "version_1",
+            documentName: "Prior sign-once waiver",
+            contentHash: "sha256:sign-once",
+            importedFileId: "file_1",
+            scopeType: "ORGANIZATION",
+            scopeId: "org_1",
+            signerRole: "participant",
+          }),
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+      { params: Promise.resolve({ id: "org_1" }) },
+    );
+
+    expect(response.status).toBe(201);
+    expect(signedDocumentEvidenceFieldsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ signOnce: true }),
+    );
+    expect(txMock.signedDocuments.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          scopeType: "ORGANIZATION",
+          scopeId: "org_1",
+        }),
+      }),
+    );
+  });
+
+  it("derives combined signer roles for imported evidence", async () => {
+    prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
+      id: "version_1",
+      organizationId: "org_1",
+      documentRequirementId: "requirement_1",
+      requiredSignerType: "PARENT_GUARDIAN_CHILD",
+      signerRoles: [],
+    });
+
+    const response = await POST(
+      new NextRequest(
+        "http://localhost/api/organizations/org_1/documents/import",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            subjectUserId: "player_1",
+            signerUserId: "player_1",
+            templateId: "version_1",
+            documentName: "Prior combined waiver",
+            contentHash: "sha256:combined",
+            importedFileId: "file_1",
+            scopeType: "ORGANIZATION",
+            scopeId: "org_1",
+            signerRole: "Child",
+          }),
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+      { params: Promise.resolve({ id: "org_1" }) },
+    );
+
+    expect(response.status).toBe(201);
+    expect(createDocumentRequirementSatisfactionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requiredSignerRoles: ["Parent/Guardian", "Child"],
+        completedSignerRoles: ["Parent/Guardian", "Child"],
+        signerRole: "Child",
+      }),
+      expect.anything(),
+    );
+  });
+  it("treats a signed import without a signer role as complete evidence for every required role", async () => {
+    prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
+      id: "version_1",
+      organizationId: "org_1",
+      documentRequirementId: "requirement_1",
+      requiredSignerType: "PARENT_GUARDIAN_CHILD",
+      signerRoles: [],
+    });
+
+    const response = await POST(
+      new NextRequest(
+        "http://localhost/api/organizations/org_1/documents/import",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            subjectUserId: "player_1",
+            templateId: "version_1",
+            documentName: "Prior combined waiver",
+            contentHash: "sha256:combined-no-role",
+            importedFileId: "file_1",
+            scopeType: "ORGANIZATION",
+            scopeId: "org_1",
+          }),
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+      { params: Promise.resolve({ id: "org_1" }) },
+    );
+
+    expect(response.status).toBe(201);
+    expect(createDocumentRequirementSatisfactionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requiredSignerRoles: ["Parent/Guardian", "Child"],
+        completedSignerRoles: ["Parent/Guardian", "Child"],
+        signerRole: undefined,
       }),
       expect.anything(),
     );

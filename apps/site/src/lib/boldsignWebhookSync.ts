@@ -21,7 +21,10 @@ import {
   isBoldSignInvalidTemplateIdError,
   isBoldSignNotFoundError,
 } from '@/lib/boldsignServer';
-import { normalizeRequiredSignerType } from '@/lib/templateSignerTypes';
+import {
+  normalizeRequiredSignerType,
+  resolveRequiredSignerRoles,
+} from '@/lib/templateSignerTypes';
 import { acquireEventLockAndLoadStructure } from '@/server/events/eventRegistrations';
 import {
   createDocumentTemplateVersion,
@@ -31,8 +34,9 @@ import {
 } from '@/server/documents/documentTemplateVersions';
 import {
   ensureDocumentSubject,
-  signedDocumentEvidenceFields,
   createDocumentRequirementSatisfaction,
+  signedDocumentEvidenceFields,
+  invalidateDocumentRequirementSatisfactions,
   DOCUMENT_EVIDENCE_PROVENANCE,
 } from '@/server/documentEvidence';
 
@@ -971,6 +975,30 @@ export const projectTemplateProjectionFromOperation = async (params: {
     })
     : null;
   const baseTemplate = existing ?? source;
+  const isDetachedTemplateEdit = isDeferredTemplateEdit
+    && Boolean(sourceTemplateDocumentId)
+    && (!existing || existing.id !== sourceTemplateDocumentId);
+  const isTemplateEdit = params.eventToken === 'templateedited';
+  const frozenProviderVersion = isTemplateEdit && params.templateId
+    ? await prisma.templateDocuments.findFirst({
+      where: {
+        templateId: params.templateId,
+        frozenAt: { not: null },
+      },
+      select: { id: true },
+    })
+    : null;
+  const isFrozenProviderEditQuarantined = isTemplateEdit
+    && Boolean(frozenProviderVersion)
+    && !isDetachedTemplateEdit;
+  if (isFrozenProviderEditQuarantined && existing) {
+    await updateOperationState(params.operation?.id, {
+      status: BOLDSIGN_OPERATION_STATUSES.FAILED,
+      lastError: 'BoldSign provider edit was quarantined because the Document Template Version is frozen.',
+      completedAt: new Date(),
+    });
+    throw new Error('BoldSign provider edit was quarantined because the Document Template Version is frozen.');
+  }
   if (isDeferredTemplateEdit && existing && (!targetVersionId || existing.id === targetVersionId)) {
     return existing;
   }
@@ -982,7 +1010,6 @@ export const projectTemplateProjectionFromOperation = async (params: {
     source?.organizationId,
   );
 
-  const isTemplateEdit = params.eventToken === 'templateedited';
   const title = pickString(
     ...(isTemplateEdit
       ? [
@@ -1049,7 +1076,7 @@ export const projectTemplateProjectionFromOperation = async (params: {
       const editResult = await editDocumentTemplateVersion(tx, {
         versionId: projectionVersionId,
         organizationId,
-        isFrozenRejectionRequired: params.operation === null,
+        isFrozenRejectionRequired: !isDetachedTemplateEdit,
         isNewVersionRequired: isDeferredTemplateEdit,
         newVersionId: targetVersionId ?? undefined,
         display: {
@@ -1387,8 +1414,9 @@ const createOrUpdateSignedDocumentProjection = async (params: {
       select: {
         id: true,
         organizationId: true,
-        title: true,
         documentRequirementId: true,
+        title: true,
+        requiredSignerType: true,
         signOnce: true,
         signerRoles: true,
       },
@@ -1420,8 +1448,9 @@ const createOrUpdateSignedDocumentProjection = async (params: {
       select: {
         id: true,
         organizationId: true,
-        title: true,
         documentRequirementId: true,
+        title: true,
+        requiredSignerType: true,
         signOnce: true,
         signerRoles: true,
       },
@@ -1451,6 +1480,10 @@ const createOrUpdateSignedDocumentProjection = async (params: {
     command.documentName,
     projectionTemplateRow?.title,
   ) ?? 'Signed Document';
+  const requiredSignerRoles = resolveRequiredSignerRoles(
+    projectionTemplateRow?.signerRoles,
+    projectionTemplateRow?.requiredSignerType,
+  );
 
   const signerRows = command.signers;
   const explicitEventId = pickString(
@@ -1490,6 +1523,7 @@ const createOrUpdateSignedDocumentProjection = async (params: {
     roleIndex: number | null;
   }> = [];
   let primaryRowId = pickString(operation?.signedDocumentRecordId);
+  const isTerminalFailure = TERMINAL_FAILURE_STATUS_TOKENS.has(command.eventToken);
 
   await prisma.$transaction(async (tx) => {
     for (const signerRow of signerRows) {
@@ -1634,13 +1668,13 @@ const createOrUpdateSignedDocumentProjection = async (params: {
         });
       }
 
-      const preserveSignedState = Boolean(
+      const isSignedStatePreserved = Boolean(
         existing
         && isSignedStatus(existing.status)
         && !isSignedStatus(signerStatus)
-        && !TERMINAL_FAILURE_STATUS_TOKENS.has(command.eventToken),
+        && !TERMINAL_FAILURE_STATUS_TOKENS.has(command.eventToken)
       );
-      const nextStatus = preserveSignedState ? 'SIGNED' : signerStatus;
+      const nextStatus = isSignedStatePreserved ? 'SIGNED' : signerStatus;
       const nextSignedAt = nextStatus === 'SIGNED'
         ? (normalizeText(existing?.signedAt) ?? defaultSignedAt)
         : null;
@@ -1654,7 +1688,7 @@ const createOrUpdateSignedDocumentProjection = async (params: {
         provenance: DOCUMENT_EVIDENCE_PROVENANCE.BOLDSIGN,
         providerDocumentId,
       });
-      const satisfactionReady = nextStatus === 'SIGNED'
+      const isSatisfactionReady = nextStatus === 'SIGNED'
         && Boolean(
           projectionTemplateRow?.documentRequirementId
           && evidenceFields.documentSubjectId
@@ -1692,7 +1726,7 @@ const createOrUpdateSignedDocumentProjection = async (params: {
             signerRole,
           },
         });
-        if (satisfactionReady) {
+        if (isSatisfactionReady) {
           const existingSatisfaction: { organizationId: string } | null =
             await tx.documentRequirementSatisfactions.findFirst({
               where: { id: `document-satisfaction:${existing.id}` },
@@ -1712,10 +1746,13 @@ const createOrUpdateSignedDocumentProjection = async (params: {
             documentSubjectId: evidenceFields.documentSubjectId,
             scopeType: evidenceFields.scopeType,
             scopeId: evidenceFields.scopeId,
-            requiredSignerRoles: projectionTemplateRow?.signerRoles,
+            requiredSignerRoles,
+            completedSignerRoles: [signerRole],
             signerRole,
           }, tx);
         }
+      } else if (isTerminalFailure && existingEvidenceRows.length > 0) {
+        continue;
       } else {
         const createdAt = new Date();
         const created: { id: string } = await tx.signedDocuments.create({
@@ -1743,12 +1780,12 @@ const createOrUpdateSignedDocumentProjection = async (params: {
           select: { id: true },
         });
         projectedRowId = created.id;
-        if (satisfactionReady) {
+        if (isSatisfactionReady) {
           const existingSatisfaction: { organizationId: string } | null =
             await tx.documentRequirementSatisfactions.findFirst({
-            where: { id: `document-satisfaction:${created.id}` },
-            select: { organizationId: true },
-          });
+              where: { id: `document-satisfaction:${created.id}` },
+              select: { organizationId: true },
+            });
           if (
             existingSatisfaction
             && existingSatisfaction.organizationId !== inferredContext.organizationId
@@ -1762,8 +1799,9 @@ const createOrUpdateSignedDocumentProjection = async (params: {
             organizationId: inferredContext.organizationId,
             documentSubjectId: evidenceFields.documentSubjectId,
             scopeType: evidenceFields.scopeType,
-            requiredSignerRoles: projectionTemplateRow?.signerRoles,
             scopeId: evidenceFields.scopeId,
+            requiredSignerRoles,
+            completedSignerRoles: [signerRole],
             signerRole,
           }, tx);
         }
@@ -1781,8 +1819,10 @@ const createOrUpdateSignedDocumentProjection = async (params: {
         roleIndex,
       });
     }
+    // Terminal provider events update every evidence row before the
+    // Satisfaction aggregate is invalidated in this transaction.
 
-    if (updatedRows === 0) {
+    if (updatedRows === 0 || isTerminalFailure) {
       const existingRows = await tx.signedDocuments.findMany({
         where: {
           signedDocumentId: providerDocumentId,
@@ -1807,6 +1847,12 @@ const createOrUpdateSignedDocumentProjection = async (params: {
             signedAt: eventSignedAt ?? undefined,
           },
         });
+        if (isTerminalFailure) {
+          await invalidateDocumentRequirementSatisfactions({
+            evidenceIds: ids,
+            isForceInvalidation: true,
+          }, tx);
+        }
         primaryRowId = existingRows[0]?.id ?? null;
         updatedRows = existingRows.length;
       }
